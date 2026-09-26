@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: PROJECT_ROOT patched below
 
 import pytest
 from tests.vibesys.golden.harness import (
@@ -86,7 +86,7 @@ def _build_request(
     )
 
 
-async def _execute(  # noqa: PLR0913  # tracked: #288
+async def _execute(  # noqa: PLR0913  # LW-040130 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     request: RunRequest,
     orchestrator_factory: type[Orchestrator],
     descriptor: OrchestrationDescriptor,
@@ -112,7 +112,7 @@ async def _execute(  # noqa: PLR0913  # tracked: #288
         integration.close()
 
 
-def run_agent_loop(  # noqa: PLR0913  # tracked: #288
+def run_agent_loop(  # noqa: PLR0913  # LW-040131 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     tmp_path: Path,
     runner: FakeAgentClient,
     orchestrator_factory: type[Orchestrator],
@@ -139,6 +139,7 @@ def run_agent_loop(  # noqa: PLR0913  # tracked: #288
         tmp_path, descriptor, config, exp_name=exp_name, resume_from=resume_from
     )
 
+    # test-isolation: PROJECT_ROOT is a module constant with no injection seam; the run must write under tmp_path
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = asyncio.run(
             _execute(
@@ -156,7 +157,7 @@ def run_agent_loop(  # noqa: PLR0913  # tracked: #288
     return AgentRun(result=result, project_dir=project_dir, run_id=run_id)
 
 
-def run_agent_loop_expect_crash(  # noqa: PLR0913  # tracked: #288
+def run_agent_loop_expect_crash(  # noqa: PLR0913  # LW-040132 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     tmp_path: Path,
     runner: FakeAgentClient,
     orchestrator_factory: type[Orchestrator],
@@ -177,6 +178,7 @@ def run_agent_loop_expect_crash(  # noqa: PLR0913  # tracked: #288
     request = _build_request(tmp_path, descriptor, config, exp_name=exp_name, resume_from=None)
 
     with (
+        # test-isolation: PROJECT_ROOT is a module constant with no injection seam; the run must write under tmp_path
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         pytest.raises(error),
     ):

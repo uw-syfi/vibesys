@@ -56,7 +56,7 @@ def _make_tool_function[T: BaseModel](spec: ToolSpec[T]) -> Callable[..., str]:
         args = spec.input_schema(**kwargs)
         return spec.handler(args)
 
-    tool_function.__signature__ = inspect.Signature(  # ty: ignore[unresolved-attribute]  # tracked: #288
+    tool_function.__signature__ = inspect.Signature(  # ty: ignore[unresolved-attribute]
         parameters, return_annotation=str
     )
     tool_function.__name__ = spec.name

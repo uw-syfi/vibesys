@@ -30,6 +30,15 @@ _BUILD_AND_CACHE_DIRECTORIES = frozenset(
 )
 
 
+class InvalidPackageNamesError(ValueError):
+    """Raised when a distribution package has an invalid top-level name."""
+
+    def __init__(self, package_names: set[str]) -> None:
+        """Record the invalid package names for diagnostics."""
+        self.package_names = package_names
+        super().__init__("distribution package names must be Python identifiers")
+
+
 def release_has_native_payload() -> bool:
     """Return whether setuptools is building a target-specific release wheel."""
     return os.environ.get("VIBESYS_WHEEL_TARGET") is not None
@@ -39,9 +48,7 @@ def clear_distribution_build_outputs(build_lib: Path, packages: list[str]) -> No
     """Remove stale build-tree copies of packages owned by this distribution."""
     top_level_packages = {package.partition(".")[0] for package in packages}
     if any(not package.isidentifier() for package in top_level_packages):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            "distribution package names must be Python identifiers"
-        )
+        raise InvalidPackageNamesError(top_level_packages)
     for package in top_level_packages:
         destination = build_lib / package
         if destination.is_symlink() or destination.is_file():

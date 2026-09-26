@@ -1,4 +1,6 @@
-from __future__ import annotations  # noqa: D100  # tracked: #288
+"""Policy functions for validating issue-board updates."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 

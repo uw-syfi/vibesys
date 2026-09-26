@@ -69,9 +69,8 @@ class ProfileGuidedComponent(BaseModel):
         ):
             rounds = [sample.round for sample in samples]
             if rounds != sorted(set(rounds)):
-                raise ValueError(  # noqa: TRY003
-                    f"{name} history rounds must be unique and ordered"
-                )
+                message = f"{name} history rounds must be unique and ordered"
+                raise ValueError(message)
         return self
 
 
@@ -94,16 +93,16 @@ class ProfileFocusState(BaseModel):
     def _valid_cursor(self) -> Self:
         names = [component.name for component in self.components]
         if len(names) != len(set(names)):
-            raise ValueError("profile-guided component names must be unique")  # noqa: TRY003
+            message = "profile-guided component names must be unique"
+            raise ValueError(message)
         active = [
             component.name
             for component in self.components
             if component.status is ProfileGuidanceStatus.ACTIVE
         ]
         if active != ([self.active_component] if self.active_component is not None else []):
-            raise ValueError(  # noqa: TRY003
-                "active_component must name the only active component"
-            )
+            message = "active_component must name the only active component"
+            raise ValueError(message)
         return self
 
 

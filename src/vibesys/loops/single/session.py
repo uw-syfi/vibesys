@@ -273,7 +273,7 @@ class SingleSession:
             yield
 
     def _focus_state(self) -> ProfileFocusState:
-        assert self.profile_focus is not None  # noqa: S101  # only called when profiling is on
+        assert self.profile_focus is not None  # noqa: S101  # LW-040128 [S101]; only called when profiling is on.
         return self.state.profile_guidance or self.profile_focus.initial()
 
     def _with_focus(self, focus_state: ProfileFocusState) -> HypothesisState:
@@ -338,7 +338,7 @@ class SingleSession:
                 publish=self.state,
             )
         else:
-            assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
+            assert isinstance(decision, Continue)  # noqa: S101  # LW-040129 [S101]; only remaining variant.
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
             self.ctx.progress.note(

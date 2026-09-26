@@ -54,7 +54,8 @@ _HEADING_ROUND = re.compile(r"^## Round (\d+) — ")
 _PROGRESS_HEADER = "# Progress\n\n"
 
 
-def render_pre_round_decision(round_number: int, decision: PreRoundDecision) -> str:  # noqa: D103  # tracked: #288
+def render_pre_round_decision(round_number: int, decision: PreRoundDecision) -> str:
+    """Render the orchestrator's pre-round decision."""
     return (
         f"## Round {round_number} — Orchestrator (pre-round)\n"
         f"- **need_profile**: {decision.need_profile}\n"
@@ -63,7 +64,8 @@ def render_pre_round_decision(round_number: int, decision: PreRoundDecision) -> 
     )
 
 
-def render_profiler_summary(round_number: int, summary: ProfilerSummary) -> str:  # noqa: D103  # tracked: #288
+def render_profiler_summary(round_number: int, summary: ProfilerSummary) -> str:
+    """Render a profiler summary for one round."""
     perf_line = ""
     if summary.perf_metric is not None:
         unit = summary.perf_unit or ""
@@ -77,7 +79,8 @@ def render_profiler_summary(round_number: int, summary: ProfilerSummary) -> str:
     )
 
 
-def render_orchestrator_plan(round_number: int, plan: OrchestratorPlan) -> str:  # noqa: D103  # tracked: #288
+def render_orchestrator_plan(round_number: int, plan: OrchestratorPlan) -> str:
+    """Render the orchestrator plan and any requested round rollback."""
     revert_line = ""
     if plan.revert_to_round is not None:
         revert_line = f"- **revert_to_round**: {plan.revert_to_round}\n"
@@ -104,13 +107,14 @@ def render_orchestrator_plan(round_number: int, plan: OrchestratorPlan) -> str: 
     )
 
 
-def render_hypothesis_continuation(  # noqa: D103  # tracked: #288
+def render_hypothesis_continuation(
     round_number: int,
     *,
     plan: OrchestratorPlan,
     started_round: int,
     continuation_step: str,
 ) -> str:
+    """Render the continuation plan used to refine the active hypothesis."""
     return (
         f"## Round {round_number} — Active hypothesis continuation\n"
         f"- **hypothesis_id**: {plan.hypothesis_id}\n"
@@ -121,7 +125,8 @@ def render_hypothesis_continuation(  # noqa: D103  # tracked: #288
     )
 
 
-def render_implementer(round_number: int, retry: int, response: ImplementerResponse) -> str:  # noqa: D103  # tracked: #288
+def render_implementer(round_number: int, retry: int, response: ImplementerResponse) -> str:
+    """Render one implementer attempt and its reported result."""
     perf_line = ""
     if response.perf_metric is not None:
         unit = response.perf_unit or ""
@@ -152,7 +157,8 @@ def render_implementer(round_number: int, retry: int, response: ImplementerRespo
     )
 
 
-def render_judge(round_number: int, retry: int, response: JudgeResponse) -> str:  # noqa: D103  # tracked: #288
+def render_judge(round_number: int, retry: int, response: JudgeResponse) -> str:
+    """Render one judge response."""
     return (
         f"## Round {round_number} — Judge (attempt {retry})\n"
         f"- **verdict**: {response.verdict.value}\n\n"
@@ -161,12 +167,13 @@ def render_judge(round_number: int, retry: int, response: JudgeResponse) -> str:
     )
 
 
-def render_judge_skipped(  # noqa: D103  # tracked: #288
+def render_judge_skipped(
     round_number: int,
     *,
     outcome: str,
     judge_every: int,
 ) -> str:
+    """Render the reason the judge step was skipped."""
     return (
         f"## Round {round_number} — Independent review deferred\n"
         f"- **implementer_outcome**: {outcome}\n"
@@ -175,7 +182,7 @@ def render_judge_skipped(  # noqa: D103  # tracked: #288
     )
 
 
-def render_official_evaluation_decision(  # noqa: D103, PLR0913  # tracked: #288
+def render_official_evaluation_decision(  # noqa: PLR0913  # LW-011115 [PLR0913]; This formatter writes round/attempt plus the already-computed run/reason and cadence counts; a new decision object would only repack values for one Markdown block.
     round_number: int,
     retry: int,
     *,
@@ -184,6 +191,7 @@ def render_official_evaluation_decision(  # noqa: D103, PLR0913  # tracked: #288
     official_eval_every: int,
     provisional_candidates: int,
 ) -> str:
+    """Render the framework's official evaluation decision."""
     decision = "run" if run else "deferred"
     return (
         f"## Round {round_number} — Official evaluation policy (attempt {retry})\n"
@@ -194,11 +202,12 @@ def render_official_evaluation_decision(  # noqa: D103, PLR0913  # tracked: #288
     )
 
 
-def render_single_agent_round(  # noqa: D103  # tracked: #288
+def render_single_agent_round(
     round_number: int,
     retry: int,
     response: SingleAgentRoundResponse,
 ) -> str:
+    """Render the result of a single-agent round."""
     perf_line = ""
     if response.perf_metric is not None:
         unit = response.perf_unit or ""
@@ -227,7 +236,7 @@ def render_single_agent_round(  # noqa: D103  # tracked: #288
     )
 
 
-def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
+def render_framework_accuracy_gate(
     round_number: int,
     retry: int,
     *,
@@ -235,6 +244,7 @@ def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
     passed: bool,
     output: str,
 ) -> str:
+    """Render the framework accuracy-gate result."""
     verdict = "pass" if passed else "fail"
     return (
         f"## Round {round_number} — Framework accuracy gate (attempt {retry})\n"
@@ -267,7 +277,7 @@ def render_framework_validation_gate(
     return "\n".join(lines) + "\n"
 
 
-def render_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
+def render_framework_benchmark(  # noqa: PLR0913  # LW-040106 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     round_number: int,
     retry: int,
     *,
@@ -277,6 +287,7 @@ def render_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
     metric_value: float | None,
     output: str,
 ) -> str:
+    """Render framework benchmark metrics and diagnostics."""
     verdict = "pass" if passed else "fail"
     metric_line = (
         f"- **{metric_name}**: {metric_value}\n"
@@ -292,7 +303,8 @@ def render_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
     )
 
 
-def render_exhaustion_note(round_number: int, attempts: int, last_feedback: str) -> str:  # noqa: D103  # tracked: #288
+def render_exhaustion_note(round_number: int, attempts: int, last_feedback: str) -> str:
+    """Render a note that judge retries were exhausted."""
     return (
         f"## Round {round_number} — Judge loop exhausted\n"
         f"- **attempts**: {attempts}\n"
@@ -304,7 +316,8 @@ def _round_number(block: str) -> int:
     heading = block.splitlines()[0]
     match = _HEADING_ROUND.match(heading)
     if match is None:
-        raise ValueError(f"framework log block missing a round heading: {heading!r}")  # noqa: TRY003
+        message = f"framework log block missing a round heading: {heading!r}"
+        raise ValueError(message)
     return int(match.group(1))
 
 

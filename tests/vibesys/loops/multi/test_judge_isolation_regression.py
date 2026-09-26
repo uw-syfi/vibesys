@@ -60,7 +60,7 @@ the round completes normally.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch  # test-isolation: attribution scripted below
 
 import pytest
 from tests.vibesys.loops._support import run_agent_loop
@@ -113,7 +113,7 @@ def _plan() -> OrchestratorPlan:
         hypothesis_id="r1-h1-enqueue-binary-insertion",
         hypothesis="the enqueue path incurs most of the measured cost",
         task="replace the enqueue insertion algorithm",
-        pass_criteria="correctness gates pass; enqueue cost drops",  # noqa: S106
+        pass_criteria="correctness gates pass; enqueue cost drops",  # noqa: S106  # LW-040133 [S106]; the argument is a fixture literal, not a credential.
         reasoning="scripted: reproduce the live-run judge isolation crash",
     )
 
@@ -151,6 +151,7 @@ def _judge_stray_write_then_pass(invocation: FakeInvocation) -> JudgeResponse:
     )
 
 
+# test-isolation: run_attribution has no injectable seam yet; the test scripts it out
 def _no_attribution() -> AsyncMock:
     """Replace the per-round component-attribution shell-out with an empty
     result, the same seam ``tests/vibesys/golden/test_profile_multi_golden.py``
@@ -158,6 +159,7 @@ def _no_attribution() -> AsyncMock:
     ``vibesys.loops.multi.session`` but removes the dependency on a real
     profiler command running in the sandbox.
     """
+    # test-isolation: run_attribution has no injectable seam yet; the test scripts it out
     return AsyncMock(return_value=())
 
 
@@ -175,6 +177,7 @@ def test_judge_stray_write_in_declared_memory_path_is_reverted(tmp_path: Path) -
     runner.enqueue("judge", _judge_fail(), _judge_stray_write_then_pass)
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
+    # test-isolation: run_attribution has no injectable seam yet; the test scripts it out
     with patch("vibesys.loops.multi.session.run_attribution", new=_no_attribution()):
         run = run_agent_loop(
             tmp_path,

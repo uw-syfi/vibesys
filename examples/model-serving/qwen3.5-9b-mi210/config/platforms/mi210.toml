@@ -11,6 +11,10 @@ compute_units = 104
 memory_gb = 64
 memory_type = "HBM2e"
 memory_bandwidth_gb_s = 1600
+memory_bandwidth_measured_gb_s = 1380  # measured with a streaming read microbenchmark, vs the 1600 spec above
+bf16_tflops_spec = 181
+bf16_tflops_sustained_low = 115   # measured GEMM throughput under continuous serving load
+bf16_tflops_sustained_high = 122  # (power-limited, not compute-limited); isolated bursts reach ~150
 fp8_native = false
 notes = """
 Older than the MI300 family (gfx942) the serving-systems knowledge tree
@@ -36,6 +40,9 @@ attention_kv_block_tokens = 528   # vLLM forces this block size on this model/GP
                                    # "Setting attention block size to 528 tokens
                                    # to ensure that attention page size is >= mamba
                                    # page size."
+mtp_num_hidden_layers = 1         # the checkpoint ships one multi-token-prediction
+                                   # (MTP) draft layer (`mtp.*` weights: its own
+                                   # attention + KV, shared lm_head)
 
 [platform.mi210.capacity_notes]
 # Worked budget for sizing the workload (see ../../OBJECTIVE.md): weights consume 19.3 GB,
@@ -70,3 +77,12 @@ attention_backend_default = "ROCM_ATTN"
 # TRITON_ATTN (benchmark/vllm_baseline.sh's default), not attention_backend_default.
 attention_backend_recommended = "TRITON_ATTN"
 attention_backend_incompatible = ["TURBOQUANT"]
+# PyTorch TunableOp (torch 2.9.1+rocm6.4) picks kernels from short timings on an
+# otherwise-idle GPU. Picks for large prefill GEMM shapes lose to hipBLASLt's
+# defaults once the GPU is under sustained serving load; picks for decode-sized
+# shapes still gain there.
+tunableop_picks_hold_under_load = "decode_only"
+# ROCm 6.4 + torch 2.9.1: after a torch.profiler (roctracer) session ends,
+# subsequent async event waits can hang or fault the GPU. Drain in-flight work
+# and run synchronously before ending a profiler capture.
+torch_profiler_post_capture_hang = true

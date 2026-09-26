@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from vibesys.evaluators.input_manifest import BenchmarkResult
-    from vibesys.evaluators.metrics import Objective
+    from vibesys.evaluators.metrics import MetricSpace, Objective
     from vs_sandbox.api import SandboxExecutionResult
 
 
@@ -104,30 +104,16 @@ def emit_gate_started(
     )
 
 
-def emit_gate_finished(  # noqa: PLR0913  # independent payload dimensions
-    gate: GateKind,
+def emit_gate_finished(
+    data: GateFinishedData,
     *,
     passed: bool,
-    recipe: str | None = None,
-    reused: bool = False,
-    metric: str | None = None,
-    value: float | None = None,
-    unit: str | None = None,
-    output_tail: str | None = None,
     round_label: str | None = None,
 ) -> None:
     """Publish one framework gate outcome; envelope status carries the verdict."""
     output_sink().emit(
         CoreEventType.GATE_FINISHED,
-        data=GateFinishedData(
-            gate=gate,
-            recipe=recipe,
-            reused=reused,
-            metric=metric,
-            value=value,
-            unit=unit,
-            output_tail=output_tail,
-        ),
+        data=data,
         status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
         round_label=round_label,
     )
@@ -161,7 +147,7 @@ class AccuracyGateResult:
     executed: bool
 
 
-def run_accuracy_gate(  # tracked: #288
+def run_accuracy_gate(
     ctx: TrustedGateContext,
     *,
     process_id: str,
@@ -176,9 +162,11 @@ def run_accuracy_gate(  # tracked: #288
         output = "Evaluator-owned files were modified: " + ", ".join(changed)
         emit_gate_started(GateKind.ACCURACY, command=command or None, round_label=round_label)
         emit_gate_finished(
-            GateKind.ACCURACY,
+            GateFinishedData(
+                gate=GateKind.ACCURACY,
+                output_tail=output[-GATE_LOG_TAIL_CHARS:],
+            ),
             passed=False,
-            output_tail=output[-GATE_LOG_TAIL_CHARS:],
             round_label=round_label,
         )
         return AccuracyGateResult(
@@ -207,7 +195,7 @@ def run_accuracy_gate(  # tracked: #288
         output = result.output.strip()
         passed = result.exit_code == 0
         _publish_subprocess_output(ctx, process_id=process_id, result=result)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010263 [BLE001]; backend execution errors become accuracy feedback rather than aborting the run.
         output = f"accuracy command could not be executed: {exc}"
         passed = False
 
@@ -220,13 +208,19 @@ def run_accuracy_gate(  # tracked: #288
         passed = False
 
     if passed:
-        emit_gate_finished(GateKind.ACCURACY, passed=True, round_label=round_label)
+        emit_gate_finished(
+            GateFinishedData(gate=GateKind.ACCURACY),
+            passed=True,
+            round_label=round_label,
+        )
         feedback = None
     else:
         emit_gate_finished(
-            GateKind.ACCURACY,
+            GateFinishedData(
+                gate=GateKind.ACCURACY,
+                output_tail=output[-GATE_LOG_TAIL_CHARS:],
+            ),
             passed=False,
-            output_tail=output[-GATE_LOG_TAIL_CHARS:],
             round_label=round_label,
         )
         feedback = f"Framework accuracy gate failed.\n{output[-GATE_FEEDBACK_TAIL_CHARS:]}"
@@ -270,7 +264,7 @@ FRAMEWORK_BENCHMARK_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 # The SkyPilot bridge allowlists framework result artifacts by this path
 # shape (``_FRAMEWORK_ARTIFACT`` in ``vibesys.skypilot.bridge``); the nonce
 # appended per invocation must stay within its ``[a-zA-Z0-9._-]`` alphabet.
-_BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # tracked: #288
+_BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010207 [S108]; evaluator and remote bridge share this fixed artifact path protocol.
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +339,17 @@ class BenchmarkGateResult:
         a second writer of the same fact.
         """
         return self.outcome.feedback is None
+
+
+@dataclass(frozen=True)
+class _ParsedBenchmarkOutput:
+    output: str
+    passed: bool
+    metric_name: str | None
+    metric_value: float | None
+    metric_direction: Literal["max", "min"] | None
+    metric_unit: str | None
+    row: Mapping[str, float] | None
 
 
 def read_protocol_benchmark(
@@ -436,6 +441,31 @@ def _metric_values(value: object, metric: str) -> list[object]:
     return []
 
 
+def _parse_json_metric(encoded: str, metric: str) -> float:
+    """Parse one finite numeric metric from a JSON result payload."""
+    payload = json.loads(encoded.strip())
+    # A result object owns its top-level metric. Rich benchmark reports may
+    # repeat that name in per-trial diagnostics, which must not make the
+    # declared aggregate ambiguous. Preserve recursive lookup for legacy
+    # list-shaped result payloads.
+    if isinstance(payload, dict) and metric in payload:
+        values = [payload[metric]]
+    else:
+        values = _metric_values(payload, metric)
+    if len(values) != 1:
+        message = f"expected exactly one {metric!r} field, found {len(values)}"
+        raise ValueError(message)
+    value = values[0]
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        message = f"{metric!r} is not numeric"
+        raise TypeError(message)
+    metric_value = float(value)
+    if not math.isfinite(metric_value):
+        message = f"{metric!r} is not finite"
+        raise ValueError(message)
+    return metric_value
+
+
 def _check_output_slug(output_slug: str) -> None:
     """Reject a slug that would move the result file out of its directory.
 
@@ -445,30 +475,122 @@ def _check_output_slug(output_slug: str) -> None:
     SkyPilot artifact allowlist and the cleanup both assume.
     """
     if not output_slug:
-        raise ValueError("output_slug must not be empty")  # noqa: TRY003  # tracked: #288
+        message = "output_slug must not be empty"
+        raise ValueError(message)
     if "/" in output_slug or ".." in output_slug:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"output_slug must be a single path segment, got {output_slug!r}"
-        )
+        _exception_message = f"output_slug must be a single path segment, got {output_slug!r}"
+        raise ValueError(_exception_message)
 
 
-def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
-    ctx: TrustedGateContext,
+def _parse_benchmark_output(
+    output: str,
     *,
     result_spec: BenchmarkResult | None,
-    result_protocol: Literal[2] | None = None,
-    objectives: Sequence[Objective] = (),
+    objectives: Sequence[Objective],
+) -> _ParsedBenchmarkOutput:
+    """Parse the framed result after a successful benchmark command."""
+    metric_name = result_spec.metric if result_spec is not None else None
+    metric_value: float | None = None
+    metric_direction: Literal["max", "min"] | None = None
+    metric_unit: str | None = None
+    row: Mapping[str, float] | None = None
+    _, marker, framed = output.rpartition(FRAMEWORK_BENCHMARK_MARKER)
+    encoded, end_marker, _ = framed.partition(FRAMEWORK_BENCHMARK_END_MARKER)
+    passed = True
+    if not marker or not end_marker:
+        output = f"{output}\nbenchmark output did not include its result JSON".strip()
+        passed = False
+    elif result_spec is None:
+        protocol_outcome = read_protocol_benchmark(encoded, objectives=objectives)
+        if protocol_outcome.feedback is not None:
+            output = f"{output}\n{protocol_outcome.feedback}".strip()
+            passed = False
+        else:
+            metric_name = protocol_outcome.metric_name
+            metric_value = protocol_outcome.metric_value
+            metric_direction = protocol_outcome.metric_direction
+            metric_unit = protocol_outcome.metric_unit
+            row = protocol_outcome.row
+    else:
+        try:
+            metric_value = _parse_json_metric(encoded, result_spec.metric)
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            output = f"{output}\ninvalid benchmark result: {exc}".strip()
+            passed = False
+    return _ParsedBenchmarkOutput(
+        output=output,
+        passed=passed,
+        metric_name=metric_name,
+        metric_value=metric_value,
+        metric_direction=metric_direction,
+        metric_unit=metric_unit,
+        row=row,
+    )
+
+
+def _execute_benchmark_command(
+    ctx: TrustedGateContext,
+    command: str,
+    *,
+    output_path: str,
+    process_id: str,
+    timeout_seconds: int | None,
+) -> tuple[str, bool, list[str]]:
+    """Run one benchmark command, capture output, and clean its result file."""
+    changed_before_execution = ctx.trusted_input_changes()
+    if changed_before_execution:
+        output = "Evaluator-owned files were modified: " + ", ".join(changed_before_execution)
+        return output, False, changed_before_execution
+
+    try:
+        if timeout_seconds is None:
+            result = ctx.judge_backend.execute(command)
+        else:
+            result = ctx.judge_backend.execute(command, timeout=timeout_seconds)
+        output = result.output.strip()
+        passed = result.exit_code == 0
+        _publish_subprocess_output(
+            ctx,
+            process_id=process_id,
+            result=result,
+            process_kind="benchmark",
+        )
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010264 [BLE001]; backend execution errors become benchmark feedback rather than aborting the run.
+        output = f"benchmark command could not be executed: {exc}"
+        passed = False
+    finally:
+        # Remove the per-invocation transport artifact on every exit path
+        # (success, nonzero exit, timeout, malformed output). The result is
+        # already recovered from stdout, so the file is dead weight; leaving
+        # it leaks one JSON per benchmark on hosts where /tmp persists for
+        # weeks. Best-effort: a cleanup failure must not mask the result.
+        #
+        # Limitation on the timeout path: the Docker and Modal backends
+        # report a timeout as exit code -1 rather than raising, so this
+        # cleanup runs while the timed-out benchmark may still be alive in
+        # the sandbox and can write its result file afterwards. The nonce
+        # keeps that orphan from being read by any later invocation -- the
+        # correctness property this gate owns -- but it can survive as a
+        # leaked file until the sandbox is torn down.
+        with contextlib.suppress(Exception):
+            ctx.judge_backend.execute(f"rm -f -- {shlex.quote(output_path)}")
+    return output, passed, []
+
+
+def run_benchmark_gate(  # noqa: PLR0913  # lint-waiver: LW-011116 [PLR0913]; Process ID feeds subprocess events, slug names the nonce file, execution_base overrides the trusted command, and round_label scopes gate events; no caller object contains all four.
+    ctx: TrustedGateContext,
+    *,
+    contract: BenchmarkContract,
+    space: MetricSpace,
     process_id: str,
     output_slug: str,
-    timeout_seconds: int | None = None,
     execution_base: str | None = None,
     round_label: str | None = None,
 ) -> BenchmarkGateResult:
     """Run and parse an opt-in trusted benchmark result contract.
 
-    ``result_spec`` scrapes one declared scalar out of arbitrary benchmark
-    JSON; ``result_protocol`` reads a complete validated metric row from the
-    evaluator result protocol. The manifest rejects declaring both.
+    ``contract`` describes the declared scalar or protocol result format and
+    timeout; ``space`` supplies the configured metric axes.
 
     The result file path carries ``output_slug`` plus a per-invocation nonce,
     and is removed before the benchmark runs, so a concurrent or earlier run
@@ -485,7 +607,6 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
             directory.
     """
     _check_output_slug(output_slug)
-    contract = BenchmarkContract(result_spec=result_spec, result_protocol=result_protocol)
     if not contract.declared:
         return BenchmarkGateResult(
             command=None,
@@ -507,7 +628,9 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
     output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{output_slug}-{uuid.uuid4().hex[:12]}.json"
     # Not None: `contract.declared` is true, so one of the two forms set it.
     output_argument = contract.output_argument
-    assert output_argument is not None  # noqa: S101
+    if output_argument is None:
+        message = "declared benchmark result contract has no output argument"
+        raise RuntimeError(message)
     # The markers recover the result file through stdout, which is what makes
     # the contract work for remote execution. Both contracts share that
     # transport; only the recovered text is parsed differently.
@@ -520,92 +643,34 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
         f" && printf '\\n{FRAMEWORK_BENCHMARK_END_MARKER}\\n'"
     )
     emit_gate_started(GateKind.BENCHMARK, command=base_command, round_label=round_label)
-    metric_name = result_spec.metric if result_spec is not None else None
+    output, passed, changed_before_execution = _execute_benchmark_command(
+        ctx,
+        command,
+        output_path=output_path,
+        process_id=process_id,
+        timeout_seconds=contract.timeout_seconds,
+    )
+
+    metric_name: str | None = (
+        contract.result_spec.metric if contract.result_spec is not None else None
+    )
     metric_value: float | None = None
     metric_direction: Literal["max", "min"] | None = None
     metric_unit: str | None = None
     row: Mapping[str, float] | None = None
-    changed_before_execution = ctx.trusted_input_changes()
-    if changed_before_execution:
-        output = "Evaluator-owned files were modified: " + ", ".join(changed_before_execution)
-        passed = False
-    else:
-        try:
-            if timeout_seconds is None:
-                result = ctx.judge_backend.execute(command)
-            else:
-                result = ctx.judge_backend.execute(command, timeout=timeout_seconds)
-            output = result.output.strip()
-            passed = result.exit_code == 0
-            _publish_subprocess_output(
-                ctx,
-                process_id=process_id,
-                result=result,
-                process_kind="benchmark",
-            )
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
-            output = f"benchmark command could not be executed: {exc}"
-            passed = False
-        finally:
-            # Remove the per-invocation transport artifact on every exit path
-            # (success, nonzero exit, timeout, malformed output). The result is
-            # already recovered from stdout, so the file is dead weight; leaving
-            # it leaks one JSON per benchmark on hosts where /tmp persists for
-            # weeks. Best-effort: a cleanup failure must not mask the result.
-            #
-            # Limitation on the timeout path: the Docker and Modal backends
-            # report a timeout as exit code -1 rather than raising, so this
-            # cleanup runs while the timed-out benchmark may still be alive in
-            # the sandbox and can write its result file afterwards. The nonce
-            # keeps that orphan from being read by any later invocation -- the
-            # correctness property this gate owns -- but it can survive as a
-            # leaked file until the sandbox is torn down.
-            with contextlib.suppress(Exception):
-                ctx.judge_backend.execute(f"rm -f -- {shlex.quote(output_path)}")
-
     if passed:
-        _, marker, framed = output.rpartition(FRAMEWORK_BENCHMARK_MARKER)
-        encoded, end_marker, _ = framed.partition(FRAMEWORK_BENCHMARK_END_MARKER)
-        if not marker or not end_marker:
-            output = f"{output}\nbenchmark output did not include its result JSON".strip()
-            passed = False
-        elif result_spec is None:
-            # No scalar spec, so the caller declared `result_protocol`: the
-            # recovered text is a record stream, not arbitrary benchmark JSON.
-            protocol_outcome = read_protocol_benchmark(encoded, objectives=objectives)
-            if protocol_outcome.feedback is not None:
-                output = f"{output}\n{protocol_outcome.feedback}".strip()
-                passed = False
-            else:
-                metric_name = protocol_outcome.metric_name
-                metric_value = protocol_outcome.metric_value
-                metric_direction = protocol_outcome.metric_direction
-                metric_unit = protocol_outcome.metric_unit
-                row = protocol_outcome.row
-        else:
-            try:
-                payload = json.loads(encoded.strip())
-                # A result object owns its top-level metric. Rich benchmark
-                # reports may repeat that name in per-trial diagnostics, which
-                # must not make the declared aggregate ambiguous. Preserve the
-                # recursive lookup for legacy list-shaped result payloads.
-                if isinstance(payload, dict) and result_spec.metric in payload:
-                    values = [payload[result_spec.metric]]
-                else:
-                    values = _metric_values(payload, result_spec.metric)
-                if len(values) != 1:
-                    raise ValueError(  # noqa: TRY003, TRY301  # tracked: #288
-                        f"expected exactly one {result_spec.metric!r} field, found {len(values)}"
-                    )
-                value = values[0]
-                if isinstance(value, bool) or not isinstance(value, int | float):
-                    raise ValueError(f"{result_spec.metric!r} is not numeric")  # noqa: TRY003, TRY004, TRY301  # tracked: #288
-                metric_value = float(value)
-                if not math.isfinite(metric_value):
-                    raise ValueError(f"{result_spec.metric!r} is not finite")  # noqa: TRY003, TRY301  # tracked: #288
-            except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                output = f"{output}\ninvalid benchmark result: {exc}".strip()
-                passed = False
+        parsed = _parse_benchmark_output(
+            output,
+            result_spec=contract.result_spec,
+            objectives=space.objectives,
+        )
+        output = parsed.output
+        passed = parsed.passed
+        metric_name = parsed.metric_name
+        metric_value = parsed.metric_value
+        metric_direction = parsed.metric_direction
+        metric_unit = parsed.metric_unit
+        row = parsed.row
 
     changed = [] if changed_before_execution else ctx.trusted_input_changes()
     if changed:
@@ -620,13 +685,15 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
     if passed:
         has_metric = metric_name is not None and metric_value is not None
         emit_gate_finished(
-            GateKind.BENCHMARK,
+            GateFinishedData(
+                gate=GateKind.BENCHMARK,
+                metric=metric_name if has_metric else None,
+                value=metric_value if has_metric else None,
+                # Preserve the historical fallback: the scalar contract declares
+                # no unit, so the metric name stands in for it.
+                unit=(metric_unit or metric_name) if has_metric else None,
+            ),
             passed=True,
-            metric=metric_name if has_metric else None,
-            value=metric_value if has_metric else None,
-            # Preserve the historical fallback: the scalar contract declares
-            # no unit, so the metric name stands in for it.
-            unit=(metric_unit or metric_name) if has_metric else None,
             round_label=round_label,
         )
         outcome = FrameworkBenchmarkOutcome(
@@ -638,10 +705,10 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
             metric_direction=(
                 metric_direction
                 or next(
-                    (item.direction for item in objectives if item.name == metric_name),
+                    (item.direction for item in space.objectives if item.name == metric_name),
                     None,
                 )
-                or ("max" if result_spec is not None else None)
+                or ("max" if contract.result_spec is not None else None)
             ),
             # Only the result protocol declares a unit; the scalar contract
             # names a metric and nothing else, so its unit stays unknown.
@@ -650,9 +717,11 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
         )
     else:
         emit_gate_finished(
-            GateKind.BENCHMARK,
+            GateFinishedData(
+                gate=GateKind.BENCHMARK,
+                output_tail=output[-GATE_LOG_TAIL_CHARS:],
+            ),
             passed=False,
-            output_tail=output[-GATE_LOG_TAIL_CHARS:],
             round_label=round_label,
         )
         outcome = FrameworkBenchmarkOutcome(

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: path constants patched below
 
 import pytest
 from tests.vibesys.golden.harness import (
@@ -144,6 +144,7 @@ def run_plain(
         tmp_path, descriptor, config, exp_name=exp_name, resume_from=resume_from
     )
 
+    # test-isolation: redirects a module-level path constant that has no injection seam.
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = asyncio.run(_execute(request, descriptor, runner))
 
@@ -173,6 +174,7 @@ def run_plain_expect_crash(
     request = _build_request(tmp_path, descriptor, config, exp_name=exp_name, resume_from=None)
 
     with (
+        # test-isolation: redirects a module-level path constant that has no injection seam.
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         pytest.raises(error),
     ):

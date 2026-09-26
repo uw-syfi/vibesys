@@ -103,7 +103,7 @@ def exception_summary(error: BaseException, operation: str = "Operation") -> str
     return f"{operation} failed"
 
 
-def exception_to_diagnostic(  # noqa: PLR0913  # independent contract dimensions
+def exception_to_diagnostic(  # noqa: PLR0913  # lint-waiver: LW-011107 [PLR0913]; Scope and operation drive inferred defaults; summary, code, hint, severity, retryability, cause, and debug reference are independent Diagnostic overrides.
     error: BaseException,
     *,
     scope: DiagnosticScope

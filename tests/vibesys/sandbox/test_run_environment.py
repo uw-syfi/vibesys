@@ -6,12 +6,14 @@ import os
 import shlex
 import subprocess
 import sys
+import sys as _sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Never, cast
 from unittest.mock import MagicMock
 
 import pytest
 from tests.support import provider_profiles as fake_profiles
+from tests.support import run_test_command
 
 from vibesys.backends import SandboxKind
 from vibesys.constants import ComputeBackend
@@ -24,19 +26,28 @@ from vibesys.evaluators import (
     tool_install_root,
     tool_spec_digest,
 )
-from vibesys.evaluators.input_manifest import load_project_task
+from vibesys.evaluators.input_manifest import (
+    WorkspaceSource,
+    load_project_task,
+)
+from vibesys.evaluators.tools import EvaluatorToolError
 from vibesys.profilers import ProfilerKind
+from vibesys.sandbox.images import ImagePushError
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
+    SkyPilotEnvironment,
     _cli_container_env,
     _cli_provider_env_and_auth_files,
     _container_mount_plan,
     _docker_agent_toolchains,
     _docker_evaluator_tool_mounts,
+    _ensure_pushed_for_remote_backend,
+    _environment_command,
     _evaluator_container_setup,
     _evaluator_tools,
     _EvaluatorToolBuildRequiredError,
+    _materialize_effective_objective,
     _resolve_docker_image_id,
     _SkyPilotRunEnvironmentSession,
     _symlink_lifecycle_hooks,
@@ -55,8 +66,10 @@ from vs_sandbox.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from subprocess import CompletedProcess
 
     from vibesys.backends.base import ContentionMonitor
+    from vibesys.sandbox.run_environment import RunEnvironment
     from vs_sandbox.execution import Sandbox
 
 
@@ -123,38 +136,49 @@ class FakeBackend:
         self.sandbox = MagicMock()
         self.calls: list[tuple[SandboxKind, dict[str, Any]]] = []
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> Sandbox:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> Sandbox:
         self.calls.append((kind, kwargs))
         if kind is SandboxKind.DOCKER:
             # A real DockerSandbox derives agent_path from (host_workspace,
             # resources); give the mock the same behavior so AgentPaths
             # assertions exercise the real lookup instead of a bare Mock.
+            host_workspace = kwargs.get("host_workspace", "")
+            resources = kwargs.get("resources", ())
+            if not isinstance(host_workspace, str) or not isinstance(resources, (list, tuple)):
+                raise TypeError
+            if any(not isinstance(resource, HostResource) for resource in resources):
+                raise TypeError
             self.sandbox.agent_path.side_effect = _fake_agent_path(
-                kwargs.get("host_workspace", ""), kwargs.get("resources", ())
+                host_workspace, cast("Sequence[HostResource]", resources)
             )
         return self.sandbox
 
-    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: ARG002  # tracked: #288
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        del log_dir
         return None
 
     def reselect_device(self) -> None:
         return
 
 
-def _request(tmp_path: Path, backend: FakeBackend, **overrides: Any) -> RunEnvironmentRequest:  # noqa: ANN401  # tracked: #288
-    workspace = overrides.pop("workspace", tmp_path / "workspace")
+def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEnvironmentRequest:
+    workspace_value = overrides.pop("workspace", tmp_path / "workspace")
+    if not isinstance(workspace_value, Path):
+        raise TypeError
+    workspace = workspace_value
     workspace.mkdir(exist_ok=True)
-    values: dict[str, Any] = dict(  # noqa: C408  # tracked: #288
-        log_dir=tmp_path / "logs",
-        workspace=workspace,
-        ref_dir=None,
-        backend=backend,
-        agent_backend="stub",
-        cli_provider=None,
-        run_id="run-123",
-    )
+    log_dir = tmp_path / "logs"
+    values: dict[str, Any] = {
+        "log_dir": log_dir,
+        "workspace": workspace,
+        "ref_dir": None,
+        "backend": backend,
+        "agent_backend": "stub",
+        "cli_provider": None,
+        "run_id": "run-123",
+    }
     values.update(overrides)
-    values["log_dir"].mkdir(exist_ok=True)
+    log_dir.mkdir(exist_ok=True)
     return RunEnvironmentRequest(**values)
 
 
@@ -167,7 +191,7 @@ def _run_rootless_rust_setup(
     tmp_path: Path,
     *,
     downloader_exit_code: int = 0,
-) -> subprocess.CompletedProcess[str]:
+) -> CompletedProcess[str]:
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
     _write_executable(
@@ -221,7 +245,7 @@ def _run_rootless_rust_setup(
         "FAKE_WORKING_CARGO": str(working_cargo),
         "FAKE_WORKING_RUSTC": str(working_rustc),
     }
-    return subprocess.run(  # noqa: S603
+    return run_test_command(
         ["/bin/sh", "-c", "set -e\n" + "\n".join((*commands, "cargo --version"))],
         cwd=request.workspace,
         env=environment,
@@ -273,9 +297,9 @@ def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     def fake_agent_image(
         base_image: str,
         *,
-        toolchains: Any = (),  # noqa: ANN401  # tracked: #288
-        pip_extras: Any = (),  # noqa: ANN401  # tracked: #288
-        **_kwargs: Any,  # noqa: ANN401  # tracked: #288
+        toolchains: Sequence[str] = (),
+        pip_extras: Sequence[str] = (),
+        **_kwargs: object,
     ) -> str:
         calls.append(
             {
@@ -305,7 +329,7 @@ def fake_ensure_pushed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """
     calls: list[str] = []
 
-    def fake_ensure_pushed(image_id: str, **_kwargs: Any) -> str:  # noqa: ANN401  # tracked: #288
+    def fake_ensure_pushed(image_id: str, **_kwargs: object) -> str:
         calls.append(image_id)
         return _PUSHED_DIGEST
 
@@ -314,7 +338,7 @@ def fake_ensure_pushed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 @pytest.fixture(autouse=True)
-def _synthetic_cli_auth(monkeypatch):  # noqa: ANN001, ANN202
+def _synthetic_cli_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin a deterministic host auth source for container CLI setup.
 
     ``_cli_container_env`` fails loud when a provider has neither a staged
@@ -328,7 +352,7 @@ def _synthetic_cli_auth(monkeypatch):  # noqa: ANN001, ANN202
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-openai-key")
 
 
-def test_cli_compatibility_flags_keep_options_scoped_to_selected_environment():  # noqa: ANN201  # tracked: #288
+def test_cli_compatibility_flags_keep_options_scoped_to_selected_environment() -> None:
     assert make_run_environment_spec().options == {}
     assert make_run_environment_spec(use_docker=True, docker_image="editor").options == {
         "image": "editor"
@@ -384,7 +408,7 @@ def test_skypilot_selection_requires_profile_and_resources() -> None:
         )
 
 
-def test_run_environment_record_captures_operator_selected_options():  # noqa: ANN201  # tracked: #288
+def test_run_environment_record_captures_operator_selected_options() -> None:
     assert run_environment_record(make_run_environment_spec()) == RunEnvironmentRecord(name="local")
     assert run_environment_record(
         make_run_environment_spec(use_docker=True, docker_image="editor")
@@ -416,7 +440,7 @@ def test_run_environment_record_captures_operator_selected_options():  # noqa: A
     )
 
 
-def test_run_environment_record_rejects_an_unknown_environment():  # noqa: ANN201  # tracked: #288
+def test_run_environment_record_rejects_an_unknown_environment() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
         run_environment_record(RunEnvironmentSpec("kubernetes"))
 
@@ -425,7 +449,7 @@ def _modal_runtime_document(tmp_path: Path) -> str:
     return (tmp_path / "logs" / "runtime-environment.md").read_text()
 
 
-def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("local"))
 
@@ -446,7 +470,9 @@ def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path):  # noq
     backend.sandbox.start.assert_not_called()
 
 
-def test_local_environment_materializes_effective_objective_outside_workspace(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_local_environment_materializes_effective_objective_outside_workspace(
+    tmp_path: Path,
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("local"))
     effective = "Optimize the service.\n\n## Operator constraints\n\n- BF16 only\n"
@@ -779,7 +805,7 @@ def test_docker_evaluator_tools_use_ephemeral_builder_and_read_only_final_mounts
     )
     prepare_calls = 0
 
-    def prepare(tools, install_parent, *, command_runner=None):  # noqa: ANN001, ANN202
+    def prepare(tools: object, install_parent: object, *, command_runner: object = None) -> object:
         nonlocal prepare_calls
         del tools, install_parent, command_runner
         prepare_calls += 1
@@ -1023,7 +1049,7 @@ def test_microservice_package_does_not_install_rust(
     assert fake_agent_image[-1]["toolchains"] == frozenset({"go"})
 
 
-def test_docker_environment_mounts_effective_objective_read_only(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_mounts_effective_objective_read_only(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     effective = "Optimize.\n\n## Operator constraints\n\n- exact BF16\n"
@@ -1040,7 +1066,9 @@ def test_docker_environment_mounts_effective_objective_read_only(tmp_path):  # n
     assert session.view.paths.objective == "/opt/vibesys-runtime/objective.md"
 
 
-def test_local_environment_objective_defaults_to_the_bare_workspace_relative_name(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_local_environment_objective_defaults_to_the_bare_workspace_relative_name(
+    tmp_path: Path,
+) -> None:
     """The host answer for an unset objective is identity: no lookup, no rewrite."""
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("local"))
@@ -1050,7 +1078,7 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
     assert session.view.paths.objective == "OBJECTIVE.md"
 
 
-def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path: Path) -> None:
     """``_container_mount_plan`` returns ``HostResource`` entries, not bind-mount
     tuples, with ``access`` and ``agent_path`` set for every named mount."""
     backend = FakeBackend()
@@ -1091,7 +1119,9 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
 
 
 @pytest.mark.parametrize("environment_name", ["docker", "modal"])
-def test_isolated_environment_enforces_project_path_policy(tmp_path, environment_name):  # noqa: ANN001, ANN201  # tracked: #288
+def test_isolated_environment_enforces_project_path_policy(
+    tmp_path: Path, environment_name: str
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec(environment_name))
     project = tmp_path / "workspace"
@@ -1134,7 +1164,9 @@ def test_isolated_environment_enforces_project_path_policy(tmp_path, environment
     assert hidden_mounts["/workspace/agent.toml"].is_relative_to(tmp_path / "logs")
 
 
-def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cli_container_env_and_setup_agree_on_the_container_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``_cli_provider_env_and_auth_files`` (Modal/SkyPilot) agrees with
     ``_cli_container_env`` (the plain Docker path) on the container
     environment, and additionally returns the staged auth copy pairs a
@@ -1158,14 +1190,14 @@ def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path
     assert auth_files == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
 
 
-def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -> None:
     backend = FakeBackend()
     request = _request(tmp_path, backend, agent_backend="stub", cli_provider="codex")
 
     assert _cli_container_env(request) is None
 
 
-def test_docker_agent_toolchains_adds_rust_only_when_tools_are_needed(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_agent_toolchains_adds_rust_only_when_tools_are_needed(tmp_path: Path) -> None:
     backend = FakeBackend()
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
@@ -1179,7 +1211,9 @@ def test_docker_agent_toolchains_adds_rust_only_when_tools_are_needed(tmp_path):
     assert _docker_agent_toolchains(_request(tmp_path, backend), {}) == frozenset()
 
 
-def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_copies_cli_auth_from_readonly_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     home = tmp_path / "synthetic-home"
@@ -1198,7 +1232,9 @@ def test_docker_environment_copies_cli_auth_from_readonly_staging(tmp_path, monk
     assert kwargs["auth_files"] == [("/opt/vibesys-auth/0", "/home/agent/.codex/auth.json")]
 
 
-def test_docker_environment_forwards_host_cli_auth_environment(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_forwards_host_cli_auth_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "proxy-token")
@@ -1208,7 +1244,7 @@ def test_docker_environment_forwards_host_cli_auth_environment(tmp_path, monkeyp
     env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="claude"))
 
     container_env = backend.calls[0][1]["extra_env"]
-    assert container_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"  # noqa: S105  # tracked: #288
+    assert container_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"  # noqa: S105  # lint-waiver: LW-006012; provider auth variable name is an explicit environment contract.
     assert container_env["ANTHROPIC_BASE_URL"] == "https://proxy.invalid/v1"
     # VibeSys owns per-role model selection, so a host export must not reach
     # the container and override it.
@@ -1219,10 +1255,10 @@ def test_docker_environment_forwards_host_cli_auth_environment(tmp_path, monkeyp
     assert container_env["PYTHONPATH"] == "/opt/vibesys"
 
 
-def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(  # noqa: ANN201  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-    monkeypatch,  # noqa: ANN001  # tracked: #288
-):
+def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     home = tmp_path / "absent-home"
@@ -1240,7 +1276,7 @@ def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(  # n
     assert backend.calls == []
 
 
-def test_docker_environment_exposes_framework_git_history_read_only(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_exposes_framework_git_history_read_only(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     history = tmp_path / "experiment-history"
@@ -1263,7 +1299,7 @@ def test_docker_environment_exposes_framework_git_history_read_only(tmp_path):  
     assert "hashes without recoverable source are insufficient" in session.view.prompt_notes
 
 
-def test_docker_environment_uses_environment_bind_mounts(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_uses_environment_bind_mounts(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     model_dir = tmp_path / "model"
@@ -1273,7 +1309,7 @@ def test_docker_environment_uses_environment_bind_mounts(tmp_path):  # noqa: ANN
         _request(
             tmp_path,
             backend,
-            environment_bind_mounts=(EnvironmentBindMount(model_dir, "/model", True),),  # noqa: FBT003  # tracked: #288
+            environment_bind_mounts=(EnvironmentBindMount(model_dir, "/model", read_only=True),),
         )
     )
 
@@ -1281,7 +1317,7 @@ def test_docker_environment_uses_environment_bind_mounts(tmp_path):  # noqa: ANN
     assert (str(model_dir), "/model", True) in _as_mount_tuples(kwargs["resources"])
 
 
-def test_docker_environment_mounts_selected_profiler_support(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_mounts_selected_profiler_support(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     support = tmp_path / "custom-profiler"
@@ -1303,7 +1339,7 @@ def test_docker_environment_mounts_selected_profiler_support(tmp_path):  # noqa:
     assert session.view.paths.profiler_support == "fixture_profiler"
 
 
-def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     ref_dir = tmp_path / "reference"
@@ -1315,7 +1351,7 @@ def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_pa
     assert all(container_path != "/model" for _, container_path, _ in mounts)
 
 
-def test_environment_session_context_manager_closes(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_environment_session_context_manager_closes(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
 
@@ -1329,7 +1365,7 @@ def test_environment_session_context_manager_closes(tmp_path):  # noqa: ANN001, 
 
 
 def test_modal_environment_uses_local_docker_for_editing(
-    tmp_path,  # noqa: ANN001  # tracked: #288
+    tmp_path: Path,
     fake_agent_image: list[dict[str, Any]],
     fake_ensure_pushed: list[str],
 ) -> None:
@@ -1357,7 +1393,7 @@ def test_modal_environment_uses_local_docker_for_editing(
     backend.sandbox.start.assert_called_once()
 
 
-def test_modal_environment_owns_candidate_runtime_naming(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_owns_candidate_runtime_naming(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
     session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
@@ -1373,7 +1409,7 @@ def test_modal_environment_owns_candidate_runtime_naming(tmp_path):  # noqa: ANN
     assert runtime.deployment_name in runtime.prompt_notes
 
 
-def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
@@ -1403,7 +1439,7 @@ def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_pat
     )
 
 
-def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path) -> None:  # noqa: ANN001
+def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(
         RunEnvironmentSpec(
@@ -1432,7 +1468,7 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path) -> None:
     assert session.view.paths.benchmark_command == f"{prefix} trusted-benchmark"
 
 
-def test_modal_environment_installs_nothing_at_container_start(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -> None:
     """The local Docker container starts from a prebuilt, pushed agent image
     and installs nothing at start, including the Modal Python SDK an earlier
     revision `pip install`ed here: that install ran through
@@ -1447,7 +1483,9 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path):  # noq
     assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
 
 
-def test_modal_environment_mounts_modal_auth_under_the_agent_home(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_mounts_modal_auth_under_the_agent_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The Modal SDK inside the editor container reads its token from the
     HOME of the ``agent`` user the image runs as, so the host's
     ``~/.modal.toml`` must land there, not under ``/root``. The first real
@@ -1469,7 +1507,7 @@ def test_modal_environment_mounts_modal_auth_under_the_agent_home(tmp_path, monk
     assert not any(container.startswith("/root/") for _host, container, _ro in mounts)
 
 
-def test_modal_environment_prompt_references_runtime_document(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_prompt_references_runtime_document(tmp_path: Path) -> None:
     """Prompts name the runtime manual instead of embedding it in every role."""
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
@@ -1516,7 +1554,7 @@ def test_modal_environment_prompt_references_runtime_document(tmp_path):  # noqa
         assert term.casefold() not in runtime.casefold()
 
 
-def test_modal_environment_mounts_effective_objective_read_only(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_mounts_effective_objective_read_only(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
     effective = "Optimize.\n\n## Operator constraints\n\n- no quantization\n"
@@ -1541,7 +1579,7 @@ def test_modal_environment_mounts_effective_objective_read_only(tmp_path):  # no
     assert session.view.paths.objective == "/opt/vibesys-runtime/objective.md"
 
 
-def test_modal_environment_prompt_notes_require_remote_runtime_fingerprint(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_prompt_notes_require_remote_runtime_fingerprint(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
@@ -1554,7 +1592,7 @@ def test_modal_environment_prompt_notes_require_remote_runtime_fingerprint(tmp_p
     assert "same Modal image and hardware" in notes
 
 
-def test_modal_environment_requires_exact_default_h100_identity(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_requires_exact_default_h100_identity(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
@@ -1567,7 +1605,7 @@ def test_modal_environment_requires_exact_default_h100_identity(tmp_path):  # no
     assert "fail closed" in notes
 
 
-def test_modal_environment_documents_history_and_exact_measurement_source(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_documents_history_and_exact_measurement_source(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
     history = tmp_path / "experiment-history"
@@ -1595,7 +1633,7 @@ def test_modal_environment_documents_history_and_exact_measurement_source(tmp_pa
     assert "Create this provenance artifact before launch" in notes
 
 
-def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) -> None:
     """Project location does not participate in remote resource identity."""
     backend_a = FakeBackend()
     backend_b = FakeBackend()
@@ -1640,7 +1678,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path):  # noqa
     assert "vibesys-20260429-100100-runb" not in notes_a
 
 
-def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path: Path) -> None:
     """The runtime notes must spell out the modal_profile / profile_remote
     contract; without it the profiler agent has no Modal entrypoint to
     invoke and falls back to local synthetic-weight profiling."""
@@ -1661,7 +1699,7 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path):  #
     assert "from torch.autograd import DeviceType" not in notes
 
 
-def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
@@ -1675,7 +1713,7 @@ def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path):  # n
     assert "excluding `.venv` and `.cache`" in notes
 
 
-def test_modal_environment_with_stub_agent_backend_uses_docker_too(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_with_stub_agent_backend_uses_docker_too(tmp_path: Path) -> None:
     """A non-cli agent backend also runs locally in Docker: Modal is a
     dispatch target, not a runtime for the agent."""
     backend = FakeBackend()
@@ -1686,7 +1724,7 @@ def test_modal_environment_with_stub_agent_backend_uses_docker_too(tmp_path):  #
     assert backend.calls[0][0] is SandboxKind.DOCKER
 
 
-def test_unknown_environment_name_raises():  # noqa: ANN201  # tracked: #288
+def test_unknown_environment_name_raises() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
         build_run_environment(RunEnvironmentSpec("wat"))
 
@@ -1713,9 +1751,10 @@ remote_artifact_root = "/remote/vibesys"
     captures: dict[str, object] = {}
 
     class FakeBridge:
-        def __init__(self, **kwargs):  # noqa: ANN003, ANN204
+        def __init__(self, *, socket_path: Path, **kwargs: object) -> None:
             captures.update(kwargs)
-            self.socket_path = kwargs["socket_path"]
+            captures["socket_path"] = socket_path
+            self.socket_path = socket_path
             self.closed = 0
 
         def start(self) -> None:
@@ -1800,9 +1839,10 @@ remote_artifact_root = "/remote/vibesys"
     captures: dict[str, object] = {}
 
     class FakeBridge:
-        def __init__(self, **kwargs):  # noqa: ANN003, ANN204
+        def __init__(self, *, socket_path: Path, **kwargs: object) -> None:
             captures.update(kwargs)
-            self.socket_path = kwargs["socket_path"]
+            captures["socket_path"] = socket_path
+            self.socket_path = socket_path
 
         def start(self) -> None:
             self.socket_path.write_text("socket")
@@ -1872,12 +1912,14 @@ remote_artifact_root = "/remote/vibesys"
     session.close()
 
 
-def test_docker_remove_workspace_child_quotes_path(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_docker_remove_workspace_child_quotes_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
     calls = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
+    def fake_run(cmd: object, **_kwargs: object) -> object:
         calls.append(cmd)
         result = MagicMock()
         result.returncode = 0
@@ -1898,14 +1940,13 @@ def test_docker_remove_workspace_child_quotes_path(tmp_path, monkeypatch):  # no
     assert "'/workspace/semi;touch hacked'" in shell_command
 
 
-def test_modal_teardown_deployment_stops_app_via_cli(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    import sys as _sys  # noqa: PLC0415  # tracked: #288
+def test_modal_teardown_deployment_stops_app_via_cli(monkeypatch: pytest.MonkeyPatch) -> None:
 
     env = build_run_environment(RunEnvironmentSpec("modal"))
     calls = []
     logs = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
+    def fake_run(cmd: object, **_kwargs: object) -> object:
         calls.append(cmd)
         result = MagicMock()
         result.returncode = 0
@@ -1920,11 +1961,13 @@ def test_modal_teardown_deployment_stops_app_via_cli(monkeypatch):  # noqa: ANN0
     assert any("stopped candidate app vibesys-run-g1c2" in line for line in logs)
 
 
-def test_modal_teardown_deployment_is_best_effort_on_nonzero(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_teardown_deployment_is_best_effort_on_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     env = build_run_environment(RunEnvironmentSpec("modal"))
     logs = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
+    def fake_run(_cmd: object, **_kwargs: object) -> object:
         result = MagicMock()
         result.returncode = 1
         result.stderr = "boom"
@@ -1937,11 +1980,13 @@ def test_modal_teardown_deployment_is_best_effort_on_nonzero(monkeypatch):  # no
     assert any("failed" in line for line in logs)
 
 
-def test_modal_teardown_deployment_is_best_effort_on_exception(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_teardown_deployment_is_best_effort_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     env = build_run_environment(RunEnvironmentSpec("modal"))
     logs = []
 
-    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
+    def fake_run(_cmd: object, **_kwargs: object) -> Never:
         raise TimeoutError("stuck")
 
     monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
@@ -1951,11 +1996,12 @@ def test_modal_teardown_deployment_is_best_effort_on_exception(monkeypatch):  # 
 
 
 @pytest.mark.parametrize("name", ["local", "docker"])
-def test_non_modal_teardown_deployment_is_noop(name, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_non_modal_teardown_deployment_is_noop(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     env = build_run_environment(RunEnvironmentSpec(name))
 
-    def fail_run(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202, ARG001  # tracked: #288
-        raise AssertionError("subprocess.run should not be called for non-Modal envs")  # noqa: TRY003  # tracked: #288
+    def fail_run(*_args: object, **_kwargs: object) -> Never:
+        _failure_message = "subprocess.run should not be called for non-Modal envs"
+        raise AssertionError(_failure_message)
 
     monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fail_run)
 
@@ -1963,11 +2009,10 @@ def test_non_modal_teardown_deployment_is_noop(name, monkeypatch):  # noqa: ANN0
     env.teardown_deployment("vibesys-run-g1c2", log=lambda _: None)
 
 
-def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path: Path) -> None:
     """Seeded starting-point checkouts live only in the editor container, so
     the runtime notes must tell the agent to bake them into the Modal image;
     unseeded runs must not mention checkouts at all."""
-    from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: PLC0415  # tracked: #288
 
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
@@ -2021,7 +2066,9 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
         EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
     )
 
-    def _open(env_name: str, env: Any, backend: FakeBackend, **overrides: Any) -> None:  # noqa: ANN401  # tracked: #288
+    def _open(
+        env_name: str, env: RunEnvironment, backend: FakeBackend, **overrides: object
+    ) -> None:
         root = tmp_path / env_name
         root.mkdir()
         env.open(
@@ -2056,8 +2103,8 @@ remote_artifact_root = "/remote/vibesys"
     )
 
     class _FakeBridge:
-        def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401  # tracked: #288
-            self.socket_path = kwargs["socket_path"]
+        def __init__(self, *, socket_path: Path, **_kwargs: object) -> None:
+            self.socket_path = socket_path
 
         def start(self) -> None:
             self.socket_path.write_text("socket")
@@ -2113,3 +2160,206 @@ remote_artifact_root = "/remote/vibesys"
         for agent_path, resource in mounts.items():
             if resource.access is HostResourceAccess.READ_WRITE:
                 assert agent_path in legitimately_writable, (env_name, agent_path)
+
+
+@pytest.mark.parametrize("environment_name", ["local", "modal"])
+def test_environments_without_a_sandbox_workspace_cannot_remove_children(
+    tmp_path: Path, environment_name: str
+) -> None:
+    env = build_run_environment(RunEnvironmentSpec(environment_name))
+
+    assert env.remove_workspace_child(tmp_path, "child", backend=FakeBackend()) is False
+
+
+def test_docker_repair_workspace_logs_launch_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    monkeypatch.setattr(
+        "vibesys.sandbox.run_environment.subprocess.run",
+        MagicMock(side_effect=OSError("docker unavailable")),
+    )
+    logs: list[str] = []
+
+    env.repair_workspace(tmp_path, backend=FakeBackend(), log=logs.append)
+
+    assert logs == [f"[warn] chown failed for {tmp_path}: docker unavailable"]
+
+
+def test_docker_candidate_runtime_reuses_the_session_namespace(tmp_path: Path) -> None:
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    session = env.open(_request(tmp_path, FakeBackend()))
+
+    runtime = env.candidate_runtime(session.view, generation=3, child_idx=1)
+
+    assert runtime.prompt_notes == session.view.prompt_notes
+    assert runtime.deployment_name == session.view.deployment_namespace
+
+
+def test_skypilot_options_require_a_cluster_profile() -> None:
+    for options in ({}, {"profile": ""}, {"profile": 5}):
+        with pytest.raises(ValueError, match="non-empty cluster profile"):
+            SkyPilotEnvironment.from_options(options)
+
+
+def test_skypilot_open_requires_resources_and_a_state_namespace(tmp_path: Path) -> None:
+    request = _request(tmp_path, FakeBackend())
+
+    with pytest.raises(ValueError, match="requires portable run resources"):
+        SkyPilotEnvironment.from_options({"profile": "cluster"}).open(request)
+
+    resources = RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda")
+    with pytest.raises(ValueError, match="requires a machine-local state namespace"):
+        SkyPilotEnvironment.from_options({"profile": "cluster"}, resources).open(request)
+
+
+def test_modal_open_requires_a_model_id_in_reference_metadata(tmp_path: Path) -> None:
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "meta.json").write_text(json.dumps({"revision": "main"}))
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+
+    with pytest.raises(ValueError, match="missing required 'model_id' field"):
+        env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
+
+
+def test_modal_open_requires_a_model_id_in_draft_metadata(tmp_path: Path) -> None:
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "draft_meta.json").write_text("{}")
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+
+    with pytest.raises(ValueError, match=r"draft_meta\.json at .* missing required 'model_id'"):
+        env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
+
+
+def test_effective_objective_must_match_a_document_inside_the_workspace(tmp_path: Path) -> None:
+    backend = FakeBackend()
+    outside = tmp_path / "OBJECTIVE.md"
+    outside.write_text("goal")
+    request = _request(tmp_path, backend, objective="goal", objective_document=outside)
+    with pytest.raises(ValueError, match="must be inside the project workspace"):
+        _materialize_effective_objective(request)
+
+    inside = request.workspace / "OBJECTIVE.md"
+    inside.write_text("stale goal")
+    request = _request(tmp_path, backend, objective="goal", objective_document=inside)
+    with pytest.raises(ValueError, match="does not match its committed document"):
+        _materialize_effective_objective(request)
+
+    inside.write_text("goal")
+    assert _materialize_effective_objective(request) == inside.resolve()
+
+
+def test_environment_command_rejects_unbalanced_quotes(tmp_path: Path) -> None:
+    request = _request(tmp_path, FakeBackend())
+
+    with pytest.raises(ValueError, match="invalid evaluator command"):
+        _environment_command(request, "python 'unterminated")
+
+
+def test_remote_push_failure_names_the_backend_and_image() -> None:
+    failing_push = MagicMock(side_effect=ImagePushError("registry refused"))
+
+    with pytest.raises(
+        ImagePushError,
+        match=r"agent image sha256:abc in the registry for a Modal run: registry refused",
+    ):
+        _ensure_pushed_for_remote_backend(
+            "sha256:abc", ensure_pushed=failing_push, backend_label="Modal"
+        )
+
+
+def _tool_request(tmp_path: Path, **overrides: object) -> tuple[RunEnvironmentRequest, Any]:
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(name="vibesys-evaluator-request-factory", version="0.1.0")
+    )
+    request = _request(
+        tmp_path,
+        FakeBackend(),
+        evaluator_package_root=package.root,
+        **{"evaluator_tools_root": tmp_path / "operator-tools", **overrides},
+    )
+    return request, package.metadata.tools
+
+
+def test_docker_tool_mounts_need_a_backend_image_and_a_tools_root(tmp_path: Path) -> None:
+    request, tools = _tool_request(tmp_path)
+    cast("FakeBackend", request.backend).image = ""
+    with pytest.raises(EvaluatorToolError, match="requires a configured backend image"):
+        _docker_evaluator_tool_mounts(request, tools)
+
+    request, tools = _tool_request(tmp_path, evaluator_tools_root=None)
+    with pytest.raises(ValueError, match="require an operator-owned tools root"):
+        _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
+
+
+def test_docker_tool_builder_reports_ownership_and_incomplete_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request, tools = _tool_request(tmp_path)
+    monkeypatch.setattr(
+        "vibesys.sandbox.run_environment.prepare_evaluator_tools",
+        MagicMock(side_effect=_EvaluatorToolBuildRequiredError),
+    )
+    backend = cast("FakeBackend", request.backend)
+    backend.sandbox.execute.return_value = MagicMock(exit_code=1, output="denied\n")
+
+    with pytest.raises(EvaluatorToolError, match=r"could not return cache ownership.*denied"):
+        _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
+
+    backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="")
+    with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
+        _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
+
+
+@pytest.mark.parametrize(
+    ("runs", "error", "message"),
+    [
+        (
+            [MagicMock(returncode=1, stdout="", stderr=""), FileNotFoundError()],
+            EvaluatorToolError,
+            "Docker was not found",
+        ),
+        (
+            [MagicMock(returncode=1, stdout="", stderr=""), subprocess.TimeoutExpired("d", 600)],
+            EvaluatorToolError,
+            "Docker image pull timed out: img",
+        ),
+        (
+            [
+                MagicMock(returncode=1, stdout="", stderr=""),
+                MagicMock(returncode=1, stdout="", stderr="no such image"),
+            ],
+            EvaluatorToolError,
+            "Could not resolve Docker image 'img': no such image",
+        ),
+        (
+            [
+                MagicMock(returncode=1, stdout="", stderr=""),
+                MagicMock(returncode=0, stdout="pulled", stderr=""),
+                MagicMock(returncode=0, stdout="not-a-digest", stderr=""),
+            ],
+            EvaluatorToolError,
+            "no resolvable immutable image ID",
+        ),
+    ],
+)
+def test_docker_image_resolution_failures_are_diagnosed(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[object],
+    error: type[Exception],
+    message: str,
+) -> None:
+    outcomes = iter(runs)
+
+    def run(*_args: object, **_kwargs: object) -> object:
+        outcome = next(outcomes)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", run)
+
+    with pytest.raises(error, match=message):
+        _resolve_docker_image_id("img")

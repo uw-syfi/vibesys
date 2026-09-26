@@ -11,7 +11,7 @@ from vs_project.api import (
 )
 
 
-def _project(tmp_path):  # noqa: ANN001, ANN202
+def _project(tmp_path):  # noqa: ANN001, ANN202  # LW-040068 [ANN001, ANN202]; this scripted double mirrors a production signature whose parameters are not annotated here. The helper is private to this test module and its return type is the local closure type.
     (tmp_path / "OBJECTIVE.md").write_text("Make it fast.\n")
     project = Project.open(tmp_path)
     project.state.create_project("test")
@@ -40,12 +40,12 @@ def _plan(identifier: str) -> OrchestratorPlan:
         hypothesis_id=identifier,
         hypothesis=f"claim {identifier}",
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        pass_criteria="tests pass",  # noqa: S106  # LW-040069 [S106]; the argument is a fixture literal, not a credential.
         reasoning="test the claim",
     )
 
 
-def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None:  # noqa: ANN001
+def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None:  # noqa: ANN001  # LW-040070 [ANN001]; this scripted double mirrors a production signature whose parameters are not annotated here.
     project = _project(tmp_path)
     namespace = project.state.portable_namespace("run-1", "agent")
     store = HypothesisStateStore(namespace)

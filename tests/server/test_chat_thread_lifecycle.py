@@ -15,13 +15,12 @@ from server.chat.factory import ChatAgentResources, ExperimentChatFactory
 from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
-from server.run_attachment import AgentSelection
+from server.run_attachment import AgentSelection, RunAttachment
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from server.run_attachment import RunAttachment
     from vibesys.api import RunSession
 
 
@@ -360,26 +359,23 @@ def _factory_for_test(
 ) -> ExperimentChatFactory:
     defaults = ChatRunSettings(driver="agentshim", provider="codex", model="gpt-test")
 
-    def resolve_selection(
-        *, driver: str | None, provider: str | None, model: str | None
-    ) -> AgentSelection:
-        return AgentSelection(
-            driver=driver or defaults.driver,
-            provider=provider or defaults.provider,
-            model=model or defaults.model,
-        )
-
     return ExperimentChatFactory(
         manager=parts.chat,
         controller=cast("Any", object()),
         executions=cast("Any", object()),
-        project=cast("Any", _Project(_ProjectState(tmp_path / "chat"))),
-        run_id="run-1",
-        workspace=tmp_path,
-        defaults=defaults,
-        resolve_selection=resolve_selection,
         session=cast("Any", object()),
-        attachment=cast("Any", object()),
+        attachment=RunAttachment(
+            project=cast("Any", _Project(_ProjectState(tmp_path / "chat"))),
+            run_id="run-1",
+            workspace=tmp_path,
+            log_dir=tmp_path,
+            agent_backend="agentshim",
+            agent_defaults=AgentSelection(
+                driver=defaults.driver,
+                provider=defaults.provider,
+                model=defaults.model,
+            ),
+        ),
         build_agent=build_agent,
         fallback=lambda _question: "fallback",
     )

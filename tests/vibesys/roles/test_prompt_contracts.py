@@ -57,7 +57,8 @@ def _resolve_template_path(template: str) -> tuple[Path, tuple[Path, ...]]:
         candidate = root / name
         if candidate.is_file():
             return candidate, roots
-    raise AssertionError(f"no template file found for {template!r}")  # noqa: TRY003
+    message = f"no template file found for {template!r}"
+    raise AssertionError(message)
 
 
 def _free_variables(template: str) -> frozenset[str]:

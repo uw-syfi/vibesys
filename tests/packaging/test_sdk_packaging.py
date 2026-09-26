@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 
 import pytest
 
 from vibesys import sdk_paths
 from vibesys.input_project import InputProjectError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _installable_package(root: Path, name: str = "vs-bench") -> Path:
@@ -17,7 +20,7 @@ def _installable_package(root: Path, name: str = "vs-bench") -> Path:
     return package
 
 
-def test_sdk_root_prefers_the_checkout(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
+def test_sdk_root_prefers_the_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     checkout = tmp_path / "checkout"
     packaged = tmp_path / "site-packages" / "vibesys" / "_sdk"
     (checkout / "sdk").mkdir(parents=True)
@@ -29,7 +32,9 @@ def test_sdk_root_prefers_the_checkout(tmp_path, monkeypatch):  # noqa: ANN001, 
     assert sdk_paths.sdk_root() == checkout / "sdk"
 
 
-def test_sdk_root_falls_back_to_the_packaged_copy(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
+def test_sdk_root_falls_back_to_the_packaged_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     packaged = tmp_path / "site-packages" / "vibesys" / "_sdk"
     packaged.mkdir(parents=True)
 
@@ -39,7 +44,7 @@ def test_sdk_root_falls_back_to_the_packaged_copy(tmp_path, monkeypatch):  # noq
     assert sdk_paths.sdk_root() == packaged
 
 
-def test_resolve_sdk_source_prefers_an_installable_checkout_package(tmp_path):  # noqa: ANN001, ANN201
+def test_resolve_sdk_source_prefers_an_installable_checkout_package(tmp_path: Path) -> None:
     checkout_root = tmp_path / "repo" / "sdk"
     checkout = _installable_package(checkout_root)
     packaged_root = tmp_path / "site-packages" / "vibesys" / "_sdk"
@@ -57,7 +62,7 @@ def test_resolve_sdk_source_prefers_an_installable_checkout_package(tmp_path):  
     assert resolved == checkout
 
 
-def test_resolve_sdk_source_maps_a_repo_relative_path_to_packaged_sdk(tmp_path):  # noqa: ANN001, ANN201
+def test_resolve_sdk_source_maps_a_repo_relative_path_to_packaged_sdk(tmp_path: Path) -> None:
     checkout_root = tmp_path / "no-checkout" / "sdk"
     packaged_root = tmp_path / "site-packages" / "vibesys" / "_sdk"
     packaged = _installable_package(packaged_root)
@@ -78,7 +83,7 @@ def test_resolve_sdk_source_maps_a_repo_relative_path_to_packaged_sdk(tmp_path):
     "raw_path",
     ["/sdk/vs-bench", "../../../other/vs-bench", "../../../sdk/../secrets"],
 )
-def test_resolve_sdk_source_rejects_paths_outside_the_sdk(tmp_path, raw_path):  # noqa: ANN001, ANN201
+def test_resolve_sdk_source_rejects_paths_outside_the_sdk(tmp_path: Path, raw_path: str) -> None:
     project = tmp_path / "repo" / "examples" / "input"
     project.mkdir(parents=True)
 
@@ -91,7 +96,7 @@ def test_resolve_sdk_source_rejects_paths_outside_the_sdk(tmp_path, raw_path):  
         )
 
 
-def test_resolve_sdk_source_rejects_unknown_or_incomplete_packages(tmp_path):  # noqa: ANN001, ANN201
+def test_resolve_sdk_source_rejects_unknown_or_incomplete_packages(tmp_path: Path) -> None:
     project = tmp_path / "repo" / "examples" / "input"
     project.mkdir(parents=True)
     packaged_root = tmp_path / "package" / "_sdk"
@@ -106,7 +111,9 @@ def test_resolve_sdk_source_rejects_unknown_or_incomplete_packages(tmp_path):  #
         )
 
 
-def test_resolve_sdk_source_rejects_an_installable_project_outside_owned_roots(tmp_path):  # noqa: ANN001, ANN201
+def test_resolve_sdk_source_rejects_an_installable_project_outside_owned_roots(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "external" / "input"
     project.mkdir(parents=True)
     _installable_package(tmp_path / "external" / "sdk", "evil")

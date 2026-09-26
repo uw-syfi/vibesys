@@ -20,6 +20,8 @@ from vibesys.schemas import SkillResourceSelection
 __all__ = ["SkillResourceSelection", "Verdict"]
 
 
-class Verdict(StrEnum):  # noqa: D101  # tracked: #288
-    PASS = "pass"  # noqa: S105  # tracked: #288
+class Verdict(StrEnum):
+    """Binary outcome returned by a judge or validation stage."""
+
+    PASS = "pass"  # noqa: S105  # lint-waiver: LW-010203 [S105]; this is the public result enum value, not a credential.
     FAIL = "fail"

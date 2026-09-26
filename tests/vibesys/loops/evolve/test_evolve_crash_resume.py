@@ -26,7 +26,7 @@ Two layers:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypedDict
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: crash injection below
 
 import pytest
 from hypothesis import given, settings
@@ -38,7 +38,6 @@ from tests.vibesys.loops.evolve._support import (
     _load_population,
     _mutator_writes_callback,
     _project_dir,
-    ref_file,  # noqa: F401  # tracked: #288  # pytest fixture
 )
 
 from vibesys.loops.evolve.run import EvolveRun
@@ -47,6 +46,8 @@ from vibesys.search.population.search import PopulationSearch
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vibesys.search.population.models import PopulationState
 
 # ---------------------------------------------------------------------------
@@ -222,12 +223,13 @@ def _crash_after(target: type, method_name: str, n: int) -> tuple[Any, dict[str,
     original = getattr(target, method_name)
     calls = {"count": 0}
 
-    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401  # LW-040188 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         if calls["count"] >= n:
             raise _SimulatedCrashError
         calls["count"] += 1
         return await original(self, *args, **kwargs)
 
+    # test-isolation: the test injects a crash into evolve internals to check resume, and no seam exists for that
     return patch.object(target, method_name, wrapper), calls
 
 
@@ -244,7 +246,7 @@ class _ResumeKwargs(TypedDict):
     existing: bool
 
 
-def _resume_kwargs(tmp_path) -> _ResumeKwargs:  # noqa: ANN001
+def _resume_kwargs(tmp_path) -> _ResumeKwargs:  # noqa: ANN001  # LW-040189 [ANN001]; this scripted double mirrors a production signature whose parameters are not annotated here.
     """The exp_name/input_path a resumed ``_invoke_loop`` call needs.
 
     Mirrors ``test_evolve_with_preexisting_passing_seed_skips_bootstrap``:
@@ -266,7 +268,10 @@ def _script(n_children: int, *, all_pass: bool = True) -> FakeAgentClient:
     return runner
 
 
-def test_crash_before_any_generation_evaluation_resumes_cleanly(tmp_path, ref_file) -> None:  # noqa: ANN001, F811
+def test_crash_before_any_generation_evaluation_resumes_cleanly(
+    tmp_path: Path,
+    ref_file: str,
+) -> None:
     """Boundary: crash right after proposals are derived, before any child
     is evaluated. Resume evaluates every child slot exactly once."""
     n = 3
@@ -290,7 +295,7 @@ def test_crash_before_any_generation_evaluation_resumes_cleanly(tmp_path, ref_fi
     assert len(runner.calls_for("implementer")) == 1 + n
 
 
-def test_crash_after_one_admit_does_not_redo_it(tmp_path, ref_file) -> None:  # noqa: ANN001, F811
+def test_crash_after_one_admit_does_not_redo_it(tmp_path: Path, ref_file: str) -> None:
     """Boundary: crash after one child is admitted and committed. Resume
     picks up at the next slot; the admitted child is not re-evaluated."""
     n = 3
@@ -316,7 +321,10 @@ def test_crash_after_one_admit_does_not_redo_it(tmp_path, ref_file) -> None:  # 
     assert len(runner.calls_for("implementer")) == 1 + n
 
 
-def test_crash_after_admit_before_commit_redoes_only_that_slot(tmp_path, ref_file) -> None:  # noqa: ANN001, F811
+def test_crash_after_admit_before_commit_redoes_only_that_slot(
+    tmp_path: Path,
+    ref_file: str,
+) -> None:
     """Boundary: the in-memory admit happened, but the checkpoint never
     reached disk. A resumed process cannot see it, so it evaluates that slot
     again -- and produces the same final population as an uninterrupted
@@ -344,19 +352,21 @@ def test_crash_after_admit_before_commit_redoes_only_that_slot(tmp_path, ref_fil
     assert len(runner.calls_for("implementer")) == 1 + n + 1
 
 
-def test_crash_mid_parallel_batch_admits_nothing_from_it(tmp_path, ref_file) -> None:  # noqa: ANN001, F811
+def test_crash_mid_parallel_batch_admits_nothing_from_it(tmp_path: Path, ref_file: str) -> None:
     """Boundary: the parallel pool dies partway through. Since outcomes are
     only admitted after the whole pool returns, nothing from that batch is
     committed, and a resume re-evaluates the entire batch (never a partial,
     inconsistent admission)."""
 
-    async def _dying_pool(self: Any, generation: int, targets: Any) -> Any:  # noqa: ARG001, ANN401
+    async def _dying_pool(self: Any, generation: int, targets: Any) -> Any:  # noqa: ARG001, ANN401  # LW-040190 [ANN401, ARG001]; the value crosses an untyped boundary, so Any is the accurate type. This scripted double accepts the production keyword arguments and ignores the ones it does not need.
         raise _SimulatedCrashError
 
     n = 2
     runner = _script(n)
     with (
-        patch.object(EvolveRun, "parallel", property(lambda self: True)),  # noqa: ARG005
+        # test-isolation: the test injects a crash into evolve internals to check resume, and no seam exists for that
+        patch.object(EvolveRun, "parallel", property(lambda self: True)),  # noqa: ARG005  # LW-040191 [ARG005]; the lambda stands in for a method with a fixed signature and ignores the arguments it does not need.
+        # test-isolation: the test injects a crash into evolve internals to check resume, and no seam exists for that
         patch.object(EvolveRun, "_evaluate_parallel_pool", _dying_pool),
         pytest.raises(_SimulatedCrashError),
     ):

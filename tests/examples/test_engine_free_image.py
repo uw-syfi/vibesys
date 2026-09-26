@@ -1,6 +1,7 @@
-import subprocess
 import sys
 from pathlib import Path
+
+from tests.support import run_test_command
 
 IMAGE = Path("examples/model-serving/images/rocm-mi30x-engine-free")
 BASE_TAG = "lmsysorg/sglang:v0.5.18-rocm700-mi30x"
@@ -35,7 +36,7 @@ def test_readme_documents_placeholders() -> None:
 
 
 def test_verify_script_fails_closed_outside_the_image() -> None:
-    proc = subprocess.run(  # noqa: S603  # fixed argv, no untrusted input
+    proc = run_test_command(  # fixed argv, no untrusted input
         [sys.executable, str(IMAGE / "verify_image.py")],
         capture_output=True,
         text=True,

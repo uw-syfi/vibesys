@@ -20,7 +20,7 @@ _PROMPTS_LOOPS = Path(PROMPTS_DIR) / "loops"
 def _registered_strategy_folders() -> set[str]:
     registry = built_in_orchestrations()
     folders = set()
-    for registration in registry._registrations.values():  # noqa: SLF001
+    for registration in registry._registrations.values():  # noqa: SLF001  # LW-040196 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
         module = registration.orchestrator.__module__
         assert module.startswith("vibesys.loops."), (
             f"registered orchestrator {module!r} is not under vibesys.loops"

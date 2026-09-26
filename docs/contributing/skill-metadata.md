@@ -46,11 +46,11 @@ Semantics:
 - `path` must stay inside the sidecar directory; absolute paths and `..` are
   invalid.
 - `backends` is optional. If absent, the rule does not constrain backend.
-- Every backend value must match a `ComputeBackend` value: `cuda`, `metal`,
-  `trainium`, or `cpu`.
+- Every backend value must match a `ComputeBackend` value: `cuda`, `rocm`,
+  `metal`, `trainium`, or `cpu`.
 - `domains` is optional. If absent, the rule does not constrain domain.
 - Every domain value must match a registered domain: `generic`, `llm-serving`,
-  or `microservices`.
+  `microservices`, or `database`.
 - A skill with no matching rule is globally eligible and may load for any
   backend and domain.
 - When a rule declares both `backends` and `domains`, both constraints must

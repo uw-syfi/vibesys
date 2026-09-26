@@ -8,13 +8,13 @@ import os
 import platform
 import shutil
 import stat
-import subprocess
 import zipfile
 from pathlib import Path
 
 import packaging_support
 import pytest
 import verify_release_wheel as verifier
+from tests.support import run_test_command
 from wheel_targets import TARGETS
 
 FRAMEWORK_PACKAGES = (
@@ -86,8 +86,8 @@ dependencies = ["example>=1"]
     _source_file(root, "third_party/bun/LICENSE", b"Bun license\n")
     _source_file(root, "LICENSE", b"VibeSys license\n")
 
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)  # noqa: S607
-    subprocess.run(["git", "add", "."], cwd=root, check=True)  # noqa: S607
+    run_test_command(["git", "init", "-q"], cwd=root, check=True)
+    run_test_command(["git", "add", "."], cwd=root, check=True)
     return root
 
 
@@ -631,7 +631,7 @@ def test_bdist_wheel_revalidates_the_native_host(tmp_path: Path) -> None:
 
     uv = shutil.which("uv")
     assert uv is not None
-    result = subprocess.run(  # noqa: S603
+    result = run_test_command(
         [uv, "build", "--wheel", "--out-dir", str(tmp_path / "dist")],
         cwd=Path(__file__).resolve().parents[2],
         env=env,

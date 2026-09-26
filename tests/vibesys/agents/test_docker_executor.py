@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import builtins
 import json
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from agentshim import (
@@ -47,16 +49,14 @@ def _sink(
     )
 
 
-def _request(**overrides: object) -> CommandRequest:
-    fields: dict[str, object] = {
-        "argv": ["claude", "-p"],
-        "stdin": "prompt",
-        "cwd": None,
-        "env": {},
-        "timeout": 17.0,
-    }
-    fields.update(overrides)
-    return CommandRequest(**fields)  # type: ignore[arg-type]
+def _request(*, argv: list[str] | None = None) -> CommandRequest:
+    return CommandRequest(
+        argv=argv if argv is not None else ["claude", "-p"],
+        stdin="prompt",
+        cwd=None,
+        env={},
+        timeout=17.0,
+    )
 
 
 class _BlockingHandle:
@@ -400,7 +400,10 @@ class TestCodexRolloutReading:
             rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
         )
         monkeypatch.setattr("vs_agent.docker_executor.subprocess.run", queries)
-        return executor._read_codex_rollout_completion("container-123", THREAD_ID)  # noqa: SLF001
+        # lint-waiver: LW-010047 [SLF001]; these parser-edge unit tests isolate rollout-file classification without entering the blocking watchdog run loop, and the reader has no public surface.
+        return executor._read_codex_rollout_completion(  # noqa: SLF001
+            "container-123", THREAD_ID
+        )
 
     def test_no_rollout_file_is_no_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         queries = _FakeDockerQueries(rollout=None)
@@ -600,9 +603,11 @@ class TestCodexResumeArgvMatches:
         assert not _codex_resume_argv_matches([], THREAD_ID)
 
     def test_the_termination_script_embeds_the_same_predicate(self) -> None:
-        namespace: dict[str, object] = {}
+        namespace: dict[str, object] = {"Path": Path}
         header = _CODEX_RESUME_TERMINATION_SCRIPT.split("\nthread_id = ")[0]
-        exec(header, namespace)  # noqa: S102
+        # Execute only the generated predicate definition to verify that the
+        # shell termination script embeds the same tested contract.
+        builtins.exec(header, namespace)  # noqa: S102  # lint-waiver: LW-010049 [S102]; execute the repository-owned predicate fixture so this test checks the embedded shell contract against Python behavior.
         embedded = cast("Callable[[list[str], str], bool]", namespace["_codex_resume_argv_matches"])
         argv = ["node", "/usr/local/bin/codex", "exec", "resume", THREAD_ID, "-", "--json"]
         assert embedded(argv, THREAD_ID) is True

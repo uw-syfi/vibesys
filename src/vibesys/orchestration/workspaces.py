@@ -4,6 +4,7 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 """
 
 # Capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-040112 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ class WorkspaceRestoreError(RuntimeError):
         super().__init__(f"could not restore candidate revision {revision!r}")
 
 
-class WorkspaceTransactionKeep(Exception):  # noqa: N818  # a signal, not always an error
+class WorkspaceTransactionKeep(Exception):  # noqa: N818  # LW-040113 [N818]; a signal, not always an error.
     """Raise (or subclass) inside a transaction body to skip restore-on-error.
 
     ``async with workspace.transaction():`` restores the workspace to its
@@ -177,7 +178,8 @@ class WorkspaceHandle:
     async def discard(self) -> None:
         """Close an isolated workspace and all of its agent handles."""
         if self._scope is None:
-            raise ValueError("the run root cannot be discarded")  # noqa: TRY003
+            message = "the run root cannot be discarded"
+            raise ValueError(message)
         await self._owner._discard_scope(self._scope)
 
     @asynccontextmanager
@@ -223,7 +225,8 @@ class _Workspaces:
         """Resolve a public handle to its internal scope identity."""
         if isinstance(scope, WorkspaceHandle):
             if scope._owner is not self:
-                raise ValueError("workspace handle belongs to another run")  # noqa: TRY003
+                message = "workspace handle belongs to another run"
+                raise ValueError(message)
             return scope._scope
         return scope
 
@@ -237,9 +240,11 @@ class _Workspaces:
         parent = self._host._resources
         base = revision or parent.git.current_sha()
         if base is None:
-            raise RuntimeError("cannot fork a workspace without a committed revision")  # noqa: TRY003
+            message = "cannot fork a workspace without a committed revision"
+            raise RuntimeError(message)
         if not parent.run_environment_view.supports_parallel_candidate_evaluation:
-            raise RuntimeError("run environment cannot open isolated candidate sandboxes")  # noqa: TRY003
+            message = "run environment cannot open isolated candidate sandboxes"
+            raise RuntimeError(message)
         scope_id = f"s{uuid.uuid4().hex}"
         context = create_workspace_resources(
             parent,
@@ -275,7 +280,8 @@ class _Workspaces:
         parent.git.snapshot(label)
         revision = parent.git.current_sha()
         if revision is None:
-            raise RuntimeError("workspace snapshot completed without a Git revision")  # noqa: TRY003
+            message = "workspace snapshot completed without a Git revision"
+            raise RuntimeError(message)
         return revision
 
     def _snapshot_scoped(self, label: str, scope: WorkspaceScope) -> str:
@@ -284,7 +290,8 @@ class _Workspaces:
         git.snapshot(label)
         revision = git.current_sha()
         if revision is None:
-            raise RuntimeError("workspace snapshot completed without a Git revision")  # noqa: TRY003
+            message = "workspace snapshot completed without a Git revision"
+            raise RuntimeError(message)
         return revision
 
     def _retain_scoped(self, scope: WorkspaceScope, revision: str) -> str:
@@ -392,7 +399,7 @@ class _Workspaces:
                     continue
                 try:
                     await agent.close()
-                except BaseException as exc:  # noqa: BLE001  # finish scope cleanup
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020031 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
             async with (
                 self._host.gates._lock_for(scope),
@@ -401,13 +408,14 @@ class _Workspaces:
             ):
                 try:
                     await self._host._run_blocking(self._discard, scope)
-                except BaseException as exc:  # noqa: BLE001  # report all cleanup errors
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020032 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
                 finally:
                     if scope.id not in self._scopes:
                         self._host.gates._forget(scope)
             if errors:
-                raise BaseExceptionGroup("scoped agent cleanup failed", errors)  # noqa: TRY003
+                message = "scoped agent cleanup failed"
+                raise BaseExceptionGroup(message, errors)
 
     def _discard(self, scope: WorkspaceScope) -> None:
         current = self._require_scope(scope)
@@ -423,10 +431,12 @@ class _Workspaces:
     def _require_scope(self, scope: WorkspaceScope | WorkspaceHandle) -> WorkspaceScope:
         resolved = self._scope_of(scope)
         if resolved is None:
-            raise ValueError("expected an isolated workspace scope")  # noqa: TRY003
+            message = "expected an isolated workspace scope"
+            raise ValueError(message)
         current = self._scopes.get(resolved.id)
         if current is not resolved:
-            raise ValueError("workspace scope is closed or belongs to another run")  # noqa: TRY003
+            message = "workspace scope is closed or belongs to another run"
+            raise ValueError(message)
         return current
 
     def _resources_for(self, scope: WorkspaceScope | WorkspaceHandle | None) -> _RunResources:
@@ -448,7 +458,8 @@ class _Workspaces:
                     self._host._parent_mutation_lock,
                 ):
                     await asyncio.to_thread(self._discard, scope)
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020033 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if errors:
-            raise BaseExceptionGroup("workspace cleanup failed", errors)  # noqa: TRY003
+            message = "workspace cleanup failed"
+            raise BaseExceptionGroup(message, errors)

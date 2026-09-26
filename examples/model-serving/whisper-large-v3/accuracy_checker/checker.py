@@ -31,7 +31,7 @@ import torch
 
 # The read-only reference lives in the sibling reference/ directory.
 sys.path.insert(0, str((Path(__file__).parent.parent / "reference").resolve()))
-from reference import load_reference, reference_transcribe  # noqa: E402
+from reference import load_reference, reference_transcribe
 
 
 def _load_custom_model_class():

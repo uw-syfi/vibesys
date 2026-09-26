@@ -51,9 +51,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import launcher  # noqa: E402
-import vs_protocol  # noqa: E402
-from vs_protocol import MetricSpec  # noqa: E402
+import launcher
+import vs_protocol
+from vs_protocol import MetricSpec
 
 # Workload/pacing-model version. Kept at 4: unlimited concurrency and an
 # admission-queue-aware schedule, identical to the multiturn task's v4 workload
@@ -456,7 +456,7 @@ async def send_chat_turn(
                         first_token = time.perf_counter()
                         first_token_ts_wall = time.time()
                     parts.append(content)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         ttft = first_token and (first_token - started)
         return TurnAttempt(
             "".join(parts),
@@ -757,7 +757,7 @@ def metrics_output_path(output_json: str | None, vs_output: str | None) -> Path:
     """
     if output_json is not None:
         return Path(output_json)
-    assert vs_output is not None  # noqa: S101 -- guarded by main()
+    assert vs_output is not None
     return Path(vs_output + ".metrics.json")
 
 
@@ -866,7 +866,7 @@ async def main_async(args: argparse.Namespace) -> int:
         report.declare(METRIC_SPECS)
         try:
             values, all_results = await measure(args)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             print(f"benchmark failed: {message}", file=sys.stderr)
             output_path.unlink(missing_ok=True)

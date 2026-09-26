@@ -6,7 +6,6 @@ import configparser
 import importlib.util
 import re
 import shlex
-import subprocess
 import tarfile
 import tomllib
 import zipfile
@@ -16,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from packaging.requirements import Requirement
 from scripts.example_repositories import is_example_repository_path
+from tests.support import run_test_command
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -45,8 +45,8 @@ INTERNAL_IMPORT_PACKAGES = {
 
 def test_headless_readme_examples_select_a_run_collection() -> None:
     """Removing the explicit collection from a headless example must fail here."""
-    result = subprocess.run(
-        ["git", "ls-files", "--", "examples/**/README.md"],  # noqa: S607
+    result = run_test_command(
+        ["git", "ls-files", "--", "examples/**/README.md"],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,
@@ -116,8 +116,8 @@ def test_repository_examples_track_their_vibesys_branches() -> None:
 
 def test_tracked_submodule_initialization_commands_override_the_opt_out() -> None:
     """Adding an ineffective setup command must make the documentation contract fail."""
-    result = subprocess.run(
-        [  # noqa: S607
+    result = run_test_command(
+        [
             "git",
             "ls-files",
             "-z",
@@ -161,7 +161,7 @@ def _load_packaging_support() -> ModuleType:
     return module
 
 
-def test_root_distribution_discovers_internal_packages_from_their_source_roots():  # noqa: ANN201
+def test_root_distribution_discovers_internal_packages_from_their_source_roots() -> None:
     """Dropping one source root must make its import package disappear from the wheel."""
     module = _load_packaging_support()
     packages, package_dirs = module.discover_distribution_packages(PROJECT_ROOT)
@@ -218,7 +218,7 @@ def test_build_output_cleanup_removes_only_owned_top_level_packages(tmp_path: Pa
     assert unrelated.is_file()
 
 
-def test_root_metadata_declares_internal_runtime_dependencies_directly():  # noqa: ANN201
+def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None:
     """Reintroducing a workspace-only dependency must make PyPI resolution fail here."""
     pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
     requirements = {Requirement(raw).name for raw in pyproject["project"]["dependencies"]}
@@ -240,8 +240,8 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
     tmp_path: Path,
 ) -> None:
     """Published metadata must preserve constraints needed by Intel macOS installs."""
-    subprocess.run(  # noqa: S603
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],  # noqa: S607
+    run_test_command(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,
@@ -271,8 +271,8 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "graft resources/evaluators" in manifest
     assert "prune resources/evaluators/queue/native_runner/target" in manifest
 
-    subprocess.run(  # noqa: S603
-        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],  # noqa: S607
+    run_test_command(
+        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,

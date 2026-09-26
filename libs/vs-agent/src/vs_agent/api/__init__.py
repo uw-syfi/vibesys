@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.client import AgentClient
+    from vs_agent.factory import agent_driver_supports_mcp_servers
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -134,22 +135,25 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:  # noqa: ANN401
+def __getattr__(name: str) -> object:
     """Expose the heavy composition lazily so imports cannot form a cycle."""
     if name == "AgentClient":
-        from vs_agent.client import AgentClient  # noqa: PLC0415
+        from vs_agent.client import (  # noqa: PLC0415  # lint-waiver: LW-010114 [PLC0415]; Keep AgentClient lazy in __getattr__ so unused providers and import cycles stay unloaded.
+            AgentClient,
+        )
 
         return AgentClient
     if name == "agent_driver_supports_mcp_servers":
-        from vs_agent.factory import (  # noqa: PLC0415
+        from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010115 [PLC0415]; Keep this dependency lazy in __getattr__ so unused providers and import cycles stay unloaded.
             agent_driver_supports_mcp_servers,
         )
 
         return agent_driver_supports_mcp_servers
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")  # noqa: TRY003
+    message = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(message)
 
 
-def build_agent_client(  # noqa: PLR0913
+def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; preserve the public keyword parameters shared with the factory so callers can configure each agent setting directly.
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
@@ -165,7 +169,9 @@ def build_agent_client(  # noqa: PLR0913
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
-    from vs_agent.factory import build_agent_client as build  # noqa: PLC0415
+    from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
+        build_agent_client as build,
+    )
 
     return build(
         spec=spec,

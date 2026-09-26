@@ -8,10 +8,12 @@ driver's internals.
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003  # pytest tmp_path annotation
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import (
+    BaseModel,
+)
 
 from vibesys.events import (
     AgentOutputChunkData,
@@ -41,6 +43,7 @@ from vs_agent.drivers.fake import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -54,12 +57,12 @@ def sink_events() -> Iterator[list[CoreEvent]]:
         unsubscribe()
 
 
-def _invoke_plan(  # noqa: ANN202
+def _invoke_plan(
     driver: FakeDriver,
     workspace: Path,
     *,
     round_label: str = "round 1",
-):
+) -> OrchestratorPlan:
     """Run one orchestrator turn through the real client for ``driver``.
 
     The client is left open: the caller may run further turns on the same
@@ -93,7 +96,7 @@ def _of_type(events: list[CoreEvent], event_type: CoreEventType) -> list[CoreEve
     return [event for event in events if event.type is event_type]
 
 
-def test_scripted_mode_answers_a_structured_turn(tmp_path, sink_events):  # noqa: ANN001, ANN201, ARG001
+def test_scripted_mode_answers_a_structured_turn(tmp_path: Path) -> None:
     plan = _invoke_plan(FakeDriver(turn=[assistant_text("planning...")]), tmp_path)
 
     assert isinstance(plan, OrchestratorPlan)
@@ -101,7 +104,9 @@ def test_scripted_mode_answers_a_structured_turn(tmp_path, sink_events):  # noqa
     assert plan.reasoning != "fallback", "the fake must produce a parseable structured answer"
 
 
-def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(tmp_path, sink_events):  # noqa: ANN001, ANN201
+def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(
+    tmp_path: Path, sink_events: list[CoreEvent]
+) -> None:
     text_chunks = 3
     thinking_chunks = 2
     tool_calls = 4
@@ -152,7 +157,9 @@ def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(tmp_path, sink
     assert len(usage) == usage_updates
 
 
-def test_scripted_tool_results_carry_the_configured_payload_size(tmp_path, sink_events):  # noqa: ANN001, ANN201
+def test_scripted_tool_results_carry_the_configured_payload_size(
+    tmp_path: Path, sink_events: list[CoreEvent]
+) -> None:
     _invoke_plan(
         FakeDriver(turn=[tool_call("Bash", {"command": "x"}), tool_result("y" * 4096)]),
         tmp_path,
@@ -166,7 +173,9 @@ def test_scripted_tool_results_carry_the_configured_payload_size(tmp_path, sink_
     assert data.is_error is False
 
 
-def test_scripted_tool_calls_and_results_are_correlated(tmp_path, sink_events):  # noqa: ANN001, ANN201
+def test_scripted_tool_calls_and_results_are_correlated(
+    tmp_path: Path, sink_events: list[CoreEvent]
+) -> None:
     events = [
         event
         for i in range(3)
@@ -190,7 +199,9 @@ def test_scripted_tool_calls_and_results_are_correlated(tmp_path, sink_events): 
     assert result_ids == call_ids
 
 
-def test_scripted_todos_arrive_as_a_provider_plan_snapshot(tmp_path, sink_events):  # noqa: ANN001, ANN201
+def test_scripted_todos_arrive_as_a_provider_plan_snapshot(
+    tmp_path: Path, sink_events: list[CoreEvent]
+) -> None:
     _invoke_plan(
         FakeDriver(
             turn=[
@@ -213,7 +224,9 @@ def test_scripted_todos_arrive_as_a_provider_plan_snapshot(tmp_path, sink_events
     assert [item.status for item in data.todos] == ["in_progress", "pending", "pending"]
 
 
-def test_scripted_usage_reaches_the_sink_as_a_usage_update(tmp_path, sink_events):  # noqa: ANN001, ANN201
+def test_scripted_usage_reaches_the_sink_as_a_usage_update(
+    tmp_path: Path, sink_events: list[CoreEvent]
+) -> None:
     _invoke_plan(FakeDriver(turn=[usage_event(input_tokens=1000, output_tokens=120)]), tmp_path)
 
     usage = _of_type(sink_events, CoreEventType.USAGE_UPDATE)
@@ -224,7 +237,7 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(tmp_path, sink_events
     assert data.model == "mock-model"
 
 
-def test_scripted_rounds_advance_the_hypothesis_story(tmp_path, sink_events):  # noqa: ANN001, ANN201, ARG001
+def test_scripted_rounds_advance_the_hypothesis_story(tmp_path: Path) -> None:
     driver = FakeDriver(turn=[assistant_text("planning...")])
 
     first = _invoke_plan(driver, tmp_path, round_label="round 1")
@@ -234,7 +247,9 @@ def test_scripted_rounds_advance_the_hypothesis_story(tmp_path, sink_events):  #
     assert third.hypothesis_id == "H-02"
 
 
-def test_events_are_scoped_to_the_invoking_role_and_round(tmp_path, sink_events):  # noqa: ANN001, ANN201
+def test_events_are_scoped_to_the_invoking_role_and_round(
+    tmp_path: Path, sink_events: list[CoreEvent]
+) -> None:
     _invoke_plan(
         FakeDriver(turn=[tool_call("Bash", {"command": "x"}), tool_result("ok")]),
         tmp_path,
@@ -247,8 +262,7 @@ def test_events_are_scoped_to_the_invoking_role_and_round(tmp_path, sink_events)
     assert {event.round_label for event in scoped} == {"round 7"}
 
 
-def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path):  # noqa: ANN001, ANN201
-    from pydantic import BaseModel  # noqa: PLC0415
+def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path: Path) -> None:
 
     class UnknownResponse(BaseModel):
         answer: str
@@ -267,7 +281,7 @@ def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path): 
         session.run_turn(AgentTurnRequest(message="go", output_schema=UnknownResponse))
 
 
-def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path):  # noqa: ANN001, ANN201
+def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path: Path) -> None:
     driver = FakeDriver()
     session = driver.create_session(
         AgentSessionSpec(
@@ -286,7 +300,7 @@ def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path):  # noqa: 
     assert session.run_turn(AgentTurnRequest(message="go")).text
 
 
-def test_a_closed_driver_refuses_new_sessions(tmp_path):  # noqa: ANN001, ANN201
+def test_a_closed_driver_refuses_new_sessions(tmp_path: Path) -> None:
     driver = FakeDriver()
     driver.close()
     driver.close()  # idempotent

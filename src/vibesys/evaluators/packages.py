@@ -22,10 +22,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 EVALUATOR_PACKAGE_METADATA_NAME = "vibesys.evaluator.toml"
-PACKAGE_ROOT_TOKEN = "${PACKAGE_ROOT}"  # noqa: S105
-PROJECT_ROOT_TOKEN = "${PROJECT_ROOT}"  # noqa: S105
-PYTHON_TOKEN = "${PYTHON}"  # noqa: S105
-TOOL_TOKEN_PREFIX = "${TOOL:"  # noqa: S105
+PACKAGE_ROOT_TOKEN = "${PACKAGE_ROOT}"  # noqa: S105  # lint-waiver: LW-007086 [S105]; Public argv template token, not a credential.
+PROJECT_ROOT_TOKEN = "${PROJECT_ROOT}"  # noqa: S105  # lint-waiver: LW-007087 [S105]; Public argv template token, not a credential.
+PYTHON_TOKEN = "${PYTHON}"  # noqa: S105  # lint-waiver: LW-007088 [S105]; Public argv template token, not a credential.
+TOOL_TOKEN_PREFIX = "${TOOL:"  # noqa: S105  # lint-waiver: LW-007089 [S105]; Public argv template token, not a credential.
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 _CARGO_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
@@ -41,9 +41,65 @@ _DIGEST_EXCLUDED_NAMES = frozenset({".git", "__pycache__", "target"})
 class EvaluatorPackageError(ValueError):
     """Base error for invalid or ambiguous evaluator packages."""
 
+    @classmethod
+    def missing_entrypoint(
+        cls, package: str, entrypoint: str, available: str
+    ) -> EvaluatorPackageError:
+        """Describe an entrypoint absent from a resolved package."""
+        return cls(
+            f"evaluator package {package!r} has no entrypoint {entrypoint!r}; "
+            f"available entrypoints: {available}"
+        )
+
+    @classmethod
+    def duplicate_package(cls, name: str, version: str, locations: str) -> EvaluatorPackageError:
+        """Describe multiple local packages matching one exact requirement."""
+        return cls(f"duplicate evaluator package {name}=={version}: {locations}")
+
+    @classmethod
+    def invalid_directory(cls, path: Path) -> EvaluatorPackageError:
+        """Describe a package root that is not a directory."""
+        return cls(f"evaluator package is not a directory: {path}")
+
+    @classmethod
+    def missing_metadata(cls, path: Path) -> EvaluatorPackageError:
+        """Describe a package directory without its metadata file."""
+        return cls(f"evaluator package metadata not found: {path}")
+
+    @classmethod
+    def invalid_metadata(cls, path: Path, error: Exception) -> EvaluatorPackageError:
+        """Describe package metadata that failed parsing or validation."""
+        return cls(f"invalid evaluator package metadata {path}: {error}")
+
+    @classmethod
+    def contains_symlink(cls, path: Path) -> EvaluatorPackageError:
+        """Describe a package containing a symbolic link."""
+        return cls(f"evaluator packages may not contain symlinks: {path}")
+
 
 class EvaluatorPackageNotFoundError(EvaluatorPackageError):
     """Raised when a local collection cannot satisfy an exact requirement."""
+
+    @classmethod
+    def missing_collection(cls, path: Path) -> EvaluatorPackageNotFoundError:
+        """Describe a package collection that does not exist."""
+        return cls(f"evaluator package collection does not exist: {path}")
+
+    @classmethod
+    def missing_requirement(
+        cls, name: str, version: str, path: Path, available: str
+    ) -> EvaluatorPackageNotFoundError:
+        """Describe an exact package version absent from a collection."""
+        detail = f"; available packages: {available}" if available else ""
+        return cls(f"evaluator package {name}=={version} not found in {path}{detail}")
+
+    @classmethod
+    def resources_unavailable(cls) -> EvaluatorPackageNotFoundError:
+        """Describe a distribution without bundled evaluator package resources."""
+        return cls(
+            "VibeSys evaluator package resources are not available; install a complete "
+            "VibeSys distribution or pass packages_root"
+        )
 
 
 class CargoGitToolSpec(BaseModel):
@@ -69,38 +125,42 @@ class CargoGitToolSpec(BaseModel):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError(  # noqa: TRY003
-                "git must be an HTTPS URL without credentials, query, or fragment"
-            )
+            message = "git must be an HTTPS URL without credentials, query, or fragment"
+            raise ValueError(message)
         return value
 
     @field_validator("rev")
     @classmethod
     def _full_git_revision(cls, value: str) -> str:
         if not _GIT_REVISION_PATTERN.fullmatch(value):
-            raise ValueError("rev must be a full 40-character lowercase Git commit SHA")  # noqa: TRY003
+            message = "rev must be a full 40-character lowercase Git commit SHA"
+            raise ValueError(message)
         return value
 
     @field_validator("package")
     @classmethod
     def _valid_package(cls, value: str) -> str:
         if not _CARGO_IDENTIFIER_PATTERN.fullmatch(value):
-            raise ValueError("package must be a canonical Cargo package name")  # noqa: TRY003
+            message = "package must be a canonical Cargo package name"
+            raise ValueError(message)
         return value
 
     @field_validator("bins")
     @classmethod
     def _valid_bins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if not value:
-            raise ValueError("bins must declare at least one binary")  # noqa: TRY003
+            message = "bins must declare at least one binary"
+            raise ValueError(message)
         if len(value) != len(set(value)):
-            raise ValueError("bins must not contain duplicates")  # noqa: TRY003
+            message = "bins must not contain duplicates"
+            raise ValueError(message)
         invalid = next(
             (binary for binary in value if not _CARGO_IDENTIFIER_PATTERN.fullmatch(binary)),
             None,
         )
         if invalid is not None:
-            raise ValueError(f"invalid Cargo binary name: {invalid!r}")  # noqa: TRY003
+            message = f"invalid Cargo binary name: {invalid!r}"
+            raise ValueError(message)
         return value
 
 
@@ -116,18 +176,16 @@ class EvaluatorPackageRequirement(BaseModel):
     @classmethod
     def _valid_name(cls, value: str) -> str:
         if not _IDENTIFIER_PATTERN.fullmatch(value):
-            raise ValueError(  # noqa: TRY003
-                "name must contain lowercase letters and digits separated by '-' or '.'"
-            )
+            message = "name must contain lowercase letters and digits separated by '-' or '.'"
+            raise ValueError(message)
         return value
 
     @field_validator("version")
     @classmethod
     def _valid_version(cls, value: str) -> str:
         if not _VERSION_PATTERN.fullmatch(value):
-            raise ValueError(  # noqa: TRY003
-                "version must be an exact package version without whitespace"
-            )
+            message = "version must be an exact package version without whitespace"
+            raise ValueError(message)
         return value
 
 
@@ -147,7 +205,8 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
         value: tuple[Literal["go", "rust"], ...],
     ) -> tuple[Literal["go", "rust"], ...]:
         if len(value) != len(set(value)):
-            raise ValueError("toolchains must not contain duplicates")  # noqa: TRY003
+            message = "toolchains must not contain duplicates"
+            raise ValueError(message)
         return value
 
     @field_validator("entrypoints")
@@ -157,33 +216,35 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
         value: dict[str, tuple[str, ...]],
     ) -> dict[str, tuple[str, ...]]:
         if not value:
-            raise ValueError("entrypoints must define at least one command")  # noqa: TRY003
+            message = "entrypoints must define at least one command"
+            raise ValueError(message)
         for name, command in value.items():
             if not _IDENTIFIER_PATTERN.fullmatch(name):
-                raise ValueError(  # noqa: TRY003
+                message = (
                     f"entrypoint {name!r} must contain lowercase letters and digits "
                     "separated by '-' or '.'"
                 )
+                raise ValueError(message)
             if not command:
-                raise ValueError(  # noqa: TRY003
-                    f"entrypoint {name!r} must contain at least one argv element"
-                )
+                message = f"entrypoint {name!r} must contain at least one argv element"
+                raise ValueError(message)
             if any(not part for part in command):
-                raise ValueError(  # noqa: TRY003
-                    f"entrypoint {name!r} contains an empty argv element"
-                )
+                message = f"entrypoint {name!r} contains an empty argv element"
+                raise ValueError(message)
             if any(PYTHON_TOKEN in part and part != PYTHON_TOKEN for part in command):
-                raise ValueError(  # noqa: TRY003
+                message = (
                     f"entrypoint {name!r} contains a malformed Python token; "
                     "${PYTHON} must occupy one complete argv element"
                 )
+                raise ValueError(message)
         return value
 
     @model_validator(mode="after")
     def _valid_tools(self) -> EvaluatorPackageMetadata:
         for name in self.tools:
             if not _IDENTIFIER_PATTERN.fullmatch(name):
-                raise ValueError(f"invalid evaluator tool name: {name!r}")  # noqa: TRY003
+                message = f"invalid evaluator tool name: {name!r}"
+                raise ValueError(message)
         for entrypoint, command in self.entrypoints.items():
             _validate_tool_tokens(self.tools, command, location=f"entrypoint {entrypoint!r}")
         return self
@@ -201,23 +262,22 @@ def _validate_tool_tokens(
         match = _TOOL_TOKEN_PATTERN.fullmatch(part)
         if match is None:
             if TOOL_TOKEN_PREFIX in part:
-                raise ValueError(  # noqa: TRY003
+                message = (
                     f"{location} contains a malformed tool token; "
                     "tool tokens must occupy one complete argv element"
                 )
+                raise ValueError(message)
             continue
         tool_name = match.group("tool")
         binary = match.group("binary")
         try:
             tool = tools[tool_name]
         except KeyError as exc:
-            raise ValueError(  # noqa: TRY003
-                f"{location} references undeclared tool {tool_name!r}"
-            ) from exc
+            message = f"{location} references undeclared tool {tool_name!r}"
+            raise ValueError(message) from exc
         if binary not in tool.bins:
-            raise ValueError(  # noqa: TRY003
-                f"{location} references undeclared binary {binary!r} from tool {tool_name!r}"
-            )
+            message = f"{location} references undeclared binary {binary!r} from tool {tool_name!r}"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -256,9 +316,8 @@ class ResolvedEvaluatorPackage:
             command = self.metadata.entrypoints[entrypoint]
         except KeyError as exc:
             available = ", ".join(sorted(self.metadata.entrypoints))
-            raise EvaluatorPackageError(  # noqa: TRY003
-                f"evaluator package {self.name!r} has no entrypoint {entrypoint!r}; "
-                f"available entrypoints: {available}"
+            raise EvaluatorPackageError.missing_entrypoint(
+                self.name, entrypoint, available
             ) from exc
         try:
             _validate_tool_tokens(
@@ -291,9 +350,7 @@ class EvaluatorPackageRegistry:
     def resolve(self, requirement: EvaluatorPackageRequirement) -> ResolvedEvaluatorPackage:
         """Resolve one exact package requirement or raise a diagnostic error."""
         if not self.root.is_dir():
-            raise EvaluatorPackageNotFoundError(  # noqa: TRY003
-                f"evaluator package collection does not exist: {self.root}"
-            )
+            raise EvaluatorPackageNotFoundError.missing_collection(self.root)
 
         packages = self._packages()
         matches = [
@@ -303,16 +360,13 @@ class EvaluatorPackageRegistry:
         ]
         if not matches:
             available = sorted(f"{package.name}=={package.version}" for package in packages)
-            detail = f"; available packages: {', '.join(available)}" if available else ""
-            raise EvaluatorPackageNotFoundError(  # noqa: TRY003
-                f"evaluator package {requirement.name}=={requirement.version} not found "
-                f"in {self.root}{detail}"
+            raise EvaluatorPackageNotFoundError.missing_requirement(
+                requirement.name, requirement.version, self.root, ", ".join(available)
             )
         if len(matches) > 1:
             locations = ", ".join(str(package.root) for package in matches)
-            raise EvaluatorPackageError(  # noqa: TRY003
-                f"duplicate evaluator package {requirement.name}=={requirement.version}: "
-                f"{locations}"
+            raise EvaluatorPackageError.duplicate_package(
+                requirement.name, requirement.version, locations
             )
         return matches[0]
 
@@ -329,20 +383,14 @@ def load_evaluator_package(path: Path) -> ResolvedEvaluatorPackage:
     root = path.expanduser().resolve()
     metadata_path = root / EVALUATOR_PACKAGE_METADATA_NAME
     if not root.is_dir():
-        raise EvaluatorPackageError(  # noqa: TRY003
-            f"evaluator package is not a directory: {root}"
-        )
+        raise EvaluatorPackageError.invalid_directory(root)
     if not metadata_path.is_file():
-        raise EvaluatorPackageError(  # noqa: TRY003
-            f"evaluator package metadata not found: {metadata_path}"
-        )
+        raise EvaluatorPackageError.missing_metadata(metadata_path)
     try:
         document = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
         metadata = EvaluatorPackageMetadata.model_validate(document)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
-        raise EvaluatorPackageError(  # noqa: TRY003
-            f"invalid evaluator package metadata {metadata_path}: {exc}"
-        ) from exc
+        raise EvaluatorPackageError.invalid_metadata(metadata_path, exc) from exc
     return ResolvedEvaluatorPackage(
         root=root,
         metadata=metadata,
@@ -358,10 +406,7 @@ def resolve_evaluator_package(
     """Resolve a package from an explicit collection or VibeSys resources."""
     root = packages_root if packages_root is not None else evaluator_packages_dir()
     if root is None:
-        raise EvaluatorPackageNotFoundError(  # noqa: TRY003
-            "VibeSys evaluator package resources are not available; install a complete "
-            "VibeSys distribution or pass packages_root"
-        )
+        raise EvaluatorPackageNotFoundError.resources_unavailable()
     return EvaluatorPackageRegistry(root).resolve(requirement)
 
 
@@ -374,9 +419,7 @@ def _content_digest(root: Path) -> str:
         if any(part in _DIGEST_EXCLUDED_NAMES for part in relative.parts):
             continue
         if path.is_symlink():
-            raise EvaluatorPackageError(  # noqa: TRY003
-                f"evaluator packages may not contain symlinks: {path}"
-            )
+            raise EvaluatorPackageError.contains_symlink(path)
         if not path.is_file() or path.suffix == ".pyc":
             continue
         relative_bytes = relative.as_posix().encode()

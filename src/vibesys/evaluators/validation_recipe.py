@@ -59,7 +59,8 @@ class ValidationRecipe(BaseModel):
     def _strip_recipe_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")  # noqa: TRY003  # tracked: #288
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
         return value
 
     @field_validator("input_paths")
@@ -70,13 +71,15 @@ class ValidationRecipe(BaseModel):
             value = raw.strip()
             path = PurePosixPath(value)
             if not value or path.is_absolute() or value == "." or ".." in path.parts:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
+                message = (
                     "input_paths must contain non-empty workspace-relative paths "
                     "without parent traversal"
                 )
+                raise ValueError(message)
             normalized.append(path.as_posix())
         if len(set(normalized)) != len(normalized):
-            raise ValueError("input_paths must not contain duplicates")  # noqa: TRY003  # tracked: #288
+            message = "input_paths must not contain duplicates"
+            raise ValueError(message)
         return normalized
 
 

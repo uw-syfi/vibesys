@@ -92,7 +92,7 @@ def test_plain_performance_record_requires_timezone_aware_timestamp() -> None:
     with pytest.raises(ValidationError, match="timezone info"):
         PlainPerformanceRecord(
             iteration=1,
-            timestamp=datetime(2026, 8, 12, 1, 2, 3),  # noqa: DTZ001  # tracked: #288
+            timestamp=datetime(2026, 8, 12, 1, 2, 3),  # noqa: DTZ001  # lint-waiver: LW-010104 [DTZ001]; this test intentionally supplies a naive timestamp to verify rejection.
             throughput_trend="mixed",
             latency_trend="mixed",
             metrics={},

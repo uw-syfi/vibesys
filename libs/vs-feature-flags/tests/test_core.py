@@ -34,21 +34,21 @@ def _registry() -> FeatureRegistry[ExampleFlag]:
     )
 
 
-def test_registry_uses_defaults():  # noqa: ANN201  # tracked: #288
+def test_registry_uses_defaults() -> None:
     registry = _registry()
 
     assert registry.is_enabled(ExampleFlag.NEW_LOOP) is False
     assert registry.is_enabled(ExampleFlag.STRICT_MODE) is True
 
 
-def test_registry_uses_typed_overrides():  # noqa: ANN201  # tracked: #288
+def test_registry_uses_typed_overrides() -> None:
     registry = _registry()
 
     assert registry.is_enabled(ExampleFlag.NEW_LOOP, {ExampleFlag.NEW_LOOP: True}) is True
     assert registry.is_enabled(ExampleFlag.STRICT_MODE, {ExampleFlag.STRICT_MODE: False}) is False
 
 
-def test_registry_requires_every_enum_member_to_have_definition():  # noqa: ANN201  # tracked: #288
+def test_registry_requires_every_enum_member_to_have_definition() -> None:
     with pytest.raises(ValueError, match="Missing feature definitions for: strict_mode"):
         FeatureRegistry(
             ExampleFlag,
@@ -58,7 +58,7 @@ def test_registry_requires_every_enum_member_to_have_definition():  # noqa: ANN2
         )
 
 
-def test_registry_rejects_definitions_for_another_enum():  # noqa: ANN201  # tracked: #288
+def test_registry_rejects_definitions_for_another_enum() -> None:
     with pytest.raises(TypeError, match="is not a ExampleFlag"):
         FeatureRegistry(
             ExampleFlag,
@@ -70,7 +70,7 @@ def test_registry_rejects_definitions_for_another_enum():  # noqa: ANN201  # tra
         )
 
 
-def test_definitions_mapping_is_read_only():  # noqa: ANN201  # tracked: #288
+def test_definitions_mapping_is_read_only() -> None:
     registry = _registry()
     # The property hands out a read-only view. Take it as mutable so the
     # assignment below is the runtime behavior under test, not a type error.

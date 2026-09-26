@@ -13,9 +13,8 @@ allowlist loader suffered from.
 """
 
 import tomllib
-from collections.abc import Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -25,6 +24,8 @@ from vibesys.features import FeatureFlag
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
 from vs_feature_flags.api import parse_feature_flag_overrides
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
 
 
@@ -34,7 +35,9 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ModelCfg(_Strict):  # noqa: D101  # tracked: #288
+class ModelCfg(_Strict):
+    """Model identifier and deprecated provider key from agent.toml."""
+
     name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
     # Deprecated: accepted so existing agent.toml files load, but ignored.
     provider: Provider | None = Field(
@@ -43,7 +46,9 @@ class ModelCfg(_Strict):  # noqa: D101  # tracked: #288
     )
 
 
-class ThinkingCfg(_Strict):  # noqa: D101  # tracked: #288
+class ThinkingCfg(_Strict):
+    """Optional reasoning-effort level or token budget."""
+
     level: str | None = Field(
         default=None,
         description=(
@@ -63,11 +68,14 @@ class ThinkingCfg(_Strict):  # noqa: D101  # tracked: #288
     @model_validator(mode="after")
     def _one_thinking_control(self) -> Self:
         if self.level is not None and self.budget is not None:
-            raise ValueError("thinking.level and thinking.budget are mutually exclusive")  # noqa: TRY003  # tracked: #288
+            message = "thinking.level and thinking.budget are mutually exclusive"
+            raise ValueError(message)
         return self
 
 
-class VertexCfg(_Strict):  # noqa: D101  # tracked: #288
+class VertexCfg(_Strict):
+    """Deprecated Vertex AI fields accepted for configuration compatibility."""
+
     # Deprecated: accepted so existing agent.toml files load, but ignored.
     # The attribute is ``json_path`` to avoid shadowing ``BaseModel.json``; the
     # TOML key stays ``json`` via the alias.
@@ -88,7 +96,9 @@ class VertexCfg(_Strict):  # noqa: D101  # tracked: #288
     )
 
 
-class OpenAICompatCfg(_Strict):  # noqa: D101  # tracked: #288
+class OpenAICompatCfg(_Strict):
+    """Deprecated OpenAI-compatible endpoint fields."""
+
     # Deprecated: accepted so existing agent.toml files load, but ignored.
     base_url: str | None = Field(
         default=None,
@@ -112,7 +122,9 @@ class _CredEnvProviderCfg(_Strict):
     """
 
 
-class ProvidersCfg(_Strict):  # noqa: D101  # tracked: #288
+class ProvidersCfg(_Strict):
+    """Deprecated provider tables accepted while configuration migrates."""
+
     # Deprecated: every [providers.*] table is accepted so existing agent.toml
     # files load, but none is read.
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -142,7 +154,9 @@ class ProvidersCfg(_Strict):  # noqa: D101  # tracked: #288
     )
 
 
-class BackendCfg(_Strict):  # noqa: D101  # tracked: #288
+class BackendCfg(_Strict):
+    """Compute backend selected for the run."""
+
     name: ComputeBackend = Field(
         default=DEFAULT_COMPUTE_BACKEND,
         description=(
@@ -168,7 +182,9 @@ class AgentRoleCfg(_Strict):
     )
 
 
-class AgentCfg(_Strict):  # noqa: D101  # tracked: #288
+class AgentCfg(_Strict):
+    """Agent driver and role-specific model controls."""
+
     driver: Literal["agentshim", "omnigent"] | None = Field(
         default=None,
         description=(
@@ -208,7 +224,9 @@ class AgentCfg(_Strict):  # noqa: D101  # tracked: #288
     )
 
 
-class RepositoryCfg(_Strict):  # noqa: D101  # tracked: #288
+class RepositoryCfg(_Strict):
+    """Default GitHub owner and repository visibility."""
+
     owner: str | None = Field(
         default=None,
         description=(
@@ -228,7 +246,8 @@ class RepositoryCfg(_Strict):  # noqa: D101  # tracked: #288
             return None
         owner = value.strip()
         if not REPOSITORY_COMPONENT.fullmatch(owner):
-            raise ValueError("repository owner must be one GitHub user or organization name")  # noqa: TRY003  # tracked: #288
+            message = "repository owner must be one GitHub user or organization name"
+            raise ValueError(message)
         return owner
 
 
@@ -243,7 +262,9 @@ class LoadLevelCfg(_Strict):
     max_tokens: int = Field(gt=0, description="Max output tokens per request at this load level.")
 
 
-class PerfEvalCfg(_Strict):  # noqa: D101  # tracked: #288
+class PerfEvalCfg(_Strict):
+    """Optional benchmark load ladder for performance evaluation."""
+
     load_levels: list[LoadLevelCfg] | None = Field(
         default=None,
         description=(
@@ -253,7 +274,9 @@ class PerfEvalCfg(_Strict):  # noqa: D101  # tracked: #288
     )
 
 
-class Config(_Strict):  # noqa: D101  # tracked: #288
+class Config(_Strict):
+    """Validated project configuration for one VibeSys run."""
+
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     model: ModelCfg = Field(description="[model] — model name and provider. Required.")
@@ -319,7 +342,7 @@ def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -
     """
     _load_dotenv_file()
     path = Path(path)
-    with open(path, "rb") as f:  # noqa: PTH123  # tracked: #288
+    with path.open("rb") as f:
         raw = {key: value for key, value in tomllib.load(f).items() if key not in ignored_sections}
 
     return Config.model_validate(raw)

@@ -34,7 +34,7 @@ Three conditions fail:
 
 Usage:
     uv run python scripts/check_file_length.py
-    uv run python scripts/check_file_length.py --root /path/to/repo
+    uv run python scripts/check_file_length.py --root /path/to/repo.
 """
 
 from __future__ import annotations
@@ -65,6 +65,21 @@ class Config:
 class ConfigError(Exception):
     """The `[tool.vibesys.file_length]` section is missing or malformed."""
 
+    @classmethod
+    def unreadable(cls, path: Path, error: OSError) -> ConfigError:
+        """Describe a project configuration file that could not be read."""
+        return cls(f"{path}: cannot be read ({error})")
+
+    @classmethod
+    def invalid_toml(cls, path: Path, error: tomllib.TOMLDecodeError) -> ConfigError:
+        """Describe invalid TOML in the project configuration file."""
+        return cls(f"{path}: is not valid TOML ({error})")
+
+    @classmethod
+    def missing_key(cls, path: Path, key: KeyError) -> ConfigError:
+        """Describe a missing configuration key."""
+        return cls(f"{path}: missing [tool.vibesys.file_length] key {key}")
+
 
 def load_config(pyproject_path: Path) -> Config:
     """Read the file-length ceiling, scan roots, and allowlist from ``pyproject.toml``.
@@ -75,19 +90,15 @@ def load_config(pyproject_path: Path) -> Config:
     try:
         data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ConfigError(f"{pyproject_path}: cannot be read ({exc})") from exc  # noqa: TRY003  # tracked: #288
+        raise ConfigError.unreadable(pyproject_path, exc) from exc
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"{pyproject_path}: is not valid TOML ({exc})") from exc  # noqa: TRY003  # tracked: #288
-
+        raise ConfigError.invalid_toml(pyproject_path, exc) from exc
     try:
         section = data["tool"]["vibesys"]["file_length"]
         max_lines = int(section["max_lines"])
         roots = tuple(str(entry) for entry in section["roots"])
     except KeyError as exc:
-        raise ConfigError(  # noqa: TRY003  # tracked: #288
-            f"{pyproject_path}: missing [tool.vibesys.file_length] key {exc}"
-        ) from exc
-
+        raise ConfigError.missing_key(pyproject_path, exc) from exc
     allowlist = {str(path): int(count) for path, count in section.get("allowlist", {}).items()}
     return Config(max_lines=max_lines, roots=roots, allowlist=allowlist)
 

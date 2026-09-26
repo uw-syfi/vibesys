@@ -33,7 +33,6 @@ from tests.vibesys.loops.evolve._support import (
     _load_population,
     _mutator_writes_callback,
     _project_dir,
-    ref_file,  # noqa: F401  # tracked: #288  # pytest fixture
 )
 
 from vibesys.api.testing import FakeGateExecutor
@@ -67,6 +66,10 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
+
     from vibesys.evaluators.gates import TrustedGateContext
 
 # ---------------------------------------------------------------------------
@@ -75,7 +78,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_bootstrap_fails_all_attempts_returns_false(tmp_path: Path, ref_file: str) -> None:
     """Abort handling: when every bootstrap attempt fails the judge, the run
     logs and stops before the generation loop, returning False without ever
     profiling an unverified candidate."""
@@ -97,7 +100,7 @@ def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):  # noqa
         assert ind.generation == 0
 
 
-def test_bootstrap_repairs_wip_seed_across_attempts(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_bootstrap_repairs_wip_seed_across_attempts(tmp_path: Path, ref_file: str) -> None:
     """WIP-seed regression: a second bootstrap attempt fix-forwards from the
     most-recent WIP seed (checks that commit out and mutates on top) rather
     than restarting from the reference, yielding a distinct WIP commit."""
@@ -119,7 +122,7 @@ def test_bootstrap_repairs_wip_seed_across_attempts(tmp_path, ref_file):  # noqa
     assert first.commit != second.commit
 
 
-def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path: Path, ref_file: str) -> None:
     """An LLM-approved seed still fails when the trusted oracle rejects it:
     the failed seed is never profiled, its oracle feedback is retained for
     the repair attempt, and the configured timeout reaches the framework
@@ -156,7 +159,9 @@ def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):
     assert seed.passed is True
 
 
-def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_evolve_with_preexisting_passing_seed_skips_bootstrap(
+    tmp_path: Path, ref_file: str
+) -> None:
     """A resumed run whose population already has a passing seed skips the
     bootstrap phase entirely and evolves straight off the seed."""
     _invoke_bootstrap(tmp_path, ref_file, FakeAgentClient())
@@ -194,7 +199,7 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
 # ---------------------------------------------------------------------------
 
 
-def test_final_project_tree_is_the_deterministic_scalar_best(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_final_project_tree_is_the_deterministic_scalar_best(tmp_path: Path, ref_file: str) -> None:
     """Deterministic replay: the run ends with the workspace checked out to
     the highest-fitness individual's tree, not the last-evaluated one."""
     responses = [
@@ -215,7 +220,7 @@ def test_final_project_tree_is_the_deterministic_scalar_best(tmp_path, ref_file)
     assert not (project / "mutant_3.py").exists()
 
 
-def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_failed_child_excluded_from_future_parent_pool(tmp_path: Path, ref_file: str) -> None:
     """Proposals are always derived from generation-start state, and only
     committed individuals are eligible parents: gen 2 must still parent off
     the seed, never off the failed, commit-less gen-1 child."""
@@ -234,7 +239,7 @@ def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):  # n
     assert g2.parent_id == seed.id
 
 
-def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path: Path, ref_file: str) -> None:
     """With axes configured, the profiler's ``metrics`` dict is copied onto
     every passing ``Individual`` so the frontier can be computed."""
     space = MetricSpace(
@@ -267,7 +272,7 @@ def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):  #
     assert front_ids == {seed.id, child.id}
 
 
-def _profiler_metrics(perf_metric: float, metrics: dict[str, float]):  # noqa: ANN202  # tracked: #288
+def _profiler_metrics(perf_metric: float, metrics: dict[str, float]):  # noqa: ANN202  # LW-040169 [ANN202];  tracked: #288.
 
     return ProfilerSummary(
         analysis="ok",
@@ -279,7 +284,9 @@ def _profiler_metrics(perf_metric: float, metrics: dict[str, float]):  # noqa: A
     )
 
 
-def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(
+    tmp_path: Path, ref_file: str
+) -> None:
     """A space with no axes keeps ``Individual.metrics`` empty (single-
     objective mode), even though the profiler stub doesn't supply one."""
     result = _invoke_bootstrap(tmp_path, ref_file, FakeAgentClient())
@@ -288,7 +295,7 @@ def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_fil
     assert pop[0].metrics == {}
 
 
-def test_openevolve_policy_persists_state_as_data(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_openevolve_policy_persists_state_as_data(tmp_path: Path, ref_file: str) -> None:
     """R4: OpenEvolve state is held entirely inside the committed
     ``PopulationState``, so it never grows an on-disk snapshot directory."""
 
@@ -337,7 +344,7 @@ def test_openevolve_policy_persists_state_as_data(tmp_path, ref_file):  # noqa: 
 # ---------------------------------------------------------------------------
 
 
-def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path: Path, ref_file: str) -> None:
     """A declared benchmark result contract, not the profiler agent's self-
     report, records every candidate's fitness."""
 
@@ -365,7 +372,9 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
     assert len(runner.calls_for("profiler")) == 2  # ran for diagnostics; self-report unused
 
 
-def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_benchmark_contract_failure_fails_the_candidate_before_profiling(
+    tmp_path: Path, ref_file: str
+) -> None:
 
     failing = BenchmarkGateResult(
         command="trusted-benchmark --json /tmp/result.json",
@@ -394,7 +403,9 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
     assert "Framework benchmark failed." in (failed.feedback or "")
 
 
-def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(
+    tmp_path: Path, ref_file: str
+) -> None:
     """Regression: a one-metric contract must not empty a two-axis frontier.
 
     The trusted row now overrides only the axis it measures and leaves the
@@ -436,7 +447,9 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
     assert {item.id for item in _frontier(pop, space)} == {seed.id, child.id}
 
 
-def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_protocol_contract_records_the_evaluator_declared_unit(
+    tmp_path: Path, ref_file: str
+) -> None:
     gate_executor = FakeGateExecutor()
     gate_executor.script_benchmark(_passing_gate_result(42.5, unit="ops/s"))
     result = _invoke_bootstrap(
@@ -453,7 +466,7 @@ def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_fil
     assert seed.perf_unit == "ops/s"
 
 
-def _passing_gate_result(metric_value: float, *, unit: str | None = None):  # noqa: ANN202  # tracked: #288
+def _passing_gate_result(metric_value: float, *, unit: str | None = None):  # noqa: ANN202  # LW-040176 [ANN202];  tracked: #288.
 
     return BenchmarkGateResult(
         command="trusted-benchmark --json /tmp/result.json",
@@ -473,14 +486,16 @@ def _passing_gate_result(metric_value: float, *, unit: str | None = None):  # no
 # ---------------------------------------------------------------------------
 
 
-def test_max_parallelism_ignored_without_environment_capability(tmp_path, ref_file, monkeypatch):  # noqa: ANN001, ANN201, F811  # tracked: #288
+def test_max_parallelism_ignored_without_environment_capability(
+    tmp_path: Path, ref_file: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An environment without isolated evaluation support stays serial even
     when a larger ``max_parallelism`` is requested."""
     called = {"parallel": False}
     monkeypatch.setattr(
         EvolveRun,
         "_evaluate_parallel_pool",
-        lambda *a, **k: called.__setitem__("parallel", True),  # noqa: ARG005, FBT003  # tracked: #288
+        lambda *a, **k: called.__setitem__("parallel", True),  # noqa: ARG005, FBT003  # LW-040178 [ARG005, FBT003];  tracked: #288.
     )
     runner = FakeAgentClient().enqueue(
         "judge", _judge_response("pass"), _judge_response("pass"), _judge_response("pass")
@@ -497,7 +512,7 @@ def test_max_parallelism_ignored_without_environment_capability(tmp_path, ref_fi
 # ---------------------------------------------------------------------------
 
 
-def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  # tracked: #288
+def test_evaluate_in_subcontext_skips_parent_without_commit() -> None:
     """A parent with no commit can't seed a worktree: folded into a failed
     outcome without ever building a sub-context."""
 
@@ -518,7 +533,7 @@ def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  
                 space=MetricSpace(),
                 modality="text_generation",
                 domain_definition=resolve_domain(DomainName.LLM_SERVING),
-                pass_criteria="crit",  # noqa: S106  # tracked: #288
+                pass_criteria="crit",  # noqa: S106  # LW-040180 [S106];  tracked: #288.
                 keep_deployments=False,
                 policy_parent_id=None,
                 target_island=None,
@@ -534,7 +549,7 @@ def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  
     assert any("no parent commit" in summary for summary in warnings)
 
 
-def test_candidate_runtime_notes_delegates_and_noop_without_deployment():  # noqa: ANN201  # tracked: #288
+def test_candidate_runtime_notes_delegates_and_noop_without_deployment() -> None:
     """The loop stays backend-agnostic: naming and prompt notes come from
     the run environment, and a non-named deployment is a pass-through."""
     base = "run-20260720-abcd1234-llama3"
@@ -544,7 +559,7 @@ def test_candidate_runtime_notes_delegates_and_noop_without_deployment():  # noq
             prompt_notes=f"Deploy to Modal app {base}; endpoint {base}-web.",
         ),
         run_environment=MagicMock(
-            candidate_runtime=lambda view, generation, child_idx: CandidateRuntime(  # noqa: ARG005  # tracked: #288
+            candidate_runtime=lambda view, generation, child_idx: CandidateRuntime(  # noqa: ARG005  # LW-040182 [ARG005];  tracked: #288.
                 prompt_notes="provider-owned candidate instructions",
                 deployment_name=f"candidate-{generation}-{child_idx}",
             )
@@ -558,7 +573,7 @@ def test_candidate_runtime_notes_delegates_and_noop_without_deployment():  # noq
     local = _FakeRunContext(
         run_environment_view=SimpleNamespace(deployment_namespace=None, prompt_notes=notes_in),
         run_environment=MagicMock(
-            candidate_runtime=lambda view, generation, child_idx: CandidateRuntime(  # noqa: ARG005  # tracked: #288
+            candidate_runtime=lambda view, generation, child_idx: CandidateRuntime(  # noqa: ARG005  # LW-040183 [ARG005];  tracked: #288.
                 prompt_notes=view.prompt_notes
             )
         ),
@@ -568,7 +583,7 @@ def test_candidate_runtime_notes_delegates_and_noop_without_deployment():  # noq
     assert notes == notes_in
 
 
-def test_teardown_candidate_deployment_delegates_skips_when_kept_or_absent():  # noqa: ANN201  # tracked: #288
+def test_teardown_candidate_deployment_delegates_skips_when_kept_or_absent() -> None:
     """The loop hands the deployment name to the run environment, which
     decides how to release it; a kept or absent deployment is a no-op."""
 
@@ -586,7 +601,7 @@ def test_teardown_candidate_deployment_delegates_skips_when_kept_or_absent():  #
     run_env.teardown_deployment.assert_not_called()
 
 
-def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path: Path) -> None:
     """The diff shown to agents never leaks evolve's own framework-state
     files (population/metrics documents) alongside real candidate code."""
 
@@ -630,7 +645,7 @@ def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path):  #
     assert "population.json" not in code
 
 
-def test_evolve_accuracy_gate_extends_timeout_by_environment_setup_allowance():  # noqa: ANN201  # tracked: #288
+def test_evolve_accuracy_gate_extends_timeout_by_environment_setup_allowance() -> None:
     """Environment-owned deployment/readiness time must not eat the
     accuracy/benchmark command's declared budget."""
     ctx = _FakeRunContext(run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90))
