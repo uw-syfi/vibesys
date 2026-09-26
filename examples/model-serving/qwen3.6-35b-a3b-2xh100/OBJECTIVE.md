@@ -20,36 +20,41 @@ management.
 
 ## Workload
 
-Run the benchmark exactly as written unless the evaluator passes a different
-`--url` or `--output-json`:
+Run the Request Factory benchmark through the bundle adapter. The evaluator
+may pass a different serving URL:
 
 ```bash
-uv run python benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
+python3 benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
 ```
 
 Default load:
 
 - `/v1/completions`
 - streaming responses
-- closed-loop concurrency 16
-- 30 second duration
-- medium-length synthetic prompts (~256 tokens)
-- `max_tokens = 128`
+- 64 independent requests, saturated replay, maximum concurrency 16
+- exact 256-token prompts and `max_tokens = 128`
 - `temperature = 0`
 
 This benchmark stresses the MoE dispatch path, cross-GPU parallelism, KV-cache
 management, scheduler overhead, and decode throughput under concurrency.
-Candidates must not reduce prompt length, duration, concurrency, or max output
-tokens to improve the score.
+Exact token lengths replace the approximate prompt word count, and the fixed
+trace replaces the legacy 30-second closed-loop duration. Candidates must not
+reduce request count, prompt/output lengths, or concurrency to improve the
+score.
 
 ## Metrics
 
 Pareto axes:
 
-- `aggregate_throughput`: output tokens per second, maximize.
-- `p99_latency_ms`: end-to-end request latency in milliseconds, minimize.
+- `output_token_throughput_per_s`: RF-measured output tokens per second,
+  maximize.
+- `p90_latency_ms`: RF-measured end-to-end request latency in milliseconds,
+  minimize.
 
-The scalar fallback/headline metric is `aggregate_throughput`.
+These intentionally replace legacy `aggregate_throughput` (which counted
+nonempty SSE chunks as tokens) and p99 latency. Old and new scores are not
+directly comparable. The scalar headline metric is
+`output_token_throughput_per_s`.
 
 ## Correctness
 
