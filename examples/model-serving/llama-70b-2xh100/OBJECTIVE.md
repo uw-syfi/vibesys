@@ -12,11 +12,16 @@ and the model served, not how work is split.
 
 ## Workload
 
-Run the Request Factory benchmark through the bundle adapter. The evaluator may
-pass a different server `--url`:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different server `--url`:
 
 ```bash
-python3 benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model meta-llama/Llama-3.3-70B-Instruct \
+  --tokenizer meta-llama/Llama-3.3-70B-Instruct \
+  --tokenizer-revision 6f6073b423013f6a7d4d9f39144961bfbfbc386b \
+  --request-count 64 \
+  --input-tokens 256 --output-tokens 128 --concurrency 8 --url <SERVER_URL>
 ```
 
 Default workload:
