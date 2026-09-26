@@ -24,6 +24,9 @@ class SessionScope(StrEnum):
     CHAT = "chat"
     """One operator chat thread."""
 
+    MEMBER = "member"
+    """One explicitly named orchestration-plugin agent session."""
+
     ROLE = "role"
     """A bare agent role, used when a caller names no narrower conversation."""
 
@@ -33,7 +36,7 @@ class SessionScope(StrEnum):
 #: continues. ``ROLE`` deliberately stays out: it is the fallback key every
 #: unscoped call lands on, so persisting it would resume the judge, perf_eval,
 #: and profiler conversations of an earlier process against unrelated work.
-_DURABLE_SCOPES = frozenset({SessionScope.HYPOTHESIS, SessionScope.CHAT})
+_DURABLE_SCOPES = frozenset({SessionScope.HYPOTHESIS, SessionScope.CHAT, SessionScope.MEMBER})
 
 
 @dataclass(frozen=True, slots=True)

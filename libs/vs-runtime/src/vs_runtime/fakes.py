@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentBinding,
     AgentRole,
     AgentSession,
     BenchmarkEvaluation,
@@ -61,12 +62,14 @@ class FakeAgentSession:
         role: AgentRole,
         workspace: Workspace,
         member_id: str | None,
+        binding: AgentBinding,
         responder: TurnResponder,
     ) -> None:
         """Bind one fresh session to immutable creation configuration."""
         self._role = role
         self._workspace = workspace
         self._member_id = member_id
+        self._binding = binding
         self._responder = responder
         self._history: list[str] = []
         self._closed = False
@@ -83,8 +86,13 @@ class FakeAgentSession:
 
     @property
     def member_id(self) -> str | None:
-        """Return optional policy attribution for this instance."""
+        """Return the durable policy identity for this instance."""
         return self._member_id
+
+    @property
+    def binding(self) -> AgentBinding:
+        """Return the configured immutable runtime attribution."""
+        return self._binding
 
     @property
     def closed(self) -> bool:
@@ -132,10 +140,14 @@ class FakeAgentSessions:
         agents: tuple[AgentRole, ...],
         *,
         responder: TurnResponder = _echo_responder,
+        bindings: dict[str, AgentBinding] | None = None,
     ) -> None:
         """Build the private role lookup from the plugin's authoritative tuple."""
         self._roles = {role.id: role for role in agents}
         self._responder = responder
+        self._bindings = bindings or {
+            role.id: AgentBinding(backend="fake", driver="fake", provider="fake") for role in agents
+        }
         self._sessions: list[FakeAgentSession] = []
         self._closed = False
 
@@ -157,7 +169,13 @@ class FakeAgentSessions:
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
         validate_member_id(member_id)
-        session = FakeAgentSession(role, workspace, member_id, self._responder)
+        session = FakeAgentSession(
+            role,
+            workspace,
+            member_id,
+            self._bindings[role.id],
+            self._responder,
+        )
         self._sessions.append(session)
         return session
 
@@ -446,7 +464,7 @@ class FakeEvaluation:
 class FakeRunHost:
     """In-memory run host that owns fake sessions and captured log lines."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-040117 [PLR0913]; these are independent fake inputs, and a fake-host options bundle would add a second public configuration shape solely to shorten this signature.
         self,
         plugin: OrchestrationPlugin,
         *,
@@ -454,12 +472,17 @@ class FakeRunHost:
         project_root: Path = Path(),
         facts: RunFacts | None = None,
         responder: TurnResponder = _echo_responder,
+        agent_bindings: dict[str, AgentBinding] | None = None,
     ) -> None:
         """Create a host whose private role map derives from ``plugin.agents``."""
         self._run_id = run_id
         self._facts = RunFacts(domain_id="generic") if facts is None else facts
         self._workspaces = FakeWorkspaces(FakeWorkspace(path=project_root))
-        self._agents = FakeAgentSessions(plugin.agents, responder=responder)
+        self._agents = FakeAgentSessions(
+            plugin.agents,
+            responder=responder,
+            bindings=agent_bindings,
+        )
         self._evaluation = FakeEvaluation(run_id=run_id)
         self._state = FakeState(plugin.state, self._workspaces.root)
         self._control = FakeControl()

@@ -157,6 +157,18 @@ class AgentRole(BaseModel):
     required_capabilities: frozenset[AgentCapability] = frozenset()
 
 
+class AgentBinding(BaseModel):
+    """Immutable runtime choices resolved for one role session."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    backend: str = Field(min_length=1)
+    driver: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+
+
 class AgentSession(Protocol):
     """One configured conversation with sequential, context-preserving turns."""
 
@@ -172,7 +184,12 @@ class AgentSession(Protocol):
 
     @property
     def member_id(self) -> str | None:
-        """Return optional policy attribution for this session instance."""
+        """Return the durable policy identity, or ``None`` for a fresh session."""
+        ...
+
+    @property
+    def binding(self) -> AgentBinding:
+        """Return immutable harness and model attribution resolved by the runtime."""
         ...
 
     @property
@@ -207,7 +224,7 @@ class AgentSessions(Protocol):
         workspace: Workspace,
         member_id: str | None = None,
     ) -> AgentSession:
-        """Create a fresh conversation bound to immutable session configuration."""
+        """Create a conversation, durably resumed only when ``member_id`` is set."""
         ...
 
     async def close(self) -> None:

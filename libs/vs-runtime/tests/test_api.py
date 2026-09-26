@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentBinding,
     AgentCapability,
     AgentRole,
     AgentTool,
@@ -146,10 +147,31 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
         assert first.role == role
         assert first.workspace is workspace
         assert first.member_id == "candidate-1"
+        assert first.binding == AgentBinding(backend="fake", driver="fake", provider="fake")
         await host.close()
 
     asyncio.run(scenario())
     assert observed_history_lengths == [0, 1, 0]
+
+
+def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
+    async def scenario() -> None:
+        role = _role()
+        binding = AgentBinding(
+            backend="cli",
+            driver="agentshim",
+            provider="codex",
+            model="gpt-6-sol",
+            reasoning_effort="high",
+        )
+        host = FakeRunHost(_plugin(role), agent_bindings={role.id: binding})
+        session = await host.agents.create_session(role, workspace=_workspace())
+
+        assert session.binding is binding
+        with pytest.raises(ValidationError):
+            binding.__setattr__("model", "other")
+
+    asyncio.run(scenario())
 
 
 def test_factory_rejects_role_not_declared_by_plugin() -> None:

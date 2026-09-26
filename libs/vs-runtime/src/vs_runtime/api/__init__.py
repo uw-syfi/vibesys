@@ -3,6 +3,7 @@
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentBinding,
     AgentCapability,
     AgentRole,
     AgentSession,
@@ -35,6 +36,7 @@ from vs_runtime.contracts import (
 __all__ = [
     "AccuracyEvaluation",
     "AccuracyReceipt",
+    "AgentBinding",
     "AgentCapability",
     "AgentRole",
     "AgentSession",

@@ -120,6 +120,7 @@ def test_session_key_serializes_to_the_stored_form() -> None:
 def test_only_run_scoped_conversations_are_durable() -> None:
     assert HYPOTHESIS.durable
     assert AgentSessionKey(SessionScope.CHAT, "thread-9").durable
+    assert AgentSessionKey(SessionScope.MEMBER, "worker:workspace=root:candidate-1").durable
     assert not ROLE.durable
 
 

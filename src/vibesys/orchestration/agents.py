@@ -53,6 +53,7 @@ from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_runtime.api import (
+    AgentBinding,
     AgentRole,
     RuntimeContractError,
     SessionClosedError,
@@ -244,6 +245,12 @@ class _LocalAgentHandle:
     def model(self) -> str | None:
         """Return the model used for this handle's role."""
         return self._client.model_for_kind(self._definition.id)
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        """Return the reasoning effort resolved for this handle's role."""
+        spec = self._definition.spec
+        return spec.role_reasoning_efforts.get(self._definition.id, spec.reasoning_effort)
 
     async def turn(
         self,
@@ -454,7 +461,21 @@ class _ExplicitAgentSession:
         self._role = role
         self._workspace = workspace
         self._member_id = member_id
-        self._session_key = AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")
+        self._binding = AgentBinding(
+            backend=agent.backend_name,
+            driver=agent.driver_name,
+            provider=agent.provider,
+            model=agent.model,
+            reasoning_effort=agent.reasoning_effort,
+        )
+        self._session_key = (
+            AgentSessionKey(
+                SessionScope.MEMBER,
+                f"{role.id}:workspace={workspace.id or 'root'}:{member_id}",
+            )
+            if member_id is not None
+            else AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")
+        )
         self._turn_number = 0
         self._turn_lock = asyncio.Lock()
         self._closed = False
@@ -472,8 +493,13 @@ class _ExplicitAgentSession:
 
     @property
     def member_id(self) -> str | None:
-        """Return the optional policy attribution fixed at creation."""
+        """Return the durable policy identity fixed at creation."""
         return self._member_id
+
+    @property
+    def binding(self) -> AgentBinding:
+        """Return immutable runtime attribution for the resolved agent."""
+        return self._binding
 
     @property
     def closed(self) -> bool:
@@ -579,7 +605,7 @@ class _Agents:
         workspace: Workspace,
         member_id: str | None = None,
     ) -> _ExplicitAgentSession:
-        """Create a fresh conversation bound to one role and workspace."""
+        """Create a role session, durable only when policy supplies a member ID."""
         validate_member_id(member_id)
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
@@ -603,14 +629,19 @@ class _Agents:
                 registration_id=f"session:{session_id}",
             ),
         )
-        missing_capabilities = sorted(
+        missing_capabilities = {
             capability.value
             for capability in role.required_capabilities
             if not getattr(agent.capabilities, capability.value)
-        )
+        }
+        if member_id is not None and not agent.capabilities.provider_session_resume:
+            missing_capabilities.add("provider_session_resume")
         if missing_capabilities:
             await agent.close()
-            message = f"agent driver lacks required capabilities: {', '.join(missing_capabilities)}"
+            message = (
+                "agent driver lacks required capabilities: "
+                f"{', '.join(sorted(missing_capabilities))}"
+            )
             raise RuntimeContractError(message)
         session = _ExplicitAgentSession(
             self._host,

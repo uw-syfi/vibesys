@@ -19,6 +19,7 @@ from vibesys.orchestration.runtime import RunContext
 from vibesys.orchestrations.single import PLUGIN
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
+from vs_agent.api import AgentCapabilities, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
@@ -123,7 +124,12 @@ def _run_with_clients(
 
 
 def test_sessions_fix_configuration_and_preserve_distinct_conversations(tmp_path: Path) -> None:
-    first = FakeAgentClient(session_reuse=True).enqueue_text("worker", "one", "two")
+    first = FakeAgentClient(
+        capabilities=AgentCapabilities(
+            session_reuse=True,
+            provider_session_resume=True,
+        )
+    ).enqueue_text("worker", "one", "two")
     second = FakeAgentClient(session_reuse=True).enqueue_text("worker", "fresh")
     role = AgentRole(id="worker", system_prompt="Work carefully.")
 
@@ -147,6 +153,68 @@ def test_sessions_fix_configuration_and_preserve_distinct_conversations(tmp_path
     assert first.calls[0].session_key != second.calls[0].session_key
     assert all(call.reuse_session is True for call in [*first.calls, *second.calls])
     assert all(call.system_prompt == "Work carefully." for call in first.calls)
+
+
+def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path) -> None:
+    capabilities = AgentCapabilities(
+        session_reuse=True,
+        provider_session_resume=True,
+    )
+    first = FakeAgentClient(
+        backend_name="cli",
+        driver_name="agentshim",
+        provider="codex",
+        model="gpt-6-sol",
+        capabilities=capabilities,
+    ).enqueue_text("worker", "one")
+    second = FakeAgentClient(capabilities=capabilities).enqueue_text("worker", "two")
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def body(ctx: RunContext) -> None:
+        one = await ctx.agents.create_session(
+            role,
+            workspace=ctx.workspaces.root,
+            member_id="candidate-1",
+        )
+        assert one.binding.backend == "cli"
+        assert one.binding.driver == "agentshim"
+        assert one.binding.provider == "codex"
+        assert one.binding.model == "gpt-6-sol"
+        assert await one.turn("start") == "one"
+        await one.close()
+
+        continued = await ctx.agents.create_session(
+            role,
+            workspace=ctx.workspaces.root,
+            member_id="candidate-1",
+        )
+        assert await continued.turn("continue") == "two"
+
+    _run_with_clients(tmp_path, [first, second], body, declaration=(role,))
+
+    expected = AgentSessionKey(
+        SessionScope.MEMBER,
+        "worker:workspace=root:candidate-1",
+    )
+    assert expected.durable
+    assert first.calls[0].session_key == expected
+    assert second.calls[0].session_key == expected
+
+
+def test_named_session_requires_cross_process_resume_support(tmp_path: Path) -> None:
+    client = FakeAgentClient(session_reuse=True)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def body(ctx: RunContext) -> None:
+        with pytest.raises(RuntimeContractError, match="provider_session_resume"):
+            await ctx.agents.create_session(
+                role,
+                workspace=ctx.workspaces.root,
+                member_id="candidate-1",
+            )
+
+    _run_with_clients(tmp_path, [client], body, declaration=(role,))
+    assert client.closed
 
 
 def test_typed_parse_failure_is_not_replaced_by_a_fallback(tmp_path: Path) -> None:
