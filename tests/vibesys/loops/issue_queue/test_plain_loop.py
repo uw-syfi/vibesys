@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 
 def _client() -> FakeAgentClient:
-    return FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    return FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
 
 
 def _board(project_dir: Path) -> IssueBoard:

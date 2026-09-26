@@ -10,12 +10,12 @@ from server.chat.prompts import experiment_chat_system_prompt
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.config import Config
 from vibesys.skills import NULL_SKILL_SELECTION
-from vs_agent.api import MCPServerSpec
+from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor
 from vs_agent.api.testing import FakeAgentClient
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 _FAKE_TOOL_SERVERS = (
-    MCPServerSpec(
+    StdioServerDescriptor(
         name="vibesys-run",
         command="python",
         args=("-m", "vibesys.api.chat_tools_server", "--run-id", "run-1"),
@@ -44,13 +44,13 @@ class _FakeAgentEnvironment:
     isolated: bool = False
     agent_path_value: str | None = None
     closed: bool = False
-    tool_servers: tuple[MCPServerSpec, ...] = _FAKE_TOOL_SERVERS
+    tool_servers: tuple[ToolServerDescriptor, ...] = _FAKE_TOOL_SERVERS
 
     def agent_path(self, _host: Path) -> str:
         assert self.agent_path_value is not None, "agent_path() called with no configured value"
         return self.agent_path_value
 
-    def investigation_tools(self) -> tuple[MCPServerSpec, ...]:
+    def investigation_tools(self) -> tuple[ToolServerDescriptor, ...]:
         return self.tool_servers
 
     def close(self) -> None:
@@ -149,7 +149,7 @@ def test_host_chat_agent_receives_read_only_server_state(
     assert chat_resource.path == shared_state_dir
     assert chat_resource.access is HostResourceAccess.READ_ONLY
     assert captured["use_docker"] is False
-    assert resources.mcp_servers == _FAKE_TOOL_SERVERS
+    assert resources.tool_servers == _FAKE_TOOL_SERVERS
     assert environment.closed is False
     resources.close()
     assert client.closed
@@ -197,7 +197,7 @@ def test_container_chat_agent_mounts_server_state_read_only(
     assert chat_mount.agent_path == "/opt/vibesys-chat"
     assert captured["use_docker"] is True
     assert set(captured["backends"]) == {"chat"}
-    assert resources.mcp_servers == _FAKE_TOOL_SERVERS
+    assert resources.tool_servers == _FAKE_TOOL_SERVERS
     resources.close()
     assert client.closed
     assert environment.closed

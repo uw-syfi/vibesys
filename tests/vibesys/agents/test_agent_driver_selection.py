@@ -14,7 +14,7 @@ from vs_agent.api import (
     AgentClient,
     AgentUsage,
     Driver,
-    agent_driver_supports_mcp_servers,
+    agent_driver_supports_tool_servers,
     build_agent_client,
 )
 from vs_agent.drivers.omnigent import OmnigentDriverError
@@ -108,18 +108,18 @@ def test_preflight_capabilities_match_constructed_driver(
 ) -> None:
     config = _config(driver=driver, backend="cli", cli_provider="codex")
     spec = agent_spec_from_config(config)
-    declared = agent_driver_supports_mcp_servers(spec)
+    declared = agent_driver_supports_tool_servers(spec)
     client = _build(config)
 
     assert declared is supports_mcp
-    assert declared is client.capabilities.mcp_servers
+    assert declared is client.capabilities.tool_servers
 
 
 def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
     config = _config(backend="stub")
     spec = agent_spec_from_config(config)
 
-    assert agent_driver_supports_mcp_servers(spec) is None
+    assert agent_driver_supports_tool_servers(spec) is None
 
 
 def test_omnigent_selection_passes_model_and_log_dir(tmp_path: Path) -> None:

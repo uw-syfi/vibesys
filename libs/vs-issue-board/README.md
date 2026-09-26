@@ -1,19 +1,22 @@
 # vs-issue-board
 
-Reusable JSON-backed issue board utilities for small agent workflows.
+Reusable issue tracker contract and JSON-backed implementation for small agent
+workflows.
 
 This is an internal import package shipped by the `vibesys` distribution. It
 is not published as a separate Python distribution.
 
 ## Responsibility
 
-This package owns reusable issue state and history, JSON persistence, create
-policies, text formatting, and a stdio MCP server. Applications supply prompts,
-rendering, agent tools, and loop orchestration around that board.
+This package owns the storage-neutral issue and progress contracts, the JSON
+and file implementations, issue state and history, create policies, text
+formatting, and issue-tool subprocess descriptors. Applications supply
+persistence selection, prompts, rendering, and loop orchestration.
 
 ## Concepts
 
-- `IssueBoard` stores issues in one JSON file and writes atomically with a
+- `IssueTracker` defines operations independently of storage. `IssueBoard`
+  implements it, stores issues in one JSON file, and writes atomically with a
   temporary file plus rename.
 - `Issue`, `IssueEvent`, `IssueStatus`, and `IssueType` are typed Pydantic
   models/enums for issue state and history.
@@ -25,6 +28,10 @@ rendering, agent tools, and loop orchestration around that board.
   without making rendering part of the core library.
 - `CreateIssuePolicy` keeps role-specific create limits out of application
   wrappers, so MCP and in-process tool paths can share the same semantics.
+- `IssueTrackerSession` groups issue tracking, progress logging, refreshable
+  issue views, and per-turn issue-tool grants. `IssueToolServer` contains only
+  subprocess launch values, so an application can adapt it to its agent API
+  without the library depending on that API.
 
 ## Example
 
@@ -98,6 +105,26 @@ The server registers:
 - `get_issue`
 - `search_issues`
 - `create_issue`, unless `--read-only` is passed
+
+Applications that inject the server into agent turns should request its
+descriptor from the active session instead of constructing the server module
+and policy arguments themselves:
+
+```python
+from vs_issue_board.api import CreateIssuePolicy, IssueType
+
+server = session.issue_tool_server(
+    CreateIssuePolicy(
+        creator="judge",
+        iteration=3,
+        cap=1,
+        allowed_types=frozenset({IssueType.BUG}),
+    )
+)
+```
+
+The returned `IssueToolServer` has `name`, `command`, `args`, and `env` fields.
+These values are provider-neutral and do not import an agent-driver package.
 
 Useful options:
 

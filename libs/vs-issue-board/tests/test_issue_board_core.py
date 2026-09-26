@@ -215,20 +215,32 @@ class TestLoadCorrupt:
         monkeypatch.setattr(Path, "read_text", read_then_write)
         opened = IssueBoard(path)
 
-        assert [issue.title for issue in opened.list()] == ["existing"]
+        assert [issue.title for issue in opened.list()] == ["existing", "concurrent"]
         assert [issue.title for issue in IssueBoard(path).list()] == ["existing", "concurrent"]
 
 
 class TestReload:
-    def test_reload_picks_up_external_writes(self, tmp_path: Path) -> None:
+    def test_reads_pick_up_external_writes(self, tmp_path: Path) -> None:
         store_a = _make_store(tmp_path)
         store_b = _make_store(tmp_path)
         _create(store_a, title="written by a")
-        # store_b is unaware of the new issue
-        assert len(store_b.list()) == 0
-        store_b.reload()
+        # Each public read observes the latest persisted snapshot.
         assert len(store_b.list()) == 1
         assert store_b.list()[0].title == "written by a"
+        assert store_b.search("written by a")[0].id == 1
+        assert store_b.get(1) is not None
+        assert store_b.open_count_by_creator_in_iter("perf_eval", 1) == 1
+        assert store_b.next_open() is not None
+        assert (
+            store_b.create(
+                type=IssueType.BUG,
+                title="written by b",
+                description="fresh next id",
+                created_by="tester",
+                iteration=2,
+            ).id
+            == 2
+        )
 
     def test_reload_corrupt_json_raises_and_preserves_last_valid_snapshot(
         self, tmp_path: Path
@@ -242,12 +254,11 @@ class TestReload:
         with pytest.raises(IssueBoardLoadError, match="invalid JSON"):
             store.reload()
 
-        assert [issue.title for issue in store.list()] == ["last valid"]
+        with pytest.raises(IssueBoardLoadError, match="invalid JSON"):
+            store.list()
         assert path.read_bytes() == corrupt
 
-    def test_reload_wrong_version_raises_and_preserves_last_valid_snapshot(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reload_wrong_version_raises_without_modifying_the_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         store = IssueBoard(path)
         _create(store, title="last valid")
@@ -260,12 +271,11 @@ class TestReload:
         with pytest.raises(IssueBoardLoadError, match="unsupported version 2"):
             store.reload()
 
-        assert [issue.title for issue in store.list()] == ["last valid"]
+        with pytest.raises(IssueBoardLoadError, match="unsupported version 2"):
+            store.list()
         assert path.read_bytes() == incompatible
 
-    def test_reload_missing_file_raises_and_preserves_last_valid_snapshot(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reload_missing_file_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         store = IssueBoard(path)
         _create(store, title="last valid")
@@ -274,7 +284,8 @@ class TestReload:
         with pytest.raises(IssueBoardLoadError, match="cannot read store"):
             store.reload()
 
-        assert [issue.title for issue in store.list()] == ["last valid"]
+        with pytest.raises(IssueBoardLoadError, match="cannot read store"):
+            store.list()
 
 
 # ---------------------------------------------------------------------------

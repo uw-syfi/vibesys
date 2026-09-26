@@ -205,6 +205,11 @@ class RunContext:
         """Return the run's semantic event journal."""
         return self._integration.events
 
+    @property
+    def run_id(self) -> str:
+        """Return the canonical identifier assigned to this run."""
+        return self._resources.run_id
+
     def log(self, message: str) -> None:
         """Write one line to the active run log."""
         self._resources.lprint(message)

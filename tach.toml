@@ -205,11 +205,6 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
-path = "vibesys.orchestration.tools"
-layer = "orchestration_host"
-depends_on = ["vs_agent"]
-
-[[modules]]
 # Host-owned agent memory (roadmap, progress log, Pareto archive): pure path
 # resolution plus the file writes strategies used to hand-roll via the
 # dissolved vibesys.agent_run.issue_board.
@@ -282,7 +277,7 @@ depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vi
 [[modules]]
 path = "vibesys.loops.issue_queue"
 layer = "loops"
-depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.errors"]
+depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.evolve"

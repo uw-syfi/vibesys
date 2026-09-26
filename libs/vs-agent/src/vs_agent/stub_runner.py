@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
+    from vs_agent.tools import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -108,6 +109,8 @@ class StubAgentClient:
         round_label: str,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
+        # Deprecated compatibility spelling.
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -118,6 +121,7 @@ class StubAgentClient:
             system_prompt,
             env,
             progress,
+            tool_servers,
             mcp_servers,
             reuse_session,
             session_key,

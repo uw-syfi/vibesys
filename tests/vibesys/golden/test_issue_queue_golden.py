@@ -37,9 +37,10 @@ Board files are split across two roots (investigated, not assumed):
   ``vs_issue_board.api.IssueBoard``.
 - The machine-local run-state directory (outside the project workspace, a
   sibling of ``tmp_path`` per ``isolated_vibesys_state_home`` in
-  ``tests/conftest.py``) holds the agent-visible ``progress.md`` plus the
+  ``tests/conftest.py``) holds the local ``progress.md`` plus the
   per-issue markdown mirror ``issues/INDEX.md`` and ``issues/000N-*.md``
-  rendered by ``vibesys.loops.issue_queue.render``.
+  rendered by ``vibesys.loops.issue_queue.render``. Progress is passed into
+  agent prompts through the progress-log interface, not through a path.
 """
 
 from __future__ import annotations
@@ -157,7 +158,7 @@ def _descriptor(**overrides: object) -> OrchestrationDescriptor:
 
 
 def test_pass_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
     runner.enqueue("implementer", _implementer(1))
     runner.enqueue("judge", _judge(1, Verdict.PASS))
     runner.enqueue("perf_eval", _perf_eval())
@@ -179,7 +180,7 @@ def test_pass_scenario_golden(tmp_path: Path) -> None:
 
 
 def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
     runner.enqueue(
         "implementer",
         _implementer(1, "first attempt: partial server, missing /health"),
@@ -209,7 +210,7 @@ def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
 
 
 def test_perf_eval_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
     runner.enqueue("implementer", _implementer(1))
     runner.enqueue("judge", _judge(1, Verdict.PASS))
     runner.enqueue("perf_eval", _perf_eval(with_metrics=True))

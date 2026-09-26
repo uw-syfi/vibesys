@@ -32,9 +32,7 @@ from vibesys.profilers import (
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.profilers import (
-    mcp_spec as profiler_mcp_spec,
-)
+from vibesys.profilers import tool_server as profiler_tool_server
 from vibesys.prompts.contexts import (
     display_path,
     domain_context,
@@ -357,7 +355,7 @@ Write bounded durable profile evidence only below
             profiler_campaign_context=self._profiler_campaign_context(artifact),
         )
         role = replace(MULTI_PROFILERS[kind], access=ReadOnly(allow=(artifact,)))
-        spec = profiler_mcp_spec(self.ctx.environment.profiler_kind)
+        spec = profiler_tool_server(self.ctx.environment.profiler_kind)
         try:
             summary = cast(
                 "ProfilerSummary",
@@ -366,7 +364,7 @@ Write bounded durable profile evidence only below
                     agent=self.profiler,
                     context=context,
                     label=f"round-{round_number}-profiler",
-                    mcp_servers=[spec] if spec is not None else None,
+                    tool_servers=[spec] if spec is not None else None,
                 ),
             )
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020021 [BLE001]; profile evidence is optional, so a profiler failure is reported and the round proceeds without it.

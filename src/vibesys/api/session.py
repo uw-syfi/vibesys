@@ -20,7 +20,7 @@ from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
-from vs_agent.api import MCPServerSpec, expose_as_tools
+from vs_agent.api import ToolServerDescriptor, expose_as_tools
 from vs_project.api import Project
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -419,8 +419,8 @@ class _OpenedAgentEnvironment:
         """Map a host path to its path inside this environment's sandbox."""
         return cast("_AgentPathSandbox", self._session.sandbox).agent_path(host)
 
-    def investigation_tools(self) -> tuple[MCPServerSpec, ...]:
-        """Build the read-only MCP tool server for investigating this run's history.
+    def investigation_tools(self) -> tuple[ToolServerDescriptor, ...]:
+        """Build the read-only tool server for investigating this run's history.
 
         Launches `vibesys.api.chat_tools_server` with the project root
         translated into this environment's own sandbox path
@@ -437,14 +437,7 @@ class _OpenedAgentEnvironment:
                 self.agent_path(self.project.root),
             ),
         )
-        return (
-            MCPServerSpec(
-                name=descriptor.name,
-                command=descriptor.command,
-                args=descriptor.args,
-                env=descriptor.env,
-            ),
-        )
+        return (descriptor,)
 
     def close(self) -> None:
         """Release the opened environment session."""

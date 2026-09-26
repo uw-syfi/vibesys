@@ -140,7 +140,6 @@ graph TD
     vibesys.loops.issue_queue --> vibesys.evaluators
     vibesys.loops.issue_queue --> vibesys.orchestration
     vibesys.loops.issue_queue --> vibesys.orchestration.runtime
-    vibesys.loops.issue_queue --> vibesys.orchestration.tools
     vibesys.loops.issue_queue --> vibesys.orchestration.view
     vibesys.loops.issue_queue --> vibesys.prompts
     vibesys.loops.issue_queue --> vibesys.roles
@@ -464,7 +463,6 @@ graph TD
     vibesys.loops.issue_queue --> vibesys.evaluators
     vibesys.loops.issue_queue --> vibesys.orchestration
     vibesys.loops.issue_queue --> vibesys.orchestration.runtime
-    vibesys.loops.issue_queue --> vibesys.orchestration.tools
     vibesys.loops.issue_queue --> vibesys.orchestration.view
     vibesys.loops.issue_queue --> vibesys.prompts
     vibesys.loops.issue_queue --> vibesys.roles
@@ -601,7 +599,6 @@ graph TD
     vibesys.orchestration.state --> vibesys.orchestration.progress_log
     vibesys.orchestration.state --> vibesys.orchestration.view
     vibesys.orchestration.state --> vs_project
-    vibesys.orchestration.tools --> vs_agent
     vibesys.orchestration.workspaces --> vibesys
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host

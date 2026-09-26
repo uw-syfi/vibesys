@@ -42,7 +42,7 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.events import FrameworkSource
 from vibesys.orchestration.runtime import MeasurementOptions
-from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
+from vibesys.profilers import ProfilerKind, profiler_definition, tool_server
 from vibesys.roles.common import Verdict
 from vibesys.roles.judge import CANDIDATE_JUDGE, CandidateJudgeContext
 from vibesys.roles.mutator import CANDIDATE_MUTATOR, MutatorContext
@@ -166,7 +166,7 @@ async def _teardown_candidate_deployment(
 
 
 # ---------------------------------------------------------------------------
-# Profiler MCP wiring (reused from orchestrate; kept here to avoid an
+# Profiler tool wiring (reused from orchestrate; kept here to avoid an
 # import-time dependency on the orchestrate loop)
 # ---------------------------------------------------------------------------
 
@@ -355,7 +355,7 @@ async def _run_profiler(  # noqa: PLR0913  # lint-waiver: LW-020009 [PLR0913]; t
         profiler_mcp_name=definition.mcp_name,
         pareto_objectives_addendum=addendum,
     )
-    spec = mcp_spec(kind)
+    spec = tool_server(kind)
     label = f"gen-{generation}-cand-{child_idx}-profiler"
     try:
         return cast(
@@ -365,7 +365,7 @@ async def _run_profiler(  # noqa: PLR0913  # lint-waiver: LW-020009 [PLR0913]; t
                 agent=agents["profiler"],
                 context=context,
                 label=label,
-                mcp_servers=[spec] if spec is not None else None,
+                tool_servers=[spec] if spec is not None else None,
                 workspace=scope or ctx.workspaces.root,
             ),
         )

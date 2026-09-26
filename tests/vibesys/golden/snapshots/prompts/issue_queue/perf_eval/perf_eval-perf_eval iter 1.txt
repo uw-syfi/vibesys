@@ -43,7 +43,6 @@ Your working directory contains the implementer's code. The benchmark command is
 
 Previous performance metrics from earlier iterations are available at `.vibesys/state/runs/<RUN_ID>/plain/perf/metrics.json`. Read this file to understand how performance has changed across iterations and whether your suggestions led to improvements.
 
-
 You can review code changes from previous iterations by looking at the git history (e.g. `git log --oneline`, `git diff HEAD~1`). This can help you understand what optimizations were attempted and correlate code changes with performance differences.
 
 ## Trend assessment

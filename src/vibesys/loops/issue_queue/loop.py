@@ -5,22 +5,26 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import StringIO
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
-from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.roles.implementer import ISSUE_IMPLEMENTER, IssueImplementerContext
 from vibesys.roles.judge import ISSUE_JUDGE, IssueJudgeContext
 from vibesys.roles.perf_eval import ISSUE_PERF_EVAL, IssuePerfEvalContext
-from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
+from vs_agent.api import RoundProgress
 from vs_issue_board.api import (
+    CreateIssuePolicy,
     Issue,
-    IssueBoard,
+    IssueTracker,
+    IssueTrackerSession,
     IssueType,
+    ProgressLog,
+    open_local_issue_tracker_session,
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
@@ -35,6 +39,7 @@ class ImplementerUserContext(BaseModel):
 
     issue: Issue
     prior_judge_review: dict[str, Any] | None
+    progress: str
 
 
 class JudgeUserContext(BaseModel):
@@ -43,6 +48,7 @@ class JudgeUserContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     issue: Issue
+    progress: str
 
 
 class BootstrapContext(BaseModel):
@@ -58,7 +64,6 @@ class BootstrapContext(BaseModel):
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
     from vibesys.config import LoadLevelCfg
     from vibesys.evaluators.perf_reply import IssuePerfEvalResponse
@@ -69,104 +74,64 @@ if TYPE_CHECKING:
     from vibesys.runtime import AgentHandle
 
 
-def build_issue_mcp_spec(
-    *,
-    store_relpath: str,
-    creator: str,
-    iteration: int,
-    cap: int | None,
-    allowed_types: set[IssueType],
-) -> MCPServerSpec:
-    """Describe the issue-board MCP server and its per-phase policy.
-
-    Goes through the host's generic tool-serving descriptor
-    (``vs_agent.expose_as_tools``) instead of hand-building an
-    ``MCPServerSpec``; only the issue-board-specific argv stays here.
-    """
-    entrypoint_args = [
-        store_relpath,
-        "--creator",
-        creator,
-        "--iteration",
-        str(iteration),
-        "--allowed-types",
-        ",".join(sorted(issue_type.value for issue_type in allowed_types)),
-    ]
-    if cap is not None:
-        entrypoint_args += ["--cap", str(cap)]
-    descriptor = expose_as_tools(
-        name="vibesys-issues",
-        entrypoint_module="vs_issue_board.mcp",
-        entrypoint_args=tuple(entrypoint_args),
-    )
-    return mcp_spec_from_descriptor(descriptor)
-
-
 # ---------------------------------------------------------------------------
 # Progress markdown helpers
 # ---------------------------------------------------------------------------
 
 
-def _init_progress(log_dir: Path) -> Path:
-    progress_path = log_dir / "progress.md"
-    if not progress_path.exists():
-        progress_path.write_text("# Experiment Progress\n\n")
-    return progress_path
-
-
-def _update_progress_from_implementer(
-    progress_path: Path,
+def _format_progress_from_implementer(
     iteration: int,
     issue: Issue,
     response: IssueImplementerResponse,
-) -> None:
-    with progress_path.open("a", encoding="utf-8") as f:
-        f.write(f"## Iter {iteration} — Implementer on issue #{issue.id}\n\n")
-        f.write(f"**Issue**: [{issue.type.value}] {issue.title}\n\n")
-        f.write(f"**Summary**: {response.summary}\n\n")
-        if response.files_touched:
-            f.write("**Files touched**:\n")
-            for fp in response.files_touched:
-                f.write(f"- `{fp}`\n")
-            f.write("\n")
-        f.write(f"**Self-check**: {response.self_check}\n\n")
+) -> str:
+    progress = StringIO()
+    progress.write(f"## Iter {iteration} — Implementer on issue #{issue.id}\n\n")
+    progress.write(f"**Issue**: [{issue.type.value}] {issue.title}\n\n")
+    progress.write(f"**Summary**: {response.summary}\n\n")
+    if response.files_touched:
+        progress.write("**Files touched**:\n")
+        for fp in response.files_touched:
+            progress.write(f"- `{fp}`\n")
+        progress.write("\n")
+    progress.write(f"**Self-check**: {response.self_check}\n\n")
+    return progress.getvalue()
 
 
-def _update_progress_from_judge(
-    progress_path: Path,
+def _format_progress_from_judge(
     iteration: int,
     issue: Issue,
     response: IssueJudgeResponse,
-) -> None:
-    with progress_path.open("a", encoding="utf-8") as f:
-        f.write(f"### Iter {iteration} — Judge on issue #{issue.id}\n\n")
-        f.write(f"**Verdict**: {response.verdict.value.upper()}\n\n")
-        f.write(f"**Analysis**: {response.analysis}\n\n")
-        if response.feedback:
-            f.write(f"**Feedback**: {response.feedback}\n\n")
-        if response.new_issues_filed:
-            ids = ", ".join(f"#{i}" for i in response.new_issues_filed)
-            f.write(f"**New issues filed**: {ids}\n\n")
+) -> str:
+    progress = StringIO()
+    progress.write(f"### Iter {iteration} — Judge on issue #{issue.id}\n\n")
+    progress.write(f"**Verdict**: {response.verdict.value.upper()}\n\n")
+    progress.write(f"**Analysis**: {response.analysis}\n\n")
+    if response.feedback:
+        progress.write(f"**Feedback**: {response.feedback}\n\n")
+    if response.new_issues_filed:
+        ids = ", ".join(f"#{i}" for i in response.new_issues_filed)
+        progress.write(f"**New issues filed**: {ids}\n\n")
+    return progress.getvalue()
 
 
-def _update_progress_from_perf_eval(
-    progress_path: Path,
+def _format_progress_from_perf_eval(
     iteration: int,
     response: IssuePerfEvalResponse,
-) -> None:
-    with progress_path.open("a", encoding="utf-8") as f:
-        f.write(f"## Iter {iteration} — Performance Evaluator\n\n")
-        f.write(f"**Throughput trend**: {response.throughput_trend.value.upper()}\n\n")
-        f.write(f"**Latency trend**: {response.latency_trend.value.upper()}\n\n")
-        f.write(f"**Analysis**: {response.analysis}\n\n")
-        if response.new_issue_ids:
-            ids = ", ".join(f"#{i}" for i in response.new_issue_ids)
-            f.write(f"**New issues filed**: {ids}\n\n")
-        if response.evaluator_feedback:
-            f.write("**Notes for next perf evaluator**:\n")
-            for note in response.evaluator_feedback:
-                f.write(f"- {note}\n")
-            f.write("\n")
+) -> str:
+    progress = StringIO()
+    progress.write(f"## Iter {iteration} — Performance Evaluator\n\n")
+    progress.write(f"**Throughput trend**: {response.throughput_trend.value.upper()}\n\n")
+    progress.write(f"**Latency trend**: {response.latency_trend.value.upper()}\n\n")
+    progress.write(f"**Analysis**: {response.analysis}\n\n")
+    if response.new_issue_ids:
+        ids = ", ".join(f"#{i}" for i in response.new_issue_ids)
+        progress.write(f"**New issues filed**: {ids}\n\n")
+    if response.evaluator_feedback:
+        progress.write("**Notes for next perf evaluator**:\n")
+        for note in response.evaluator_feedback:
+            progress.write(f"- {note}\n")
+        progress.write("\n")
+    return progress.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +185,8 @@ class IssueQueueRun:
     """Plain-owned state and effects bound to the one shared run host."""
 
     host: RunContext
-    board: IssueBoard
+    board: IssueTracker
+    progress_log: ProgressLog
     state_store: IssueQueueStateStore
     state: PlainLoopCursor
     turns: _IssueQueueTurns
@@ -240,14 +206,23 @@ class IssueQueueRun:
         portable = host.state.namespace
         state_store = IssueQueueStateStore(portable)
         local_dir = host.state.local_namespace.external_directory()
-        progress_path = _init_progress(local_dir)
         issues_dir = local_dir / "issues"
-        board: IssueBoard
-        board = IssueBoard(
-            host.workspaces.root.path / "issues.json",
-            on_change=lambda: render_all(issues_dir, board),
+        board: IssueTracker | None = None
+
+        def render_changed_issues() -> None:
+            if board is not None:
+                render_all(issues_dir, board.list())
+
+        tracker_session = open_local_issue_tracker_session(
+            store_path=host.workspaces.root.path / "issues.json",
+            progress_path=local_dir / "progress.md",
+            tool_store_path="issues.json",
+            on_change=render_changed_issues,
+            view_sink=lambda issues: render_all(issues_dir, issues),
         )
-        render_all(issues_dir, board)
+        board = tracker_session.tracker
+        tracker_session.refresh()
+        progress_log = tracker_session.progress
         persisted = await host.state.slot("state.json", PlainLoopCursor).load()
         turns = _IssueQueueTurns(
             host=host,
@@ -255,10 +230,10 @@ class IssueQueueRun:
             judge_agent=await host.agents.spawn(host.agents.default_definition("judge")),
             perf_agent=await host.agents.spawn(host.agents.default_definition("perf_eval")),
             board=board,
+            tracker_session=tracker_session,
             state_store=state_store,
             prompt=prompt,
-            progress_path=progress_path,
-            issues_dir=issues_dir,
+            progress_log=progress_log,
             perf_metrics_location=portable.agent_visible_path("perf/metrics.json"),
             max_issues_per_perf_eval=options.max_issues_per_perf_eval,
             load_levels=host.request.config.perf_eval.load_levels,
@@ -269,6 +244,7 @@ class IssueQueueRun:
             state_store=state_store,
             state=persisted or PlainLoopCursor(),
             turns=turns,
+            progress_log=progress_log,
             resuming=host.request.resume is not None or persisted is not None,
             prompt=prompt,
             options=options,
@@ -368,31 +344,14 @@ class _IssueQueueTurns:
     implementer: AgentHandle
     judge_agent: AgentHandle
     perf_agent: AgentHandle
-    board: IssueBoard
+    board: IssueTracker
+    tracker_session: IssueTrackerSession
     state_store: IssueQueueStateStore
     prompt: Prompt
-    progress_path: Path
-    issues_dir: Path
+    progress_log: ProgressLog
     perf_metrics_location: str
     max_issues_per_perf_eval: int
     load_levels: list[LoadLevelCfg] | None
-
-    def _issue_mcp_spec(
-        self, *, creator: str, iteration: int, cap: int, allowed_types: set[IssueType]
-    ) -> list[MCPServerSpec]:
-        agent = self.judge_agent if creator == "judge" else self.perf_agent
-        if not agent.capabilities.mcp_servers:
-            message = f"agent backend {agent.backend_name!r} cannot expose issue-board tools"
-            raise RuntimeError(message)
-        return [
-            build_issue_mcp_spec(
-                store_relpath="issues.json",
-                creator=creator,
-                iteration=iteration,
-                cap=cap,
-                allowed_types=allowed_types,
-            )
-        ]
 
     async def implement(self, issue: Issue) -> IssueImplementerResponse:
         host = self.host
@@ -400,6 +359,7 @@ class _IssueQueueTurns:
         user_context = ImplementerUserContext(
             issue=issue,
             prior_judge_review=_latest_judge_review(issue),
+            progress=self.progress_log.read().rstrip(),
         )
         user_prompt = self.prompt.render("implementer/user.j2", **user_context.model_dump())
         await host.control.debug_step(f"Implementer step on issue #{issue.id}")
@@ -424,7 +384,7 @@ class _IssueQueueTurns:
     async def record_implementation(
         self, issue: Issue, response: IssueImplementerResponse, iteration: int
     ) -> None:
-        _update_progress_from_implementer(self.progress_path, iteration, issue, response)
+        self.progress_log.append(_format_progress_from_implementer(iteration, issue, response))
         await self.host.workspaces.root.snapshot(
             f"iter-{iteration}-impl-{issue.id}-att{issue.attempts}"
         )
@@ -434,7 +394,10 @@ class _IssueQueueTurns:
         host = self.host
         await host.environment.reselect_device()
         user_prompt = self.prompt.render(
-            "judge/user.j2", **JudgeUserContext(issue=issue).model_dump()
+            "judge/user.j2",
+            **JudgeUserContext(
+                issue=issue, progress=self.progress_log.read().rstrip()
+            ).model_dump(),
         )
         await host.control.debug_step(f"Judge step on issue #{issue.id}")
         host.log(f"\n>>> Judge reviewing issue #{issue.id}...")
@@ -450,19 +413,22 @@ class _IssueQueueTurns:
                 ),
                 message=user_prompt,
                 label=f"judge issue #{issue.id} att{issue.attempts}",
-                mcp_servers=self._issue_mcp_spec(
-                    creator="judge",
-                    iteration=iteration,
-                    cap=1,
-                    allowed_types={IssueType.BUG},
-                ),
+                tool_servers=[
+                    self.tracker_session.issue_tool_server(
+                        CreateIssuePolicy(
+                            creator="judge",
+                            iteration=iteration,
+                            cap=1,
+                            allowed_types=frozenset({IssueType.BUG}),
+                        )
+                    )
+                ],
                 backend=host.request.backend,
             ),
         )
         response = reply.model_copy(update={"issue_id": issue.id})
-        self.board.reload()
-        render_all(self.issues_dir, self.board)
-        _update_progress_from_judge(self.progress_path, iteration, issue, response)
+        self.tracker_session.refresh()
+        self.progress_log.append(_format_progress_from_judge(iteration, issue, response))
         await host.workspaces.root.snapshot(
             f"iter-{iteration}-judge-{issue.id}-att{issue.attempts}"
         )
@@ -484,7 +450,6 @@ class _IssueQueueTurns:
                 agent=self.perf_agent,
                 context=IssuePerfEvalContext(
                     load_levels=self.load_levels,
-                    progress_path=None,
                     perf_metrics_path=self.perf_metrics_location,
                     issue_create_cap=self.max_issues_per_perf_eval,
                     benchmark_command=host.environment.view.paths.benchmark_command,
@@ -492,18 +457,23 @@ class _IssueQueueTurns:
                 ),
                 message=user_prompt,
                 label=f"perf_eval iter {iteration}",
-                mcp_servers=self._issue_mcp_spec(
-                    creator="perf_eval",
-                    iteration=iteration,
-                    cap=self.max_issues_per_perf_eval,
-                    allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
-                ),
+                tool_servers=[
+                    self.tracker_session.issue_tool_server(
+                        CreateIssuePolicy(
+                            creator="perf_eval",
+                            iteration=iteration,
+                            cap=self.max_issues_per_perf_eval,
+                            allowed_types=frozenset(
+                                {IssueType.BUG, IssueType.FEATURE, IssueType.PERF}
+                            ),
+                        )
+                    )
+                ],
                 backend=host.request.backend,
             ),
         )
-        self.board.reload()
-        render_all(self.issues_dir, self.board)
-        _update_progress_from_perf_eval(self.progress_path, iteration, response)
+        self.tracker_session.refresh()
+        self.progress_log.append(_format_progress_from_perf_eval(iteration, response))
         self.state_store.append_performance(
             PlainPerformanceRecord(
                 iteration=iteration,

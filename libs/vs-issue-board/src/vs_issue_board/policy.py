@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vs_issue_board.core import Issue, IssueBoard, IssueType
+from vs_issue_board.core import Issue, IssueTracker, IssueType
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ def parse_type(value: str) -> IssueType:
 
 
 def check_create_allowed(
-    store: IssueBoard,
+    store: IssueTracker,
     *,
     type_enum: IssueType,
     policy: CreateIssuePolicy,
@@ -41,7 +41,6 @@ def check_create_allowed(
             f"not '{type_enum.value}'"
         )
     if policy.cap is not None:
-        store.reload()
         already = store.open_count_by_creator_in_iter(policy.creator, policy.iteration)
         if already >= policy.cap:
             return (
@@ -54,7 +53,7 @@ def check_create_allowed(
 
 
 def create_issue_under_policy(
-    store: IssueBoard,
+    store: IssueTracker,
     *,
     type_str: str,
     title: str,

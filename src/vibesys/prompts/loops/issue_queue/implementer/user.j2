@@ -1,6 +1,10 @@
 Work on issue #{{ issue.id }} ({{ issue.title }}). Read the existing workspace, make the minimum set of changes that satisfy the issue's Acceptance criteria, run a quick self-check, then return your JSON response.
 
-A read-only `progress.md` is in the workspace for context only — do not write to it. A read-only `issues.json` mirror exists for human inspection — agents access the tracker via tools, not by reading the file.
+## Recent run progress
+
+{{ progress }}
+
+Use this run context if it helps, but make changes only to the existing workspace and do not alter the recorded progress.
 {% if prior_judge_review %}
 
 ## Previous review feedback (read carefully)

@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from vs_agent.progress import AgentProgress
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
+    from vs_agent.tools import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)
@@ -160,12 +161,15 @@ def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
 
 
 def _normalize_mcp_servers(
-    servers: Iterable[MCPServerSpec] | None,
+    servers: Iterable[ToolServerDescriptor] | None,
+    legacy_servers: Iterable[MCPServerSpec] | None = None,
 ) -> tuple[MCPServerSpec, ...]:
-    """Freeze the caller's server list so it can key a session spec."""
-    if servers is None:
-        return ()
-    return tuple(servers)
+    """Translate generic tool declarations into the driver's MCP contract."""
+    selected = (*(servers or ()), *(legacy_servers or ()))
+    return tuple(
+        MCPServerSpec(name=item.name, command=item.command, args=item.args, env=item.env)
+        for item in selected
+    )
 
 
 class AgentClient:
@@ -271,6 +275,8 @@ class AgentClient:
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
+        # Deprecated: converted to the internal driver contract.
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -286,6 +292,7 @@ class AgentClient:
             env=env,
             invocation_id=invocation_id,
             progress=progress,
+            tool_servers=tool_servers,
             mcp_servers=mcp_servers,
             reuse_session=reuse_session,
             session_key=session_key,
@@ -326,6 +333,8 @@ class AgentClient:
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
+        # Deprecated: converted to the internal driver contract.
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -341,6 +350,7 @@ class AgentClient:
             env=env,
             invocation_id=invocation_id,
             progress=progress,
+            tool_servers=tool_servers,
             mcp_servers=mcp_servers,
             reuse_session=reuse_session,
             session_key=session_key,
@@ -376,6 +386,7 @@ class AgentClient:
         env: dict[str, str] | None,
         invocation_id: str | None,
         progress: AgentProgress | None,
+        tool_servers: list[ToolServerDescriptor] | None,
         mcp_servers: list[MCPServerSpec] | None,
         reuse_session: bool | None,
         session_key: AgentSessionKey | None,
@@ -395,7 +406,7 @@ class AgentClient:
             workspace=workspace,
             policy=self._policy,
             model=model,
-            mcp_servers=_normalize_mcp_servers(mcp_servers),
+            mcp_servers=_normalize_mcp_servers(tool_servers, mcp_servers),
             skills=self._skills,
             environment=tuple(sorted((env or {}).items())),
             reasoning_effort=reasoning_effort,

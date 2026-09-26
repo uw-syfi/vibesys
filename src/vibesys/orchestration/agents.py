@@ -66,7 +66,7 @@ if TYPE_CHECKING:
         AgentCapabilities,
         AgentClientProtocol,
         AgentProgress,
-        MCPServerSpec,
+        ToolServerDescriptor,
     )
 
 T = TypeVar("T", bound=BaseModel)
@@ -272,7 +272,7 @@ class _LocalAgentHandle:
         label: str = "",
         session_key: AgentSessionKey | None = None,
         reuse_session: bool | None = None,
-        mcp_servers: list[MCPServerSpec] | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
     ) -> T:
         """Run a typed turn through the same control and event path as text turns."""
         if self._close_task is not None:
@@ -293,7 +293,7 @@ class _LocalAgentHandle:
                 invocation_id=execution_id,
                 session_key=session_key or AgentSessionKey(SessionScope.ROLE, kind),
                 reuse_session=reuse_session,
-                mcp_servers=mcp_servers,
+                tool_servers=tool_servers,
                 progress=progress,
             )
 
@@ -458,7 +458,7 @@ class _Agents:
         message: str | None = None,
         session_key: str | None = None,
         label: str,
-        mcp_servers: list[MCPServerSpec] | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
         correction_message: Callable[[BaseModel, str], str] | None = None,
         before_paid: Callable[[], Awaitable[None]] | None = None,
         backend: ComputeBackend | None = None,
@@ -542,7 +542,7 @@ class _Agents:
                         label=turn_label,
                         session_key=resolved_session_key,
                         reuse_session=reuse_session,
-                        mcp_servers=mcp_servers,
+                        tool_servers=tool_servers,
                     )
                 except subprocess.TimeoutExpired as error:
                     host.log(

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -79,6 +79,88 @@ class Issue(BaseModel):
     attempts: int = 0
     history: list[IssueEvent] = Field(default_factory=list)
     closed_iter: int | None = None
+
+
+class IssueTracker(Protocol):
+    """Storage-neutral contract for the issue-queue workflow.
+
+    Reads observe updates committed by other tracker clients before returning.
+    Implementations preserve issue identity, ordering, lifecycle, and event
+    history. Storage paths and provider-specific operations stay out of this
+    interface.
+    """
+
+    def create(
+        self,
+        *,
+        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-920407 [A002]; preserve the established public keyword across tracker backends.
+        title: str,
+        description: str,
+        created_by: str,
+        iteration: int,
+    ) -> Issue:
+        """Create an open issue and its initial create event."""
+        ...
+
+    def get(self, issue_id: int) -> Issue | None:
+        """Return a detached issue, or ``None`` if the identifier is absent."""
+        ...
+
+    def update_status(  # noqa: PLR0913  # lint-waiver: LW-920409 [PLR0913]; retain the tracker transition contract's named state, actor, iteration, and event fields.
+        self,
+        issue_id: int,
+        status: IssueStatus | str,
+        *,
+        actor: str,
+        iteration: int,
+        note: str = "",
+        payload: dict[str, Any] | None = None,
+    ) -> Issue:
+        """Change status and append a history event; missing IDs raise ``KeyError``."""
+        ...
+
+    def reopen_blocked(
+        self,
+        *,
+        actor: str,
+        iteration: int,
+        note: str = "",
+    ) -> builtins.list[int]:
+        """Reopen blocked issues and reset their attempt counts."""
+        ...
+
+    def increment_attempts(
+        self,
+        issue_id: int,
+        *,
+        actor: str,
+        iteration: int,
+        note: str = "",
+        payload: dict[str, Any] | None = None,
+    ) -> Issue:
+        """Increment the attempt count and append an attempt event."""
+        ...
+
+    def list(
+        self,
+        *,
+        status: IssueStatus | str | None = None,
+        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-920408 [A002]; preserve the established public filter keyword across tracker backends.
+    ) -> builtins.list[Issue]:
+        """List detached issues, optionally filtered by status and type."""
+        ...
+
+    def search(self, query: str) -> builtins.list[Issue]:
+        """Case-insensitive substring search with comma-separated AND terms."""
+        ...
+
+    def open_count_by_creator_in_iter(self, creator: str, iteration: int) -> int:
+        """Count issues created by this actor and iteration, regardless of status."""
+        ...
+
+    def next_open(self) -> Issue | None:
+        """Return the open issue with the earliest type priority and creation time."""
+        ...
 
 
 class IssueBoardLoadError(ValueError):
@@ -164,6 +246,10 @@ class IssueBoard:
             ) from exc
         return data
 
+    def _refresh_locked(self) -> None:
+        """Read the latest persisted snapshot while holding ``_lock``."""
+        self._data = self._load_from_disk()
+
     def _save_locked(self) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(self._data.model_dump_json(indent=2), encoding="utf-8")
@@ -178,7 +264,7 @@ class IssueBoard:
     def reload(self) -> None:
         """Re-read the JSON file from disk, discarding the in-memory copy."""
         with self._lock:
-            self._data = self._load_from_disk()
+            self._refresh_locked()
 
     def _replace_issue(self, issue: Issue) -> None:
         for idx, stored in enumerate(self._data.issues):
@@ -199,6 +285,7 @@ class IssueBoard:
         """Create and persist a new open issue with its initial history event."""
         issue_type = IssueType(type) if not isinstance(type, IssueType) else type
         with self._lock:
+            self._refresh_locked()
             now = datetime.now(UTC).isoformat()
             issue = Issue(
                 id=self._data.next_id,
@@ -228,6 +315,7 @@ class IssueBoard:
     def get(self, issue_id: int) -> Issue | None:
         """Return a detached copy of an issue, or ``None`` when absent."""
         with self._lock:
+            self._refresh_locked()
             for issue in self._data.issues:
                 if issue.id == issue_id:
                     return issue.model_copy(deep=True)
@@ -247,6 +335,7 @@ class IssueBoard:
         if not isinstance(status, IssueStatus):
             status = IssueStatus(status)
         with self._lock:
+            self._refresh_locked()
             issue = self.get(issue_id)
             if issue is None:
                 raise _issue_not_found(issue_id)
@@ -280,6 +369,7 @@ class IssueBoard:
         """Reopen every blocked issue, resetting its attempt budget."""
         reopened: list[int] = []
         with self._lock:
+            self._refresh_locked()
             for issue in self._data.issues:
                 if issue.status is not IssueStatus.BLOCKED:
                     continue
@@ -313,6 +403,7 @@ class IssueBoard:
     ) -> Issue:
         """Increment an issue's attempt count and append an attempt event."""
         with self._lock:
+            self._refresh_locked()
             issue = self.get(issue_id)
             if issue is None:
                 raise _issue_not_found(issue_id)
@@ -349,6 +440,7 @@ class IssueBoard:
             type if isinstance(type, IssueType) else IssueType(type) if type is not None else None
         )
         with self._lock:
+            self._refresh_locked()
             out: list[Issue] = []
             for issue in self._data.issues:
                 if status is not None and issue.status != status:
@@ -369,6 +461,7 @@ class IssueBoard:
         if not keywords:
             return []
         with self._lock:
+            self._refresh_locked()
             out: list[Issue] = []
             for issue in self._data.issues:
                 hay = (issue.title + "\n" + issue.description).lower()
@@ -379,6 +472,7 @@ class IssueBoard:
     def open_count_by_creator_in_iter(self, creator: str, iteration: int) -> int:
         """Count issues created by *creator* during *iteration*, any status."""
         with self._lock:
+            self._refresh_locked()
             return sum(
                 1
                 for issue in self._data.issues

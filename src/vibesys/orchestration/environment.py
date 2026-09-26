@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentView
     from vibesys.skills import SkillSelection
-    from vs_agent.api import MCPServerSpec
+    from vs_agent.api import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox, SandboxExecutionResult
 
 
@@ -90,10 +90,10 @@ class AgentEnvironment(Protocol):
         """Map a host path to its path inside this environment's sandbox."""
         ...
 
-    def investigation_tools(self) -> tuple[MCPServerSpec, ...]:
-        """Return the read-only MCP tool servers for investigating this run's history.
+    def investigation_tools(self) -> tuple[ToolServerDescriptor, ...]:
+        """Return the read-only tool servers for investigating this run's history.
 
-        Each spec launches a `vibesys.api.chat_tools_server` subprocess scoped
+        Each descriptor launches a `vibesys.api.chat_tools_server` subprocess scoped
         to this environment's run, exposing its read-model
         (`vibesys.api.RunStore`) as MCP tools instead of materializing files
         into the sandbox for a shell to `rg`/`tail`.

@@ -74,7 +74,7 @@ _OMNIGENT_INTERNAL_HIDDEN = frozenset({".codex-tmp"})
 _SESSION_SHUTDOWN_TIMEOUT = 5.0
 
 OMNIGENT_CAPABILITIES = AgentCapabilities(
-    mcp_servers=True,
+    tool_servers=True,
     timeouts=True,
     session_reuse=True,
 )

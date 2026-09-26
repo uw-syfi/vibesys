@@ -408,7 +408,7 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=str(shared_state_dir),
-            mcp_servers=(),
+            tool_servers=(),
         )
 
     factory = _factory_for_test(parts, tmp_path, build_agent)

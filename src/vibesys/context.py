@@ -91,7 +91,7 @@ from vibesys.sandbox.run_environment import (
 from vibesys.skills import SkillSelection, platform_skill_selection
 from vs_agent.api import (
     AgentBackend,
-    agent_driver_supports_mcp_servers,
+    agent_driver_supports_tool_servers,
     task_agent_host_resources,
 )
 from vs_project.api import (
@@ -483,7 +483,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                     provider=cli_provider,
                     model=model_name,
                 )
-                if not agent_driver_supports_mcp_servers(agent_spec):
+                if not agent_driver_supports_tool_servers(agent_spec):
                     driver_name = resolve_agent_driver(config)
                     definition = profiler_definition(resolved_profiler_kind)
                     raise ConfigurationError(
@@ -491,9 +491,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                             code="agent_profiler_incompatible",
                             stage="agent_capability_validation",
                             message=(
-                                f"Profiler {resolved_profiler_kind.value!r} requires session MCP server "
+                                f"Profiler {resolved_profiler_kind.value!r} requires agent tool server "
                                 f"{definition.mcp_name!r}, but agent driver {driver_name.value!r} does not "
-                                "support session MCP servers. Select agent.driver='agentshim' or "
+                                "support agent tool servers. Select agent.driver='agentshim' or "
                                 "disable profiling with --profiler none."
                             ),
                         )
