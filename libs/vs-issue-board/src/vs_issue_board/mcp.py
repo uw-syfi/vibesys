@@ -7,7 +7,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vs_issue_board.core import IssueBoard, IssueStatus, IssueType
+from vs_issue_board.core import IssueBoard, IssueStatus, IssueTracker, IssueType
 from vs_issue_board.format import format_issue_full, format_issue_short
 from vs_issue_board.policy import CreateIssuePolicy, create_issue_under_policy
 
@@ -78,20 +78,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_server(args: argparse.Namespace) -> FastMCP:
-    """Build a configured FastMCP instance from parsed args."""
-    store = IssueBoard(args.store_path)
+    """Build the standalone JSON-backed issue MCP server."""
+    tracker = IssueBoard(args.store_path)
     policy = CreateIssuePolicy(
         creator=args.creator,
         iteration=args.iteration,
         cap=args.cap,
         allowed_types=frozenset(args.allowed_types),
     )
+    return build_tracker_server(tracker, policy=policy, read_only=args.read_only)
+
+
+def build_tracker_server(
+    tracker: IssueTracker,
+    *,
+    policy: CreateIssuePolicy,
+    read_only: bool = False,
+) -> FastMCP:
+    """Expose a storage-neutral tracker through the issue-board MCP tools."""
     mcp = FastMCP("issue-board")
 
     @mcp.tool()
     def list_issues(status: str | None = None) -> str:
         """List issues. Optional status filter: 'open', 'in_progress', 'closed', 'blocked'."""
-        store.reload()
         try:
             status_enum = IssueStatus(status) if status else None
         except ValueError:
@@ -99,7 +108,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
                 f"error: invalid status '{status}'. "
                 f"Use one of: {[s.value for s in IssueStatus]} or omit."
             )
-        issues = store.list(status=status_enum)
+        issues = tracker.list(status=status_enum)
         if not issues:
             return "(no issues)"
         return "\n".join(format_issue_short(i) for i in issues)
@@ -107,8 +116,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
     @mcp.tool()
     def get_issue(issue_id: int) -> str:
         """Return the full body of an issue by id."""
-        store.reload()
-        issue = store.get(issue_id)
+        issue = tracker.get(issue_id)
         if issue is None:
             return f"(no issue #{issue_id})"
         return format_issue_full(issue)
@@ -120,13 +128,12 @@ def build_server(args: argparse.Namespace) -> FastMCP:
         Use comma-separated keywords for AND-matching, e.g. 'kv cache, paged'.
         Matching is case-insensitive.
         """
-        store.reload()
-        hits = store.search(query)
+        hits = tracker.search(query)
         if not hits:
             return "(no matches)"
         return "\n".join(format_issue_short(i) for i in hits)
 
-    if not args.read_only:
+    if not read_only:
 
         @mcp.tool()
         def create_issue(
@@ -142,7 +149,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
                 description: Markdown body.
             """
             _, msg = create_issue_under_policy(
-                store,
+                tracker,
                 type_str=type,
                 title=title,
                 description=description,

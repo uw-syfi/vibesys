@@ -1,7 +1,7 @@
 """Per-issue markdown renderer for the issue-loop.
 
 This module turns ``Issue`` objects into a human-readable directory of
-markdown files mirrored next to ``logs/issues.json``:
+markdown files mirrored next to the local JSON board:
 
     logs/
       issues.json                      # canonical, machine-readable
@@ -11,10 +11,9 @@ markdown files mirrored next to ``logs/issues.json``:
         0002-add-streaming-completions.md
         ...
 
-The renderer is invoked by ``IssueBoard``'s ``on_change`` callback so the
-markdown view is always
-re-generated after every successful save. Writes are atomic via the same
-tmp+rename pattern the store uses.
+The local JSON-backed issue board invokes the renderer through its ``on_change``
+callback. The renderer accepts issue snapshots rather than a store so it stays
+independent of the tracker implementation. Writes are atomic via tmp+rename.
 
 Pure functions only — this module owns no state and reads no globals. The
 only side-effect surface is the ``render_*`` functions, which write files.
@@ -27,12 +26,7 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
 
-from vs_issue_board.api import (
-    Issue,
-    IssueBoard,
-    IssueEvent,
-    IssueStatus,
-)
+from vs_issue_board.api import Issue, IssueEvent, IssueStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -282,12 +276,11 @@ def render_index_file(issues_dir: Path, issues: list[Issue]) -> Path:
     return path
 
 
-def render_all(issues_dir: Path, store: IssueBoard) -> None:
-    """Re-render every per-issue file plus ``INDEX.md`` from the store.
+def render_all(issues_dir: Path, issues: list[Issue]) -> None:
+    """Re-render every per-issue file plus ``INDEX.md`` from a snapshot.
 
-    Single entry point used by ``IssueBoard``'s ``on_change`` callback. The
-    cost is one atomic write per issue + one for the index — trivial for
-    realistic issue counts (~tens) and idempotent.
+    The cost is one atomic write per issue plus one for the index, and is
+    idempotent for realistic issue counts.
 
     NOTE on title rename: the filename derives from the (currently
     immutable) title via ``issue_md_filename``. If issue rename is ever
@@ -295,7 +288,6 @@ def render_all(issues_dir: Path, store: IssueBoard) -> None:
     old file will linger as an orphan. Add cleanup logic at that time.
     """
     issues_dir.mkdir(parents=True, exist_ok=True)
-    issues = store.list()
     for issue in issues:
         render_issue_file(issues_dir, issue)
     render_index_file(issues_dir, issues)

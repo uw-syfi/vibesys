@@ -5,10 +5,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import StringIO
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from vibesys.loops.issue_queue.progress_log import FileProgressLog, ProgressLog
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.orchestration.tools import mcp_spec_from_descriptor
@@ -20,6 +22,7 @@ from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vs_issue_board.api import (
     Issue,
     IssueBoard,
+    IssueTracker,
     IssueType,
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
@@ -35,6 +38,7 @@ class ImplementerUserContext(BaseModel):
 
     issue: Issue
     prior_judge_review: dict[str, Any] | None
+    progress: str
 
 
 class JudgeUserContext(BaseModel):
@@ -43,6 +47,7 @@ class JudgeUserContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     issue: Issue
+    progress: str
 
 
 class BootstrapContext(BaseModel):
@@ -107,66 +112,59 @@ def build_issue_mcp_spec(
 # ---------------------------------------------------------------------------
 
 
-def _init_progress(log_dir: Path) -> Path:
-    progress_path = log_dir / "progress.md"
-    if not progress_path.exists():
-        progress_path.write_text("# Experiment Progress\n\n")
-    return progress_path
-
-
-def _update_progress_from_implementer(
-    progress_path: Path,
+def _format_progress_from_implementer(
     iteration: int,
     issue: Issue,
     response: IssueImplementerResponse,
-) -> None:
-    with progress_path.open("a", encoding="utf-8") as f:
-        f.write(f"## Iter {iteration} — Implementer on issue #{issue.id}\n\n")
-        f.write(f"**Issue**: [{issue.type.value}] {issue.title}\n\n")
-        f.write(f"**Summary**: {response.summary}\n\n")
-        if response.files_touched:
-            f.write("**Files touched**:\n")
-            for fp in response.files_touched:
-                f.write(f"- `{fp}`\n")
-            f.write("\n")
-        f.write(f"**Self-check**: {response.self_check}\n\n")
+) -> str:
+    progress = StringIO()
+    progress.write(f"## Iter {iteration} — Implementer on issue #{issue.id}\n\n")
+    progress.write(f"**Issue**: [{issue.type.value}] {issue.title}\n\n")
+    progress.write(f"**Summary**: {response.summary}\n\n")
+    if response.files_touched:
+        progress.write("**Files touched**:\n")
+        for fp in response.files_touched:
+            progress.write(f"- `{fp}`\n")
+        progress.write("\n")
+    progress.write(f"**Self-check**: {response.self_check}\n\n")
+    return progress.getvalue()
 
 
-def _update_progress_from_judge(
-    progress_path: Path,
+def _format_progress_from_judge(
     iteration: int,
     issue: Issue,
     response: IssueJudgeResponse,
-) -> None:
-    with progress_path.open("a", encoding="utf-8") as f:
-        f.write(f"### Iter {iteration} — Judge on issue #{issue.id}\n\n")
-        f.write(f"**Verdict**: {response.verdict.value.upper()}\n\n")
-        f.write(f"**Analysis**: {response.analysis}\n\n")
-        if response.feedback:
-            f.write(f"**Feedback**: {response.feedback}\n\n")
-        if response.new_issues_filed:
-            ids = ", ".join(f"#{i}" for i in response.new_issues_filed)
-            f.write(f"**New issues filed**: {ids}\n\n")
+) -> str:
+    progress = StringIO()
+    progress.write(f"### Iter {iteration} — Judge on issue #{issue.id}\n\n")
+    progress.write(f"**Verdict**: {response.verdict.value.upper()}\n\n")
+    progress.write(f"**Analysis**: {response.analysis}\n\n")
+    if response.feedback:
+        progress.write(f"**Feedback**: {response.feedback}\n\n")
+    if response.new_issues_filed:
+        ids = ", ".join(f"#{i}" for i in response.new_issues_filed)
+        progress.write(f"**New issues filed**: {ids}\n\n")
+    return progress.getvalue()
 
 
-def _update_progress_from_perf_eval(
-    progress_path: Path,
+def _format_progress_from_perf_eval(
     iteration: int,
     response: IssuePerfEvalResponse,
-) -> None:
-    with progress_path.open("a", encoding="utf-8") as f:
-        f.write(f"## Iter {iteration} — Performance Evaluator\n\n")
-        f.write(f"**Throughput trend**: {response.throughput_trend.value.upper()}\n\n")
-        f.write(f"**Latency trend**: {response.latency_trend.value.upper()}\n\n")
-        f.write(f"**Analysis**: {response.analysis}\n\n")
-        if response.new_issue_ids:
-            ids = ", ".join(f"#{i}" for i in response.new_issue_ids)
-            f.write(f"**New issues filed**: {ids}\n\n")
-        if response.evaluator_feedback:
-            f.write("**Notes for next perf evaluator**:\n")
-            for note in response.evaluator_feedback:
-                f.write(f"- {note}\n")
-            f.write("\n")
+) -> str:
+    progress = StringIO()
+    progress.write(f"## Iter {iteration} — Performance Evaluator\n\n")
+    progress.write(f"**Throughput trend**: {response.throughput_trend.value.upper()}\n\n")
+    progress.write(f"**Latency trend**: {response.latency_trend.value.upper()}\n\n")
+    progress.write(f"**Analysis**: {response.analysis}\n\n")
+    if response.new_issue_ids:
+        ids = ", ".join(f"#{i}" for i in response.new_issue_ids)
+        progress.write(f"**New issues filed**: {ids}\n\n")
+    if response.evaluator_feedback:
+        progress.write("**Notes for next perf evaluator**:\n")
+        for note in response.evaluator_feedback:
+            progress.write(f"- {note}\n")
+        progress.write("\n")
+    return progress.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +218,8 @@ class IssueQueueRun:
     """Plain-owned state and effects bound to the one shared run host."""
 
     host: RunContext
-    board: IssueBoard
+    board: IssueTracker
+    progress_log: ProgressLog
     state_store: IssueQueueStateStore
     state: PlainLoopCursor
     turns: _IssueQueueTurns
@@ -240,14 +239,14 @@ class IssueQueueRun:
         portable = host.state.namespace
         state_store = IssueQueueStateStore(portable)
         local_dir = host.state.local_namespace.external_directory()
-        progress_path = _init_progress(local_dir)
+        progress_log = FileProgressLog(local_dir / "progress.md")
         issues_dir = local_dir / "issues"
-        board: IssueBoard
+        board: IssueTracker
         board = IssueBoard(
             host.workspaces.root.path / "issues.json",
-            on_change=lambda: render_all(issues_dir, board),
+            on_change=lambda: render_all(issues_dir, board.list()),
         )
-        render_all(issues_dir, board)
+        render_all(issues_dir, board.list())
         persisted = await host.state.slot("state.json", PlainLoopCursor).load()
         turns = _IssueQueueTurns(
             host=host,
@@ -257,7 +256,7 @@ class IssueQueueRun:
             board=board,
             state_store=state_store,
             prompt=prompt,
-            progress_path=progress_path,
+            progress_log=progress_log,
             issues_dir=issues_dir,
             perf_metrics_location=portable.agent_visible_path("perf/metrics.json"),
             max_issues_per_perf_eval=options.max_issues_per_perf_eval,
@@ -269,6 +268,7 @@ class IssueQueueRun:
             state_store=state_store,
             state=persisted or PlainLoopCursor(),
             turns=turns,
+            progress_log=progress_log,
             resuming=host.request.resume is not None or persisted is not None,
             prompt=prompt,
             options=options,
@@ -368,10 +368,10 @@ class _IssueQueueTurns:
     implementer: AgentHandle
     judge_agent: AgentHandle
     perf_agent: AgentHandle
-    board: IssueBoard
+    board: IssueTracker
     state_store: IssueQueueStateStore
     prompt: Prompt
-    progress_path: Path
+    progress_log: ProgressLog
     issues_dir: Path
     perf_metrics_location: str
     max_issues_per_perf_eval: int
@@ -400,6 +400,7 @@ class _IssueQueueTurns:
         user_context = ImplementerUserContext(
             issue=issue,
             prior_judge_review=_latest_judge_review(issue),
+            progress=self.progress_log.read().rstrip(),
         )
         user_prompt = self.prompt.render("implementer/user.j2", **user_context.model_dump())
         await host.control.debug_step(f"Implementer step on issue #{issue.id}")
@@ -424,7 +425,7 @@ class _IssueQueueTurns:
     async def record_implementation(
         self, issue: Issue, response: IssueImplementerResponse, iteration: int
     ) -> None:
-        _update_progress_from_implementer(self.progress_path, iteration, issue, response)
+        self.progress_log.append(_format_progress_from_implementer(iteration, issue, response))
         await self.host.workspaces.root.snapshot(
             f"iter-{iteration}-impl-{issue.id}-att{issue.attempts}"
         )
@@ -434,7 +435,10 @@ class _IssueQueueTurns:
         host = self.host
         await host.environment.reselect_device()
         user_prompt = self.prompt.render(
-            "judge/user.j2", **JudgeUserContext(issue=issue).model_dump()
+            "judge/user.j2",
+            **JudgeUserContext(
+                issue=issue, progress=self.progress_log.read().rstrip()
+            ).model_dump(),
         )
         await host.control.debug_step(f"Judge step on issue #{issue.id}")
         host.log(f"\n>>> Judge reviewing issue #{issue.id}...")
@@ -460,9 +464,8 @@ class _IssueQueueTurns:
             ),
         )
         response = reply.model_copy(update={"issue_id": issue.id})
-        self.board.reload()
-        render_all(self.issues_dir, self.board)
-        _update_progress_from_judge(self.progress_path, iteration, issue, response)
+        render_all(self.issues_dir, self.board.list())
+        self.progress_log.append(_format_progress_from_judge(iteration, issue, response))
         await host.workspaces.root.snapshot(
             f"iter-{iteration}-judge-{issue.id}-att{issue.attempts}"
         )
@@ -484,7 +487,6 @@ class _IssueQueueTurns:
                 agent=self.perf_agent,
                 context=IssuePerfEvalContext(
                     load_levels=self.load_levels,
-                    progress_path=None,
                     perf_metrics_path=self.perf_metrics_location,
                     issue_create_cap=self.max_issues_per_perf_eval,
                     benchmark_command=host.environment.view.paths.benchmark_command,
@@ -501,9 +503,8 @@ class _IssueQueueTurns:
                 backend=host.request.backend,
             ),
         )
-        self.board.reload()
-        render_all(self.issues_dir, self.board)
-        _update_progress_from_perf_eval(self.progress_path, iteration, response)
+        render_all(self.issues_dir, self.board.list())
+        self.progress_log.append(_format_progress_from_perf_eval(iteration, response))
         self.state_store.append_performance(
             PlainPerformanceRecord(
                 iteration=iteration,

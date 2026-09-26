@@ -37,9 +37,10 @@ Board files are split across two roots (investigated, not assumed):
   ``vs_issue_board.api.IssueBoard``.
 - The machine-local run-state directory (outside the project workspace, a
   sibling of ``tmp_path`` per ``isolated_vibesys_state_home`` in
-  ``tests/conftest.py``) holds the agent-visible ``progress.md`` plus the
+  ``tests/conftest.py``) holds the local ``progress.md`` plus the
   per-issue markdown mirror ``issues/INDEX.md`` and ``issues/000N-*.md``
-  rendered by ``vibesys.loops.issue_queue.render``.
+  rendered by ``vibesys.loops.issue_queue.render``. Progress is passed into
+  agent prompts through the progress-log interface, not through a path.
 """
 
 from __future__ import annotations

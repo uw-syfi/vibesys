@@ -17,11 +17,11 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.runtime import RunContext
-    from vs_issue_board.api import IssueBoard
+    from vs_issue_board.api import IssueTracker
     from vs_project.api import OrchestrationDescriptor, Project
 
 
-def resume_point(state: PlainLoopCursor, board: IssueBoard) -> tuple[int, str, int | None]:
+def resume_point(state: PlainLoopCursor, board: IssueTracker) -> tuple[int, str, int | None]:
     """Revisit an interrupted role only while its issue remains actionable."""
     issue_id = state.current_issue_id
     if issue_id is not None and state.phase in {"judge", "implementer"}:

@@ -1,19 +1,22 @@
 # vs-issue-board
 
-Reusable JSON-backed issue board utilities for small agent workflows.
+Reusable issue tracker contract and JSON-backed implementation for small agent
+workflows.
 
 This is an internal import package shipped by the `vibesys` distribution. It
 is not published as a separate Python distribution.
 
 ## Responsibility
 
-This package owns reusable issue state and history, JSON persistence, create
-policies, text formatting, and a stdio MCP server. Applications supply prompts,
-rendering, agent tools, and loop orchestration around that board.
+This package owns the storage-neutral issue contract, the JSON implementation,
+issue state and history, create policies, text formatting, and generic stdio
+MCP tools. Applications supply persistence selection, prompts, rendering, and
+loop orchestration.
 
 ## Concepts
 
-- `IssueBoard` stores issues in one JSON file and writes atomically with a
+- `IssueTracker` defines operations independently of storage. `IssueBoard`
+  implements it, stores issues in one JSON file, and writes atomically with a
   temporary file plus rename.
 - `Issue`, `IssueEvent`, `IssueStatus`, and `IssueType` are typed Pydantic
   models/enums for issue state and history.

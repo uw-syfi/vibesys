@@ -1,9 +1,9 @@
 """Public issue board storage, policy, and display helpers.
 
-``IssueBoard`` stores ``Issue`` records and ``IssueEvent`` history. Use
-``CreateIssuePolicy`` and its helpers when creating issues under an iteration
-cap. The format helpers produce short and full text representations. The
-standalone MCP server's Python helpers are exposed by :mod:`vs_issue_board.api.mcp`.
+``IssueTracker`` defines storage-neutral issue operations; ``IssueBoard`` is
+its JSON-backed implementation. Use ``CreateIssuePolicy`` and its helpers when
+creating issues under an iteration cap. Format helpers produce short and full
+text representations. MCP helpers are exposed by :mod:`vs_issue_board.api.mcp`.
 """
 
 from vs_issue_board.core import (
@@ -12,6 +12,7 @@ from vs_issue_board.core import (
     IssueBoardLoadError,
     IssueEvent,
     IssueStatus,
+    IssueTracker,
     IssueType,
 )
 from vs_issue_board.format import format_issue_full, format_issue_short
@@ -29,6 +30,7 @@ __all__ = [
     "IssueBoardLoadError",
     "IssueEvent",
     "IssueStatus",
+    "IssueTracker",
     "IssueType",
     "check_create_allowed",
     "create_issue_under_policy",

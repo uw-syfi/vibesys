@@ -13,8 +13,10 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from vs_issue_board.api import IssueType
+from vs_issue_board.api import IssueBoard, IssueType
+from vs_issue_board.api.mcp import build_tracker_server
 from vs_issue_board.mcp import build_parser, build_server
+from vs_issue_board.policy import CreateIssuePolicy
 
 
 def _ns(tmp_path: Path, *extra: str) -> Namespace:
@@ -157,6 +159,32 @@ class TestEndToEnd:
         assert "#1" in listed
         assert "[perf]" in listed
         assert "paged kv" in listed
+
+    def test_injected_tracker_observes_writes_from_another_client(self, tmp_path: Path) -> None:
+        path = tmp_path / "issues.json"
+        tracker = IssueBoard(path)
+        server = build_tracker_server(
+            tracker,
+            policy=CreateIssuePolicy(
+                creator="agent",
+                iteration=2,
+                cap=None,
+                allowed_types=frozenset(IssueType),
+            ),
+        )
+        writer = IssueBoard(path)
+        writer.create(
+            type=IssueType.FEATURE,
+            title="shared tracker",
+            description="written by another client",
+            created_by="perf_eval",
+            iteration=1,
+        )
+
+        listed = asyncio.run(_call_tool(server, "list_issues"))
+
+        assert "shared tracker" in listed
+        assert "#1" in listed
 
     def test_judge_policy_caps_at_one(self, tmp_path: Path) -> None:
         server = build_server(

@@ -64,7 +64,7 @@ You may be reviewing an implementation that has been through previous review cyc
 
 ## Review criteria
 
-A file called `progress.md` may be available in your working directory. It contains a log of previous iterations — what the implementer did, previous verdicts, and performance data. The latest progress is at the end of the file. Read it for context, but base your verdict on the current state of the code.
+Recent run progress is included in the task prompt. Use it for context, but base your verdict on the current state of the code.
 
 Inspect the current implementation entrypoints, manifests, and tests that are
 relevant to this issue. Follow imports or runtime artifacts only when they can
@@ -199,4 +199,19 @@ IMPORTANT: Your verdict must be consistent with your analysis. If your analysis 
 
 # user
 Review the implementation against issue #1. Update or write pytest tests as needed, run them with `uv run pytest -v`, and reflect on the results before giving your verdict. Return one raw JSON object with keys: issue_id, analysis, feedback, verdict, new_issues_filed. Do not use markdown fences or any extra text.
+
+## Recent run progress
+
+# Experiment Progress
+
+## Iter 1 — Implementer on issue #1
+
+**Issue**: [feature] Build FastAPI inference server for the reference model
+
+**Summary**: first attempt: partial server, missing /health
+
+**Files touched**:
+- `server.py`
+
+**Self-check**: ran the accuracy checker locally
 
