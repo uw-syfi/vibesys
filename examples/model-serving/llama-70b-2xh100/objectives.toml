@@ -1,7 +1,7 @@
 [[objective]]
-name = "aggregate_throughput"
+name = "output_token_throughput_per_s"
 direction = "max"
 
 [[objective]]
-name = "p99_latency_ms"
+name = "p90_latency_ms"
 direction = "min"
