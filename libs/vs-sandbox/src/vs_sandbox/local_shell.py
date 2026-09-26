@@ -12,7 +12,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from vs_sandbox.execution import SandboxExecutionResult
+from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 
 DEFAULT_EXECUTE_TIMEOUT = 120
 DEFAULT_MAX_OUTPUT_CHARS = 100_000
@@ -85,6 +85,12 @@ class LocalShellSandbox:
                 output=f"Error executing command ({type(exc).__name__}): {exc}", exit_code=1
             )
 
+        streams = bounded_execution_result(
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            exit_code=proc.returncode,
+            max_output_chars=self._max_output_chars,
+        )
         parts = [proc.stdout] if proc.stdout else []
         if proc.stderr:
             parts.extend(f"[stderr] {line}" for line in proc.stderr.strip().split("\n"))
@@ -100,7 +106,7 @@ class LocalShellSandbox:
         return SandboxExecutionResult(
             output=output,
             exit_code=proc.returncode,
-            truncated=truncated,
-            stdout=proc.stdout,
-            stderr=proc.stderr,
+            truncated=truncated or streams.truncated,
+            stdout=streams.stdout,
+            stderr=streams.stderr,
         )

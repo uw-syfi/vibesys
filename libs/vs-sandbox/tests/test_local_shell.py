@@ -90,6 +90,8 @@ def test_output_past_the_cap_is_cut_and_flagged(tmp_path: Path) -> None:
     result = LocalShellSandbox(tmp_path, max_output_chars=10).execute("printf 'a%.0s' $(seq 50)")
 
     assert result.truncated
+    assert len(result.stdout) <= 10
+    assert result.stderr == ""
     assert result.output.startswith("a" * 10)
     assert "Output truncated at 10 characters" in result.output
     assert "a" * 11 not in result.output
