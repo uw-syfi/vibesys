@@ -15,4 +15,8 @@ the metrics to VibeSys result protocol 2.
 The evaluator injects the trusted RF engine path. For CPU-only request-path
 validation, run `python benchmark/cpu_smoke.py --request-factory-engine
 <RF_ENGINE>`; it uses a strict local fake completions server and a tiny local
-tokenizer fixture. Fake server metrics are not serving-performance results.
+tokenizer fixture. The benchmark generates its deterministic text corpus in
+the per-run temporary directory and sets the token-pool limit to the larger of
+twice the prompt length or the request count. It fails if RF warns that the
+pool is shorter than a prompt. Fake server metrics are not serving-performance
+results.
