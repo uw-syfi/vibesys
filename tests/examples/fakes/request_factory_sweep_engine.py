@@ -25,6 +25,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--trace", type=Path, required=True)
     parser.add_argument("--text-file", type=Path, required=True)
+    parser.add_argument("--tokenizer", type=Path, required=True)
     parser.add_argument("--token-pool-limit", type=int, required=True)
     parser.add_argument("--max-concurrency", type=int, required=True)
     parser.add_argument("--summary-path", type=Path, required=True)
@@ -41,7 +42,16 @@ def main() -> int:
     ]
     capture_path = Path(_required_environment("RF_FAKE_CAPTURE"))
     with capture_path.open("a", encoding="utf-8") as capture:
-        capture.write(json.dumps({"concurrency": args.max_concurrency, "prompts": prompts}) + "\n")
+        capture.write(
+            json.dumps(
+                {
+                    "concurrency": args.max_concurrency,
+                    "prompts": prompts,
+                    "tokenizer": str(args.tokenizer),
+                }
+            )
+            + "\n"
+        )
 
     state_path = Path(_required_environment("RF_FAKE_STATE"))
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}

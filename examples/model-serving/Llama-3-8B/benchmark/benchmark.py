@@ -17,12 +17,26 @@ from pathlib import Path
 from typing import Any
 
 _MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+_TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
 _DEFAULT_CONCURRENCIES = (1, 2, 4, 8, 16, 32, 64, 128)
 _METRICS = {
     "aggregate_throughput": {"unit": "tok/s", "direction": "max"},
     "p99_latency_ms": {"unit": "ms", "direction": "min"},
 }
 _UNDERSIZED_POOL_WARNING = "synthetic content will repeat within a single request"
+
+
+def _resolve_tokenizer(tokenizer: str | None) -> str:
+    """Resolve the pinned production tokenizer while preserving local overrides."""
+    if tokenizer is not None:
+        return tokenizer
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(
+        repo_id=_MODEL,
+        filename="tokenizer.json",
+        revision=_TOKENIZER_REVISION,
+    )
 
 
 def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) -> None:
@@ -304,7 +318,7 @@ def main() -> int:
     parser.add_argument("--request-factory-engine", default="session_runner")
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--model", default=_MODEL)
-    parser.add_argument("--tokenizer", default="meta-llama/Llama-3.1-8B-Instruct")
+    parser.add_argument("--tokenizer")
     parser.add_argument("--request-count", type=int, default=512)
     parser.add_argument("--input-tokens", type=int, default=256)
     parser.add_argument("--output-tokens", type=int, default=128)
@@ -324,6 +338,7 @@ def main() -> int:
         or tuple(sorted(set(args.concurrencies))) != args.concurrencies
     ):
         parser.error("concurrencies must be unique positive integers in ascending order")
+    args.tokenizer = _resolve_tokenizer(args.tokenizer)
     args.request_factory_engine = args.request_factory_engine
     return run(args)
 
