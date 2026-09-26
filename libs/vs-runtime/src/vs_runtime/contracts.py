@@ -250,6 +250,23 @@ class Control(Protocol):
         ...
 
 
+class ProfileExecution(StrEnum):
+    """Where profiling must execute to observe the production path."""
+
+    LOCAL = "local"
+    REMOTE = "remote"
+
+
+class RunFacts(BaseModel):
+    """Immutable prompt-visible facts resolved before orchestration starts."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    domain_id: str = Field(min_length=1)
+    environment_notes: str = ""
+    profile_execution: ProfileExecution = ProfileExecution.LOCAL
+
+
 class MetricDirection(StrEnum):
     """Which direction improves one benchmark objective."""
 
@@ -337,7 +354,6 @@ class RunStatus(StrEnum):
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
-    STOPPED = "stopped"
 
 
 class RunHost(Protocol):
@@ -346,6 +362,11 @@ class RunHost(Protocol):
     @property
     def run_id(self) -> str:
         """Return this run's stable identity."""
+        ...
+
+    @property
+    def facts(self) -> RunFacts:
+        """Return immutable prompt-visible facts fixed during run setup."""
         ...
 
     @property

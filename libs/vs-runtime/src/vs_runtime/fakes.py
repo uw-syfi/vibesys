@@ -17,6 +17,7 @@ from vs_runtime.contracts import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     OrchestrationPlugin,
+    RunFacts,
     RuntimeContractError,
     SessionClosedError,
     StateModelError,
@@ -451,10 +452,12 @@ class FakeRunHost:
         *,
         run_id: str = "test-run",
         project_root: Path = Path(),
+        facts: RunFacts | None = None,
         responder: TurnResponder = _echo_responder,
     ) -> None:
         """Create a host whose private role map derives from ``plugin.agents``."""
         self._run_id = run_id
+        self._facts = RunFacts(domain_id="generic") if facts is None else facts
         self._workspaces = FakeWorkspaces(FakeWorkspace(path=project_root))
         self._agents = FakeAgentSessions(plugin.agents, responder=responder)
         self._evaluation = FakeEvaluation(run_id=run_id)
@@ -467,6 +470,11 @@ class FakeRunHost:
     def run_id(self) -> str:
         """Return this fake run's stable identity."""
         return self._run_id
+
+    @property
+    def facts(self) -> RunFacts:
+        """Return the configured immutable run facts."""
+        return self._facts
 
     @property
     def workspaces(self) -> FakeWorkspaces:

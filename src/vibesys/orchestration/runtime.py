@@ -65,6 +65,7 @@ from vibesys.orchestration.workspaces import (
 from vibesys.render.sink import output_sink
 from vibesys.run.agent_sessions import SynchronizedSessionStore
 from vs_agent.api import AgentExecutionPolicy, AgentSessionState, build_agent_client
+from vs_runtime.api import ProfileExecution, RunFacts
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -207,6 +208,7 @@ class RunContext:
         self._backend_factory = backend_factory
         self._gate_executor = gate_executor
         self._resource_owner: _RunResources | None = None
+        self._facts: RunFacts | None = None
         self._session_store: SynchronizedSessionStore | None = None
         self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
         self._spawn_lock = asyncio.Lock()
@@ -236,6 +238,13 @@ class RunContext:
     def run_id(self) -> str:
         """Return this run's stable identity."""
         return self._resources.run_id
+
+    @property
+    def facts(self) -> RunFacts:
+        """Return prompt-visible facts fixed when run resources were prepared."""
+        if self._facts is None:
+            raise _RuntimeClosedError
+        return self._facts
 
     def log(self, message: str) -> None:
         """Write one line to the active run log."""
@@ -367,7 +376,12 @@ class RunContext:
 
     def _prepare(self) -> None:
         """Open the canonical run context once."""
-        self._ensure_resources()
+        resources = self._ensure_resources()
+        self._facts = RunFacts(
+            domain_id=self.request.input_bundle.domain.value,
+            environment_notes=resources.run_environment_view.prompt_notes,
+            profile_execution=ProfileExecution(resources.run_environment_view.profile_execution),
+        )
 
     async def _spawn(
         self,

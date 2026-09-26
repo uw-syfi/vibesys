@@ -21,6 +21,8 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     OrchestrationPlugin,
+    ProfileExecution,
+    RunFacts,
     RunHost,
     RunStatus,
     RuntimeContractError,
@@ -240,6 +242,29 @@ def test_real_control_checkpoint_lands_a_pending_stop(tmp_path: Path) -> None:
             integration.control.request_stop()
             with pytest.raises(RunStopped):
                 await run.control.checkpoint()
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
+def test_real_run_facts_map_prepared_input_and_environment_once(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with RunContext.open(
+            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
+        ) as run:
+            facts = run.facts
+            assert facts == RunFacts(
+                domain_id="generic",
+                environment_notes="",
+                profile_execution=ProfileExecution.LOCAL,
+            )
+            assert run.facts is facts
 
     try:
         asyncio.run(exercise())

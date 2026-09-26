@@ -17,6 +17,8 @@ from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
     OrchestrationPlugin,
+    ProfileExecution,
+    RunFacts,
     RunHost,
     RunStatus,
     SessionClosedError,
@@ -97,6 +99,27 @@ def test_role_is_a_strict_complete_declaration() -> None:
                 "config_profile": "hidden alias",
             }
         )
+
+
+def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
+    facts = RunFacts(
+        domain_id="llm_serving",
+        environment_notes="Run the service through its public endpoint.",
+        profile_execution=ProfileExecution.REMOTE,
+    )
+    host = FakeRunHost(_plugin(), facts=facts)
+
+    assert host.facts is facts
+    with pytest.raises(ValidationError):
+        host.facts.__setattr__("domain_id", "generic")
+    with pytest.raises(ValidationError):
+        RunFacts.model_validate({"domain_id": "generic", "backend": "modal"})
+
+
+def test_fake_run_facts_have_a_policy_neutral_default() -> None:
+    host = FakeRunHost(_plugin())
+
+    assert host.facts == RunFacts(domain_id="generic")
 
 
 def test_same_session_continues_and_second_creation_is_fresh() -> None:
