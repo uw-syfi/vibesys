@@ -5,19 +5,29 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from vibesys.orchestrations.issue_queue import PLUGIN, IssueQueueState
+from vibesys.orchestrations.issue_queue import PLUGIN, IssueQueueOptions, IssueQueueState
+from vibesys.orchestrations.issue_queue.agents import (
+    IMPLEMENTER_SYSTEM_PROMPT,
+    JUDGE_SYSTEM_PROMPT,
+    PERFORMANCE_SYSTEM_PROMPT,
+)
+from vibesys.orchestrations.issue_queue.prompts import (
+    implementer_message,
+    judge_message,
+    performance_message,
+)
 from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 from vs_runtime.api import RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
 
     from vs_runtime.api import AgentRole
 
@@ -125,7 +135,11 @@ def test_plugin_declares_fixed_roles_and_strict_policy_options() -> None:
     assert PLUGIN.id == "plain"
     assert PLUGIN.agents == (IMPLEMENTER, JUDGE, PERF_EVALUATOR)
     assert [tool.id for tool in JUDGE.tools] == ["shell", "issue-board"]
-    assert [tool.id for tool in PERF_EVALUATOR.tools] == ["shell", "issue-board"]
+    assert [tool.id for tool in PERF_EVALUATOR.tools] == [
+        "shell",
+        "issue-board",
+        "profiler",
+    ]
     options = _options(load_levels=[{"rate": 1, "duration": 2, "max_tokens": 3}])
     assert len(options.model_dump()["load_levels"]) == 1
 
@@ -307,3 +321,130 @@ def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path:
     board = IssueBoard(tmp_path / "issues.json")
     assert board.list()[0].status is IssueStatus.IN_PROGRESS
     assert all(session.closed for session in host.agents.sessions)
+
+
+@pytest.mark.parametrize(
+    ("creation_script", "failed_role", "opened_sessions"),
+    [
+        ((RuntimeError("implementer unavailable"),), "implementer", 0),
+        ((None, RuntimeError("judge unavailable")), "judge", 1),
+        ((None, None, RuntimeError("perf_eval unavailable")), "perf_eval", 2),
+    ],
+)
+def test_session_construction_failure_leaves_no_policy_artifacts(
+    tmp_path: Path,
+    creation_script: tuple[BaseException | None, ...],
+    failed_role: str,
+    opened_sessions: int,
+) -> None:
+    async def scenario() -> tuple[FakeRunHost, RuntimeError]:
+        host = FakeRunHost(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Build the candidate."),
+        )
+        host.agents.script_creation(*creation_script)
+        try:
+            with pytest.raises(RuntimeError, match=f"{failed_role} unavailable") as raised:
+                await PLUGIN.orchestrate(host, _options())
+            return host, raised.value
+        finally:
+            await host.close()
+
+    host, error = asyncio.run(scenario())
+
+    assert error.args == (f"{failed_role} unavailable",)
+    assert len(host.agents.sessions) == opened_sessions
+    assert all(session.closed for session in host.agents.sessions)
+    assert list(tmp_path.iterdir()) == []
+    assert host.state.commits == ()
+
+
+def test_registered_system_prompts_match_reviewed_golden() -> None:
+    actual = (
+        f"{IMPLEMENTER_SYSTEM_PROMPT}\n\n"
+        f"=== JUDGE ===\n\n{JUDGE_SYSTEM_PROMPT}\n\n"
+        f"=== PERFORMANCE ===\n\n{PERFORMANCE_SYSTEM_PROMPT}"
+    )
+
+    snapshot = Path(__file__).with_name("fixtures") / "system_prompts.txt"
+    assert actual == snapshot.read_text(encoding="utf-8").rstrip("\n")
+
+
+def test_prompts_preserve_legacy_role_policy_and_dynamic_context(tmp_path: Path) -> None:
+    board = IssueBoard(tmp_path / "issues.json")
+    issue = board.create(
+        type=IssueType.FEATURE,
+        title="Implement streaming",
+        description="## Acceptance criteria\n- stream non-empty token deltas",
+        created_by="test",
+        iteration=1,
+    )
+    facts = RunFacts(
+        domain_id="llm-serving",
+        objective="Maximize measured token throughput without losing correctness.",
+        reference_location="reference/model.py",
+        accuracy_command="uv run check-accuracy",
+        benchmark_command="uv run benchmark",
+        profiler_id="torch",
+        environment_notes="Use CUDA with bfloat16.",
+    )
+    options = IssueQueueOptions.model_validate(_options())
+
+    implementer = implementer_message(
+        issue,
+        facts,
+        {"feedback": "Streaming chunks were empty.", "analysis": "TPOT was null."},
+    )
+    judge = judge_message(issue, facts)
+    performance = performance_message(
+        iteration=1,
+        facts=facts,
+        options=options,
+        state=IssueQueueState(),
+    )
+
+    assert all(
+        text in IMPLEMENTER_SYSTEM_PROMPT
+        for text in ("/model", "ready-made model classes", "non-empty text delta", "uv")
+    )
+    assert "Streaming chunks were empty" in implementer
+    assert "uv run check-accuracy" in implementer
+    assert '"files_touched"' in implementer
+    assert all(
+        text in JUDGE_SYSTEM_PROMPT
+        for text in ("real server smoke test", "accuracy checker", "at most one bug")
+    )
+    assert "positive token throughput" in judge
+    assert '"verdict": "pass" | "fail"' in judge
+    assert [tool.id for tool in PERF_EVALUATOR.tools] == [
+        "shell",
+        "issue-board",
+        "profiler",
+    ]
+    assert all(
+        text in PERFORMANCE_SYSTEM_PROMPT
+        for text in (
+            "identified stale server",
+            "workload shape",
+            "all-time best",
+            "limiting resource at each load level",
+            "at most one profile",
+            "impact over effort",
+        )
+    )
+    assert "Profiler `torch` is available through the fixed `profiler` tool" in performance
+    assert "increase request rate until throughput plateaus" in performance
+    assert "prompt-length or output-length workloads" in performance
+    assert "Always\nstop any server process" in performance
+    assert "code_evidence" in performance
+    assert "list_issues" in performance
+    assert '"throughput_trend": "improved" | "regressed" | "mixed"' in performance
+
+    without_profiler = performance_message(
+        iteration=1,
+        facts=facts.model_copy(update={"profiler_id": "none"}),
+        options=options,
+        state=IssueQueueState(),
+    )
+    assert "No profiler is configured; do not attempt a profile." in without_profiler

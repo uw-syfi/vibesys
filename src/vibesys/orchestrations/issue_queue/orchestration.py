@@ -64,45 +64,37 @@ class _IssueQueueRun:
         self.options = options
         self.workspace = host.workspaces.root
         self.root = self.workspace.path
-        self.board = IssueBoard(self.root / _ISSUES_FILE)
+        self._board: IssueBoard | None = None
         self.state = IssueQueueState()
         self.sessions: _Sessions | None = None
         self.resuming = False
 
     async def initialize(self) -> None:
-        """Load the aggregate, establish artifacts, and resume named sessions."""
+        """Acquire all sessions before creating or changing policy artifacts."""
         loaded = await self.host.state.load(IssueQueueState)
         self.resuming = loaded is not None
         self.state = loaded or IssueQueueState()
-        render_all(self.root / _ISSUES_DIRECTORY, self.board)
-        progress = self.root / _PROGRESS_FILE
-        if not progress.exists():
-            progress.write_text("# Experiment Progress\n\n", encoding="utf-8")
-
         implementer = await self.host.agents.create_session(
             IMPLEMENTER,
             workspace=self.workspace,
             member_id="issue-queue-implementer",
         )
-        try:
-            judge = await self.host.agents.create_session(
-                JUDGE,
-                workspace=self.workspace,
-                member_id="issue-queue-judge",
-            )
-            try:
-                performance = await self.host.agents.create_session(
-                    PERF_EVALUATOR,
-                    workspace=self.workspace,
-                    member_id="issue-queue-perf-evaluator",
-                )
-            except BaseException:
-                await judge.close()
-                raise
-        except BaseException:
-            await implementer.close()
-            raise
+        judge = await self.host.agents.create_session(
+            JUDGE,
+            workspace=self.workspace,
+            member_id="issue-queue-judge",
+        )
+        performance = await self.host.agents.create_session(
+            PERF_EVALUATOR,
+            workspace=self.workspace,
+            member_id="issue-queue-perf-evaluator",
+        )
         self.sessions = _Sessions(implementer, judge, performance)
+        self._board = IssueBoard(self.root / _ISSUES_FILE)
+        render_all(self.root / _ISSUES_DIRECTORY, self.board)
+        progress = self.root / _PROGRESS_FILE
+        if not progress.exists():
+            progress.write_text("# Experiment Progress\n\n", encoding="utf-8")
 
         if not self.state.bootstrap_done:
             self.board.create(
@@ -137,6 +129,14 @@ class _IssueQueueRun:
             message = "issue-queue sessions are not initialized"
             raise RuntimeError(message)
         return self.sessions
+
+    @property
+    def board(self) -> IssueBoard:
+        """Return the issue board after session acquisition succeeds."""
+        if self._board is None:
+            message = "issue queue is not initialized"
+            raise RuntimeError(message)
+        return self._board
 
     async def commit(self, label: str) -> None:
         """Persist the aggregate and its policy artifacts with the root workspace."""
