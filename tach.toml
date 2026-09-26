@@ -282,12 +282,7 @@ depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vi
 [[modules]]
 path = "vibesys.loops.issue_queue"
 layer = "loops"
-depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.errors", "vibesys.loops.issue_queue.progress_log"]
-
-[[modules]]
-path = "vibesys.loops.issue_queue.progress_log"
-layer = "loops"
-depends_on = []
+depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.evolve"
@@ -427,10 +422,6 @@ from = ["vs_prompts"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_sandbox"]
-
-[[interfaces]]
-expose = ["FileProgressLog", "ProgressLog"]
-from = ["vibesys.loops.issue_queue.progress_log"]
 
 [[modules]]
 path = "vibesys.orchestration.resume"
