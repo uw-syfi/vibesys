@@ -238,6 +238,21 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
     assert observed_history_lengths == [0, 1, 0]
 
 
+def test_fake_read_write_turns_snapshot_input_and_completed_output() -> None:
+    async def scenario() -> None:
+        role = _role()
+        host = FakeRunHost(_plugin(role))
+        workspace = host.workspaces.root
+        initial = workspace.revision
+        session = await host.agents.create_session(role, workspace=workspace)
+
+        assert await session.turn("write") == "write"
+        assert workspace.revision != initial
+        assert workspace.revision == "fake-revision-2"
+
+    asyncio.run(scenario())
+
+
 def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
     async def scenario() -> None:
         role = _role()
@@ -254,6 +269,22 @@ def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
         assert session.binding is binding
         with pytest.raises(ValidationError):
             binding.__setattr__("model", "other")
+
+    asyncio.run(scenario())
+
+
+def test_fake_session_creation_failures_are_scriptable_without_leaking_sessions() -> None:
+    async def scenario() -> None:
+        role = _role()
+        host = FakeRunHost(_plugin(role))
+        host.agents.script_creation(RuntimeError("construction failed"), None)
+
+        with pytest.raises(RuntimeError, match="construction failed"):
+            await host.agents.create_session(role, workspace=host.workspaces.root)
+        assert host.agents.sessions == ()
+
+        session = await host.agents.create_session(role, workspace=host.workspaces.root)
+        assert host.agents.sessions == (session,)
 
     asyncio.run(scenario())
 
@@ -334,7 +365,11 @@ def test_fake_workspace_models_root_revision_operations() -> None:
 
 def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(), project_root=Path("/project"))
+        host = FakeRunHost(
+            _plugin(),
+            project_root=Path("/project"),
+            supports_parallel_candidates=True,
+        )
         root_revision = host.workspaces.root.revision
         assert root_revision is not None
         assert host.workspaces.supports_parallel_candidates

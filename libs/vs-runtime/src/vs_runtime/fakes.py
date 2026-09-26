@@ -102,6 +102,7 @@ class FakeAgentSession:
         self._binding = binding
         self._responder = responder
         self._history: list[str] = []
+        self._turn_number = 0
         self._closed = False
 
     @property
@@ -151,6 +152,9 @@ class FakeAgentSession:
         """Respond from prior completed turns, then append this message."""
         if self._closed:
             raise SessionClosedError
+        self._turn_number += 1
+        label = f"{self._role.id}-session-turn-{self._turn_number}"
+        await self._workspace.snapshot(f"{label}-input")
         value = self._responder(self._role, tuple(self._history), message, response)
         if response is None:
             if not isinstance(value, str):
@@ -160,6 +164,8 @@ class FakeAgentSession:
         else:
             result = response.model_validate(value)
         self._history.append(message)
+        if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
+            await self._workspace.snapshot(label)
         return result
 
     async def close(self) -> None:
@@ -184,12 +190,17 @@ class FakeAgentSessions:
             role.id: AgentBinding(backend="fake", driver="fake", provider="fake") for role in agents
         }
         self._sessions: list[FakeAgentSession] = []
+        self._creation_results: list[BaseException | None] = []
         self._closed = False
 
     @property
     def sessions(self) -> tuple[FakeAgentSession, ...]:
         """Return created sessions in ownership order."""
         return tuple(self._sessions)
+
+    def script_creation(self, *results: BaseException | None) -> None:
+        """Queue deterministic session-creation successes or failures."""
+        self._creation_results.extend(results)
 
     async def create_session(
         self,
@@ -202,6 +213,10 @@ class FakeAgentSessions:
         """Validate the declared role and create an independent conversation."""
         if self._closed:
             raise SessionClosedError
+        if self._creation_results:
+            failure = self._creation_results.pop(0)
+            if failure is not None:
+                raise failure
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
         validate_member_id(member_id)
@@ -231,7 +246,7 @@ class FakeAgentSessions:
 class FakeWorkspaces:
     """In-memory owner of one root and its isolated candidate workspaces."""
 
-    def __init__(self, root: FakeWorkspace, *, supports_parallel_candidates: bool = True) -> None:
+    def __init__(self, root: FakeWorkspace, *, supports_parallel_candidates: bool = False) -> None:
         """Bind the fake capability to one root and a fixed isolation capability."""
         self._root = root
         self._supports_parallel_candidates = supports_parallel_candidates
@@ -859,7 +874,7 @@ class FakeRunHost:
         facts: RunFacts | None = None,
         responder: TurnResponder = _echo_responder,
         agent_bindings: dict[str, AgentBinding] | None = None,
-        supports_parallel_candidates: bool = True,
+        supports_parallel_candidates: bool = False,
     ) -> None:
         """Create a host whose private role map derives from ``plugin.agents``."""
         self._run_id = run_id
