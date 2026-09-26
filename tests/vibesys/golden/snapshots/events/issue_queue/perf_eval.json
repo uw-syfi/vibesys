@@ -1,0 +1,699 @@
+[
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": "<SHA>",
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: initialize run <RUN_ID>",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "project_attached",
+      "revision": null
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: record effective objective",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "benchmark_contract": false,
+      "kind": "run_configured",
+      "model": "claude-golden-test",
+      "objective": null,
+      "pareto_objectives": null,
+      "project_root": "<WORKSPACE>/<TEST_DIR>/exp_env/<RUN_ID>",
+      "run_log_path": "<WORKSPACE>/.vibesys-state-<TEST_DIR>/projects/<RUN_ID>/runs/<RUN_ID>/logs/run-<TIMESTAMP>.log",
+      "search_policy": null,
+      "source": "loop"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "run_configured"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "impl issue #1 att1-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "implementer is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "implementer",
+      "system_prompt": "<text len=9149 sha256=f4fbc1eb027beea0>",
+      "user_prompt": "<text len=449 sha256=e1b8d0ca0220abea>"
+    },
+    "round_label": "impl issue #1 att1",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "impl issue #1 att1",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=9149 sha256=f4fbc1eb027beea0>",
+      "user_prompt": "<text len=449 sha256=e1b8d0ca0220abea>"
+    },
+    "round_label": "impl issue #1 att1",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "files_touched": [
+          "server.py"
+        ],
+        "issue_id": 1,
+        "self_check": "ran the accuracy checker locally",
+        "summary": "Built the inference server."
+      }
+    },
+    "round_label": "impl issue #1 att1",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "files_touched": [
+          "server.py"
+        ],
+        "issue_id": 1,
+        "self_check": "ran the accuracy checker locally",
+        "summary": "Built the inference server."
+      }
+    },
+    "round_label": "impl issue #1 att1",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "impl issue #1 att1",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "impl issue #1 att1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "iter-1-impl-1-att1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "judge issue #1 att1-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "judge is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "judge",
+      "system_prompt": "<text len=14031 sha256=9b3c8deead490d36>",
+      "user_prompt": "<text len=314 sha256=0e324f3aaea81e73>"
+    },
+    "round_label": "judge issue #1 att1",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "judge"
+    },
+    "round_label": "judge issue #1 att1",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=14031 sha256=9b3c8deead490d36>",
+      "user_prompt": "<text len=314 sha256=0e324f3aaea81e73>"
+    },
+    "round_label": "judge issue #1 att1",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "analysis": "reviewed the diff and the accuracy checks",
+        "feedback": "",
+        "issue_id": 1,
+        "new_issues_filed": [],
+        "verdict": "pass"
+      }
+    },
+    "round_label": "judge issue #1 att1",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "analysis": "reviewed the diff and the accuracy checks",
+        "feedback": "",
+        "issue_id": 1,
+        "new_issues_filed": [],
+        "verdict": "pass"
+      }
+    },
+    "round_label": "judge issue #1 att1",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "judge"
+    },
+    "round_label": "judge issue #1 att1",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "judge issue #1 att1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "iter-1-judge-1-att1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "perf_eval iter 1-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "perf_eval",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "perf_eval is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "perf_eval",
+      "system_prompt": "<text len=15346 sha256=c3f0927135e9f3c4>",
+      "user_prompt": "<text len=322 sha256=678e4c0052fcf09d>"
+    },
+    "round_label": "perf_eval iter 1",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "perf_eval",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "perf_eval"
+    },
+    "round_label": "perf_eval iter 1",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "perf_eval",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=15346 sha256=c3f0927135e9f3c4>",
+      "user_prompt": "<text len=322 sha256=678e4c0052fcf09d>"
+    },
+    "round_label": "perf_eval iter 1",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "perf_eval",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "analysis": "Throughput saturates around rate=8; TTFT stays flat below that.",
+        "evaluator_feedback": [
+          "rate=8 is the saturation point; try rate=16 next iteration"
+        ],
+        "latency_trend": "mixed",
+        "metrics": {
+          "extra": {},
+          "load_levels": [
+            {
+              "actual_rate": 7.9,
+              "duration": 20.0,
+              "num_completed": 100,
+              "num_failed": 0,
+              "num_requests": 100,
+              "target_rate": 8.0,
+              "throughput": {
+                "request_throughput": 7.9,
+                "token_throughput": 1011.2
+              },
+              "total_latency": {
+                "mean_ms": 900.0,
+                "p50_ms": 880.0,
+                "p90_ms": 1000.0,
+                "p95_ms": 1050.0,
+                "p99_ms": 1200.0
+              },
+              "tpot": {
+                "mean_ms": 9.0,
+                "p50_ms": 8.5,
+                "p90_ms": 11.0,
+                "p95_ms": 12.0,
+                "p99_ms": 15.0
+              },
+              "ttft": {
+                "mean_ms": 42.0,
+                "p50_ms": 40.0,
+                "p90_ms": 55.0,
+                "p95_ms": 60.0,
+                "p99_ms": 70.0
+              }
+            }
+          ]
+        },
+        "new_issue_ids": [],
+        "throughput_trend": "improved"
+      }
+    },
+    "round_label": "perf_eval iter 1",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "perf_eval",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "analysis": "Throughput saturates around rate=8; TTFT stays flat below that.",
+        "evaluator_feedback": [
+          "rate=8 is the saturation point; try rate=16 next iteration"
+        ],
+        "latency_trend": "mixed",
+        "metrics": {
+          "extra": {},
+          "load_levels": [
+            {
+              "actual_rate": 7.9,
+              "duration": 20.0,
+              "num_completed": 100,
+              "num_failed": 0,
+              "num_requests": 100,
+              "target_rate": 8.0,
+              "throughput": {
+                "request_throughput": 7.9,
+                "token_throughput": 1011.2
+              },
+              "total_latency": {
+                "mean_ms": 900.0,
+                "p50_ms": 880.0,
+                "p90_ms": 1000.0,
+                "p95_ms": 1050.0,
+                "p99_ms": 1200.0
+              },
+              "tpot": {
+                "mean_ms": 9.0,
+                "p50_ms": 8.5,
+                "p90_ms": 11.0,
+                "p95_ms": 12.0,
+                "p99_ms": 15.0
+              },
+              "ttft": {
+                "mean_ms": 42.0,
+                "p50_ms": 40.0,
+                "p90_ms": 55.0,
+                "p95_ms": 60.0,
+                "p99_ms": 70.0
+              }
+            }
+          ]
+        },
+        "new_issue_ids": [],
+        "throughput_trend": "improved"
+      }
+    },
+    "round_label": "perf_eval iter 1",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "perf_eval",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "perf_eval"
+    },
+    "round_label": "perf_eval iter 1",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "perf_eval iter 1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "iter-1-perf_eval",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 2): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  }
+]

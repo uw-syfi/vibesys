@@ -37,7 +37,8 @@ from agentshim.testing import (
 )
 
 from vibesys.events import CommandResultPayload
-from vibesys.schemas import ImplementerResponse, JudgeResponse
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
 from vs_agent import docker_executor
 from vs_agent.api import (
     AgentEvent,

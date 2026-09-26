@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
-from tests.server.support import build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts
+from tests.support.run_execution import run_execution_record
 
 from server.api.experiments import (
     ExperimentLoadToken,
@@ -16,26 +17,27 @@ from server.api.experiments import (
 )
 from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry, PerformanceQuery
 from server.events import EventType, ExperimentsChangedData
-from vibesys.api._readmodel import project_committed_run_view, project_run_view
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.agent.model import (
-    AgentRunState,
+from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.loops.hypothesis_readmodel import project_committed_run_view, project_run_view
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfDeltaReason,
+)
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
     HypothesisReview,
+    HypothesisState,
+    HypothesisStateStore,
     HypothesisStrategy,
 )
-from vibesys.loops.agent.state import AgentRunStateStore
-from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    OrchestratorPlan,
-    PerfDeltaReason,
-)
+from vibesys.search.hypothesis.transitions import reproject_run_evidence
 from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -148,8 +150,8 @@ def _hypothesis(
     return Hypothesis(**fields)
 
 
-def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
-    """Project a hand-built `AgentRunState` into the `RunView` the server reads.
+def _view(state: HypothesisState, *, run_id: str = "run-1") -> RunView:
+    """Project a hand-built `HypothesisState` into the `RunView` the server reads.
 
     `build_experiment_log`/`ExperimentProjection` now consume `vibesys.api`'s
     `RunView`, not raw core state directly, so unit tests that build a state
@@ -160,12 +162,13 @@ def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
         run_id=run_id,
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
+        loop="single-agent",
     )
 
 
 def test_round_carries_its_own_verdict_and_causal_delta() -> None:
     """Per-round review and delta cross once, on the experiment log's row."""
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -195,7 +198,7 @@ def test_round_carries_its_own_verdict_and_causal_delta() -> None:
 
 def test_round_reads_an_implementer_outcome_from_its_own_vocabulary() -> None:
     """Both vocabularies reach a round record, and both stay closed sets."""
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -211,7 +214,7 @@ def test_round_reads_an_implementer_outcome_from_its_own_vocabulary() -> None:
 
 
 def test_round_drops_a_retired_outcome_rather_than_failing_the_log() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -258,7 +261,7 @@ def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> N
         strategy_reason="The official baseline regressed.",
     )
 
-    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
+    (entry,) = build_experiment_log(_view(HypothesisState(hypotheses=[hypothesis])))
 
     assert [round_.round for round_ in entry.rounds] == [1, 2]
     assert (entry.first_round, entry.last_round) == (1, 2)
@@ -282,7 +285,7 @@ def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> N
 
 def test_projection_carries_baseline_identity_and_the_no_delta_reason() -> None:
     """Why a number has no delta crosses as a typed value, not as an absence."""
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -373,7 +376,7 @@ def test_hypothesis_entry_round_trips_the_no_delta_reason() -> None:
 
 
 def test_projection_surfaces_active_hypothesis_before_a_round_finishes() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         active_hypothesis_id="H-02",
         hypotheses=[_hypothesis("H-02", 2)],
     )
@@ -400,7 +403,7 @@ def test_projection_uses_the_orchestrator_title_when_present() -> None:
         ),
     )
 
-    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
+    (entry,) = build_experiment_log(_view(HypothesisState(hypotheses=[hypothesis])))
 
     assert entry.title == "Batch decode requests"
 
@@ -418,7 +421,7 @@ def test_projection_derives_a_title_from_the_claim_when_the_plan_title_is_empty(
         ),
     )
 
-    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
+    (entry,) = build_experiment_log(_view(HypothesisState(hypotheses=[hypothesis])))
 
     assert entry.title == "Batching decode requests reduces overhead"
 
@@ -436,13 +439,13 @@ def test_projection_title_is_none_without_any_text() -> None:
         ),
     )
 
-    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
+    (entry,) = build_experiment_log(_view(HypothesisState(hypotheses=[hypothesis])))
 
     assert entry.title is None
 
 
 def test_projection_orders_hypotheses_by_started_round() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis("H-B", 3, rounds=[_round(3, hypothesis_id="H-B")]),
             _hypothesis("H-A", 1, rounds=[_round(1, hypothesis_id="H-A")]),
@@ -456,7 +459,7 @@ def test_projection_orders_hypotheses_by_started_round() -> None:
 
 def test_revisioned_projection_returns_only_changed_entries() -> None:
     projection = ExperimentProjection()
-    initial = AgentRunState(
+    initial = HypothesisState(
         experiment_revision=1,
         hypotheses=[
             _hypothesis("H-01", 1, last_experiment_revision=1),
@@ -495,13 +498,13 @@ def test_revisioned_projection_returns_only_changed_entries() -> None:
 
 def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
     projection = ExperimentProjection()
-    original = AgentRunState(
+    original = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
     full = projection.replace("run", "projection", _view(original))
-    projection.update("run", "projection", _view(AgentRunState(experiment_revision=2)))
-    recreated = AgentRunState(
+    projection.update("run", "projection", _view(HypothesisState(experiment_revision=2)))
+    recreated = HypothesisState(
         experiment_revision=3,
         hypotheses=[
             _hypothesis(
@@ -527,7 +530,7 @@ def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
 
 def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
     projection = ExperimentProjection(history_limit=1)
-    first = AgentRunState(
+    first = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
@@ -554,7 +557,7 @@ def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
 
 def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> None:
     projection = ExperimentProjection()
-    old = AgentRunState(hypotheses=[_hypothesis("H-01", 1)])
+    old = HypothesisState(hypotheses=[_hypothesis("H-01", 1)])
     original = projection.replace("run", "projection", _view(old))
     stale_cursor = ExperimentCursor(
         run_id="run",
@@ -582,7 +585,7 @@ def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> No
 
 def test_equal_revision_authoritative_snapshot_starts_a_new_cursor_chain() -> None:
     projection = ExperimentProjection()
-    old = AgentRunState(
+    old = HypothesisState(
         experiment_revision=4,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=4)],
     )
@@ -610,7 +613,7 @@ def test_invalidation_during_a_cold_load_rejects_the_stale_snapshot() -> None:
     assert isinstance(token, ExperimentLoadToken)
 
     projection.invalidate("run", "projection", revision=2)
-    stale = AgentRunState(
+    stale = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-stale", 1, last_experiment_revision=1)],
     )
@@ -619,26 +622,9 @@ def test_invalidation_during_a_cold_load_rejects_the_stale_snapshot() -> None:
     assert isinstance(projection.query("run", "projection", None), ExperimentLoadToken)
 
 
-def _configuration() -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        inner_loop="single-agent",
-        interface="inprocess",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-        run_environment=RunEnvironmentRecord(name="local"),
-    )
-
-
 def _project_run(
     project: Path,
-    configuration: AgentRunConfiguration | None = None,
+    configuration: OrchestrationDescriptor | None = None,
 ) -> tuple[Project, str]:
     project.mkdir()
     (project / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
@@ -649,7 +635,9 @@ def _project_run(
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=configuration or _configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=configuration or agent_descriptor(),
         trusted_input_baseline="0" * 40,
     )
     vibesys_project.state.create_run(manifest)
@@ -658,9 +646,9 @@ def _project_run(
 
 def test_service_reads_only_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    portable = project.state.portable_namespace(run_id, "agent")
-    AgentRunStateStore(portable).save(
-        AgentRunState(
+    portable = project.state.portable_namespace(run_id, "single")
+    portable.slot("state.json", HypothesisState).save(
+        HypothesisState(
             active_hypothesis_id="H-02",
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01")]),
@@ -681,8 +669,8 @@ def test_service_projects_committed_live_state_without_reloading_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = AgentRunStateStore(project.state.portable_namespace(run_id, "agent"))
-    initial = AgentRunState(
+    store = project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState)
+    initial = HypothesisState(
         experiment_revision=1,
         hypotheses=[
             _hypothesis("H-01", 1, last_experiment_revision=1),
@@ -700,14 +688,15 @@ def test_service_projects_committed_live_state_without_reloading_history(
     changed.hypotheses[1].plan.task = "project this row only"
     store.save(changed)
     parts.publish_committed_view(
-        project_committed_run_view(changed, run_id=run_id), changed_keys=("H-02",)
+        project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
+        changed_keys=("H-02",),
     )
     parts.journal.record(
         EventType.EXPERIMENTS_CHANGED,
         data=ExperimentsChangedData(reason="round_persisted", revision=2),
     )
     monkeypatch.setattr(
-        AgentRunStateStore,
+        HypothesisStateStore,
         "load_optional",
         lambda _self: (_ for _ in ()).throw(AssertionError("unexpected state reload")),
     )
@@ -733,8 +722,8 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = AgentRunStateStore(project.state.portable_namespace(run_id, "agent"))
-    initial = AgentRunState(
+    store = project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState)
+    initial = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
@@ -742,10 +731,10 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     loaded = Event()
     release = Event()
-    original_load = AgentRunStateStore.load_optional
+    original_load = HypothesisStateStore.load_optional
     load_count = 0
 
-    def delayed_load(current_store: AgentRunStateStore) -> AgentRunState | None:
+    def delayed_load(current_store: HypothesisStateStore) -> HypothesisState | None:
         nonlocal load_count
         load_count += 1
         state = original_load(current_store)
@@ -753,7 +742,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         assert release.wait(timeout=5)
         return state
 
-    monkeypatch.setattr(AgentRunStateStore, "load_optional", delayed_load)
+    monkeypatch.setattr(HypothesisStateStore, "load_optional", delayed_load)
     with ThreadPoolExecutor(max_workers=1) as executor:
         response_future = executor.submit(parts.api.execute, ExperimentQuery())
         assert loaded.wait(timeout=5)
@@ -763,7 +752,8 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         changed.hypotheses[0].plan.task = "new committed contents"
         store.save(changed)
         parts.publish_committed_view(
-            project_committed_run_view(changed, run_id=run_id), changed_keys=("H-01",)
+            project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
+            changed_keys=("H-01",),
         )
         parts.journal.record(
             EventType.EXPERIMENTS_CHANGED,
@@ -782,11 +772,13 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
     tmp_path: Path,
 ) -> None:
     first_project, run_id = _project_run(tmp_path / "first")
-    first_state = AgentRunState(
+    first_state = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-first", 1, last_experiment_revision=1)],
     )
-    AgentRunStateStore(first_project.state.portable_namespace(run_id, "agent")).save(first_state)
+    first_project.state.portable_namespace(run_id, "single").slot(
+        "state.json", HypothesisState
+    ).save(first_state)
     parts = build_server_parts(
         first_project.state.log_directory(run_id),
         project=first_project,
@@ -796,11 +788,13 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
     assert first.experiment_update is not None
 
     second_project, _ = _project_run(tmp_path / "second")
-    second_state = AgentRunState(
+    second_state = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-second", 1, last_experiment_revision=1)],
     )
-    AgentRunStateStore(second_project.state.portable_namespace(run_id, "agent")).save(second_state)
+    second_project.state.portable_namespace(run_id, "single").slot(
+        "state.json", HypothesisState
+    ).save(second_state)
     parts.attach(
         second_project.state.log_directory(run_id),
         project=second_project,
@@ -830,9 +824,11 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
 def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    state = AgentRunState(hypotheses=[_hypothesis("H-01", 1)])
+    state = HypothesisState(hypotheses=[_hypothesis("H-01", 1)])
 
-    parts.publish_committed_view(project_committed_run_view(state, run_id=run_id))
+    parts.publish_committed_view(
+        project_committed_run_view(state, run_id=run_id, loop="single-agent")
+    )
     state.hypotheses[0].plan.task = "uncommitted mutation"
     response = parts.api.execute(ExperimentQuery())
 
@@ -841,9 +837,9 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
 
 def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    portable = project.state.portable_namespace(run_id, "agent")
-    AgentRunStateStore(portable).save(
-        AgentRunState(
+    portable = project.state.portable_namespace(run_id, "single")
+    portable.slot("state.json", HypothesisState).save(
+        HypothesisState(
             hypotheses=[
                 _hypothesis(
                     "H-01",
@@ -867,95 +863,19 @@ def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path
     assert [(item.round, item.perf_metric) for item in response.performance] == [(1, 42.0)]
 
 
-def test_service_adapts_legacy_state_read_only(tmp_path: Path) -> None:
-    project, run_id = _project_run(tmp_path / "project")
-    project.state.save_round(
-        run_id,
-        _round(
-            1,
-            hypothesis_id="H-01",
-            hypothesis_claim="legacy claim",
-            hypothesis_task="legacy task",
-        ),
-    )
-    portable = project.state.portable_namespace(run_id, "agent")
-    store = AgentRunStateStore(portable)
-    parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    (entry,) = parts.api.execute(ExperimentQuery()).experiments
-
-    assert entry.hypothesis_id == "H-01"
-    assert entry.claim == "legacy claim"
-    assert store.load_optional() is None
-
-
-def test_service_rebuilds_legacy_measurement_and_resolution_from_round_evidence(
-    tmp_path: Path,
-) -> None:
-    """Legacy summaries may omit measurements, but nested evidence is complete."""
-    configuration = _configuration().model_copy(update={"objectives": ("ops_s:max",)})
-    project, run_id = _project_run(tmp_path / "project", configuration)
-    project.state.save_round(
-        run_id,
-        _round(
-            1,
-            commit="a" * 40,
-            hypothesis_id="H-parent",
-            hypothesis_outcome="proven",
-            passed=True,
-            reviewed=True,
-            official_evaluation=True,
-            perf_metric=100.0,
-            perf_unit="ops_s",
-        ),
-    )
-    project.state.save_round(
-        run_id,
-        _round(
-            2,
-            commit="b" * 40,
-            hypothesis_id="H-regression",
-            hypothesis_parent_round=1,
-            hypothesis_parent_commit="a" * 40,
-            hypothesis_outcome="proven",
-            passed=True,
-            reviewed=True,
-            official_evaluation=True,
-            perf_metric=90.0,
-            perf_unit="ops_s",
-        ),
-    )
-    parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    entries = parts.api.execute(ExperimentQuery()).experiments
-
-    regression = next(entry for entry in entries if entry.hypothesis_id == "H-regression")
-    assert regression.resolved_outcome == "disproven"
-    assert (regression.perf_metric, regression.perf_unit, regression.perf_delta_pct) == (
-        90.0,
-        "ops_s",
-        -10.0,
-    )
-    # The configured objective direction and the rebuilt causal baseline reach
-    # the wire, so the client can label the numbers above.
-    assert (
-        regression.perf_metric_name,
-        regression.perf_direction,
-        regression.perf_baseline_value,
-    ) == ("ops_s", "max", 100.0)
-
-
 def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -> None:
-    """Regression for #507: the read path must use the run's stored tolerance.
+    """Regression for #507: the writer must use the run's stored tolerance.
 
-    The server reprojects hypothesis evidence on every read. It has no access
-    to the task's ``objectives.toml``, so the tolerance has to travel with the
-    run state; otherwise a 1% delta under a 5% noise model reaches the client
-    as ``proven`` while the round record says the run learned nothing.
+    The persisted hypothesis summary carries the resolution computed from
+    the 5% noise model, so a 1% delta reaches the client as inconclusive.
     """
-    configuration = _configuration().model_copy(update={"objectives": ("ops_s:max",)})
+    configuration = agent_descriptor(
+        metric_space=MetricSpace(objectives=(Objective("ops_s", "max"),))
+    )
     project, run_id = _project_run(tmp_path / "project", configuration)
-    portable = project.state.portable_namespace(run_id, "agent")
-    AgentRunStateStore(portable).save(
-        AgentRunState(
+    portable = project.state.portable_namespace(run_id, "single")
+    state = reproject_run_evidence(
+        HypothesisState(
             metrics=MetricSpace(
                 objectives=(Objective(name="ops_s", direction="max"),),
                 relative_noise=0.05,
@@ -1005,6 +925,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
             ],
         )
     )
+    portable.slot("state.json", HypothesisState).save(state)
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     entries = parts.api.execute(ExperimentQuery()).experiments
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.evaluators.input_synthesis import (
     InputSynthesisError,
@@ -29,7 +30,6 @@ from vibesys.evaluators.input_synthesis import (
     synthesize_input_bundle,
 )
 from vibesys.evaluators.objective import load_objective, with_operator_constraints
-from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 from vibesys.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
 from vibesys.repository import (
     REPOSITORY_SLUG,
@@ -52,13 +52,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.profilers import ProfilerKind
+    from vs_project.api import OrchestrationDescriptor
 
 __all__ = [
     "CLI_PROFILER_CHOICES",
     "REPOSITORY_SLUG",
     "InputBundle",
     "InputSynthesisError",
-    "OpenEvolveSearchConfig",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
     "build_task_image",
@@ -71,13 +71,23 @@ __all__ = [
     "load_project_task",
     "make_run_environment_spec",
     "repository_name_from_experiment",
+    "resolve_agent_driver",
     "resolve_skill_source_dirs",
     "run_environment_record",
     "supported_profilers",
     "synthesize_input_bundle",
+    "validate_descriptor",
     "validate_experiment_name",
     "with_operator_constraints",
 ]
+
+
+def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
+    """Validate a selected policy before the CLI creates run resources."""
+    # lint-waiver: LW-020003 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
+    from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
+
+    built_in_orchestrations().resolve(descriptor.id).orchestrator(descriptor)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

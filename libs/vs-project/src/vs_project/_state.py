@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -24,12 +25,23 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Self
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ValidationError,
+)
 
 import vs_project._paths as project_paths
-from vs_loop_state.api import RoundRecord, parse_round_record
+from vs_project._manifests import (
+    _IDENTIFIER_PATTERN,
+    GitObjectId,
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
+    ProjectManifest,
+    RunEnvironmentRecord,
+    RunExecutionRecord,
+)
 from vs_project._state_io import (
     _atomic_write_bytes,
     _atomic_write_model,
@@ -39,33 +51,24 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
-    _validate_portable_round,
-    _validation_message,
-    serialize_round,
 )
 from vs_project.errors import (
     ProjectStateError,
-    RunSchemaMigrationRequiredError,
     StateModelNotFoundError,
 )
 
 if TYPE_CHECKING:
     from uuid import UUID
 
+_logger = logging.getLogger(__name__)
+
 PROJECT_SCHEMA_VERSION: Literal[1] = 1
-# Version 2 added the required run-environment recording. Version 3 adds the
-# portable compute-resource request used to reproduce remote execution. Older
-# recordings are rejected at load time and must be migrated explicitly.
-RUN_SCHEMA_VERSION: Literal[3] = 3
+RUN_SCHEMA_VERSION: Literal[4] = 4
 _CONFIG_DIRECTORY_NAME = project_paths.CONFIGURATION_DIRECTORY_NAME
 _STATE_DIRECTORY_PARTS = project_paths.STATE_DIRECTORY_PARTS
 _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
 _RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
-_IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,127}$"
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-_GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
-_ROUND_FILE_PATTERN = re.compile(r"^(?P<round>0*[1-9][0-9]*)\.json$")
 _STATE_HOME_ENV = "VIBESYS_STATE_HOME"
 _LEGACY_WORKTREE_MIN_PARTS = 3
 _EXCLUDED_NAMES = frozenset(
@@ -82,11 +85,6 @@ _EXCLUDED_NAMES = frozenset(
         "node_modules",
     }
 )
-
-Identifier = Annotated[str, Field(pattern=_IDENTIFIER_PATTERN)]
-Sha256Digest = Annotated[str, Field(pattern=_DIGEST_PATTERN)]
-GitObjectId = Annotated[str, Field(pattern=_GIT_OBJECT_ID_PATTERN)]
-PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
 
 def is_project_state_path(relative_path: Path | str) -> bool:
@@ -418,6 +416,63 @@ class StateNamespace:
         """Atomically serialize one state model at a safe relative path."""
         self.apply(self.transition(relative_path, model))
 
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        """Read one safe state file, returning ``None`` only when absent.
+
+        This byte boundary supports compatibility formats whose schemas are
+        owned by a subsystem rather than by ``vs_project``.
+        """
+        path = self._resolve_file(relative_path)
+        if not path.exists():
+            return None
+        if not path.is_file():
+            raise ProjectStateError.state_path_not_file(path)
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise ProjectStateError.state_file_read_failed(path, exc) from exc
+
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        """List direct state-directory entry names without following symlinks."""
+        directory = self._resolve_file(relative_directory)
+        if not directory.exists():
+            return ()
+        if not directory.is_dir():
+            raise ProjectStateError.state_entry_not_directory(directory)
+        try:
+            entries = tuple(sorted(directory.iterdir(), key=lambda entry: entry.name))
+        except OSError as exc:
+            raise ProjectStateError.state_directory_list_failed(directory, exc) from exc
+        for entry in entries:
+            if entry.is_symlink():
+                raise ProjectStateError.state_entry_symlink(entry)
+        return tuple(entry.name for entry in entries)
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Atomically write one safe state file in a subsystem-owned format."""
+        path = self._resolve_file(relative_path)
+        if not isinstance(contents, bytes):
+            message = "state file contents must be bytes"
+            raise TypeError(message)
+        try:
+            _atomic_write_bytes(path, contents)
+        except OSError as exc:
+            raise ProjectStateError.state_file_write_failed(path, exc) from exc
+
+    def snapshot_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> StateSnapshot:
+        """Prepare an exact portable snapshot of one subsystem-owned file."""
+        if not self._portable:
+            raise ProjectStateError.local_state_cannot_snapshot()
+        if not isinstance(contents, bytes):
+            message = "state snapshot contents must be bytes"
+            raise TypeError(message)
+        relative = _validate_state_relative_path(relative_path)
+        self._resolve_file(relative)
+        return StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-020000 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+            self._namespace_root,
+            (StateFile(relative_path=relative, contents=contents),),
+        )
+
     def slot[ModelT: BaseModel](
         self,
         relative_path: str | PurePosixPath,
@@ -711,166 +766,6 @@ class StateSlot[ModelT: BaseModel]:
         self._namespace.apply(self.validate_transition(transition))
 
 
-class _CommittedManifest(BaseModel):
-    """Strict base for versioned, portable metadata committed with source.
-
-    Each concrete manifest declares its own ``schema_version`` literal so the
-    project and run schemas can evolve independently.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-
-class ProjectManifest(_CommittedManifest):
-    """Immutable identity and initial provenance of one project directory."""
-
-    schema_version: Literal[1]
-    project_id: Identifier
-    created_at: AwareDatetime
-    initial_input_fingerprint: Sha256Digest
-
-
-class RunResourceRequest(BaseModel):
-    """Portable compute resources required by one run environment.
-
-    Operator-owned cluster profiles resolve this logical request to concrete
-    infrastructure. Provider names, partitions, accounts, images, paths, and
-    transient allocation identifiers deliberately do not belong here.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    nodes: Annotated[int, Field(gt=0)] = 1
-    accelerators_per_node: Annotated[int, Field(gt=0)]
-    accelerator_backend: Literal["cuda", "rocm", "trainium"]
-    cpus_per_node: Annotated[int, Field(gt=0)] | None = None
-
-
-class RunEnvironmentRecord(BaseModel):
-    """Runtime environment a run executes in, recorded for faithful resume.
-
-    ``name`` selects the environment; the remaining fields carry that
-    environment's operator-selected options and stay ``None`` when they do not
-    apply. Values a run derives from its own input (rather than from the
-    operator) are deliberately absent: they are re-derived on every launch.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    name: Literal["local", "docker", "modal", "skypilot"]
-    image: PortableText | None = None
-    gpu: PortableText | None = None
-    model_volume: PortableText | None = None
-    app: PortableText | None = None
-    resources: RunResourceRequest | None = None
-
-
-class _BaseRunConfiguration(BaseModel):
-    """Strict settings shared by every supported outer loop."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    run_environment: RunEnvironmentRecord
-    model: PortableText | None = None
-    agent_backend: PortableText
-    agent_driver: PortableText | None = None
-    cli_provider: PortableText | None = None
-    cli_timeout: Annotated[int, Field(gt=0)] | None = None
-    compute_backend: PortableText
-    profiler: PortableText | None = None
-    modality: PortableText | None = None
-    default_reasoning_effort: PortableText | None = None
-    outer_model: PortableText | None = None
-    outer_reasoning_effort: PortableText | None = None
-    inner_model: PortableText | None = None
-    inner_reasoning_effort: PortableText | None = None
-
-
-class AgentRunConfiguration(_BaseRunConfiguration):
-    """Sanitized settings that define an agent-loop run."""
-
-    outer_loop: Literal["agent", "profile-guided"]
-    inner_loop: PortableText
-    interface: PortableText
-    max_rounds: Annotated[int, Field(gt=0)]
-    max_retries_per_round: Annotated[int, Field(gt=0)]
-    judge_every: Annotated[int, Field(gt=0)]
-    official_eval_every: Annotated[int, Field(gt=0)]
-    memory_layout: PortableText
-    operator_constraints: tuple[str, ...] = ()
-    objectives: tuple[PortableText, ...] = ()
-
-
-class PlainRunConfiguration(_BaseRunConfiguration):
-    """Sanitized settings that define an issue-driven plain-loop run."""
-
-    outer_loop: Literal["plain"]
-    max_rounds: Annotated[int, Field(gt=0)]
-    max_attempts_per_issue: Annotated[int, Field(gt=0)]
-    max_issues_per_perf_eval: Annotated[int, Field(gt=0)]
-
-
-class EvolveRunConfiguration(_BaseRunConfiguration):
-    """Sanitized settings that define an evolutionary-search run."""
-
-    outer_loop: Literal["evolve"]
-    max_generations: Annotated[int, Field(gt=0)]
-    children_per_generation: Annotated[int, Field(gt=0)]
-    k_top_inspirations: Annotated[int, Field(ge=0)]
-    k_random_inspirations: Annotated[int, Field(ge=0)]
-    selection_temperature: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    seed: int | None = None
-    search_policy: Literal["vibesys", "openevolve"] | None = None
-    openevolve_population_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_archive_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_num_islands: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_interval: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_rate: Annotated[float, Field(ge=0, le=1)] | None = None
-    frontier_bias: Annotated[float, Field(ge=0, le=1)]
-    bootstrap_max_attempts: Annotated[int, Field(gt=0)]
-    keep_deployments: bool
-    max_parallelism: Annotated[int, Field(gt=0)]
-    objectives: tuple[PortableText, ...] = ()
-
-    @model_validator(mode="after")
-    def _validate_search_policy_settings(self) -> Self:
-        openevolve_values = (
-            self.openevolve_population_size,
-            self.openevolve_archive_size,
-            self.openevolve_num_islands,
-            self.openevolve_migration_interval,
-            self.openevolve_migration_rate,
-        )
-        if self.search_policy == "vibesys" and any(
-            value is not None for value in openevolve_values
-        ):
-            message = "OpenEvolve settings require search_policy='openevolve'"
-            raise ValueError(message)
-        return self
-
-
-RunConfiguration = Annotated[
-    AgentRunConfiguration | PlainRunConfiguration | EvolveRunConfiguration,
-    Field(discriminator="outer_loop"),
-]
-
-
-class RunManifest(_CommittedManifest):
-    """Immutable identity and starting provenance of one optimization run."""
-
-    schema_version: Literal[3]
-    run_id: Identifier
-    project_id: Identifier
-    task_name: Identifier | None = None
-    display_name: PortableText
-    created_at: AwareDatetime
-    input_fingerprint: Sha256Digest
-    trusted_input_baseline: GitObjectId
-    branch: PortableText
-    vibesys_version: PortableText
-    configuration: RunConfiguration
-
-
 class _Digest(Protocol):
     def update(self, data: bytes, /) -> object:
         """Add bytes to the digest state."""
@@ -1075,17 +970,19 @@ class ProjectState:
         *,
         branch: str,
         vibesys_version: str,
-        configuration: RunConfiguration,
+        run_environment: RunEnvironmentRecord,
+        execution: RunExecutionRecord,
+        orchestration: OrchestrationDescriptor,
         trusted_input_baseline: GitObjectId,
         task_name: str | None = None,
         run_id: str | None = None,
         now: datetime | None = None,
         unique: UUID | None = None,
-    ) -> RunManifest:
-        """Build, but do not persist, a run manifest for the current project tree."""
+    ) -> OrchestrationRunManifest:
+        """Build the current run manifest; the orchestration validates its options."""
         project = self.load_project()
         created_at = _aware_now(now)
-        return RunManifest(
+        return OrchestrationRunManifest(
             schema_version=RUN_SCHEMA_VERSION,
             run_id=(
                 _validate_run_id(run_id)
@@ -1100,10 +997,12 @@ class ProjectState:
             trusted_input_baseline=trusted_input_baseline,
             branch=branch,
             vibesys_version=vibesys_version,
-            configuration=configuration,
+            run_environment=run_environment,
+            execution=execution,
+            orchestration=orchestration,
         )
 
-    def create_run(self, manifest: RunManifest, *, make_current: bool = True) -> None:
+    def create_run(self, manifest: OrchestrationRunManifest, *, make_current: bool = True) -> None:
         """Persist a new run manifest and initialize its local operational paths."""
         self._validate_storage_roots()
         project = self.load_project()
@@ -1139,81 +1038,13 @@ class ProjectState:
             ),
         )
 
-    def load_run(self, run_id: str) -> RunManifest:
-        """Load one run manifest, rejecting recordings from an older schema."""
+    def load_run(self, run_id: str) -> OrchestrationRunManifest:
+        """Load the current run manifest or reject an unsupported schema."""
         path = self._run_manifest_path(run_id)
-        _require_current_run_schema(path, run_id)
-        return _load_model(path, RunManifest)
-
-    def migrate_run_environment(
-        self,
-        run_id: str,
-        run_environment: RunEnvironmentRecord,
-    ) -> RunManifest:
-        """Migrate a version 1 or 2 run to the current environment schema.
-
-        Run schema version 1 never recorded the runtime environment, so the
-        operator supplies the environment the run actually used. Version 2
-        already recorded it, so the supplied value must match before the
-        optional portable resource request is added. The migration is one-way.
-        """
-        self._validate_storage_roots()
-        path = self._run_manifest_path(run_id)
-        raw = _read_json_object(path)
-        recorded_version = raw.get("schema_version")
-        if recorded_version == RUN_SCHEMA_VERSION:
-            message = (
-                f"Run metadata at {path} is already at run schema version {RUN_SCHEMA_VERSION}"
-            )
-            raise ProjectStateError(message)
-        if recorded_version not in {1, 2}:
-            message = (
-                f"Run metadata at {path} records unsupported run schema version "
-                f"{recorded_version!r}; only versions 1 and 2 can be migrated"
-            )
-            raise ProjectStateError(message)
-        configuration = raw.get("configuration")
-        if not isinstance(configuration, dict):
-            message = f"Run metadata at {path} has no configuration object"
-            raise ProjectStateError(message)
-        if recorded_version == 1:
-            if "run_environment" in configuration:
-                message = (
-                    f"Run metadata at {path} already records a run environment; "
-                    "its schema version is inconsistent with its contents"
-                )
-                raise ProjectStateError(message)
-            migrated_environment = run_environment
-        else:
-            recorded_environment = configuration.get("run_environment")
-            try:
-                migrated_environment = RunEnvironmentRecord.model_validate(
-                    recorded_environment, strict=True
-                )
-            except (TypeError, ValueError) as exc:
-                message = f"Run metadata at {path} has an invalid run environment: {exc}"
-                raise ProjectStateError(message) from exc
-            if migrated_environment != run_environment:
-                message = (
-                    f"Run metadata at {path} records a different run environment; "
-                    "supply the environment already recorded by version 2"
-                )
-                raise ProjectStateError(message)
-        migrated = {
-            **raw,
-            "schema_version": RUN_SCHEMA_VERSION,
-            "configuration": {
-                **configuration,
-                "run_environment": migrated_environment.model_dump(mode="json"),
-            },
-        }
-        try:
-            manifest = RunManifest.model_validate_json(json.dumps(migrated), strict=True)
-        except (TypeError, ValueError) as exc:
-            message = f"Could not migrate VibeSys metadata at {path}: {exc}"
-            raise ProjectStateError(message) from exc
-        _atomic_write_model(path, manifest)
-        return manifest
+        version = _read_json_object(path).get("schema_version")
+        if version != RUN_SCHEMA_VERSION:
+            raise ProjectStateError.unsupported_run_schema(path, version, RUN_SCHEMA_VERSION)
+        return _load_model(path, OrchestrationRunManifest)
 
     def run_manifest_snapshot(self, run_id: str) -> StateSnapshot:
         """Snapshot the current portable manifest for one run."""
@@ -1225,40 +1056,69 @@ class ProjectState:
             paths=(path,),
         )
 
-    def update_run_configuration(
+    def update_run_orchestration(
         self,
         run_id: str,
-        configuration: RunConfiguration,
+        orchestration: OrchestrationDescriptor,
     ) -> None:
-        """Replace a run's sanitized configuration while preserving its identity."""
+        """Update version 4 options without changing orchestration identity or version.
+
+        The orchestration owns option validation and resume compatibility.
+        """
         self._validate_storage_roots()
         manifest = self.load_run(run_id)
-        if configuration.outer_loop != manifest.configuration.outer_loop:
-            message = (
-                f"Run {manifest.run_id!r} uses outer loop "
-                f"{manifest.configuration.outer_loop!r}, not {configuration.outer_loop!r}"
+        recorded = manifest.orchestration
+        if (orchestration.id, orchestration.config_version) != (
+            recorded.id,
+            recorded.config_version,
+        ):
+            raise ProjectStateError.orchestration_identity_change(run_id)
+        if orchestration != recorded:
+            _atomic_write_model(
+                self._run_manifest_path(run_id),
+                manifest.model_copy(update={"orchestration": orchestration}),
             )
-            raise ProjectStateError(message)
-        path = self._run_manifest_path(run_id)
-        updated = manifest.model_copy(update={"configuration": configuration})
-        if updated != manifest:
-            _atomic_write_model(path, updated)
 
-    def list_runs(self) -> list[RunManifest]:
-        """Return all runs ordered by creation time, then run ID."""
+    def list_runs(self) -> list[OrchestrationRunManifest]:
+        """Return all compatible runs ordered by creation time, then run ID.
+
+        A run this VibeSys cannot load (e.g. an older schema version) is
+        skipped rather than failing the whole listing; see
+        :meth:`incompatible_runs` to discover what was skipped and why.
+        """
+        manifests, _skipped = self._load_all_runs()
+        return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
+
+    def incompatible_runs(self) -> list[tuple[str, ProjectStateError]]:
+        """Return ``(run_id, error)`` for every run :meth:`list_runs` skipped."""
+        _loaded, skipped = self._load_all_runs()
+        return skipped
+
+    def _load_all_runs(
+        self,
+    ) -> tuple[list[OrchestrationRunManifest], list[tuple[str, ProjectStateError]]]:
+        """Load every run directory, separating what loaded from what didn't."""
         self._validate_storage_roots()
         runs_dir = self._metadata_dir / "runs"
         if not runs_dir.exists():
-            return []
-        manifests: list[RunManifest] = []
+            return [], []
+        manifests: list[OrchestrationRunManifest] = []
+        skipped: list[tuple[str, ProjectStateError]] = []
         for child in sorted(runs_dir.iterdir()):
             if not child.is_dir():
                 message = f"Unexpected file in VibeSys runs directory: {child}"
                 raise ProjectStateError(message)
-            manifests.append(self.load_run(child.name))
-        return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
+            try:
+                manifests.append(self.load_run(child.name))
+            except ProjectStateError as exc:
+                _logger.warning("Skipping incompatible VibeSys run %r: %s", child.name, exc)
+                skipped.append((child.name, exc))
+        return (
+            sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id)),
+            skipped,
+        )
 
-    def latest_run(self) -> RunManifest | None:
+    def latest_run(self) -> OrchestrationRunManifest | None:
         """Return the most recently created run, if one exists."""
         runs = self.list_runs()
         return runs[-1] if runs else None
@@ -1285,7 +1145,7 @@ class ProjectState:
         self.load_run(normalized)
         _atomic_write_text(self._current_run_path, f"{normalized}\n")
 
-    def resolve_run(self, run_id: str | None = None) -> RunManifest:
+    def resolve_run(self, run_id: str | None = None) -> OrchestrationRunManifest:
         """Resolve an explicit run, otherwise current, otherwise latest."""
         if run_id is not None:
             return self.load_run(run_id)
@@ -1298,108 +1158,9 @@ class ProjectState:
             raise ProjectStateError(message)
         return latest
 
-    def save_round(self, run_id: str, record: RoundRecord) -> StateSnapshot:
-        """Persist one completed round and return its exact portable snapshot."""
-        self._validate_storage_roots()
-        self.load_run(run_id)
-        contents = serialize_round(record)
-        completed = self.load_rounds(run_id)
-        path = self._rounds_dir(run_id) / f"{record.round_number:04d}.json"
-        if record.round_number <= len(completed):
-            existing = completed[record.round_number - 1]
-            if existing != record:
-                raise ProjectStateError.completed_round_data_conflict(path)
-            return self.completed_round_snapshot(run_id, record.round_number)
-        next_round = len(completed) + 1
-        if record.round_number != next_round:
-            raise ProjectStateError.completed_round_append_out_of_order(
-                next_round, record.round_number
-            )
-        _atomic_write_text(path, contents.decode("utf-8"))
-        return self.completed_round_snapshot(run_id, record.round_number)
-
-    def prepare_completed_round_snapshot(
-        self,
-        run_id: str,
-        record: RoundRecord,
-    ) -> StateSnapshot:
-        """Build the canonical snapshot for a typed completed round without writing it."""
-        self.load_run(run_id)
-        _validate_portable_round(record, source=self.project_root)
-        root = self._portable_state_dir(run_id, "agent")
-        round_path = self._rounds_dir(run_id) / f"{record.round_number:04d}.json"
-        return StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-008234 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-            namespace_root=PurePosixPath(root.relative_to(self.project_root).as_posix()),
-            files=(
-                StateFile(
-                    relative_path=PurePosixPath(round_path.relative_to(root).as_posix()),
-                    contents=serialize_round(record),
-                ),
-            ),
-        )
-
-    def restore_completed_round(self, run_id: str, record: RoundRecord) -> StateSnapshot:
-        """Restore one already-committed round from its typed canonical record."""
-        self.load_run(run_id)
-        _validate_portable_round(record, source=self.project_root)
-        directory = self._rounds_dir(run_id)
-        self._validate_round_restore_position(directory, record.round_number)
-        path = directory / f"{record.round_number:04d}.json"
-        _atomic_write_bytes(path, serialize_round(record))
-        return self.completed_round_snapshot(run_id, record.round_number)
-
-    def load_rounds(self, run_id: str) -> list[RoundRecord]:
-        """Load completed rounds in numeric order."""
-        self.load_run(run_id)
-        directory = self._rounds_dir(run_id)
-        if not directory.exists():
-            return []
-        numbered_paths: list[tuple[int, Path]] = []
-        for path in directory.iterdir():
-            match = _ROUND_FILE_PATTERN.fullmatch(path.name)
-            if not path.is_file() or match is None:
-                raise ProjectStateError.unexpected_completed_round_entry(path)
-            numbered_paths.append((int(match.group("round")), path))
-        records: list[RoundRecord] = []
-        for sequence_number, (file_number, path) in enumerate(sorted(numbered_paths), start=1):
-            if file_number != sequence_number:
-                raise ProjectStateError.completed_rounds_not_contiguous(
-                    sequence_number, file_number, path
-                )
-            record = self._load_round(path)
-            if record.round_number != file_number:
-                raise ProjectStateError.completed_round_file_mismatch(
-                    path, record.round_number, file_number
-                )
-            records.append(record)
-        return records
-
-    def completed_round_snapshot(self, run_id: str, round_number: int) -> StateSnapshot:
-        """Snapshot one validated completed-round record."""
-        if round_number < 1:
-            raise ProjectStateError.invalid_round_number(round_number)
-        records = self.load_rounds(run_id)
-        if round_number > len(records):
-            raise ProjectStateError.completed_round_missing(round_number, run_id)
-        root = self._portable_state_dir(run_id, "agent")
-        path = self._rounds_dir(run_id) / f"{round_number:04d}.json"
-        return _snapshot_selected_files(
-            project_root=self.project_root,
-            root=root,
-            paths=(path,),
-        )
-
     def _run_manifest_path(self, run_id: str) -> Path:
         """Return the committed manifest path for *run_id*."""
         return self._contained_run_dir(run_id) / "run.json"
-
-    def _rounds_dir(self, run_id: str) -> Path:
-        """Return the agent loop's committed completed-round directory."""
-        return _contained_state_dir(
-            self._portable_state_dir(run_id, "agent"),
-            "rounds",
-            kind="completed-round",
-        )
 
     def _portable_state_dir(self, run_id: str, namespace: str) -> Path:
         """Return one loop or subsystem's portable state directory."""
@@ -1505,50 +1266,6 @@ class ProjectState:
             return
         separator = "" if not existing or existing.endswith("\n") else "\n"
         _atomic_write_text(self._metadata_gitignore_path, f"{existing}{separator}{required}\n")
-
-    @staticmethod
-    def _load_round(path: Path) -> RoundRecord:
-        payload = _read_json_object(path)
-        try:
-            record = parse_round_record(payload)
-        except ValidationError as exc:
-            message = f"Invalid completed-round metadata at {path}: {_validation_message(exc)}"
-            raise ProjectStateError(message) from exc
-        _validate_portable_round(record, source=path)
-        return record
-
-    @classmethod
-    def _validate_round_restore_position(cls, directory: Path, round_number: int) -> None:
-        """Require valid predecessors while permitting repair of the target file."""
-        if round_number < 1:
-            raise ProjectStateError.invalid_round_number(round_number)
-        if not directory.exists():
-            existing: dict[int, Path] = {}
-        else:
-            existing = {}
-            for path in directory.iterdir():
-                match = _ROUND_FILE_PATTERN.fullmatch(path.name)
-                if not path.is_file() or path.is_symlink() or match is None:
-                    raise ProjectStateError.unexpected_completed_round_entry(path)
-                file_number = int(match.group("round"))
-                if file_number in existing:
-                    raise ProjectStateError.duplicate_completed_round(
-                        file_number, existing[file_number], path
-                    )
-                existing[file_number] = path
-
-        unexpected_later = sorted(number for number in existing if number > round_number)
-        if unexpected_later:
-            raise ProjectStateError.restore_before_existing_round(round_number, unexpected_later[0])
-        for predecessor in range(1, round_number):
-            path = existing.get(predecessor)
-            if path is None:
-                raise ProjectStateError.restore_without_predecessor(round_number, predecessor)
-            restored = cls._load_round(path)
-            if restored.round_number != predecessor:
-                raise ProjectStateError.completed_round_file_mismatch(
-                    path, restored.round_number, predecessor
-                )
 
 
 def _aware_now(value: datetime | None) -> datetime:
@@ -1910,28 +1627,3 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
     except OSError as exc:
         message = f"Could not fingerprint project input {path}: {exc}"
         raise ProjectStateError(message) from exc
-
-
-def _require_current_run_schema(path: Path, run_id: str) -> None:
-    """Reject a run manifest written before the current run schema version.
-
-    Only an outdated version is diagnosed here; every other defect is left to
-    the model validation that follows, which reports the offending field.
-    """
-    if not path.exists():
-        return
-    recorded_version = _read_json_object(path).get("schema_version")
-    if not isinstance(recorded_version, int) or recorded_version >= RUN_SCHEMA_VERSION:
-        return
-    missing_contract = (
-        "the runtime environment the run executes in"
-        if recorded_version == 1
-        else "portable compute-resource requirements"
-    )
-    raise RunSchemaMigrationRequiredError.older_schema(
-        path=path,
-        run_id=run_id,
-        recorded_version=recorded_version,
-        required_version=RUN_SCHEMA_VERSION,
-        missing_contract=missing_contract,
-    )

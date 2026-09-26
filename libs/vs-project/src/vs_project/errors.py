@@ -295,14 +295,42 @@ class ProjectStateError(ProjectError):
         return cls(f"Duplicate completed-round number {number}: {first} and {duplicate}")
 
     @classmethod
-    def invalid_portable_round(cls, subject: str, field_name: str) -> Self:
-        """Describe a completed-round path that cannot be persisted portably."""
-        return cls(f"{subject} {field_name} must be a portable project-relative path")
+    def state_file_read_failed(cls, path: Path, error: Exception) -> Self:
+        """Describe an unreadable state file."""
+        return cls(f"Could not read VibeSys state file {path}: {error}")
 
     @classmethod
-    def non_finite_round_metrics(cls, subject: str) -> Self:
-        """Describe non-finite metrics in completed-round metadata."""
-        return cls(f"{subject} metrics must be finite numbers")
+    def state_file_write_failed(cls, path: Path, error: Exception) -> Self:
+        """Describe a state file that could not be written."""
+        return cls(f"Could not write VibeSys state file {path}: {error}")
+
+    @classmethod
+    def state_entry_not_directory(cls, path: Path) -> Self:
+        """Describe a state path occupied by a non-directory entry."""
+        return cls(f"VibeSys state path is not a directory: {path}")
+
+    @classmethod
+    def state_directory_list_failed(cls, path: Path, error: Exception) -> Self:
+        """Describe a state directory that could not be listed."""
+        return cls(f"Could not list VibeSys state directory {path}: {error}")
+
+    @classmethod
+    def state_entry_symlink(cls, path: Path) -> Self:
+        """Describe a symlink found inside a state directory."""
+        return cls(f"VibeSys state must not contain symlinks: {path}")
+
+    @classmethod
+    def unsupported_run_schema(cls, path: Path, version: object, required: int) -> Self:
+        """Describe a run manifest whose schema version is not the current one."""
+        return cls(
+            f"Run metadata at {path} records unsupported run schema version {version!r}; "
+            f"this VibeSys requires version {required}"
+        )
+
+    @classmethod
+    def orchestration_identity_change(cls, run_id: str) -> Self:
+        """Describe an attempt to change a run's orchestration identity."""
+        return cls(f"Run {run_id!r} cannot change orchestration id or config version")
 
     @classmethod
     def invalid_round_number(cls, round_number: int) -> Self:
@@ -318,11 +346,6 @@ class ProjectStateError(ProjectError):
     def unexpected_completed_round_entry(cls, path: Path) -> Self:
         """Describe a non-round file in the completed-round directory."""
         return cls(f"Unexpected completed-round entry: {path}")
-
-    @classmethod
-    def round_serialization_failed(cls, round_number: int) -> Self:
-        """Describe a completed round that could not be serialized."""
-        return cls(f"Could not serialize completed-round metadata for round {round_number}")
 
     @classmethod
     def state_serialization_failed(cls) -> Self:
@@ -372,42 +395,3 @@ class StateModelNotFoundError(ProjectStateError):
     def missing(cls, path: Path) -> Self:
         """Describe a missing required operational-state model."""
         return cls(f"VibeSys state model does not exist: {path}")
-
-
-class RunSchemaMigrationRequiredError(ProjectStateError):
-    """Raised when a run manifest predates the current run schema version.
-
-    Callers own the operator-facing migration instructions; this package
-    reports only the offending path and the two schema versions.
-    """
-
-    @classmethod
-    def older_schema(
-        cls,
-        *,
-        path: Path,
-        run_id: str,
-        recorded_version: int,
-        required_version: int,
-        missing_contract: str,
-    ) -> Self:
-        """Describe the metadata missing from a run recorded by an older schema."""
-        message = (
-            f"Run metadata at {path} uses run schema version {recorded_version}, but this "
-            f"VibeSys requires version {required_version}, which records "
-            f"{missing_contract}. Migrate the run with the environment it was launched "
-            "with; VibeSys cannot infer missing execution metadata."
-        )
-        return cls(
-            message,
-            path=path,
-            run_id=run_id,
-            recorded_version=recorded_version,
-        )
-
-    def __init__(self, message: str, *, path: Path, run_id: str, recorded_version: int) -> None:
-        """Initialize the migration error and its structured context."""
-        super().__init__(message)
-        self.path = path
-        self.run_id = run_id
-        self.recorded_version = recorded_version

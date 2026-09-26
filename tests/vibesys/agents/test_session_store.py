@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
     AgentCapabilities,
@@ -35,7 +36,7 @@ from vs_agent.contracts import (
     session_spec_fingerprint,
 )
 from vs_project.api import (
-    PlainRunConfiguration,
+    OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
 )
@@ -49,19 +50,17 @@ def _project(tmp_path: Path) -> Project:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
-        "test",
+        "Run 1",
         run_id="run-1",
+        trusted_input_baseline="a" * 40,
         branch="vibesys/run-1",
         vibesys_version="test",
-        trusted_input_baseline="a" * 40,
-        configuration=PlainRunConfiguration(
-            outer_loop="plain",
-            run_environment=RunEnvironmentRecord(name="local"),
-            agent_backend="stub",
-            compute_backend="cpu",
-            max_rounds=2,
-            max_attempts_per_issue=1,
-            max_issues_per_perf_eval=1,
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="multi-agent",
+            config_version=1,
+            options={},
         ),
     )
     project.state.create_run(run)

@@ -1,47 +1,28 @@
-from pathlib import Path
+"""Progress attribution for direct agent handles."""
 
-import pytest
+from __future__ import annotations
 
-from vibesys.context import _RunContext
-from vibesys.run import RunPaths
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
+from io import StringIO
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
+
+from vibesys.orchestration.agents import _active_progress, _Agents, _LocalAgentHandle
+from vibesys.roles.common import Verdict
+from vibesys.roles.judge import JudgeResponse
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.schemas import JudgeResponse, Verdict
-from vs_agent.api import CandidateProgress, RoundProgress
+from vibesys.runtime import AgentDefinition
+from vs_agent.api import AgentBackend, AgentSpec, CandidateProgress, RoundProgress
 from vs_agent.api.testing import FakeAgentClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _judge_fallback() -> JudgeResponse:
-    return JudgeResponse(
-        analysis="fallback",
-        feedback="fallback-feedback",
-        verdict=Verdict.FAIL,
-    )
-
-
-def _make_context(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
-) -> tuple[_RunContext, FakeAgentClient]:
-    ctx = object.__new__(_RunContext)
-    ctx.integration = LocalRunIntegration()
-    request.addfinalizer(ctx.integration.close)
-    ctx.events = ctx.integration.events
-    # lint-waiver: LW-010043 [SLF001]; this minimal fixture bypasses the resource-owning constructor to exercise public progress scoping without provisioning a project.
-    ctx._progress_stack = []  # noqa: SLF001
-    # lint-waiver: LW-010044 [SLF001]; public invoke() requires canonical log paths, and constructing a full run context would add unrelated project resources to this unit test.
-    ctx._paths = RunPaths(  # noqa: SLF001
-        project_root=tmp_path,
-        log_dir=tmp_path / "logs",
-        run_log_path=tmp_path / "run.log",
-    )
-    monkeypatch.setattr(ctx, "gpu_env", dict)
-    # Every invocation event carries the client's attribution, so the fake
-    # supplies real strings the event payload can validate.
-    client = FakeAgentClient(driver_name="mock", provider="mock", model="mock-model")
-    client.set_response("judge", _judge_fallback())
-    ctx.agent_client = client
-    return ctx, client
+    return JudgeResponse(analysis="fallback", feedback="fallback-feedback", verdict=Verdict.FAIL)
 
 
 def test_progress_rendering_is_loop_owned() -> None:
@@ -49,63 +30,58 @@ def test_progress_rendering_is_loop_owned() -> None:
     assert CandidateProgress(2, 8, 1, 4).label() == "Round 2/8 Cand 1/4"
 
 
-def test_run_context_progress_scope_restores_previous(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
-) -> None:
-    ctx, _client = _make_context(tmp_path, monkeypatch, request)
+def test_agent_progress_scope_restores_previous() -> None:
+    agents = _Agents(cast("Any", object()))
     outer = RoundProgress(1, 3)
     inner = CandidateProgress(2, 3, 1, 2)
 
-    assert ctx.current_progress() is None
-    with ctx.progress(outer):
-        assert ctx.current_progress() is outer
-        with ctx.progress(inner):
-            assert ctx.current_progress() is inner
-        assert ctx.current_progress() is outer
-    assert ctx.current_progress() is None
+    with agents.progress(outer):
+        with agents.progress(inner):
+            pass
+        assert _active_progress.get() is outer
+    assert _active_progress.get() is None
 
 
-def test_run_context_injects_current_progress(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
-) -> None:
-    ctx, client = _make_context(tmp_path, monkeypatch, request)
+def test_agent_turn_captures_current_progress(tmp_path: Path) -> None:
+    integration = LocalRunIntegration()
+    client = FakeAgentClient(driver_name="mock", provider="mock", model="mock-model")
+    client.set_response("judge", _judge_fallback())
+    resources = cast(
+        "Any",
+        SimpleNamespace(
+            integration=integration,
+            events=integration.events,
+            workspace=tmp_path,
+            run_log_file=StringIO(),
+        ),
+    )
     progress = RoundProgress(2, 5)
+    agents = _Agents(cast("Any", object()))
 
-    with ctx.progress(progress):
-        ctx.invoke(
-            kind="judge",
-            system_prompt="sys",
-            user_prompt="usr",
-            response_cls=JudgeResponse,
-            fallback_factory=_judge_fallback,
-            round_label="judge #1",
+    async def invoke() -> None:
+        handle = _LocalAgentHandle(
+            AgentDefinition("judge", AgentSpec(backend=AgentBackend.STUB)),
+            resources,
+            client,
+            ExitStack(),
+            ThreadPoolExecutor(max_workers=1),
+            None,
+            use_docker=True,
         )
+        try:
+            with agents.progress(progress):
+                await handle.turn_structured(
+                    "usr",
+                    response_cls=JudgeResponse,
+                    fallback_factory=_judge_fallback,
+                    system_prompt="sys",
+                    label="judge #1",
+                )
+        finally:
+            await handle.close()
 
-    assert client.calls_for("judge")[0].progress is progress
-
-
-def test_run_context_explicit_progress_overrides_scope(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
-) -> None:
-    ctx, client = _make_context(tmp_path, monkeypatch, request)
-    scoped = RoundProgress(2, 5)
-    explicit = CandidateProgress(2, 5, 1, 3)
-
-    with ctx.progress(scoped):
-        ctx.invoke(
-            kind="judge",
-            system_prompt="sys",
-            user_prompt="usr",
-            response_cls=JudgeResponse,
-            fallback_factory=_judge_fallback,
-            round_label="judge #1",
-            progress=explicit,
-        )
-
-    assert client.calls_for("judge")[0].progress is explicit
+    try:
+        asyncio.run(invoke())
+        assert client.calls_for("judge")[0].progress is progress
+    finally:
+        integration.close()

@@ -3,7 +3,7 @@
 ``vs_agent`` never launches a subprocess or builds a core MCP server spec
 itself: it only describes what a subprocess-hosted server would look like.
 A vibesys-owned module (the analogue of
-``vibesys.loops.plain.mcp_config.build_issue_mcp_spec``) turns a
+``vibesys.loops.issue_queue.loop.build_issue_mcp_spec``) turns a
 :class:`StdioServerDescriptor` into the actual
 ``vs_agent.contracts.MCPServerSpec`` that a driver launches. This
 module does not import that type.

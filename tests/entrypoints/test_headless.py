@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -25,7 +25,6 @@ from entrypoints.cli import (
     _parse_cli_objective,
     _prepare_experiment_repository,
     _render_configuration_error,
-    _run_migrate_run_environment,
     _with_operator_constraints,
     build_run_request,
     load_config_and_skills,
@@ -36,30 +35,32 @@ from entrypoints.headless import main
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.evaluators.input_manifest import load_input_bundle
-from vibesys.events import CoreEventType, RunStartedData
-from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.loops.roles import EXPECTED_AGENT_ROLES
+from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
+from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.events import CoreEventType
+from vibesys.loops.agent_options import (
+    AgentOrchestrationOptions,
+)
+from vibesys.loops.agent_options import (
+    descriptor_from_options as agent_descriptor,
+)
+from vibesys.loops.evolve.orchestration import EvolveOptions
+from vibesys.loops.evolve.orchestration import descriptor_from_options as evolve_descriptor
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project.api import (
-    RUN_SCHEMA_VERSION,
-    AgentRunConfiguration,
-    EvolveRunConfiguration,
-    PlainRunConfiguration,
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
     Project,
-    RunConfiguration,
     RunEnvironmentRecord,
+    RunExecutionRecord,
 )
 
-# The lazily-imported loop function `vibesys.api._dispatch` calls for each
-# `LoopKind`. Tests that need `create_session`'s own RUN_STARTED/FINISHED/
-# FAILED bracket to actually execute patch these directly instead of the CLI
-# dispatch record, which would bypass it.
 _LOOP_RUN_TARGETS = {
-    "agent": "vibesys.loops.agent.loop.run_agent_loop",
-    "plain": "vibesys.loops.plain.loop.run_plain_loop",
-    "evolve": "vibesys.loops.evolve.loop.run_evolve_loop",
+    "agent": "vibesys.api.session.run_orchestration",
+    "plain": "vibesys.api.session.run_orchestration",
+    "evolve": "vibesys.api.session.run_orchestration",
 }
 
 
@@ -166,7 +167,6 @@ def test_cli_rejects_mixed_generic_and_compatibility_environment_flags(tmp_path:
 
 
 class _CommonConfiguration(TypedDict):
-    run_environment: RunEnvironmentRecord
     model: str
     agent_backend: str
     agent_driver: str
@@ -191,11 +191,8 @@ _MODAL_ENVIRONMENT = RunEnvironmentRecord(
 )
 
 
-def _common_configuration(
-    run_environment: RunEnvironmentRecord | None = None,
-) -> _CommonConfiguration:
+def _common_configuration() -> _CommonConfiguration:
     return {
-        "run_environment": run_environment or _LOCAL_ENVIRONMENT,
         "model": "gpt-recorded",
         "agent_backend": "cli",
         "agent_driver": "omnigent",
@@ -212,15 +209,43 @@ def _common_configuration(
     }
 
 
+def _execution_record() -> RunExecutionRecord:
+    common = _common_configuration()
+    return RunExecutionRecord(
+        model=common["model"],
+        agent_backend=common["agent_backend"],
+        agent_driver=common["agent_driver"],
+        cli_provider=common["cli_provider"],
+        cli_timeout=common["cli_timeout"],
+        compute_backend=common["compute_backend"],
+        requested_profiler=common["profiler"],
+        resolved_profiler=common["profiler"],
+        default_reasoning_effort=common["default_reasoning_effort"],
+        outer_model=common["outer_model"],
+        outer_reasoning_effort=common["outer_reasoning_effort"],
+        inner_model=common["inner_model"],
+        inner_reasoning_effort=common["inner_reasoning_effort"],
+    )
+
+
+@dataclass(frozen=True)
+class _RecordedRun:
+    orchestration: OrchestrationDescriptor
+    run_environment: RunEnvironmentRecord = _LOCAL_ENVIRONMENT
+
+    @property
+    def execution(self) -> RunExecutionRecord:
+        return _execution_record()
+
+
 def _agent_configuration(
     *,
     max_rounds: int = 7,
     run_environment: RunEnvironmentRecord | None = None,
-) -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        **_common_configuration(run_environment),
-        outer_loop="agent",
-        inner_loop="single-agent",
+    orchestration_id: str = "single-agent",
+    profile_guided: ProfileGuidedInput | None = None,
+) -> _RecordedRun:
+    options = AgentOrchestrationOptions(
         interface="service",
         max_rounds=max_rounds,
         max_retries_per_round=4,
@@ -228,23 +253,25 @@ def _agent_configuration(
         official_eval_every=5,
         memory_layout="directories",
         operator_constraints=("Preserve the ABI.",),
+        profile_guided=profile_guided,
+    )
+    return _RecordedRun(
+        agent_descriptor(options, orchestration_id=orchestration_id),
+        run_environment or _LOCAL_ENVIRONMENT,
     )
 
 
-def _plain_configuration(*, max_rounds: int = 6) -> PlainRunConfiguration:
-    return PlainRunConfiguration(
-        **_common_configuration(),
-        outer_loop="plain",
+def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
+    options = IssueQueueOptions(
         max_rounds=max_rounds,
         max_attempts_per_issue=4,
         max_issues_per_perf_eval=2,
     )
+    return _RecordedRun(descriptor_from_options(options))
 
 
-def _evolve_configuration(*, max_generations: int = 5) -> EvolveRunConfiguration:
-    return EvolveRunConfiguration(
-        **_common_configuration(),
-        outer_loop="evolve",
+def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
+    options = EvolveOptions(
         max_generations=max_generations,
         children_per_generation=3,
         k_top_inspirations=4,
@@ -261,8 +288,14 @@ def _evolve_configuration(*, max_generations: int = 5) -> EvolveRunConfiguration
         bootstrap_max_attempts=7,
         keep_deployments=True,
         max_parallelism=2,
-        objectives=("latency:min", "throughput:max"),
+        metric_space=MetricSpace(
+            objectives=(
+                Objective(name="latency", direction="min"),
+                Objective(name="throughput", direction="max"),
+            )
+        ),
     )
+    return _RecordedRun(evolve_descriptor(options))
 
 
 @dataclass(frozen=True)
@@ -275,7 +308,7 @@ def _write_project_run(
     project: Path,
     run_id: str,
     *,
-    configuration: RunConfiguration,
+    configuration: _RecordedRun,
     created_at: datetime,
     options: _RunFixtureOptions | None = None,
 ) -> Project:
@@ -288,7 +321,9 @@ def _write_project_run(
         run_id=run_id,
         branch=f"vibesys-runs/{run_id}",
         vibesys_version="0.2.0-test",
-        configuration=configuration,
+        run_environment=configuration.run_environment,
+        execution=configuration.execution,
+        orchestration=configuration.orchestration,
         trusted_input_baseline="0" * 40,
         task_name=fixture_options.task_name,
         now=created_at,
@@ -431,16 +466,11 @@ def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("loop_name", "runner_path"),
-    [
-        ("agent", "vibesys.loops.agent.loop.run_agent_loop"),
-        ("plain", "vibesys.loops.plain.loop.run_plain_loop"),
-        ("evolve", "vibesys.loops.evolve.loop.run_evolve_loop"),
-    ],
+    "loop_name",
+    ["agent", "plain", "evolve"],
 )
 def test_each_outer_loop_builds_the_task_image_once(
     loop_name: str,
-    runner_path: str,
     tmp_path: Path,
 ) -> None:
 
@@ -453,7 +483,6 @@ def test_each_outer_loop_builds_the_task_image_once(
         ["--outer-loop", loop_name, "--project", str(project), "--task", "latency"]
     )
     image_id = f"sha256:{'a' * 64}"
-    run = getattr(cli, f"_run_{loop_name}")
     config = Config.model_validate({"model": {"name": "gpt-5.4"}})
     # `load_config_and_skills`/`_prepare_experiment_repository` normally fill
     # these in as side effects on `args`; both are mocked away here, so set
@@ -468,12 +497,12 @@ def test_each_outer_loop_builds_the_task_image_once(
             return_value=(config, (), ComputeBackend.CPU),
         ),
         patch("entrypoints.cli._prepare_experiment_repository"),
-        patch(runner_path, return_value=True) as loop_runner,
     ):
-        run(invocation.args)
+        request = cli.build_run_request(invocation)
 
     build.assert_called_once_with(dockerfile.resolve())
-    assert loop_runner.call_args.args[0].run_environment.options["image"] == image_id
+    assert request.run_environment is not None
+    assert request.run_environment.options["image"] == image_id
 
 
 @pytest.mark.parametrize(
@@ -700,9 +729,8 @@ def test_openevolve_knobs_select_openevolve_for_a_new_run(tmp_path: Path) -> Non
     )
     request = build_run_request(invocation)
 
-    assert request.search_policy == "openevolve"
-    assert request.openevolve_config is not None
-    assert request.openevolve_config.num_islands == 3
+    assert request.orchestration.options["search_policy"] == "openevolve"
+    assert request.orchestration.options["openevolve_num_islands"] == 3
 
 
 def test_openevolve_knobs_cannot_be_combined_with_vibesys_policy(tmp_path: Path) -> None:
@@ -1119,9 +1147,9 @@ def test_remote_resume_selects_run_branch_before_reading_project_state(
     assert branch == f"vibesys-runs/{run_id}"
     assert upstream == f"origin/vibesys-runs/{run_id}"
 
-    Project.open(source).state.update_run_configuration(
+    Project.open(source).state.update_run_orchestration(
         run_id,
-        _agent_configuration(max_rounds=8),
+        _agent_configuration(max_rounds=8).orchestration,
     )
     _git(source, "add", ".vibesys/state")
     _git(
@@ -1351,6 +1379,65 @@ def test_agent_resume_restores_its_configuration(
     assert config.agent.inner.model == "gpt-inner"
 
 
+@pytest.mark.parametrize("loop_kind", ["agent", "profile-guided"])
+def test_v4_agent_resume_restores_config_constraints_and_budget(
+    loop_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _write_input_project(tmp_path)
+    if loop_kind == "profile-guided":
+        with (project / "vibesys.input.toml").open("a") as input_manifest:
+            input_manifest.write('\n[profile_guided]\ncommand = ["python", "profile.py"]\n')
+    run_id = f"20260811-120000-11111111-{loop_kind}-v4"
+    configuration = _agent_configuration(
+        orchestration_id=(
+            "profile-guided-single-agent" if loop_kind == "profile-guided" else "single-agent"
+        ),
+        profile_guided=(
+            ProfileGuidedInput(command=("python", "profile.py"))
+            if loop_kind == "profile-guided"
+            else None
+        ),
+    )
+    store = Project.open(project).state
+    store.create_project(project.name)
+    manifest = store.new_run_manifest(
+        project.name,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=configuration.run_environment,
+        execution=configuration.execution,
+        orchestration=configuration.orchestration,
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    store.create_run(manifest)
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--outer-loop", loop_kind, "--resume", run_id]).args
+    config, _, backend = load_config_and_skills(args, domain=DomainName.GENERIC)
+    raised = parse_cli_invocation(
+        ["--outer-loop", loop_kind, "--resume", run_id, "--max-rounds", "8"]
+    ).args
+
+    assert args.max_rounds == 7
+    assert args.constraint == ["Preserve the ABI."]
+    assert args.inner_loop == "single-agent"
+    assert args.profiler is ProfilerKind.NONE
+    assert backend is ComputeBackend.CPU
+    assert config.model.name == "gpt-recorded"
+    assert config.agent.driver == "omnigent"
+    assert raised.max_rounds == 8
+    with pytest.raises(ConfigurationError, match="operator_constraints"):
+        parse_cli_invocation(
+            ["--outer-loop", loop_kind, "--resume", run_id, "--constraint", "Change the ABI."]
+        )
+    with pytest.raises(ConfigurationError, match="agent_backend"):
+        parse_cli_invocation(["--outer-loop", loop_kind, "--resume", run_id, "--stub-agent"])
+
+
 def test_plain_resume_restores_its_configuration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1374,6 +1461,44 @@ def test_plain_resume_restores_its_configuration(
     assert args.cli_provider == "claude"
     assert args.backend is ComputeBackend.CPU
     assert args.profiler is ProfilerKind.NONE
+
+
+def test_v4_plain_resume_restores_options_and_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _write_input_project(tmp_path)
+    run_id = "20260811-120000-11111111-plain-v4"
+    configuration = _plain_configuration()
+    store = Project.open(project).state
+    store.create_project(project.name)
+    manifest = store.new_run_manifest(
+        project.name,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=configuration.run_environment,
+        execution=configuration.execution,
+        orchestration=configuration.orchestration,
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    store.create_run(manifest)
+    assert isinstance(store.load_run(run_id), OrchestrationRunManifest)
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--outer-loop", "plain", "--resume", run_id]).args
+    raised = parse_cli_invocation(
+        ["--outer-loop", "plain", "--resume", run_id, "--max-rounds", "7"]
+    ).args
+
+    assert args.max_rounds == 6
+    assert args.max_attempts_per_issue == 4
+    assert args.max_issues_per_perf_eval == 2
+    assert args.cli_provider == "claude"
+    assert raised.max_rounds == 7
+    with pytest.raises(ConfigurationError, match="cannot decrease"):
+        parse_cli_invocation(["--outer-loop", "plain", "--resume", run_id, "--max-rounds", "5"])
 
 
 def test_evolve_resume_restores_its_configuration(
@@ -1414,6 +1539,57 @@ def test_evolve_resume_restores_its_configuration(
     ]
 
 
+def test_v4_evolve_resume_restores_openevolve_settings_and_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _write_input_project(tmp_path)
+    run_id = "20260811-120000-11111111-evolve-v4"
+    configuration = _evolve_configuration()
+    store = Project.open(project).state
+    store.create_project(project.name)
+    manifest = store.new_run_manifest(
+        project.name,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=configuration.run_environment,
+        execution=configuration.execution,
+        orchestration=configuration.orchestration,
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    store.create_run(manifest)
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--outer-loop", "evolve", "--resume", run_id]).args
+    config, _, backend = load_config_and_skills(args, domain=DomainName.GENERIC)
+    raised = parse_cli_invocation(
+        ["--outer-loop", "evolve", "--resume", run_id, "--max-generations", "6"]
+    ).args
+
+    assert args.max_generations == 5
+    assert args.search_policy == "openevolve"
+    assert args.openevolve_population_size == 40
+    assert args.openevolve_num_islands == 3
+    assert args.openevolve_migration_rate == 0.25
+    assert [(item.name, item.direction) for item in args.objective] == [
+        ("latency", "min"),
+        ("throughput", "max"),
+    ]
+    assert backend is ComputeBackend.CPU
+    assert config.model.name == "gpt-recorded"
+    assert raised.max_generations == 6
+    with pytest.raises(ConfigurationError, match="cannot decrease"):
+        parse_cli_invocation(
+            ["--outer-loop", "evolve", "--resume", run_id, "--max-generations", "4"]
+        )
+    with pytest.raises(ConfigurationError, match="objective"):
+        parse_cli_invocation(
+            ["--outer-loop", "evolve", "--resume", run_id, "--objective", "latency:max"]
+        )
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -1423,7 +1599,7 @@ def test_evolve_resume_restores_its_configuration(
     ],
 )
 def test_resume_budgets_can_only_increase(
-    case: tuple[str, RunConfiguration, str, int, int],
+    case: tuple[str, _RecordedRun, str, int, int],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1489,12 +1665,11 @@ def test_resume_rejects_changes_to_immutable_configuration(
     assert "judge_every" in exc.value.diagnostic.message
 
 
-def _write_pre_migration_run(project: Path, run_id: str) -> None:
-    """Rewrite a run manifest as a schema version 1 recording."""
+def _write_unsupported_schema_run(project: Path, run_id: str) -> None:
+    """Rewrite a v4 manifest with an unsupported schema version."""
     path = project / ".vibesys" / "state" / "runs" / run_id / "run.json"
     raw = json.loads(path.read_text())
-    raw["schema_version"] = 1
-    del raw["configuration"]["run_environment"]
+    raw["schema_version"] = 3
     path.write_text(json.dumps(raw, indent=2, sort_keys=True))
 
 
@@ -1589,66 +1764,19 @@ def test_resume_rejects_run_environment_flags_that_contradict_the_recording(
     assert field in exc.value.diagnostic.message
 
 
-def test_resume_rejects_a_recording_without_a_run_environment(
+def test_resume_rejects_an_unsupported_run_schema(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _modal_run(tmp_path, monkeypatch)
-    _write_pre_migration_run(project, run_id)
+    _write_unsupported_schema_run(project, run_id)
 
     with pytest.raises(ConfigurationError) as exc:
         parse_cli_invocation(["--resume", run_id])
 
-    assert exc.value.diagnostic.code == "project_run_schema_migration_required"
-    assert "migrate-run-environment" in exc.value.diagnostic.message
+    assert exc.value.diagnostic.code == "unsupported_run_schema"
+    assert "requires version 4" in exc.value.diagnostic.message
     assert run_id in exc.value.diagnostic.message
-
-
-def test_migrated_recording_resumes_with_the_supplied_run_environment(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project, run_id = _modal_run(tmp_path, monkeypatch)
-    _write_pre_migration_run(project, run_id)
-
-    _run_migrate_run_environment(
-        [
-            "--project",
-            str(project),
-            "--run",
-            run_id,
-            "--run-environment",
-            "modal",
-            "--modal-gpu",
-            "A100-80GB",
-            "--modal-model-volume",
-            "weights",
-            "--modal-app",
-            "run-app",
-        ]
-    )
-
-    args = parse_cli_invocation(["--resume", run_id]).args
-    assert args.modal is True
-    assert run_environment_record(run_environment_spec_from_args(args)) == _MODAL_ENVIRONMENT
-    recorded = Project.open(project).state.load_run(run_id)
-    assert recorded.schema_version == RUN_SCHEMA_VERSION
-    assert recorded.configuration.run_environment == _MODAL_ENVIRONMENT
-
-
-def test_migration_rejects_an_already_migrated_recording(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project, run_id = _modal_run(tmp_path, monkeypatch)
-
-    with pytest.raises(ConfigurationError) as exc:
-        _run_migrate_run_environment(
-            ["--project", str(project), "--run", run_id, "--run-environment", "modal"]
-        )
-
-    assert exc.value.diagnostic.code == "migration_failed"
-    assert "already at run schema version" in exc.value.diagnostic.message
 
 
 @pytest.mark.parametrize(
@@ -1708,17 +1836,18 @@ def test_main_routes_to_the_selected_loop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`create_session` dispatches to the loop function selected by `LoopKind`."""
+    """The selected descriptor reaches the shared orchestration runner."""
     project = _write_input_project(tmp_path)
-    runner = Mock(return_value=True)
+    runner = AsyncMock(return_value=True)
     monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], runner)
     argv = ["vibesys", "--outer-loop", loop, "--input", str(project)]
 
     with patch.object(sys, "argv", argv):
         main()
 
-    runner.assert_called_once()
-    assert runner.call_args.args[0].input_bundle.root == project.resolve()
+    runner.assert_awaited_once()
+    assert runner.await_args is not None
+    assert runner.await_args.args[0].input_bundle.root == project.resolve()
 
 
 def test_dispatch_owns_headless_rendering(
@@ -1731,7 +1860,7 @@ def test_dispatch_owns_headless_rendering(
     project = _write_input_project(tmp_path)
     renderer = Mock()
     monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
-    monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], Mock(return_value=True))
+    monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], AsyncMock(return_value=True))
 
     cli.dispatch(["--input", str(project)])
 
@@ -1751,7 +1880,9 @@ def test_dispatch_records_failure_through_the_headless_renderer(
     project = _write_input_project(tmp_path)
     renderer = Mock()
     monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
-    monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], Mock(side_effect=RuntimeError("runner failed")))
+    monkeypatch.setattr(
+        _LOOP_RUN_TARGETS["agent"], AsyncMock(side_effect=RuntimeError("runner failed"))
+    )
 
     with pytest.raises(RuntimeError, match="runner failed"):
         cli.dispatch(["--input", str(project)])
@@ -1834,60 +1965,3 @@ def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) 
 
     invocation = parse_cli_invocation(["--input", str(project)])
     assert invocation.args.profiler is ProfilerKind.AUTO
-
-
-def test_expected_role_registry_covers_every_outer_loop() -> None:
-    """The advertised contract must name every loop dispatch can select."""
-
-    assert set(EXPECTED_AGENT_ROLES) == {"agent", "profile-guided", "plain", "evolve"}
-    assert all(EXPECTED_AGENT_ROLES.values())
-
-
-@pytest.mark.parametrize("loop", ["agent", "plain", "evolve"])
-def test_dispatch_advertises_expected_roles_on_run_started(
-    loop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-
-    headless_run_module = sys.modules["headless.execute"]
-
-    project = _write_input_project(tmp_path)
-    renderer = Mock()
-    monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
-    monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], Mock(return_value=True))
-
-    cli.dispatch(["--outer-loop", loop, "--input", str(project)])
-
-    started = next(
-        call.args[0]
-        for call in renderer.handle.call_args_list
-        if call.args[0].type is CoreEventType.RUN_STARTED
-    )
-    assert isinstance(started.data, RunStartedData)
-    assert started.data.expected_roles == EXPECTED_AGENT_ROLES[loop]
-    assert started.data.expected_roles
-
-
-@pytest.mark.parametrize("loop", ["agent", "evolve"])
-def test_dispatch_omits_profiler_role_when_profiler_is_disabled(
-    loop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A disabled profiler never runs, so its placeholder must not be seeded."""
-
-    headless_run_module = sys.modules["headless.execute"]
-
-    project = _write_input_project(tmp_path)
-    renderer = Mock()
-    monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
-    monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], Mock(return_value=True))
-
-    cli.dispatch(["--outer-loop", loop, "--input", str(project), "--profiler", "none"])
-
-    started = next(
-        call.args[0]
-        for call in renderer.handle.call_args_list
-        if call.args[0].type is CoreEventType.RUN_STARTED
-    )
-    assert "profiler" not in started.data.expected_roles
-    assert started.data.expected_roles == tuple(
-        role for role in EXPECTED_AGENT_ROLES[loop] if role != "profiler"
-    )

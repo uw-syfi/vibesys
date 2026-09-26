@@ -52,7 +52,7 @@ EXCLUDED_WORKSPACE_DIRS: frozenset[str] = frozenset(
     }
 )
 
-# Skill destinations mirrored by materialize_skills in agents.cli_common; both
+# Skill destinations mirrored by materialize_skills in vs_agent.cli_common; both
 # derive from the same vs_agent.provider_policy.cli_skill_dirs union.
 _CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
 

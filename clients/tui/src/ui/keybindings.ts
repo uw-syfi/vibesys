@@ -616,11 +616,9 @@ export function bindKeybindings(
         // stacked fallback can appear at all. The two come apart in one
         // transition, list to graph at an unchanged width, which needs the two
         // to be equal while the list is showing: one stage whose kind name runs
-        // past 20 characters. The role vocabulary is closed and its longest name
-        // is 12 (`src/vibesys/loops/roles.py`), so that state is unreachable.
-        // Adding a long role, lowering `NODE_WIDTH_MIN`, or raising
-        // `STACKED_WIDTH` is what would make this a presentation test that has
-        // to be written as one.
+        // past 20 characters. Built-in roles are shorter, but custom policies
+        // may advertise longer names. Such roles, a lower `NODE_WIDTH_MIN`,
+        // or a higher `STACKED_WIDTH` make this transition visible.
         if (next !== width) actions.setGraphWidthOverride(next);
       }
       key.preventDefault();

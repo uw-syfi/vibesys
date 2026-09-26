@@ -21,7 +21,7 @@ from server.events import (
 
 if TYPE_CHECKING:
     from server.chat.options import ChatRunSettings
-    from server.journal import EventJournal
+    from server.journal import WireJournal
     from server.run_lifecycle import RunStatus
 
 _CHAT_DRAIN_TIMEOUT_SECONDS = 5.0
@@ -109,7 +109,7 @@ class ChatManager:
     def __init__(
         self,
         condition: threading.Condition,
-        journal: EventJournal,
+        journal: WireJournal,
         *,
         run_status: Callable[[], RunStatus],
     ) -> None:

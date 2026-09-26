@@ -49,8 +49,8 @@ from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
 from vibesys.api import open_run_store
+from vibesys.api.agent import agent_projection, agent_run_objectives, is_agent_run_manifest
 from vs_project.api import (
-    AgentRunConfiguration,
     GitTracker,
     NullGitTrackerEvents,
     ProjectStateError,
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from server.controller import ProjectRunState, RunController
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
-    from server.journal import EventJournal
+    from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunControl, RunView
     from vs_project.api import Project
@@ -124,7 +124,7 @@ class RunApi:
         condition: threading.Condition,
         controller: RunController,
         executions: ExecutionTracker,
-        journal: EventJournal,
+        journal: WireJournal,
         chat: ChatManager,
         integration: RunIntegrationAdapter,
         *,
@@ -227,7 +227,7 @@ class RunApi:
         Routes through `self._session_provider()` (a `vibesys.api.RunControl`)
         rather than a channel this class owns: once a session's
         `vibesys.run.run_control.RunControlChannel` is private to that
-        session (`vibesys.context._RunContext.invoke` reads it at each
+        session (`vibesys.orchestration.runtime` reads it at each agent
         invocation boundary; the controller's status/journal mirror its
         events, see `server.integration.RunIntegrationAdapter
         ._project_control_event`), there is no run-scoped channel to hold
@@ -388,7 +388,7 @@ class RunApi:
     def performance_rounds(self) -> list[PerformanceRound]:
         """Build the recorded round-level performance series.
 
-        Sourced from `vibesys.api`'s `RunView.rounds`: every field this DTO
+        Sourced from the agent projection's `rounds`: every field this DTO
         needs (`round_number`, `perf_metric`, `perf_unit`, `passed`,
         `profile_skipped`) is copied verbatim from the run's own round
         history, not re-derived from core state.
@@ -397,6 +397,9 @@ class RunApi:
         if project_run is None:
             return []
         run_view = open_run_store(project_run.project).get_run(project_run.run_id)
+        projection = agent_projection(run_view)
+        if projection is None:
+            return []
         return [
             PerformanceRound(
                 round=record.round_number,
@@ -405,7 +408,7 @@ class RunApi:
                 passed=record.passed,
                 profile_skipped=record.profile_skipped,
             )
-            for record in run_view.rounds
+            for record in projection.rounds
             if record.perf_metric is not None and record.perf_unit is not None
         ]
 
@@ -421,12 +424,13 @@ class RunApi:
         if project_run is None:
             return None
         manifest = project_run.project.state.load_run(project_run.run_id)
-        if not isinstance(manifest.configuration, AgentRunConfiguration):
+        objectives = agent_run_objectives(manifest)
+        if objectives is None:
             return None
         run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         return build_performance_context(
             run_view,
-            objectives=manifest.configuration.objectives,
+            objectives=objectives,
             objective_description=self._objective_description(),
         )
 
@@ -563,6 +567,8 @@ class RunApi:
             if isinstance(cached, ExperimentQueryResult):
                 return cached
             view = open_run_store(project_run.project).get_run(project_run.run_id)
+            if agent_projection(view) is None:
+                return None
             current = self._controller.project_run
             if current is not None and self._same_project_run(current, project_run):
                 installed = self._experiment_projection.install_loaded(
@@ -585,7 +591,7 @@ class RunApi:
             cached = self._experiment_run_kind
             if cached is not None and cached[0] == key:
                 return cached[1]
-        is_agent = project.state.load_run(run_id).configuration.outer_loop == "agent"
+        is_agent = is_agent_run_manifest(project.state.load_run(run_id))
         with self._experiment_run_kind_lock:
             self._experiment_run_kind = (key, is_agent)
         return is_agent
@@ -609,7 +615,7 @@ class RunApi:
         do here.
         """
         project_run = self._controller.project_run
-        if project_run is None:
+        if project_run is None or agent_projection(view) is None:
             return
         self._experiment_projection.update(
             project_run.run_id,

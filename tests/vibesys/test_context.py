@@ -1,25 +1,23 @@
-import json
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TypedDict, Unpack
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
 from tests.support import run_test_command
 
 from vibesys import boot_trace
-from vibesys.backends.cuda import CudaBackend
-from vibesys.backends.cuda.gpu_monitor import GpuInfo
+from vibesys.api import open_run_store
+from vibesys.api.agent import is_agent_run_manifest
 from vibesys.config import Config
-from vibesys.constants import DomainName
 from vibesys.context import (
+    RunSetup,
+    WorkspaceResourceSpec,
     _profiler_support_extra,
-    _resume_configuration_update,
-    _RunContext,
-    create_candidate_context,
-    create_run_context,
+    _RunResources,
+    create_workspace_resources,
+    open_run_resources,
 )
 from vibesys.domains.environment import (
     EnvironmentContext,
@@ -34,37 +32,30 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
-from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import (
+    WorkspaceInput,
+    WorkspaceSource,
+    load_input_bundle,
+    load_project_task,
+)
 from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
-from vibesys.loops.agent.model import AgentRunState
+from vibesys.loops.agent_options import (
+    AgentOrchestrationOptions,
+    compare_resume_descriptors,
+    descriptor_from_options,
+)
+from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
 from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
 from vibesys.run import (
-    DeviceLease,
     LocalRunIntegration,
-    RunPaths,
     RunStateNamespace,
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
-from vs_agent.api import (
-    AgentCapabilities,
-    AgentClient,
-    AgentSessionKey,
-    DurableSessionStore,
-    SessionScope,
-)
-from vs_agent.api.testing import FakeAgentClient
-from vs_agent.contracts import (
-    AgentDriver,
-    AgentObserver,
-    AgentSession,
-    AgentSessionSpec,
-    AgentTurnRequest,
-    AgentTurnResult,
-)
+from vibesys.search.hypothesis.state import HypothesisState
 from vs_loop_state.api import PlainLoopCursor
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationRunManifest, Project
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle, SandboxLifecycleHooks
 
 
@@ -110,7 +101,11 @@ class _CreateContextOptions(TypedDict, total=False):
     evaluator_package_root: Path | None
     exp_name: str
     existing: bool
-    configuration: AgentRunConfiguration | None
+    configuration: AgentOrchestrationOptions | None
+    config: Config | None
+    profiler_kind: ProfilerKind
+    workspace_sources: tuple[WorkspaceSource, ...]
+    agent_backend: str | None
     objective: str
     task_name: str | None
     task_root: Path | None
@@ -123,49 +118,9 @@ class _CreateContextOptions(TypedDict, total=False):
 def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("vibesys.context.backends.get", lambda *_args, **_kwargs: _FakeBackend())
     monkeypatch.setattr(
-        "vibesys.context.build_agent_client", lambda *_args, **_kwargs: FakeAgentClient()
-    )
-    monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
         lambda kind: ProfilerPreflightResult(kind, usable=True),
     )
-
-
-def _configuration(max_rounds: int = 1) -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        run_environment=RunEnvironmentRecord(name="local"),
-        inner_loop="multi-agent",
-        interface="inprocess",
-        model="gpt-test",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=max_rounds,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-    )
-
-
-def test_resume_adopts_objectives_omitted_by_legacy_agent_manifest() -> None:
-    requested = _configuration().model_copy(update={"objectives": ("throughput:max",)})
-    legacy_payload = requested.model_dump(exclude={"objectives"})
-    recorded = AgentRunConfiguration.model_validate(legacy_payload)
-
-    assert "objectives" not in recorded.model_fields_set
-    assert _resume_configuration_update(recorded, requested) == requested
-
-
-def test_resume_does_not_adopt_objectives_for_profile_guided_run() -> None:
-    requested = _configuration().model_copy(
-        update={"outer_loop": "profile-guided", "objectives": ("throughput:max",)}
-    )
-    recorded = AgentRunConfiguration.model_validate(requested.model_dump(exclude={"objectives"}))
-
-    with pytest.raises(ConfigurationError, match="objectives"):
-        _resume_configuration_update(recorded, requested)
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -222,33 +177,73 @@ command = ["python", "benchmark.py"]
     return task
 
 
+def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
+    return AgentOrchestrationOptions(
+        interface="inprocess",
+        max_rounds=max_rounds,
+        max_retries_per_round=1,
+        judge_every=1,
+        official_eval_every=1,
+        memory_layout="files",
+    )
+
+
 def _create_context(
     project: Path,
     **options: Unpack[_CreateContextOptions],
-) -> _RunContext:
-    return create_run_context(
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        exp_name=options.get("exp_name", "queue"),
-        runs_dir=options.get("runs_dir"),
-        input_path=str(project),
-        accuracy_command="python _evaluator/checker/check.py",
-        benchmark_command="python _evaluator/checker/check.py",
-        task_name=options.get("task_name"),
-        task_root=options.get("task_root"),
-        evaluator_path=options.get("evaluator"),
-        evaluator_package_root=options.get("evaluator_package_root"),
+) -> _RunResources:
+    task_root = options.get("task_root")
+    evaluator = options.get("evaluator")
+    evaluator_package_root = options.get("evaluator_package_root")
+    workspace_sources = options.get("workspace_sources", ())
+    if task_root is not None:
+        selected_project = Project.open(project)
+        bundle = load_project_task(
+            selected_project, selected_project.select_task(options.get("task_name"))
+        )
+    else:
+        bundle = load_input_bundle(project)
+    updates: dict[str, object] = {}
+    if evaluator is not None:
+        updates["evaluator_path"] = evaluator
+    if evaluator_package_root is not None:
+        updates["evaluator_package_root"] = evaluator_package_root
+    if workspace_sources:
+        updates["manifest"] = bundle.manifest.model_copy(
+            update={"workspace": WorkspaceInput(sources=workspace_sources)}
+        )
+    bundle = bundle.model_copy(update=updates)
+    exp_name = options.get("exp_name", "queue")
+    request = RunRequest(
+        project_root=project,
+        orchestration=descriptor_from_options(
+            options.get("configuration") or _options(), orchestration_id="multi-agent"
+        ),
+        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-test"}}),
+        input_bundle=bundle,
         objective=options.get("objective", "Make the queue faster.\n"),
-        existing=options.get("existing", False),
-        project_configuration=options.get("configuration") or _configuration(),
-        profiler_kind=ProfilerKind.NONE,
-        profiler_domain=DomainName.GENERIC,
+        exp_name=exp_name,
+        resume=ResumeRef(run_id=exp_name) if options.get("existing", False) else None,
+        runs_dir=options.get("runs_dir"),
+        profiler_kind=options.get("profiler_kind", ProfilerKind.NONE),
         run_environment=RunEnvironmentSpec("local"),
-        agent_backend="stub",
-        environment_hooks=options.get("hooks") or NoopEnvironmentHooks(),
+        agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
-        agent_state_model_type=AgentRunState,
-        integration=options.get("integration"),
     )
+    setup = RunSetup(
+        state_namespace="multi",
+        state_slots={"state.json": HypothesisState},
+        resume_policy=compare_resume_descriptors,
+    )
+    with patch(
+        "vibesys.context.resolve_domain",
+        return_value=SimpleNamespace(
+            environment_hooks=options.get("hooks") or NoopEnvironmentHooks()
+        ),
+    ):
+        return open_run_resources(
+            request, setup, options.get("integration") or LocalRunIntegration()
+        )
 
 
 def _git(project: Path, *args: str) -> str:
@@ -271,32 +266,28 @@ def _git(project: Path, *args: str) -> str:
 def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    runner = FakeAgentClient()
+    with _create_context(project, evaluator=evaluator) as ctx:
+        assert ctx.project_root == project
+        assert ctx.workspace == project
+        assert ctx.project.root == project
+        assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
+        assert (
+            not ctx.state.local(RunStateNamespace.AGENT)
+            .external_directory()
+            .is_relative_to(project)
+        )
+        objective_path = Path(ctx.run_environment_view.paths.objective)
+        assert objective_path == (
+            ctx.project.state.portable_namespace(ctx.run_id, "runtime").external_directory()
+            / "effective-objective.md"
+        )
+        assert objective_path.read_text() == "Make the queue faster.\n"
+        assert objective_path.is_relative_to(ctx.workspace)
 
-    with patch("vibesys.context.build_agent_client", return_value=runner) as build_runner:
-        with _create_context(project, evaluator=evaluator) as ctx:
-            assert ctx.project_root == project
-            assert ctx.workspace == project
-            assert ctx.project.root == project
-            assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
-            assert (
-                not ctx.state.local(RunStateNamespace.AGENT)
-                .external_directory()
-                .is_relative_to(project)
-            )
-            objective_path = Path(ctx.objective_location)
-            assert objective_path == (
-                ctx.project.state.portable_namespace(ctx.run_id, "runtime").external_directory()
-                / "effective-objective.md"
-            )
-            assert objective_path.read_text() == "Make the queue faster.\n"
-            assert objective_path.is_relative_to(ctx.workspace)
-
-        policy = build_runner.call_args.kwargs["project_path_policy"]
-        state_paths = Project.open(project).state.sandbox_paths()
+        policy = ctx.environment_request.project_path_policy
+        state_paths = ctx.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
         assert state_paths.hidden_path is None
-        assert runner.closed
 
     manifest = Project.open(project).state.load_run(ctx.run_id)
     assert manifest.branch == f"vibesys-runs/{ctx.run_id}"
@@ -371,7 +362,7 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``create_run_context`` spends time before the TUI's hypothesis screen
+    ``open_run_resources`` spends time before the TUI's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
@@ -393,7 +384,6 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
         "workspace_setup",
         "environment_open",
         "device_monitor_start",
-        "agent_client_build",
     ):
         assert f"boot span context.{stage}: " in log_text, f"missing span timing for {stage!r}"
     # The enclosing span is assembly's total, recorded after its children.
@@ -402,11 +392,11 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
 
 
 def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
-    """Spans closed before ``create_run_context`` land in the run log, first.
+    """Spans closed before ``open_run_resources`` land in the run log, first.
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
-    ``_assemble_run_context`` must drain that buffer at entry, so the
+    ``_assemble_run_resources`` must drain that buffer at entry, so the
     preamble's spans reach the persistent run log ahead of assembly's own.
     """
     project = tmp_path / "queue"
@@ -472,7 +462,21 @@ def test_repository_task_exposes_its_actual_reference_path(tmp_path: Path) -> No
     reference = task / "reference"
     reference.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text("Reduce latency.\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (task / "vibesys.input.toml").write_text(
+        """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "_evaluator/checker/check.py"]
+
+[benchmark]
+command = ["python", "_evaluator/checker/check.py"]
+""",
+        encoding="utf-8",
+    )
     (reference / "baseline.py").write_text("VALUE = 1\n", encoding="utf-8")
 
     with _create_context(
@@ -509,7 +513,7 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             assert not (reference / "model").exists()
             assert not (copied_reference / "model").exists()
             assert runtime_model.resolve() == downloaded
-            assert ctx.trusted_input_changes() == []
+            assert ctx.git.trusted_input_changes() == []
 
         assert _git(ctx.project_root, "status", "--porcelain") == ""
 
@@ -534,7 +538,7 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
 
             assert not (reference / "model").exists()
             assert runtime_model.resolve() == downloaded
-            assert ctx.trusted_input_changes() == []
+            assert ctx.git.trusted_input_changes() == []
 
         assert _git(project, "status", "--porcelain") == ""
 
@@ -560,61 +564,32 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Pa
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path: Path) -> None:
+def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
-
-    with _create_context(
-        project,
-        evaluator=evaluator,
-        exp_name=run_id,
-        existing=True,
-        configuration=_configuration(max_rounds=2),
-    ) as resumed:
-        assert resumed.project_root == project
-        assert resumed.run_id == run_id
 
     stored = Project.open(project).state.load_run(run_id)
-    assert isinstance(stored.configuration, AgentRunConfiguration)
-    assert stored.configuration.max_rounds == 2
-    assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
+    assert isinstance(stored, OrchestrationRunManifest)
+    assert stored.orchestration.id == "multi-agent"
+    assert stored.orchestration.options["max_rounds"] == 1
+    assert is_agent_run_manifest(stored)
+    assert open_run_store(Project.open(project)).get_run(run_id).loop == "multi-agent"
 
-
-def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path: Path) -> None:
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-    with _create_context(project, evaluator=evaluator) as first:
-        run_id = first.run_id
-
-    state = Project.open(project).state
-    # lint-waiver: LW-010039 [SLF001]; this migration fixture must remove a field from the persisted legacy JSON before the public resume path loads it.
-    manifest_path = state._run_manifest_path(run_id)  # noqa: SLF001
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    payload["configuration"].pop("objectives")
-    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    _git(project, "add", str(manifest_path.relative_to(project)))
-    _git(project, "commit", "-m", "simulate legacy run manifest")
-    candidate = project / "queue.py"
-    candidate.write_text(candidate.read_text() + "\n# interrupted edit\n")
-
-    requested = _configuration().model_copy(update={"objectives": ("total_ops_per_sec:max",)})
     with _create_context(
         project,
         evaluator=evaluator,
         exp_name=run_id,
         existing=True,
-        configuration=requested,
+        configuration=_options(max_rounds=2),
     ):
         pass
 
-    stored = state.load_run(run_id)
-    assert isinstance(stored.configuration, AgentRunConfiguration)
-    assert stored.configuration.objectives == ("total_ops_per_sec:max",)
-    assert "# interrupted edit" in candidate.read_text()
-    assert "queue.py" in _git(project, "status", "--porcelain")
-    assert "# interrupted edit" not in _git(project, "show", "HEAD:queue.py")
+    resumed = Project.open(project).state.load_run(run_id)
+    assert isinstance(resumed, OrchestrationRunManifest)
+    assert resumed.orchestration.options["max_rounds"] == 2
+    assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
 
 
 def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) -> None:
@@ -757,27 +732,13 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path: Path) -> N
     )
 
     with pytest.raises(ConfigurationError, match="pass --runs-dir"):
-        create_run_context(
-            config=Config.model_validate({"model": {"name": "gpt-test"}}),
-            exp_name="queue",
-            runs_dir=None,
-            input_path=str(project),
-            accuracy_command="true",
-            benchmark_command="true",
-            workspace_sources=(source,),
-            evaluator_path=evaluator,
-            project_configuration=_configuration(),
-            profiler_kind=ProfilerKind.NONE,
-            profiler_domain=DomainName.GENERIC,
-            run_environment=RunEnvironmentSpec("local"),
-            agent_backend="stub",
-        )
+        _create_context(project, evaluator=evaluator, workspace_sources=(source,))
 
 
 def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    configuration = _configuration().model_copy(
+    configuration = _options().model_copy(
         update={
             "agent_backend": "cli",
             "agent_driver": "omnigent",
@@ -786,24 +747,18 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
         }
     )
 
-    with create_run_context(
+    with _create_context(
+        project,
+        evaluator=evaluator,
+        configuration=configuration,
         config=Config.model_validate(
             {
                 "model": {"name": "gpt-test"},
                 "agent": {"backend": "cli", "driver": "omnigent", "cli_provider": "codex"},
             }
         ),
-        exp_name="queue",
-        runs_dir=None,
-        input_path=str(project),
-        accuracy_command="python _evaluator/checker/check.py",
-        benchmark_command="python _evaluator/checker/check.py",
-        evaluator_path=evaluator,
-        project_configuration=configuration,
         profiler_kind=ProfilerKind.MACOS_CPU,
-        profiler_domain=DomainName.GENERIC,
-        run_environment=RunEnvironmentSpec("local"),
-        agent_state_model_type=AgentRunState,
+        agent_backend=None,
     ) as context:
         assert context.profiler_kind is ProfilerKind.MACOS_CPU
 
@@ -827,20 +782,23 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> N
     assert portable.agent_visible_path("old.json") not in tree
 
 
-def test_candidate_context_uses_project_worktree_directory(tmp_path: Path) -> None:
+def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
     with _create_context(project, evaluator=evaluator) as parent:
         parent_commit = parent.git.current_sha()
         assert parent_commit is not None
-        candidate = create_candidate_context(
+        candidate = create_workspace_resources(
             parent,
-            config=Config.model_validate({"model": {"name": "gpt-test"}}),
-            generation=2,
-            child_idx=3,
-            parent_commit=parent_commit,
-            agent_backend="stub",
+            WorkspaceResourceSpec(
+                scope_id="g2c3",
+                revision=parent_commit,
+                config=Config.model_validate({"model": {"name": "gpt-test"}}),
+                log_namespace=RunStateNamespace.EVOLVE,
+                log_directory="candidates",
+                agent_backend="stub",
+            ),
         )
         candidate_root = candidate.workspace
         assert candidate_root == parent.project.state.candidate_worktree_directory(
@@ -850,7 +808,9 @@ def test_candidate_context_uses_project_worktree_directory(tmp_path: Path) -> No
         assert candidate.log_dir == (
             parent.state.local(RunStateNamespace.EVOLVE).external_directory("candidates/g2c3/logs")
         )
-        assert Path(candidate.objective_location).read_text() == parent.effective_objective
+        assert Path(candidate.run_environment_view.paths.objective).read_text() == (
+            parent.effective_objective
+        )
         candidate.close()
         assert not candidate_root.exists()
 
@@ -862,8 +822,8 @@ def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path: Pa
     hooks = _RecordingHooks()
 
     with (
-        patch("vibesys.context.build_agent_client", side_effect=RuntimeError("runner failed")),
-        pytest.raises(RuntimeError, match="runner failed"),
+        patch("vibesys.context.RunState", side_effect=RuntimeError("state failed")),
+        pytest.raises(RuntimeError, match="state failed"),
     ):
         _create_context(source, runs_dir=runs_dir, evaluator=evaluator, hooks=hooks)
 
@@ -896,197 +856,12 @@ def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
         ctx.switch_log_file("round001")
 
         assert original_file.closed
-        assert isinstance(ctx.agent_client, FakeAgentClient)
-        assert ctx.agent_client.log_files == [ctx.logger.writer]
         sys.stderr.write("\033[31mcolored diagnostic\033[0m\n")
         run_log_path = ctx.run_log_path
 
     assert sys.stderr is original_stderr
     assert "colored diagnostic" in run_log_path.read_text()
     assert "\033[31m" not in run_log_path.read_text()
-
-
-def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path: Path) -> None:
-    """The run's agent client checkpoints provider sessions outside the repo.
-
-    Provider transcripts are host-local, so the map must live in the run's
-    machine-local namespace, never in the portable snapshot that travels
-    between machines.
-    """
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-
-    with (
-        patch("vibesys.context.build_agent_client", return_value=FakeAgentClient()) as build_runner,
-        _create_context(project, evaluator=evaluator) as ctx,
-    ):
-        store = build_runner.call_args.kwargs["session_store"]
-        assert isinstance(store, DurableSessionStore)
-        store.record(
-            AgentSessionKey(SessionScope.HYPOTHESIS, "H-01"),
-            spec_fingerprint="fingerprint",
-            provider="codex",
-            model="gpt-test",
-            session_id="thread-1",
-        )
-        local_dir = ctx.state.local(RunStateNamespace.AGENT).external_directory()
-
-    assert (local_dir / "sessions.json").is_file()
-    assert not local_dir.is_relative_to(project)
-
-
-def test_evolve_candidate_clients_get_no_provider_session_store(tmp_path: Path) -> None:
-    """Candidates never name a durable conversation, so they checkpoint nothing."""
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-
-    with _create_context(project, evaluator=evaluator) as parent:
-        parent_commit = parent.git.current_sha()
-        assert parent_commit is not None
-        with patch(
-            "vibesys.context.build_agent_client", return_value=FakeAgentClient()
-        ) as build_runner:
-            candidate = create_candidate_context(
-                parent,
-                config=Config.model_validate({"model": {"name": "gpt-test"}}),
-                generation=2,
-                child_idx=3,
-                parent_commit=parent_commit,
-                agent_backend="stub",
-            )
-            assert "session_store" not in build_runner.call_args.kwargs
-            candidate.close()
-
-
-# ---------------------------------------------------------------------------
-# The device pin and the agent execution mode
-# ---------------------------------------------------------------------------
-
-
-class _PinResponse(BaseModel):
-    answer: str
-
-
-@dataclass
-class _PinSession:
-    """One turn that answers whatever the schema asked for."""
-
-    turns: list[AgentTurnRequest] = field(default_factory=list)
-
-    def run_turn(
-        self, request: AgentTurnRequest, observer: AgentObserver | None = None
-    ) -> AgentTurnResult:
-        del observer
-        self.turns.append(request)
-        return AgentTurnResult('{"answer":"ok"}')
-
-    def resume_provider_session(self, session_id: str) -> bool:
-        del session_id
-        return False
-
-    def cancel(self) -> None: ...
-
-    def close(self) -> None: ...
-
-
-@dataclass
-class _PinDriver(AgentDriver):
-    """Records the session specs the client builds, and its execution mode."""
-
-    containerized: bool
-    specs: list[AgentSessionSpec] = field(default_factory=list)
-
-    @property
-    def capabilities(self) -> AgentCapabilities:
-        return AgentCapabilities(container_execution=self.containerized)
-
-    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
-        self.specs.append(spec)
-        return _PinSession()
-
-    def close(self) -> None: ...
-
-
-def _pin_context(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-    *,
-    containerized: bool,
-    device_index: int = 3,
-) -> tuple[_RunContext, _PinDriver]:
-    """A context whose only real parts are the device lease and agent client."""
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir(exist_ok=True)
-    backend = CudaBackend(log_dir=log_dir, log=lambda _message: None)
-    backend.selected_device = GpuInfo(
-        index=device_index,
-        uuid=f"GPU-{device_index}",
-        name="test-gpu",
-        memory_used_mib=0,
-        memory_total_mib=1,
-        utilization_pct=0,
-    )
-    driver = _PinDriver(containerized=containerized)
-
-    ctx = object.__new__(_RunContext)
-    ctx.integration = LocalRunIntegration()
-    request.addfinalizer(ctx.integration.close)
-    ctx.events = ctx.integration.events
-    # lint-waiver: LW-010040 [SLF001]; this isolated GPU pin fixture bypasses the full context constructor, so initialize the progress stack required by public invoke().
-    ctx._progress_stack = []  # noqa: SLF001
-    # lint-waiver: LW-010041 [SLF001]; the minimal fixture supplies canonical paths required by public invoke() without constructing unrelated project and run resources.
-    ctx._paths = RunPaths(  # noqa: SLF001
-        project_root=tmp_path,
-        log_dir=log_dir,
-        run_log_path=tmp_path / "run.log",
-    )
-    ctx.device = DeviceLease(backend, log_dir=log_dir)
-    ctx.agent_client = AgentClient(driver, provider="claude", model_name="m", log_dir=log_dir)
-    return ctx, driver
-
-
-def test_a_host_agent_is_pinned_to_the_selected_device(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> None:
-    ctx, driver = _pin_context(tmp_path, request, containerized=False)
-
-    assert ctx.gpu_env() == {"CUDA_VISIBLE_DEVICES": "3"}
-
-    ctx.invoke(
-        kind="judge",
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=_PinResponse,
-        fallback_factory=lambda: _PinResponse(answer="fallback"),
-    )
-
-    assert driver.specs[0].environment == (("CUDA_VISIBLE_DEVICES", "3"),)
-
-
-def test_a_container_agent_carries_no_host_device_pin(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> None:
-    """``--gpus device=N`` already makes the chosen GPU device 0 inside.
-
-    A host index forwarded into the container would name a device that is not
-    there, and re-pinning it mid-run would change the session fingerprint and
-    evict the live conversation.
-    """
-    ctx, driver = _pin_context(tmp_path, request, containerized=True)
-
-    assert ctx.gpu_env() == {}
-
-    ctx.invoke(
-        kind="judge",
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=_PinResponse,
-        fallback_factory=lambda: _PinResponse(answer="fallback"),
-    )
-
-    assert driver.specs[0].environment == ()
 
 
 def test_profiler_support_extra_includes_shared_runtime_and_declared_extras() -> None:

@@ -58,8 +58,8 @@ class CoreEventType(StrEnum):
     # Run-control transitions (see `vibesys.run.run_control.RunControlChannel`):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
     # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
-    # `STEER_CONSUMED`) come from `_RunContext.invoke` landing them on the run
-    # loop's own thread. A server projects both onto its own status machine
+    # `STEER_CONSUMED`) come from the run boundary or an agent turn. A server
+    # projects both onto its own status machine
     # and CONTROL journal; there is no frontend-visible wire event for them.
     STEER_QUEUED = "steer_queued"
     PAUSE_REQUESTED = "pause_requested"
@@ -166,10 +166,9 @@ class RunStartedData(EventPayload):
     kind: Literal["run_started"] = "run_started"
     outer_loop: str
     input: str
-    max_rounds: int
-    # The agent roles the loop can run per round (vibesys.loops.roles), so
-    # frontends seed placeholders from the contract instead of a client-side
-    # table. Empty on events recorded before the field existed.
+    max_rounds: int | None = None
+    # Policy-owned role hints let frontends seed per-round placeholders.
+    # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
 
 

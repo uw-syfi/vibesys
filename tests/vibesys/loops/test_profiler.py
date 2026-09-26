@@ -1,7 +1,7 @@
 """Tests for nsys profiler integration: response models and agent-runner plumbing.
 
 The orchestrate loop's profiler-gating behavior is covered in
-``tests/vibesys/loops/agent/test_orchestrate.py``; this module keeps the lower-level
+``tests/vibesys/loops/multi/test_orchestrate.py``; this module keeps the lower-level
 ProfilerResponse / parser / nsys-toolkit tests.
 
 The ``resources.profilers.nsys.analyze_nsys`` imports below resolve at
@@ -24,9 +24,7 @@ from resources.profilers.nsys.analyze_nsys import (
     analyze_memory_ops,
 )
 
-from vibesys.schemas import (
-    ProfilerResponse,
-)
+from vibesys.roles.profiler import ProfilerResponse
 from vs_agent.runner import parse_typed_response_text
 
 # ---------------------------------------------------------------------------

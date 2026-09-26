@@ -9,13 +9,14 @@ from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType, RunStatusChangedData
 from server.execution import AgentExecutionRequest
 from server.run_lifecycle import RunStatus, RunTrigger, transition
+from vibesys.api import _portable_history_snapshots
 
 if TYPE_CHECKING:
     import threading
     from pathlib import Path
 
     from server.execution import ExecutionHandle, ExecutionTracker
-    from server.journal import EventJournal
+    from server.journal import WireJournal
     from vs_project.api import Project, StateSnapshot
 
 
@@ -28,10 +29,7 @@ class ProjectRunState:
 
     def history_snapshots(self) -> tuple[StateSnapshot, ...]:
         """Return portable history snapshots relevant to frontend queries."""
-        return tuple(
-            self.project.state.portable_namespace(self.run_id, namespace).snapshot()
-            for namespace in ("agent", "plain", "evolve")
-        )
+        return _portable_history_snapshots(self.project, self.run_id)
 
 
 class RunController:
@@ -40,7 +38,7 @@ class RunController:
     def __init__(
         self,
         condition: threading.Condition,
-        journal: EventJournal,
+        journal: WireJournal,
         executions: ExecutionTracker,
     ) -> None:
         """Initialize control state over the shared server condition."""
@@ -140,7 +138,7 @@ class RunController:
 
         Pause, stop, and steering are no longer applied here: they are
         core's job now, through `vibesys.run.run_control.RunControlChannel`
-        at the entry to `vibesys.context._RunContext.invoke`. This method
+        at the entry to an agent turn. This method
         only allocates the execution; the caller is responsible for having
         already applied any entry-side run control to `user_prompt`.
         """
@@ -153,7 +151,7 @@ class RunController:
         """Compatibility boundary allocating an execution and returning its prompt.
 
         No longer applies run control to `user_prompt`: only core does, at
-        the entry to `_RunContext.invoke`, which this compatibility boundary
+        the entry to an agent turn, which this compatibility boundary
         is not part of. Callers that need pause/stop/steering applied must
         go through the core invocation path instead.
         """

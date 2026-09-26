@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from server.chat.manager import ChatManager
     from server.controller import ProjectRunState, RunController
     from server.execution import ExecutionTracker
-    from server.journal import EventJournal as WireEventJournal
+    from server.journal import WireJournal
     from vibesys.api import CoreEvent, RunResourceHandoff, RunSession
     from vs_project.api import Project
 
@@ -187,7 +187,7 @@ class RunIntegrationAdapter:
         self,
         controller: RunController,
         executions: ExecutionTracker,
-        journal: WireEventJournal,
+        journal: WireJournal,
         chat: ChatManager,
         *,
         chat_agent_builder: ChatAgentBuilder = build_chat_agent,

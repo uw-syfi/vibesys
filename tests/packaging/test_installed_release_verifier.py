@@ -318,8 +318,12 @@ def test_project_smoke_reads_rounds_from_authoritative_agent_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The installed smoke reads round state through the registered
+    projector, the same path the server uses (``registry.resolve(loop)``
+    then ``projector.view(...)``), rather than a strategy-specific store.
+    """
     run_id = "test-installed-release-smoke"
-    namespace = object()
+    orchestration_id = "multi-agent"
     log_directory = tmp_path / "logs"
     log_directory.mkdir()
     (tmp_path / ".git").mkdir()
@@ -331,9 +335,9 @@ def test_project_smoke_reads_rounds_from_authoritative_agent_state(
         def list_runs(self) -> list[object]:
             return [SimpleNamespace(run_id=run_id)]
 
-        def portable_namespace(self, actual_run_id: str, name: str) -> object:
-            assert (actual_run_id, name) == (run_id, "agent")
-            return namespace
+        def load_run(self, actual_run_id: str) -> object:
+            assert actual_run_id == run_id
+            return SimpleNamespace(orchestration=SimpleNamespace(id=orchestration_id))
 
         def current_run_id(self) -> str:
             return run_id
@@ -349,14 +353,26 @@ def test_project_smoke_reads_rounds_from_authoritative_agent_state(
         def open(cls, _root: Path) -> _Project:
             return cls()
 
-    class _AgentStateStore:
-        def __init__(self, actual_namespace: object) -> None:
-            assert actual_namespace is namespace
+    class _FakeProjector:
+        def view(self, project: object, actual_run_id: str, *, status: object, loop: str) -> object:
+            del status
+            assert isinstance(project, _Project)
+            assert actual_run_id == run_id
+            assert loop == orchestration_id
+            return SimpleNamespace(rounds=[SimpleNamespace(number=1)])
 
-        def load(self) -> object:
-            return SimpleNamespace(rounds=[SimpleNamespace(round_number=1)])
+    class _FakeRegistration:
+        projector = _FakeProjector()
+
+    class _FakeRegistry:
+        def resolve(self, kind: str) -> object:
+            assert kind == orchestration_id
+            return _FakeRegistration()
+
+    def _fake_registry() -> _FakeRegistry:
+        return _FakeRegistry()
 
     monkeypatch.setattr(verifier, "Project", _Project)
-    monkeypatch.setattr(verifier, "AgentRunStateStore", _AgentStateStore)
+    monkeypatch.setattr(verifier, "built_in_orchestrations", _fake_registry)
 
     _verify_project_state_in_isolation(tmp_path)

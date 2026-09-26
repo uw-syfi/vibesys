@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -11,18 +10,17 @@ from uuid import UUID
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from tests.support.run_execution import run_execution_record
 
-from vs_loop_state.api import RoundRecord
 from vs_project.api import (
-    PlainRunConfiguration,
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
     Project,
     ProjectStateError,
     RunEnvironmentRecord,
-    RunManifest,
     StateFile,
     generate_run_id,
     is_project_state_path,
-    serialize_round,
 )
 
 NOW = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
@@ -40,20 +38,8 @@ class _Other(BaseModel):
     name: str
 
 
-def _configuration() -> PlainRunConfiguration:
-    return PlainRunConfiguration(
-        model="gpt-5",
-        outer_loop="plain",
-        run_environment=RunEnvironmentRecord(name="local"),
-        agent_backend="cli",
-        cli_provider="codex",
-        cli_timeout=1800,
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=5,
-        max_attempts_per_issue=3,
-        max_issues_per_perf_eval=3,
-    )
+def _descriptor() -> OrchestrationDescriptor:
+    return OrchestrationDescriptor(id="team-search", config_version=1, options={})
 
 
 def _store(tmp_path: Path) -> Project:
@@ -69,34 +55,30 @@ def _project_dir(tmp_path: Path) -> Path:
     return directory
 
 
-def _manifest(store: Project, *, branch: str = "vibesys/queue") -> RunManifest:
+def _new_manifest(
+    store: Project, *, branch: str = "vibesys/queue", now: datetime = NOW
+) -> OrchestrationRunManifest:
     return store.state.new_run_manifest(
         "Queue SPSC",
         branch=branch,
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline="a" * 40,
-        now=NOW,
+        now=now,
         unique=UUID(int=1),
     )
 
 
-def _run(store: Project) -> RunManifest:
-    manifest = _manifest(store)
+def _run(store: Project) -> OrchestrationRunManifest:
+    manifest = _new_manifest(store)
     store.state.create_run(manifest)
     return manifest
 
 
 def _run_json(store: Project, run_id: str) -> Path:
     return store.state.project_root / ".vibesys/state/runs" / run_id / "run.json"
-
-
-def _rounds_dir(store: Project, run_id: str) -> Path:
-    return store.state.project_root / ".vibesys/state/runs" / run_id / "agent/rounds"
-
-
-def _record(number: int) -> RoundRecord:
-    return RoundRecord(number, f"{number:x}" * 40, 10.0, "ops/s", passed=True)
 
 
 def _fail_for(monkeypatch: pytest.MonkeyPatch, method: str, name: str, error: OSError) -> None:
@@ -129,14 +111,7 @@ def test_generate_run_id_and_new_manifest_require_timezone(tmp_path: Path) -> No
     naive = datetime(2026, 1, 1, tzinfo=UTC).replace(tzinfo=None)
 
     with pytest.raises(ProjectStateError, match="Metadata timestamp must include a timezone"):
-        store.state.new_run_manifest(
-            "x",
-            branch="vibesys/x",
-            vibesys_version="0.2.0",
-            configuration=_configuration(),
-            trusted_input_baseline="a" * 40,
-            now=naive,
-        )
+        _new_manifest(store, now=naive)
     with pytest.raises(ProjectStateError, match="Run ID timestamp must include a timezone"):
         generate_run_id("x", now=naive)
 
@@ -172,134 +147,6 @@ def test_current_run_pointer_read_failure_is_reported(
 
     with pytest.raises(ProjectStateError, match=r"Could not read current run pointer .*denied"):
         store.state.current_run_id()
-
-
-def _write_legacy_run(store: Project, run_id: str, version: object, configuration: object) -> None:
-    manifest = _manifest(store)
-    raw = json.loads(manifest.model_dump_json())
-    raw["run_id"] = run_id
-    raw["schema_version"] = version
-    raw["configuration"] = configuration
-    path = _run_json(store, run_id)
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps(raw), encoding="utf-8")
-
-
-def _configuration_dict(*, with_environment: bool) -> dict[str, object]:
-    raw = json.loads(_configuration().model_dump_json())
-    if not with_environment:
-        del raw["run_environment"]
-    return raw
-
-
-@pytest.mark.parametrize(
-    ("version", "configuration", "message"),
-    [
-        (1, None, "has no configuration object"),
-        (
-            1,
-            _configuration_dict(with_environment=True),
-            "already records a run environment",
-        ),
-        (
-            2,
-            {**_configuration_dict(with_environment=True), "run_environment": "nope"},
-            "has an invalid run environment",
-        ),
-        (
-            2,
-            {
-                **_configuration_dict(with_environment=True),
-                "run_environment": {"name": "docker"},
-            },
-            "records a different run environment",
-        ),
-        (
-            1,
-            {"outer_loop": "plain"},
-            "Could not migrate VibeSys metadata",
-        ),
-        (7, _configuration_dict(with_environment=True), "unsupported run schema version 7"),
-    ],
-)
-def test_migrate_run_environment_rejects_inconsistent_manifests(
-    tmp_path: Path, version: int, configuration: object, message: str
-) -> None:
-    store = _store(tmp_path)
-    _write_legacy_run(store, "legacy-run", version, configuration)
-    before = _run_json(store, "legacy-run").read_text(encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match=message):
-        store.state.migrate_run_environment("legacy-run", RunEnvironmentRecord(name="local"))
-
-    assert _run_json(store, "legacy-run").read_text(encoding="utf-8") == before
-
-
-def test_migrate_run_environment_rejects_current_schema(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    manifest = _run(store)
-
-    with pytest.raises(ProjectStateError, match="already at run schema version"):
-        store.state.migrate_run_environment(manifest.run_id, RunEnvironmentRecord(name="local"))
-
-
-def test_load_rounds_rejects_unexpected_entries(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    store.state.save_round(run.run_id, _record(1))
-    (_rounds_dir(store, run.run_id) / "notes.txt").write_text("x", encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match="Unexpected completed-round entry"):
-        store.state.load_rounds(run.run_id)
-
-
-def test_load_rounds_rejects_file_naming_another_round(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    store.state.save_round(run.run_id, _record(1))
-    (_rounds_dir(store, run.run_id) / "0001.json").write_bytes(serialize_round(_record(2)))
-
-    with pytest.raises(ProjectStateError, match="contains round 2, expected 1"):
-        store.state.load_rounds(run.run_id)
-
-
-def test_restore_rejects_unexpected_or_duplicate_entries(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    rounds = _rounds_dir(store, run.run_id)
-    rounds.mkdir(parents=True)
-    (rounds / "readme.txt").write_text("x", encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match="Unexpected completed-round entry"):
-        store.state.restore_completed_round(run.run_id, _record(1))
-
-    (rounds / "readme.txt").unlink()
-    (rounds / "1.json").write_text("{}", encoding="utf-8")
-    (rounds / "0001.json").write_text("{}", encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match="Duplicate completed-round number 1"):
-        store.state.restore_completed_round(run.run_id, _record(1))
-
-
-def test_restore_rejects_a_round_before_an_existing_later_round(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    store.state.save_round(run.run_id, _record(1))
-    store.state.save_round(run.run_id, _record(2))
-
-    with pytest.raises(ProjectStateError, match="Cannot restore round 1 before existing round 2"):
-        store.state.restore_completed_round(run.run_id, _record(1))
-
-
-def test_restore_rejects_predecessor_naming_another_round(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    rounds = _rounds_dir(store, run.run_id)
-    rounds.mkdir(parents=True)
-    (rounds / "0001.json").write_text(serialize_round(_record(3)).decode("utf-8"), encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match="contains round 3, expected 1"):
-        store.state.restore_completed_round(run.run_id, _record(2))
 
 
 def test_namespace_apply_deletion_rejects_directory_at_target(tmp_path: Path) -> None:

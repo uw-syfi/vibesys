@@ -3,57 +3,13 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from vs_loop_state.api import RoundRecord, serialize_round_record
 from vs_project.errors import ProjectStateError, StateModelNotFoundError
-
-
-def _validate_portable_round(record: RoundRecord, *, source: Path | None = None) -> None:
-    """Reject machine-local paths and non-finite metrics at the commit boundary."""
-    subject = f"Completed-round metadata at {source}" if source is not None else "Completed-round"
-    for field_name in ("evaluation_artifact", "candidate_evaluation_artifact"):
-        value = getattr(record, field_name)
-        if value is None:
-            continue
-        artifact = PurePosixPath(value)
-        if (
-            not value
-            or "\\" in value
-            or artifact.is_absolute()
-            or artifact == PurePosixPath(".")
-            or ".." in artifact.parts
-        ):
-            raise ProjectStateError.invalid_portable_round(subject, field_name)
-    metric_values = [
-        record.perf_metric,
-        *record.metrics.values(),
-        *record.candidate_metrics.values(),
-    ]
-    if any(value is not None and not math.isfinite(value) for value in metric_values):
-        raise ProjectStateError.non_finite_round_metrics(subject)
-
-
-def serialize_round(record: RoundRecord) -> bytes:
-    """Return validated canonical bytes for one portable completed round."""
-    if record.round_number < 1:
-        raise ProjectStateError.invalid_round_number(record.round_number)
-    _validate_portable_round(record)
-    try:
-        contents = json.dumps(
-            serialize_round_record(record),
-            allow_nan=False,
-            indent=2,
-            sort_keys=True,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ProjectStateError.round_serialization_failed(record.round_number) from exc
-    return f"{contents}\n".encode()
 
 
 def _serialize_state_model(model: BaseModel) -> bytes:

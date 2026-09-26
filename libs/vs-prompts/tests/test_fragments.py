@@ -70,11 +70,11 @@ def test_render_strips_trailing_newline(tmp_path: Path) -> None:
 def test_render_all_resolves_via_fallback_root(tmp_path: Path) -> None:
     """The fragment family's root lives under a *fallback* root, not the
     renderer's own root — the real vibesys topology, where a per-loop
-    renderer (root=``prompts/loops/agent``) still needs to reach shared
+    renderer (root=``prompts/loops/multi``) still needs to reach shared
     ``prompts/backend/`` fragments via its fallback to ``prompts/``.
     """
     shared_root = tmp_path / "shared"
-    loop_root = tmp_path / "shared" / "loops" / "agent"
+    loop_root = tmp_path / "shared" / "loops" / "multi"
     _write(shared_root / "backend" / "cuda" / "device_dtype.j2", "bfloat16")
     loop_root.mkdir(parents=True, exist_ok=True)
     renderer = TemplateRenderer(loop_root, fallback_roots=(shared_root,))

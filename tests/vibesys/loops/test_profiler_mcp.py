@@ -21,8 +21,7 @@ from typing import Protocol
 
 import pytest
 
-from vibesys.loops.profiler import mcp_spec
-from vibesys.profilers import ProfilerKind
+from vibesys.profilers import ProfilerKind, mcp_spec
 
 
 class _ToolInfo(Protocol):

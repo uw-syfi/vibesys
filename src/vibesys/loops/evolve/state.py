@@ -1,103 +1,97 @@
-"""Typed persistence adapter for evolutionary population state."""
+"""Typed persistence adapter for the evolutionary loop's durable state.
+
+``EvolveState`` is the single value the loop checkpoints between generations.
+``population`` is the running, committed :class:`PopulationState`.
+``generation_start`` is a frozen copy of ``population`` taken the moment a
+generation begins; it lets ``PopulationSearch.propose`` be replayed
+deterministically for every child slot in that generation, on a fresh
+process, without depending on anything that happened mid-generation.
+``admitted_slots`` counts how many of the generation's child slots (1-indexed,
+strictly sequential) have already been evaluated and admitted (or skipped),
+so a resumed run only evaluates the slots that come after it.
+
+Between generations (no generation in progress) ``generation_start`` is
+``None`` and ``admitted_slots`` is 0; the next generation number is always
+``population.generation + 1``.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.loops.evolve.population import Individual, Population
-from vibesys.loops.metrics import MetricSpace
-from vs_loop_state.api import IndividualRecord, PopulationSnapshot
+from pydantic import BaseModel, ConfigDict, Field
+
+from vibesys.evaluators.metrics import MetricSpace
+from vibesys.search.population.models import PopulationState
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace, StateSlot
 
-_POPULATION_FILE = "population.json"
+_STATE_FILE = "state.json"
 _METRICS_FILE = "metrics.json"
 
 
-def population_snapshot(population: Population) -> PopulationSnapshot:
-    """Convert an in-memory population into its strict persisted contract."""
-    return PopulationSnapshot(
-        individuals=tuple(
-            IndividualRecord(
-                id=individual.id,
-                generation=individual.generation,
-                parent_id=individual.parent_id,
-                inspiration_ids=tuple(individual.inspiration_ids),
-                commit=individual.commit,
-                perf_metric=individual.perf_metric,
-                perf_unit=individual.perf_unit,
-                metrics=dict(individual.metrics),
-                passed=individual.passed,
-                summary=individual.summary,
-                feedback=individual.feedback,
-                policy_parent_id=individual.policy_parent_id,
-                policy_target_island=individual.policy_target_island,
-            )
-            for individual in population.all
-        )
-    )
+class EvolveState(BaseModel):
+    """The exact durable state one checkpoint commits."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    population: PopulationState
+    generation_start: PopulationState | None = None
+    admitted_slots: int = Field(default=0, ge=0)
 
 
-def population_from_snapshot(snapshot: PopulationSnapshot) -> Population:
-    """Build an in-memory population from validated persisted records."""
-    return Population(
-        [
-            Individual(
-                id=record.id,
-                generation=record.generation,
-                parent_id=record.parent_id,
-                inspiration_ids=list(record.inspiration_ids),
-                commit=record.commit,
-                perf_metric=record.perf_metric,
-                perf_unit=record.perf_unit,
-                metrics=dict(record.metrics),
-                passed=record.passed,
-                summary=record.summary,
-                feedback=record.feedback,
-                policy_parent_id=record.policy_parent_id,
-                policy_target_island=record.policy_target_island,
-            )
-            for record in snapshot.individuals
-        ]
-    )
+class EvolutionProjection(BaseModel):
+    """The committed population and metric space exposed to run readers."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    population: PopulationState
+    metric_space: MetricSpace
+    generation: int
 
 
 class EvolutionStateStore:
-    """Persist a validated population inside one portable namespace."""
+    """Persist a validated :class:`EvolveState` inside one portable namespace."""
 
     def __init__(self, namespace: StateNamespace) -> None:
         """Bind the adapter to one portable evolve-loop namespace."""
         self._namespace = namespace
-        self._population: StateSlot[PopulationSnapshot] = namespace.slot(
-            _POPULATION_FILE,
-            PopulationSnapshot,
-        )
-        self._metrics: StateSlot[MetricSpace] = namespace.slot(
-            _METRICS_FILE,
-            MetricSpace,
-        )
+        self._state: StateSlot[EvolveState] = namespace.slot(_STATE_FILE, EvolveState)
+        self._metrics: StateSlot[MetricSpace] = namespace.slot(_METRICS_FILE, MetricSpace)
 
-    def load_population(self) -> Population:
-        """Load the population, starting empty only when it is absent."""
-        snapshot = self._population.load_optional()
-        return population_from_snapshot(snapshot or PopulationSnapshot())
+    def load(self) -> EvolveState | None:
+        """Load the committed state, or ``None`` for a run with no history."""
+        return self._state.load_optional()
 
-    def save_population(self, population: Population) -> None:
-        """Validate and atomically save the complete population."""
-        self._population.save(population_snapshot(population))
+    def save(self, state: EvolveState) -> None:
+        """Validate and atomically save the complete durable state."""
+        self._state.save(state)
 
     def load_metric_space(self) -> MetricSpace:
         """Load the run's metric space.
 
-        State written before the space was persisted has no document; it loads
-        as the empty strict space, which is how those runs already compared.
+        State written before the space was persisted has no document; it
+        loads as the empty strict space, which is how those runs already
+        compared.
         """
         return self._metrics.load_optional() or MetricSpace()
 
     def save_metric_space(self, space: MetricSpace) -> None:
         """Atomically record the axes and tolerance this run selects within."""
         self._metrics.save(space)
+
+    def projection(self, state: EvolveState) -> EvolutionProjection:
+        """Project one durable state into the read model committed readers see."""
+        return EvolutionProjection(
+            population=state.population,
+            metric_space=self.load_metric_space(),
+            generation=state.population.generation,
+        )
+
+    def checkpoint_writes(self, state: EvolveState) -> dict[str, BaseModel]:
+        """Return the validated files that define one durable checkpoint."""
+        return {_STATE_FILE: state, _METRICS_FILE: self.load_metric_space()}
 
     @property
     def namespace(self) -> StateNamespace:

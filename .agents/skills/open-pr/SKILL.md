@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Prepare and open VibeSys pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, GitHub pull request creation, or native GitHub stacks for dependent PRs.
+description: Prepare and open VibeSys pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, GitHub pull request creation, native GitHub stacks for dependent PRs, or maintaining a stack after its base changes or lands.
 ---
 
 # Open PR
@@ -113,12 +113,40 @@ For every intentionally independent PR opened alongside stacked work, target
 the trunk, do not pass it to `gh stack link`, and verify that its remote
 `.stack` value is `null`.
 
+## Maintaining a stack
+
+PRs land through the GitHub merge queue with squash merge, bottom-up. A child
+branch therefore still holds the pre-squash commits of any parent that has
+already landed.
+
+- Ask how the stack will be landed (queue order, squash) and which PRs are
+  enqueued before touching any stack branch or resolving conflicts across
+  branches.
+- Never push to a branch that is queued or about to be queued: the push drops
+  it from the queue.
+- After a parent lands or changes, move the child onto the new parent tip so
+  the already-squashed commits are dropped:
+  `git rebase --onto <new-parent-tip> <old-parent-tip> <child>`, then
+  `git push --force-with-lease`. Do not merge the parent forward into the
+  child: that drags pre-squash history in and conflicts with the squashed
+  commits on the trunk.
+- Force-with-lease on a stack branch is safe only when nobody else pushes to
+  it. Ask the user before force-pushing.
+- After changing a base PR, check each child against the new base tip with
+  `git merge-tree --write-tree <base> <head>` (exit 0 means clean). A child
+  that was clean against its old base can conflict with the updated one. Use
+  this before trusting or dismissing GitHub's mergeable state, which can lag
+  by a minute: poll past `UNKNOWN`.
+- Keep child PRs in draft until the stack has been rebased onto the current
+  base. Mark a PR ready only after verifying its mergeable state.
+
 ## PR Body
 
 Use this repository's template headings exactly:
 
 - `Problem`: Lead with intent. Explain the maintainer or user pain, why the change is needed, what context led to it, and any issue links. This is the highest-priority section of the PR body.
 - `Solution`: Describe the high-level design, important boundaries, tradeoffs, and what reviewers should inspect.
+- `Design`: Use this subsection under `Solution` to answer the `software-design` checkpoint: owning module, public interface added or changed, direction of data and dependencies, new coupling or `tach.toml` edges, and known drift left untouched or filed as an issue. Write `n/a: <reason>` for a question that does not apply.
 - `Architecture`: Use this subsection under `Solution` to describe the ownership model and major components involved in the solution. For nontrivial control flow or cross-boundary changes, include a Mermaid diagram or equivalent sketch that shows how the pieces interact.
 - `Verification`: Summarize automated tests, manual checks, benchmarks, or why a check was not run.
 - `Correctness properties`: List invariants, contracts, expected behaviors, and compatibility constraints preserved or introduced.

@@ -11,8 +11,13 @@ from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTracker
 from server.integration import RunIntegrationAdapter
-from server.journal import EventJournal
+from server.journal import WireJournal
 from server.read_model import RunInspector
+from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent_options import (
+    AgentOrchestrationOptions,
+    descriptor_from_options,
+)
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.run_control import RunControlChannel
 
@@ -24,7 +29,7 @@ if TYPE_CHECKING:
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunView
     from vs_agent.api import AgentSelection
-    from vs_project.api import Project
+    from vs_project.api import OrchestrationDescriptor, Project
 
 
 class _ControlBridge:
@@ -53,12 +58,29 @@ class _ControlBridge:
         self._channel.request_stop()
 
 
+def agent_descriptor(
+    *,
+    metric_space: MetricSpace | None = None,
+) -> OrchestrationDescriptor:
+    """Build the one active manifest descriptor for server agent fixtures."""
+    options = AgentOrchestrationOptions(
+        interface="inprocess",
+        max_rounds=3,
+        max_retries_per_round=1,
+        judge_every=1,
+        official_eval_every=1,
+        memory_layout="files",
+        metric_space=metric_space or MetricSpace(),
+    )
+    return descriptor_from_options(options, orchestration_id="single-agent")
+
+
 @dataclass(frozen=True)
 class ServerParts:
     """Explicitly composed server components used by focused tests."""
 
     condition: threading.Condition
-    journal: EventJournal
+    journal: WireJournal
     executions: ExecutionTracker
     controller: RunController
     chat: ChatManager
@@ -137,7 +159,7 @@ def build_server_parts(
 ) -> ServerParts:
     """Compose real server components and optionally attach durable state."""
     condition = threading.Condition(threading.RLock())
-    journal = EventJournal(condition)
+    journal = WireJournal(condition)
     executions = ExecutionTracker(condition, journal)
     controller = RunController(condition, journal, executions)
     chat = ChatManager(condition, journal, run_status=controller.run_status)

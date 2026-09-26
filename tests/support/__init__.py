@@ -8,7 +8,7 @@ from os import PathLike
 from typing import Literal, Protocol, cast, overload
 from unittest.mock import patch
 
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def make_orchestrator_plan(*, criteria: str, **fields: object) -> OrchestratorPlan:

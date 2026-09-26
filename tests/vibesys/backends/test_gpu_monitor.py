@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
@@ -20,12 +21,8 @@ from vibesys.backends.cuda.gpu_monitor import (
     pick_gpu,
     query_gpu_info,
 )
-from vibesys.context import (
-    _RunContext,
-)
 from vibesys.run import (
     DeviceLease,
-    RunPaths,
 )
 from vs_sandbox.api import (
     DockerSandbox,
@@ -295,27 +292,19 @@ class TestMonitorLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# reselect_gpu on _RunContext
+# device lease reselection
 # ---------------------------------------------------------------------------
 
 
 class TestReselectGpu:
-    """Tests for _RunContext.reselect_gpu()."""
+    """Tests for DeviceLease.reselect()."""
 
     def _make_ctx(
         self, tmp_path: Path, *, selected_gpu: GpuInfo | None = None, use_docker: bool = False
-    ) -> _RunContext:
-        """Build a minimal _RunContext-like object for reselect_gpu testing."""
+    ) -> SimpleNamespace:
+        """Build a device lease with registered CUDA sandboxes."""
 
-        ctx = object.__new__(_RunContext)
-        ctx.selected_gpu = selected_gpu
-        # lint-waiver: LW-008504 [SLF001]; the focused reselect fixture skips
-        # full run construction, so it must supply the backing paths field.
-        ctx._paths = RunPaths(  # noqa: SLF001
-            project_root=tmp_path / "workspace",
-            log_dir=tmp_path / "logs",
-            run_log_path=tmp_path / "run.log",
-        )
+        ctx = SimpleNamespace(log_dir=tmp_path / "logs")
         ctx.log_dir.mkdir(parents=True, exist_ok=True)
 
         # Real CudaBackend so reselect_gpu's delegation hits the actual logic;
@@ -324,7 +313,7 @@ class TestReselectGpu:
         backend_impl.selected_device = selected_gpu
         ctx.backend_impl = backend_impl
 
-        # gpu_env / reselect_gpu / gpu_monitor delegate to the device lease.
+        # DeviceLease coordinates reselection and monitor ownership.
 
         ctx.device = DeviceLease(backend_impl, log_dir=ctx.log_dir)
 
@@ -384,25 +373,25 @@ class TestReselectGpu:
     def test_noop_when_cuda_visible_set(self, mock_pick: MagicMock, tmp_path: Path) -> None:
         ctx = self._make_ctx(tmp_path, selected_gpu=_gpu(0, GPU_A))
         with patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "0"}):
-            ctx.reselect_gpu()
+            ctx.device.reselect()
         mock_pick.assert_not_called()
 
     @patch("vibesys.backends.cuda.pick_gpu", return_value=None)
     def test_noop_when_no_gpus(self, mock_pick: MagicMock, tmp_path: Path) -> None:
         del mock_pick
         ctx = self._make_ctx(tmp_path, selected_gpu=_gpu(0, GPU_A))
-        ctx.reselect_gpu()
-        assert ctx.selected_gpu is not None
-        assert ctx.selected_gpu.index == 0  # unchanged
+        ctx.device.reselect()
+        assert ctx.device.selected_device is not None
+        assert ctx.device.selected_device.index == 0  # unchanged
 
     @patch("vibesys.backends.cuda.pick_gpu")
     def test_noop_when_same_gpu(self, mock_pick: MagicMock, tmp_path: Path) -> None:
         gpu0 = _gpu(0, GPU_A, used=100)
         ctx = self._make_ctx(tmp_path, selected_gpu=gpu0)
         mock_pick.return_value = _gpu(0, GPU_A, used=200)
-        ctx.reselect_gpu()
+        ctx.device.reselect()
         # Still the original object (not updated since index matches)
-        assert ctx.selected_gpu is gpu0
+        assert ctx.device.selected_device is gpu0
 
     @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
     @patch("vibesys.backends.cuda.pick_gpu")
@@ -425,9 +414,9 @@ class TestReselectGpu:
         judge_backend.env["CUDA_VISIBLE_DEVICES"] = "0"
 
         mock_pick.return_value = gpu1
-        ctx.reselect_gpu()
+        ctx.device.reselect()
 
-        assert ctx.selected_gpu is gpu1
+        assert ctx.device.selected_device is gpu1
         assert implementer_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
         assert judge_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
 
@@ -448,7 +437,7 @@ class TestReselectGpu:
         ctx = self._make_ctx(tmp_path, selected_gpu=gpu0, use_docker=False)
 
         # Initial monitor lives on the backend (matches the production flow
-        # where _RunContext.__init__ binds ctx.gpu_monitor to the same object).
+        # where DeviceLease owns the backend monitor).
         old_monitor = MagicMock()
 
         next_monitor = MagicMock()
@@ -458,13 +447,13 @@ class TestReselectGpu:
         ) as monitor_factory:
             ctx.device.start_monitor()
             mock_pick.return_value = gpu1
-            ctx.reselect_gpu()
+            ctx.device.reselect()
 
         old_monitor.stop.assert_called_once()
-        assert ctx.gpu_monitor is next_monitor
+        assert ctx.device.monitor is next_monitor
         assert monitor_factory.call_args.kwargs["gpu_uuid"] == GPU_B
         # Clean up
-        ctx.gpu_monitor.stop()
+        ctx.device.monitor.stop()
 
     @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
     @patch("vibesys.backends.cuda.pick_gpu")
@@ -483,15 +472,15 @@ class TestReselectGpu:
         ctx = self._make_ctx(tmp_path, selected_gpu=gpu0, use_docker=True)
 
         mock_pick.return_value = gpu1
-        ctx.reselect_gpu()
+        ctx.device.reselect()
 
         implementer_backend = cast("MagicMock", ctx.implementer_backend)
         judge_backend = cast("MagicMock", ctx.judge_backend)
         implementer_backend.restart_with_gpus.assert_called_once_with("device=1")
         judge_backend.restart_with_gpus.assert_called_once_with("device=1")
         # Clean up
-        assert ctx.gpu_monitor is not None
-        ctx.gpu_monitor.stop()
+        assert ctx.device.monitor is not None
+        ctx.device.monitor.stop()
 
     # Note: symlink replay on restart is the sandbox class's responsibility
     # (it runs lifecycle hooks before becoming ready).
@@ -512,10 +501,10 @@ class TestReselectGpu:
         ctx = self._make_ctx(tmp_path, selected_gpu=None, use_docker=False)
 
         mock_pick.return_value = gpu1
-        ctx.reselect_gpu()
+        ctx.device.reselect()
 
-        assert ctx.selected_gpu is gpu1
+        assert ctx.device.selected_device is gpu1
         assert cast("MagicMock", ctx.implementer_backend).env["CUDA_VISIBLE_DEVICES"] == "1"
         # Clean up
-        assert ctx.gpu_monitor is not None
-        ctx.gpu_monitor.stop()
+        assert ctx.device.monitor is not None
+        ctx.device.monitor.stop()

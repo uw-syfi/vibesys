@@ -7,21 +7,23 @@ from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
 from server.api.protocol import PerformanceRound
-from vibesys.schemas import (
-    HYPOTHESIS_TITLE_MAX_LEN,
-    ImplementerResponse,
-    JudgeResponse,
+from vibesys.evaluators.perf_reply import (
     LatencyStats,
     LoadLevelMetrics,
-    OrchestratorPlan,
-    ProfilerSummary,
-    SingleAgentRoundResponse,
-    SkillResourceSelection,
     ThroughputStats,
-    Verdict,
+)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.profiler import ProfilerSummary
+from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.schemas import (
+    HYPOTHESIS_TITLE_MAX_LEN,
+    SkillResourceSelection,
     derive_hypothesis_title,
     normalize_hypothesis_title,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _profiler_summary(

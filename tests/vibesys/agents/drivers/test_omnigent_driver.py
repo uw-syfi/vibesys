@@ -28,7 +28,7 @@ from omnigent.tools.builtins import os_env as omnigent_os_tools
 from tests.support import run_test_command
 
 from vibesys.events import CommandResultPayload, JsonResultPayload
-from vibesys.schemas import JudgeResponse
+from vibesys.roles.judge import JudgeResponse
 from vs_agent.api import (
     AgentEvent,
     MCPServerSpec,

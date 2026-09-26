@@ -21,11 +21,9 @@ from vibesys.api.contracts import (
     ConfigurationError,
     CoreEvent,
     EventStatus,
-    HypothesisRoundView,
-    HypothesisView,
-    LoopKind,
     MetricSpace,
     Objective,
+    OrchestrationDescriptor,
     PerfDeltaReason,
     ResumeRef,
     RunRequest,
@@ -35,7 +33,13 @@ from vibesys.api.contracts import (
 )
 from vibesys.api.entry import load_config
 from vibesys.api.session import RunControl, RunSession, create_session
-from vibesys.api.store import RunStore, open_run_store
+from vibesys.api.store import (
+    RunStore,
+    open_run_store,
+)
+from vibesys.api.store import (
+    portable_history_snapshots as _portable_history_snapshots,  # noqa: F401  # lint-waiver: LW-020001 [F401]; server.controller imports this private facade helper by name, so the alias is a deliberate re-export.
+)
 from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import (
     AgentExecutionStartedData,
@@ -46,7 +50,7 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
 )
-from vibesys.loops.agent.issue_board import framework_memory_paths
+from vibesys.orchestration.contracts import OrchestrationRegistry, Orchestrator
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
@@ -54,11 +58,18 @@ from vibesys.render.sink import output_sink
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.integration import RunResourceHandoff
 from vibesys.run.run_control import RunStopped
+from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
+from vs_agent.api import AgentBackend, AgentSpec
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
+    "AgentBackend",
+    "AgentDefinition",
     "AgentExecutionStartedData",
+    "AgentHandle",
     "AgentOutputChunkData",
+    "AgentSpec",
     "ComputeBackend",
     "Config",
     "ConfigurationDiagnostic",
@@ -67,11 +78,13 @@ __all__ = [
     "CoreEventType",
     "DomainName",
     "EventStatus",
-    "HypothesisRoundView",
-    "HypothesisView",
-    "LoopKind",
+    "HostResource",
+    "HostResourceAccess",
     "MetricSpace",
     "Objective",
+    "OrchestrationDescriptor",
+    "OrchestrationRegistry",
+    "Orchestrator",
     "PerfDeltaReason",
     "ProfilerKind",
     "RepositoryVisibility",
@@ -89,12 +102,12 @@ __all__ = [
     "TodoUpdateData",
     "ToolCallData",
     "ToolResultData",
+    "VibeSysRuntime",
     "agent_spec_from_config",
     "boot_trace",
     "create_session",
     "format_framework_event",
     "format_status_prefix",
-    "framework_memory_paths",
     "load_config",
     "open_run_store",
     "output_sink",

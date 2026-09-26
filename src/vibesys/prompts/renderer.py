@@ -3,7 +3,7 @@
 Two concepts:
 
 - **Template** — a full prompt the LLM sees as one document
-  (e.g. ``loops/plain/implementer/system.j2``). Has structure:
+  (e.g. ``loops/issue_queue/implementer/system.j2``). Has structure:
   headers, task description, constraints. Lives in a per-mode
   directory.
 - **Fragment** — a small reusable snippet meant to be composed *into*
@@ -44,6 +44,7 @@ from vs_prompts.api import FragmentFamily, TemplateRenderer
 
 PROMPTS_DIR = Path(__file__).resolve().parent
 _BACKEND_FRAGMENTS_ROOT = PROMPTS_DIR / "backend"
+_SHARED_LOOP_FRAGMENTS_ROOT = PROMPTS_DIR / "shared"
 
 _renderer = TemplateRenderer(PROMPTS_DIR)
 
@@ -54,16 +55,24 @@ _env_cache: dict[str, TemplateRenderer] = {str(PROMPTS_DIR): _renderer}
 def _build_env(template_dir: Path | str | None = None) -> TemplateRenderer:
     """Return a ``TemplateRenderer`` for the given template directory.
 
-    Per-loop prompt directories also fall back to the shared
-    ``vibesys/prompts/`` root, so fragment lookups via
+    Per-loop prompt directories fall back, in order, to
+    ``vibesys/prompts/shared/`` (fragments shared across strategies) and then
+    to the ``vibesys/prompts/`` root itself, so fragment lookups via
     :class:`ComputeBackendFragment` resolve from package-owned prompt assets.
+    A strategy's own folder is always searched first; strategies never
+    resolve templates from a sibling strategy's folder.
     """
     if template_dir is None:
         return _renderer
     key = str(template_dir)
     if key not in _env_cache:
         _env_cache[key] = (
-            _renderer if key == str(PROMPTS_DIR) else _renderer.child(Path(template_dir))
+            _renderer
+            if key == str(PROMPTS_DIR)
+            else TemplateRenderer(
+                Path(template_dir),
+                fallback_roots=(_SHARED_LOOP_FRAGMENTS_ROOT, PROMPTS_DIR),
+            )
         )
     return _env_cache[key]
 
@@ -215,7 +224,7 @@ class Prompt:
     ----------
     template_dir:
         Per-loop directory the renderer searches first.
-        For example, ``prompts/loops/plain/`` falls back to the shared
+        For example, ``prompts/loops/issue_queue/`` falls back to the shared
         ``vibesys/prompts/`` root, where backend fragments
         live.
     backend:

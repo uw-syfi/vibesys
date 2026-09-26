@@ -1,11 +1,11 @@
-"""Tests for the `vibesys.api` entry functions (config/validate/default request)."""
+"""Structural validation of canonical descriptor-backed run requests."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api import LoopKind
-from vibesys.api.entry import default_request, validate
+from vibesys.api import Config, OrchestrationDescriptor, RunRequest
+from vibesys.api.request import load_input_bundle
 from vs_project.api import Project
 
 if TYPE_CHECKING:
@@ -14,31 +14,21 @@ if TYPE_CHECKING:
 _EXAMPLE = "examples/model-serving/whisper-large-v3"
 
 
-def test_default_request_builds_a_runnable_request(repo_root: Path) -> None:
-    """`default_request` sources config and input bundle from the project on disk."""
-    project = Project.open(repo_root / _EXAMPLE)
-
-    request = default_request(project, LoopKind.AGENT)
-
-    assert request.loop is LoopKind.AGENT
-    assert request.project_root == project.root
-    assert request.objective  # the example ships an objective
-    # Every bundle path the example declares exists, so it validates clean.
-    assert validate(request) == []
-
-
-def test_validate_reports_missing_input_and_evaluator(repo_root: Path, tmp_path: Path) -> None:
-    """`validate` collects a diagnostic per missing on-disk path, not just the first."""
-    request = default_request(Project.open(repo_root / _EXAMPLE), LoopKind.AGENT)
-    broken_bundle = request.input_bundle.model_copy(
-        update={
-            "root": tmp_path / "missing-root",
-            "evaluator_path": tmp_path / "missing-root" / "evaluator.py",
-        }
+def _request(root: Path) -> RunRequest:
+    bundle = load_input_bundle(root)
+    return RunRequest(
+        project_root=root,
+        orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
+        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        input_bundle=bundle,
+        objective=bundle.objective,
     )
-    broken = request.model_copy(update={"input_bundle": broken_bundle})
 
-    diagnostics = validate(broken)
 
-    assert {d.code for d in diagnostics} == {"missing_input", "missing_evaluator"}
-    assert all(d.stage == "input_validation" for d in diagnostics)
+def test_canonical_request_builds_a_runnable_request(repo_root: Path) -> None:
+    project = Project.open(repo_root / _EXAMPLE)
+    request = _request(project.root)
+
+    assert request.orchestration.id == "multi-agent"
+    assert request.project_root == project.root
+    assert request.objective

@@ -37,7 +37,7 @@ from vibesys.api import CoreEvent
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from server.journal import EventJournal
+    from server.journal import WireJournal
 
 
 @dataclass(frozen=True)
@@ -84,7 +84,7 @@ class ActiveAgentExecution(BaseModel):
 class ExecutionTracker:
     """Own live execution identity, activity, and lifecycle event emission."""
 
-    def __init__(self, condition: threading.Condition, journal: EventJournal) -> None:
+    def __init__(self, condition: threading.Condition, journal: WireJournal) -> None:
         """Initialize live execution state over the shared server condition."""
         self._condition = condition
         self._journal = journal
@@ -346,7 +346,7 @@ class ExecutionTracker:
         """Track a core-minted execution start; no-op if already tracked.
 
         Core mints the execution id and emits ``AGENT_EXECUTION_STARTED``
-        itself (see ``vibesys.context._RunContext.invoke``); this projects
+        itself (see ``vibesys.orchestration.runtime``); this projects
         that event into the same ``ActiveAgentExecution`` checkpoint
         ``start_locked`` builds. The guard against an already-active id
         covers a caller (``RunController.start_agent_execution``) that has

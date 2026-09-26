@@ -1,0 +1,167 @@
+"""Options, projection, and explicit round control for the multi strategy.
+
+``profile-guided-multi-agent`` is a preset of this strategy: multi with
+``profile_guided`` options required instead of forbidden. It keeps its own
+orchestration ID, state namespace, and projector so existing runs and CLI
+invocations are unaffected; ``session.py`` composes
+``vibesys.search.profile_focus`` only when ``options.profile_guided`` is set.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from vibesys.context import RunSetup, RunStartHints
+from vibesys.errors import InvalidStrategyOptionsError
+from vibesys.loops.agent_options import (
+    AgentOrchestrationOptions,
+    UnsupportedAgentOrchestrationError,
+    compare_resume_descriptors,
+    options_from_descriptor,
+)
+from vibesys.loops.hypothesis_readmodel import project_run_view
+from vibesys.loops.multi.session import MultiSession
+from vibesys.orchestration import memory
+from vibesys.orchestration.view import RunStatus, RunView
+from vibesys.search.hypothesis.attempts import AttemptDecision
+from vibesys.search.hypothesis.state import HypothesisState, load_hypothesis_state
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from vibesys.orchestration.runtime import RunContext
+    from vs_project.api import OrchestrationDescriptor, Project
+
+MULTI_ID = "multi-agent"
+PROFILE_MULTI_ID = "profile-guided-multi-agent"
+ORCHESTRATION_ID = MULTI_ID
+
+
+def _load_options(
+    descriptor: OrchestrationDescriptor, *, orchestration_id: str, requires_profile: bool
+) -> AgentOrchestrationOptions:
+    if descriptor.id != orchestration_id:
+        raise UnsupportedAgentOrchestrationError(descriptor.id, descriptor.config_version)
+    options = options_from_descriptor(descriptor)
+    if requires_profile:
+        if options.profile_guided is None:
+            raise InvalidStrategyOptionsError(orchestration_id, "profile_guided", None)
+    elif options.profile_guided is not None:
+        raise InvalidStrategyOptionsError(
+            orchestration_id, "profile_guided", options.profile_guided
+        )
+    if options.interface not in {"inprocess", "service"}:
+        raise InvalidStrategyOptionsError(orchestration_id, "interface", options.interface)
+    if options.memory_layout not in memory.MEMORY_LAYOUTS:
+        raise InvalidStrategyOptionsError(orchestration_id, "memory_layout", options.memory_layout)
+    return options
+
+
+def load_options(descriptor: OrchestrationDescriptor) -> AgentOrchestrationOptions:
+    """Validate the plain multi strategy's identity and settings."""
+    return _load_options(descriptor, orchestration_id=MULTI_ID, requires_profile=False)
+
+
+def load_profile_options(descriptor: OrchestrationDescriptor) -> AgentOrchestrationOptions:
+    """Validate the profile-guided-multi preset's identity and settings."""
+    return _load_options(descriptor, orchestration_id=PROFILE_MULTI_ID, requires_profile=True)
+
+
+@dataclass(frozen=True, slots=True)
+class MultiProjector:
+    """Project the strategy's persisted state into the public run view."""
+
+    namespace: str = "multi"
+    orchestration_id: str = MULTI_ID
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Project one persisted run into a generic view envelope."""
+        state = (
+            load_hypothesis_state(project, run_id, namespace=self.namespace) or HypothesisState()
+        )
+        return project_run_view(
+            state,
+            run_id=run_id,
+            status=status,
+            experiment_revision=state.experiment_revision,
+            loop=loop,
+        )
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project a just-committed strategy state."""
+        if namespace != self.namespace or not isinstance(state, HypothesisState):
+            return None
+        return project_run_view(
+            state,
+            run_id=run_id,
+            status=RunStatus.ACTIVE,
+            experiment_revision=state.experiment_revision,
+            loop=self.orchestration_id,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileMultiProjector(MultiProjector):
+    """``MultiProjector`` bound to the profile-guided-multi preset's namespace."""
+
+    namespace: str = "profile_multi"
+    orchestration_id: str = PROFILE_MULTI_ID
+
+
+class MultiAgentOrchestrator:
+    """Run the multi-agent strategy."""
+
+    orchestration_id = MULTI_ID
+    state_namespace = "multi"
+    requires_profile = False
+
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        """Validate the descriptor before any resources are opened."""
+        self.options = _load_options(
+            descriptor,
+            orchestration_id=self.orchestration_id,
+            requires_profile=self.requires_profile,
+        )
+        self.setup = RunSetup(
+            state_namespace=self.state_namespace,
+            state_slots={"state.json": HypothesisState},
+            resume_policy=compare_resume_descriptors,
+            start_hints=RunStartHints(
+                max_rounds=self.options.max_rounds,
+                expected_roles=("orchestrator", "implementer", "judge"),
+            ),
+            memory_paths=memory.declared_memory_paths(),
+        )
+
+    async def run(self, ctx: RunContext) -> bool:
+        """Run bounded rounds and commit each completed policy decision."""
+        session = await MultiSession.open(ctx, self.options)
+        try:
+            while session.has_next_round:
+                await ctx.control.boundary()
+                async with session.round_scope():
+                    selected = await session.select_hypothesis()
+                    for retry in session.remaining_attempts(selected):
+                        await session.begin_attempt(selected, retry)
+                        if not await session.implement(selected):
+                            continue
+                        decision = await session.review(selected)
+                        if decision is AttemptDecision.FINISH:
+                            break
+                        if decision is AttemptDecision.OFFICIAL and await session.official_gates(
+                            selected
+                        ):
+                            break
+                    await session.commit_round(selected)
+            return await session.finish()
+        finally:
+            await session.close()
+
+
+class ProfileGuidedMultiAgentOrchestrator(MultiAgentOrchestrator):
+    """Run multi with profile-guided component attribution turned on."""
+
+    orchestration_id = PROFILE_MULTI_ID
+    state_namespace = "profile_multi"
+    requires_profile = True

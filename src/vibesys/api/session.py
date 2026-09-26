@@ -9,19 +9,15 @@ needs.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.api._agent_state import load_agent_run_state
-from vibesys.api._dispatch import dispatch_loop, resolved_run_id
-from vibesys.api._readmodel import project_committed_run_view, project_run_view
-from vibesys.api.contracts import LoopKind, RunResult, RunStatus
+from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
-from vibesys.loops.agent.model import AgentRunState
-from vibesys.loops.roles import expected_agent_roles
-from vibesys.profilers import ProfilerKind
+from vibesys.orchestration._common import resolved_run_id
+from vibesys.orchestration.contracts import project_run
+from vibesys.orchestration.runner import run_orchestration
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import MCPServerSpec, expose_as_tools
@@ -34,8 +30,10 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vibesys.api.contracts import AgentEnvironment, EventSink, RunRequest, RunView
+    from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
     from vibesys.config import Config
+    from vibesys.orchestration.contracts import OrchestrationRegistry
+    from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
@@ -89,7 +87,13 @@ class RunControl(Protocol):
 class RunAgentHost(Protocol):
     """Capability to open a live agent-construction environment for this run."""
 
-    def open_agent_environment(self, *, mounts: tuple[HostResource, ...] = ()) -> AgentEnvironment:
+    def open_agent_environment(
+        self,
+        *,
+        mounts: tuple[HostResource, ...] = (),
+        agent_backend: str | None = None,
+        cli_provider: str | None = None,
+    ) -> AgentEnvironment:
         """Open this run's environment for agent construction, plus extra *mounts*.
 
         *mounts* are folded into the run's own environment request the same
@@ -97,6 +101,8 @@ class RunAgentHost(Protocol):
         server-evidence mount today: each becomes an
         `vibesys.domains.environment.EnvironmentBindMount` at the mount's own
         `HostResource.agent_path` (or the host path unchanged, when unset).
+        Backend and provider default to the run's selection; a spawned agent
+        may override them so container authentication matches its `AgentSpec`.
         """
         ...
 
@@ -115,7 +121,7 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
     def on_committed_view(
         self, listener: Callable[[RunView, tuple[str, ...] | None], None]
     ) -> None:
-        """Register the sole application projection of freshly committed state."""
+        """Register a listener for policy views and policy-defined changed keys."""
         ...
 
     def on_run_resources(self, listener: Callable[[RunResourceHandoff], None]) -> None:
@@ -123,24 +129,30 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
         ...
 
 
-def create_session(request: RunRequest, *, sink: EventSink) -> RunSession:
+def create_session(
+    request: RunRequest,
+    *,
+    sink: EventSink,
+    registry: OrchestrationRegistry | None = None,
+) -> RunSession:
     """Build a session for *request*, publishing its event stream to *sink*.
 
     Headless calls `create_session(req, sink=renderer.handle).start()`
     then `await session.await_result()`; server does the same with its own
     presentation sink, and reaches optional committed-state/resource-handoff
     seams through `on_committed_view`/`on_run_resources` instead of an
-    injected integration object.
+    injected integration object. Pass a registry to execute a custom
+    orchestration ID; otherwise the built-in registry is used.
     """
-    return _LocalRunSession(request, sink=sink)
+    return _LocalRunSession(request, sink=sink, registry=registry)
 
 
 class _LocalRunSession:
     """`RunSession` that runs one loop function in-process via `asyncio.to_thread`.
 
     `RunControl` methods write to `self._integration.control`, the same
-    `vibesys.run.run_control.RunControlChannel` `_RunContext.invoke` reads at
-    each invocation boundary (see `vibesys.context._RunContext.invoke`).
+    `vibesys.run.run_control.RunControlChannel` consumed by run boundaries
+    and agent turns in `vibesys.orchestration.runtime`.
     """
 
     def __init__(
@@ -148,9 +160,21 @@ class _LocalRunSession:
         request: RunRequest,
         *,
         sink: EventSink,
+        registry: OrchestrationRegistry | None,
     ) -> None:
         self._request = request
         self._sink = sink
+        if registry is None:
+            # lint-waiver: LW-020004 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
+            from vibesys.loops.registry import (  # noqa: PLC0415
+                built_in_orchestrations,
+            )
+
+            registry = built_in_orchestrations()
+        self._registry = registry
+        self._registration = self._registry.resolve(request.orchestration.id)
+        # Constructor validation precedes integration and run resource setup.
+        self._policy = self._registration.orchestrator(request.orchestration)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -168,7 +192,7 @@ class _LocalRunSession:
     def on_committed_view(
         self, listener: Callable[[RunView, tuple[str, ...] | None], None]
     ) -> None:
-        """Register the sole application projection of freshly committed state."""
+        """Register a listener for policy views and policy-defined changed keys."""
         self._committed_view_listener = listener
 
     def _handle_committed_state(
@@ -177,10 +201,14 @@ class _LocalRunSession:
         state: BaseModel,
         changed_keys: tuple[str, ...] | None,
     ) -> None:
-        if namespace != "agent" or self._committed_view_listener is None:
+        if self._committed_view_listener is None:
             return
-        view = project_committed_run_view(state, run_id=resolved_run_id(self._request))
-        self._committed_view_listener(view, changed_keys)
+        projector = self._registration.projector
+        if projector is None:
+            return
+        view = projector.project_committed(namespace, state, run_id=self._run_id())
+        if view is not None:
+            self._committed_view_listener(view, changed_keys)
 
     def on_run_resources(self, listener: Callable[[RunResourceHandoff], None]) -> None:
         """Register the sole application consumer of this run's resource handoff."""
@@ -191,7 +219,19 @@ class _LocalRunSession:
         if self._resource_listener is not None:
             self._resource_listener(handoff)
 
-    def open_agent_environment(self, *, mounts: tuple[HostResource, ...] = ()) -> AgentEnvironment:
+    def _run_id(self) -> str:
+        """Use the provisioned ID once a custom runtime has created its run."""
+        if self._resource_handoff is not None:
+            return self._resource_handoff.run_id
+        return resolved_run_id(self._request)
+
+    def open_agent_environment(
+        self,
+        *,
+        mounts: tuple[HostResource, ...] = (),
+        agent_backend: str | None = None,
+        cli_provider: str | None = None,
+    ) -> AgentEnvironment:
         """Open this run's environment for agent construction, plus extra *mounts*.
 
         Reads the run-resource facts this session already captured from its
@@ -211,6 +251,16 @@ class _LocalRunSession:
             raise RuntimeError(message)
         request = replace(
             handoff.environment_request,
+            agent_backend=(
+                agent_backend
+                if agent_backend is not None
+                else handoff.environment_request.agent_backend
+            ),
+            cli_provider=(
+                cli_provider
+                if cli_provider is not None
+                else handoff.environment_request.cli_provider
+            ),
             environment_bind_mounts=(
                 *handoff.environment_request.environment_bind_mounts,
                 *(_environment_bind_mount(mount) for mount in mounts),
@@ -243,23 +293,30 @@ class _LocalRunSession:
         self._unsubscribe = self._integration.events.subscribe(self._sink)
 
     async def await_result(self) -> RunResult:
-        """Run the selected loop function on a worker thread and await its outcome."""
-        return await asyncio.to_thread(self._run_sync)
+        """Run the selected policy and return its terminal outcome."""
+        return await self._run()
 
-    def _run_sync(self) -> RunResult:
+    async def _run(self) -> RunResult:
         request = self._request
-        self._integration.events.emit(
-            CoreEventType.RUN_STARTED,
-            status=EventStatus.ACTIVE,
-            data=RunStartedData(
-                outer_loop=request.loop.value,
-                input=str(request.input_bundle.root),
-                max_rounds=_max_rounds_for_started_event(request),
-                expected_roles=_expected_roles(request),
-            ),
-        )
+        hints = self._policy.setup.start_hints
         try:
-            succeeded = dispatch_loop(request, self._integration)
+            self._integration.events.emit(
+                CoreEventType.RUN_STARTED,
+                status=EventStatus.ACTIVE,
+                data=RunStartedData(
+                    outer_loop=request.orchestration_id,
+                    input=str(request.input_bundle.root),
+                    max_rounds=hints.max_rounds if hints is not None else None,
+                    expected_roles=hints.expected_roles if hints is not None else (),
+                ),
+            )
+            succeeded = await run_orchestration(
+                request,
+                self._integration,
+                self._policy,
+                open_agent_environment=self.open_agent_environment,
+                projector=self._registration.projector,
+            )
         except BaseException as exc:
             self._status = RunStatus.FAILED
             self._integration.events.emit(
@@ -275,8 +332,8 @@ class _LocalRunSession:
                 status=EventStatus.COMPLETED if succeeded else EventStatus.FAILED,
             )
             return RunResult(
-                run_id=resolved_run_id(request),
-                loop=request.loop,
+                run_id=self._run_id(),
+                loop=request.orchestration_id,
                 succeeded=succeeded,
             )
         finally:
@@ -292,15 +349,12 @@ class _LocalRunSession:
         only go stale. `status` reflects `_run_sync`'s own progress
         (`ACTIVE` until it returns or raises), not a re-derivation from state.
         """
-        run_id = resolved_run_id(self._request)
-        project = Project.open(self._request.project_root)
-        state = load_agent_run_state(project, run_id) or AgentRunState()
-        return project_run_view(
-            state,
-            run_id=run_id,
+        return project_run(
+            self._registration,
+            Project.open(self._request.project_root),
+            run_id=self._run_id(),
             status=self._status,
-            experiment_revision=state.experiment_revision,
-            loop=self._request.loop,
+            loop=self._request.orchestration_id,
         )
 
     def workspace(self) -> HostResource:
@@ -410,26 +464,3 @@ def _environment_bind_mount(mount: HostResource) -> EnvironmentBindMount:
         mount.agent_path if mount.agent_path is not None else str(mount.path),
         read_only=mount.access is HostResourceAccess.READ_ONLY,
     )
-
-
-def _max_rounds_for_started_event(request: RunRequest) -> int:
-    """Match today's `RUN_STARTED.max_rounds`: the loop's round budget, or 1.
-
-    `dispatch()` in `entrypoints/cli.py` derived this via
-    `getattr(args, "max_rounds", getattr(args, "max_iterations", 1))`. Evolve
-    has no `--max-rounds` flag, so that chain always fell through to `1` for
-    evolve; agent/plain reported their real `--max-rounds` value. Preserved
-    here rather than "fixed" to keep this an extract-and-reroute.
-    """
-    if request.loop in (LoopKind.AGENT, LoopKind.PROFILE_GUIDED, LoopKind.PLAIN):
-        return request.max_rounds if request.max_rounds is not None else 1
-    return 1
-
-
-def _expected_roles(request: RunRequest) -> tuple[str, ...]:
-    roles = expected_agent_roles(request.loop.value)
-    if request.profiler_kind is ProfilerKind.NONE:
-        # A disabled profiler never runs (see loop.py's profiler-kind gate),
-        # so don't seed a placeholder for it.
-        return tuple(role for role in roles if role != "profiler")
-    return roles

@@ -3,23 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
-    from vs_loop_state.api import RoundRecord
     from vs_project.api import Project, StateNamespace
-
-
-class RunStateNamespace(StrEnum):
-    """Framework-owned state namespaces for one run."""
-
-    AGENT = "agent"
-    EVOLVE = "evolve"
-    PLAIN = "plain"
-    RUNTIME = "runtime"
-    SKYPILOT = "skypilot"
 
 
 @dataclass(frozen=True)
@@ -43,18 +31,14 @@ class RunState:
             _exception_message = f"run state ID does not match Git history run ID: {self.run_id!r} != {self.git.run_id!r}"
             raise ValueError(_exception_message)
 
-    def portable(self, namespace: RunStateNamespace) -> StateNamespace:
+    def portable(self, namespace: str) -> StateNamespace:
         """Return the portable state handle for ``namespace``."""
-        return self.project.state.portable_namespace(self.run_id, namespace.value)
+        return self.project.state.portable_namespace(self.run_id, namespace)
 
-    def local(self, namespace: RunStateNamespace) -> StateNamespace:
+    def local(self, namespace: str) -> StateNamespace:
         """Return the machine-local state handle for ``namespace``."""
-        return self.project.state.local_namespace(self.run_id, namespace.value)
+        return self.project.state.local_namespace(self.run_id, namespace)
 
     def commit(self, label: str, namespace: StateNamespace) -> None:
         """Commit the exact current contents of one portable namespace."""
         self.git.snapshot_framework_state(label, namespace.snapshot())
-
-    def completed_rounds(self) -> list[RoundRecord]:
-        """Load the validated completed-round history for this run."""
-        return self.project.state.load_rounds(self.run_id)

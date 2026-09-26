@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.api._agent_state import load_agent_run_state
-from vibesys.api._readmodel import project_run_view
-from vibesys.api.contracts import LoopKind, RunStatus
-from vibesys.loops.agent.model import AgentRunState
+from vibesys.api.contracts import RunStatus
+from vibesys.orchestration.contracts import project_run
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.api.contracts import RunView
-    from vs_project.api import Project, RunManifest
+    from vibesys.orchestration.contracts import OrchestrationRegistry
+    from vs_project.api import OrchestrationRunManifest, Project, StateSnapshot
 
 
 class RunStore(Protocol):
@@ -37,9 +36,34 @@ class RunStore(Protocol):
         ...
 
 
-def open_run_store(project: Project) -> RunStore:
+def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open a read-only run history store for *project*."""
-    return _LocalRunStore(project)
+    if registry is None:
+        # lint-waiver: LW-020005 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
+        from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
+
+        registry = built_in_orchestrations()
+    return _LocalRunStore(project, registry=registry)
+
+
+def portable_history_snapshots(
+    project: Project, run_id: str, *, registry: OrchestrationRegistry | None = None
+) -> tuple[StateSnapshot, ...]:
+    """Read the portable namespaces selected by the run's policy."""
+    manifest = project.state.load_run(run_id)
+    policy_id = manifest.orchestration.id
+    if registry is None:
+        # lint-waiver: LW-020006 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
+        from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
+
+        registry = built_in_orchestrations()
+    selected = registry
+    try:
+        registration = selected.resolve(policy_id)
+    except ValueError:
+        registration = None
+    names = registration.portable_namespaces if registration is not None else ()
+    return tuple(project.state.portable_namespace(run_id, name).snapshot() for name in names)
 
 
 class _LocalRunStore:
@@ -53,8 +77,9 @@ class _LocalRunStore:
     its own session instead.
     """
 
-    def __init__(self, project: Project) -> None:
+    def __init__(self, project: Project, *, registry: OrchestrationRegistry) -> None:
         self._project = project
+        self._registry = registry
 
     def list_runs(self) -> Sequence[RunView]:
         manifests = self._project.state.list_runs()
@@ -77,13 +102,16 @@ class _LocalRunStore:
             purpose=f"recorded workspace for run {run_id!r}",
         )
 
-    def _view(self, manifest: RunManifest) -> RunView:
-        loop = LoopKind(manifest.configuration.outer_loop)
-        state = load_agent_run_state(self._project, manifest.run_id) or AgentRunState()
-        return project_run_view(
-            state,
+    def _view(self, manifest: OrchestrationRunManifest) -> RunView:
+        loop = manifest.orchestration.id
+        try:
+            registration = self._registry.resolve(loop)
+        except ValueError:
+            registration = None
+        return project_run(
+            registration,
+            self._project,
             run_id=manifest.run_id,
             status=RunStatus.UNKNOWN,
-            experiment_revision=state.experiment_revision,
             loop=loop,
         )
