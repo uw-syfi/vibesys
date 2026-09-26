@@ -138,7 +138,20 @@ class TestMain:
             main()
         assert exc_info.value.code == 1
 
-    def test_main_passes_round_args_to_run_loop(self) -> None:
+    @pytest.mark.parametrize(
+        ("tracker_args", "tracker_backend", "tracker_repository"),
+        [
+            ([], "local", None),
+            (
+                ["--tracker-backend", "github", "--tracker-repository", "owner/repo"],
+                "github",
+                "owner/repo",
+            ),
+        ],
+    )
+    def test_main_passes_run_options_to_loop(
+        self, tracker_args: list[str], tracker_backend: str, tracker_repository: str | None
+    ) -> None:
         with (
             patch(
                 "sys.argv",
@@ -150,6 +163,7 @@ class TestMain:
                     "4",
                     "--max-issues-per-perf-eval",
                     "2",
+                    *tracker_args,
                 ],
             ),
             self._patch_config(),
@@ -163,32 +177,9 @@ class TestMain:
             assert request.orchestration.options["max_rounds"] == 7
             assert request.orchestration.options["max_attempts_per_issue"] == 4
             assert request.orchestration.options["max_issues_per_perf_eval"] == 2
-            assert request.orchestration.options["tracker_backend"] == "local"
-            assert request.orchestration.options["tracker_repository"] is None
+            assert request.orchestration.options["tracker_backend"] == tracker_backend
+            assert request.orchestration.options["tracker_repository"] == tracker_repository
             assert request.runs_dir == Path("runs").resolve()
-
-    def test_main_persists_github_tracker_selection(self) -> None:
-        with (
-            patch(
-                "sys.argv",
-                [
-                    *self._BASE_ARGV,
-                    "--tracker-backend",
-                    "github",
-                    "--tracker-repository",
-                    "owner/repo",
-                ],
-            ),
-            self._patch_config(),
-            patch(
-                "entrypoints.cli.loops._execute_run_request",
-                return_value=self._result(succeeded=True),
-            ) as mock_run,
-        ):
-            main()
-            options = mock_run.call_args.args[0].orchestration.options
-            assert options["tracker_backend"] == "github"
-            assert options["tracker_repository"] == "owner/repo"
 
     def test_main_forwards_agent_backend_and_cli_provider(self) -> None:
         with (

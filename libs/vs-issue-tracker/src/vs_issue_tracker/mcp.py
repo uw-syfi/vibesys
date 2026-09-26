@@ -87,7 +87,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
     """Build the standalone MCP server for local JSON or GitHub storage."""
     if args.github_repository is not None:
         if args.store_path is not None:
-            raise ValueError("choose either store_path or --github-repository")  # noqa: TRY003  # tracked: #288
+            raise ValueError("choose either store_path or --github-repository")  # noqa: TRY003  # lint-waiver: LW-920421 [TRY003]; explain the mutually exclusive MCP backend arguments.
         local_path = Path("issues.json")
         tracker = open_issue_tracker(
             "github",
@@ -96,7 +96,7 @@ def build_server(args: argparse.Namespace) -> FastMCP:
         )
     else:
         if args.store_path is None:
-            raise ValueError("store_path is required unless --github-repository is set")  # noqa: TRY003  # tracked: #288
+            raise ValueError("store_path is required unless --github-repository is set")  # noqa: TRY003  # lint-waiver: LW-920422 [TRY003]; explain the missing local backend path.
         tracker = open_issue_tracker("local", local_path=args.store_path)
     policy = CreateIssuePolicy(
         creator=args.creator,

@@ -13,11 +13,12 @@ from vs_issue_tracker.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Any
 
 
 class MemoryGitHubCLI:
     def __init__(self) -> None:
-        self.issues: dict[int, dict[str, object]] = {}
+        self.issues: dict[int, dict[str, Any]] = {}
         self.next_number = 1
         self.labels: set[str] = set()
 

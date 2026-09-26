@@ -32,6 +32,21 @@ _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "issue_queue"
 IssueQueuePhase = Literal["implementer", "judge", "perf_eval"]
 
 
+def _bootstrap_issue_title(objective: str) -> str:
+    """Summarize the task's first objective line for the initial issue title."""
+    summary = next(
+        (line.strip().lstrip("# ").strip() for line in objective.splitlines() if line.strip()),
+        "",
+    )
+    for prefix in ("Objective -", "Objective:"):
+        if summary.lower().startswith(prefix.lower()):
+            summary = summary[len(prefix) :].strip()
+            break
+    if not summary:
+        summary = "implement the task objective"
+    return f"Initial task: {summary[:100]}"
+
+
 class ImplementerUserContext(BaseModel):
     """Context for issue_queue's implementer ``user.j2`` (the turn's message text)."""
 
@@ -56,6 +71,7 @@ class BootstrapContext(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    objective: str
     reference_path: str
     accuracy_command: str | None
     benchmark_command: str | None
@@ -75,7 +91,7 @@ if TYPE_CHECKING:
     from vibesys.runtime import AgentHandle
 
 
-def build_issue_mcp_spec(  # noqa: PLR0913  # tracked: #288
+def build_issue_mcp_spec(  # noqa: PLR0913  # lint-waiver: LW-920424 [PLR0913]; keep loop wiring explicit at the CLI-to-MCP boundary.
     *,
     store_relpath: str | None,
     creator: str,
@@ -103,12 +119,12 @@ def build_issue_mcp_spec(  # noqa: PLR0913  # tracked: #288
         entrypoint_args += ["--cap", str(cap)]
     if tracker_backend == "github":
         if tracker_repository is None:
-            raise ValueError("tracker_repository is required for the GitHub issue MCP server")  # noqa: TRY003  # tracked: #288
+            raise ValueError("tracker_repository is required for the GitHub issue MCP server")  # noqa: TRY003  # lint-waiver: LW-920425 [TRY003]; identify the missing remote repository setting.
         entrypoint_module = "vs_issue_tracker.mcp"
         entrypoint_args += ["--github-repository", tracker_repository]
     else:
         if store_relpath is None:
-            raise ValueError("store_relpath is required for the local issue MCP server")  # noqa: TRY003  # tracked: #288
+            raise ValueError("store_relpath is required for the local issue MCP server")  # noqa: TRY003  # lint-waiver: LW-920426 [TRY003]; identify the missing local persistence path.
         entrypoint_module = "vs_issue_tracker.mcp"
         entrypoint_args.insert(0, store_relpath)
     descriptor = expose_as_tools(
@@ -305,7 +321,9 @@ class IssueQueueRun:
         """Create the first candidate-facing issue and commit the cursor."""
         if self.state.bootstrap_done:
             return
+        objective = self.host.request.objective or self.host.request.input_bundle.objective
         context = BootstrapContext(
+            objective=objective,
             reference_path=self.host.environment.reference_path,
             accuracy_command=self.host.environment.view.paths.accuracy_command,
             benchmark_command=self.host.environment.view.paths.benchmark_command,
@@ -314,7 +332,7 @@ class IssueQueueRun:
         description = self.prompt.render("bootstrap_issue.j2", **context.model_dump())
         issue = self.board.create(
             type=IssueType.FEATURE,
-            title="Build FastAPI inference server for the reference model",
+            title=_bootstrap_issue_title(objective),
             description=description,
             created_by="loop:bootstrap",
             iteration=max(self.state.round_idx + 1, 1),

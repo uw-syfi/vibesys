@@ -29,16 +29,16 @@ class IssueQueueOptions(BaseModel):
     def _validate_repository(cls, value: str | None) -> str | None:
         """Require an unqualified GitHub OWNER/REPOSITORY slug."""
         if value is not None and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value) is None:
-            raise ValueError("tracker_repository must use OWNER/REPOSITORY format")  # noqa: TRY003  # tracked: #288
+            raise ValueError("tracker_repository must use OWNER/REPOSITORY format")  # noqa: TRY003  # lint-waiver: LW-920427 [TRY003]; state the required external repository syntax.
         return value
 
     @model_validator(mode="after")
     def _validate_backend(self) -> IssueQueueOptions:
         """Require the repository setting to match the selected backend."""
         if self.tracker_backend == "github" and self.tracker_repository is None:
-            raise ValueError("tracker_repository is required when tracker_backend is github")  # noqa: TRY003  # tracked: #288
+            raise ValueError("tracker_repository is required when tracker_backend is github")  # noqa: TRY003  # lint-waiver: LW-920428 [TRY003]; name the GitHub backend's required configuration.
         if self.tracker_backend == "local" and self.tracker_repository is not None:
-            raise ValueError("tracker_repository is only valid when tracker_backend is github")  # noqa: TRY003  # tracked: #288
+            raise ValueError("tracker_repository is only valid when tracker_backend is github")  # noqa: TRY003  # lint-waiver: LW-920429 [TRY003]; reject remote-only configuration for the local backend.
         return self
 
 

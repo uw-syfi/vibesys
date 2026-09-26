@@ -2,7 +2,7 @@
 
 ## Iter 1 — Implementer on issue #1
 
-**Issue**: [feature] Build FastAPI inference server for the reference model
+**Issue**: [feature] Initial task: Maximize tok/s throughput.
 
 **Summary**: Built the inference server.
 

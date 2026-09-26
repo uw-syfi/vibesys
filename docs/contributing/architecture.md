@@ -61,6 +61,7 @@ graph TD
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
+    vs_issue_tracker --> vs_github
 ```
 
 ## Core layers
@@ -645,5 +646,6 @@ graph TD
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
+    vs_issue_tracker --> vs_github
 ```
 [//]: # (tach-graph:end)

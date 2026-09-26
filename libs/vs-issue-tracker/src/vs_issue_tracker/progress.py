@@ -6,12 +6,19 @@ import json
 from pathlib import Path
 from typing import Literal, Protocol
 
-from vs_github.api import GitHubCLI
+from vs_github.api import GitHubCLI, GitHubClient
 
 _HEADER = "# Experiment Progress\n\n"
 _LABEL = "vibesys:progress-log"
 _ENTRY_START = "<!-- vibesys:progress-entry:v1\n"
 _ENTRY_END = "\n-->"
+
+
+class _InvalidIssuePayloadError(ValueError):
+    """Raised when GitHub returns an issue snapshot without a valid number."""
+
+    def __init__(self, value: object) -> None:
+        super().__init__(f"GitHub issue number must be an integer, got {value!r}")
 
 
 class ProgressLog(Protocol):
@@ -49,7 +56,7 @@ class FileProgressLog:
 class GitHubProgressLog:
     """Run notes stored in comments on a separate tagged GitHub issue."""
 
-    def __init__(self, repository: str, run_id: str, *, cli: GitHubCLI | None = None) -> None:
+    def __init__(self, repository: str, run_id: str, *, cli: GitHubClient | None = None) -> None:
         """Bind the progress log to the GitHub issue associated with this run."""
         self._cli = cli or GitHubCLI()
         self._cli.ensure_authenticated()
@@ -61,6 +68,8 @@ class GitHubProgressLog:
     def read(self) -> str:
         """Return the header and all valid progress-entry comments."""
         comments = self._cli.view_issue(self._repository, self._issue_id).get("comments", [])
+        if not isinstance(comments, list):
+            return _HEADER
         entries = [_progress_from_comment(item) for item in comments if isinstance(item, dict)]
         return _HEADER + "".join(entry for entry in entries if entry is not None)
 
@@ -74,7 +83,7 @@ class GitHubProgressLog:
     def _find_or_create(self) -> int:
         for issue in self._cli.list_issues(self._repository):
             if issue.get("title") == self._title and _LABEL in _label_names(issue.get("labels")):
-                return int(issue["number"])
+                return _number(issue.get("number"))
         return self._cli.create_issue(
             self._repository,
             title=self._title,
@@ -94,7 +103,7 @@ def open_progress_log(
     if backend == "local":
         return FileProgressLog(local_path)
     if repository is None:
-        raise ValueError("repository is required for the GitHub progress backend")  # noqa: TRY003  # tracked: #288
+        raise ValueError("repository is required for the GitHub progress backend")  # noqa: TRY003  # lint-waiver: LW-920423 [TRY003]; name the missing progress backend configuration field.
     return GitHubProgressLog(repository, run_id)
 
 
@@ -107,6 +116,12 @@ def _progress_from_comment(comment: dict[str, object]) -> str | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, str) else None
+
+
+def _number(value: object) -> int:
+    if not isinstance(value, (int, str)):
+        raise _InvalidIssuePayloadError(value)
+    return int(value)
 
 
 def _label_names(value: object) -> set[str]:

@@ -107,7 +107,7 @@ class GitHubCLI:
         )
         value = _decode_json(result.stdout, "issue list")
         if not isinstance(value, list):
-            raise GitHubCLIError("GitHub CLI returned a non-list issue response.")  # noqa: TRY003  # tracked: #288
+            raise GitHubCLIError("GitHub CLI returned a non-list issue response.")  # noqa: TRY003  # lint-waiver: LW-920410 [TRY003]; identify malformed output at the command boundary.
         return [item for item in value if isinstance(item, dict)]
 
     def view_issue(self, repository: str, issue_number: int) -> dict[str, object]:
@@ -125,7 +125,7 @@ class GitHubCLI:
         )
         value = _decode_json(result.stdout, "issue view")
         if not isinstance(value, dict):
-            raise GitHubCLIError("GitHub CLI returned a non-object issue response.")  # noqa: TRY003  # tracked: #288
+            raise GitHubCLIError("GitHub CLI returned a non-object issue response.")  # noqa: TRY003  # lint-waiver: LW-920411 [TRY003]; identify malformed output at the command boundary.
         return value
 
     def create_issue(self, repository: str, *, title: str, body: str, labels: Sequence[str]) -> int:
@@ -137,7 +137,7 @@ class GitHubCLI:
         try:
             return int(result.stdout.strip().rsplit("/", 1)[-1])
         except ValueError as exc:
-            raise GitHubCLIError("GitHub CLI did not return the created issue URL.") from exc  # noqa: TRY003  # tracked: #288
+            raise GitHubCLIError("GitHub CLI did not return the created issue URL.") from exc  # noqa: TRY003  # lint-waiver: LW-920412 [TRY003]; report missing creation output as a CLI contract error.
 
     def edit_issue(
         self,
@@ -209,4 +209,4 @@ def _decode_json(raw: str, operation: str) -> object:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise GitHubCLIError(f"GitHub CLI returned invalid JSON for {operation}.") from exc  # noqa: TRY003  # tracked: #288
+        raise GitHubCLIError(f"GitHub CLI returned invalid JSON for {operation}.") from exc  # noqa: TRY003  # lint-waiver: LW-920413 [TRY003]; report malformed command output with its operation.

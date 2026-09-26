@@ -134,8 +134,8 @@
       "model": null,
       "provider": "fake",
       "stage": "implementer",
-      "system_prompt": "<text len=9149 sha256=f4fbc1eb027beea0>",
-      "user_prompt": "<text len=408 sha256=48e68982a2f6cc92>"
+      "system_prompt": "<text len=1609 sha256=85bcf834d91cb586>",
+      "user_prompt": "<text len=394 sha256=b82772132ac26436>"
     },
     "round_label": "impl issue #1 att1",
     "status": "active",
@@ -158,8 +158,8 @@
     "agent_kind": "implementer",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=9149 sha256=f4fbc1eb027beea0>",
-      "user_prompt": "<text len=408 sha256=48e68982a2f6cc92>"
+      "system_prompt": "<text len=1609 sha256=85bcf834d91cb586>",
+      "user_prompt": "<text len=394 sha256=b82772132ac26436>"
     },
     "round_label": "impl issue #1 att1",
     "status": "active",
@@ -291,8 +291,8 @@
       "model": null,
       "provider": "fake",
       "stage": "judge",
-      "system_prompt": "<text len=13853 sha256=8f186d1dcf6a3838>",
-      "user_prompt": "<text len=601 sha256=6892cd434336e79b>"
+      "system_prompt": "<text len=3183 sha256=22d1be0936e8d12e>",
+      "user_prompt": "<text len=587 sha256=ecb1689c7e3fdde7>"
     },
     "round_label": "judge issue #1 att1",
     "status": "active",
@@ -315,8 +315,8 @@
     "agent_kind": "judge",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=13853 sha256=8f186d1dcf6a3838>",
-      "user_prompt": "<text len=601 sha256=6892cd434336e79b>"
+      "system_prompt": "<text len=3183 sha256=22d1be0936e8d12e>",
+      "user_prompt": "<text len=587 sha256=ecb1689c7e3fdde7>"
     },
     "round_label": "judge issue #1 att1",
     "status": "active",
@@ -461,7 +461,7 @@
       "model": null,
       "provider": "fake",
       "stage": "perf_eval",
-      "system_prompt": "<text len=15345 sha256=b2dfa0f16d0eca51>",
+      "system_prompt": "<text len=14609 sha256=48991c4de5c73969>",
       "user_prompt": "<text len=322 sha256=678e4c0052fcf09d>"
     },
     "round_label": "perf_eval iter 1",
@@ -485,7 +485,7 @@
     "agent_kind": "perf_eval",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=15345 sha256=b2dfa0f16d0eca51>",
+      "system_prompt": "<text len=14609 sha256=48991c4de5c73969>",
       "user_prompt": "<text len=322 sha256=678e4c0052fcf09d>"
     },
     "round_label": "perf_eval iter 1",

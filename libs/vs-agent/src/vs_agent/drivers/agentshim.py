@@ -178,9 +178,15 @@ def _resolve_binary_path(binary: str, env: Mapping[str, str]) -> str | None:
     ``CliNotFoundError`` with the provider's name attached.
     """
     try:
-        return agentshim.HostCommandExecutor().find_binary(binary, env)
+        return _find_host_binary(binary, env)
     except agentshim.CliNotFoundError:
         return None
+
+
+def _find_host_binary(binary: str, env: Mapping[str, str]) -> str:
+    """Resolve a host CLI symlink before passing its path into confinement."""
+    path = agentshim.HostCommandExecutor().find_binary(binary, env)
+    return str(Path(path).resolve())
 
 
 def _bare_binary_name(name: str, env: Mapping[str, str]) -> str:
@@ -762,7 +768,7 @@ class AgentShimDriver:
         if self._docker_sandboxes is not None:
             return self._docker_sandbox_for(spec), _bare_binary_name
         env = self._unconfined_host_env(spec)
-        return self._host_sandbox(spec, env), None
+        return self._host_sandbox(spec, env), _find_host_binary
 
     def _unconfined_host_env(self, spec: AgentSessionSpec) -> dict[str, str]:
         """Return the host session environment before any sandbox is applied.
