@@ -1,4 +1,4 @@
-benchmark = "examples/model-serving/qwen3.6-35b-a3b-2xh100/benchmark/benchmark.py"
+benchmark = "resources/evaluators/request-factory/fixed_text.py"
 model = "cpu-smoke-model"
 benchmark_args = [
   "--request-count", "8",
@@ -7,7 +7,22 @@ benchmark_args = [
   "--concurrency", "2",
 ]
 response_style = "usage"
-failure_message_contains = "failed_steps"
+
+[[failure_cases]]
+mode = "http"
+message_contains = "failed_steps"
+
+[[failure_cases]]
+mode = "malformed-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "truncated-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "output-mismatch"
+message_contains = "output_mismatch_steps"
 
 [[request_shapes]]
 input_tokens = 16
