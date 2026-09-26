@@ -180,7 +180,7 @@ def test_budget_increase_on_resume_requires_clean_workspace(tmp_path: Path) -> N
 def test_phase_ordering_and_issue_board_tool_scoping(tmp_path: Path) -> None:
     """impl -> judge -> perf_eval, with per-phase issue-board tool access.
 
-    Only judge and perf_eval get the issue-board MCP tool (scoped by
+    Only judge and perf_eval get the issue tracker tools (scoped by
     creator/cap/allowed-types); the implementer works from the issue
     inlined in its prompt and gets no tool access.
     """
@@ -213,10 +213,7 @@ def test_phase_ordering_and_issue_board_tool_scoping(tmp_path: Path) -> None:
     }
 
     perf_call = fake.calls_for("perf_eval")[0]
-    assert "Use only the tools exposed by the `vibesys-issues` MCP server" in (
-        perf_call.system_prompt
-    )
-    assert "bypass the run's selected tracker backend" in perf_call.system_prompt
+    assert "Use only the issue tracker tools provided for this turn" in perf_call.system_prompt
     assert perf_call.mcp_servers
     perf_spec = perf_call.mcp_servers[0]
     perf_args = _flags(perf_spec.args)

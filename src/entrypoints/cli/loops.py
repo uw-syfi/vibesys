@@ -33,6 +33,7 @@ from vibesys.api.request import (
     validate_descriptor,
     with_operator_constraints,
 )
+from vs_issue_tracker.api import IssueTrackerConfig
 from vs_project.api import Project
 
 if TYPE_CHECKING:
@@ -274,8 +275,10 @@ def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescripto
         "max_rounds": args.max_rounds,
         "max_attempts_per_issue": args.max_attempts_per_issue,
         "max_issues_per_perf_eval": args.max_issues_per_perf_eval,
-        "tracker_backend": args.tracker_backend,
-        "tracker_repository": args.tracker_repository,
+        "tracker": IssueTrackerConfig.from_backend(
+            args.tracker_backend,
+            repository=args.tracker_repository,
+        ).model_dump(mode="json"),
     }
     return OrchestrationDescriptor(id="plain", config_version=1, options=options)
 

@@ -115,7 +115,7 @@ def test_missing_gh_has_install_guidance() -> None:
 def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
     runner = RecordingRunner(
         [
-            _result(stdout='[{"number": 8}]'),
+            _result(stdout='[[{"number": 8}]]'),
             _result(stdout='{"number": 8}'),
             _result(stdout="https://github.com/owner/repo/issues/9\n"),
             _result(),
@@ -126,7 +126,19 @@ def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
     )
     github = GitHubCLI(_runner=runner)
 
-    assert github.list_issues("owner/repo") == [{"number": 8}]
+    assert github.list_issues("owner/repo") == [
+        {
+            "number": 8,
+            "title": None,
+            "body": None,
+            "state": None,
+            "labels": [],
+            "createdAt": None,
+            "updatedAt": None,
+            "author": None,
+            "url": None,
+        }
+    ]
     assert github.view_issue("owner/repo", 8) == {"number": 8}
     assert (
         github.create_issue("owner/repo", title="title", body="body", labels=["vibesys:type/bug"])
@@ -138,7 +150,7 @@ def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
     github.ensure_label("owner/repo", "vibesys:type/bug")
 
     assert [call[0][1:4] for call in runner.calls] == [
-        ["issue", "list", "--repo"],
+        ["api", "--paginate", "--slurp"],
         ["issue", "view", "8"],
         ["issue", "create", "--repo"],
         ["issue", "edit", "8"],
@@ -146,3 +158,4 @@ def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
         ["issue", "close", "8"],
         ["label", "create", "vibesys:type/bug"],
     ]
+    assert "repos/owner/repo/issues?state=all&per_page=100" in runner.calls[0][0]

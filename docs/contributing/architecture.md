@@ -42,6 +42,7 @@ graph TD
     entrypoints --> vibesys
     entrypoints --> vs_agent
     entrypoints --> vs_github
+    entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys
     server --> vibesys
@@ -297,6 +298,7 @@ graph TD
     entrypoints --> vibesys.api.evolve
     entrypoints --> vs_agent
     entrypoints --> vs_github
+    entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys.api
     server --> vs_agent

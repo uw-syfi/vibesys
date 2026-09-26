@@ -23,6 +23,7 @@ from vs_issue_tracker.core import (
     IssueTracker,
     IssueType,
 )
+from vs_issue_tracker.errors import IssueTrackerLoadError
 
 if TYPE_CHECKING:
     import builtins
@@ -323,13 +324,15 @@ def _events(comments: object) -> list[IssueEvent]:
         if not isinstance(comment, dict):
             continue
         body = str(comment.get("body", ""))
-        if not body.startswith(_EVENT_START) or not body.endswith(_EVENT_END):
+        if not body.startswith(_EVENT_START):
             continue
+        if not body.endswith(_EVENT_END):
+            raise IssueTrackerLoadError.issue_event_unclosed()
         try:
             value = json.loads(body[len(_EVENT_START) : -len(_EVENT_END)])
             events.append(IssueEvent.model_validate(value))
-        except (json.JSONDecodeError, ValueError):
-            continue
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise IssueTrackerLoadError.invalid_issue_event() from exc
     return events
 
 

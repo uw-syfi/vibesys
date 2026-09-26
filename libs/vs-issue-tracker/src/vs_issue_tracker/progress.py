@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from vs_github.api import GitHubCLI, GitHubClient
+from vs_issue_tracker.errors import IssueTrackerLoadError
 
 _HEADER = "# Experiment Progress\n\n"
 _LABEL = "vibesys:progress-log"
@@ -109,13 +110,17 @@ def open_progress_log(
 
 def _progress_from_comment(comment: dict[str, object]) -> str | None:
     body = str(comment.get("body", ""))
-    if not body.startswith(_ENTRY_START) or not body.endswith(_ENTRY_END):
+    if not body.startswith(_ENTRY_START):
         return None
+    if not body.endswith(_ENTRY_END):
+        raise IssueTrackerLoadError.progress_unclosed()
     try:
         value = json.loads(body[len(_ENTRY_START) : -len(_ENTRY_END)])
-    except json.JSONDecodeError:
-        return None
-    return value if isinstance(value, str) else None
+    except json.JSONDecodeError as exc:
+        raise IssueTrackerLoadError.invalid_progress() from exc
+    if not isinstance(value, str):
+        raise IssueTrackerLoadError.non_text_progress()
+    return value
 
 
 def _number(value: object) -> int:

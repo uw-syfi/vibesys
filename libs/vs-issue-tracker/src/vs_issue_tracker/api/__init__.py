@@ -15,6 +15,7 @@ from vs_issue_tracker.core import (
     IssueTracker,
     IssueType,
 )
+from vs_issue_tracker.errors import IssueTrackerLoadError
 from vs_issue_tracker.format import format_issue_full, format_issue_short
 from vs_issue_tracker.github import GitHubIssueTracker, open_issue_tracker
 from vs_issue_tracker.policy import (
@@ -29,6 +30,12 @@ from vs_issue_tracker.progress import (
     ProgressLog,
     open_progress_log,
 )
+from vs_issue_tracker.session import (
+    IssueToolServer,
+    IssueTrackerConfig,
+    IssueTrackerSession,
+    open_issue_tracker_session,
+)
 
 __all__ = [
     "CreateIssuePolicy",
@@ -40,7 +47,11 @@ __all__ = [
     "IssueBoardLoadError",
     "IssueEvent",
     "IssueStatus",
+    "IssueToolServer",
     "IssueTracker",
+    "IssueTrackerConfig",
+    "IssueTrackerLoadError",
+    "IssueTrackerSession",
     "IssueType",
     "ProgressLog",
     "check_create_allowed",
@@ -48,6 +59,7 @@ __all__ = [
     "format_issue_full",
     "format_issue_short",
     "open_issue_tracker",
+    "open_issue_tracker_session",
     "open_progress_log",
     "parse_type",
 ]

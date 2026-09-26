@@ -177,8 +177,10 @@ class TestMain:
             assert request.orchestration.options["max_rounds"] == 7
             assert request.orchestration.options["max_attempts_per_issue"] == 4
             assert request.orchestration.options["max_issues_per_perf_eval"] == 2
-            assert request.orchestration.options["tracker_backend"] == tracker_backend
-            assert request.orchestration.options["tracker_repository"] == tracker_repository
+            assert request.orchestration.options["tracker"] == {
+                "backend": tracker_backend,
+                "repository": tracker_repository,
+            }
             assert request.runs_dir == Path("runs").resolve()
 
     def test_main_forwards_agent_backend_and_cli_provider(self) -> None:

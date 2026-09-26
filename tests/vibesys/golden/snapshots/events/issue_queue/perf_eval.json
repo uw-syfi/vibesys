@@ -461,7 +461,7 @@
       "model": null,
       "provider": "fake",
       "stage": "perf_eval",
-      "system_prompt": "<text len=14609 sha256=48991c4de5c73969>",
+      "system_prompt": "<text len=14483 sha256=48730120a38d667e>",
       "user_prompt": "<text len=322 sha256=678e4c0052fcf09d>"
     },
     "round_label": "perf_eval iter 1",
@@ -485,7 +485,7 @@
     "agent_kind": "perf_eval",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=14609 sha256=48991c4de5c73969>",
+      "system_prompt": "<text len=14483 sha256=48730120a38d667e>",
       "user_prompt": "<text len=322 sha256=678e4c0052fcf09d>"
     },
     "round_label": "perf_eval iter 1",

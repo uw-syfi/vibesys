@@ -93,22 +93,22 @@ class GitHubCLI:
         """Return all issues in a repository, excluding pull requests."""
         result = self._run(
             [
-                "issue",
-                "list",
-                "--repo",
-                repository,
-                "--state",
-                "all",
-                "--limit",
-                "1000",
-                "--json",
-                "number,title,body,state,labels,createdAt,updatedAt,author,url",
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repository}/issues?state=all&per_page=100",
             ]
         )
-        value = _decode_json(result.stdout, "issue list")
+        value = _decode_json(result.stdout, "paginated issue list")
         if not isinstance(value, list):
             raise GitHubCLIError("GitHub CLI returned a non-list issue response.")  # noqa: TRY003  # lint-waiver: LW-920410 [TRY003]; identify malformed output at the command boundary.
-        return [item for item in value if isinstance(item, dict)]
+        return [
+            _issue_snapshot(item)
+            for page in value
+            if isinstance(page, list)
+            for item in page
+            if isinstance(item, dict) and "pull_request" not in item
+        ]
 
     def view_issue(self, repository: str, issue_number: int) -> dict[str, object]:
         """Return one issue and its comments as JSON-compatible values."""
@@ -210,3 +210,28 @@ def _decode_json(raw: str, operation: str) -> object:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise GitHubCLIError(f"GitHub CLI returned invalid JSON for {operation}.") from exc  # noqa: TRY003  # lint-waiver: LW-920413 [TRY003]; report malformed command output with its operation.
+
+
+def _issue_snapshot(item: dict[str, object]) -> dict[str, object]:
+    """Normalize one REST issue to the public ``gh issue --json`` shape."""
+    labels = item.get("labels")
+    user = item.get("user")
+    return {
+        "number": item.get("number"),
+        "title": item.get("title"),
+        "body": item.get("body"),
+        "state": item.get("state"),
+        "labels": [
+            {"name": label.get("name")}
+            for label in labels
+            if isinstance(label, dict) and isinstance(label.get("name"), str)
+        ]
+        if isinstance(labels, list)
+        else [],
+        "createdAt": item.get("created_at"),
+        "updatedAt": item.get("updated_at"),
+        "author": {"login": user.get("login")}
+        if isinstance(user, dict) and isinstance(user.get("login"), str)
+        else None,
+        "url": item.get("html_url"),
+    }

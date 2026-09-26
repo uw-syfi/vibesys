@@ -9,6 +9,7 @@ from vibesys.loops.issue_queue.orchestration import (
     compare_resume,
     descriptor_from_options,
 )
+from vs_issue_tracker.api import IssueTrackerConfig
 
 
 def _options(**overrides: object) -> IssueQueueOptions:
@@ -22,21 +23,21 @@ def _options(**overrides: object) -> IssueQueueOptions:
 
 
 def test_github_requires_owner_and_repository() -> None:
-    with pytest.raises(ValidationError, match="tracker_repository is required"):
-        _options(tracker_backend="github")
+    with pytest.raises(ValidationError, match="repository is required"):
+        IssueTrackerConfig.from_backend("github")
     with pytest.raises(ValidationError, match="OWNER/REPOSITORY"):
-        _options(tracker_backend="github", tracker_repository="repo-only")
+        IssueTrackerConfig.from_backend("github", repository="repo-only")
     with pytest.raises(ValidationError, match="only valid"):
-        _options(tracker_repository="owner/repo")
+        IssueTrackerConfig(repository="owner/repo")
 
 
 def test_resume_rejects_a_tracker_backend_or_repository_change() -> None:
     original = descriptor_from_options(
-        _options(tracker_backend="github", tracker_repository="owner/repo")
+        _options(tracker=IssueTrackerConfig.from_backend("github", repository="owner/repo"))
     )
     changed = descriptor_from_options(
-        _options(tracker_backend="github", tracker_repository="owner/other")
+        _options(tracker=IssueTrackerConfig.from_backend("github", repository="owner/other"))
     )
 
-    with pytest.raises(ConfigurationError, match="tracker_repository"):
+    with pytest.raises(ConfigurationError, match="tracker"):
         compare_resume(original, changed)

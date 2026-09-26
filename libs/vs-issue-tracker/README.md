@@ -10,8 +10,8 @@ is not published as a separate Python distribution.
 
 This package owns the storage-neutral `IssueTracker` and `ProgressLog`
 contracts, local and GitHub implementations, issue state and history, create
-policies, text formatting, and generic stdio MCP tools. Applications select
-backends and provide loop orchestration.
+policies, text formatting, backend configuration, run-scoped sessions, and
+agent tool exposure. Applications provide paths, run identity, and loop policy.
 
 ## Concepts
 
@@ -20,6 +20,8 @@ backends and provide loop orchestration.
   GitHub Issues.
 - `ProgressLog` is a separate append/read contract with local file and
   GitHub-backed implementations.
+- `IssueTrackerSession` opens the selected issue and progress implementations
+  together and exposes the same agent tools for every backend.
 - `Issue`, `IssueEvent`, `IssueStatus`, and `IssueType` are typed Pydantic
   models/enums for issue state and history.
 - `IssueBoard.reload()` lets multiple processes coordinate through the same
@@ -123,12 +125,12 @@ Useful options:
 ## Ownership Boundary
 
 Keep generic behavior in this package when it can be reused without importing
-VibeSys. Examples: persistence, issue lifecycle state, type validation,
-formatting, create policies, and MCP access.
+VibeSys. Examples: persistence selection, issue lifecycle state, type
+validation, formatting, create policies, progress storage, and agent tool
+exposure.
 
 Keep application-specific behavior outside the package. Examples: prompt text,
-loop scheduling, markdown report rendering, agent tool adapters, and
-VibeSys-specific CLI wiring.
+loop scheduling, markdown report rendering, and VibeSys-specific CLI flags.
 
 ## Testing
 

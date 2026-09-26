@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from vs_issue_tracker.api import (
     GitHubIssueTracker,
     GitHubProgressLog,
     IssueStatus,
+    IssueTrackerLoadError,
     IssueType,
 )
 
@@ -130,3 +133,30 @@ def test_progress_log_uses_separate_issue_and_is_hidden_from_tracker() -> None:
 
     tracker = GitHubIssueTracker("owner/repo", cli=cli)
     assert tracker.list() == []
+
+
+def test_reserved_issue_metadata_corruption_is_reported() -> None:
+    cli = MemoryGitHubCLI()
+    tracker = GitHubIssueTracker("owner/repo", cli=cli)
+    issue = tracker.create(
+        type=IssueType.BUG,
+        title="Broken metadata",
+        description="body",
+        created_by="judge",
+        iteration=1,
+    )
+    cli.issues[issue.id]["comments"].append(
+        {"body": '<!-- vibesys:issue-event:v1\n{"action": invalid}\n-->'}
+    )
+
+    with pytest.raises(IssueTrackerLoadError, match="event metadata is invalid"):
+        tracker.get(issue.id)
+
+
+def test_reserved_progress_metadata_corruption_is_reported() -> None:
+    cli = MemoryGitHubCLI()
+    progress = GitHubProgressLog("owner/repo", "run-123", cli=cli)
+    cli.issues[1]["comments"].append({"body": "<!-- vibesys:progress-entry:v1\nnot-json\n-->"})
+
+    with pytest.raises(IssueTrackerLoadError, match="progress metadata is invalid"):
+        progress.read()
