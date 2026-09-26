@@ -305,3 +305,20 @@ def test_fake_state_preserves_round_trip_pydantic_values() -> None:
         assert host.state.commits[0].value == value
 
     asyncio.run(scenario())
+
+
+def test_fake_control_records_checkpoints_and_propagates_stop() -> None:
+    class _Stopped(BaseException):
+        pass
+
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin())
+        await host.control.checkpoint()
+        assert host.control.checkpoints == 1
+
+        host.control.fail_with(_Stopped())
+        with pytest.raises(_Stopped):
+            await host.control.checkpoint()
+        assert host.control.checkpoints == 2
+
+    asyncio.run(scenario())

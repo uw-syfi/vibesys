@@ -208,6 +208,14 @@ class State(Protocol):
         ...
 
 
+class Control(Protocol):
+    """Cooperative operator-control boundary for plugin control flow."""
+
+    async def checkpoint(self) -> None:
+        """Land a pending stop or wait for a pending pause to resume."""
+        ...
+
+
 class MetricDirection(StrEnum):
     """Which direction improves one benchmark objective."""
 
@@ -324,6 +332,11 @@ class RunHost(Protocol):
     @property
     def state(self) -> State:
         """Return plugin-bound typed state durability."""
+        ...
+
+    @property
+    def control(self) -> Control:
+        """Return the cooperative operator-control capability."""
         ...
 
     def log(self, message: str) -> None:

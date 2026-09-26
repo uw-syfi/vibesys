@@ -544,6 +544,7 @@ graph TD
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vs_project
+    vibesys.orchestration.contracts --> vs_runtime
     vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.environment --> vibesys
     vibesys.orchestration.environment --> vibesys.context
@@ -584,6 +585,7 @@ graph TD
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runner --> vs_agent
+    vibesys.orchestration.runner --> vs_runtime
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
@@ -605,6 +607,7 @@ graph TD
     vibesys.orchestration.state --> vibesys.orchestration.progress_log
     vibesys.orchestration.state --> vibesys.orchestration.view
     vibesys.orchestration.state --> vs_project
+    vibesys.orchestration.state --> vs_runtime
     vibesys.orchestration.tools --> vs_agent
     vibesys.orchestration.workspaces --> vibesys
     vibesys.orchestration.workspaces --> vibesys.context

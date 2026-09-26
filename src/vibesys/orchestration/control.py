@@ -24,6 +24,10 @@ class _RunControl:
         self._channel.raise_if_stopped()
         await asyncio.to_thread(self._channel.wait_while_paused)
 
+    async def checkpoint(self) -> None:
+        """Expose the cooperative boundary without steering or debug controls."""
+        await self.boundary()
+
     async def debug_step(self, message: str) -> None:
         """Pause at a policy step when interactive debug mode was requested."""
         await self.boundary()

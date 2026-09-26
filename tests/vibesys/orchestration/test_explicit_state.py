@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.api import create_session
+from vibesys.api import RunStopped, create_session
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
@@ -223,5 +223,25 @@ def test_run_context_rejects_a_plugin_other_than_the_selected_orchestration(
     try:
         with pytest.raises(ValueError, match="does not match plugin 'state-probe'"):
             asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
+def test_real_control_checkpoint_lands_a_pending_stop(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with RunContext.open(
+            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
+        ) as run:
+            await run.control.checkpoint()
+            integration.control.request_stop()
+            with pytest.raises(RunStopped):
+                await run.control.checkpoint()
+
+    try:
+        asyncio.run(exercise())
     finally:
         integration.close()

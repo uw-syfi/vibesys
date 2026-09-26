@@ -172,6 +172,30 @@ class FakeWorkspaces:
         return self._root
 
 
+class FakeControl:
+    """Deterministic cooperative-control boundary for plugin tests."""
+
+    def __init__(self) -> None:
+        """Create an active control with no pending failure."""
+        self._failure: BaseException | None = None
+        self._checkpoints = 0
+
+    @property
+    def checkpoints(self) -> int:
+        """Return how many checkpoints plugin control flow reached."""
+        return self._checkpoints
+
+    def fail_with(self, error: BaseException | None) -> None:
+        """Configure the error raised at subsequent checkpoints, or clear it."""
+        self._failure = error
+
+    async def checkpoint(self) -> None:
+        """Record the boundary and raise its configured stop failure, if any."""
+        self._checkpoints += 1
+        if self._failure is not None:
+            raise self._failure
+
+
 @dataclass(frozen=True, slots=True)
 class FakeStateCommit:
     """One validated state replacement recorded by :class:`FakeState`."""
@@ -337,6 +361,7 @@ class FakeRunHost:
         self._agents = FakeAgentSessions(plugin.agents, responder=responder)
         self._evaluation = FakeEvaluation(run_id=run_id)
         self._state = FakeState(plugin.state, self._workspaces.root)
+        self._control = FakeControl()
         self._logs: list[str] = []
         self._closed = False
 
@@ -364,6 +389,11 @@ class FakeRunHost:
     def state(self) -> FakeState:
         """Return plugin-bound in-memory state durability."""
         return self._state
+
+    @property
+    def control(self) -> FakeControl:
+        """Return the deterministic cooperative-control capability."""
+        return self._control
 
     @property
     def logs(self) -> tuple[str, ...]:
