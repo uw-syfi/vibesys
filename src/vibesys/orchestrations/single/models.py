@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from vibesys.search.hypothesis.state import HypothesisState
+from vs_runtime.api import AccuracyReceipt
 
 
 class SingleOptions(BaseModel):
@@ -14,6 +18,27 @@ class SingleOptions(BaseModel):
 
     objective: str = Field(min_length=1)
     max_retries_per_round: int = Field(default=2, ge=0)
+
+
+class PaidAttempt(BaseModel):
+    """Durable proof that one paid implementation attempt was started."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    round_number: Annotated[int, Field(gt=0)]
+    hypothesis_id: str = Field(min_length=1)
+    attempt: Annotated[int, Field(gt=0)]
+
+
+class SingleState(BaseModel):
+    """The single plugin's complete opaque durability aggregate."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    schema_version: Literal[1] = 1
+    search: HypothesisState = Field(default_factory=HypothesisState)
+    last_paid_attempt: PaidAttempt | None = None
+    accuracy_receipt: AccuracyReceipt | None = None
 
 
 class HypothesisUpdate(BaseModel):
@@ -98,9 +123,11 @@ def fallback_result() -> SingleAgentResult:
 __all__ = [
     "HypothesisUpdate",
     "InvalidSinglePlanError",
+    "PaidAttempt",
     "SingleAgentResult",
     "SingleOptions",
     "SinglePlan",
+    "SingleState",
     "Verdict",
     "fallback_plan",
     "fallback_result",

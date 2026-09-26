@@ -339,7 +339,7 @@ depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 [[modules]]
 path = "vibesys.orchestrations"
 layer = "loops"
-depends_on = ["vs_runtime"]
+depends_on = ["vibesys.search.hypothesis", "vs_runtime"]
 
 [[modules]]
 path = "vibesys._model_config"

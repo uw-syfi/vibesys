@@ -10,7 +10,8 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from vibesys.orchestrations.single import PLUGIN
-from vs_runtime.api import AgentRole, RunStatus, StructuredResponseError
+from vibesys.orchestrations.single.models import PaidAttempt, SingleState
+from vs_runtime.api import AccuracyReceipt, AgentRole, RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRunHost
 
 DESIGNER, IMPLEMENTER = PLUGIN.agents
@@ -83,9 +84,31 @@ def test_plugin_declares_fixed_roles_and_strict_options() -> None:
     assert PLUGIN.agents == (DESIGNER, IMPLEMENTER)
     assert DESIGNER.system_prompt
     assert IMPLEMENTER.system_prompt
+    assert PLUGIN.state is SingleState
 
     with pytest.raises(ValidationError):
         PLUGIN.options.model_validate({"objective": "speed up", "unknown": True})
+
+
+def test_single_state_owns_paid_attempt_and_accuracy_resume_data() -> None:
+    state = SingleState(
+        last_paid_attempt=PaidAttempt(
+            round_number=2,
+            hypothesis_id="batch-prefill",
+            attempt=1,
+        ),
+        accuracy_receipt=AccuracyReceipt(
+            run_id="run-1",
+            workspace_id=None,
+            revision="candidate-revision",
+        ),
+    )
+
+    serialized = state.model_dump_json(round_trip=True)
+    restored = SingleState.model_validate_json(serialized)
+
+    assert restored == state
+    assert restored.search.hypotheses == []
 
 
 def test_invalid_plan_gets_one_correction_in_the_same_session() -> None:
