@@ -29,10 +29,26 @@ For the built application, stop the dev server and run
 `pnpm --filter @vibesys/web preview`. Preview uses the same port and proxy.
 The gateway serves API routes only. Candidate files are never served.
 
+## Demo
+
+```sh
+pnpm --filter @vibesys/web demo
+```
+
+Builds the UI, then serves it at <http://127.0.0.1:5173> (`PORT=` overrides)
+with no gateway, no backend, and no paid agent calls. An in-process mock
+(`scripts/demo-server.mjs`) speaks the `/api/request` + `/api/events`
+contract of `src/server/browser_gateway.py` and replays
+`src/fixtures/demo-run.jsonl`: a synthetic `llm-serve` run with eight
+hypotheses, one gate failure, one judge rejection, and a throughput metric
+climbing from a 950 tok/s baseline. The first rounds land at once, the rest
+stream in, and the last round stays running, so Pause, Resume, and steer all
+work. Demo data only, not optimization results. Ctrl+C stops the server.
+
 ## Behavior
 
 - Three regions: a round rail, the selected round's log, and an inspector.
-  From 768 to 1023 px the inspector is a dialog opened by selecting a round.
+  From 768 to 1199 px the inspector is a dialog opened by selecting a round.
   Below 768 px the rail is a chip strip, and tapping the selected chip opens
   the inspector as a bottom sheet.
 - Core-state projects snapshots, ordered events, duplicate replay, execution

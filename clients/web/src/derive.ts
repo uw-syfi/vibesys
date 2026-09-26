@@ -43,6 +43,7 @@ import type {
   RunControl,
   RunPulse,
   Steers,
+  SummaryModel,
   ToolOutput,
   ToolResultSummary,
   TrendModel,
@@ -50,10 +51,12 @@ import type {
 } from './model.js';
 
 const compact = new Intl.NumberFormat('en', {notation: 'compact', maximumSignificantDigits: 4});
+const grouped = new Intl.NumberFormat('en', {maximumSignificantDigits: 5});
 const exact = new Intl.NumberFormat('en', {maximumFractionDigits: 3});
 
+/** `1,045` below 100k, where compact notation would hide digits a reader compares; `112.7M` above. */
 export function formatValue(value: number): string {
-  return compact.format(value);
+  return Math.abs(value) < 100_000 ? grouped.format(value) : compact.format(value);
 }
 
 export function formatDuration(ms: number): string {
@@ -299,6 +302,8 @@ export function railModel(
       return {
         round: number,
         status,
+        title: facts.get(number)?.entry.title ?? null,
+        raw: value,
         value: value === null ? null : formatValue(value),
         valueTip: value === null ? null : `${exact.format(value)}${unit}`,
         official: fact?.official_evaluation === true,
@@ -312,6 +317,8 @@ export function railModel(
     rows.unshift({
       round: 0,
       status: 'baseline',
+      title: 'Baseline',
+      raw: baseline,
       value: formatValue(baseline),
       valueTip: `${exact.format(baseline)}${unit}`,
       official: false,
@@ -328,6 +335,58 @@ export function railModel(
       ? null
       : Math.max(0, core.maxRounds - latest);
   return {rows, roundsLeft};
+}
+
+/**
+ * The run's result at a glance: the objective metric, the baseline, and the best kept round by the
+ * metric's direction. Null until a round is measured or the objective names a metric.
+ */
+export function summaryModel(
+  rail: RailModel,
+  context: PerformanceContext | null,
+  maxRounds: number | null,
+  experiments: readonly HypothesisEntry[] = [],
+): SummaryModel | null {
+  const named = experiments.find(entry => entry.perf_metric_name);
+  const metric = context?.objective_metric || named?.perf_metric_name || null;
+  // Nothing measured and nothing named: no result to summarize yet.
+  if (metric === null && !rail.rows.some(row => row.raw !== null)) return null;
+  const direction = context?.objective_direction ?? named?.perf_direction ?? null;
+  // A unit that only repeats the metric's name says nothing twice.
+  const unit =
+    context?.objective_unit && context.objective_unit !== metric ? context.objective_unit : null;
+  const baseline = rail.rows.find(row => row.status === 'baseline')?.raw ?? null;
+  const better = (a: number, b: number) => (direction === 'min' ? a < b : a > b);
+  let best: RailRow | null = null;
+  // Without a direction no value is better than another, so there is no best to name.
+  for (const row of direction === null ? [] : rail.rows) {
+    if (row.status !== 'kept' || row.raw === null) continue;
+    if (best === null || better(row.raw, best.raw as number)) best = row;
+  }
+  const done = rail.rows.filter(row => row.round > 0 && row.live === null).length;
+  const kept = rail.rows.filter(row => row.status === 'kept').length;
+  const delta =
+    best?.raw != null && baseline !== null && baseline !== 0
+      ? ((best.raw - baseline) / Math.abs(baseline)) * 100
+      : null;
+  return {
+    metric: metric ?? 'Metric',
+    unit,
+    direction,
+    baseline: baseline === null ? null : formatValue(baseline),
+    best:
+      best === null
+        ? null
+        : {
+            value: formatValue(best.raw as number),
+            round: best.round,
+            delta: delta === null ? null : formatDelta(delta),
+            improved: delta === null ? null : direction === 'min' ? delta < 0 : delta > 0,
+          },
+    done,
+    max: maxRounds,
+    kept,
+  };
 }
 
 // The sparkline's user space: a `0 0 100 36` viewBox, inset so the stroke and the dot at the last
@@ -1098,7 +1157,7 @@ export function usageText(core: CoreState): string | null {
   if (usage.contextWindow === null || usage.inputTokens > usage.contextWindow) {
     return `${used} tokens`;
   }
-  return `${used}/${tokenCount(usage.contextWindow)} context`;
+  return `${used} of ${tokenCount(usage.contextWindow)} context`;
 }
 
 export function headerModel(
@@ -1110,6 +1169,7 @@ export function headerModel(
   const started = captured.find(event => event.type === 'run_started');
   const input = started?.data?.kind === 'run_started' ? started.data.input : null;
   return {
+    status: core.status,
     project: input?.split('/').filter(Boolean).at(-1) ?? null,
     objective: objective(context?.objective_description),
     startedAt: started?.timestamp ?? null,

@@ -35,6 +35,7 @@ import {
   showsChanges,
   steers,
   steersNeedOlder,
+  summaryModel,
   toolOutput,
   trendModel,
   usageText,
@@ -91,7 +92,7 @@ const tool = (items: LogItem[], id: string) => {
 };
 
 test('formats compact values, durations, and signed deltas', () => {
-  assert.deepEqual([6_210_000, 112_700_000, 1045].map(formatValue), ['6.21M', '112.7M', '1.045K']);
+  assert.deepEqual([6_210_000, 112_700_000, 1045].map(formatValue), ['6.21M', '112.7M', '1,045']);
   assert.deepEqual([0, 374_000, 6_198_000].map(formatDuration), ['0:00', '6:14', '1:43:18']);
   assert.deepEqual([1.14, -2.06, 0].map(formatDelta), ['+1.1%', '-2.1%', '0.0%']);
 });
@@ -101,14 +102,14 @@ test('rail rows: statuses, values, official, incumbent, rounds left', () => {
   assert.deepEqual(
     ended.rows.map(row => [row.round, row.status, row.value, row.incumbent]),
     [
-      [1, 'kept', '1K', false],
-      [2, 'kept', '1.045K', false],
+      [1, 'kept', '1,000', false],
+      [2, 'kept', '1,045', false],
       [3, 'kept', null, false],
-      [4, 'kept', '1.135K', false],
-      [5, 'kept', '1.18K', false],
+      [4, 'kept', '1,135', false],
+      [5, 'kept', '1,180', false],
       [6, 'kept', null, false],
-      [7, 'kept', '1.27K', false],
-      [8, 'kept', '1.315K', true],
+      [7, 'kept', '1,270', false],
+      [8, 'kept', '1,315', true],
     ],
   );
   assert.equal(ended.rows[0]?.valueTip, '1,000 median_tok_per_sec');
@@ -207,7 +208,7 @@ test('R0: a baseline row only with a baseline value, the incumbent until the fir
     'a kept round takes over',
   );
   const r1 = inspectorModel(rows, STUB_EXPERIMENTS, STUB_DESIGN, captured(STUB), 1, BASELINE);
-  assert.deepEqual(r1.delta, {value: '+11.1%', vs: 0, tip: '1K vs 900 median_tok_per_sec'});
+  assert.deepEqual(r1.delta, {value: '+11.1%', vs: 0, tip: '1,000 vs 900 median_tok_per_sec'});
   const r0 = inspectorModel(rows, STUB_EXPERIMENTS, STUB_DESIGN, captured(STUB), 0, BASELINE);
   assert.deepEqual(
     [r0.hypothesis, r0.delta, r0.judge, r0.changes],
@@ -228,7 +229,7 @@ test('the trend plots one point per measured round, spaced by round number', () 
   // y is inverted and scaled to the plotted values: the lowest sits at the bottom inset.
   assert.equal(model.points[0]?.y, 32);
   assert.equal(model.points.at(-1)?.y, 4);
-  assert.deepEqual([model.first, model.last], ['1K', '1.315K'], 'the rail rows write them so');
+  assert.deepEqual([model.first, model.last], ['1,000', '1,315'], 'the rail rows write them so');
   // The name says the span the curve covers, so no count can disagree with the rows.
   assert.deepEqual([model.firstRound, model.lastRound], [1, 8]);
   // One row without a number would otherwise poison every coordinate.
@@ -326,19 +327,19 @@ test('context meter: the count alone unless a window honestly bounds it', () => 
   assert.equal(usageText(initialCoreState()), null, 'no usage_update, no meter');
   assert.equal(meter(0, 200_000), null, 'a call that carried nothing says nothing');
   // The recording's own value, which is what the header renders from it.
-  assert.equal(meter(2, 200_000), '2/200k context');
-  assert.equal(meter(12_400, 200_000), '12k/200k context');
+  assert.equal(meter(2, 200_000), '2 of 200k context');
+  assert.equal(meter(12_400, 200_000), '12k of 200k context');
   // Where the format changes: under a thousand is the integer, then `k`, then `M` to a tenth.
-  assert.equal(meter(999, 200_000), '999/200k context');
-  assert.equal(meter(1000, 200_000), '1k/200k context');
-  assert.equal(meter(999_999, 2_000_000), '999k/2.0M context');
-  assert.equal(meter(1_000_000, 2_000_000), '1.0M/2.0M context');
-  assert.equal(meter(1_240_000, 2_000_000), '1.2M/2.0M context');
+  assert.equal(meter(999, 200_000), '999 of 200k context');
+  assert.equal(meter(1000, 200_000), '1k of 200k context');
+  assert.equal(meter(999_999, 2_000_000), '999k of 2.0M context');
+  assert.equal(meter(1_000_000, 2_000_000), '1.0M of 2.0M context');
+  assert.equal(meter(1_240_000, 2_000_000), '1.2M of 2.0M context');
   assert.equal(meter(12_400, null), '12k tokens', 'no window, no ratio');
   assert.equal(meter(220_000, 200_000), '220k tokens', 'a ratio over 100% is not a true statement');
   assert.equal(
     headerModel(fold(upTo(QUEUE, 623)), [], 'connected', null).usage,
-    '2/200k context',
+    '2 of 200k context',
     'the header carries the meter',
   );
 });
@@ -832,7 +833,7 @@ test('inspector: hypothesis, delta vs the incumbent of that time, judge verdict 
   assert.deepEqual(r4.delta, {
     value: '+8.6%',
     vs: 2,
-    tip: '1.135K vs 1.045K median_tok_per_sec',
+    tip: '1,135 vs 1,045 median_tok_per_sec',
   });
   assert.deepEqual(r4.judge, [{attempt: 1, verdict: 'Kept', feedback: '', open: true}]);
   assert.deepEqual(r4.changes, {commit: STUB_DESIGN[3]?.commit, files: []});
@@ -1460,4 +1461,40 @@ test('graph layout: two disconnected chains keep their own rows', () => {
   assert.equal(row('a'), row('b'));
   assert.equal(row('c'), row('d'));
   assert.notEqual(row('a'), row('c'), 'the two chains are on different rows');
+});
+
+test('summary: best kept round by the metric direction, against the baseline', () => {
+  const row = (round: number, status: 'baseline' | 'kept' | 'rejected', raw: number) => ({
+    round,
+    status,
+    title: null,
+    raw,
+    value: String(raw),
+    valueTip: null,
+    official: false,
+    incumbent: false,
+    live: null,
+  });
+  const rail = {
+    rows: [
+      row(0, 'baseline', 100),
+      row(1, 'kept', 90),
+      row(2, 'rejected', 50),
+      row(3, 'kept', 120),
+    ],
+    roundsLeft: null,
+  };
+  const context = (direction: 'max' | 'min') =>
+    ({objective_metric: 'latency', objective_direction: direction}) as PerformanceContext;
+  const min = summaryModel(rail, context('min'), 10);
+  // A rejected round never counts, however good its number.
+  assert.deepEqual(min?.best, {value: '90', round: 1, delta: '-10.0%', improved: true});
+  assert.deepEqual([min?.done, min?.kept, min?.max], [3, 2, 10]);
+  const max = summaryModel(rail, context('max'), null);
+  assert.deepEqual(max?.best, {value: '120', round: 3, delta: '+20.0%', improved: true});
+  assert.equal(summaryModel(rail, {objective_metric: 'x'} as PerformanceContext, null)?.best, null);
+  // A negative baseline: moving from -100 toward zero under max is an improvement.
+  const negative = {rows: [row(0, 'baseline', -100), row(1, 'kept', -80)], roundsLeft: null};
+  assert.equal(summaryModel(negative, context('max'), null)?.best?.delta, '+20.0%');
+  assert.equal(summaryModel({rows: [], roundsLeft: null}, null, null), null, 'nothing to say');
 });

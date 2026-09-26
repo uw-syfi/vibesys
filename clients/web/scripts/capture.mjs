@@ -191,12 +191,12 @@ const REPLAY = [
   {
     name: 'live',
     fixture: live(),
-    // The graph's four cards fit at 1440 and not at 1024 or 390, and neither resize crosses a
-    // media query: React renders nothing, so only the row's own ResizeObserver can notice the
-    // narrower scrollport. Without it the row overflows at 1024 with no fade to say so.
+    // The graph's four cards fit at 1440 and 1024 (the inspector is a drawer there) and not at
+    // 390. Only the row's own ResizeObserver can notice the narrower scrollport; without it the
+    // row overflows at 390 with no fade to say so.
     each: async (page, width) => {
       // The fade follows the observer, so it lands a frame or two after the resize.
-      const wanted = width === 1440 ? null : 'end';
+      const wanted = width === 390 ? 'end' : null;
       await page
         .waitForFunction(
           want => (document.querySelector('.gflow')?.getAttribute('data-more') ?? null) === want,
@@ -212,9 +212,9 @@ const REPLAY = [
       'Optimize a single-producer, single-consumer bounded FIFO queue.',
       'Pause',
       'Measure baseline vs ring, 3 reps each',
-      'Pending',
+      'Measured when the round finishes',
       // The recording's own usage_update, in the header's context meter.
-      '2/200k context',
+      '2 of 200k context',
       // Graph only: a role the round has not reached, and the model the live agent runs on.
       'Profiler',
       'claude-opus-5',
@@ -240,7 +240,7 @@ const REPLAY = [
     name: 'context',
     fixture: queue(NEAR_FULL(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
     widths: [1440, 390],
-    expect: ['184k/200k context'],
+    expect: ['184k of 200k context'],
   },
   {
     // Five roles overflow the graph row at every width, which is what the edge fade marks.
@@ -357,7 +357,7 @@ const REPLAY = [
     after: async page => {
       await rail(page, 1).click();
       // The curve starts from the invented baseline, so this is the frame that shows R0 on it.
-      await page.getByRole('img', {name: 'Metric trend: 900 to 1.315K, R0 to R8'}).waitFor();
+      await page.getByRole('img', {name: 'Metric trend: 900 to 1,315, R0 to R8'}).waitFor();
     },
     expect: ['R0', '+11.1%', 'vs R0'],
   },

@@ -15,7 +15,7 @@ body {
   overflow: hidden;
   background: var(--canvas);
   color: var(--text-primary);
-  font: 400 var(--text-sm) / 1.5 var(--font-sans);
+  font: 400 0.875rem / 1.5 var(--font-sans);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }

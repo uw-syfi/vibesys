@@ -20,7 +20,7 @@ export interface InspectorProps {
   model: InspectorModel | null;
   /** The selected tool row's full output, above the round's own sections; null when none is. */
   output: ToolOutput | null;
-  /** >= 1024 px: an aside. 768-1023 px: a right drawer. < 768 px: a bottom sheet. */
+  /** >= 1200 px: an aside. 768-1199 px: a right drawer. < 768 px: a bottom sheet. */
   mode: 'aside' | 'drawer' | 'sheet';
   /** Drawer and sheet only. */
   open: boolean;
@@ -66,7 +66,7 @@ export function Inspector({
   // Whether the pointer went down on the backdrop: a selection dragged out of the panel ends in a
   // click on the dialog too, and must not close it.
   const pressed = useRef(false);
-  // Crossing 1024 px swaps the dialog for the aside and back; the new dialog node must reopen, or
+  // Crossing 1200 px swaps the dialog for the aside and back; the new dialog node must reopen, or
   // `open` stays true with nothing shown and no row click can open it again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `mode` re-runs this for the new node.
   useEffect(() => {
@@ -200,9 +200,9 @@ function Body({
           {delta === null ? null : (
             <p className="meas">
               {delta.value === null ? (
-                <span className="big pending">Pending</span>
+                <span className="pending">Measured when the round finishes</span>
               ) : (
-                <span className="big mono" data-tip={delta.tip ?? undefined}>
+                <span className="big" data-tip={delta.tip ?? undefined}>
                   {delta.value}
                 </span>
               )}

@@ -13,6 +13,10 @@ export type RoundStatus = 'baseline' | 'kept' | 'rejected' | 'failed' | 'running
 export interface RailRow {
   round: number;
   status: RoundStatus;
+  /** The hypothesis the round tested, when the experiments row names one. */
+  title: string | null;
+  /** The measured value, unformatted; null when the round recorded none. */
+  raw: number | null;
   /** Compact headline value such as `112.7M`; null when the round recorded none. */
   value: string | null;
   /** Absolute value with its unit, for the tooltip. */
@@ -30,6 +34,19 @@ export interface RailModel {
   rows: RailRow[];
   /** `max_rounds` minus the latest started round; null when unknown or the run ended. */
   roundsLeft: number | null;
+}
+
+/** The header's result strip: what is optimized, where it started, the best kept result. */
+export interface SummaryModel {
+  metric: string;
+  unit: string | null;
+  direction: 'max' | 'min' | null;
+  baseline: string | null;
+  best: {value: string; round: number; delta: string | null; improved: boolean | null} | null;
+  /** Finished rounds past R0, the run's round budget, and how many were kept. */
+  done: number;
+  max: number | null;
+  kept: number;
 }
 
 /** A point of the rail's sparkline, in the `0 0 100 36` user space of its viewBox. */
@@ -193,6 +210,8 @@ export type RunControl =
   | {kind: 'ended'; word: EndedWord; tip: string | null};
 
 export interface HeaderModel {
+  /** What the header's state chip says while the run has not ended. */
+  status: CoreRunStatus;
   /** Basename of `run_started.input`. */
   project: string | null;
   /** First sentence and full text of `performance_context.objective_description`. */

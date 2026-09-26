@@ -12,7 +12,9 @@
     "check": "tsc --noEmit",
     "pretest": "pnpm --filter @vibesys/web^... build",
     "test": "bun test src",
-    "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort"
+    "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort",
+    "predemo": "pnpm --filter @vibesys/web build",
+    "demo": "bun scripts/demo-server.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

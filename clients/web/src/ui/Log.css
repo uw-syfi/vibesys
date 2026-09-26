@@ -17,7 +17,7 @@
 }
 .grps {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
 .grp {
   display: grid;
@@ -34,11 +34,13 @@
   align-items: center;
   gap: var(--space-2);
   width: calc(100% + 2 * var(--space-2));
-  height: 22px;
-  margin: 0 calc(-1 * var(--space-2));
+  height: 32px;
+  margin: 0 calc(-1 * var(--space-2)) var(--space-1);
   padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border);
   background: var(--canvas);
   color: var(--text-muted);
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 .grp.is-active .who {
@@ -50,7 +52,7 @@
   min-width: 0;
 }
 /* Which attempt made the rows under this header. A retry does not get rows of its own. */
-.att {
+.who .att {
   color: var(--text-muted);
   font-size: var(--text-xs);
   font-weight: 400;
@@ -61,8 +63,8 @@
   align-items: center;
   column-gap: var(--space-3);
   width: calc(100% + 2 * var(--space-2));
-  height: 20px;
-  line-height: 18px;
+  height: 28px;
+  line-height: 26px;
   margin: 0 calc(-1 * var(--space-2));
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
@@ -79,7 +81,6 @@
   flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
 }
 /* Basis 0: the command gets only the room the verb and result leave, so it gives way first.
    At least 2ch, since the first glyph is clipped rather than ellipsed: a squeezed command reads
@@ -115,10 +116,10 @@
 .row.sel {
   box-shadow: inset 2px 0 0 var(--text-primary);
 }
-/* The role header is sticky and 22px tall, so a row the cursor scrolls to the very top of the
+/* The role header is sticky and 32px tall, so a row the cursor scrolls to the very top of the
    log would come to rest under it. `block: 'nearest'` honours this margin. */
 [data-row] {
-  scroll-margin-top: 22px;
+  scroll-margin-top: 36px;
 }
 /* The cursor is the focused row, so the ring is the focus ring, drawn inside the row's box
    rather than 2px outside it, where it would cross the rows above and below. */

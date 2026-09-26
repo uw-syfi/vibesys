@@ -7,7 +7,13 @@
 .insp-body {
   display: grid;
   align-content: start;
-  gap: var(--space-8);
+  gap: var(--space-6);
+}
+/* Sections after the hypothesis sit on hairlines, so each reads as one labelled block. */
+.insp-body > .sec + .sec,
+.insp-body > div + .sec {
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
 }
 .hid {
   color: var(--text-muted);
@@ -51,14 +57,12 @@
 }
 .big {
   font-size: var(--text-xl);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.2;
-  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
 }
-.big.pending {
+.pending {
   color: var(--text-muted);
-  font: 500 var(--text-lg) / 1.4 var(--font-sans);
-  letter-spacing: 0;
 }
 .vs {
   color: var(--text-muted);
@@ -167,7 +171,7 @@
   background: var(--canvas);
 }
 
-/* Drawer (768-1023 px) and bottom sheet (< 768 px): the same body in a modal <dialog>. */
+/* Drawer (768-1199 px) and bottom sheet (< 768 px): the same body in a modal <dialog>. */
 dialog.insp {
   max-width: none;
   max-height: none;

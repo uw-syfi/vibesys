@@ -1,0 +1,9 @@
+{
+ "objective_metric": "median_tok_per_sec",
+ "objective_unit": "tok/s",
+ "objective_direction": "max",
+ "objective_baseline_value": 950,
+ "objective_baseline_round": 0,
+ "objective_baseline_commit": null,
+ "objective_description": "Increase decode throughput of the batch inference server without changing outputs."
+}

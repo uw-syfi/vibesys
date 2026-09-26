@@ -13,6 +13,7 @@ import {
   showsChanges,
   steers,
   steersNeedOlder,
+  summaryModel,
   toolOutput,
   trendModel,
 } from './derive.js';
@@ -26,10 +27,11 @@ import {LiveRegion} from './ui/LiveRegion.js';
 import {Log, type LogHandle} from './ui/Log.js';
 import {Rail} from './ui/Rail.js';
 import {Shortcuts} from './ui/Shortcuts.js';
+import {Summary} from './ui/Summary.js';
 import {Tooltip} from './ui/Tooltip.js';
 import './App.css';
 
-const WIDE = '(min-width: 1024px)';
+const WIDE = '(min-width: 1200px)';
 const TABLET = '(min-width: 768px)';
 const HINT_KEY = 'vibesys.web.sheet-hint';
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
@@ -88,6 +90,10 @@ export function App({session}: {session: WorkspaceSession}) {
   const series = queries.performance.response?.performance ?? NO_PERFORMANCE;
   const rail = useMemo(() => railModel(core, experiments, context), [core, experiments, context]);
   const trend = useMemo(() => trendModel(series, context), [series, context]);
+  const summary = useMemo(
+    () => summaryModel(rail, context, core.maxRounds, experiments),
+    [rail, context, core.maxRounds, experiments],
+  );
   const steer = useMemo(() => steers(captured), [captured]);
   const live = latestRound(core);
   // The live round stays selected on new rounds until the user picks another.
@@ -199,6 +205,7 @@ export function App({session}: {session: WorkspaceSession}) {
         }}
         onRetrySnapshot={() => void session.refresh()}
       />
+      {summary === null ? null : <Summary model={summary} trend={trend} />}
       <div className="shell">
         <Rail
           state={railState(queries.experiments.response, queries.experiments.error)}
@@ -206,7 +213,6 @@ export function App({session}: {session: WorkspaceSession}) {
           selected={selected}
           error={queries.experiments.error}
           hint={!tablet && !hinted}
-          trend={trend}
           onSelect={select}
           onRetry={() => void session.load('experiments')}
         />

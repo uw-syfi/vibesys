@@ -335,11 +335,11 @@ async function checkInteractions(browser, origin) {
     assert.equal(await belowTop(), restingTop, 'opening the output moved the row below it');
     assert.equal(await wide(), true, 'a long output line widened the page');
     // The header's context meter, from the run's own usage_update.
-    await page.getByRole('banner').getByText('12k/200k context').waitFor();
+    await page.getByRole('banner').getByText('12k of 200k context').waitFor();
 
     // The sticky role header covers the rows' own band, or a selected row passing under it
     // leaks its edge mark into the gutter beside the role name. The band itself is unchanged:
-    // 20px rows on a 22px pitch.
+    // 28px rows on a 30px pitch.
     const band = await log.evaluate(node => {
       const group = [...node.querySelectorAll('.grp')].find(
         grp => grp.querySelector(':scope > .what > .row') !== null,
@@ -353,8 +353,8 @@ async function checkInteractions(browser, origin) {
     });
     assert.deepEqual(band.slice(0, 2), [band[1], band[1]], 'the header left the rows a gutter');
     assert.deepEqual(band.slice(2, 4), [band[3], band[3]], 'the header left the rows a gutter');
-    assert.equal(band[4], 20, 'the row height moved');
-    assert.equal(band[5], 22, 'the row pitch moved');
+    assert.equal(band[4], 28, 'the row height moved');
+    assert.equal(band[5], 30, 'the row pitch moved');
 
     // The live row carries both marks when it is also the selected one: the tint says which
     // call is running, the edge says which one the inspector is quoting.
@@ -445,7 +445,7 @@ async function checkInteractions(browser, origin) {
       const port = node.closest('.log').getBoundingClientRect();
       return [Math.round(box.top - port.top), box.bottom <= port.bottom];
     });
-    assert.deepEqual(seen, [22, true], 'Tab back left the cursor out of view');
+    assert.deepEqual(seen, [36, true], 'Tab back left the cursor out of view');
     // That scroll leaves the live edge, which mounts the pill and re-renders the log, and the
     // pill shortens the scrollport: wait for it before measuring row positions below.
     await jump.waitFor();

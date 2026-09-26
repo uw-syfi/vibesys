@@ -11,7 +11,7 @@ import {
   Trophy,
 } from 'lucide-react';
 import {useEffect, useRef} from 'react';
-import type {RailModel, RailRow, RailState, RoundStatus, TrendModel} from '../model.js';
+import type {RailModel, RailRow, RailState, RoundStatus} from '../model.js';
 import {Elapsed} from './Elapsed.js';
 import './Rail.css';
 
@@ -23,8 +23,6 @@ export interface RailProps {
   error: string | null;
   /** Phone only, until the first sheet opens. */
   hint: boolean;
-  /** The metric's shape across rounds; null below two measured points. */
-  trend: TrendModel | null;
   onSelect: (round: number) => void;
   onRetry: () => void;
 }
@@ -40,7 +38,7 @@ const STATUS: Record<RoundStatus, {word: string; Icon: LucideIcon}> = {
 const OFFICIAL = 'Official. Unmarked values are provisional.';
 const INCUMBENT = 'Incumbent: the best result so far. New rounds are compared against it.';
 
-export function Rail({state, model, selected, error, hint, trend, onSelect, onRetry}: RailProps) {
+export function Rail({state, model, selected, error, hint, onSelect, onRetry}: RailProps) {
   const list = useRef<HTMLOListElement>(null);
   // Keyboard selection moves focus with it, and the selected row scrolls into view once the rows
   // render, and again once the fonts load (they widen the phone chips).
@@ -75,6 +73,12 @@ export function Rail({state, model, selected, error, hint, trend, onSelect, onRe
 
   return (
     <nav className="rail" aria-label="Rounds">
+      <h2 className="rail-head">
+        Rounds
+        {state === 'ready' && model.roundsLeft !== null ? (
+          <span className="left">{model.roundsLeft} left</span>
+        ) : null}
+      </h2>
       {state === 'error' ? null : state === 'loading' ? (
         <ol className="rail-rows" aria-hidden="true">
           {['a', 'b', 'c', 'd'].map(key => (
@@ -101,13 +105,6 @@ export function Rail({state, model, selected, error, hint, trend, onSelect, onRe
           ))}
         </ol>
       )}
-      {state === 'ready' && trend !== null ? <Trend model={trend} /> : null}
-      {state === 'ready' && model.roundsLeft !== null ? (
-        <p className="left">
-          {model.roundsLeft}
-          <span className="long">{model.roundsLeft === 1 ? ' round' : ' rounds'}</span> left
-        </p>
-      ) : null}
       {hint && state === 'ready' && model.rows.length > 0 ? (
         <p className="rail-hint">Tap the selected round for details</p>
       ) : null}
@@ -121,39 +118,6 @@ export function Rail({state, model, selected, error, hint, trend, onSelect, onRe
       )}
       {state === 'loading' ? <p className="sr-only">Loading rounds</p> : null}
     </nav>
-  );
-}
-
-/**
- * The shape of the metric across rounds, under the rows: one polyline and a dot on the last point.
- * The rows already carry every value, the incumbent and the provenance, so this adds no axes, no
- * labels and no tooltip, only the two ends of its own scale. The phone strip hides it (CSS).
- */
-function Trend({model}: {model: TrendModel}) {
-  const {points, first, last, firstRound, lastRound} = model;
-  const dot = points.at(-1);
-  if (dot === undefined) return null;
-  return (
-    <div className="trend">
-      {/* The box stretches to the rail's width, so the dot is a round-capped zero-length path:
-          a circle would go oval with it, while a non-scaling stroke keeps its 3px. */}
-      <svg
-        className="tplot"
-        viewBox="0 0 100 36"
-        preserveAspectRatio="none"
-        role="img"
-        // The span the curve covers, not a count of points: a round with no value has no point,
-        // so any count would disagree with the rows above.
-        aria-label={`Metric trend: ${first} to ${last}, R${firstRound} to R${lastRound}`}
-      >
-        <polyline points={points.map(point => `${point.x},${point.y}`).join(' ')} />
-        <path className="tdot" d={`M${dot.x},${dot.y}h0`} />
-      </svg>
-      <p className="tends mono" aria-hidden="true">
-        <span>{first}</span>
-        <span>{last}</span>
-      </p>
-    </div>
   );
 }
 
@@ -183,6 +147,7 @@ function Row({
   // is re-announced every second while the row has focus.
   const name = [
     `R${row.round}`,
+    row.title,
     live === null ? row.value : null,
     word.toLowerCase(),
     live === null ? row.valueTip : null,
@@ -242,6 +207,11 @@ function Row({
         </span>
       ) : (
         <span />
+      )}
+      {row.title === null ? null : (
+        <span className="rtitle" aria-hidden="true">
+          {row.title}
+        </span>
       )}
     </button>
   );

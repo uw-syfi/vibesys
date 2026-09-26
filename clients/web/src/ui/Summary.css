@@ -1,0 +1,142 @@
+/* A row of stats, label over value, as a deployment or experiment summary reads. */
+.sum {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-10);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.stat {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.lbl {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+.lbl .at {
+  font-weight: 400;
+}
+.num {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 28px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.num .unit,
+.num .kept {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.num .kept::before {
+  content: '·';
+  margin-right: var(--space-2);
+}
+.num .none {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.metric {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 28px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.metric .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.metric .dir {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+/* The sign carries direction; the tint only repeats it. */
+.delta {
+  align-self: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.delta.up {
+  color: var(--status-improvement);
+  background: color-mix(in srgb, var(--status-improvement) 12%, transparent);
+}
+.delta.down {
+  color: var(--status-regression);
+  background: color-mix(in srgb, var(--status-regression) 12%, transparent);
+}
+.trend {
+  width: 180px;
+  margin-left: auto;
+}
+.tplot {
+  display: block;
+  width: 100%;
+  height: 32px;
+}
+.tplot polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.tplot .tdot {
+  stroke: var(--accent);
+  stroke-width: 4px;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.tends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+@media (max-width: 1199px) {
+  .sum {
+    gap: var(--space-6);
+  }
+  .trend {
+    width: 120px;
+  }
+}
+/* Phone: the metric on its own line, then baseline, best and rounds as three columns. */
+@media (max-width: 767px) {
+  .sum {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+  .stat-metric {
+    grid-column: 1 / -1;
+  }
+  .stat-metric .lbl,
+  .num .kept,
+  .trend {
+    display: none;
+  }
+  .num {
+    flex-wrap: wrap;
+    column-gap: var(--space-1);
+    font-size: 1.0625rem;
+    line-height: 24px;
+  }
+  .metric {
+    height: auto;
+  }
+}
