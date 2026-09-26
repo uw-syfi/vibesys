@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [],
+  "normalizer": null,
+  "pre_tokenizer": {"type": "Whitespace"},
+  "post_processor": null,
+  "decoder": null,
+  "model": {
+    "type": "WordLevel",
+    "vocab": {"Request": 0, "Factory": 1, "generates": 2, "independent": 3, "synthetic": 4, "prompts": 5, "from": 6, "a": 7, "deterministic": 8, "corpus": 9, "with": 10, "model": 11, "tokenizer": 12, "tokens": 13, "[UNK]": 14},
+    "unk_token": "[UNK]"
+  }
+}

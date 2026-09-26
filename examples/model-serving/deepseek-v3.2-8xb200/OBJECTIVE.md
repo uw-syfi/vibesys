@@ -22,38 +22,38 @@ from-scratch target in this suite.
 
 ## Workload
 
-Run the benchmark exactly as written unless the evaluator passes a different
-`--url` or `--output-json`:
+Run the Request Factory benchmark with its configured workload unless the
+evaluator passes a different `--url`:
 
 ```bash
-uv run python benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
+uv run python benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
 ```
 
 Default load:
 
 - `/v1/completions`
 - streaming responses
-- closed-loop concurrency 64
-- 120 second duration
-- long synthetic prompts (~8192 tokens), distinct per request rather than a
-  shared prefix
+- 256 independent requests at saturated concurrency 64
+- long synthetic prompts (8192 token IDs), with no shared prefix
 - `max_tokens = 1024`
 - `temperature = 0`
 
 This benchmark stresses the FP8 MoE dispatch path, expert-parallel all-to-all
 communication, MLA/DSA long-context attention and KV-cache management, and
-decode throughput under concurrency. Candidates must not reduce prompt length,
-duration, concurrency, or max output tokens to improve the score, and must not
-collapse the distinct per-request prompts into a single cached prefix.
+decode throughput under concurrency. Candidates must not reduce request count,
+prompt length, concurrency, or max output tokens to improve the score, and must
+not collapse requests into a shared cached prefix. The old 120-second rolling
+window is replaced with a fixed RF trace, so scores are not directly comparable.
 
 ## Metrics
 
 Pareto axes:
 
-- `aggregate_throughput`: output tokens per second, maximize.
-- `p99_latency_ms`: end-to-end request latency in milliseconds, minimize.
+- `output_token_throughput_per_s`: RF-measured output token IDs per second,
+  maximize.
+- `p90_latency_ms`: RF end-to-end request latency in milliseconds, minimize.
 
-The scalar fallback/headline metric is `aggregate_throughput`.
+The scalar fallback/headline metric is `output_token_throughput_per_s`.
 
 ## Correctness
 
