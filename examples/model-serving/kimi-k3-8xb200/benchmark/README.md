@@ -3,9 +3,10 @@
 Request Factory drives the OpenAI-compatible /v1/completions endpoint using
 256 independent requests at saturation, concurrency 32, 4096-token
 synthetic prompts, and 2048-token output targets. The adapter generates a
-deterministic synthetic corpus in a temporary directory and explicitly sizes
-the token pool to at least twice the prompt length or the request count,
-whichever is larger. It fails if RF reports an undersized pool.
+compatible tokenizer, then delegates trace and corpus generation, RF summary
+validation, and protocol-v2 output to the evaluator's shared fixed-text
+driver. That driver sizes the token pool to at least twice the prompt length
+or the request count and fails if RF reports an undersized pool.
 
 Kimi-K3 does not publish a `tokenizer.json`, which is the format RF consumes.
 The adapter resolves `tiktoken.model` at immutable model revision
