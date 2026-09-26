@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from vibesys.api.request import load_input_bundle
+
+_REPO_ROOT = Path(__file__).parents[2]
+_BUNDLE_ROOT = _REPO_ROOT / "examples" / "model-serving" / "qwen3.5-397b-a17b-4xb200"
+
+
+def test_bundle_runs_the_benchmark_through_the_pinned_rf_adapter() -> None:
+    bundle = load_input_bundle(_BUNDLE_ROOT)
+
+    assert bundle.manifest.evaluator is not None
+    assert bundle.manifest.evaluator.name == "vibesys-evaluator-request-factory"
+    assert bundle.manifest.benchmark.entrypoint == "request-factory-adapter"
+    assert bundle.manifest.benchmark.args == ("benchmark/benchmark.py",)
+    assert bundle.benchmark_result_protocol == 2
+    assert bundle.benchmark_output_argument == "--vs-output"
+    assert bundle.benchmark_command[-1] == "benchmark/benchmark.py"
+
+
+def test_objectives_match_the_rf_protocol_metrics() -> None:
+    objectives = (_BUNDLE_ROOT / "objectives.toml").read_text(encoding="utf-8")
+
+    assert 'name = "output_token_throughput_per_s"' in objectives
+    assert 'name = "p90_latency_ms"' in objectives
