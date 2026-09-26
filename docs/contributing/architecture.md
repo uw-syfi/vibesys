@@ -564,6 +564,7 @@ graph TD
     vibesys.orchestration.gates --> vibesys.run
     vibesys.orchestration.gates --> vibesys.runtime
     vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.gates --> vs_runtime
     vibesys.orchestration.gates --> vs_sandbox
     vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.progress_log --> vibesys

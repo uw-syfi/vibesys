@@ -111,7 +111,12 @@ class _EnvironmentLike(Protocol):
         """Return the run's configured skill source directories."""
         ...
 
-    async def reconcile_model_requests(self) -> str | None:
+    async def reconcile_model_requests(
+        self,
+        *,
+        # lint-waiver: LW-040116 [ANN401]; naming the concrete WorkspaceHandle here creates a sibling-module cycle, while object would violate method contravariance.
+        scope: Any = None,  # noqa: ANN401
+    ) -> str | None:
         """Stage candidate-declared model weights; return a rejection reason."""
         ...
 
@@ -196,6 +201,11 @@ class HostResources(Protocol):
     ``Protocol`` is invariant, so ``RunContext``'s concrete, narrower
     attribute type would fail to satisfy a broader read-write member here.
     """
+
+    @property
+    def run_id(self) -> str:
+        """Return this run's durable identity."""
+        ...
 
     @property
     def request(self) -> RunRequest:

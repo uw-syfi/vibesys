@@ -7,9 +7,14 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from vs_runtime.api import (
+    AccuracyEvaluation,
+    AccuracyReceipt,
     AgentCapability,
     AgentRole,
     AgentTool,
+    BenchmarkEvaluation,
+    BenchmarkObjective,
+    MetricDirection,
     OrchestrationPlugin,
     RunHost,
     RunStatus,
@@ -176,3 +181,56 @@ def test_plugin_rejects_invalid_id() -> None:
             options=_Options,
             orchestrate=_orchestrate,
         )
+
+
+def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        workspace = host.workspaces.root
+        objective = BenchmarkObjective(name="tokens_per_second", direction=MetricDirection.MAXIMIZE)
+        accuracy = AccuracyEvaluation(executed=True)
+        benchmark = BenchmarkEvaluation(
+            executed=True,
+            metric_name="tokens_per_second",
+            metric_value=42.0,
+            metric_direction=MetricDirection.MAXIMIZE,
+            row={"tokens_per_second": 42.0},
+        )
+        host.evaluation.script_accuracy(accuracy)
+        host.evaluation.script_benchmark(benchmark)
+
+        accuracy_result = await host.evaluation.accuracy(workspace)
+        assert accuracy_result.executed
+        assert accuracy_result.receipt is not None
+        assert await host.evaluation.benchmark(workspace, objectives=(objective,)) == benchmark
+        assert host.evaluation.accuracy_calls[0].workspace is workspace
+        assert host.evaluation.benchmark_calls[0].objectives == (objective,)
+        assert accuracy_result.passed
+        assert benchmark.passed
+
+        serialized = accuracy_result.receipt.model_dump_json()
+        restored = AccuracyReceipt.model_validate_json(serialized)
+        resumed_host = FakeRunHost(
+            _plugin(_role()), run_id=host.run_id, project_root=workspace.path
+        )
+        reused = await resumed_host.evaluation.accuracy(
+            resumed_host.workspaces.root, reuse=restored
+        )
+        assert reused == AccuracyEvaluation(executed=False, receipt=restored)
+        assert resumed_host.evaluation.accuracy_calls[-1].reuse == restored
+
+    asyncio.run(scenario())
+
+
+def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
+        with pytest.raises(ValueError, match="objective names must be unique"):
+            await host.evaluation.benchmark(
+                host.workspaces.root,
+                objectives=(objective, objective),
+            )
+        assert host.evaluation.benchmark_calls == []
+
+    asyncio.run(scenario())

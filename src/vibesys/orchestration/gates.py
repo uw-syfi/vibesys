@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import subprocess
 from dataclasses import dataclass
+from itertools import count
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.evaluators.gates import (
@@ -26,18 +28,25 @@ from vibesys.evaluators.gates import (
     run_accuracy_gate,
     run_benchmark_gate,
 )
-from vibesys.evaluators.metrics import MetricSpace
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import GateFinishedData, GateKind
 from vibesys.orchestration import progress_log
+from vibesys.orchestration.workspaces import WorkspaceHandle
+from vs_runtime.api import (
+    AccuracyEvaluation,
+    AccuracyReceipt,
+    BenchmarkEvaluation,
+    BenchmarkObjective,
+    RuntimeContractError,
+    Workspace,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
     from vibesys.context import _RunResources
-    from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration._host import HostResources
-    from vibesys.orchestration.workspaces import WorkspaceHandle
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker
     from vibesys.runtime import WorkspaceScope
@@ -473,3 +482,146 @@ class _Evaluator:
         if release_env:
             variables.append(f"{release_env}=1")
         return f"env {' '.join(variables)} {command}" if variables else command
+
+
+class _EvaluationAdapter:
+    """Translate public semantic evaluations to the existing trusted gates."""
+
+    def __init__(self, host: HostResources, evaluator: _Evaluator) -> None:
+        self._host = host
+        self._evaluator = evaluator
+        self._identifiers = count(1)
+
+    @staticmethod
+    def _live_workspace(workspace: Workspace) -> WorkspaceHandle:
+        if not isinstance(workspace, WorkspaceHandle):
+            message = "workspace must be a live handle from this run"
+            raise TypeError(message)
+        return workspace
+
+    def _receipt(self, workspace: WorkspaceHandle, revision: str) -> AccuracyReceipt:
+        return AccuracyReceipt(
+            run_id=self._host.run_id,
+            workspace_id=workspace.id,
+            revision=revision,
+        )
+
+    def _validate_receipt_owner(self, workspace: WorkspaceHandle, receipt: AccuracyReceipt) -> None:
+        if receipt.run_id != self._host.run_id:
+            message = "accuracy receipt belongs to another run"
+            raise RuntimeContractError(message)
+        if receipt.workspace_id != workspace.id:
+            message = "accuracy receipt belongs to another workspace"
+            raise RuntimeContractError(message)
+
+    def _validate_receipt_revision(
+        self, workspace: WorkspaceHandle, receipt: AccuracyReceipt
+    ) -> None:
+        current_revision = workspace.revision
+        if current_revision is None:
+            message = "accuracy receipt does not match the current workspace revision"
+            raise RuntimeContractError(message)
+        if receipt.revision == current_revision:
+            return
+        git = self._host.workspaces._resources_for(workspace).git
+        try:
+            same_candidate = git.candidate_patch(receipt.revision) == git.candidate_patch(
+                current_revision
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            message = "accuracy receipt revision is unavailable in this workspace"
+            raise RuntimeContractError(message) from error
+        if not same_candidate:
+            message = "accuracy receipt does not match the current candidate revision"
+            raise RuntimeContractError(message)
+
+    async def accuracy(
+        self,
+        workspace: Workspace,
+        *,
+        reuse: AccuracyReceipt | None = None,
+    ) -> AccuracyEvaluation:
+        """Run or explicitly reuse the trusted accuracy result."""
+        live = self._live_workspace(workspace)
+        if reuse is not None:
+            self._validate_receipt_owner(live, reuse)
+            await live.snapshot("framework-accuracy-reuse-input")
+            self._validate_receipt_revision(live, reuse)
+            await self._evaluator.reuse_accuracy()
+            return AccuracyEvaluation(executed=False, receipt=reuse)
+        if self._host.request.agent_backend == "stub":
+            return AccuracyEvaluation(executed=False)
+        candidate_revision = await live.snapshot("framework-accuracy-input")
+        if resource_feedback := await self._host.environment.reconcile_model_requests(scope=live):
+            return AccuracyEvaluation(executed=False, feedback=resource_feedback)
+        view = self._host.environment.view
+        bundle = self._host.request.input_bundle
+        release = (
+            bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
+        ) or not view.paths.benchmark_command
+        execution = self._evaluator._command(
+            view.paths.accuracy_command,
+            candidate_revision,
+            view.deployment_release_env_var if release else None,
+        )
+        result = await self._evaluator.check(
+            f"evaluation-accuracy-{next(self._identifiers)}",
+            scope=live,
+            execution_command=execution,
+        )
+        feedback = result.feedback
+        if not result.passed and feedback is None:
+            feedback = "accuracy evaluation failed"
+        if result.executed:
+            await live.snapshot("framework-accuracy-evaluation")
+        receipt = self._receipt(live, candidate_revision) if result.passed else None
+        return AccuracyEvaluation(
+            executed=result.executed,
+            feedback=feedback,
+            receipt=receipt,
+        )
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        """Run the declared benchmark contract in one workspace."""
+        live = self._live_workspace(workspace)
+        legacy_objectives = tuple(
+            Objective(name=item.name, direction=item.direction.value) for item in objectives
+        )
+        _ = MetricSpace(objectives=legacy_objectives)
+        if self._host.request.agent_backend == "stub":
+            return BenchmarkEvaluation(executed=False)
+        candidate_revision = await live.snapshot("framework-benchmark-input")
+        if resource_feedback := await self._host.environment.reconcile_model_requests(scope=live):
+            return BenchmarkEvaluation(executed=False, feedback=resource_feedback)
+        identifier = f"evaluation-benchmark-{next(self._identifiers)}"
+        view = self._host.environment.view
+        execution = self._evaluator._command(
+            view.paths.benchmark_command,
+            candidate_revision,
+            view.deployment_release_env_var,
+        )
+        result = await self._evaluator.measure(
+            identifier,
+            scope=live,
+            options=MeasurementOptions(
+                objectives=legacy_objectives,
+                execution_base=execution,
+            ),
+        )
+        if result.executed:
+            await live.snapshot("framework-benchmark-evaluation")
+        outcome = result.outcome
+        return BenchmarkEvaluation(
+            executed=result.executed,
+            feedback=outcome.feedback,
+            metric_name=outcome.metric_name,
+            metric_value=outcome.metric_value,
+            metric_direction=outcome.metric_direction,
+            metric_unit=outcome.metric_unit,
+            row=outcome.row,
+        )

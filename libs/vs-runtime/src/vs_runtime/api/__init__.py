@@ -1,11 +1,17 @@
 """Public contracts for the reusable VibeSys runtime."""
 
 from vs_runtime.contracts import (
+    AccuracyEvaluation,
+    AccuracyReceipt,
     AgentCapability,
     AgentRole,
     AgentSession,
     AgentSessions,
     AgentTool,
+    BenchmarkEvaluation,
+    BenchmarkObjective,
+    Evaluation,
+    MetricDirection,
     OrchestrationPlugin,
     RunHost,
     RunStatus,
@@ -21,11 +27,17 @@ from vs_runtime.contracts import (
 )
 
 __all__ = [
+    "AccuracyEvaluation",
+    "AccuracyReceipt",
     "AgentCapability",
     "AgentRole",
     "AgentSession",
     "AgentSessions",
     "AgentTool",
+    "BenchmarkEvaluation",
+    "BenchmarkObjective",
+    "Evaluation",
+    "MetricDirection",
     "OrchestrationPlugin",
     "RunHost",
     "RunStatus",

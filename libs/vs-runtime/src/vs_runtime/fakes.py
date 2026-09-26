@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel
 
 from vs_runtime.contracts import (
+    AccuracyEvaluation,
+    AccuracyReceipt,
     AgentRole,
     AgentSession,
+    BenchmarkEvaluation,
+    BenchmarkObjective,
     OrchestrationPlugin,
+    RuntimeContractError,
     SessionClosedError,
     UnknownAgentRoleError,
     Workspace,
     WorkspaceRef,
     validate_member_id,
+    validate_objectives,
 )
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -164,6 +171,89 @@ class FakeWorkspaces:
         return self._root
 
 
+@dataclass(frozen=True, slots=True)
+class FakeAccuracyCall:
+    """One recorded accuracy evaluation request."""
+
+    workspace: Workspace
+    reuse: AccuracyReceipt | None
+
+
+@dataclass(frozen=True, slots=True)
+class FakeBenchmarkCall:
+    """One recorded benchmark evaluation request."""
+
+    workspace: Workspace
+    objectives: tuple[BenchmarkObjective, ...]
+
+
+@dataclass(slots=True)
+class FakeEvaluation:
+    """Scriptable in-memory implementation of trusted evaluation effects."""
+
+    default_accuracy: AccuracyEvaluation = field(
+        default_factory=lambda: AccuracyEvaluation(executed=False)
+    )
+    default_benchmark: BenchmarkEvaluation = field(
+        default_factory=lambda: BenchmarkEvaluation(executed=False)
+    )
+    accuracy_results: list[AccuracyEvaluation] = field(default_factory=list)
+    benchmark_results: list[BenchmarkEvaluation] = field(default_factory=list)
+    accuracy_calls: list[FakeAccuracyCall] = field(default_factory=list)
+    benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
+    run_id: str = "test-run"
+
+    def script_accuracy(self, *results: AccuracyEvaluation) -> None:
+        """Queue accuracy results in call order."""
+        self.accuracy_results.extend(results)
+
+    def script_benchmark(self, *results: BenchmarkEvaluation) -> None:
+        """Queue benchmark results in call order."""
+        self.benchmark_results.extend(results)
+
+    async def accuracy(
+        self,
+        workspace: Workspace,
+        *,
+        reuse: AccuracyReceipt | None = None,
+    ) -> AccuracyEvaluation:
+        """Record the request and return the next scripted result."""
+        self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
+        if reuse is not None:
+            if reuse.run_id != self.run_id:
+                message = "accuracy receipt belongs to another run"
+                raise RuntimeContractError(message)
+            if reuse.workspace_id != workspace.id:
+                message = "accuracy receipt belongs to another workspace"
+                raise RuntimeContractError(message)
+            if reuse.revision != "fake-revision":
+                message = "accuracy receipt does not match the current workspace revision"
+                raise RuntimeContractError(message)
+            return AccuracyEvaluation(executed=False, receipt=reuse)
+        result = self.accuracy_results.pop(0) if self.accuracy_results else self.default_accuracy
+        if not result.passed:
+            return result
+        receipt = result.receipt or AccuracyReceipt(
+            run_id=self.run_id,
+            workspace_id=workspace.id,
+            revision="fake-revision",
+        )
+        return result.model_copy(update={"receipt": receipt})
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        """Record the request and return the next scripted result."""
+        validate_objectives(objectives)
+        self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives))
+        if self.benchmark_results:
+            return self.benchmark_results.pop(0)
+        return self.default_benchmark
+
+
 class FakeRunHost:
     """In-memory run host that owns fake sessions and captured log lines."""
 
@@ -179,6 +269,7 @@ class FakeRunHost:
         self._run_id = run_id
         self._workspaces = FakeWorkspaces(WorkspaceRef(path=project_root))
         self._agents = FakeAgentSessions(plugin.agents, responder=responder)
+        self._evaluation = FakeEvaluation(run_id=run_id)
         self._logs: list[str] = []
         self._closed = False
 
@@ -196,6 +287,11 @@ class FakeRunHost:
     def agents(self) -> FakeAgentSessions:
         """Return the run-owned fake session factory."""
         return self._agents
+
+    @property
+    def evaluation(self) -> FakeEvaluation:
+        """Return the scriptable trusted evaluation capability."""
+        return self._evaluation
 
     @property
     def logs(self) -> tuple[str, ...]:

@@ -48,6 +48,7 @@ from vibesys.orchestration.gates import (
     GateExecutor,
     GateRunResult,
     MeasurementOptions,
+    _EvaluationAdapter,
     _Evaluator,
 )
 from vibesys.orchestration.progress import _Progress
@@ -197,6 +198,7 @@ class RunContext:
         self.control = _RunControl(integration, debug=request.debug)
         self.state = _RunState(self)
         self.gates = _Evaluator(self)
+        self.evaluation = _EvaluationAdapter(self, self.gates)
         self.workspaces = _Workspaces(self)
         self.agents = _Agents(self, agent_roles)
         self.environment = _Environment(self)

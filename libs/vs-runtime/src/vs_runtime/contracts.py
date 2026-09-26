@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path  # Pydantic resolves WorkspaceRef at runtime.
 from typing import TYPE_CHECKING, Protocol, TypeVar, overload
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -177,6 +178,88 @@ class Workspaces(Protocol):
         ...
 
 
+class MetricDirection(StrEnum):
+    """Which direction improves one benchmark objective."""
+
+    MAXIMIZE = "max"
+    MINIMIZE = "min"
+
+
+class BenchmarkObjective(BaseModel):
+    """One policy-selected metric axis for benchmark interpretation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    direction: MetricDirection
+
+
+class AccuracyReceipt(BaseModel):
+    """Opaque proof that accuracy passed for an exact candidate revision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: str = Field(min_length=1)
+    workspace_id: str | None = Field(default=None, min_length=1)
+    revision: str = Field(min_length=1)
+
+
+class AccuracyEvaluation(BaseModel):
+    """Semantic outcome of the trusted accuracy evaluation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    executed: bool
+    feedback: str | None = None
+    receipt: AccuracyReceipt | None = None
+
+    @property
+    def passed(self) -> bool:
+        """Return whether policy may accept this accuracy outcome."""
+        return self.feedback is None
+
+
+class BenchmarkEvaluation(BaseModel):
+    """Semantic outcome and measurements from the trusted benchmark."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    executed: bool
+    feedback: str | None = None
+    metric_name: str | None = None
+    metric_value: FiniteFloat | None = None
+    metric_direction: MetricDirection | None = None
+    metric_unit: str | None = None
+    row: Mapping[str, FiniteFloat] | None = None
+
+    @property
+    def passed(self) -> bool:
+        """Return whether policy may accept this benchmark outcome."""
+        return self.feedback is None
+
+
+class Evaluation(Protocol):
+    """Trusted candidate evaluation effects available to policy."""
+
+    async def accuracy(
+        self,
+        workspace: Workspace,
+        *,
+        reuse: AccuracyReceipt | None = None,
+    ) -> AccuracyEvaluation:
+        """Evaluate correctness, optionally reusing an exact-candidate pass."""
+        ...
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        """Measure one live workspace against policy-selected objectives."""
+        ...
+
+
 class RunStatus(StrEnum):
     """Terminal status returned by orchestration policy."""
 
@@ -201,6 +284,11 @@ class RunHost(Protocol):
     @property
     def workspaces(self) -> Workspaces:
         """Return this run's live workspace capability."""
+        ...
+
+    @property
+    def evaluation(self) -> Evaluation:
+        """Return this run's trusted evaluation capability."""
         ...
 
     def log(self, message: str) -> None:
@@ -243,4 +331,12 @@ def validate_member_id(member_id: str | None) -> None:
     """Reject an invalid optional stable member identifier."""
     if member_id is not None and re.fullmatch(r"[a-z0-9][a-z0-9._-]*", member_id) is None:
         message = f"invalid agent member ID {member_id!r}"
+        raise ValueError(message)
+
+
+def validate_objectives(objectives: tuple[BenchmarkObjective, ...]) -> None:
+    """Reject duplicate benchmark axes before trusted execution starts."""
+    names = [objective.name for objective in objectives]
+    if len(names) != len(set(names)):
+        message = "benchmark objective names must be unique"
         raise ValueError(message)
