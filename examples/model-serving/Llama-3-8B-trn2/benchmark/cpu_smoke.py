@@ -20,7 +20,7 @@ _SCRIPT = Path(__file__).with_name("benchmark.py")
 class _Handler(http.server.BaseHTTPRequestHandler):
     server: _FakeServer
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
             error = self.server.validate(self.path, body)
