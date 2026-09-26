@@ -205,6 +205,30 @@ def test_builtin_catalog_selects_plugins_and_keeps_only_evolve_legacy() -> None:
     assert legacy.projector is not None
 
 
+def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Path) -> None:
+    request = _custom_request(tmp_path).model_copy(
+        update={
+            "orchestration": OrchestrationDescriptor(
+                id="single-agent",
+                config_version=1,
+                options={
+                    "interface": "inprocess",
+                    "max_rounds": 1,
+                    "max_retries_per_round": 1,
+                    "judge_every": 1,
+                    "official_eval_every": 1,
+                    "memory_layout": "files",
+                },
+            )
+        }
+    )
+    session = create_session(request, sink=_discard_event)
+
+    result = asyncio.run(session.await_result())
+
+    assert result.loop == "single-agent"
+
+
 def test_builtin_plugin_setup_is_private_product_wiring() -> None:
     registry = built_in_orchestrations()
     agent_options = {

@@ -31,8 +31,12 @@ class StubAgentClient:
 
     @property
     def capabilities(self) -> AgentCapabilities:
-        """The deterministic stub does not expose external tools."""
-        return AgentCapabilities(session_reuse=False)
+        """Emulate every conversation capability used by built-in smoke runs."""
+        return AgentCapabilities(
+            mcp_servers=True,
+            session_reuse=True,
+            provider_session_resume=True,
+        )
 
     @property
     def driver_name(self) -> str | None:

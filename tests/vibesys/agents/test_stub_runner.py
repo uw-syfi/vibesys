@@ -65,3 +65,11 @@ def test_stub_runner_names_no_provider_conversation() -> None:
     # The stub runs no provider, so nothing can be resumed or compared against.
     assert runner.provider_session_id(key) is None
     assert runner.last_turn_provider_session_id(key) is None
+
+
+def test_stub_runner_emulates_builtin_conversation_capabilities() -> None:
+    capabilities = StubAgentClient().capabilities
+
+    assert capabilities.session_reuse
+    assert capabilities.provider_session_resume
+    assert capabilities.mcp_servers
