@@ -10,6 +10,7 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
 from vibesys.events import FrameworkSource
 from vibesys.runtime import WorkspaceScope
+from vs_runtime.api import WorkspaceRestoreError as RuntimeWorkspaceRestoreError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration._host import HostResources
 
 
-class WorkspaceRestoreError(RuntimeError):
+class WorkspaceRestoreError(RuntimeWorkspaceRestoreError):
     """A workspace checkout to a retained revision failed.
 
     Callers that need a hard failure (e.g. role-isolation revert) let this
@@ -37,7 +39,7 @@ class WorkspaceRestoreError(RuntimeError):
 
     def __init__(self, revision: str) -> None:
         """Name the revision that could not be checked out."""
-        super().__init__(f"could not restore candidate revision {revision!r}")
+        super().__init__(revision)
 
 
 class WorkspaceTransactionKeep(Exception):  # noqa: N818  # LW-040113 [N818]; a signal, not always an error.
@@ -159,9 +161,43 @@ class WorkspaceHandle:
             return False
         return True
 
-    async def retain(self, name: str, revision: str) -> str:
-        """Keep a revision reachable under a policy-owned name."""
-        return await self._owner._retain(name, revision)
+    async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
+        """Try to restore a revision using the host's tolerant restore path."""
+        return await self.restore_or_warn(revision, clean=clean)
+
+    async def retain(
+        self,
+        revision_or_name: str,
+        legacy_revision: str | None = None,
+        *,
+        label: str | None = None,
+    ) -> str | None:
+        """Retain a revision under a semantic label.
+
+        The two-positional-argument form remains temporarily for unmigrated
+        in-tree policies. Plugin callers use ``retain(revision, label=...)``;
+        its generated Git ref and return value stay private.
+        """
+        if legacy_revision is not None:
+            if label is not None:
+                message = "legacy workspace retention cannot also supply label"
+                raise TypeError(message)
+            return await self._owner._retain(revision_or_name, legacy_revision)
+        if label is None:
+            message = "workspace retention requires a semantic label"
+            raise TypeError(message)
+        private_name = self._retention_name(label, revision_or_name)
+        await self._owner._retain(private_name, revision_or_name)
+        return None
+
+    @staticmethod
+    def _retention_name(label: str, revision: str) -> str:
+        """Create a valid private ref component without exposing Git naming."""
+        if not label:
+            message = "workspace retention label must be nonempty"
+            raise ValueError(message)
+        digest = hashlib.sha256(f"{label}\0{revision}".encode()).hexdigest()
+        return f"retained-{digest}"
 
     async def pending_changes(self) -> list[str]:
         """List uncommitted candidate changes in this workspace."""

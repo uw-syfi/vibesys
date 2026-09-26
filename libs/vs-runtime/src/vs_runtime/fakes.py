@@ -22,7 +22,7 @@ from vs_runtime.contracts import (
     StateModelError,
     UnknownAgentRoleError,
     Workspace,
-    WorkspaceRef,
+    WorkspaceRestoreError,
     validate_member_id,
     validate_objectives,
 )
@@ -31,6 +31,16 @@ ResponseT = TypeVar("ResponseT", bound=BaseModel)
 TurnResponder: TypeAlias = Callable[
     [AgentRole, tuple[str, ...], str, type[BaseModel] | None], object
 ]
+
+
+class _UnknownWorkspaceRevisionError(ValueError):
+    def __init__(self, revision: str) -> None:
+        super().__init__(f"workspace revision is not retained: {revision!r}")
+
+
+class _WorkspaceRetentionLabelError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("workspace retention label must be nonempty")
 
 
 def _echo_responder(
@@ -170,6 +180,90 @@ class FakeWorkspaces:
     def root(self) -> Workspace:
         """Return the configured fake root workspace."""
         return self._root
+
+
+class FakeWorkspace:
+    """In-memory live workspace with revision and retention semantics."""
+
+    def __init__(
+        self,
+        *,
+        path: Path = Path(),
+        workspace_id: str | None = None,
+        revision: str | None = "fake-revision",
+        trusted_input_baseline: str | None = None,
+    ) -> None:
+        """Create a workspace at one recorded tree and immutable baseline."""
+        self._path = path
+        self._id = workspace_id
+        self._revision = revision
+        self._tree_revision = revision
+        self._trusted_input_baseline = (
+            revision if trusted_input_baseline is None else trusted_input_baseline
+        )
+        self._known_revisions = {
+            value for value in (revision, self._trusted_input_baseline) if value
+        }
+        self._snapshot_count = 0
+        self._retained: dict[str, str] = {}
+
+    @property
+    def id(self) -> str | None:
+        """Return the configured workspace identity."""
+        return self._id
+
+    @property
+    def path(self) -> Path:
+        """Return the configured host path without touching the filesystem."""
+        return self._path
+
+    @property
+    def revision(self) -> str | None:
+        """Return the latest recorded fake revision."""
+        return self._revision
+
+    @property
+    def trusted_input_baseline(self) -> str | None:
+        """Return the immutable configured trusted-input baseline."""
+        return self._trusted_input_baseline
+
+    @property
+    def retained(self) -> dict[str, str]:
+        """Return policy labels and revisions retained so far."""
+        return dict(self._retained)
+
+    async def snapshot(self, label: str) -> str:
+        """Record a deterministic new revision for the current fake tree."""
+        del label
+        self._snapshot_count += 1
+        revision = f"fake-revision-{self._snapshot_count}"
+        self._revision = revision
+        self._tree_revision = revision
+        self._known_revisions.add(revision)
+        return revision
+
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
+        """Materialize a known tree while leaving recorded history unchanged."""
+        del clean
+        if revision not in self._known_revisions:
+            raise WorkspaceRestoreError(revision)
+        self._tree_revision = revision
+
+    async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
+        """Return whether a known tree could be materialized."""
+        try:
+            await self.restore(revision, clean=clean)
+        except WorkspaceRestoreError:
+            return False
+        return True
+
+    async def retain(self, revision: str, *, label: str) -> None:
+        """Retain a known revision under a nonempty semantic label."""
+        if revision not in self._known_revisions:
+            raise _UnknownWorkspaceRevisionError(revision)
+        if not label:
+            raise _WorkspaceRetentionLabelError
+        self._retained[label] = revision
 
 
 class FakeControl:
@@ -316,17 +410,21 @@ class FakeEvaluation:
             if reuse.workspace_id != workspace.id:
                 message = "accuracy receipt belongs to another workspace"
                 raise RuntimeContractError(message)
-            if reuse.revision != "fake-revision":
+            if reuse.revision != workspace.revision:
                 message = "accuracy receipt does not match the current workspace revision"
                 raise RuntimeContractError(message)
             return AccuracyEvaluation(executed=False, receipt=reuse)
         result = self.accuracy_results.pop(0) if self.accuracy_results else self.default_accuracy
         if not result.passed:
             return result
+        revision = workspace.revision
+        if revision is None:
+            message = "accuracy requires a recorded workspace revision"
+            raise RuntimeContractError(message)
         receipt = result.receipt or AccuracyReceipt(
             run_id=self.run_id,
             workspace_id=workspace.id,
-            revision="fake-revision",
+            revision=revision,
         )
         return result.model_copy(update={"receipt": receipt})
 
@@ -357,7 +455,7 @@ class FakeRunHost:
     ) -> None:
         """Create a host whose private role map derives from ``plugin.agents``."""
         self._run_id = run_id
-        self._workspaces = FakeWorkspaces(WorkspaceRef(path=project_root))
+        self._workspaces = FakeWorkspaces(FakeWorkspace(path=project_root))
         self._agents = FakeAgentSessions(plugin.agents, responder=responder)
         self._evaluation = FakeEvaluation(run_id=run_id)
         self._state = FakeState(plugin.state, self._workspaces.root)

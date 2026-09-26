@@ -171,7 +171,7 @@ depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "v
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.orchestration.memory", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel"]
+depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.orchestration.memory", "vibesys.orchestrations.agent_options", "vibesys.loops.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -274,12 +274,12 @@ depends_on = []
 [[modules]]
 path = "vibesys.loops.single"
 layer = "loops"
-depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.evaluators", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
+depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
 
 [[modules]]
 path = "vibesys.loops.multi"
 layer = "loops"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestrations.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
@@ -436,7 +436,7 @@ expose = ["api", "api\\..*"]
 from = ["vs_runtime"]
 
 [[interfaces]]
-expose = ["single"]
+expose = ["agent_options", "single"]
 from = ["vibesys.orchestrations"]
 
 [[interfaces]]
@@ -471,7 +471,7 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "v
 [[modules]]
 path = "vibesys.orchestration.workspaces"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.runtime", "vibesys.orchestration._host"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.runtime", "vibesys.orchestration._host", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.state"
@@ -529,16 +529,16 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.orchestration.request", "vi
 
 [[modules]]
 # Shared strategy-option validation for the four hypothesis-driven
-# strategies. Sits directly under vibesys.loops (not inside any one
+# strategies. Sits directly under vibesys.orchestrations (not inside any one
 # strategy folder) because strategies never import each other.
-path = "vibesys.loops.agent_options"
+path = "vibesys.orchestrations.agent_options"
 layer = "loops"
 depends_on = ["vibesys", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestration", "vs_project"]
 
 [[modules]]
 # Shared hypothesis-search read model for the four hypothesis-driven
 # strategies' registered projectors. Sits directly under vibesys.loops for
-# the same reason as vibesys.loops.agent_options.
+# the same reason agent_options sits directly under vibesys.orchestrations.
 path = "vibesys.loops.hypothesis_readmodel"
 layer = "loops"
 depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state"]

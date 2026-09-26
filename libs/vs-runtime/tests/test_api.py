@@ -23,9 +23,9 @@ from vs_runtime.api import (
     StateModelError,
     UnknownAgentRoleError,
     WorkspaceAccess,
-    WorkspaceRef,
+    WorkspaceRestoreError,
 )
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 
 
 class _Options(BaseModel):
@@ -79,8 +79,8 @@ def _plugin(*agents: AgentRole, state: type[BaseModel] | None = None) -> Orchest
     )
 
 
-def _workspace() -> WorkspaceRef:
-    return WorkspaceRef(id="workspace-a", path=Path("/workspace-a"))
+def _workspace() -> FakeWorkspace:
+    return FakeWorkspace(workspace_id="workspace-a", path=Path("/workspace-a"))
 
 
 def test_role_is_a_strict_complete_declaration() -> None:
@@ -114,15 +114,14 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
     async def scenario() -> None:
         role = _role()
         host = FakeRunHost(_plugin(role), responder=respond)
-        first = await host.agents.create_session(
-            role, workspace=_workspace(), member_id="candidate-1"
-        )
+        workspace = _workspace()
+        first = await host.agents.create_session(role, workspace=workspace, member_id="candidate-1")
         assert await first.turn("one") == "one"
         assert await first.turn("two", response=_Reply) == _Reply(answer="two")
         second = await host.agents.create_session(role, workspace=_workspace())
         assert await second.turn("fresh") == "fresh"
         assert first.role == role
-        assert first.workspace == _workspace()
+        assert first.workspace is workspace
         assert first.member_id == "candidate-1"
         await host.close()
 
@@ -175,6 +174,33 @@ def test_plugin_agents_tuple_is_unique_source_of_truth() -> None:
     assert plugin.options is _Options
     with pytest.raises(ValueError, match="duplicate agent role IDs"):
         _plugin(role, role)
+
+
+def test_fake_workspace_models_root_revision_operations() -> None:
+    async def scenario() -> None:
+        workspace = FakeWorkspace(
+            path=Path("/workspace"),
+            revision="input-revision",
+            trusted_input_baseline="trusted-baseline",
+        )
+        assert workspace.id is None
+        assert workspace.path == Path("/workspace")
+        assert workspace.revision == "input-revision"
+        assert workspace.trusted_input_baseline == "trusted-baseline"
+
+        candidate = await workspace.snapshot("implemented plan")
+        assert candidate == workspace.revision
+        assert await workspace.retain(candidate, label="selected-round-0004") is None
+        assert workspace.retained == {"selected-round-0004": candidate}
+
+        await workspace.restore("trusted-baseline", clean=False)
+        assert workspace.revision == candidate
+        assert await workspace.try_restore(candidate)
+        assert not await workspace.try_restore("missing")
+        with pytest.raises(WorkspaceRestoreError, match="missing"):
+            await workspace.restore("missing")
+
+    asyncio.run(scenario())
 
 
 def test_session_rejects_invalid_member_id_before_creation() -> None:

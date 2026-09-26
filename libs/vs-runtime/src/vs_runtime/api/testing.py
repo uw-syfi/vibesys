@@ -10,6 +10,7 @@ from vs_runtime.fakes import (
     FakeRunHost,
     FakeState,
     FakeStateCommit,
+    FakeWorkspace,
     FakeWorkspaces,
     TurnResponder,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "FakeRunHost",
     "FakeState",
     "FakeStateCommit",
+    "FakeWorkspace",
     "FakeWorkspaces",
     "TurnResponder",
 ]

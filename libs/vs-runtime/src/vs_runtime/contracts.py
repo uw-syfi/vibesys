@@ -21,6 +21,14 @@ class RuntimeContractError(RuntimeError):
     """Base class for rejected runtime operations."""
 
 
+class WorkspaceRestoreError(RuntimeContractError):
+    """A workspace could not materialize a requested retained revision."""
+
+    def __init__(self, revision: str) -> None:
+        """Name the revision that could not be restored."""
+        super().__init__(f"could not restore workspace revision {revision!r}")
+
+
 class SessionClosedError(RuntimeContractError):
     """A caller used an agent session after its lifetime ended."""
 
@@ -88,7 +96,7 @@ class AgentTool(BaseModel):
 
 
 class Workspace(Protocol):
-    """Stable identity and host path of one live run workspace."""
+    """One live run workspace with semantic revision operations."""
 
     @property
     def id(self) -> str | None:
@@ -98,6 +106,32 @@ class Workspace(Protocol):
     @property
     def path(self) -> Path:
         """Return the workspace's host path."""
+        ...
+
+    @property
+    def revision(self) -> str | None:
+        """Return the workspace's latest recorded revision, if one exists."""
+        ...
+
+    @property
+    def trusted_input_baseline(self) -> str | None:
+        """Return the immutable trusted-input baseline, if configured."""
+        ...
+
+    async def snapshot(self, label: str) -> str:
+        """Record the current workspace tree and return its revision."""
+        ...
+
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
+        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`."""
+        ...
+
+    async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
+        """Try to materialize a revision, returning ``False`` on restore failure."""
+        ...
+
+    async def retain(self, revision: str, *, label: str) -> None:
+        """Keep a revision reachable under a policy-owned semantic label."""
         ...
 
 

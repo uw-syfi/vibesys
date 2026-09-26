@@ -84,10 +84,10 @@ graph TD
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.runtime
     vibesys.api --> vibesys.sandbox
-    vibesys.api.agent --> vibesys.loops.agent_options
     vibesys.api.agent --> vibesys.loops.hypothesis_readmodel
     vibesys.api.agent --> vibesys.loops.registry
     vibesys.api.agent --> vibesys.orchestration.memory
+    vibesys.api.agent --> vibesys.orchestrations.agent_options
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.evaluators
@@ -112,10 +112,6 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vibesys.render
-    vibesys.loops.agent_options --> vibesys
-    vibesys.loops.agent_options --> vibesys.errors
-    vibesys.loops.agent_options --> vibesys.evaluators
-    vibesys.loops.agent_options --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys
     vibesys.loops.evolve --> vibesys.domains
     vibesys.loops.evolve --> vibesys.errors
@@ -151,13 +147,13 @@ graph TD
     vibesys.loops.multi --> vibesys.domains
     vibesys.loops.multi --> vibesys.errors
     vibesys.loops.multi --> vibesys.evaluators
-    vibesys.loops.multi --> vibesys.loops.agent_options
     vibesys.loops.multi --> vibesys.loops.hypothesis_readmodel
     vibesys.loops.multi --> vibesys.orchestration.artifacts
     vibesys.loops.multi --> vibesys.orchestration.memory
     vibesys.loops.multi --> vibesys.orchestration.progress_log
     vibesys.loops.multi --> vibesys.orchestration.runtime
     vibesys.loops.multi --> vibesys.orchestration.view
+    vibesys.loops.multi --> vibesys.orchestrations.agent_options
     vibesys.loops.multi --> vibesys.prompts
     vibesys.loops.multi --> vibesys.render
     vibesys.loops.multi --> vibesys.roles
@@ -174,13 +170,13 @@ graph TD
     vibesys.loops.single --> vibesys.domains
     vibesys.loops.single --> vibesys.errors
     vibesys.loops.single --> vibesys.evaluators
-    vibesys.loops.single --> vibesys.loops.agent_options
     vibesys.loops.single --> vibesys.loops.hypothesis_readmodel
     vibesys.loops.single --> vibesys.orchestration.artifacts
     vibesys.loops.single --> vibesys.orchestration.memory
     vibesys.loops.single --> vibesys.orchestration.progress_log
     vibesys.loops.single --> vibesys.orchestration.runtime
     vibesys.loops.single --> vibesys.orchestration.view
+    vibesys.loops.single --> vibesys.orchestrations.agent_options
     vibesys.loops.single --> vibesys.prompts
     vibesys.loops.single --> vibesys.roles
     vibesys.loops.single --> vibesys.runtime
@@ -262,6 +258,10 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
+    vibesys.orchestrations.agent_options --> vibesys
+    vibesys.orchestrations.agent_options --> vibesys.errors
+    vibesys.orchestrations.agent_options --> vibesys.evaluators
+    vibesys.orchestrations.agent_options --> vibesys.orchestration
     vibesys.prompts --> vibesys
     vibesys.prompts --> vibesys.evaluators
     vibesys.render --> vibesys
@@ -392,10 +392,10 @@ graph TD
     vibesys.api --> vs_agent
     vibesys.api --> vs_project
     vibesys.api --> vs_sandbox
-    vibesys.api.agent --> vibesys.loops.agent_options
     vibesys.api.agent --> vibesys.loops.hypothesis_readmodel
     vibesys.api.agent --> vibesys.loops.registry
     vibesys.api.agent --> vibesys.orchestration.memory
+    vibesys.api.agent --> vibesys.orchestrations.agent_options
     vibesys.api.agent --> vs_project
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
@@ -431,11 +431,6 @@ graph TD
     vibesys.evaluators --> vs_loop_state
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
-    vibesys.loops.agent_options --> vibesys
-    vibesys.loops.agent_options --> vibesys.errors
-    vibesys.loops.agent_options --> vibesys.evaluators
-    vibesys.loops.agent_options --> vibesys.orchestration
-    vibesys.loops.agent_options --> vs_project
     vibesys.loops.evolve --> vibesys
     vibesys.loops.evolve --> vibesys.domains
     vibesys.loops.evolve --> vibesys.errors
@@ -479,13 +474,13 @@ graph TD
     vibesys.loops.multi --> vibesys.domains
     vibesys.loops.multi --> vibesys.errors
     vibesys.loops.multi --> vibesys.evaluators
-    vibesys.loops.multi --> vibesys.loops.agent_options
     vibesys.loops.multi --> vibesys.loops.hypothesis_readmodel
     vibesys.loops.multi --> vibesys.orchestration.artifacts
     vibesys.loops.multi --> vibesys.orchestration.memory
     vibesys.loops.multi --> vibesys.orchestration.progress_log
     vibesys.loops.multi --> vibesys.orchestration.runtime
     vibesys.loops.multi --> vibesys.orchestration.view
+    vibesys.loops.multi --> vibesys.orchestrations.agent_options
     vibesys.loops.multi --> vibesys.prompts
     vibesys.loops.multi --> vibesys.render
     vibesys.loops.multi --> vibesys.roles
@@ -505,13 +500,13 @@ graph TD
     vibesys.loops.single --> vibesys.domains
     vibesys.loops.single --> vibesys.errors
     vibesys.loops.single --> vibesys.evaluators
-    vibesys.loops.single --> vibesys.loops.agent_options
     vibesys.loops.single --> vibesys.loops.hypothesis_readmodel
     vibesys.loops.single --> vibesys.orchestration.artifacts
     vibesys.loops.single --> vibesys.orchestration.memory
     vibesys.loops.single --> vibesys.orchestration.progress_log
     vibesys.loops.single --> vibesys.orchestration.runtime
     vibesys.loops.single --> vibesys.orchestration.view
+    vibesys.loops.single --> vibesys.orchestrations.agent_options
     vibesys.loops.single --> vibesys.prompts
     vibesys.loops.single --> vibesys.roles
     vibesys.loops.single --> vibesys.runtime
@@ -614,6 +609,11 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.orchestrations --> vs_runtime
+    vibesys.orchestrations.agent_options --> vibesys
+    vibesys.orchestrations.agent_options --> vibesys.errors
+    vibesys.orchestrations.agent_options --> vibesys.evaluators
+    vibesys.orchestrations.agent_options --> vibesys.orchestration
+    vibesys.orchestrations.agent_options --> vs_project
     vibesys.prompts --> vibesys
     vibesys.prompts --> vibesys.evaluators
     vibesys.prompts --> vs_prompts
