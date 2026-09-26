@@ -17,6 +17,12 @@ with historical scores should account for the fixed-volume methodology.
 
 The VibeSys benchmark result is rejected if RF reports any failed or
 output-mismatched request, if the expected trace count is incomplete, or if the
-request log does not show the declared input and output lengths. For a CPU-only
-contract check, use a local tokenizer and deterministic OpenAI-compatible
-completions fake with the benchmark adapter.
+request log does not show the declared input and output lengths. For CPU-only
+contract testing, run the shared fake-server smoke with a local Request Factory
+engine:
+
+```bash
+uv run python -m tests.examples.request_factory_cpu_smoke \
+  --profile examples/model-serving/Llama-3-8B-trn2/benchmark/cpu_smoke.toml \
+  --request-factory-engine <RF_ENGINE>
+```
