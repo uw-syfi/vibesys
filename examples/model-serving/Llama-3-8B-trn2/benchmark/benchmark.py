@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 _MODEL = "NousResearch/Meta-Llama-3-8B-Instruct"
+_TOKENIZER = "/model"
 _METRICS = {"aggregate_throughput": {"unit": "tok/s", "direction": "max"}}
 _UNDERSIZED_POOL_WARNING = "synthetic content will repeat within a single request"
 
@@ -34,7 +35,20 @@ def _write_corpus(path: Path, token_pool_limit: int) -> None:
             corpus.write(f"{seed} sample {index} token sequence {index}\n")
 
 
-def _run_point(args: argparse.Namespace, length: int, concurrency: int) -> dict[str, Any]:
+def _token_pool_limit(max_length: int, total_requests: int) -> int:
+    minimum = max(2 * max_length, total_requests)
+    return 1 << (minimum - 1).bit_length()
+
+
+def _run_point(
+    args: argparse.Namespace,
+    length: int,
+    concurrency: int,
+    *,
+    point_index: int,
+    point_count: int,
+    max_length: int,
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="llama3-trn2-rf-point-") as directory:
         temporary = Path(directory)
         trace, summary_path, log_path = (
@@ -42,8 +56,9 @@ def _run_point(args: argparse.Namespace, length: int, concurrency: int) -> dict[
             temporary / "summary.json",
             temporary / "requests.jsonl",
         )
-        _write_trace(trace, args.request_count, length)
-        token_pool_limit = max(2 * length, args.request_count)
+        total_requests = args.request_count * point_count
+        _write_trace(trace, total_requests, length)
+        token_pool_limit = _token_pool_limit(max_length, total_requests)
         corpus = temporary / "corpus.txt"
         _write_corpus(corpus, token_pool_limit)
         command = [
@@ -70,6 +85,10 @@ def _run_point(args: argparse.Namespace, length: int, concurrency: int) -> dict[
             "saturated",
             "--max-concurrency",
             str(concurrency),
+            "--shard-count",
+            str(point_count),
+            "--shard-index",
+            str(point_index),
             "--token-pool-limit",
             str(token_pool_limit),
             "--request-log",
@@ -148,10 +167,20 @@ def run(args: argparse.Namespace) -> int:
             encoding="utf-8",
         )
     try:
+        points = [
+            (length, concurrency) for length in args.lengths for concurrency in args.concurrencies
+        ]
+        max_length = max(args.lengths)
         scenarios = [
-            _run_point(args, length, concurrency)
-            for length in args.lengths
-            for concurrency in args.concurrencies
+            _run_point(
+                args,
+                length,
+                concurrency,
+                point_index=point_index,
+                point_count=len(points),
+                max_length=max_length,
+            )
+            for point_index, (length, concurrency) in enumerate(points)
         ]
         best = max(scenarios, key=lambda row: row["output_token_throughput_per_s"])
         values = {"aggregate_throughput": best["output_token_throughput_per_s"]}
@@ -172,9 +201,6 @@ def run(args: argparse.Namespace) -> int:
                             "kind": "result",
                             "label": "",
                             "values": values,
-                            "artifacts": {"scenarios": scenarios},
-                            "metadata": {"peak_scenario": result["peak_scenario"]},
-                            "unit": "tok/s",
                         },
                         allow_nan=False,
                     )
@@ -197,7 +223,7 @@ def main() -> int:
     parser.add_argument("--request-factory-engine", default="session_runner")
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--model", default=_MODEL)
-    parser.add_argument("--tokenizer", default=_MODEL)
+    parser.add_argument("--tokenizer", default=_TOKENIZER)
     parser.add_argument("--request-count", type=int, default=64)
     parser.add_argument(
         "--lengths",

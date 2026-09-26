@@ -46,7 +46,10 @@ every round; do not substitute or invert it.
   uses saturated arrival mode bounded by each matrix point's concurrency. This
   fixed-volume methodology replaces the former duration-driven bundle client;
   compare its scores accordingly. `aggregate_throughput` is the maximum RF
-  output-token throughput across the full matrix, and every matrix point is
-  retained in the raw benchmark result.
+  output-token throughput across the full matrix. The wrapper partitions one
+  logical RF trace across the 12 matrix points so a later point cannot replay
+  prompt token IDs cached by an earlier point. Every matrix point is retained
+  in JSON stdout and in `--output-json` output when requested; protocol v2
+  carries only the declared headline metric.
 - Correctness is judged by the accuracy checker against the HuggingFace
   Transformers reference; match its tolerance before chasing throughput.

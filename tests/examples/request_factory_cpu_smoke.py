@@ -18,10 +18,12 @@ import tomllib
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from tests.support import run_test_command
+
+from vs_evaluator_protocol.api import parse_records, read_measurement
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TOKENIZER = Path(__file__).with_name("fixtures") / "request_factory_tokenizer.json"
@@ -58,6 +60,8 @@ class SmokeProfile(BaseModel):
     tokenizer: str | None = None
     corpus_text: str | None = None
     unique_prompt_tokens: bool = False
+    disjoint_prompt_batches: tuple[Annotated[int, Field(gt=0)], ...] = ()
+    cache_prefix_tokens: int = Field(default=16, gt=0)
 
     @property
     def benchmark_path(self) -> Path:
@@ -144,6 +148,7 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
         for key, expected in self.server.profile.required_fields.items():
             if body.get(key) != expected:
                 return f"{key} must be {expected!r}"
+        self.server.observed_prompts.append(tuple(prompt))
         return None
 
     @staticmethod
@@ -199,6 +204,7 @@ class _FakeServer(http.server.ThreadingHTTPServer):
         self.failure_mode = False
         self.errors: list[str] = []
         self.observed_shapes: Counter[tuple[int, int]] = Counter()
+        self.observed_prompts: list[tuple[int, ...]] = []
         self.lock = threading.Lock()
 
 
@@ -245,17 +251,20 @@ def _run_case(
         f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     )
     assert not server.errors, "fake server rejected requests: " + "; ".join(server.errors)
-    records = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+    records = parse_records(output_path.read_text(encoding="utf-8"))
     assert records, "benchmark did not write any result records"
-    assert records[0] == {
+    assert records[0].model_dump() == {
         "kind": "hello",
         "protocol": 2,
-        "metrics": {name: definition.model_dump() for name, definition in profile.metrics.items()},
+        "metrics": {
+            name: {**definition.model_dump(), "required": True}
+            for name, definition in profile.metrics.items()
+        },
     }, f"unexpected VibeSys protocol-v2 hello record: {records[:1]}"
-    outcome = records[-1]
+    measurement = read_measurement(records)
     if expect_success:
-        values = outcome.get("values", {})
-        assert outcome.get("kind") == "result", f"unexpected success record: {outcome}"
+        values = measurement.values
+        assert values is not None, f"unexpected success records: {records}"
         assert set(values) == set(profile.metrics), f"unexpected success metrics: {values}"
         for name, value in values.items():
             assert not isinstance(value, bool), f"metric {name} is not numeric: {value!r}"
@@ -263,10 +272,32 @@ def _run_case(
             assert math.isfinite(value), f"metric {name} is invalid: {value!r}"
             assert value >= 0, f"metric {name} is invalid: {value!r}"
     else:
-        assert outcome.get("kind") == "error", f"RF failures were not surfaced: {outcome}"
-        assert profile.failure_message_contains in outcome.get("message", ""), (
-            f"unexpected RF failure message: {outcome}"
+        assert measurement.failure is not None, f"RF failures were not surfaced: {records}"
+        assert profile.failure_message_contains in measurement.failure, (
+            f"unexpected RF failure message: {measurement.failure}"
         )
+
+
+def _check_disjoint_prompt_batches(profile: SmokeProfile, prompts: list[tuple[int, ...]]) -> None:
+    if not profile.disjoint_prompt_batches:
+        return
+    assert sum(profile.disjoint_prompt_batches) == len(prompts), (
+        f"prompt batch sizes {profile.disjoint_prompt_batches} do not cover "
+        f"{len(prompts)} observed requests"
+    )
+    batches: list[set[tuple[int, ...]]] = []
+    start = 0
+    for size in profile.disjoint_prompt_batches:
+        batch = prompts[start : start + size]
+        batches.append({prompt[: profile.cache_prefix_tokens] for prompt in batch})
+        start += size
+    for left_index, left in enumerate(batches):
+        for right_index, right in enumerate(batches[left_index + 1 :], start=left_index + 1):
+            overlap = left & right
+            assert not overlap, (
+                f"prompt batches {left_index} and {right_index} replay cache-eligible prefixes: "
+                f"{sorted(overlap)!r}"
+            )
 
 
 def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
@@ -282,7 +313,9 @@ def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
                 f"unexpected request-shape counts: {server.observed_shapes}; "
                 f"expected {profile.shape_counts}"
             )
+            _check_disjoint_prompt_batches(profile, server.observed_prompts)
             server.observed_shapes.clear()
+            server.observed_prompts.clear()
             server.failure_mode = True
             _run_case(
                 profile,
