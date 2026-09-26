@@ -26,6 +26,11 @@ at the highest requested concurrency, the run fails instead of claiming a peak.
 The final `aggregate_throughput` and `p99_latency_ms` both come from the
 highest-throughput sustainable point. `--concurrencies` can supply another
 ascending comma-separated sweep; `--request-count`, `--input-tokens`, and
-`--output-tokens` control the trace shape. For CPU-only contract testing, pass a
-local tokenizer JSON and a deterministic OpenAI completions fake to
-`benchmark/cpu_smoke.py`.
+`--output-tokens` control the trace shape. For CPU-only contract testing, run
+the shared fake-server smoke with a local Request Factory engine:
+
+```bash
+uv run python -m tests.examples.request_factory_cpu_smoke \
+  --profile examples/model-serving/Llama-3-8B/benchmark/cpu_smoke.toml \
+  --request-factory-engine <RF_ENGINE>
+```
