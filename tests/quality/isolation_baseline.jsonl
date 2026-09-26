@@ -42,7 +42,6 @@
 {"path": "tests/entrypoints/test_server.py", "rule": "patch", "count": 3}
 {"path": "tests/evaluators/test_evaluator_tools.py", "rule": "mock", "count": 6}
 {"path": "tests/evaluators/test_input_synthesis.py", "rule": "patch", "count": 1}
-{"path": "tests/evaluators/test_request_factory_evaluator.py", "rule": "patch", "count": 1}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "patch", "count": 11}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 20}

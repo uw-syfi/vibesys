@@ -86,9 +86,17 @@ setup. They must also provide any native build dependencies required by the
 declared Cargo package. The currently pinned Request Factory revision uses
 `openssl-sys`; Debian and Ubuntu targets need `pkg-config` and `libssl-dev`.
 
-The bundled Request Factory evaluator exposes two entrypoints. The low-level
+The bundled Request Factory evaluator exposes three entrypoints. The low-level
 `request-factory-engine` entrypoint resolves directly to the pinned binary.
 Experiments that need task-owned orchestration use `request-factory-adapter`
 and pass a Python script as the first argument; the evaluator invokes that
 script with `--request-factory-engine <trusted-path>` before the task's
-remaining arguments.
+remaining arguments. It also exports
+`VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER` with the installed path of the
+versioned fixed-text driver, so model-specific preparation wrappers can
+delegate the generic workload and result behavior instead of copying it.
+Fixed independent `/v1/completions` workloads use
+`request-factory-fixed-text-v1`; its typed CLI owns deterministic trace and
+corpus generation, strict RF summary validation, and protocol-v2 metric output.
+The version suffix keeps this workload and result contract explicit while the
+generic adapter remains backward compatible.

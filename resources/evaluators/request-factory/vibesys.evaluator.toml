@@ -19,3 +19,9 @@ request-factory-adapter = [
   "${TOOL:request-factory/session_runner}",
   "--",
 ]
+request-factory-fixed-text-v1 = [
+  "python3",
+  "${PACKAGE_ROOT}/fixed_text.py",
+  "--request-factory-engine",
+  "${TOOL:request-factory/session_runner}",
+]
