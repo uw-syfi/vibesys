@@ -458,6 +458,8 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
     assert isinstance(started.data, RunStartedData)
     assert started.data.max_rounds == 3
     assert started.data.expected_roles == ("worker",)
+    finished_rounds = [event for event in events if event.type is CoreEventType.ROUND_FINISHED]
+    assert [event.round_label for event in finished_rounds] == ["round-3"]
     stored = (
         Project.open(request.project_root)
         .state.portable_namespace(result.run_id, _SETUP_PLUGIN.id)

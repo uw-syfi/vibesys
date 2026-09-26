@@ -257,7 +257,7 @@ class _RunState:
         workspace: RuntimeWorkspace | None = None,
         label: str | None = None,
     ) -> None:
-        """Persist a deep-validated plugin state value without projection effects."""
+        """Persist, project, and publish one deep-validated plugin state value."""
         model = self._state_model
         if model is None or type(value) is not model:
             raise StateModelError(model, type(value))
@@ -270,6 +270,7 @@ class _RunState:
             message = "plugin did not declare a durable state namespace"
             raise TypeError(message)
         async with self._host._parent_mutation_lock:
+            before = await self._previous_view()
             sequence = self._next_transaction_sequence
             self._next_transaction_sequence += 1
             await self._host._run_blocking(
@@ -280,6 +281,11 @@ class _RunState:
                 label=label,
             )
             self._host._resources.publish_committed_state(namespace, snapshot)
+        after = self._project(snapshot)
+        self._last_view = after
+        self._last_view_loaded = True
+        _emit_commit_events(self._host.events, before, after)
+        self._flush_progress()
 
     async def _commit_legacy(
         self,
