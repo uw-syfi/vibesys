@@ -62,6 +62,8 @@ ToolResultPayload = Annotated[
 ]
 
 
-class TodoItemData(EventPayload):  # noqa: D101  # tracked: #288
+class TodoItemData(EventPayload):
+    """One item in the agent's reported todo list."""
+
     content: str
     status: str

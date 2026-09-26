@@ -15,7 +15,7 @@ def _plan() -> OrchestratorPlan:
     return OrchestratorPlan(
         hypothesis_id="h1",
         task="optimize the queue",
-        pass_criteria="the checker passes",  # noqa: S106
+        pass_criteria="the checker passes",  # noqa: S106  # LW-040066 [S106]; the argument is a fixture literal, not a credential.
         reasoning="reduce contention",
     )
 
@@ -97,7 +97,7 @@ def _plan_for(identifier: str) -> OrchestratorPlan:
     return OrchestratorPlan(
         hypothesis_id=identifier,
         task="optimize the queue",
-        pass_criteria="the checker passes",  # noqa: S106
+        pass_criteria="the checker passes",  # noqa: S106  # LW-040067 [S106]; the argument is a fixture literal, not a credential.
         reasoning="reduce contention",
     )
 

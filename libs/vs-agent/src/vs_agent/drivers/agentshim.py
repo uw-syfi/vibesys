@@ -21,7 +21,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 from weakref import WeakSet
 
 import agentshim
@@ -40,6 +40,7 @@ from vs_agent.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
+from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
 from vs_agent.events import CommandResultPayload
 from vs_agent.host_resource_declarations import declare_agent_host_resources
 from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
@@ -50,7 +51,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_sandbox.api import WorkspaceSandbox
+    from vs_sandbox.api import DockerSandbox, WorkspaceSandbox
 
 AGENTSHIM_CAPABILITIES = AgentCapabilities(
     mcp_servers=True,
@@ -348,7 +349,7 @@ class _AgentShimEventHandler:
 class AgentShimSession:
     """One configured AgentShim conversation."""
 
-    def __init__(  # noqa: PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-010138 [PLR0913]; Preserve AgentShimSession.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         *,
         session: agentshim.AgentSession,
@@ -384,7 +385,8 @@ class AgentShimSession:
     ) -> AgentTurnResult:
         """Add one turn to the conversation and return its raw result."""
         if self._closed:
-            raise RuntimeError("agent session is closed")  # noqa: TRY003  # tracked: #288
+            message = "agent session is closed"
+            raise RuntimeError(message)
 
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
@@ -625,12 +627,12 @@ def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
 class AgentShimDriver:
     """Create AgentShim sessions and translate VibeSys execution policy."""
 
-    def __init__(  # noqa: PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-010139 [PLR0913]; Preserve AgentShimDriver.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         *,
         provider: str,
         timeout: int | None = None,
-        docker_sandboxes: dict[str, Any] | None = None,
+        docker_sandboxes: dict[str, DockerSandbox] | None = None,
         log: Callable[[str], None] | None = None,
         executor_factory: ExecutorFactory | None = None,
         check_timeout: float | None = None,
@@ -649,9 +651,10 @@ class AgentShimDriver:
         four times as long as a host one.
         """
         if provider not in SHIPPED_PROVIDERS:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"unknown AgentShim provider {provider!r}; expected one of: {supported_providers()}"
             )
+            raise ValueError(message)
         self._provider = provider
         self._timeout = timeout
         self._docker_sandboxes = docker_sandboxes
@@ -691,17 +694,20 @@ class AgentShimDriver:
         provider and every non-``exec --json`` command.
         """
         if self._closed:
-            raise RuntimeError("agent driver is closed")  # noqa: TRY003  # tracked: #288
+            message = "agent driver is closed"
+            raise RuntimeError(message)
         if spec.provider != self._provider:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"AgentShimDriver for {self._provider!r} cannot create a {spec.provider!r} session"
             )
+            raise ValueError(message)
         in_container = self._docker_sandboxes is not None
         if spec.policy.containerized != in_container:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "agent session container policy does not match the configured "
                 "AgentShim execution mode"
             )
+            raise ValueError(message)
 
         provider = agentshim.get_provider(spec.provider)
         event_handler = _AgentShimEventHandler()
@@ -711,8 +717,6 @@ class AgentShimDriver:
         if sandbox is not None:
             executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
         if in_container:
-            from vs_agent.docker_executor import CodexRolloutWatchdogExecutor  # noqa: PLC0415
-
             executor = CodexRolloutWatchdogExecutor(
                 executor,
                 self._container_id_resolver(spec),
@@ -745,7 +749,7 @@ class AgentShimDriver:
     def _sandbox_for(
         self,
         spec: AgentSessionSpec,
-    ) -> tuple[Any, Callable[[str, Mapping[str, str]], str] | None]:
+    ) -> tuple[WorkspaceSandbox | None, Callable[[str, Mapping[str, str]], str] | None]:
         """Return the sandbox this session confines to, and its binary lookup.
 
         A container session's sandbox already exists, started by the run
@@ -790,13 +794,14 @@ class AgentShimDriver:
             require_enforcement=spec.policy.require_enforcement,
         )
 
-    def _docker_sandbox_for(self, spec: AgentSessionSpec) -> Any:  # noqa: ANN401  # tracked: #288
-        assert self._docker_sandboxes is not None  # noqa: S101  # tracked: #288
+    def _docker_sandbox_for(self, spec: AgentSessionSpec) -> DockerSandbox:
+        if self._docker_sandboxes is None:
+            message = "container execution has no Docker sandbox registry"
+            raise AssertionError(message)
         sandbox = self._docker_sandboxes.get(spec.role)
         if sandbox is None:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"no AgentShim Docker sandbox configured for role {spec.role!r}"
-            )
+            message = f"no AgentShim Docker sandbox configured for role {spec.role!r}"
+            raise ValueError(message)
         return sandbox
 
     def _container_id_resolver(self, spec: AgentSessionSpec) -> Callable[[], str]:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
+from dataclasses import replace
+from typing import TYPE_CHECKING, Literal
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.validation_recipe import (
@@ -40,6 +42,9 @@ from vibesys.search.hypothesis.transitions import (
 )
 from vs_loop_state.api import RoundRecord
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 _THROUGHPUT_LATENCY = MetricSpace(
     objectives=(
         Objective(name="throughput", direction="max"),
@@ -48,7 +53,7 @@ _THROUGHPUT_LATENCY = MetricSpace(
 )
 
 
-def _official_evaluation_reason(  # noqa: PLR0913
+def _official_evaluation_reason(  # noqa: PLR0913  # LW-040136 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     *,
     records: list[RoundRecord],
     round_number: int,
@@ -123,7 +128,7 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
     }
 
 
-def test_validation_recipe_rejects_non_workspace_inputs():  # noqa: ANN201  # tracked: #288
+def test_validation_recipe_rejects_non_workspace_inputs() -> None:
     with pytest.raises(ValueError, match="workspace-relative"):
         ValidationRecipe(
             name="focused-tests",
@@ -133,7 +138,7 @@ def test_validation_recipe_rejects_non_workspace_inputs():  # noqa: ANN201  # tr
         )
 
 
-def test_validation_recipe_artifact_rejects_invented_top_level_shape():  # noqa: ANN201  # tracked: #288
+def test_validation_recipe_artifact_rejects_invented_top_level_shape() -> None:
     with pytest.raises(ValueError, match="recipes"):
         ValidationRecipeArtifact.model_validate(
             {
@@ -148,7 +153,7 @@ def test_validation_recipe_artifact_rejects_invented_top_level_shape():  # noqa:
         )
 
 
-def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
 
     path = artifacts.write_validation_recipe_schema(progress)
@@ -161,28 +166,30 @@ def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path):
     assert schema["examples"][0]["recipes"][0]["name"] == "focused-tests"
 
 
-def test_pre_round_decision_accepts_booleans():  # noqa: ANN201  # tracked: #288
+def test_pre_round_decision_accepts_booleans() -> None:
     d = PreRoundDecision(need_profile=True, profile_focus="decode kernels", reasoning="ok")
     assert d.need_profile is True
     assert d.profile_focus == "decode kernels"
 
 
-def test_orchestrator_plan_revert_round_optional():  # noqa: ANN201  # tracked: #288
-    p = OrchestratorPlan(
+def test_orchestrator_plan_revert_round_optional() -> None:
+    p = make_orchestrator_plan(
         task="redo",
-        pass_criteria="passes tests",  # noqa: S106  # tracked: #288
+        criteria="passes tests",
         revert_to_round=3,
         reasoning="step back",
     )
     assert p.revert_to_round == 3
 
 
-def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds() -> None:
     records = [
-        RoundRecord(1, "a", None, None, False, reviewed=False, hypothesis_outcome="continue"),  # noqa: FBT003  # tracked: #288
-        RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
-        RoundRecord(3, "c", None, None, False, reviewed=True, hypothesis_outcome="rejected"),  # noqa: FBT003  # tracked: #288
-        RoundRecord(4, "d", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(
+            1, "a", None, None, passed=False, reviewed=False, hypothesis_outcome="continue"
+        ),
+        RoundRecord(2, "b", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
+        RoundRecord(3, "c", None, None, passed=False, reviewed=True, hypothesis_outcome="rejected"),
+        RoundRecord(4, "d", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
     ]
 
     assert provisional_candidates_since_official(records) == 2
@@ -199,7 +206,7 @@ def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds(): 
     )
 
 
-def test_frontier_candidate_forces_review_outside_sparse_cadence():  # noqa: ANN201  # tracked: #288
+def test_frontier_candidate_forces_review_outside_sparse_cadence() -> None:
     assert _review_due(
         round_number=5,
         max_rounds=20,
@@ -209,7 +216,7 @@ def test_frontier_candidate_forces_review_outside_sparse_cadence():  # noqa: ANN
     )
 
 
-def test_measured_candidate_forces_review_even_when_disposition_is_downgraded():  # noqa: ANN201  # tracked: #288
+def test_measured_candidate_forces_review_even_when_disposition_is_downgraded() -> None:
     assert _review_due(
         round_number=5,
         max_rounds=20,
@@ -219,7 +226,7 @@ def test_measured_candidate_forces_review_even_when_disposition_is_downgraded():
     )
 
 
-def test_reused_candidate_evidence_does_not_bypass_sparse_review():  # noqa: ANN201  # tracked: #288
+def test_reused_candidate_evidence_does_not_bypass_sparse_review() -> None:
     metrics = {"throughput": 6205.0, "latency": 10660.0}
     record = RoundRecord(
         round_number=75,
@@ -252,7 +259,7 @@ def test_reused_candidate_evidence_does_not_bypass_sparse_review():  # noqa: ANN
     )
 
 
-def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused():  # noqa: ANN201  # tracked: #288
+def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused() -> None:
     record = RoundRecord(
         round_number=4,
         commit="a" * 40,
@@ -274,14 +281,14 @@ def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused():  # 
     assert _candidate_evidence_is_fresh(implementation, [record])
 
 
-def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff() -> None:
     records = [
         RoundRecord(
             2,
             "b",
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_outcome="disproven",
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
@@ -292,7 +299,7 @@ def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noq
     assert provisional_candidates_since_official(records) == 1
 
 
-def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN201  # tracked: #288
+def test_typed_unknown_retention_is_not_trusted_as_pareto_state() -> None:
     record = RoundRecord(
         round_number=2,
         commit="b" * 40,
@@ -312,7 +319,7 @@ def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN2
     assert pareto_frontier_records([record], _THROUGHPUT_LATENCY) == []
 
 
-def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN201  # tracked: #288
+def test_noise_aware_dominance_preserves_sub_noise_alternatives() -> None:
     space = MetricSpace(objectives=_THROUGHPUT_LATENCY.objectives, relative_noise=0.03)
 
     assert not space.dominates(
@@ -325,7 +332,7 @@ def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN2
     )
 
 
-def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_point():  # noqa: ANN201  # tracked: #288
+def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_point() -> None:
 
     def candidate(round_number: int, throughput: float, latency: float) -> RoundRecord:
         return RoundRecord(
@@ -333,7 +340,7 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
             str(round_number) * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={"throughput": throughput, "latency": latency},
@@ -353,13 +360,13 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
     assert [record.round_number for record in frontier] == [1, 2]
 
 
-def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  # noqa: ANN201  # tracked: #288
+def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate() -> None:
     trusted = RoundRecord(
         61,
         "a" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 8795.8, "latency": 7724.0},
@@ -377,13 +384,13 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  #
     assert "frozen into the hypothesis plan" in conflict
 
 
-def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN201  # tracked: #288
+def test_live_archive_preserves_real_throughput_latency_tradeoff() -> None:
     trusted = RoundRecord(
         6,
         "a" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 100.0, "latency": 80.0},
@@ -400,13 +407,13 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN
     )
 
 
-def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_distinguishes_trusted_and_pending_candidates() -> None:
     trusted = RoundRecord(
         49,
         "a" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 5307.2, "latency": 3289.7},
@@ -418,7 +425,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
         "b" * 40,
         None,
         None,
-        False,  # noqa: FBT003  # tracked: #288
+        passed=False,
         reviewed=False,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 6827.7, "latency": 3628.7},
@@ -440,7 +447,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
     assert "round 51" in summary
 
 
-def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice() -> None:
     """The newest pending claims remain visible and older ones are disclosed."""
     pending_records = [
         RoundRecord(
@@ -448,7 +455,7 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
             chr(ord("a") + round_number) * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={
@@ -474,7 +481,7 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
     assert "do not treat any omitted claim as a trusted parent" in summary
 
 
-def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count() -> None:
     """One omitted claim reads as singular, and one omitted round is not a range.
 
     The notice goes into prompt context a model reads, so "1 older untrusted
@@ -487,7 +494,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # 
             chr(ord("a") + round_number) * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={
@@ -508,7 +515,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # 
     assert "rounds 1-1" not in summary
 
 
-def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit() -> None:
     """A short pending list needs no omission notice."""
     pending_records = [
         RoundRecord(
@@ -516,7 +523,7 @@ def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # 
             chr(ord("a") + round_number) * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={
@@ -553,7 +560,7 @@ def _accuracy_row(
         str(round_number) * 40,
         accuracy,
         "accuracy",
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         hypothesis_id="H-acc",
         judge_verdict="pass",
@@ -566,7 +573,7 @@ def _accuracy_row(
     )
 
 
-def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noqa: ANN201  # tracked: #288
+def test_implementer_report_cannot_seed_archive_or_dominate_candidates() -> None:
     """Regression for #535: implementer provenance never becomes a trusted parent.
 
     A reviewed, accuracy-passing implementer self-report that persisted
@@ -588,26 +595,24 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
     assert pareto_archive_dominators(weaker, [framework], space) == [framework]
 
 
-def _official_record(  # noqa: PLR0913  # test record builder
+def _official_record(
     round_number: int,
-    commit: str,
     perf: float,
     *,
     retained: bool = True,
     passed: bool = True,
     provenance: Literal["framework", "implementer"] = "framework",
-    metrics: dict[str, float] | None = None,
 ) -> RoundRecord:
     """Build one reviewed record eligible for final selection when trusted."""
     return RoundRecord(
         round_number,
-        commit,
+        chr(ord("a") + round_number - 1) * 40,
         perf,
         "throughput",
         passed,
         reviewed=True,
         judge_verdict="pass" if passed else "fail",
-        metrics=metrics or {},
+        metrics={},
         official_evaluation=True,
         candidate_retained=retained,
         perf_direction="max",
@@ -615,13 +620,13 @@ def _official_record(  # noqa: PLR0913  # test record builder
     )
 
 
-def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa: ANN201  # tracked: #288
+def test_final_candidate_is_noise_aware_and_rejects_untrusted_records() -> None:
     space = MetricSpace(relative_noise=0.05)
-    older = _official_record(1, "a" * 40, 100.0)
-    newer_within_noise = _official_record(2, "b" * 40, 103.0)
-    self_reported = _official_record(3, "c" * 40, 500.0, provenance="implementer")
-    rejected = _official_record(4, "d" * 40, 600.0, retained=False)
-    failed = _official_record(5, "e" * 40, 700.0, passed=False)
+    older = _official_record(1, 100.0)
+    newer_within_noise = _official_record(2, 103.0)
+    self_reported = _official_record(3, 500.0, provenance="implementer")
+    rejected = _official_record(4, 600.0, retained=False)
+    failed = _official_record(5, 700.0, passed=False)
 
     assert (
         select_final_candidate([older, newer_within_noise, self_reported, rejected, failed], space)
@@ -629,19 +634,14 @@ def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa
     )
 
 
-def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: ANN201  # tracked: #288
-    official = _official_record(
-        1,
-        "a" * 40,
-        100.0,
-        metrics={"throughput": 100.0, "latency": 10.0},
-    )
+def test_final_pareto_candidate_requires_canonical_official_metrics() -> None:
+    official = replace(_official_record(1, 100.0), metrics={"throughput": 100.0, "latency": 10.0})
     provisional = RoundRecord(
         2,
         "b" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         judge_verdict="pass",
         candidate_metrics={"throughput": 200.0, "latency": 5.0},
@@ -651,20 +651,20 @@ def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: 
     assert select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
 
 
-def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_cadence_resets_at_verified_checkpoint() -> None:
     records = [
         RoundRecord(
             1,
             "a",
             10.0,
             "tok/s",
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_outcome="proven",
             official_evaluation=True,
             official_evaluation_reason="orchestrator_request",
         ),
-        RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(2, "b", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
     ]
 
     assert provisional_candidates_since_official(records) == 1
@@ -681,15 +681,15 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: A
     )
 
 
-def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_points_designer_to_hypothesis_parent() -> None:
     records = [
-        RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
+        RoundRecord(28, "a" * 40, None, None, passed=False),
         RoundRecord(
             29,
             "b" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=True,
             hypothesis_id="bad-scheduler",
             hypothesis_outcome="rejected",
@@ -699,7 +699,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
             "c" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             hypothesis_id="bad-scheduler",
             hypothesis_outcome="disproven",
@@ -715,13 +715,13 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
     assert "revert_to_round=28" in notice
 
 
-def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit() -> None:
     record = RoundRecord(
         51,
         "b" * 40,
         None,
         None,
-        False,  # noqa: FBT003  # tracked: #288
+        passed=False,
         reviewed=False,
         hypothesis_id="capacity-192",
         hypothesis_outcome="disproven",
@@ -737,15 +737,15 @@ def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: 
     assert "do not erase a credible throughput/latency tradeoff" in notice
 
 
-def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint() -> None:
     records = [
-        RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
+        RoundRecord(28, "a" * 40, None, None, passed=False),
         RoundRecord(
             34,
             "b" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             hypothesis_id="host-autopsy",
             hypothesis_outcome="continue",
@@ -756,7 +756,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
             "c" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             hypothesis_id="host-autopsy",
             hypothesis_outcome="continue",
@@ -767,7 +767,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
             "d" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="host-autopsy",
             hypothesis_outcome="disproven",
@@ -784,15 +784,15 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
     assert "An older implementation cannot be required to reproduce" in notice
 
 
-def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposal():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposal() -> None:
     records = [
-        RoundRecord(60, "a" * 40, None, None, True),  # noqa: FBT003  # tracked: #288
+        RoundRecord(60, "a" * 40, None, None, passed=True),
         RoundRecord(
             61,
             "b" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="quantum-decode",
             hypothesis_outcome="implementation_failed",
@@ -803,7 +803,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
             "c" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="quantum-decode",
             hypothesis_outcome="blocked",
@@ -814,7 +814,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
             "d" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="quantum-decode",
             hypothesis_outcome="inconclusive",
@@ -830,7 +830,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
     assert "recorded pre-hypothesis parent is round 62" not in notice
 
 
-def test_profiler_summary_perf_metric_optional():  # noqa: ANN201  # tracked: #288
+def test_profiler_summary_perf_metric_optional() -> None:
     p = ProfilerSummary(analysis="a", bottlenecks="b", suggestions="s")
     assert p.perf_metric is None
     p2 = ProfilerSummary(
@@ -844,11 +844,11 @@ def test_profiler_summary_perf_metric_optional():  # noqa: ANN201  # tracked: #2
     assert p2.perf_unit == "tok/s"
 
 
-def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_writes_orchestrator_plan(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
-    plan = OrchestratorPlan(
+    plan = make_orchestrator_plan(
         task="Build FastAPI server",
-        pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
+        criteria="/health returns 200",
         reasoning="Round 1 cold start",
         expected_effect="Forecast 1.3x to 1.6x throughput",
         minimum_acceptance_criteria="Retain at >=1.15x with no latency regression",
@@ -866,12 +866,14 @@ def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  #
     ("progress_name", "artifact_root"),
     [("progress", "progress"), ("progress.md", "progress-artifacts")],
 )
-def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name, artifact_root):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_writes_typed_role_handoffs_atomically(
+    tmp_path: Path, progress_name: str, artifact_root: str
+) -> None:
     progress = tmp_path / progress_name
-    plan = OrchestratorPlan(
+    plan = make_orchestrator_plan(
         hypothesis_id="transport-boundary",
         task="Replace the request-local queue.",
-        pass_criteria="The direct path activates.",  # noqa: S106  # tracked: #288
+        criteria="The direct path activates.",
         reasoning="The retained profile leaves a service residual.",
     )
     implementation = ImplementerResponse(
@@ -894,7 +896,7 @@ def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name,
     assert not list((tmp_path / artifact_root).rglob(".*.tmp*"))
 
 
-def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_persisted_implementer_attempts_define_resume_boundary(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     implementation = ImplementerResponse(
         summary="Retained the first target run.",
@@ -912,7 +914,7 @@ def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noq
     assert artifacts.next_implementer_attempt(progress, 9) == 1
 
 
-def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_implementer_start_marker_advances_the_resume_boundary(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     implementation = ImplementerResponse(
         summary="Recorded after the marker.",
@@ -942,7 +944,7 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noq
     assert artifacts.next_implementer_attempt(progress, 9) == 2
 
 
-def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_agent_memory_paths_distinguish_files_from_directories(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     directory = workspace / "progress"
     artifact = directory / "plans" / "round-0012.json"
@@ -953,7 +955,7 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noq
     assert display_path(artifact, workspace) == "progress/plans/round-0012.json"
 
 
-def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     progress_log.write(
         progress,
@@ -970,9 +972,9 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
         progress,
         progress_log.render_orchestrator_plan(
             7,
-            OrchestratorPlan(
+            make_orchestrator_plan(
                 task="Keep this plan",
-                pass_criteria="plan remains",  # noqa: S106  # tracked: #288
+                criteria="plan remains",
                 reasoning="retained plan",
             ),
         ),
@@ -998,17 +1000,17 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
     assert "Keep this plan" in text
 
 
-def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_replacement_preserves_operator_recovery_section(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     progress_log.write(
         progress,
         progress_log.render_hypothesis_continuation(
             7,
-            plan=OrchestratorPlan(
+            plan=make_orchestrator_plan(
                 hypothesis_id="transport",
                 hypothesis="remove queue fanout",
                 task="stale initial implementation task",
-                pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+                criteria="source is recoverable",
                 reasoning="continue interrupted work",
             ),
             started_round=6,
@@ -1026,11 +1028,11 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
         progress,
         progress_log.render_hypothesis_continuation(
             7,
-            plan=OrchestratorPlan(
+            plan=make_orchestrator_plan(
                 hypothesis_id="transport",
                 hypothesis="remove queue fanout",
                 task="stale initial implementation task",
-                pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+                criteria="source is recoverable",
                 reasoning="resume interrupted work",
             ),
             started_round=6,
@@ -1048,7 +1050,7 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
     assert "Exact measured bytes are retained" in text
 
 
-def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     progress_log.write(
         progress,
@@ -1077,7 +1079,7 @@ def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path
     assert "retry" in text
 
 
-def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_writes_profiler_summary_with_perf(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     summary = ProfilerSummary(
         analysis="launch-bound",
@@ -1093,7 +1095,7 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
     assert "flashinfer" in text
 
 
-def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_append_implementer_and_judge(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     progress_log.write(
         progress,
@@ -1113,7 +1115,7 @@ def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN20
     assert "verdict**: pass" in text
 
 
-def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path: Path) -> None:
     roadmap, progress = memory.resolve_paths(tmp_path, "directories")
     memory.ensure_roadmap_file(roadmap)
     for round_number in range(1, 16):
@@ -1138,8 +1140,7 @@ def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # no
     assert "## Round 15 —" in recent
 
 
-def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
+def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
     assert not p.exists()
@@ -1154,8 +1155,7 @@ def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, AN
     assert "## Abandoned" in text
 
 
-def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
+def test_ensure_roadmap_does_not_overwrite_existing(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
     p.write_text("# my custom plan\n")
@@ -1163,22 +1163,20 @@ def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):  # noqa: ANN001, 
     assert p.read_text() == "# my custom plan\n"
 
 
-def test_read_roadmap_returns_text(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
+def test_read_roadmap_returns_text(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
     p.write_text("hello\n")
     assert memory.read_roadmap(p) == "hello\n"
 
 
-def test_read_roadmap_missing_returns_empty(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
+def test_read_roadmap_missing_returns_empty(tmp_path: Path) -> None:
 
     p = tmp_path / "nope.md"
     assert memory.read_roadmap(p) == ""
 
 
-def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # noqa: ANN201  # tracked: #288
+def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
     template_dir = PROMPTS_DIR / "loops" / "multi"
     single_template_dir = PROMPTS_DIR / "loops" / "single"
     plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
@@ -1206,9 +1204,11 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # n
 
 @pytest.mark.parametrize(
     ("progress_name", "expected"),
-    (("progress.md", "pareto-frontier.md"), ("progress", "progress/pareto-frontier.md")),  # noqa: PT007  # tracked: #288
+    [("progress.md", "pareto-frontier.md"), ("progress", "progress/pareto-frontier.md")],
 )
-def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name, expected):  # noqa: ANN001, ANN201  # tracked: #288
+def test_pareto_archive_is_materialized_beside_progress(
+    tmp_path: Path, progress_name: str, expected: str
+) -> None:
     progress_path = tmp_path / progress_name
 
     document = memory.write_pareto_archive(progress_path, "Trusted frontier: round 4")
@@ -1217,7 +1217,7 @@ def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name,
     assert document.read_text() == "# Pareto frontier\n\nTrusted frontier: round 4\n"
 
 
-def _record(round_number: int, perf: float | None, unit: str = "tok/s"):  # noqa: ANN202  # tracked: #288
+def _record(round_number: int, perf: float | None, unit: str = "tok/s") -> RoundRecord:
     """Build a RoundRecord shorthand for plateau tests."""
     return RoundRecord(
         round_number=round_number,
@@ -1230,31 +1230,31 @@ def _record(round_number: int, perf: float | None, unit: str = "tok/s"):  # noqa
     )
 
 
-def test_detect_plateau_returns_none_when_too_few_rounds():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_returns_none_when_too_few_rounds() -> None:
 
     # Two rounds is below the 3-round minimum streak.
     records = [_record(1, 40.0), _record(2, 41.0)]
     assert detect_plateau(records) is None
 
 
-def test_detect_plateau_fires_on_flat_perf_streak():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_fires_on_flat_perf_streak() -> None:
 
     # 41.0 vs 41.5 is ~1.2% spread — well under the 5% threshold.
     records = [_record(1, 41.0), _record(2, 41.5), _record(3, 41.2)]
     warning = detect_plateau(records)
     assert warning is not None
-    assert "rounds 1–3" in warning  # noqa: RUF001  # tracked: #288
+    assert "rounds 1\u20133" in warning
     assert "tok/s" in warning
 
 
-def test_detect_plateau_skips_when_perf_diverges():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_skips_when_perf_diverges() -> None:
 
     # 41.0 vs 116.0 is ~64% spread — clearly off-plateau.
     records = [_record(1, 41.0), _record(2, 116.0), _record(3, 114.5)]
     assert detect_plateau(records) is None
 
 
-def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_ignores_rounds_without_perf() -> None:
     """Rounds where the profiler skipped or the round failed (perf=None) must
     not interrupt the streak — only valid measurements count."""
 
@@ -1266,10 +1266,10 @@ def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracke
     ]
     warning = detect_plateau(records)
     assert warning is not None
-    assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
+    assert "rounds 1\u20134" in warning
 
 
-def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_ignores_failed_official_measurements() -> None:
     """A measured row rejected by the judge or another round gate is not
     trusted trajectory evidence, even when the framework evaluator ran."""
 
@@ -1283,17 +1283,17 @@ def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201 
     ]
     warning = detect_plateau(records)
     assert warning is not None
-    assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
+    assert "rounds 1\u20134" in warning
 
 
-def test_failed_official_measurement_cannot_complete_plateau_streak():  # noqa: ANN201  # tracked: #288
+def test_failed_official_measurement_cannot_complete_plateau_streak() -> None:
 
     failed = _record(3, 41.1)
     failed.passed = False
     assert detect_plateau([_record(1, 41.0), _record(2, 41.2), failed]) is None
 
 
-def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_streak_must_be_recent() -> None:
     """A plateau early in the run that's followed by a clear win must NOT
     fire a warning on the next round — only the *last N* matter."""
 

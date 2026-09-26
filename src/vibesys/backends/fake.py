@@ -41,7 +41,7 @@ class FakeComputeBackend:
         del log_dir, log, image
         self.sandboxes: dict[str, FakeSandbox] = {}
 
-    def make_sandbox(  # noqa: PLR0913
+    def make_sandbox(  # noqa: PLR0913  # LW-040001 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         kind: SandboxKind,
         *,

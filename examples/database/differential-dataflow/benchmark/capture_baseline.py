@@ -29,10 +29,12 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _EXAMPLE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_EXAMPLE, "reference"))
+# lint-waiver: LW-008006 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
 import workload  # noqa: E402
 
 sys.path.insert(0, _HERE)
-import benchmark  # noqa: E402  (measure_cpu, BASELINE_JSON)
+# lint-waiver: LW-008007 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
+import benchmark  # noqa: E402
 
 _REF_ENGINE = os.path.join(_EXAMPLE, "_ref_engine")
 _REF_MANIFEST = os.path.join(_REF_ENGINE, "Cargo.toml")

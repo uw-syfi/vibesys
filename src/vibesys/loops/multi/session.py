@@ -14,7 +14,7 @@ from vibesys.evaluators.gates import (
     emit_gate_started,
 )
 from vibesys.evaluators.validation_recipe import FrameworkValidationResult
-from vibesys.events import GateKind
+from vibesys.events import GateFinishedData, GateKind
 from vibesys.loops.multi.attribution import run_attribution
 from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.multi.turns import MultiAgentTurns
@@ -26,7 +26,6 @@ from vibesys.loops.multi.validation import (
 from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
-from vibesys.roles.profiler import ProfilerSummary  # noqa: TC001  # tracked: #288
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -56,6 +55,7 @@ if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.roles.profiler import ProfilerSummary
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.search.profile_focus import ProfileFocusState
 
@@ -288,7 +288,7 @@ class MultiSession:
         return self.round_number <= self.options.max_rounds
 
     def _focus_state(self) -> ProfileFocusState:
-        assert self.focus is not None  # noqa: S101  # only called when profiling is on
+        assert self.focus is not None  # noqa: S101  # LW-040125 [S101]; only called when profiling is on.
         return self.state.profile_guidance or self.focus.initial()
 
     def _current_focus(self) -> FocusView:
@@ -322,7 +322,7 @@ class MultiSession:
         if isinstance(decision, NewHypothesis):
             context = decision.context
             if self.focus is not None:
-                assert self.profile is not None  # noqa: S101  # set together in __init__
+                assert self.profile is not None  # noqa: S101  # LW-040126 [S101]; set together in __init__.
                 bottlenecks = await run_attribution(
                     self.ctx, self.profile.config, round_number=number
                 )
@@ -367,7 +367,7 @@ class MultiSession:
                 publish=self.state,
             )
         else:
-            assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
+            assert isinstance(decision, Continue)  # noqa: S101  # LW-040127 [S101]; only remaining variant.
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
             self.ctx.progress.note(
@@ -611,7 +611,7 @@ class MultiSession:
         )
         await self._checkpoint_hypothesis(selected)
 
-    async def _validate_local(  # noqa: C901  # bounded framework recipe gate
+    async def _validate_local(  # noqa: C901  # lint-waiver: LW-020018 [C901]; one sequential loop over recipes shares its reuse, execution, and early-stop state, which helper boundaries would scatter.
         self, selected: MultiRound, recipe_artifact: str | None
     ) -> str | None:
         """Run judge approved local recipes against an immutable candidate revision."""
@@ -651,10 +651,8 @@ class MultiSession:
                 if reused is not None:
                     results.append(reused)
                     emit_gate_finished(
-                        GateKind.VALIDATION,
+                        GateFinishedData(gate=GateKind.VALIDATION, recipe=recipe.name, reused=True),
                         passed=True,
-                        recipe=recipe.name,
-                        reused=True,
                         round_label=f"round-{number}",
                     )
                     continue
@@ -671,7 +669,7 @@ class MultiSession:
                         output=output[-GATE_RECORD_TAIL_CHARS:],
                         error=None if execution.exit_code == 0 else "command exited nonzero",
                     )
-                except Exception as error:  # noqa: BLE001  # report execution failure as gate feedback
+                except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020019 [BLE001]; backend execution failures become gate feedback instead of aborting the run.
                     result = FrameworkValidationResult(
                         recipe=recipe,
                         input_digest=digest,
@@ -692,10 +690,12 @@ class MultiSession:
                     None if result.passed else (result.error or result.output or "unknown failure")
                 )
                 emit_gate_finished(
-                    GateKind.VALIDATION,
+                    GateFinishedData(
+                        gate=GateKind.VALIDATION,
+                        recipe=recipe.name,
+                        output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+                    ),
                     passed=result.passed,
-                    recipe=recipe.name,
-                    output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
                     round_label=f"round-{number}",
                 )
                 if not result.passed:

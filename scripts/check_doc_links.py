@@ -16,7 +16,7 @@ Checked: relative links and absolute links back into this repository
 so the check stays offline and deterministic.
 
 Usage:
-    uv run python scripts/check_doc_links.py [PATH ...]
+    uv run python scripts/check_doc_links.py [PATH ...].
 """
 
 from __future__ import annotations
@@ -97,9 +97,8 @@ def run_git(argv: list[str]) -> str:
     from file contents, so `git` off PATH is the same trust boundary as the
     rest of `scripts/`.
     """
-    result = subprocess.run(  # noqa: S603
-        argv, capture_output=True, text=True, check=True
-    )
+    # lint-waiver: LW-008043 [S603]; Callers build Git argv from fixed subcommands and repo-relative paths.
+    result = subprocess.run(argv, capture_output=True, text=True, check=True)  # noqa: S603
     return result.stdout
 
 

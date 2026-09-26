@@ -71,7 +71,7 @@ def candidate_evidence_fresh(
     )
 
 
-def review_due(  # noqa: PLR0913
+def review_due(  # noqa: PLR0913  # LW-040039 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     config: HypothesisConfig,
     *,
     round_number: int,

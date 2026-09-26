@@ -25,20 +25,28 @@ sys.path.insert(0, str(_REPO_ROOT))
 # packaging/__init__.py: a `packaging` package would shadow the PyPA library.
 sys.path.insert(0, str(_REPO_ROOT / "packaging"))
 
+# lint-waiver: LW-008020 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from packaging_support import (  # noqa: E402
     clear_distribution_build_outputs,
     discover_distribution_packages,
     release_has_native_payload,
 )
+
+# lint-waiver: LW-008021 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from resources_packaging import stage_resources, stage_sdk  # noqa: E402
+
+# lint-waiver: LW-008022 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from tui_packaging import stage_prebuilt_tui  # noqa: E402
+
+# lint-waiver: LW-008023 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from wheel_targets import WheelTarget, resolve_wheel_target  # noqa: E402
 
 
-class build_py(_build_py):  # noqa: N801 - setuptools command classes are lowercase
+class BuildPy(_build_py):
     """Standard ``build_py`` plus staging the compiled TUI into the package."""
 
-    def run(self) -> None:  # noqa: D102  # tracked: #288
+    def run(self) -> None:
+        """Stage build outputs after setuptools copies Python packages."""
         clear_distribution_build_outputs(Path(self.build_lib), self.packages or [])
         super().run()
         vibesys_package_root = Path(self.build_lib) / "vibesys"
@@ -58,7 +66,7 @@ class build_py(_build_py):  # noqa: N801 - setuptools command classes are lowerc
         stage_sdk(_REPO_ROOT, vibesys_package_root / "_sdk", required=required)
 
 
-class bdist_wheel(_bdist_wheel):  # noqa: N801
+class BdistWheel(_bdist_wheel):
     """Emit a native payload wheel with an explicit cross-platform Python tag."""
 
     _release_target: WheelTarget | None = None
@@ -98,6 +106,6 @@ packages, package_dirs = discover_distribution_packages(_REPO_ROOT)
 setup(
     packages=packages,
     package_dir=package_dirs,
-    cmdclass={"bdist_wheel": bdist_wheel, "build_py": build_py},
+    cmdclass={"bdist_wheel": BdistWheel, "build_py": BuildPy},
     distclass=ReleaseDistribution,
 )

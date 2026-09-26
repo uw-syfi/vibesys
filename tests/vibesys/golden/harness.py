@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: seams scripted below
 
 from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
@@ -98,7 +98,7 @@ command = ["python", "-c", "print('ok')"]
     return model_dir
 
 
-def run_scripted(  # noqa: PLR0913  # tracked: #288
+def run_scripted(  # noqa: PLR0913  # LW-040006 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     tmp_path: Path,
     *,
     orchestration_id: str,
@@ -156,6 +156,7 @@ def run_scripted(  # noqa: PLR0913  # tracked: #288
         finally:
             integration.close()
 
+    # test-isolation: PROJECT_ROOT has no injection seam; the run must write under tmp_path
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = asyncio.run(execute())
 

@@ -27,7 +27,7 @@ KEPT = (
 def _importable(name: str) -> tuple[bool, str]:
     try:
         importlib.import_module(name)
-    except Exception as exc:  # noqa: BLE001  # any import failure counts
+    except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
     return True, ""
 

@@ -298,7 +298,7 @@ class Model:
         return F.silu(F.conv1d(full, weight, groups=full.shape[1]))
 
     @staticmethod
-    def delta_rule(q, k, v, g, beta, rec) -> torch.Tensor:  # noqa: ANN001
+    def delta_rule(q, k, v, g, beta, rec) -> torch.Tensor:
         """Recurrent gated delta rule, one token at a time, fp32. q,k,v: [1,T,H,d]; g,beta: [1,T,H]."""
         q, k, v, beta = (
             (l2norm(q.float()) * q.shape[-1] ** -0.5),

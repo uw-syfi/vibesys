@@ -16,12 +16,16 @@ from pathlib import Path
 from typing import Any
 
 
-class LinuxProfilerTool(StrEnum):  # noqa: D101  # tracked: #288
+class LinuxProfilerTool(StrEnum):
+    """Native profiler selected for Linux CPU samples."""
+
     PERF = "perf"
     NONE = "none"
 
 
-class DiagnosticCode(StrEnum):  # noqa: D101  # tracked: #288
+class DiagnosticCode(StrEnum):
+    """Capability or collection condition reported by the Linux profiler."""
+
     NOT_LINUX = "not_linux"
     PERF_UNAVAILABLE = "perf_unavailable"
     PERF_STAT_UNAVAILABLE = "perf_stat_unavailable"
@@ -33,7 +37,9 @@ class DiagnosticCode(StrEnum):  # noqa: D101  # tracked: #288
 
 
 @dataclass(frozen=True)
-class Capability:  # noqa: D101  # tracked: #288
+class Capability:
+    """Detected Linux profiling tool and host restrictions."""
+
     tool: LinuxProfilerTool
     perf_path: str | None
     perf_version: str | None
@@ -43,7 +49,9 @@ class Capability:  # noqa: D101  # tracked: #288
 
 
 @dataclass(frozen=True)
-class CollectionResult:  # noqa: D101  # tracked: #288
+class CollectionResult:
+    """Artifacts, counters, and status from a Linux profile collection."""
+
     status: str
     tool: LinuxProfilerTool
     output_dir: str
@@ -58,7 +66,27 @@ class CollectionResult:  # noqa: D101  # tracked: #288
     summary: str
 
 
+@dataclass(frozen=True)
+class _MetadataInput:
+    """Values captured for one persisted profiler metadata record."""
+
+    command: list[str]
+    executed: dict[str, list[str]]
+    capability: Capability
+    diagnostics: list[DiagnosticCode]
+    stderr: dict[str, str]
+    returncodes: dict[str, int | None]
+    started: float
+    timeout: int | None
+    frequency: int
+    call_graph: str
+
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+_PERF_EVENT_PARANOID_THRESHOLD = 2
+_PERF_STAT_FIELD_COUNT = 3
 
 
 def _read_int(path: Path) -> int | None:
@@ -90,7 +118,7 @@ def detect_capability(
     kptr_restrict = _read_int(Path("/proc/sys/kernel/kptr_restrict"))
     diagnostics: list[DiagnosticCode] = []
 
-    if perf_event_paranoid is not None and perf_event_paranoid > 2:  # noqa: PLR2004  # tracked: #288
+    if perf_event_paranoid is not None and perf_event_paranoid > _PERF_EVENT_PARANOID_THRESHOLD:
         diagnostics.append(DiagnosticCode.PERF_EVENT_PARANOID_RESTRICTIVE)
     if kptr_restrict is not None and kptr_restrict > 0:
         diagnostics.append(DiagnosticCode.KERNEL_SYMBOLS_RESTRICTED)
@@ -147,7 +175,9 @@ def _run_text(
     *,
     timeout: int | None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, timeout=timeout)  # noqa: PLW1510, S603  # tracked: #288
+    return subprocess.run(  # noqa: S603  # lint-waiver: LW-009001 [S603]; this boundary executes the caller-selected argv as the workload being profiled.
+        command, capture_output=True, text=True, timeout=timeout, check=False
+    )
 
 
 def _parse_perf_stat_csv(path: Path) -> tuple[dict[str, str], ...]:
@@ -156,7 +186,7 @@ def _parse_perf_stat_csv(path: Path) -> tuple[dict[str, str], ...]:
     counters: list[dict[str, str]] = []
     with path.open(newline="", encoding="utf-8", errors="replace") as fh:
         for row in csv.reader(fh):
-            if len(row) < 3:  # noqa: PLR2004  # tracked: #288
+            if len(row) < _PERF_STAT_FIELD_COUNT:
                 continue
             value, unit, event = (item.strip() for item in row[:3])
             if not event or value.startswith("#"):
@@ -180,7 +210,7 @@ def _extract_hot_symbols(report_text: str, *, limit: int = 20) -> tuple[str, ...
     return tuple(hot)
 
 
-def collect(  # noqa: PLR0913  # tracked: #288
+def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the callable profiling API because command, destination, capability, timeout, frequency, and call graph are independent controls.
     command: list[str],
     output_dir: Path,
     *,
@@ -204,16 +234,18 @@ def collect(  # noqa: PLR0913  # tracked: #288
     if capability.tool is not LinuxProfilerTool.PERF or not capability.perf_path:
         metadata_path = _write_metadata(
             output_dir,
-            command=command,
-            executed=executed,
-            capability=capability,
-            diagnostics=diagnostics,
-            stderr=stderr,
-            returncodes=returncodes,
-            started=started,
-            timeout=timeout,
-            frequency=frequency,
-            call_graph=call_graph,
+            _MetadataInput(
+                command=command,
+                executed=executed,
+                capability=capability,
+                diagnostics=diagnostics,
+                stderr=stderr,
+                returncodes=returncodes,
+                started=started,
+                timeout=timeout,
+                frequency=frequency,
+                call_graph=call_graph,
+            ),
         )
         return CollectionResult(
             "error",
@@ -315,16 +347,18 @@ def collect(  # noqa: PLR0913  # tracked: #288
 
     metadata_path = _write_metadata(
         output_dir,
-        command=command,
-        executed=executed,
-        capability=capability,
-        diagnostics=diagnostics,
-        stderr=stderr,
-        returncodes=returncodes,
-        started=started,
-        timeout=timeout,
-        frequency=frequency,
-        call_graph=call_graph,
+        _MetadataInput(
+            command=command,
+            executed=executed,
+            capability=capability,
+            diagnostics=diagnostics,
+            stderr=stderr,
+            returncodes=returncodes,
+            started=started,
+            timeout=timeout,
+            frequency=frequency,
+            call_graph=call_graph,
+        ),
     )
     status = (
         "ok"
@@ -348,20 +382,17 @@ def collect(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def _write_metadata(  # noqa: PLR0913  # tracked: #288
-    output_dir: Path,
-    *,
-    command: list[str],
-    executed: dict[str, list[str]],
-    capability: Capability,
-    diagnostics: list[DiagnosticCode],
-    stderr: dict[str, str],
-    returncodes: dict[str, int | None],
-    started: float,
-    timeout: int | None,
-    frequency: int,
-    call_graph: str,
-) -> Path:
+def _write_metadata(output_dir: Path, inputs: _MetadataInput) -> Path:
+    command = inputs.command
+    executed = inputs.executed
+    capability = inputs.capability
+    diagnostics = inputs.diagnostics
+    stderr = inputs.stderr
+    returncodes = inputs.returncodes
+    started = inputs.started
+    timeout = inputs.timeout
+    frequency = inputs.frequency
+    call_graph = inputs.call_graph
     metadata_path = output_dir / "metadata.json"
     metadata = {
         "schema_version": 1,

@@ -29,17 +29,15 @@ MEMORY_LAYOUTS_ROOTS = ("roadmap", "progress")
 def resolve_paths(workspace: Path, layout: str) -> tuple[Path, Path]:
     """Resolve both memory locations, preserving the layout of resumed runs."""
     if layout not in MEMORY_LAYOUTS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Unknown memory layout {layout!r}; choose from {', '.join(MEMORY_LAYOUTS)}"
-        )
+        message = f"Unknown memory layout {layout!r}; choose from {', '.join(MEMORY_LAYOUTS)}"
+        raise ValueError(message)
 
     def resolve(name: str) -> Path:
         legacy = workspace / f"{name}.md"
         directory = workspace / name
         if legacy.exists() and directory.exists():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Both {legacy.name} and {directory.name}/ exist; keep only one {name} layout"
-            )
+            message = f"Both {legacy.name} and {directory.name}/ exist; keep only one {name} layout"
+            raise ValueError(message)
         if legacy.exists():
             return legacy
         if directory.exists():

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from pydantic import BaseModel
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 T = TypeVar("T", bound=BaseModel)
 
 

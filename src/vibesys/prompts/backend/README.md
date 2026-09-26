@@ -8,11 +8,13 @@ backend/
 │   ├── device_dtype.j2
 │   ├── judge_device_correctness.j2
 │   └── profiling_workflow.j2
-└── metal/                           ← metal fragments (mirrors cuda)
-    ├── device_dtype.j2
-    ├── judge_device_correctness.j2
-    └── profiling_workflow.j2
+├── metal/                           ← metal fragments (mirrors cuda)
+├── rocm/
+├── trainium/
+└── cpu/
 ```
+
+Every backend directory carries the same three fragments.
 
 ## How they're used
 
@@ -53,10 +55,12 @@ Explicit kwargs passed to `prompt.render(...)` override auto-injected fragments 
        backend = ComputeBackend.ROCM
    ```
    …and register it in `_FRAGMENT_IMPLS`.
-4. Wire up the backend's runtime impl under
-   `vibesys/backends/<new>/` and register it in
-   `backends/__init__.py`. See the existing CUDA and Metal impls for
-   the pattern.
+4. Wire up the backend's runtime impl and register it in
+   `_register_defaults` in `vibesys/backends/__init__.py`. A backend with
+   device logic gets its own subpackage `vibesys/backends/<new>/` (see
+   `cuda/`, `rocm/`, `trainium/`). A local-only backend with no accelerator
+   (`metal`, `cpu`) registers `LocalBackend` from `backends/local.py`
+   bound to the new variant instead.
 
 ## Python contract
 

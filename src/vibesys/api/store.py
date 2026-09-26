@@ -39,6 +39,7 @@ class RunStore(Protocol):
 def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open a read-only run history store for *project*."""
     if registry is None:
+        # lint-waiver: LW-020005 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
         from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
         registry = built_in_orchestrations()
@@ -52,6 +53,7 @@ def portable_history_snapshots(
     manifest = project.state.load_run(run_id)
     policy_id = manifest.orchestration.id
     if registry is None:
+        # lint-waiver: LW-020006 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
         from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
         registry = built_in_orchestrations()

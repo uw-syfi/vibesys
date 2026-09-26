@@ -509,7 +509,7 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
     async def exercise() -> None:
         async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
             # Local worktrees provide a cheap substrate for the generic parallel capability.
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-030003; This test reads one private attribute to check internal wiring that has no public accessor.
                 ctx.environment.view, supports_parallel_candidate_evaluation=True
             )
             parent_revision = ctx.workspaces.root.revision
@@ -594,7 +594,7 @@ def test_discard_scope_continues_after_a_cancelled_agent_close(tmp_path: Path) -
 
     async def exercise() -> None:
         async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-040024 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
                 ctx.environment.view, supports_parallel_candidate_evaluation=True
             )
             parent_revision = ctx.workspaces.root.revision
@@ -602,11 +602,11 @@ def test_discard_scope_continues_after_a_cancelled_agent_close(tmp_path: Path) -
             scoped = await ctx.workspaces.fork(parent_revision)
             assert scoped.id is not None
             calls: list[str] = []
-            ctx._agents[(scoped.id, "first")] = cast(  # noqa: SLF001
+            ctx._agents[(scoped.id, "first")] = cast(  # noqa: SLF001  # LW-040025 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
                 "_LocalAgentHandle",
                 _ScopedCloseProbe(scoped.id, "first", calls, exc=asyncio.CancelledError()),
             )
-            ctx._agents[(scoped.id, "second")] = cast(  # noqa: SLF001
+            ctx._agents[(scoped.id, "second")] = cast(  # noqa: SLF001  # LW-040026 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
                 "_LocalAgentHandle", _ScopedCloseProbe(scoped.id, "second", calls)
             )
 
@@ -652,7 +652,7 @@ def test_discard_scope_closes_every_agent_for_any_failure_mix(
 
     async def exercise() -> None:
         async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-040027 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
                 ctx.environment.view, supports_parallel_candidate_evaluation=True
             )
             parent_revision = ctx.workspaces.root.revision
@@ -666,7 +666,7 @@ def test_discard_scope_closes_every_agent_for_any_failure_mix(
                 exc = exc_type() if exc_type is not None else None
                 if exc is not None:
                     expected_failures += 1
-                ctx._agents[(scoped.id, name)] = cast(  # noqa: SLF001
+                ctx._agents[(scoped.id, name)] = cast(  # noqa: SLF001  # LW-040028 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
                     "_LocalAgentHandle", _ScopedCloseProbe(scoped.id, name, calls, exc=exc)
                 )
 
@@ -704,9 +704,9 @@ def test_gate_lock_shares_the_parent_mutation_lock_domain() -> None:
     """
     host = cast("RunContext", _FakeMutationHost())
     evaluator = _Evaluator(host)
-    assert evaluator._lock_for(None) is host._parent_mutation_lock  # noqa: SLF001
+    assert evaluator._lock_for(None) is host._parent_mutation_lock  # noqa: SLF001  # LW-040029 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
     root_handle = cast("WorkspaceHandle", SimpleNamespace(id=None))
-    assert evaluator._lock_for(root_handle) is host._parent_mutation_lock  # noqa: SLF001
+    assert evaluator._lock_for(root_handle) is host._parent_mutation_lock  # noqa: SLF001  # LW-040030 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
 
 
 def test_gate_and_adopt_cannot_interleave_on_the_parent_tree() -> None:
@@ -721,15 +721,15 @@ def test_gate_and_adopt_cannot_interleave_on_the_parent_tree() -> None:
     events: list[str] = []
 
     async def gate() -> None:
-        async with evaluator._lock_for(None):  # noqa: SLF001
+        async with evaluator._lock_for(None):  # noqa: SLF001  # LW-040031 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
             events.append("gate-start")
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
             events.append("gate-end")
 
     async def adopt() -> None:
-        async with host._parent_mutation_lock:  # noqa: SLF001
+        async with host._parent_mutation_lock:  # noqa: SLF001  # LW-040032 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
             events.append("adopt-start")
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
             events.append("adopt-end")
 
     async def exercise() -> None:
@@ -744,17 +744,13 @@ def test_gate_and_adopt_cannot_interleave_on_the_parent_tree() -> None:
 
 @given(
     kinds=st.lists(st.sampled_from(["gate", "adopt", "checkpoint"]), min_size=2, max_size=8),
-    delays=st.lists(
-        st.floats(min_value=0.0, max_value=0.005, allow_nan=False, allow_infinity=False),
-        min_size=2,
-        max_size=8,
-    ),
+    yields=st.lists(st.integers(min_value=0, max_value=3), min_size=2, max_size=8),
 )
 @settings(
     max_examples=50, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 def test_parent_tree_lock_domain_serializes_any_gate_adopt_checkpoint_mix(
-    kinds: list[str], delays: list[float]
+    kinds: list[str], yields: list[int]
 ) -> None:
     """Property: whatever mix and interleaving of gate/adopt/checkpoint
     tasks race on the parent tree's mutation lock, at most one holds it at
@@ -767,20 +763,21 @@ def test_parent_tree_lock_domain_serializes_any_gate_adopt_checkpoint_mix(
 
     def _lock_for(kind: str) -> asyncio.Lock:
         if kind == "gate":
-            return evaluator._lock_for(None)  # noqa: SLF001
-        return host._parent_mutation_lock  # noqa: SLF001
+            return evaluator._lock_for(None)  # noqa: SLF001  # LW-040033 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
+        return host._parent_mutation_lock  # noqa: SLF001  # LW-040034 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
 
-    async def task(kind: str, delay: float) -> None:
+    async def task(kind: str, yield_count: int) -> None:
         nonlocal held, max_held
         async with _lock_for(kind):
             held += 1
             max_held = max(max_held, held)
-            await asyncio.sleep(delay)
+            for _ in range(yield_count):
+                await asyncio.sleep(0)
             held -= 1
 
     async def exercise() -> None:
-        pairs = list(zip(kinds, delays, strict=False))
-        await asyncio.gather(*(task(kind, delay) for kind, delay in pairs))
+        pairs = list(zip(kinds, yields, strict=False))
+        await asyncio.gather(*(task(kind, count) for kind, count in pairs))
 
     asyncio.run(exercise())
     assert max_held <= 1

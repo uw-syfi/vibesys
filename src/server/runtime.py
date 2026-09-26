@@ -6,7 +6,7 @@ import asyncio
 import signal
 import threading
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypeVar
 
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from vibesys.api import RunRequest, RunResult, RunSession
 
 
+_RunValueT = TypeVar("_RunValueT")
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
@@ -103,14 +104,14 @@ class ServerRuntime:
         the transport threads synchronize on; `self.api`'s `session_provider`
         reads it to route steer/pause/resume/stop to the live run. The
         resource-handoff listener closes over `session` itself so
-        `RunIntegrationAdapter._handle_run_resources` can thread it into
+        `RunIntegrationAdapter.handle_run_resources` can thread it into
         `ExperimentChatFactory`, which opens its own agent-construction
         environment through `session.open_agent_environment(...)`.
         """
         session = create_session(request, sink=self.integration.project_event)
-        session.on_committed_view(self.api._observe_committed_state)  # noqa: SLF001
+        session.on_committed_view(self.api.observe_committed_state)
         session.on_run_resources(
-            lambda handoff: self.integration._handle_run_resources(session, handoff)  # noqa: SLF001
+            lambda handoff: self.integration.handle_run_resources(session, handoff)
         )
         with self.condition:
             self.session = session
@@ -121,7 +122,7 @@ class ServerRuntime:
             with self.condition:
                 self.session = None
 
-    def run(self, run: Callable[[], Any]) -> Any:  # noqa: ANN401, PLR0915
+    def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
         previous_sigterm = signal.getsignal(signal.SIGTERM)
 
@@ -139,78 +140,15 @@ class ServerRuntime:
         run_error: BaseException | None = None
         try:
             with UnixJsonlServer(self.socket_path, self.api) as transport:
-                if not transport.wait_for_subscriber(timeout=30.0):
-                    raise RuntimeError("Timed out waiting for a server client")  # noqa: TRY003, TRY301
-                terminal_cursor = self.journal.latest_sequence
-                try:
-                    value = run()
-                except KeyboardInterrupt:
-                    self._finish_after_launcher_interrupt(terminal_cursor)
-                    raise
-                except RunStopped:
-                    # The stop already landed: the controller is STOPPED and
-                    # the journal ends with that terminal status change, so
-                    # there is no terminal event to add. ``finish`` is
-                    # absorbed by the ended status; it is called so the
-                    # journal cannot end on a live status even if a stop ever
-                    # unwinds before landing. Returning, not re-raising, is
-                    # what makes an operator stop a clean backend exit.
-                    self.controller.finish(record_event=False)
-                    transport.wait_for_subscriber_disconnect()
-                    return None
-                except ConfigurationError as exc:
-                    configuration_diagnostic = exc.diagnostic
-                    event_diagnostic = Diagnostic(
-                        code=configuration_diagnostic.code,
-                        summary=configuration_diagnostic.message,
-                        detail=(
-                            f"Stage: {configuration_diagnostic.stage}\n"
-                            f"Exit code: {configuration_diagnostic.exit_code}"
-                        ),
-                        hint=configuration_diagnostic.usage,
-                        scope=DiagnosticScope.CONFIGURATION,
-                        severity=DiagnosticSeverity.FATAL,
-                        retryability=DiagnosticRetryability.NEVER,
-                    )
-                    self.controller.finish(
-                        exc,
-                        record_event=False,
-                        diagnostic=event_diagnostic,
-                    )
-                    self.journal.record(
-                        EventType.CONFIGURATION_FAILED,
-                        event_diagnostic.summary,
-                        status=EventStatus.FAILED,
-                        data=ConfigurationFailedData(
-                            code=configuration_diagnostic.code,
-                            stage=configuration_diagnostic.stage,
-                            message=event_diagnostic.summary,
-                            usage=event_diagnostic.hint,
-                            exit_code=configuration_diagnostic.exit_code,
-                        ),
-                        diagnostic=event_diagnostic,
-                    )
-                    transport.wait_for_subscriber_disconnect()
-                    raise
-                except BaseException as exc:
-                    self.controller.finish(
-                        exc,
-                        record_event=not self._terminal_recorded_after(terminal_cursor),
-                    )
-                    transport.wait_for_subscriber_disconnect()
-                    raise
-                self.controller.finish(
-                    record_event=not self._terminal_recorded_after(terminal_cursor)
-                )
-                transport.wait_for_subscriber_disconnect()
-                return value
+                self._wait_for_subscriber(transport)
+                return self._execute_run(transport, run)
         except BaseException as exc:
             run_error = exc
             raise
         finally:
             try:
                 self.integration.close()
-            except BaseException as cleanup_error:  # optional presentation cleanup  # noqa: BLE001
+            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-009025 [BLE001]; optional cleanup must not replace a run failure or interrupt, so record it as a note instead.
                 message = (
                     "Experiment chat cleanup also failed: "
                     f"{type(cleanup_error).__name__}: {cleanup_error}"
@@ -226,6 +164,81 @@ class ServerRuntime:
                         )
             finally:
                 signal.signal(signal.SIGTERM, previous_sigterm)
+
+    @staticmethod
+    def _wait_for_subscriber(transport: UnixJsonlServer) -> None:
+        """Require a frontend client before starting the backend run."""
+        if not transport.wait_for_subscriber(timeout=30.0):
+            message = "Timed out waiting for a server client"
+            raise RuntimeError(message)
+
+    def _execute_run(
+        self,
+        transport: UnixJsonlServer,
+        run: Callable[[], _RunValueT],
+    ) -> _RunValueT | None:
+        """Run the backend and order its terminal status against the journal."""
+        terminal_cursor = self.journal.latest_sequence
+        try:
+            value = run()
+        except KeyboardInterrupt:
+            self._finish_after_launcher_interrupt(terminal_cursor)
+            raise
+        except RunStopped:
+            # The stop already landed: the controller is STOPPED and
+            # the journal ends with that terminal status change, so
+            # there is no terminal event to add. ``finish`` is
+            # absorbed by the ended status; it is called so the
+            # journal cannot end on a live status even if a stop ever
+            # unwinds before landing. Returning, not re-raising, is
+            # what makes an operator stop a clean backend exit.
+            self.controller.finish(record_event=False)
+            transport.wait_for_subscriber_disconnect()
+            return None
+        except ConfigurationError as exc:
+            configuration_diagnostic = exc.diagnostic
+            event_diagnostic = Diagnostic(
+                code=configuration_diagnostic.code,
+                summary=configuration_diagnostic.message,
+                detail=(
+                    f"Stage: {configuration_diagnostic.stage}\n"
+                    f"Exit code: {configuration_diagnostic.exit_code}"
+                ),
+                hint=configuration_diagnostic.usage,
+                scope=DiagnosticScope.CONFIGURATION,
+                severity=DiagnosticSeverity.FATAL,
+                retryability=DiagnosticRetryability.NEVER,
+            )
+            self.controller.finish(
+                exc,
+                record_event=False,
+                diagnostic=event_diagnostic,
+            )
+            self.journal.record(
+                EventType.CONFIGURATION_FAILED,
+                event_diagnostic.summary,
+                status=EventStatus.FAILED,
+                data=ConfigurationFailedData(
+                    code=configuration_diagnostic.code,
+                    stage=configuration_diagnostic.stage,
+                    message=event_diagnostic.summary,
+                    usage=event_diagnostic.hint,
+                    exit_code=configuration_diagnostic.exit_code,
+                ),
+                diagnostic=event_diagnostic,
+            )
+            transport.wait_for_subscriber_disconnect()
+            raise
+        except BaseException as exc:
+            self.controller.finish(
+                exc,
+                record_event=not self._terminal_recorded_after(terminal_cursor),
+            )
+            transport.wait_for_subscriber_disconnect()
+            raise
+        self.controller.finish(record_event=not self._terminal_recorded_after(terminal_cursor))
+        transport.wait_for_subscriber_disconnect()
+        return value
 
     def _finish_after_launcher_interrupt(self, terminal_cursor: int) -> None:
         """End a run the launcher terminated, recording the interruption once."""

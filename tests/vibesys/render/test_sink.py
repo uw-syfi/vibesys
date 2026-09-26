@@ -12,6 +12,9 @@ from vibesys.events import (
     EventStatus,
     FrameworkSource,
     FrameworkWarningData,
+    GateFinishedData,
+    GateKind,
+    GateStartedData,
     JsonResultPayload,
     RunConfiguredData,
     TodoItemData,
@@ -20,7 +23,10 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
-from vibesys.render.sink import OutputSink
+from vibesys.render.sink import (
+    OutputSink,
+    output_sink,
+)
 from vibesys.run.event_journal import EventJournal
 from vs_agent.callbacks import AgentLogger
 
@@ -32,7 +38,7 @@ def _collect(sink: OutputSink) -> tuple[list[CoreEvent], Callable[[], None]]:
 
 
 class TestSubscription:
-    def test_subscriber_receives_events(self):  # noqa: ANN201  # tracked: #288
+    def test_subscriber_receives_events(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.agent_output("hello", channel="assistant")
@@ -43,7 +49,7 @@ class TestSubscription:
         assert data.content == "hello"
         assert data.channel == "assistant"
 
-    def test_unsubscribe_stops_delivery(self):  # noqa: ANN201  # tracked: #288
+    def test_unsubscribe_stops_delivery(self) -> None:
         sink = OutputSink()
         seen, unsubscribe = _collect(sink)
         sink.agent_output("one")
@@ -51,7 +57,7 @@ class TestSubscription:
         sink.agent_output("two")
         assert [e.data.content for e in seen if isinstance(e.data, AgentOutputChunkData)] == ["one"]
 
-    def test_empty_content_is_not_emitted(self):  # noqa: ANN201  # tracked: #288
+    def test_empty_content_is_not_emitted(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.agent_output("")
@@ -60,7 +66,7 @@ class TestSubscription:
 
 
 class TestTypedEmitters:
-    def test_tool_call_event(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_call_event(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.tool_call("shell", {"cmd": "ls"}, call_id="call-1")
@@ -71,17 +77,17 @@ class TestTypedEmitters:
         assert data.call_id == "call-1"
         assert data.args == {"cmd": "ls"}
 
-    def test_tool_call_args_coerced_to_json_safe(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_call_args_coerced_to_json_safe(self, tmp_path: Path) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
-        sink.tool_call("write", {"path": Path("/tmp/x")})  # noqa: S108  # tracked: #288
+        sink.tool_call("write", {"path": tmp_path / "x"})
         data = seen[0].data
         assert isinstance(data, ToolCallData)
         # Non-JSON values are repr()'d so the event always serializes.
         assert isinstance(data.args["path"], str)
         seen[0].model_dump_json()
 
-    def test_tool_result_event(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_result_event(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.tool_result("shell", "output text", call_id="call-1", is_error=True)
@@ -93,7 +99,7 @@ class TestTypedEmitters:
         assert data.is_error is True
         assert data.payload is None
 
-    def test_tool_result_classifies_json_content_when_no_payload_given(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_result_classifies_json_content_when_no_payload_given(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.tool_result("query", '{"count": 3}')
@@ -103,7 +109,7 @@ class TestTypedEmitters:
         assert isinstance(data.payload, JsonResultPayload)
         assert data.payload.value == {"count": 3}
 
-    def test_tool_result_provided_payload_preempts_classifier(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_result_provided_payload_preempts_classifier(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         provided = CommandResultPayload(stdout='{"count": 3}', stderr="", exit_code=0, duration=0.2)
@@ -114,7 +120,7 @@ class TestTypedEmitters:
         assert isinstance(data, ToolResultData)
         assert data.payload == provided
 
-    def test_todo_update_event(self):  # noqa: ANN201  # tracked: #288
+    def test_todo_update_event(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.todo_update([TodoItemData(content="a", status="pending")])
@@ -122,7 +128,7 @@ class TestTypedEmitters:
         assert isinstance(data, TodoUpdateData)
         assert data.todos[0].content == "a"
 
-    def test_usage_update_event(self):  # noqa: ANN201  # tracked: #288
+    def test_usage_update_event(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.usage_update(12_345, context_window=200_000, model="claude-sonnet-4-6")
@@ -134,7 +140,7 @@ class TestTypedEmitters:
 
 
 class TestFrameworkEmitters:
-    def test_framework_warning_event(self):  # noqa: ANN201
+    def test_framework_warning_event(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.framework_warning(
@@ -151,7 +157,7 @@ class TestFrameworkEmitters:
         assert data.source is FrameworkSource.LOOP
         assert seen[0].round_label == "round-2"
 
-    def test_framework_warning_defaults(self):  # noqa: ANN201
+    def test_framework_warning_defaults(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.framework_warning("skills catalog invalid", source_label="skills")
@@ -162,16 +168,18 @@ class TestFrameworkEmitters:
         assert data.source_label == "skills"
         assert seen[0].round_label is None
 
-    def test_run_configured_keeps_first_objective_line_only(self):  # noqa: ANN201
+    def test_run_configured_keeps_first_objective_line_only(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.run_configured(
-            run_log_path="/logs/run.log",
-            project_root="/work/project",
-            objective="\n  \nMake the queue fast.\nSecond paragraph.",
-            search_policy="pareto-ucb",
-            benchmark_contract=True,
-            pareto_objectives="[latency(min)]",
+            RunConfiguredData(
+                run_log_path="/logs/run.log",
+                project_root="/work/project",
+                objective="\n  \nMake the queue fast.\nSecond paragraph.",
+                search_policy="pareto-ucb",
+                benchmark_contract=True,
+                pareto_objectives="[latency(min)]",
+            )
         )
         assert seen[0].type == CoreEventType.RUN_CONFIGURED
         data = seen[0].data
@@ -182,17 +190,18 @@ class TestFrameworkEmitters:
         assert data.benchmark_contract is True
         assert data.pareto_objectives == "[latency(min)]"
 
-    def test_run_configured_without_objective(self):  # noqa: ANN201
+    def test_run_configured_without_objective(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
-        sink.run_configured(run_log_path="/logs/run.log", project_root="/p", model="m")
+        sink.run_configured(
+            RunConfiguredData(run_log_path="/logs/run.log", project_root="/p", model="m")
+        )
         data = seen[0].data
         assert isinstance(data, RunConfiguredData)
         assert data.objective is None
         assert data.model == "m"
 
-    def test_gate_events_carry_envelope_status(self):  # noqa: ANN201
-        from vibesys.events import GateFinishedData, GateKind, GateStartedData  # noqa: PLC0415
+    def test_gate_events_carry_envelope_status(self) -> None:
 
         sink = OutputSink()
         seen, _ = _collect(sink)
@@ -210,7 +219,7 @@ class TestFrameworkEmitters:
 
 
 class TestComposition:
-    def test_events_can_be_recorded_by_the_core_journal(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_events_can_be_recorded_by_the_core_journal(self, tmp_path: Path) -> None:
         journal = EventJournal()
         journal.attach(tmp_path, "test-run")
         sink = OutputSink()
@@ -224,12 +233,11 @@ class TestComposition:
         assert CoreEventType.AGENT_OUTPUT_CHUNK in types
         assert CoreEventType.TOOL_CALL in types
 
-    def test_no_subscriber_no_error(self):  # noqa: ANN201  # tracked: #288
+    def test_no_subscriber_no_error(self) -> None:
         sink = OutputSink()
         sink.agent_output("standalone")
 
-    def test_logger_metadata_survives_subprocess_thread_emission(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
+    def test_logger_metadata_survives_subprocess_thread_emission(self) -> None:
 
         logger = AgentLogger(
             agent_kind="chat",

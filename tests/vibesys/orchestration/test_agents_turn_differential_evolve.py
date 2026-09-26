@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: render swap below
 
 from tests.vibesys.golden.test_evolve_golden import (
     _implementer,
@@ -59,8 +59,8 @@ class _RecordedRender:
     text: str = ""
 
 
-def _record_render_calls(recorded: list[_RecordedRender]):  # noqa: ANN202  # tracked: #288
-    def _wrapper(name: str, *, template_dir=None, **kwargs: object) -> str:  # noqa: ANN001  # tracked: #288
+def _record_render_calls(recorded: list[_RecordedRender]):  # noqa: ANN202  # LW-040194 [ANN202];  tracked: #288.
+    def _wrapper(name: str, *, template_dir=None, **kwargs: object) -> str:  # noqa: ANN001  # LW-040195 [ANN001];  tracked: #288.
         text = _real_render_template(name, template_dir=template_dir, **kwargs)
         recorded.append(_RecordedRender(name=name, kwargs=kwargs, text=text))
         return text
@@ -95,6 +95,7 @@ def test_every_evolve_role_prompt_matches_ctx_agents_turn(tmp_path: Path) -> Non
     descriptor = descriptor_from_options(
         _options(max_generations=1, children_per_generation=1, bootstrap_max_attempts=1)
     )
+    # test-isolation: the test records render calls by swapping one module function
     with patch("vibesys.orchestration.agents.render_template", _record_render_calls(recorded)):
         real_run = _run_evolve(tmp_path / "real", descriptor=descriptor, runner=runner)
     assert real_run.result is True

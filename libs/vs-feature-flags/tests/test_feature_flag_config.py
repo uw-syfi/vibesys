@@ -10,26 +10,26 @@ class ExampleFlag(StrEnum):
     STRICT_MODE = "strict_mode"
 
 
-def test_parse_feature_flag_overrides_returns_typed_flags():  # noqa: ANN201  # tracked: #288
+def test_parse_feature_flag_overrides_returns_typed_flags() -> None:
     parsed = parse_feature_flag_overrides({"new_loop": True}, ExampleFlag)
 
     assert parsed == {ExampleFlag.NEW_LOOP: True}
 
 
-def test_parse_feature_flag_overrides_accepts_missing_section():  # noqa: ANN201  # tracked: #288
+def test_parse_feature_flag_overrides_accepts_missing_section() -> None:
     assert parse_feature_flag_overrides(None, ExampleFlag) == {}
 
 
-def test_parse_feature_flag_overrides_rejects_non_table():  # noqa: ANN201  # tracked: #288
+def test_parse_feature_flag_overrides_rejects_non_table() -> None:
     with pytest.raises(ValueError, match="feature_flags must be a TOML table"):
-        parse_feature_flag_overrides(True, ExampleFlag)  # noqa: FBT003  # tracked: #288
+        parse_feature_flag_overrides(raw=True, flag_type=ExampleFlag)
 
 
-def test_parse_feature_flag_overrides_rejects_unknown_flag():  # noqa: ANN201  # tracked: #288
+def test_parse_feature_flag_overrides_rejects_unknown_flag() -> None:
     with pytest.raises(ValueError, match="Unknown feature flag 'nope'"):
         parse_feature_flag_overrides({"nope": True}, ExampleFlag)
 
 
-def test_parse_feature_flag_overrides_rejects_non_bool_value():  # noqa: ANN201  # tracked: #288
-    with pytest.raises(ValueError, match="feature_flags.new_loop must be true or false"):  # noqa: RUF043  # tracked: #288
+def test_parse_feature_flag_overrides_rejects_non_bool_value() -> None:
+    with pytest.raises(ValueError, match=r"feature_flags\.new_loop must be true or false"):
         parse_feature_flag_overrides({"new_loop": "true"}, ExampleFlag)

@@ -20,6 +20,7 @@ those external imports keep working unchanged.
 """
 
 # Capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-040107 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -36,9 +37,9 @@ from vibesys.context import (
     open_run_resources,
     open_scoped_agent_environment,
 )
-from vibesys.events import FrameworkSource
+from vibesys.events import FrameworkSource, RunConfiguredData
 from vibesys.orchestration.agents import (
-    _active_progress,  # noqa: F401  # re-export, see below
+    _active_progress,  # noqa: F401  # LW-040108 [F401]; re-export, see below.
     _Agents,
     _LocalAgentHandle,
 )
@@ -115,7 +116,7 @@ async def _wait_until_done(task: asyncio.Task) -> None:
             await asyncio.shield(task)
         except asyncio.CancelledError:
             continue
-        except BaseException:  # noqa: BLE001
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-020027 [BLE001]; the caller inspects the worker's outcome after the wait, so this loop only needs to stop on any failure.
             break
 
 
@@ -128,7 +129,7 @@ async def _close_runtime(host: RunContext, error: BaseException | None) -> None:
             await asyncio.shield(cleanup)
         except asyncio.CancelledError:
             cancelled = True
-        except BaseException:  # noqa: BLE001  # inspect the completed task below
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-020028 [BLE001]; the completed cleanup task's exception is inspected right after the loop.
             break
     try:
         cleanup.result()
@@ -148,7 +149,7 @@ async def _close_runtime(host: RunContext, error: BaseException | None) -> None:
 class RunContext:
     """One run's resources and focused host capabilities."""
 
-    def __init__(  # noqa: PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # LW-040004 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         request: RunRequest,
         integration: LocalRunIntegration,
@@ -227,7 +228,7 @@ class RunContext:
             round_label=round_label,
         )
 
-    def run_configured(  # noqa: PLR0913
+    def run_configured(  # noqa: PLR0913  # LW-040110 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         *,
         run_log_path: str,
@@ -240,13 +241,15 @@ class RunContext:
     ) -> None:
         """Publish the one-per-run resolved loop configuration event."""
         output_sink().run_configured(
-            run_log_path=run_log_path,
-            project_root=project_root,
-            model=model,
-            objective=objective,
-            search_policy=search_policy,
-            benchmark_contract=benchmark_contract,
-            pareto_objectives=pareto_objectives,
+            RunConfiguredData(
+                run_log_path=run_log_path,
+                project_root=project_root,
+                model=model,
+                objective=objective,
+                search_policy=search_policy,
+                benchmark_contract=benchmark_contract,
+                pareto_objectives=pareto_objectives,
+            )
         )
 
     def switch_log(self, label: int | str) -> None:
@@ -276,7 +279,7 @@ class RunContext:
 
     @classmethod
     @asynccontextmanager
-    async def open(  # noqa: PLR0913  # tracked: #288
+    async def open(  # noqa: PLR0913  # LW-040005 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         cls,
         request: RunRequest,
         integration: LocalRunIntegration,
@@ -466,16 +469,17 @@ class RunContext:
             for agent in reversed(tuple(self._agents.values())):
                 try:
                     await agent.close()
-                except BaseException as exc:  # noqa: BLE001
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020034 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
             try:
                 await self.workspaces.close()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020035 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if self._resource_owner is not None:
             try:
                 await asyncio.to_thread(self._resource_owner.close)
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020036 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if errors:
-            raise BaseExceptionGroup("run cleanup failed", errors)  # noqa: TRY003
+            message = "run cleanup failed"
+            raise BaseExceptionGroup(message, errors)

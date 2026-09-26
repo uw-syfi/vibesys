@@ -21,9 +21,13 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 MODEL_MANIFEST_RELPATH = ".vibesys/models.json"
 _ALLOW_ENV_VAR = "VIBESYS_MODEL_REQUEST_ALLOW"
@@ -31,6 +35,42 @@ _ALLOW_ENV_VAR = "VIBESYS_MODEL_REQUEST_ALLOW"
 
 class ModelRequestError(ValueError):
     """Raised when a model-request manifest is malformed or disallowed."""
+
+    @classmethod
+    def invalid_json(cls, error: json.JSONDecodeError) -> ModelRequestError:
+        """Describe a model manifest that could not be decoded as JSON."""
+        return cls(f"{MODEL_MANIFEST_RELPATH} is not valid JSON: {error}")
+
+    @classmethod
+    def invalid_root(cls) -> ModelRequestError:
+        """Describe a model manifest without its expected list structure."""
+        return cls(
+            f"{MODEL_MANIFEST_RELPATH} must be a JSON list of model objects, "
+            'or an object with a "models" list'
+        )
+
+    @classmethod
+    def entry_not_object(cls, index: int) -> ModelRequestError:
+        """Describe a model manifest entry that is not an object."""
+        return cls(f"{MODEL_MANIFEST_RELPATH} entry {index} is not an object")
+
+    @classmethod
+    def entry_id_missing(cls, index: int) -> ModelRequestError:
+        """Describe a model entry without a nonempty repository ID."""
+        return cls(
+            f"{MODEL_MANIFEST_RELPATH} entry {index} needs a non-empty "
+            'string "id" (the HuggingFace repo id)'
+        )
+
+    @classmethod
+    def entry_revision_not_string(cls, index: int) -> ModelRequestError:
+        """Describe a model entry whose optional revision is not a string."""
+        return cls(f'{MODEL_MANIFEST_RELPATH} entry {index} "revision" must be a string')
+
+    @classmethod
+    def model_not_allowed(cls, model_id: str, allowlist: str | None) -> ModelRequestError:
+        """Describe a model request excluded by the operator allowlist."""
+        return cls(f"model request {model_id!r} is not permitted by {_ALLOW_ENV_VAR}={allowlist!r}")
 
 
 @dataclass(frozen=True)
@@ -59,35 +99,23 @@ def read_model_requests(workspace: Path) -> list[ModelRequest]:
     try:
         raw = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
-        raise ModelRequestError(  # noqa: TRY003  # tracked: #288
-            f"{MODEL_MANIFEST_RELPATH} is not valid JSON: {exc}"
-        ) from exc
+        raise ModelRequestError.invalid_json(exc) from exc
 
     entries = raw.get("models") if isinstance(raw, dict) else raw
     if not isinstance(entries, list):
-        raise ModelRequestError(  # noqa: TRY003  # tracked: #288
-            f"{MODEL_MANIFEST_RELPATH} must be a JSON list of model objects, "
-            'or an object with a "models" list'
-        )
+        raise ModelRequestError.invalid_root()
 
     requests: list[ModelRequest] = []
     seen: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
-            raise ModelRequestError(  # noqa: TRY003  # tracked: #288
-                f"{MODEL_MANIFEST_RELPATH} entry {index} is not an object"
-            )
+            raise ModelRequestError.entry_not_object(index)
         model_id = entry.get("id") or entry.get("model_id")
         if not isinstance(model_id, str) or not model_id.strip():
-            raise ModelRequestError(  # noqa: TRY003  # tracked: #288
-                f"{MODEL_MANIFEST_RELPATH} entry {index} needs a non-empty "
-                'string "id" (the HuggingFace repo id)'
-            )
+            raise ModelRequestError.entry_id_missing(index)
         revision = entry.get("revision")
         if revision is not None and not isinstance(revision, str):
-            raise ModelRequestError(  # noqa: TRY003  # tracked: #288
-                f'{MODEL_MANIFEST_RELPATH} entry {index} "revision" must be a string'
-            )
+            raise ModelRequestError.entry_revision_not_string(index)
         model_id = model_id.strip()
         if model_id in seen:
             continue
@@ -133,15 +161,15 @@ def reconcile_model_requests(
     if not requests:
         return []
 
-    from vs_sandbox.api import ensure_model_volume  # noqa: PLC0415  # tracked: #288
+    ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
     allow = _allow_prefixes()
     volumes: list[str] = []
     for request in requests:
         if not check_allowed(request.model_id, allow):
-            raise ModelRequestError(  # noqa: TRY003  # tracked: #288
-                f"model request {request.model_id!r} is not permitted by "
-                f"{_ALLOW_ENV_VAR}={os.environ.get(_ALLOW_ENV_VAR)!r}"
+            raise ModelRequestError.model_not_allowed(
+                request.model_id,
+                os.environ.get(_ALLOW_ENV_VAR),
             )
         suffix = f"@{request.revision}" if request.revision else ""
         log(f"[model-request] ensuring weights for {request.model_id}{suffix}")

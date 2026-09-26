@@ -70,7 +70,7 @@ class _RecipeBackend(FakeComputeBackend):
         self._exit_code = exit_code
         self._output = output
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> FakeSandbox:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> FakeSandbox:  # noqa: ANN401  # LW-040134 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         sandbox = cast("FakeSandbox", super().make_sandbox(kind, **kwargs))
         sandbox.default_result = SandboxExecutionResult(
             output=self._output, exit_code=self._exit_code, stdout=self._output, stderr=""
@@ -111,7 +111,7 @@ def _plan() -> OrchestratorPlan:
         hypothesis_id="H-01",
         hypothesis="batching the prefill step removes per-request launch overhead",
         task="batch the prefill step",
-        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106
+        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # LW-040135 [S106]; the argument is a fixture literal, not a credential.
         reasoning="scripted",
     )
 

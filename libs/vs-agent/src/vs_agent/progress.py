@@ -21,7 +21,8 @@ class RoundProgress:
     round_number: int
     total_rounds: int
 
-    def label(self) -> str:  # noqa: D102  # tracked: #288
+    def label(self) -> str:
+        """Render the current round and total round count."""
         return f"Round {self.round_number}/{self.total_rounds}"
 
 
@@ -34,7 +35,8 @@ class CandidateProgress:
     candidate_number: int
     total_candidates: int
 
-    def label(self) -> str:  # noqa: D102  # tracked: #288
+    def label(self) -> str:
+        """Render the current round and candidate position."""
         return (
             f"Round {self.round_number}/{self.total_rounds} "
             f"Cand {self.candidate_number}/{self.total_candidates}"

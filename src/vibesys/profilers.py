@@ -5,6 +5,7 @@ from __future__ import annotations
 import platform
 from dataclasses import dataclass
 from enum import StrEnum
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
@@ -29,13 +30,13 @@ class ProfilerKind(StrEnum):
 
 def mcp_spec(profiler_kind: ProfilerKind) -> MCPServerSpec | None:
     """Build the analysis server grant for a selected profiler."""
-    from vs_agent.api import MCPServerSpec  # noqa: PLC0415
+    mcp_server_spec = import_module("vs_agent.api").MCPServerSpec
 
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
         return None
     definition = profiler_definition(kind)
-    return MCPServerSpec(
+    return mcp_server_spec(
         name=definition.mcp_name,
         command="python",
         args=(definition.server_path,),
@@ -55,19 +56,23 @@ class ProfilerDefinition:
     requires_domain_torch_support: bool = False
 
     @property
-    def support_name(self) -> str:  # noqa: D102  # tracked: #288
+    def support_name(self) -> str:
+        """Return the packaged support directory name for this profiler."""
         return f"{self.kind.value}_profiler"
 
     @property
-    def server_path(self) -> str:  # noqa: D102  # tracked: #288
+    def server_path(self) -> str:
+        """Return the profiler server path relative to its support package."""
         return f"{self.support_name}/server.py"
 
     @property
-    def prompt_template(self) -> str:  # noqa: D102  # tracked: #288
+    def prompt_template(self) -> str:
+        """Return the prompt template path for this profiler."""
         return f"profilers/{self.kind.value}.j2"
 
     @property
-    def mcp_name(self) -> str:  # noqa: D102  # tracked: #288
+    def mcp_name(self) -> str:
+        """Return the MCP server name registered for this profiler."""
         return f"vibesys-{self.kind.value.replace('_', '-')}-profiler"
 
 
@@ -80,7 +85,8 @@ class ProfilerPreflightResult:
     diagnostics: tuple[str, ...] = ()
     details: tuple[str, ...] = ()
 
-    def error_message(self) -> str:  # noqa: D102  # tracked: #288
+    def error_message(self) -> str:
+        """Format the preflight diagnostics for an unusable profiler."""
         diagnostic_text = ", ".join(self.diagnostics) or "unknown"
         detail_text = "; ".join(self.details)
         suffix = f" ({detail_text})" if detail_text else ""
@@ -124,7 +130,8 @@ def profiler_definition(kind: ProfilerKind) -> ProfilerDefinition:
     try:
         return PROFILER_DEFINITIONS[kind]
     except KeyError as exc:
-        raise ValueError(f"Profiler {kind.value!r} is not runnable.") from exc  # noqa: TRY003  # tracked: #288
+        message = f"Profiler {kind.value!r} is not runnable."
+        raise ValueError(message) from exc
 
 
 def coerce_profiler_kind(value: str, *, label: str = "profiler") -> ProfilerKind:
@@ -133,20 +140,23 @@ def coerce_profiler_kind(value: str, *, label: str = "profiler") -> ProfilerKind
         return ProfilerKind(value)
     except ValueError as exc:
         choices = ", ".join(kind.value for kind in ProfilerKind)
-        raise ValueError(f"Unknown {label} kind {value!r}; choose from: {choices}.") from exc  # noqa: TRY003  # tracked: #288
+        message = f"Unknown {label} kind {value!r}; choose from: {choices}."
+        raise ValueError(message) from exc
 
 
 def require_profiler_kind(value: object, *, label: str = "profiler") -> ProfilerKind:
     """Require an already-parsed profiler enum at internal API boundaries."""
     if not isinstance(value, ProfilerKind):
-        raise TypeError(f"{label} must be a ProfilerKind, got {type(value).__name__}.")  # noqa: TRY003  # tracked: #288
+        message = f"{label} must be a ProfilerKind, got {type(value).__name__}."
+        raise TypeError(message)
     return value
 
 
 def require_domain_name(value: object, *, label: str = "domain") -> DomainName:
     """Require an already-parsed domain enum at internal API boundaries."""
     if not isinstance(value, DomainName):
-        raise TypeError(f"{label} must be a DomainName, got {type(value).__name__}.")  # noqa: TRY003  # tracked: #288
+        message = f"{label} must be a DomainName, got {type(value).__name__}."
+        raise TypeError(message)
     return value
 
 
@@ -163,7 +173,35 @@ def allowed_profiler_kinds(domain: DomainName) -> frozenset[ProfilerKind]:
     )
 
 
-def resolve_profiler_kind(  # noqa: C901, PLR0911, PLR0912  # tracked: #288
+def _resolve_generic_profiler(
+    allowed: frozenset[ProfilerKind],
+    environment_default: ProfilerKind,
+    environment_supported: frozenset[ProfilerKind] | None,
+) -> ProfilerKind:
+    """Pick a host-native profiler when the generic environment supports it."""
+    system = platform.system()
+    if system == "Darwin":
+        candidate = ProfilerKind.MACOS_CPU
+    elif system == "Linux":
+        candidate = ProfilerKind.LINUX_CPU
+    else:
+        candidate = ProfilerKind.NONE
+    if environment_supported is None or candidate in environment_supported:
+        return candidate
+    # Remote or constrained environments may not expose a host profiler.
+    if environment_default in allowed and environment_default in environment_supported:
+        return environment_default
+    if ProfilerKind.NONE in environment_supported:
+        return ProfilerKind.NONE
+    supported_values = ", ".join(sorted(kind.value for kind in environment_supported))
+    message = (
+        "No profiler supported by both the generic domain and selected run environment; "
+        f"environment allows: {supported_values}."
+    )
+    raise ValueError(message)
+
+
+def resolve_profiler_kind(
     requested: ProfilerKind,
     *,
     domain: DomainName,
@@ -184,10 +222,8 @@ def resolve_profiler_kind(  # noqa: C901, PLR0911, PLR0912  # tracked: #288
     if requested_kind is not ProfilerKind.AUTO:
         if requested_kind not in allowed:
             allowed_values = ", ".join(sorted(kind.value for kind in allowed))
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Profiler {requested_kind.value!r} is not supported for domain "
-                f"{domain_name.value!r}; allowed: {allowed_values}."
-            )
+            _exception_message_3 = f"Profiler {requested_kind.value!r} is not supported for domain {domain_name.value!r}; allowed: {allowed_values}."
+            raise ValueError(_exception_message_3)
         if (
             environment_supported_profiler_kinds is not None
             and requested_kind not in environment_supported_profiler_kinds
@@ -195,41 +231,15 @@ def resolve_profiler_kind(  # noqa: C901, PLR0911, PLR0912  # tracked: #288
             supported_values = ", ".join(
                 sorted(kind.value for kind in environment_supported_profiler_kinds)
             )
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Profiler {requested_kind.value!r} is not supported by the selected "
-                f"run environment; allowed: {supported_values}."
-            )
+            _exception_message_4 = f"Profiler {requested_kind.value!r} is not supported by the selected run environment; allowed: {supported_values}."
+            raise ValueError(_exception_message_4)
         return requested_kind
 
     if domain_name is DomainName.GENERIC:
-        system = platform.system()
-        if system == "Darwin":
-            candidate = ProfilerKind.MACOS_CPU
-        elif system == "Linux":
-            candidate = ProfilerKind.LINUX_CPU
-        else:
-            candidate = ProfilerKind.NONE
-        if (
-            environment_supported_profiler_kinds is None
-            or candidate in environment_supported_profiler_kinds
-        ):
-            return candidate
-        # A remote or otherwise constrained environment may not expose the
-        # host-native profiler. Prefer its declared default when the domain
-        # supports it, then degrade cleanly to no profiler.
-        if (
-            environment_default_profiler_kind in allowed
-            and environment_default_profiler_kind in environment_supported_profiler_kinds
-        ):
-            return environment_default_profiler_kind
-        if ProfilerKind.NONE in environment_supported_profiler_kinds:
-            return ProfilerKind.NONE
-        supported_values = ", ".join(
-            sorted(kind.value for kind in environment_supported_profiler_kinds)
-        )
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            "No profiler supported by both the generic domain and selected run "
-            f"environment; environment allows: {supported_values}."
+        return _resolve_generic_profiler(
+            allowed,
+            environment_default_profiler_kind,
+            environment_supported_profiler_kinds,
         )
 
     # OTel requires an input bundle that provisions instrumentation and a
@@ -268,10 +278,8 @@ def resolve_profiler_kind(  # noqa: C901, PLR0911, PLR0912  # tracked: #288
 
     if candidate not in allowed:
         allowed_values = ", ".join(sorted(kind.value for kind in allowed))
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Resolved profiler {candidate.value!r} is not supported for domain "
-            f"{domain_name.value!r}; allowed: {allowed_values}."
-        )
+        _exception_message = f"Resolved profiler {candidate.value!r} is not supported for domain {domain_name.value!r}; allowed: {allowed_values}."
+        raise ValueError(_exception_message)
     if (
         environment_supported_profiler_kinds is not None
         and candidate not in environment_supported_profiler_kinds
@@ -279,10 +287,8 @@ def resolve_profiler_kind(  # noqa: C901, PLR0911, PLR0912  # tracked: #288
         supported_values = ", ".join(
             sorted(kind.value for kind in environment_supported_profiler_kinds)
         )
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Resolved profiler {candidate.value!r} is not supported by the selected "
-            f"run environment; allowed: {supported_values}."
-        )
+        _exception_message_2 = f"Resolved profiler {candidate.value!r} is not supported by the selected run environment; allowed: {supported_values}."
+        raise ValueError(_exception_message_2)
     return candidate
 
 
@@ -295,22 +301,21 @@ def preflight_profiler_kind(kind: ProfilerKind) -> ProfilerPreflightResult:
     """
     resolved = require_profiler_kind(kind)
     if resolved is ProfilerKind.NONE:
-        return ProfilerPreflightResult(resolved, True)  # noqa: FBT003  # tracked: #288
+        return ProfilerPreflightResult(kind=resolved, usable=True)
     if resolved is ProfilerKind.LINUX_CPU:
-        from vibesys.linux_cpu_profiler import (  # noqa: PLC0415
-            DiagnosticCode,
-            LinuxProfilerTool,
-            detect_capability,
-        )
+        linux_profiler = import_module("vibesys.linux_cpu_profiler")
+        diagnostic_code = linux_profiler.DiagnosticCode
+        linux_profiler_tool = linux_profiler.LinuxProfilerTool
+        detect_capability = linux_profiler.detect_capability
 
         capability = detect_capability()
         blocking = {
-            DiagnosticCode.NOT_LINUX,
-            DiagnosticCode.PERF_UNAVAILABLE,
-            DiagnosticCode.PERF_STAT_UNAVAILABLE,
+            diagnostic_code.NOT_LINUX,
+            diagnostic_code.PERF_UNAVAILABLE,
+            diagnostic_code.PERF_STAT_UNAVAILABLE,
         }
         diagnostics = tuple(item.value for item in capability.diagnostics)
-        usable = capability.tool is LinuxProfilerTool.PERF and not any(
+        usable = capability.tool is linux_profiler_tool.PERF and not any(
             item in blocking for item in capability.diagnostics
         )
         details = (
@@ -320,18 +325,17 @@ def preflight_profiler_kind(kind: ProfilerKind) -> ProfilerPreflightResult:
         )
         return ProfilerPreflightResult(resolved, usable, diagnostics, details)
     if resolved is ProfilerKind.MACOS_CPU:
-        from vibesys.macos_cpu_profiler import (  # noqa: PLC0415
-            MacOSProfilerTool,
-            detect_capability,
-        )
+        macos_profiler = import_module("vibesys.macos_cpu_profiler")
+        macos_profiler_tool = macos_profiler.MacOSProfilerTool
+        detect_capability = macos_profiler.detect_capability
 
         capability = detect_capability()
         diagnostics = tuple(item.value for item in capability.diagnostics)
-        usable = capability.tool is not MacOSProfilerTool.NONE
+        usable = capability.tool is not macos_profiler_tool.NONE
         details = (
             f"xcode_path={capability.xcode_path or 'missing'}",
             f"xctrace_path={capability.xctrace_path or 'missing'}",
             f"sample_path={capability.sample_path or 'missing'}",
         )
         return ProfilerPreflightResult(resolved, usable, diagnostics, details)
-    return ProfilerPreflightResult(resolved, True)  # noqa: FBT003  # tracked: #288
+    return ProfilerPreflightResult(kind=resolved, usable=True)

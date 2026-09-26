@@ -46,7 +46,8 @@ class MutatorContext(BaseModel):
     @model_validator(mode="after")
     def _require_parent_unless_cold_start(self) -> Self:
         if not self.is_cold_start and self.parent is None:
-            raise ValueError("parent is required unless is_cold_start is True")  # noqa: TRY003
+            message = "parent is required unless is_cold_start is True"
+            raise ValueError(message)
         return self
 
 

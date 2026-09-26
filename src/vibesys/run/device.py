@@ -8,31 +8,39 @@ open) the run-environment view; selection logic itself stays in the
 backend.
 """
 
+from __future__ import annotations
+
 import json
-from datetime import datetime
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
+    from vibesys.backends.cuda import GpuInfo
     from vibesys.sandbox.run_environment import RunEnvironmentView
 
 
-class DeviceLease:  # noqa: D101  # tracked: #288
-    def __init__(  # noqa: D107  # tracked: #288
+class DeviceLease:
+    """Selected compute device and its optional contention monitor."""
+
+    def __init__(
         self,
-        backend: "ComputeBackendImpl",
+        backend: ComputeBackendImpl,
         *,
         log_dir: Path,
-        run_environment_view: "RunEnvironmentView | None" = None,
+        run_environment_view: RunEnvironmentView | None = None,
     ) -> None:
+        """Bind the selected backend to run-specific device monitoring state."""
         self._backend = backend
         self._log_dir = log_dir
         self._view = run_environment_view
         self.monitor: ContentionMonitor | None = None
 
     @property
-    def selected_device(self):  # noqa: ANN201, D102  # tracked: #288
+    def selected_device(self) -> GpuInfo | None:
+        """Return the device selected by the backend, if it exposes one."""
         return getattr(self._backend, "selected_device", None)
 
     def start_monitor(self) -> None:
@@ -82,10 +90,11 @@ class DeviceLease:  # noqa: D101  # tracked: #288
 
         data["contention_detected"] = contention_events > 0
         data["contention_events"] = contention_events
-        data["finished_at"] = datetime.now().isoformat()  # noqa: DTZ005  # tracked: #288
+        data["finished_at"] = datetime.now(UTC).isoformat()
         gpu_json.write_text(json.dumps(data, indent=2))
 
-    def close(self) -> None:  # noqa: D102  # tracked: #288
+    def close(self) -> None:
+        """Stop device monitoring and finalize persisted contention metadata."""
         if self.monitor is not None:
             self.monitor.stop()
         self._finalize_metadata()

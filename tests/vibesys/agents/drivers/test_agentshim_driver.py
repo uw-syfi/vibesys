@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import agentshim
 import pytest
@@ -77,6 +77,13 @@ Codex and Gemini print one cached-token total, so no scripted turn can carry a
 separate cache-write count through them. The neutral usage contract keeps the
 two fields distinct regardless; these are the providers that can fill both.
 """
+
+
+class _DriverOptions(TypedDict, total=False):
+    timeout: int | None
+    log: Callable[[str], None] | None
+    docker_sandboxes: dict[str, Any] | None
+    check_timeout: float | None
 
 
 @dataclass
@@ -161,14 +168,14 @@ def sandbox_builds(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Record every host-sandbox build and leave the fake executor unconfined."""
     builds: list[dict[str, Any]] = []
 
-    def build(workspace: Path, **kwargs: Any) -> None:  # noqa: ANN401
+    def build(workspace: Path, **kwargs: object) -> None:
         builds.append({"workspace": workspace, **kwargs})
 
     monkeypatch.setattr(subject, "build_host_sandbox", build)
     return builds
 
 
-def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
+def _spec(tmp_path: Path, **changes: object) -> AgentSessionSpec:
     values: dict[str, Any] = {
         "role": "implementer",
         "provider": "claude",
@@ -182,14 +189,10 @@ def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
     return AgentSessionSpec(**values)
 
 
-def _driver(  # noqa: PLR0913
+def _driver(
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    *,
-    timeout: int | None = None,
-    log: Callable[[str], None] | None = None,
-    docker_sandboxes: dict[str, Any] | None = None,
-    check_timeout: float | None = None,
+    **options: Unpack[_DriverOptions],
 ) -> tuple[subject.AgentShimDriver, FakeExecutor]:
     """Build a driver whose provider process is the scripted fake executor.
 
@@ -202,10 +205,10 @@ def _driver(  # noqa: PLR0913
     fake = FakeExecutor(runs)
     driver = subject.AgentShimDriver(
         provider=provider,
-        timeout=timeout,
-        log=log,
-        docker_sandboxes=docker_sandboxes,
-        check_timeout=check_timeout,
+        timeout=options.get("timeout"),
+        log=options.get("log"),
+        docker_sandboxes=options.get("docker_sandboxes"),
+        check_timeout=options.get("check_timeout"),
         executor_factory=lambda: fake,
     )
     return driver, fake
@@ -215,9 +218,9 @@ def _session(
     tmp_path: Path,
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    **kwargs: Any,  # noqa: ANN401
+    **options: Unpack[_DriverOptions],
 ) -> tuple[AgentSession, FakeExecutor]:
-    driver, fake = _driver(provider, runs, **kwargs)
+    driver, fake = _driver(provider, runs, **options)
     return driver.create_session(_spec(tmp_path, provider=provider)), fake
 
 
@@ -657,7 +660,7 @@ def _workspace_files(root: Path) -> dict[str, str]:
     }
 
 
-def _container_spec(tmp_path: Path, provider: str, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
+def _container_spec(tmp_path: Path, provider: str, **changes: object) -> AgentSessionSpec:
     return _spec(
         tmp_path,
         provider=provider,
@@ -716,7 +719,7 @@ def test_a_container_binary_check_gets_the_container_budget(
 
     check = fake.requests[0]
     assert "--help" in check.argv
-    assert check.timeout == subject._CONTAINER_BINARY_CHECK_TIMEOUT_S  # noqa: SLF001
+    assert check.timeout == 60.0
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -745,9 +748,8 @@ def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     empty list means the session never had one.
     """
     watched: list[tuple[str, ...]] = []
-    real = docker_executor.CodexRolloutWatchdogExecutor
 
-    class _Recording(real):  # type: ignore[misc, valid-type]
+    class _Recording(docker_executor.CodexRolloutWatchdogExecutor):
         def run(
             self,
             request: agentshim.CommandRequest,
@@ -756,7 +758,7 @@ def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
             watched.append(tuple(request.argv))
             return super().run(request, sink)
 
-    monkeypatch.setattr(docker_executor, "CodexRolloutWatchdogExecutor", _Recording)
+    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _Recording)
     return watched
 
 
@@ -789,11 +791,22 @@ def test_the_watchdog_rollout_root_comes_from_the_sandbox_home(
     captured: dict[str, str] = {}
     real = docker_executor.CodexRolloutWatchdogExecutor
 
-    def _spy(*args: Any, rollout_sessions_root: str, **kwargs: Any) -> Any:  # noqa: ANN401
+    def _spy(
+        inner: agentshim.CommandExecutor,
+        container_id_resolver: Callable[[], str],
+        *,
+        rollout_sessions_root: str,
+        log: Callable[[str], None],
+    ) -> object:
         captured["rollout_sessions_root"] = rollout_sessions_root
-        return real(*args, rollout_sessions_root=rollout_sessions_root, **kwargs)
+        return real(
+            inner,
+            container_id_resolver,
+            rollout_sessions_root=rollout_sessions_root,
+            log=log,
+        )
 
-    monkeypatch.setattr(docker_executor, "CodexRolloutWatchdogExecutor", _spy)
+    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _spy)
     sandbox = _FakeDockerSandbox(workspace=tmp_path, home="/home/somebody-else")
     driver, _fake = _driver(
         "codex", scripted_turn("codex", text="ok"), docker_sandboxes={"implementer": sandbox}
@@ -1063,7 +1076,11 @@ def test_a_schema_no_dialect_accepts_falls_back_to_the_prompt_contract(
 
     class UnsupportedResponse(JudgeResponse):
         @classmethod
-        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401, ARG003
+        def model_json_schema(
+            cls,
+            *_args: object,
+            **_kwargs: object,
+        ) -> dict[str, Any]:
             return {
                 "type": "object",
                 "properties": {"analysis": {"type": "string"}},

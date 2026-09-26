@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: module seams patched below
 
 import pytest
 from tests.vibesys.golden.harness import ScriptedRun, write_minimal_input_bundle
@@ -145,7 +145,7 @@ def _profiler(perf_metric: float, *, perf_unit: str = "tok/s") -> ProfilerSummar
     )
 
 
-def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # tracked: #288
+def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # LW-040150 [ANN202];  tracked: #288.
     """Write a distinct file on every mutator turn.
 
     Without a workspace diff a mutator turn is a no-op snapshot: no git commit
@@ -154,7 +154,7 @@ def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # tracked:
     final tree).
     """
 
-    def _write(call):  # noqa: ANN001, ANN202  # tracked: #288
+    def _write(call):  # noqa: ANN001, ANN202  # LW-040151 [ANN001, ANN202];  tracked: #288.
         if call.kind != "implementer":
             return
         n = len(fake.calls_for("implementer"))
@@ -166,7 +166,7 @@ def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # tracked:
 def _run_evolve(
     tmp_path: Path,
     *,
-    descriptor,  # noqa: ANN001  # tracked: #288
+    descriptor,  # noqa: ANN001  # LW-040152 [ANN001];  tracked: #288.
     runner: FakeAgentClient,
     gate_executor: FakeGateExecutor | None = None,
 ) -> ScriptedRun:
@@ -209,11 +209,14 @@ def _run_evolve(
             integration.close()
 
     with (
+        # test-isolation: the sandbox factory and PROJECT_ROOT have no injection seam; the golden run patches them
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
+        # test-isolation: the sandbox factory and PROJECT_ROOT have no injection seam; the golden run patches them
         patch(
             "vibesys.orchestration.runtime.build_agent_client",
             side_effect=lambda **_kwargs: _SharedFakeClient(runner),
         ),
+        # test-isolation: the sandbox factory and PROJECT_ROOT have no injection seam; the golden run patches them
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
     ):
         result = asyncio.run(execute())
