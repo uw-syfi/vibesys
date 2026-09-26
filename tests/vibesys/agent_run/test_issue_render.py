@@ -400,7 +400,7 @@ class TestRenderAll:
         )
 
         issues_dir = tmp_path / "issues"
-        render_all(issues_dir, store)
+        render_all(issues_dir, store.list())
 
         assert (issues_dir / "INDEX.md").is_file()
         assert (issues_dir / "0001-build-server.md").is_file()
@@ -425,7 +425,7 @@ class TestRenderAll:
         )
         issues_dir = tmp_path / "nested" / "issues"
         assert not issues_dir.exists()
-        render_all(issues_dir, store)
+        render_all(issues_dir, store.list())
         assert issues_dir.is_dir()
         assert (issues_dir / "INDEX.md").is_file()
 
@@ -439,8 +439,8 @@ class TestRenderAll:
             iteration=1,
         )
         issues_dir = tmp_path / "issues"
-        render_all(issues_dir, store)
+        render_all(issues_dir, store.list())
         first_files = sorted(p.read_bytes() for p in issues_dir.glob("*.md"))
-        render_all(issues_dir, store)
+        render_all(issues_dir, store.list())
         second_files = sorted(p.read_bytes() for p in issues_dir.glob("*.md"))
         assert first_files == second_files

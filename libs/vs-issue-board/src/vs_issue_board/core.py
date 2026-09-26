@@ -127,7 +127,7 @@ class IssueTracker(Protocol):
         actor: str,
         iteration: int,
         note: str = "",
-    ) -> list[int]:
+    ) -> builtins.list[int]:
         """Reopen blocked issues and reset their attempt counts."""
         ...
 
@@ -150,11 +150,11 @@ class IssueTracker(Protocol):
         # lint-waiver: LW-010198 [A002]; preserve the existing public `type` filter keyword.
         # > Renaming it would create a second API shape for every tracker backend.
         type: IssueType | str | None = None,  # noqa: A002
-    ) -> list[Issue]:
+    ) -> builtins.list[Issue]:
         """List detached issues, optionally filtered by status and type."""
         ...
 
-    def search(self, query: str) -> list[Issue]:
+    def search(self, query: str) -> builtins.list[Issue]:
         """Case-insensitive substring search with comma-separated AND terms."""
         ...
 
