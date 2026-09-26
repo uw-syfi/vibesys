@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Run the fixed Kimi-K3 workload through Request Factory."""
+"""Prepare Kimi-K3's tokenizer, then delegate to the shared RF text driver."""
 
 from __future__ import annotations
 
 import argparse
-import csv
-import json
-import math
+import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 _MODEL = "moonshotai/Kimi-K3"
 _TOKENIZER_REVISION = "f831ab66814297da540d832a5235f8e904f29d06"
@@ -50,46 +46,11 @@ _NAMED_TOKENS = {
     163_838: "[UNK]",
     163_839: "[PAD]",
 }
+_FIXED_TEXT_DRIVER_ENV = "VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER"
 _REQUESTS = 256
 _INPUT_TOKENS = 4096
 _OUTPUT_TOKENS = 2048
 _CONCURRENCY = 32
-_METRICS = {
-    "output_token_throughput_per_s": {"unit": "tok/s", "direction": "max"},
-    "p90_latency_ms": {"unit": "ms", "direction": "min"},
-}
-
-
-def _write_record(path: Path | None, record: Mapping[str, Any]) -> None:
-    if path is None:
-        return
-    with path.open("a", encoding="utf-8") as output:
-        output.write(json.dumps(record, allow_nan=False) + "\n")
-        output.flush()
-
-
-def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) -> None:
-    with path.open("w", newline="", encoding="utf-8") as trace:
-        writer = csv.writer(trace)
-        writer.writerow(("id", "arrival_time", "input_len", "output_len"))
-        for index in range(count):
-            writer.writerow((f"request-{index:04d}", 0, input_tokens, output_tokens))
-
-
-def _token_pool_limit(request_count: int, input_tokens: int) -> int:
-    return max(2 * input_tokens, request_count)
-
-
-def _write_corpus(path: Path, token_pool_limit: int) -> None:
-    with path.open("w", encoding="utf-8") as corpus:
-        for index in range(token_pool_limit):
-            corpus.write(f"Request Factory synthetic benchmark sequence sample {index}.\n")
-
-
-def _check_token_pool_warning(stderr: str) -> None:
-    warning = "synthetic content will repeat within a single request"
-    if warning in stderr:
-        raise RuntimeError(f"Request Factory reported an undersized token pool: {stderr.strip()}")
 
 
 def _prepare_kimi_tokenizer(directory: Path) -> Path:
@@ -127,109 +88,45 @@ def _prepare_kimi_tokenizer(directory: Path) -> Path:
     return tokenizer_path
 
 
-def _summary_metrics(summary: Mapping[str, Any], expected: int) -> dict[str, float]:
-    replay = summary.get("replay")
-    common = replay.get("common") if isinstance(replay, Mapping) else None
-    if not isinstance(replay, Mapping) or replay.get("kind") != "independent_requests":
-        raise ValueError("RF summary replay must describe independent_requests")
-    if not isinstance(common, Mapping):
-        raise ValueError("RF summary is missing replay.common")
-    for key, value in {
-        "failed_steps": 0,
-        "attempted_steps": expected,
-        "success_steps": expected,
-        "output_mismatch_steps": 0,
-    }.items():
-        actual = common.get(key)
-        if actual != value:
-            raise ValueError(f"RF summary {key}={actual!r}, expected {value}")
-
-    raw_values = {
-        "output_token_throughput_per_s": common.get("output_token_throughput_per_s"),
-        "p90_latency_ms": common.get("total_duration_ms_p90"),
-    }
-    values: dict[str, float] = {}
-    for name, raw in raw_values.items():
-        if isinstance(raw, bool) or not isinstance(raw, int | float):
-            raise ValueError(f"RF summary metric {name} is missing or not numeric: {raw!r}")
-        value = float(raw)
-        if not math.isfinite(value) or value < 0:
-            raise ValueError(f"RF summary metric {name} is invalid: {raw!r}")
-        values[name] = value
-    if values["output_token_throughput_per_s"] <= 0:
-        raise ValueError("RF output-token throughput must be positive")
-    return values
-
-
 def run(args: argparse.Namespace) -> int:
-    output_path = Path(args.vs_output) if args.vs_output else None
-    if output_path is not None:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("", encoding="utf-8")
-        _write_record(output_path, {"kind": "hello", "protocol": 2, "metrics": _METRICS})
-    try:
-        with tempfile.TemporaryDirectory(prefix="vibesys-rf-kimi-") as directory:
-            temporary = Path(directory)
-            tokenizer_path = (
-                Path(args.tokenizer) if args.tokenizer else _prepare_kimi_tokenizer(temporary)
-            )
-            trace = temporary / "requests.csv"
-            corpus_path = Path(args.text_file) if args.text_file else temporary / "corpus.txt"
-            token_pool_limit = args.token_pool_limit
-            if not args.text_file:
-                _write_corpus(corpus_path, token_pool_limit)
-            summary_path = temporary / "summary.json"
-            _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
-            command = [
-                args.request_factory_engine,
-                "--trace",
-                str(trace),
-                "--input-file-format",
-                "text-generation-independent",
-                "--text-file",
-                str(corpus_path),
-                "--tokenizer",
-                str(tokenizer_path),
-                "--model",
-                args.model,
-                "--backend",
-                "openai",
-                "--dialect",
-                "openai",
-                "--base-url",
-                args.url.rstrip("/") + "/v1",
-                "--temperature",
-                "0",
-                "--arrival-mode",
-                "saturated",
-                "--max-concurrency",
-                str(args.concurrency),
-                "--token-pool-limit",
-                str(token_pool_limit),
-                "--request-log",
-                "false",
-                "--timeline",
-                "false",
-                "--summary-path",
-                str(summary_path),
-            ]
-            completed = subprocess.run(command, check=False, text=True, capture_output=True)
-            if completed.stdout:
-                print(completed.stdout, end="")
-            if completed.stderr:
-                print(completed.stderr, end="", file=sys.stderr)
-            _check_token_pool_warning(completed.stderr)
-            if completed.returncode != 0:
-                raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            metrics = _summary_metrics(summary, args.request_count)
-            _write_record(output_path, {"kind": "result", "label": "", "values": metrics})
-            print(json.dumps({"metrics": metrics}, sort_keys=True))
-            return 0
-    except Exception as exc:
-        _write_record(output_path, {"kind": "error", "message": str(exc)})
-        print(f"benchmark failed: {exc}", file=sys.stderr)
-        return 1
+    """Keep tokenizer resources alive while the shared driver runs."""
+    driver = os.environ.get(_FIXED_TEXT_DRIVER_ENV)
+    if driver is None or not Path(driver).is_file():
+        raise RuntimeError(
+            f"{_FIXED_TEXT_DRIVER_ENV} must name the installed fixed-text driver; "
+            "run this benchmark through request-factory-adapter"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="vibesys-rf-kimi-") as directory:
+        tokenizer_path = (
+            Path(args.tokenizer) if args.tokenizer else _prepare_kimi_tokenizer(Path(directory))
+        )
+        command = [
+            sys.executable,
+            driver,
+            "--request-factory-engine",
+            args.request_factory_engine,
+            "--url",
+            args.url,
+            "--model",
+            args.model,
+            "--tokenizer",
+            str(tokenizer_path),
+            "--request-count",
+            str(args.request_count),
+            "--input-tokens",
+            str(args.input_tokens),
+            "--output-tokens",
+            str(args.output_tokens),
+            "--concurrency",
+            str(args.concurrency),
+        ]
+        if args.vs_output:
+            command.extend(("--vs-output", args.vs_output))
+        # lint-waiver: LW-031732 [S603]; the evaluator exports the installed driver path,
+        # > and every workload value is forwarded as an argv element without a shell.
+        completed = subprocess.run(command, check=False)  # noqa: S603
+        return completed.returncode
 
 
 def main() -> int:
@@ -249,26 +146,9 @@ def main() -> int:
     parser.add_argument("--input-tokens", type=int, default=_INPUT_TOKENS)
     parser.add_argument("--output-tokens", type=int, default=_OUTPUT_TOKENS)
     parser.add_argument("--concurrency", type=int, default=_CONCURRENCY)
-    parser.add_argument("--token-pool-limit", type=int)
-    parser.add_argument("--text-file")
     args = parser.parse_args()
-    if args.token_pool_limit is None:
-        args.token_pool_limit = _token_pool_limit(args.request_count, args.input_tokens)
-    if (
-        min(
-            args.request_count,
-            args.input_tokens,
-            args.output_tokens,
-            args.concurrency,
-            args.token_pool_limit,
-        )
-        <= 0
-    ):
-        parser.error(
-            "request count, token lengths, concurrency, and token-pool-limit must be positive"
-        )
-    if args.token_pool_limit < args.input_tokens:
-        parser.error("token-pool-limit must be at least input-tokens")
+    if min(args.request_count, args.input_tokens, args.output_tokens, args.concurrency) <= 0:
+        parser.error("request count, token lengths, and concurrency must be positive")
     return run(args)
 
 
