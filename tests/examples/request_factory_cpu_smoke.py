@@ -80,8 +80,6 @@ class SmokeProfile(BaseModel):
 class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
     server: _FakeServer
 
-    # lint-waiver: LW-031726 [N802]; BaseHTTPRequestHandler dispatches POST to this exact name.
-    # > Renaming it would bypass the server's method dispatch; an alias adds needless indirection.
     def do_POST(self) -> None:
         try:
             request_body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
@@ -186,8 +184,10 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
             },
         )
 
-    def log_message(self, _format: str, *_args: object) -> None:
-        return
+    def log_message(self, format: str, *_args: object) -> None:  # noqa: A002  # LW-031727; preserve stdlib override signature.
+        # > Renaming breaks keyword signature compatibility; a generic kwargs signature weakens
+        # > type checking, and delegating to the base handler would pollute smoke output.
+        del format
 
 
 class _FakeServer(http.server.ThreadingHTTPServer):
