@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from vibesys.api import RunSession
-    from vs_agent.api import MCPServerSpec
+    from vs_agent.api import ToolServerDescriptor
 
 
 #: Session-key identifier for the run's default chat, which has no thread ID of
@@ -53,7 +53,7 @@ class ChatAgentResources:
     environment: Callable[[], dict[str, str]]
     progress: Callable[[], object | None]
     agent_shared_state_dir: str
-    mcp_servers: tuple[MCPServerSpec, ...]
+    tool_servers: tuple[ToolServerDescriptor, ...]
 
 
 class ChatAgentBuilder(Protocol):
@@ -153,7 +153,7 @@ def build_chat_agent(
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=agent_shared_state_dir,
-            mcp_servers=tool_servers,
+            tool_servers=tool_servers,
         )
     except BaseException as construction_error:
         try:
@@ -345,7 +345,7 @@ class ExperimentChatFactory:
                     workspace=self._workspace,
                     state_dir=state_dir,
                     agent_state_dir=agent_state_dir,
-                    mcp_servers=resources.mcp_servers,
+                    tool_servers=resources.tool_servers,
                     log=resources.log,
                     environment=resources.environment,
                     progress=resources.progress,

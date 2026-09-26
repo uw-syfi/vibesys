@@ -1,18 +1,14 @@
-"""Pure descriptors for exposing handlers as a stdio MCP tool server.
+"""Transport-neutral declarations for tools exposed to an agent turn.
 
-``vs_agent`` never launches a subprocess or builds a core MCP server spec
-itself: it only describes what a subprocess-hosted server would look like.
-A vibesys-owned module (the analogue of
-``vibesys.loops.issue_queue.loop.build_issue_mcp_spec``) turns a
-:class:`StdioServerDescriptor` into the actual
-``vs_agent.contracts.MCPServerSpec`` that a driver launches. This
-module does not import that type.
+Libraries describe subprocess-hosted tools through the structural
+``ToolServerDescriptor`` contract. ``vs_agent`` owns the translation to the
+transport understood by the selected driver.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -41,14 +37,38 @@ class ToolSpec[T: BaseModel]:
     handler: Callable[[T], str]
 
 
+class ToolServerDescriptor(Protocol):
+    """Structural description of a subprocess tool server.
+
+    Libraries can provide this shape without depending on ``vs_agent``. The
+    agent runtime maps it onto the tool transport supported by the selected
+    driver.
+    """
+
+    @property
+    def name(self) -> str:
+        """Name used to identify the tool server."""
+        ...
+
+    @property
+    def command(self) -> str:
+        """Executable command for the subprocess."""
+        ...
+
+    @property
+    def args(self) -> tuple[str, ...]:
+        """Arguments passed to the subprocess command."""
+        ...
+
+    @property
+    def env(self) -> tuple[tuple[str, str], ...]:
+        """Environment variables passed to the subprocess."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class StdioServerDescriptor:
-    """A stdio MCP server launch, shaped to map 1:1 onto ``MCPServerSpec``.
-
-    Pure data: no live objects, no dependency on
-    ``vs_agent.contracts``. A vibesys adapter reads these fields to
-    build the actual spec.
-    """
+    """Concrete descriptor produced by :func:`expose_as_tools`."""
 
     name: str
     command: str
@@ -63,13 +83,12 @@ def expose_as_tools(
     entrypoint_args: Sequence[str] = (),
     env: Mapping[str, str] | None = None,
     command: str = "python",
-) -> StdioServerDescriptor:
+) -> ToolServerDescriptor:
     """Build a descriptor for launching ``<command> -m <entrypoint_module> <entrypoint_args>``.
 
     Primitives only: ``entrypoint_module`` and ``entrypoint_args`` are what
-    the subprocess's own CLI parses to rebuild its :class:`ToolSpec` list
-    from scratch, mirroring ``build_issue_mcp_spec``'s primitive-argv
-    approach. No live object crosses the subprocess boundary.
+    the subprocess's own CLI parses to rebuild its :class:`ToolSpec` list.
+    No live object crosses the subprocess boundary.
     """
     return StdioServerDescriptor(
         name=name,

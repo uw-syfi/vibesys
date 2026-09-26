@@ -23,6 +23,12 @@ from vs_issue_board.policy import (
     parse_type,
 )
 from vs_issue_board.progress import FileProgressLog, ProgressLog
+from vs_issue_board.session import (
+    IssueToolServer,
+    IssueTrackerSession,
+    LocalIssueTrackerSession,
+    open_local_issue_tracker_session,
+)
 
 __all__ = [
     "CreateIssuePolicy",
@@ -32,12 +38,16 @@ __all__ = [
     "IssueBoardLoadError",
     "IssueEvent",
     "IssueStatus",
+    "IssueToolServer",
     "IssueTracker",
+    "IssueTrackerSession",
     "IssueType",
+    "LocalIssueTrackerSession",
     "ProgressLog",
     "check_create_allowed",
     "create_issue_under_policy",
     "format_issue_full",
     "format_issue_short",
+    "open_local_issue_tracker_session",
     "parse_type",
 ]

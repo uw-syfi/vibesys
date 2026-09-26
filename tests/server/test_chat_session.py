@@ -17,7 +17,7 @@ from server.chat.prompts import (
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
 from server.events import EventType
 from vibesys.render import output_sink
-from vs_agent.api import AgentClient, AgentSessionKey, MCPServerSpec, SessionScope
+from vs_agent.api import AgentClient, AgentSessionKey, SessionScope, StdioServerDescriptor
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.drivers import agentshim as agentshim_driver
 
@@ -35,7 +35,7 @@ _SHARED_STATE_DIR = "/state/server/chat"
 _FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR)
 _CONTINUATION_PROMPT = experiment_chat_continuation_prompt(_SHARED_STATE_DIR)
 _TOOL_SERVERS = (
-    MCPServerSpec(
+    StdioServerDescriptor(
         name="vibesys-run", command="python", args=("-m", "vibesys.api.chat_tools_server")
     ),
 )
@@ -67,7 +67,7 @@ def _chat(
             workspace=workspace,
             state_dir=tmp_path / "state",
             agent_state_dir=_SHARED_STATE_DIR,
-            mcp_servers=_TOOL_SERVERS,
+            tool_servers=_TOOL_SERVERS,
             log=lambda _message: None,
             environment=dict,
             progress=lambda: None,
@@ -105,7 +105,7 @@ def test_chat_passes_the_investigation_tool_servers_to_the_agent(tmp_path: Path)
 
     chat.ask("what happened?")
 
-    assert fake.calls_for("chat")[0].mcp_servers == list(_TOOL_SERVERS)
+    assert fake.calls_for("chat")[0].tool_servers == list(_TOOL_SERVERS)
 
 
 def test_chat_shortens_the_prompt_inside_a_named_conversation(tmp_path: Path) -> None:

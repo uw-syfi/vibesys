@@ -15,13 +15,14 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, override
 import pytest
 from pydantic import BaseModel
 
-from vs_agent.contracts import AgentCapabilities
+from vs_agent.api import StdioServerDescriptor
+from vs_agent.contracts import AgentCapabilities, MCPServerSpec
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.sink import AgentEventSink
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentProgress, MCPServerSpec
+    from vs_agent.api import AgentProgress, ToolServerDescriptor
     from vs_agent.events import AgentOutputChannel, AgentStatusData, TodoItemData, ToolResultPayload
 
 
@@ -111,6 +112,7 @@ class _InvokeOptions(TypedDict, total=False):
     env: dict[str, str] | None
     invocation_id: str | None
     progress: AgentProgress | None
+    tool_servers: list[ToolServerDescriptor] | None
     mcp_servers: list[MCPServerSpec] | None
     reuse_session: bool | None
     session_key: AgentSessionKey | None
@@ -291,6 +293,21 @@ def test_calls_records_every_kwarg_and_calls_for_filters_by_kind() -> None:
     assert text_call.response_cls is None
 
 
+def test_tool_server_descriptors_are_recorded_without_transport_types() -> None:
+    client = FakeAgentClient()
+    descriptor = StdioServerDescriptor(
+        name="issues", command="python", args=("-m", "issues"), env=(("X", "1"),)
+    )
+
+    _invoke(client, tool_servers=[descriptor])
+
+    record = client.calls[0]
+    assert record.tool_servers == [descriptor]
+    assert record.mcp_servers == [
+        MCPServerSpec(name="issues", command="python", args=("-m", "issues"), env=(("X", "1"),))
+    ]
+
+
 def test_stream_output_emits_through_the_event_sink() -> None:
     sink = _CapturingSink()
     client = FakeAgentClient(event_sink=sink)
@@ -427,6 +444,7 @@ def test_capabilities_and_backend_name_are_configurable() -> None:
     default = FakeAgentClient()
     assert default.backend_name == "fake"
     assert default.capabilities.mcp_servers is False
+    assert default.capabilities.tool_servers is False
 
     client = FakeAgentClient(
         backend_name="cli",
@@ -434,6 +452,7 @@ def test_capabilities_and_backend_name_are_configurable() -> None:
     )
     assert client.backend_name == "cli"
     assert client.capabilities.mcp_servers is True
+    assert client.capabilities.tool_servers is True
     assert client.capabilities.session_reuse is True
 
     client.set_capabilities(AgentCapabilities(mcp_servers=False))

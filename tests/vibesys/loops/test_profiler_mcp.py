@@ -23,7 +23,7 @@ from typing import Protocol
 
 import pytest
 
-from vibesys.profilers import ProfilerKind, mcp_spec
+from vibesys.profilers import ProfilerKind, tool_server
 
 
 class _ToolInfo(Protocol):
@@ -63,46 +63,46 @@ def _load_module(name: str, path: Path) -> ModuleType:
 _REPO = Path(__file__).resolve().parents[3]
 
 
-def test_profiler_mcp_spec_maps_known_kinds_exactly() -> None:
-    assert mcp_spec(ProfilerKind.NONE) is None
+def test_profiler_tool_server_maps_known_kinds_exactly() -> None:
+    assert tool_server(ProfilerKind.NONE) is None
 
-    nsys = mcp_spec(ProfilerKind.NSYS)
+    nsys = tool_server(ProfilerKind.NSYS)
     assert nsys is not None
     assert nsys.name == "vibesys-nsys-profiler"
     assert nsys.args == ("nsys_profiler/server.py",)
 
-    rocprof = mcp_spec(ProfilerKind.ROCPROF)
+    rocprof = tool_server(ProfilerKind.ROCPROF)
     assert rocprof is not None
     assert rocprof.name == "vibesys-rocprof-profiler"
     assert rocprof.args == ("rocprof_profiler/server.py",)
 
-    torch = mcp_spec(ProfilerKind.TORCH)
+    torch = tool_server(ProfilerKind.TORCH)
     assert torch is not None
     assert torch.name == "vibesys-torch-profiler"
     assert torch.args == ("torch_profiler/server.py",)
 
-    neuron = mcp_spec(ProfilerKind.NEURON)
+    neuron = tool_server(ProfilerKind.NEURON)
     assert neuron is not None
     assert neuron.name == "vibesys-neuron-profiler"
     assert neuron.args == ("neuron_profiler/server.py",)
 
-    otel = mcp_spec(ProfilerKind.OTEL)
+    otel = tool_server(ProfilerKind.OTEL)
     assert otel is not None
     assert otel.name == "vibesys-otel-profiler"
     assert otel.args == ("otel_profiler/server.py",)
 
-    macos = mcp_spec(ProfilerKind.MACOS_CPU)
+    macos = tool_server(ProfilerKind.MACOS_CPU)
     assert macos is not None
     assert macos.name == "vibesys-macos-cpu-profiler"
     assert macos.args == ("macos_cpu_profiler/server.py",)
 
 
-def test_profiler_mcp_spec_rejects_unknown_kind() -> None:
+def test_profiler_tool_server_rejects_unknown_kind() -> None:
     # The rejection is a runtime guard against a value the annotation forbids,
     # so route the bad argument through an untyped mapping.
     invalid_kwargs: dict = {"profiler_kind": "bogus"}
     with pytest.raises(TypeError, match="ProfilerKind"):
-        mcp_spec(**invalid_kwargs)
+        tool_server(**invalid_kwargs)
 
 
 @pytest.fixture(scope="module")

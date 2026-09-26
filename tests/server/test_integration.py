@@ -405,7 +405,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=str(shared_state_dir),
-            mcp_servers=(),
+            tool_servers=(),
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)
@@ -458,7 +458,7 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=str(shared_state_dir),
-            mcp_servers=(),
+            tool_servers=(),
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)

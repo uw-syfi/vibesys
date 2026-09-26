@@ -1,9 +1,9 @@
 """The public API of ``vs_agent``. Import from here, not from submodules.
 
 Eager exports are light: value types, contracts, agent identity/selection,
-progress and event-sink value types, provider/session policy, and the generic
-subprocess-hosted MCP tool bridge. The agent execution composition
-(``AgentClient``, ``build_agent_client``, ``agent_driver_supports_mcp_servers``)
+progress and event-sink value types, provider/session policy, and generic
+subprocess-hosted tools. The agent execution composition
+(``AgentClient``, ``build_agent_client``, ``agent_driver_supports_tool_servers``)
 is exposed lazily via module ``__getattr__`` so importing :mod:`vs_agent.api`
 never pulls in ``agentshim`` or ``omnigent``.
 """
@@ -63,7 +63,7 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventS
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
 from vs_agent.spec import AgentBackend, AgentSpec, Driver
 from vs_agent.todos import todos_from_tool_call
-from vs_agent.tools import StdioServerDescriptor, ToolSpec, expose_as_tools
+from vs_agent.tools import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, expose_as_tools
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -71,7 +71,10 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.client import AgentClient
-    from vs_agent.factory import agent_driver_supports_mcp_servers
+    from vs_agent.factory import (
+        agent_driver_supports_mcp_servers,
+        agent_driver_supports_tool_servers,
+    )
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -117,9 +120,11 @@ __all__ = [
     "StdioServerDescriptor",
     "TodoItemData",
     "ToolResultPayload",
+    "ToolServerDescriptor",
     "ToolSpec",
     "agent_catalog",
     "agent_driver_supports_mcp_servers",
+    "agent_driver_supports_tool_servers",
     "auth_bind_mounts",
     "auth_copy_paths",
     "auth_env_passthrough",
@@ -143,12 +148,17 @@ def __getattr__(name: str) -> object:
         )
 
         return AgentClient
-    if name == "agent_driver_supports_mcp_servers":
+    if name in {"agent_driver_supports_mcp_servers", "agent_driver_supports_tool_servers"}:
         from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010115 [PLC0415]; Keep this dependency lazy in __getattr__ so unused providers and import cycles stay unloaded.
             agent_driver_supports_mcp_servers,
+            agent_driver_supports_tool_servers,
         )
 
-        return agent_driver_supports_mcp_servers
+        return (
+            agent_driver_supports_tool_servers
+            if name == "agent_driver_supports_tool_servers"
+            else agent_driver_supports_mcp_servers
+        )
     message = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(message)
 

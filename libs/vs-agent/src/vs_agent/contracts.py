@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
+    from vs_agent.tools import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)
@@ -68,7 +69,10 @@ class MCPServerSpec:
 class AgentCapabilities:
     """Features a driver can provide without weakening requested semantics."""
 
-    mcp_servers: bool = False
+    tool_servers: bool = False
+    # Deprecated compatibility spelling. Normalized to ``tool_servers`` so
+    # callers can migrate without changing driver capability behavior.
+    mcp_servers: bool | None = None
     nested_read_only_paths: bool = False
     hidden_paths: bool = False
     host_path_grants: bool = False
@@ -79,6 +83,12 @@ class AgentCapabilities:
     # earlier process, so a resumed run continues the same conversation instead
     # of replaying it. ``session_reuse`` only promises reuse within one process.
     provider_session_resume: bool = False
+
+    def __post_init__(self) -> None:
+        """Keep the old MCP capability spelling as an alias."""
+        if self.mcp_servers is not None:
+            object.__setattr__(self, "tool_servers", self.mcp_servers)
+        object.__setattr__(self, "mcp_servers", self.tool_servers)
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +290,8 @@ class AgentClientProtocol(Protocol):
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
+        # Deprecated. Convert legacy callers at the client boundary.
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -298,6 +310,8 @@ class AgentClientProtocol(Protocol):
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
+        # Deprecated. Convert legacy callers at the client boundary.
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,

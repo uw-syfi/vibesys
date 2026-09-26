@@ -158,7 +158,7 @@ def _descriptor(**overrides: object) -> OrchestrationDescriptor:
 
 
 def test_pass_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
     runner.enqueue("implementer", _implementer(1))
     runner.enqueue("judge", _judge(1, Verdict.PASS))
     runner.enqueue("perf_eval", _perf_eval())
@@ -180,7 +180,7 @@ def test_pass_scenario_golden(tmp_path: Path) -> None:
 
 
 def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
     runner.enqueue(
         "implementer",
         _implementer(1, "first attempt: partial server, missing /health"),
@@ -210,7 +210,7 @@ def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
 
 
 def test_perf_eval_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    runner = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(tool_servers=True))
     runner.enqueue("implementer", _implementer(1))
     runner.enqueue("judge", _judge(1, Verdict.PASS))
     runner.enqueue("perf_eval", _perf_eval(with_metrics=True))

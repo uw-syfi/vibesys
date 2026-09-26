@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox, WorkspaceSandbox
 
 AGENTSHIM_CAPABILITIES = AgentCapabilities(
-    mcp_servers=True,
+    tool_servers=True,
     nested_read_only_paths=True,
     hidden_paths=True,
     timeouts=True,
