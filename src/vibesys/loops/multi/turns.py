@@ -1,15 +1,20 @@
-"""Agent turns and prompt decisions for the multi strategy."""
+"""Agent turns and prompt decisions for the multi strategy.
+
+Every role turn (orchestrator pre-round decision and plan, profiler,
+implementer, judge) runs through ``ctx.agents.turn`` with the roles declared
+across roles/designer.py, pre_round.py, profiler.py, implementer.py, and
+judge.py. This module builds each turn's typed prompt context and the
+strategy-only logic that cannot live in a generic host verb: the designer's
+plan-ID validation retry (state dependent, not a pure reply check) and
+composing the profiler's per-round campaign-context addendum.
+"""
 
 from __future__ import annotations
 
-import subprocess
-from typing import TYPE_CHECKING, TypeVar, cast
-
-from pydantic import BaseModel
+from dataclasses import replace
+from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
-from vibesys.agent_run.hypotheses import apply_strategy_updates
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -17,11 +22,10 @@ from vibesys.errors import (
     InvalidPlanError,
     MissingImplementationError,
     PlanCorrectionExhaustedError,
-    RoleIsolationError,
     UnsupportedProfilerError,
 )
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -31,81 +35,105 @@ from vibesys.profilers import (
 from vibesys.profilers import (
     mcp_spec as profiler_mcp_spec,
 )
-from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.render.sink import output_sink
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
-from vibesys.schemas import (
-    SkillResourceSelection,
-    normalize_hypothesis_title,
+from vibesys.prompts.contexts import (
+    display_path,
+    domain_context,
+    implementer_focus_kwargs,
+    plan_focus_kwargs,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.roles.common import Verdict
+from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN, PlanContext
+from vibesys.roles.implementer import (
+    MULTI_IMPLEMENTER,
+    MULTI_IMPLEMENTER_CONTINUATION,
+    ImplementerContext,
+    ImplementerContinuationContext,
+    ImplementerResponse,
+)
+from vibesys.roles.judge import MULTI_JUDGE, JudgeContext, JudgeResponse
+from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundContext, PreRoundDecision
+from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerContext, ProfilerSummary
+from vibesys.runtime import ReadOnly
+from vibesys.schemas import normalize_hypothesis_title
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
-from vs_agent.api import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
-    from vibesys.agent_run.attempts import AttemptState
-    from vibesys.agent_run.evidence import CarryOver
-    from vibesys.agent_run.options import AgentOrchestrationOptions
-    from vibesys.agent_run.state import AgentRunState
+    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.runtime import AgentHandle
+    from vibesys.schemas import SkillResourceSelection
+    from vibesys.search.hypothesis import CarryOver, HypothesisSearch
+    from vibesys.search.hypothesis.attempts import AttemptState, ImplementerReply
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.state import HypothesisState
     from vibesys.skills import ResolvedSkillSelection
-    from vs_agent.api import MCPServerSpec
 
-T = TypeVar("T", bound=BaseModel)
-
-
-def _unauthorized_paths(changes: list[str], allowed: tuple[str, ...]) -> list[str]:
-    """Exclude the paths a read-only role may update."""
-    return [
-        path
-        for path in changes
-        if not any(
-            path == item.rstrip("/") or path.startswith(f"{item.rstrip('/')}/") for item in allowed
-        )
-    ]
-
-
-def _fallback_plan() -> OrchestratorPlan:
-    """Fail closed with the existing minimal health check plan."""
-    return OrchestratorPlan.model_validate(
-        {
-            "task": "Re-check minimal server boots and /health returns 200.",
-            "pass_criteria": "/health returns 200.",
-            "reasoning": "fallback: orchestrator produced no structured response",
-        }
-    )
+# The implementer's fallback texts are the sentinel that identifies a
+# synthesized (unparseable or timed-out) reply; see roles/multi.py.
+_SYNTHESIZED_IMPLEMENTER_SUMMARIES = frozenset(
+    {
+        "Implementer produced no structured response.",
+        "Implementer invocation timed out.",
+    }
+)
 
 
 class MultiAgentTurns:
     """Independent designer, profiler, implementer, and judge roles."""
 
-    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
-        """Bind the run's public capabilities and strategy options."""
+    def __init__(
+        self, ctx: RunContext, options: AgentOrchestrationOptions, search: HypothesisSearch
+    ) -> None:
+        """Bind the run's public capabilities, strategy options, and search policy.
+
+        Declares this run's progress-board path once with `ctx.progress`
+        (see `vibesys.orchestration.progress`): turns note pure, unwritten
+        Markdown blocks (see `vibesys.orchestration.progress_log`'s
+        `render_*` functions) via `ctx.progress.note`; only
+        `ctx.state.commit`/`ctx.gates.run` -- the host -- write them to disk.
+        """
         self.ctx = ctx
         self.options = options
+        self.search = search
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
         if self.modality is None and self.domain.name is constants.DomainName.LLM_SERVING:
             self.modality = "text_generation"
         self.objective = ctx.request.objective or ctx.request.input_bundle.objective
-        self.roadmap_path, self.progress_path = issue_board.resolve_paths(
+        self.roadmap_path, self.progress_path = memory.resolve_paths(
             self.workspace.path, options.memory_layout
         )
-        self.progress_location = issue_board.display_path(self.progress_path, self.workspace.path)
-        self.roadmap_location = issue_board.display_path(self.roadmap_path, self.workspace.path)
-        self.pareto_location = issue_board.display_path(
-            issue_board.pareto_archive_path(self.progress_path), self.workspace.path
+        ctx.progress.declare(self.progress_path)
+        self.progress_location = display_path(self.progress_path, self.workspace.path)
+        self.roadmap_location = display_path(self.roadmap_path, self.workspace.path)
+        self.pareto_location = display_path(
+            memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
-        self.template_dir = PROMPTS_DIR / "loops" / "multi"
+
+    def _write_plan_artifact(self, round_number: int, plan: OrchestratorPlan) -> Path:
+        """Persist the exact typed plan used by the framework for one round.
+
+        The host (`vibesys.orchestration.artifacts`) only knows how to write
+        an arbitrary `BaseModel`; this strategy owns the plan's type.
+        """
+        path = artifacts.plan_artifact_path(self.progress_path, round_number)
+        return artifacts.write_model(path, plan)
+
+    def _write_implementer_artifact(
+        self, round_number: int, retry: int, response: ImplementerReply
+    ) -> Path:
+        """Persist parsed implementer claims as untrusted data for Judge audit.
+
+        `response` is `ImplementerReply`, a structural protocol (not a
+        `BaseModel` subclass -- `vibesys.search.hypothesis` must not import
+        `vibesys.roles`), so this writes its dump through `write_json`
+        rather than the host's `BaseModel`-typed `write_model`.
+        """
+        path = artifacts.implementer_artifact_path(self.progress_path, round_number, retry)
+        return artifacts.write_json(path, response.model_dump(mode="json"))
 
     async def open(self) -> None:
         """Start each role this strategy can invoke."""
@@ -129,26 +157,23 @@ class MultiAgentTurns:
 
     def _domain_context(self) -> dict[str, object]:
         view = self.ctx.environment.view
-        return {
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "reference_path": self.ctx.environment.reference_path,
-            "benchmark_command": view.paths.benchmark_command,
-            "accuracy_command": view.paths.accuracy_command,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "workspace_sources": self.ctx.environment.workspace_sources,
-        }
+        return domain_context(
+            modality=self.modality,
+            interface=self.options.interface,
+            reference_path=self.ctx.environment.reference_path,
+            benchmark_command=view.paths.benchmark_command,
+            accuracy_command=view.paths.accuracy_command,
+            runtime_notes=view.prompt_notes,
+            profile_execution=view.profile_execution,
+            workspace_sources=self.ctx.environment.workspace_sources,
+        ).model_dump()
 
-    def _plan_prompt(self, request: PlanRequest) -> str:
+    def _plan_context(self, request: PlanRequest) -> PlanContext:
         view = self.ctx.environment.view
         domain_orchestrator = render_domain_section(
             self.domain, DomainRole.ORCHESTRATOR, **self._domain_context()
         )
-        return render_template(
-            "orchestrator_plan_prompt.j2",
-            template_dir=self.template_dir,
-            objective=self.objective,
+        return PlanContext(
             objective_location=view.paths.objective,
             profiler_summary=request.profiler_summary,
             regression_info=request.carry.regression_info,
@@ -159,20 +184,16 @@ class MultiAgentTurns:
             plateau_warning=request.plateau_warning,
             domain_orchestrator=domain_orchestrator,
             runtime_notes=view.prompt_notes,
-            profile_execution=view.profile_execution,
-            framework_benchmark_enabled=(
-                self.ctx.request.input_bundle.benchmark_result is not None
-                or self.ctx.request.input_bundle.benchmark_result_protocol is not None
-            ),
+            framework_benchmark_enabled=self._framework_benchmark_configured(),
             official_eval_every=self.options.official_eval_every,
             provisional_candidates=request.provisional_candidates,
             official_eval_cadence_due=(
                 request.provisional_candidates + 1 >= self.options.official_eval_every
             ),
-            **request.profile_guidance.plan_prompt_context(),
+            **plan_focus_kwargs(request.profile_guidance.plan_prompt_context()),
         )
 
-    def _validate_plan(self, plan: OrchestratorPlan, state: AgentRunState) -> None:
+    def _validate_plan(self, plan: OrchestratorPlan, state: HypothesisState) -> None:
         updates = [item.hypothesis_id for item in plan.hypothesis_updates]
         if len(updates) != len(set(updates)):
             raise InvalidPlanError.duplicate_updates()
@@ -180,46 +201,37 @@ class MultiAgentTurns:
             raise InvalidPlanError.self_reference()
         if state.by_id(plan.hypothesis_id) is not None:
             raise InvalidPlanError.reused_id(plan.hypothesis_id)
-        apply_strategy_updates(state.clone(), plan.hypothesis_updates)
+        self.search.validate_updates(state, plan.hypothesis_updates)
 
-    async def _designer_turn(self, prompt: str, message: str, label: str) -> OrchestratorPlan:
+    async def plan(self, request: PlanRequest) -> OrchestratorPlan:
+        """Ask for a new plan, with one correction for invalid lifecycle edits.
+
+        The correction here is state dependent (a hypothesis ID collision
+        against this run's history), which ``Role.check`` cannot express (it
+        only sees the reply in isolation); it stays strategy code wrapping
+        ``ctx.agents.turn``, as today.
+        """
+        context = self._plan_context(request)
         allowed = (
             f"{self.roadmap_location.rstrip('/')}/index.md"
             if self.roadmap_location.endswith("/")
             else self.roadmap_location
         )
-        revision = await self.workspace.snapshot(f"{label}-input")
-        try:
-            return await self.designer.turn_structured(
-                message,
-                system_prompt=prompt,
-                response_cls=OrchestratorPlan,
-                fallback_factory=_fallback_plan,
-                label=label,
-                reuse_session=False,
-            )
-        finally:
-            unauthorized = _unauthorized_paths(await self.workspace.pending_changes(), (allowed,))
-            if unauthorized:
-                await self.workspace.restore(revision, clean=True, preserve_paths=(allowed,))
-                remaining = _unauthorized_paths(await self.workspace.pending_changes(), (allowed,))
-                if remaining:
-                    raise RoleIsolationError(remaining, role="orchestrator")
-                self.ctx.log(
-                    f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
-                    f"attempted by orchestrator: {', '.join(unauthorized[:8])}"
-                )
-
-    async def plan(self, request: PlanRequest) -> OrchestratorPlan:
-        """Ask for a new plan, with one correction for invalid lifecycle edits."""
-        prompt = self._plan_prompt(request)
+        role = replace(MULTI_ORCHESTRATOR_PLAN, access=ReadOnly(allow=(allowed,)))
         feedback: str | None = None
         for attempt in range(2):
             label = (
                 f"round-{request.round_number}" + (f"-retry-{attempt}" if attempt else "") + "-plan"
             )
-            plan = await self._designer_turn(
-                prompt, feedback or "Produce this round's plan. Return only the JSON object.", label
+            plan = cast(
+                "OrchestratorPlan",
+                await self.ctx.agents.turn(
+                    role,
+                    agent=self.designer,
+                    context=context,
+                    message=feedback,
+                    label=label,
+                ),
             )
             plan.hypothesis_id = (
                 plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
@@ -245,51 +257,12 @@ class MultiAgentTurns:
                     "Produce a corrected plan for this round. Return only the JSON object."
                 )
                 continue
-            plan.recommended_skills, _ = self._skills(plan.recommended_skills)
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            issue_board.append_orchestrator_plan(self.progress_path, request.round_number, plan)
+            self._write_plan_artifact(request.round_number, plan)
+            self.ctx.progress.note(
+                progress_log.render_orchestrator_plan(request.round_number, plan)
+            )
             return plan
         raise PlanCorrectionExhaustedError
-
-    def _skills(
-        self, selections: list[SkillResourceSelection]
-    ) -> tuple[list[SkillResourceSelection], list[ResolvedSkillSelection]]:
-        if not selections:
-            return [], []
-        sources = self.ctx.environment.skill_source_paths
-        if not sources:
-            output_sink().framework_warning(
-                "ignored skill recommendations because no skills are installed",
-                source=FrameworkSource.LOOP,
-                source_label="skills",
-            )
-            return [], []
-        try:
-            resolved, diagnostics = resolve_skill_selections(
-                selections, build_skill_catalog(sources)
-            )
-        except (OSError, ValueError) as error:
-            output_sink().framework_warning(
-                "ignored skill recommendations because the catalog is invalid",
-                detail=f"{type(error).__name__}: {error}",
-                source=FrameworkSource.LOOP,
-                source_label="skills",
-            )
-            return [], []
-        for diagnostic in diagnostics:
-            output_sink().framework_warning(
-                diagnostic, source=FrameworkSource.LOOP, source_label="skills"
-            )
-        return [
-            SkillResourceSelection(
-                skill=item.skill,
-                resource_paths=[
-                    path.removeprefix(f"{item.skill}/") for path in item.resource_paths
-                ],
-                purpose=item.purpose,
-            )
-            for item in resolved
-        ], resolved
 
     def _profiler(self) -> ProfilerDefinition | None:
         kind = require_profiler_kind(self.ctx.environment.profiler_kind)
@@ -300,49 +273,12 @@ class MultiAgentTurns:
             raise UnsupportedProfilerError
         return definition
 
-    async def _read_only(  # noqa: PLR0913  # lint-waiver: LW-020020 [PLR0913]; the read-only agent turn forwards independent prompt, response, and session options.
-        self,
-        agent: AgentHandle,
-        *,
-        message: str,
-        prompt: str,
-        response_cls: type[T],
-        fallback_factory: Callable[[], T],
-        label: str,
-        allowed: tuple[str, ...] = (),
-        mcp_servers: list[MCPServerSpec] | None = None,
-    ) -> T:
-        revision = await self.workspace.snapshot(f"{label}-input")
-        try:
-            return await agent.turn_structured(
-                message,
-                system_prompt=prompt,
-                response_cls=response_cls,
-                fallback_factory=fallback_factory,
-                label=label,
-                reuse_session=False,
-                mcp_servers=mcp_servers,
-            )
-        finally:
-            unauthorized = _unauthorized_paths(await self.workspace.pending_changes(), allowed)
-            if unauthorized:
-                await self.workspace.restore(revision, clean=True, preserve_paths=allowed)
-                remaining = _unauthorized_paths(await self.workspace.pending_changes(), allowed)
-                if remaining:
-                    raise RoleIsolationError(remaining, role=label)
-                self.ctx.log(
-                    f"[role-isolation] reverted {len(unauthorized)} workspace change(s): {', '.join(unauthorized[:8])}"
-                )
-
     async def pre_round_decision(
         self, round_number: int, carry: CarryOver, *, has_history: bool
     ) -> PreRoundDecision:
         """Ask the orchestrator whether a specialist profile is useful."""
         view = self.ctx.environment.view
-        prompt = render_template(
-            "orchestrator_pre_round_prompt.j2",
-            template_dir=self.template_dir,
-            objective=self.objective,
+        context = PreRoundContext(
             objective_location=view.paths.objective,
             regression_info=carry.regression_info,
             exhaustion_info=carry.exhaustion_info,
@@ -351,45 +287,25 @@ class MultiAgentTurns:
             profile_execution=view.profile_execution,
             has_history=has_history,
         )
-        decision = await self._read_only(
-            self.designer,
-            message="Decide whether a profiling pass is needed before planning this round. Return only the JSON object.",
-            prompt=prompt,
-            response_cls=PreRoundDecision,
-            fallback_factory=lambda: PreRoundDecision(
-                need_profile=False, profile_focus="", reasoning="fallback: default to skip"
+        decision = cast(
+            "PreRoundDecision",
+            await self.ctx.agents.turn(
+                MULTI_PRE_ROUND_DECISION,
+                agent=self.designer,
+                context=context,
+                label=f"round-{round_number}-pre",
             ),
-            label=f"round-{round_number}-pre",
         )
-        issue_board.append_pre_round_decision(self.progress_path, round_number, decision)
+        self.ctx.progress.note(progress_log.render_pre_round_decision(round_number, decision))
         return decision
 
-    async def profile(self, round_number: int, focus: str) -> ProfilerSummary | None:
-        """Collect read-only profiler evidence before the designer plan."""
-        definition = self._profiler()
-        if definition is None:
-            return None
-        view = self.ctx.environment.view
-        prompt = render_template(
-            definition.prompt_template,
-            template_dir=self.template_dir,
-            profile_focus=focus,
-            benchmark_command=view.paths.benchmark_command,
-            modality=self.modality,
-            domain_profiler=render_domain_section(
-                self.domain, DomainRole.PROFILER, **self._domain_context()
-            ),
-            runtime_notes=view.prompt_notes,
-            profile_execution=view.profile_execution,
-            objective=self.objective,
-            profiler_support_name=definition.support_name,
-            profiler_mcp_name=definition.mcp_name,
-        )
-        artifact = issue_board.display_path(
-            issue_board.profiler_artifact_root(self.progress_path, round_number),
-            self.workspace.path,
-        ).rstrip("/")
-        prompt += f"""
+    def _profiler_campaign_context(self, artifact: str) -> str:
+        """The per-round addendum every profiler template renders at its tail.
+
+        Kept as Python (not baked into the shared templates) because it
+        depends on this round's bounded evidence directory.
+        """
+        return f"""
 
 ## Recent campaign context
 
@@ -414,83 +330,113 @@ capability mismatch; a later Implementer may add reviewed instrumentation.
 Write bounded durable profile evidence only below
 `{artifact}/`; keep large transient traces under `/tmp`.
 """
+
+    async def profile(self, round_number: int, focus: str) -> ProfilerSummary | None:
+        """Collect read-only profiler evidence before the designer plan."""
+        definition = self._profiler()
+        if definition is None:
+            return None
+        kind = require_profiler_kind(self.ctx.environment.profiler_kind)
+        view = self.ctx.environment.view
+        artifact = display_path(
+            artifacts.profiler_artifact_root(self.progress_path, round_number),
+            self.workspace.path,
+        ).rstrip("/")
+        context = ProfilerContext(
+            profile_focus=focus,
+            benchmark_command=view.paths.benchmark_command,
+            modality=self.modality,
+            domain_profiler=render_domain_section(
+                self.domain, DomainRole.PROFILER, **self._domain_context()
+            ),
+            runtime_notes=view.prompt_notes,
+            profile_execution=view.profile_execution,
+            objective=self.objective,
+            profiler_support_name=definition.support_name,
+            profiler_mcp_name=definition.mcp_name,
+            profiler_campaign_context=self._profiler_campaign_context(artifact),
+        )
+        role = replace(MULTI_PROFILERS[kind], access=ReadOnly(allow=(artifact,)))
         spec = profiler_mcp_spec(self.ctx.environment.profiler_kind)
         try:
-            summary = await self._read_only(
-                self.profiler,
-                message="Profile the server and return exactly one JSON object matching the schema above.",
-                prompt=prompt,
-                response_cls=ProfilerSummary,
-                fallback_factory=lambda: ProfilerSummary(
-                    analysis="Profiler produced no structured response.",
-                    bottlenecks="n/a",
-                    suggestions="Re-run profiling on the next round.",
+            summary = cast(
+                "ProfilerSummary",
+                await self.ctx.agents.turn(
+                    role,
+                    agent=self.profiler,
+                    context=context,
+                    label=f"round-{round_number}-profiler",
+                    mcp_servers=[spec] if spec is not None else None,
                 ),
-                label=f"round-{round_number}-profiler",
-                allowed=(artifact,),
-                mcp_servers=[spec] if spec is not None else None,
             )
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020021 [BLE001]; profile evidence is optional, so a profiler failure is reported and the round proceeds without it.
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "profiler failed",
                 detail=str(error),
                 source=FrameworkSource.LOOP,
                 round_label=f"round-{round_number}",
             )
             return None
-        issue_board.append_profiler_summary(self.progress_path, round_number, summary)
-        await self.workspace.snapshot(f"round-{round_number}-profiler")
+        self.ctx.progress.note(progress_log.render_profiler_summary(round_number, summary))
         return summary
 
-    def _implementer_prompt(
-        self, request: AttemptRequest, state: AttemptState, skills: list
-    ) -> str:
+    def _framework_benchmark_configured(self) -> bool:
+        bundle = self.ctx.request.input_bundle
+        return bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
+
+    def _resolved_skills(
+        self, selections: list[SkillResourceSelection]
+    ) -> list[ResolvedSkillSelection]:
+        """Resolve an already-filtered selection list for prompt display.
+
+        ``plan.recommended_skills`` was already validated and filtered by the
+        designer's own turn (``MULTI_ORCHESTRATOR_PLAN.filter_skills``); this
+        only adds each skill's router path for the implementer prompt, so it
+        does not re-warn on selections already accepted this run.
+        """
+        if not selections or not self.ctx.environment.skill_source_paths:
+            return []
+        try:
+            resolved, _ = resolve_skill_selections(
+                selections, build_skill_catalog(self.ctx.environment.skill_source_paths)
+            )
+        except (OSError, ValueError):
+            return []
+        return resolved
+
+    def _implementer_context(
+        self, request: AttemptRequest, state: AttemptState
+    ) -> ImplementerContext:
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
-        artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+        artifact = self._write_plan_artifact(request.round_number, plan)
         prior = tuple(
-            issue_board.display_path(path, self.workspace.path)
-            for path in issue_board.implementer_artifact_paths(
+            display_path(path, self.workspace.path)
+            for path in artifacts.implementer_artifact_paths(
                 self.progress_path, request.round_number
             )
         )
-
-        def location(path: Path) -> str:
-            return issue_board.display_path(path, self.workspace.path)
-
-        return render_template(
-            "implementer_continuation_prompt.j2"
-            if hypothesis.next_step
-            else "implementer_prompt.j2",
-            template_dir=self.template_dir,
+        profile_extra = request.profile_focus.implementer_prompt_context()
+        return ImplementerContext(
             reference_path=self.ctx.environment.reference_path,
             modality=self.modality,
             interface=self.options.interface,
             domain_implementer=render_domain_section(
                 self.domain, DomainRole.IMPLEMENTER, **self._domain_context()
             ),
-            task=plan.task,
-            pass_criteria=plan.pass_criteria,
-            objective=self.objective,
             objective_location=view.paths.objective,
-            plan_artifact_location=location(artifact),
-            hypothesis_id=plan.hypothesis_id,
-            hypothesis=plan.hypothesis,
-            activation_evidence=plan.activation_evidence,
-            falsification_criteria=plan.falsification_criteria,
-            expected_effect=plan.expected_effect,
-            minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
-            invariants=plan.invariants,
+            plan_artifact_location=display_path(artifact, self.workspace.path),
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
-            validation_location=location(issue_board.validation_artifact_root(self.progress_path)),
-            validation_recipe_contract_location=location(
-                issue_board.validation_recipe_schema_path(self.progress_path)
+            validation_location=display_path(
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
+            ),
+            validation_recipe_contract_location=display_path(
+                artifacts.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
             retry=state.retry,
             feedback=state.feedback,
-            continuation_step=hypothesis.next_step,
             framework_revert_applied=hypothesis.revert_applied,
             framework_revert_round=hypothesis.parent_round,
             framework_revert_commit=hypothesis.revert_commit,
@@ -499,88 +445,89 @@ Write bounded durable profile evidence only below
             gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
             gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
             runtime_notes=view.prompt_notes,
-            profile_execution=view.profile_execution,
             framework_benchmark_enabled=self._framework_benchmark_configured(),
             official_evaluation_due=request.planned_official_reason is not None,
             official_evaluation_reason=request.planned_official_reason,
-            recommended_skills=skills,
+            recommended_skills=self._resolved_skills(plan.recommended_skills),
             prior_attempt_artifact_locations=prior,
-            **request.engine.controller.guidance.implementer_prompt_context(),
+            **implementer_focus_kwargs(profile_extra),
         )
 
-    def _framework_benchmark_configured(self) -> bool:
-        bundle = self.ctx.request.input_bundle
-        return bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
+    def _implementer_continuation_context(
+        self, request: AttemptRequest, state: AttemptState
+    ) -> ImplementerContinuationContext:
+        plan = request.plan
+        hypothesis = request.active_hypothesis
+        view = self.ctx.environment.view
+        artifact = self._write_plan_artifact(request.round_number, plan)
+        prior = tuple(
+            display_path(path, self.workspace.path)
+            for path in artifacts.implementer_artifact_paths(
+                self.progress_path, request.round_number
+            )
+        )
+        return ImplementerContinuationContext(
+            hypothesis_id=plan.hypothesis_id,
+            objective_location=view.paths.objective,
+            plan_artifact_location=display_path(artifact, self.workspace.path),
+            progress_location=self.progress_location,
+            pareto_archive_location=self.pareto_location,
+            validation_location=display_path(
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
+            ),
+            validation_recipe_contract_location=display_path(
+                artifacts.validation_recipe_schema_path(self.progress_path), self.workspace.path
+            ),
+            runtime_notes=view.prompt_notes,
+            prior_attempt_artifact_locations=prior,
+            retry=state.retry,
+            continuation_step=cast("str", hypothesis.next_step),
+            feedback=state.feedback,
+            recommended_skills=self._resolved_skills(plan.recommended_skills),
+            framework_revert_applied=hypothesis.revert_applied,
+            framework_revert_round=hypothesis.parent_round,
+            framework_revert_commit=hypothesis.revert_commit,
+            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
+        )
 
     async def implement(
         self, request: AttemptRequest, state: AttemptState
     ) -> tuple[ImplementerResponse, bool]:
         """Prepare the prompt, then mark and invoke one paid implementer turn."""
         plan = request.plan
-        plan.recommended_skills, skills = self._skills(plan.recommended_skills)
-        prompt = self._implementer_prompt(request, state, skills)
-        synthesized = False
-
-        def fallback() -> ImplementerResponse:
-            nonlocal synthesized
-            synthesized = True
-            return ImplementerResponse(
-                summary="Implementer produced no structured response.",
-                expected_behavior="unknown",
-                hypothesis_outcome="inconclusive",
-                evidence="The implementer output could not be parsed.",
-                next_step="Recover retained evidence and return a schema-valid response before review.",
-            )
-
-        message = (
-            "Execute the required continuation step and return only the JSON object."
-            if request.active_hypothesis.next_step
-            else "Work persistently on the active hypothesis and return only the JSON object."
+        continuing = bool(request.active_hypothesis.next_step)
+        role = MULTI_IMPLEMENTER_CONTINUATION if continuing else MULTI_IMPLEMENTER
+        context: ImplementerContext | ImplementerContinuationContext = (
+            self._implementer_continuation_context(request, state)
+            if continuing
+            else self._implementer_context(request, state)
         )
         label = f"round-{request.round_number}-retry-{state.retry}-implementer"
-        session_key = AgentSessionKey(SessionScope.HYPOTHESIS, plan.hypothesis_id)
-        issue_board.write_implementer_start_marker(
-            self.progress_path, request.round_number, state.retry
-        )
-        await self.workspace.snapshot(
-            f"round-{request.round_number}-retry-{state.retry}-paid-marker"
-        )
-        try:
-            response = await self.worker.turn_structured(
-                message,
-                system_prompt=prompt,
-                response_cls=ImplementerResponse,
-                fallback_factory=fallback,
+
+        async def mark_paid() -> None:
+            artifacts.write_implementer_start_marker(
+                self.progress_path, request.round_number, state.retry
+            )
+
+        response = cast(
+            "ImplementerResponse",
+            await self.ctx.agents.turn(
+                role,
+                agent=self.worker,
+                context=context,
+                session_key=plan.hypothesis_id,
                 label=label,
-                reuse_session=True,
-                session_key=session_key,
-            )
-        except subprocess.TimeoutExpired as error:
-            synthesized = True
-            response = ImplementerResponse(
-                summary="Implementer invocation timed out.",
-                expected_behavior="unknown",
-                hypothesis_outcome="inconclusive",
-                evidence=f"The framework stopped the implementer after {error.timeout:g} seconds without a structured response.",
-                next_step="Inspect retained evidence and return a schema-valid response on retry.",
-            )
-            self.ctx.log(
-                f"[implementer] attempt {state.retry} timed out after {error.timeout:g} seconds"
-            )
-        response.skill_context_updates, _ = self._skills(response.skill_context_updates)
+                before_paid=mark_paid,
+            ),
+        )
+        synthesized = response.summary in _SYNTHESIZED_IMPLEMENTER_SUMMARIES
         if response.skill_context_updates:
-            plan.recommended_skills, _ = self._skills(
-                [*plan.recommended_skills, *response.skill_context_updates]
-            )
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-        issue_board.write_implementer_artifact(
-            self.progress_path, request.round_number, state.retry, response
-        )
-        issue_board.append_implementer(
-            self.progress_path, request.round_number, state.retry, response
-        )
-        await self.workspace.snapshot(
-            f"round-{request.round_number}-retry-{state.retry}-implementer"
+            plan.recommended_skills = [*plan.recommended_skills, *response.skill_context_updates]
+            self._write_plan_artifact(request.round_number, plan)
+        self._write_implementer_artifact(request.round_number, state.retry, response)
+        self.ctx.progress.note(
+            progress_log.render_implementer(request.round_number, state.retry, response)
         )
         return response, synthesized
 
@@ -588,95 +535,58 @@ Write bounded durable profile evidence only below
         self, request: AttemptRequest, state: AttemptState, conflict: str | None
     ) -> JudgeResponse:
         """Ask the independent judge to audit the parsed implementation."""
-        if state.implementation is None:
+        implementation = state.implementation
+        if implementation is None:
             raise MissingImplementationError
-        # TODO(stack PR 07): drop this cast once vibesys.roles.implementer owns  # noqa: FIX002, TD003  # LW-040036 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
-        # ImplementerResponse and AttemptState.implementation is typed against
-        # it directly; at BASE it is vibesys.schemas.ImplementerResponse, which
-        # structurally (but not nominally) satisfies search's ImplementerReply.
-        implementation = cast("ImplementerResponse", state.implementation)
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
 
-        def location(path: Path) -> str:
-            return issue_board.display_path(path, self.workspace.path)
-
-        plan_artifact = issue_board.write_plan_artifact(
-            self.progress_path, request.round_number, plan
+        plan_artifact = self._write_plan_artifact(request.round_number, plan)
+        evidence = self._write_implementer_artifact(
+            request.round_number, state.retry, implementation
         )
-        evidence = issue_board.write_implementer_artifact(
-            self.progress_path, request.round_number, state.retry, implementation
-        )
-        domain_context = self._domain_context()
-        domain_context["accuracy_command"] = None
-        domain_context["benchmark_command"] = None
-        prompt = render_template(
-            "judge_prompt.j2",
-            template_dir=self.template_dir,
-            accuracy_command=view.paths.accuracy_command,
-            benchmark_command=view.paths.benchmark_command,
-            pass_criteria=plan.pass_criteria,
-            modality=self.modality,
-            interface=self.options.interface,
-            domain_judge=render_domain_section(self.domain, DomainRole.JUDGE, **domain_context),
-            retry=state.retry,
-            runtime_notes=view.prompt_notes,
-            profile_execution=view.profile_execution,
-            objective=self.objective,
-            objective_location=view.paths.objective,
-            plan_artifact_location=location(plan_artifact),
-            implementer_artifact_location=location(evidence),
-            hypothesis_id=plan.hypothesis_id,
-            hypothesis=plan.hypothesis,
-            activation_evidence=plan.activation_evidence,
-            falsification_criteria=plan.falsification_criteria,
-            expected_effect=plan.expected_effect,
-            minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
-            invariants=plan.invariants,
-            implementer_outcome=implementation.hypothesis_outcome.value,
-            implementer_evidence=implementation.evidence,
-            implementer_perf_metric=implementation.perf_metric,
-            implementer_perf_unit=implementation.perf_unit,
-            implementer_metrics=implementation.metrics,
-            implementer_evaluation_artifact=implementation.evaluation_artifact,
-            candidate_disposition=implementation.candidate_disposition.value,
-            candidate_metrics=implementation.candidate_metrics,
-            candidate_evaluation_artifact=implementation.candidate_evaluation_artifact,
-            candidate_operating_point=implementation.candidate_operating_point,
-            candidate_retention_reason=implementation.candidate_retention_reason,
-            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
-            gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
-            gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
-            gate_approved_metrics=hypothesis.gate_approved_metrics,
-            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
-            progress_location=self.progress_location,
-            pareto_archive_location=self.pareto_location,
-            validation_location=location(issue_board.validation_artifact_root(self.progress_path)),
-            validation_recipe_contract_location=location(
-                issue_board.validation_recipe_schema_path(self.progress_path)
-            ),
+        domain_ctx = self._domain_context()
+        domain_ctx["accuracy_command"] = None
+        domain_ctx["benchmark_command"] = None
+        context = JudgeContext(
+            domain_judge=render_domain_section(self.domain, DomainRole.JUDGE, **domain_ctx),
+            framework_benchmark_enabled=self._framework_benchmark_configured(),
             framework_revert_applied=hypothesis.revert_applied,
             framework_revert_round=hypothesis.parent_round,
             framework_revert_commit=hypothesis.revert_commit,
-            framework_benchmark_enabled=self._framework_benchmark_configured(),
+            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
+            gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
+            gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
+            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+            implementer_artifact_location=display_path(evidence, self.workspace.path),
+            interface=self.options.interface,
+            modality=self.modality,
+            objective_location=view.paths.objective,
             official_evaluation_due=request.planned_official_reason is not None,
             official_evaluation_reason=request.planned_official_reason,
             pareto_archive_conflict=conflict,
-        )
-        response = await self._read_only(
-            self.judge,
-            message="Review the implementation per the criteria above. Return only the JSON verdict.",
-            prompt=prompt,
-            response_cls=JudgeResponse,
-            fallback_factory=lambda: JudgeResponse(
-                analysis="Judge produced no structured response.",
-                feedback="No structured response received.",
-                verdict=Verdict.FAIL,
+            pareto_archive_location=self.pareto_location,
+            plan_artifact_location=display_path(plan_artifact, self.workspace.path),
+            progress_location=self.progress_location,
+            retry=state.retry,
+            runtime_notes=view.prompt_notes,
+            validation_location=display_path(
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            label=f"round-{request.round_number}-retry-{state.retry}-judge",
+            validation_recipe_contract_location=display_path(
+                artifacts.validation_recipe_schema_path(self.progress_path), self.workspace.path
+            ),
         )
-        response.skills_used, _ = self._skills(response.skills_used)
+        response = cast(
+            "JudgeResponse",
+            await self.ctx.agents.turn(
+                MULTI_JUDGE,
+                agent=self.judge,
+                context=context,
+                label=f"round-{request.round_number}-retry-{state.retry}-judge",
+            ),
+        )
         if response.verdict is Verdict.PASS and conflict:
             response = response.model_copy(
                 update={
@@ -696,6 +606,7 @@ Write bounded durable profile evidence only below
                 verdict=response.verdict.value, feedback=response.feedback, attempt=state.retry
             ),
         )
-        issue_board.append_judge(self.progress_path, request.round_number, state.retry, response)
-        await self.workspace.snapshot(f"round-{request.round_number}-retry-{state.retry}-judge")
+        self.ctx.progress.note(
+            progress_log.render_judge(request.round_number, state.retry, response)
+        )
         return response

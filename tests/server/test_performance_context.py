@@ -9,16 +9,16 @@ from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
-from vibesys.agent_run.hypotheses import reproject_run_evidence
-from vibesys.agent_run.readmodel import project_run_view
-from vibesys.agent_run.state import (
-    AgentRunState,
-    Hypothesis,
-    HypothesisMeasurement,
-)
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.hypothesis_readmodel import project_run_view
 from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.state import (
+    Hypothesis,
+    HypothesisMeasurement,
+    HypothesisState,
+)
+from vibesys.search.hypothesis.transitions import reproject_run_evidence
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
@@ -86,8 +86,8 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
     return vibesys_project, manifest.run_id
 
 
-def _view(state: AgentRunState) -> RunView:
-    """Project a hand-built `AgentRunState` into the `RunView` `build_performance_context` reads."""
+def _view(state: HypothesisState) -> RunView:
+    """Project a hand-built `HypothesisState` into the `RunView` `build_performance_context` reads."""
     return project_run_view(
         state,
         run_id="run-1",
@@ -113,7 +113,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         encoding="utf-8",
     )
     state = reproject_run_evidence(
-        AgentRunState(
+        HypothesisState(
             hypotheses=[
                 _hypothesis(
                     "H-01",
@@ -137,7 +137,9 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
-    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(state)
+    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
+        state
+    )
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
@@ -155,8 +157,8 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(
-        AgentRunState()
+    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
+        HypothesisState()
     )
 
     response = _service(project, run_id).execute(PerformanceQuery())
@@ -178,7 +180,7 @@ def test_service_returns_no_context_without_an_attached_run() -> None:
 
 
 def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -212,7 +214,7 @@ def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
 
 
 def test_build_context_falls_back_to_the_manifest_direction() -> None:
-    state = AgentRunState(hypotheses=[_hypothesis("H-01", 1, measurement=_measurement(1))])
+    state = HypothesisState(hypotheses=[_hypothesis("H-01", 1, measurement=_measurement(1))])
 
     context = build_performance_context(_view(state), objectives=("total_ops_per_sec:min",))
 
@@ -221,7 +223,7 @@ def test_build_context_falls_back_to_the_manifest_direction() -> None:
 
 
 def test_build_context_is_none_with_nothing_to_say() -> None:
-    assert build_performance_context(_view(AgentRunState()), objectives=()) is None
+    assert build_performance_context(_view(HypothesisState()), objectives=()) is None
     assert build_performance_context(None, objectives=()) is None
 
 

@@ -315,6 +315,7 @@ class _LocalRunSession:
                 self._integration,
                 self._policy,
                 open_agent_environment=self.open_agent_environment,
+                projector=self._registration.projector,
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED

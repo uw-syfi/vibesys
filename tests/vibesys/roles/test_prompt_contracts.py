@@ -88,16 +88,16 @@ def test_every_role_declares_a_context_model() -> None:
         assert role.context is not None, f"{role.id}: {role.template} has no context model"
 
 
-# TODO(stack PR 07/08): remove. At this commit, `loops/multi/profilers/*.j2`  # noqa: FIX002, TD003  # LW-040125 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
-# and `loops/evolve/profilers/*.j2` do not exist yet as their own files (they
-# land with the multi and evolve strategy migrations); a `ProfilerContext`/
-# `CandidateProfilerContext` role's template resolves through the shared/
-# fallback root instead, to `shared/profilers/*.j2`, which does not read
-# these two fields yet. PR 07 (multi) and PR 08 (evolve) each add a thin
-# `loops/<strategy>/profilers/<kind>.j2` wrapper that includes the shared
-# fragment and reads its strategy-specific addendum field.
+# TODO(stack PR 08): remove. At this commit, `loops/evolve/profilers/*.j2`  # noqa: FIX002, TD003  # LW-040148 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
+# does not exist yet as its own files (they land with the evolve strategy
+# migration); the `CandidateProfilerContext` role's template resolves
+# through the shared/ fallback root instead, to `shared/profilers/*.j2`,
+# which does not read this field yet. `loops/multi/profilers/*.j2` wrappers
+# landed with the multi migration (stack PR 07), so `ProfilerContext` is no
+# longer exempt. PR 08 adds the analogous `loops/evolve/profilers/<kind>.j2`
+# wrapper that includes the shared fragment and reads its Pareto-objectives
+# addendum field.
 _EXPECTED_EXTRA_FIELDS_BEFORE_STRATEGY_MIGRATION = {
-    "ProfilerContext": frozenset({"profiler_campaign_context"}),
     "CandidateProfilerContext": frozenset({"pareto_objectives_addendum"}),
 }
 

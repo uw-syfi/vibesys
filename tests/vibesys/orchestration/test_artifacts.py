@@ -71,7 +71,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _recipe(name: str = "focused-tests"):  # noqa: ANN202  # LW-040118 [ANN202];  tracked: #288 -- return type resolved dynamically above.
+def _recipe(name: str = "focused-tests"):  # noqa: ANN202  # LW-040118 [ANN202]; return type resolved dynamically above.
     return ValidationRecipe(
         name=name,
         command="uv run pytest -q test_server.py",

@@ -361,7 +361,7 @@
 {"id": "LW-011112", "path": "src/vibesys/backends/local.py", "rules": ["PLR0913"]}
 {"id": "LW-011113", "path": "src/vibesys/backends/rocm/__init__.py", "rules": ["PLR0913"]}
 {"id": "LW-011114", "path": "src/vibesys/backends/trainium/__init__.py", "rules": ["PLR0913"]}
-{"id": "LW-011115", "path": "src/vibesys/agent_run/issue_board.py", "rules": ["PLR0913"]}
+{"id": "LW-011115", "path": "src/vibesys/orchestration/progress_log.py", "rules": ["PLR0913"]}
 {"id": "LW-011116", "path": "src/vibesys/evaluators/gates.py", "rules": ["PLR0913"]}
 {"id": "LW-011118", "path": "src/vibesys/render/sink.py", "rules": ["PLR0913"]}
 {"id": "LW-011119", "path": "src/vibesys/render/sink.py", "rules": ["PLR0913"]}
@@ -390,16 +390,9 @@
 {"id": "LW-020014", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["PLR0913"]}
 {"id": "LW-020015", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["PLR0913"]}
 {"id": "LW-020016", "path": "src/vibesys/loops/evolve/run.py", "rules": ["BLE001"]}
-{"id": "LW-020017", "path": "src/vibesys/loops/multi/decisions.py", "rules": ["PLR0913"]}
 {"id": "LW-020018", "path": "src/vibesys/loops/multi/session.py", "rules": ["C901"]}
 {"id": "LW-020019", "path": "src/vibesys/loops/multi/session.py", "rules": ["BLE001"]}
-{"id": "LW-020020", "path": "src/vibesys/loops/multi/turns.py", "rules": ["PLR0913"]}
 {"id": "LW-020021", "path": "src/vibesys/loops/multi/turns.py", "rules": ["BLE001"]}
-{"id": "LW-020022", "path": "src/vibesys/loops/profile_multi/decisions.py", "rules": ["PLR0913"]}
-{"id": "LW-020023", "path": "src/vibesys/loops/profile_multi/session.py", "rules": ["C901"]}
-{"id": "LW-020024", "path": "src/vibesys/loops/profile_multi/session.py", "rules": ["BLE001"]}
-{"id": "LW-020025", "path": "src/vibesys/loops/profile_multi/turns.py", "rules": ["PLR0913"]}
-{"id": "LW-020026", "path": "src/vibesys/loops/profile_multi/turns.py", "rules": ["BLE001"]}
 {"id": "LW-020027", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
 {"id": "LW-020028", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
 {"id": "LW-020029", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR0913"]}
@@ -417,17 +410,7 @@
 {"id": "LW-030003", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-030004", "path": "tests/vibesys/loops/evolve/test_policy_flow.py", "rules": ["S311"]}
 {"id": "LW-030005", "path": "tests/vibesys/loops/evolve/test_policy_flow.py", "rules": ["S311"]}
-{"id": "LW-030006", "path": "tests/vibesys/loops/multi/test_direct_session.py", "rules": ["SLF001"]}
-{"id": "LW-030007", "path": "tests/vibesys/loops/multi/test_direct_turns.py", "rules": ["SLF001"]}
-{"id": "LW-030008", "path": "tests/vibesys/loops/multi/test_interface_modes.py", "rules": ["SLF001"]}
-{"id": "LW-030009", "path": "tests/vibesys/loops/multi/test_policy_ports.py", "rules": ["SLF001"]}
 {"id": "LW-030010", "path": "tests/vibesys/loops/multi/test_validation_helpers.py", "rules": ["SLF001"]}
-{"id": "LW-030011", "path": "tests/vibesys/loops/profile_multi/test_session.py", "rules": ["SLF001"]}
-{"id": "LW-030012", "path": "tests/vibesys/loops/profile_multi/test_turns.py", "rules": ["SLF001"]}
-{"id": "LW-030013", "path": "tests/vibesys/loops/profile_single/test_session_policy.py", "rules": ["SLF001"]}
-{"id": "LW-030014", "path": "tests/vibesys/loops/profile_single/test_turns.py", "rules": ["SLF001"]}
-{"id": "LW-030015", "path": "tests/vibesys/loops/single/test_policy_scheduler.py", "rules": ["SLF001"]}
-{"id": "LW-030016", "path": "tests/vibesys/loops/single/test_turns.py", "rules": ["SLF001"]}
 {"id": "LW-040001", "path": "src/vibesys/backends/fake.py", "rules": ["PLR0913"]}
 {"id": "LW-040002", "path": "src/vibesys/orchestration/runner.py", "rules": ["PLR0913"]}
 {"id": "LW-040004", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
@@ -460,8 +443,6 @@
 {"id": "LW-040033", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040034", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040035", "path": "libs/vs-project/tests/test_store.py", "rules": ["SLF001"]}
-{"id": "LW-040036", "path": "src/vibesys/loops/multi/turns.py", "rules": ["FIX002", "TD003"]}
-{"id": "LW-040037", "path": "src/vibesys/loops/profile_multi/turns.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040039", "path": "src/vibesys/search/hypothesis/cadence.py", "rules": ["PLR0913"]}
 {"id": "LW-040040", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["S101"]}
 {"id": "LW-040041", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["PLR0913"]}
@@ -492,7 +473,6 @@
 {"id": "LW-040068", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["ANN001", "ANN202"]}
 {"id": "LW-040069", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["S106"]}
 {"id": "LW-040070", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["ANN001"]}
-{"id": "LW-040071", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040073", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["S106"]}
 {"id": "LW-040074", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
 {"id": "LW-040075", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
@@ -543,4 +523,27 @@
 {"id": "LW-040122", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["FBT001"]}
 {"id": "LW-040123", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["FBT001"]}
 {"id": "LW-040124", "path": "src/vibesys/prompts/contexts.py", "rules": ["PLR0913"]}
-{"id": "LW-040125", "path": "tests/vibesys/roles/test_prompt_contracts.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040125", "path": "src/vibesys/loops/multi/session.py", "rules": ["S101"]}
+{"id": "LW-040126", "path": "src/vibesys/loops/multi/session.py", "rules": ["S101"]}
+{"id": "LW-040127", "path": "src/vibesys/loops/multi/session.py", "rules": ["S101"]}
+{"id": "LW-040128", "path": "src/vibesys/loops/single/session.py", "rules": ["S101"]}
+{"id": "LW-040129", "path": "src/vibesys/loops/single/session.py", "rules": ["S101"]}
+{"id": "LW-040130", "path": "tests/vibesys/loops/_support.py", "rules": ["PLR0913"]}
+{"id": "LW-040131", "path": "tests/vibesys/loops/_support.py", "rules": ["PLR0913"]}
+{"id": "LW-040132", "path": "tests/vibesys/loops/_support.py", "rules": ["PLR0913"]}
+{"id": "LW-040133", "path": "tests/vibesys/loops/multi/test_judge_isolation_regression.py", "rules": ["S106"]}
+{"id": "LW-040134", "path": "tests/vibesys/loops/multi/test_local_validation.py", "rules": ["ANN401"]}
+{"id": "LW-040135", "path": "tests/vibesys/loops/multi/test_local_validation.py", "rules": ["S106"]}
+{"id": "LW-040136", "path": "tests/vibesys/loops/multi/test_orchestrate.py", "rules": ["PLR0913"]}
+{"id": "LW-040137", "path": "tests/vibesys/loops/multi/test_plan_correction.py", "rules": ["S106"]}
+{"id": "LW-040138", "path": "tests/vibesys/loops/multi/test_profile_option.py", "rules": ["ANN401"]}
+{"id": "LW-040139", "path": "tests/vibesys/loops/multi/test_profile_option.py", "rules": ["S106"]}
+{"id": "LW-040140", "path": "tests/vibesys/loops/multi/test_resume.py", "rules": ["S106"]}
+{"id": "LW-040141", "path": "tests/vibesys/loops/multi/test_rollback_restore_failure.py", "rules": ["S106"]}
+{"id": "LW-040142", "path": "tests/vibesys/loops/multi/test_sparse_review.py", "rules": ["S106"]}
+{"id": "LW-040143", "path": "tests/vibesys/loops/single/test_plan_correction.py", "rules": ["S106"]}
+{"id": "LW-040144", "path": "tests/vibesys/loops/single/test_profile_option.py", "rules": ["ANN401"]}
+{"id": "LW-040145", "path": "tests/vibesys/loops/single/test_profile_option.py", "rules": ["S106"]}
+{"id": "LW-040146", "path": "tests/vibesys/loops/single/test_resume.py", "rules": ["S106"]}
+{"id": "LW-040147", "path": "tests/vibesys/loops/single/test_rollback_restore_failure.py", "rules": ["S106"]}
+{"id": "LW-040148", "path": "tests/vibesys/roles/test_prompt_contracts.py", "rules": ["FIX002", "TD003"]}

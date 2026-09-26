@@ -14,12 +14,12 @@ import server.api.service as service_module
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
-from vibesys.agent_run.readmodel import project_run_view
-from vibesys.agent_run.state import AgentRunState, Hypothesis
 from vibesys.api.contracts import RunStatus
+from vibesys.loops.hypothesis_readmodel import project_run_view
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
@@ -89,8 +89,8 @@ def _hypothesis(
     return Hypothesis(**fields)
 
 
-def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
-    """Project a hand-built `AgentRunState` into the `RunView` `DesignLog.rounds` reads.
+def _view(state: HypothesisState, *, run_id: str = "run-1") -> RunView:
+    """Project a hand-built `HypothesisState` into the `RunView` `DesignLog.rounds` reads.
 
     `DesignLog.rounds` now consumes `vibesys.api`'s `RunView`, not raw core
     state directly (see `server.api.experiments._view`, the same fixture
@@ -172,7 +172,7 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
     (workspace / "src" / "lib.rs").rename(workspace / "src" / "queue.rs")
     second = _commit_all(workspace, "round 2")
 
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -206,7 +206,7 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
 
 def test_design_log_publishes_only_the_round_and_its_files(tmp_path: Path) -> None:
     """Stage fields belong to the experiment log; the design log has no copy."""
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -240,7 +240,7 @@ def test_design_log_measures_a_reverted_hypothesis_from_its_parent(tmp_path: Pat
     (workspace / "batching.rs").write_text("attempt two\n", encoding="utf-8")
     second = _commit_all(workspace, "round 2 from baseline")
 
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -269,7 +269,7 @@ def test_design_log_measures_a_reverted_hypothesis_from_its_parent(tmp_path: Pat
 
 def test_design_log_leaves_unresolvable_ranges_unknown(tmp_path: Path) -> None:
     workspace = _repo(tmp_path / "workspace")
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -297,7 +297,7 @@ def test_design_log_never_passes_a_non_hex_commit_to_git(tmp_path: Path) -> None
         attempted.append((base, head))
         return ""
 
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -356,7 +356,7 @@ def test_design_log_drops_a_rename_out_of_framework_memory(tmp_path: Path) -> No
     """Both sides of a rename are filtered, not only the new path."""
     output = _name_status("R100", "progress/round-0001.md", "notes/round-1.md", "M", "src/lib.rs")
 
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -382,7 +382,7 @@ def test_design_log_caches_each_commit_range(tmp_path: Path) -> None:
         calls.append((base, head))
         return _name_status("M", "src/lib.rs")
 
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -413,7 +413,7 @@ def test_design_log_retries_a_failed_range(tmp_path: Path) -> None:
     def diff(_base: str, _head: str) -> str | None:
         return outputs.pop(0)
 
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -441,7 +441,7 @@ def test_design_log_evicts_oldest_ranges_past_capacity(tmp_path: Path) -> None:
         return ""
 
     design = DesignLog(workspace=tmp_path, diff=diff, patch=_no_patch, capacity=1)
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -630,8 +630,8 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
     portable = project.state.portable_namespace(run_id, "single")
-    portable.slot("state.json", AgentRunState).save(
-        AgentRunState(
+    portable.slot("state.json", HypothesisState).save(
+        HypothesisState(
             hypotheses=[
                 _hypothesis(
                     "H-01",
@@ -661,8 +661,8 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(
-        AgentRunState(
+    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
+        HypothesisState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])
             ],
@@ -703,8 +703,8 @@ def test_service_reuses_one_design_projection_per_run(
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(
-        AgentRunState(
+    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
+        HypothesisState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])
             ],

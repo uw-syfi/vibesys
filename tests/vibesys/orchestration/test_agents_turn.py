@@ -97,11 +97,11 @@ def _role(  # noqa: PLR0913  # LW-040115 [PLR0913]; test helper mirroring every 
     )
 
 
-async def _spawn(ctx: RunContext, role_id: str = "testrole"):  # noqa: ANN202  # LW-040116 [ANN202];  tracked: #288.
+async def _spawn(ctx: RunContext, role_id: str = "testrole"):  # noqa: ANN202  # LW-040116 [ANN202]; the helper is private to this test module and its return type is the local closure type.
     return await ctx.agents.spawn(ctx.agents.default_definition(role_id))
 
 
-def _with_fixture_prompts_dir(tmp_path: Path, fn):  # noqa: ANN001, ANN202  # LW-040117 [ANN001, ANN202];  tracked: #288.
+def _with_fixture_prompts_dir(tmp_path: Path, fn):  # noqa: ANN001, ANN202  # LW-040117 [ANN001, ANN202]; the helper wraps an arbitrary test callable, so its parameter and return types are open.
     """Patch ``PROMPTS_DIR`` to an isolated fixture tree for one call."""
     prompts_root = tmp_path / "prompts_fixture"
     _write_fixture_templates(prompts_root)

@@ -10,28 +10,25 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict, Unpack
 
-from vibesys.agent_run.hypotheses import measurement_delta_reason
-from vibesys.agent_run.readmodel import project_run_view as _project_run_view
-from vibesys.agent_run.state import (
-    AgentRunState,
+from vibesys.api.agent import AgentRunProjection, agent_projection
+from vibesys.api.contracts import RunStatus
+from vibesys.loops.hypothesis_readmodel import project_run_view as _project_run_view
+from vibesys.schemas import CandidateDisposition, derive_hypothesis_title
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
     HypothesisReview,
+    HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.api.agent import AgentRunProjection, agent_projection
-from vibesys.api.contracts import RunStatus
-from vibesys.schemas import (
-    CandidateDisposition,
-    derive_hypothesis_title,
-)
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.transitions import measurement_delta_reason
 from vs_loop_state.api import RoundRecord
 
 
 def _project_agent_view(
-    state: AgentRunState,
+    state: HypothesisState,
     *,
     run_id: str,
     status: RunStatus,
@@ -147,7 +144,7 @@ def _representative_hypothesis() -> Hypothesis:
 def test_hypothesis_view_matches_fixture_facts_field_for_field() -> None:
     """The boundary projection copies every authoritative fixture fact verbatim."""
     hypothesis = _representative_hypothesis()
-    state = AgentRunState(hypotheses=[hypothesis], active_hypothesis_id=None)
+    state = HypothesisState(hypotheses=[hypothesis], active_hypothesis_id=None)
 
     (view,) = _project_agent_view(
         state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=0
@@ -196,7 +193,7 @@ def test_hypothesis_view_matches_fixture_facts_field_for_field() -> None:
 
 
 def test_hypothesis_round_drops_a_retired_outcome_rather_than_failing() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -223,7 +220,7 @@ def test_hypothesis_round_drops_a_retired_outcome_rather_than_failing() -> None:
 
 def test_hypothesis_view_falls_back_to_a_derived_title() -> None:
     hypothesis = _hypothesis("H-01", 1)  # plan.title defaults to "".
-    state = AgentRunState(hypotheses=[hypothesis])
+    state = HypothesisState(hypotheses=[hypothesis])
 
     (view,) = _project_agent_view(
         state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=0
@@ -245,7 +242,7 @@ def test_hypothesis_view_uses_the_orchestrator_title_when_present() -> None:
             reasoning="",
         ),
     )
-    state = AgentRunState(hypotheses=[hypothesis])
+    state = HypothesisState(hypotheses=[hypothesis])
 
     (view,) = _project_agent_view(
         state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=0
@@ -255,7 +252,7 @@ def test_hypothesis_view_uses_the_orchestrator_title_when_present() -> None:
 
 
 def test_hypothesis_view_reports_active_before_a_round_finishes() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         active_hypothesis_id="H-02",
         hypotheses=[_hypothesis("H-02", 2)],
     )
@@ -272,7 +269,7 @@ def test_hypothesis_view_reports_active_before_a_round_finishes() -> None:
 
 def test_run_view_preserves_hypothesis_append_order_not_first_round_order() -> None:
     """`RunView.hypotheses` is persisted order; `build_experiment_log` re-sorts, this must not."""
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis("H-02", 5),
             _hypothesis("H-01", 1),
@@ -287,7 +284,7 @@ def test_run_view_preserves_hypothesis_append_order_not_first_round_order() -> N
 
 
 def test_run_view_rounds_are_run_wide_and_chronological() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -326,7 +323,7 @@ def test_run_view_rounds_are_run_wide_and_chronological() -> None:
 
 
 def test_run_view_current_round_counts_every_completed_round() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -349,7 +346,7 @@ def test_run_view_current_round_counts_every_completed_round() -> None:
 
 def test_run_view_reports_no_rounds_or_hypotheses_for_an_empty_state() -> None:
     run_view = _project_agent_view(
-        AgentRunState(), run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=0
+        HypothesisState(), run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=0
     )
 
     assert run_view.hypotheses == []

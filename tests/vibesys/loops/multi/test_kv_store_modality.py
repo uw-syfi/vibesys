@@ -66,6 +66,7 @@ def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance() -> None:
         objective="OBJ",
         profiler_support_name="linux_cpu_profiler",
         profiler_mcp_name="vibesys-linux-cpu-profiler",
+        profiler_campaign_context="",
     )
     assert "RESP2" in output
     assert "py-spy record" in output

@@ -4,16 +4,17 @@ from __future__ import annotations
 
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator, EvolveProjector
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator, IssueQueueProjector
-from vibesys.loops.multi.orchestration import MultiAgentOrchestrator, MultiProjector
-from vibesys.loops.profile_multi.orchestration import (
+from vibesys.loops.multi.orchestration import (
+    MultiAgentOrchestrator,
+    MultiProjector,
     ProfileGuidedMultiAgentOrchestrator,
     ProfileMultiProjector,
 )
-from vibesys.loops.profile_single.orchestration import (
+from vibesys.loops.single.orchestration import (
     ProfileGuidedSingleAgentOrchestrator,
-    ProfileSingleProjector,
+    SingleAgentOrchestrator,
+    SingleProjector,
 )
-from vibesys.loops.single.orchestration import SingleAgentOrchestrator, SingleProjector
 from vibesys.orchestration.contracts import OrchestrationRegistry
 
 
@@ -33,7 +34,10 @@ def built_in_orchestrations() -> OrchestrationRegistry:
             "profile-guided-single-agent",
             "profile_single",
             ProfileGuidedSingleAgentOrchestrator,
-            ProfileSingleProjector(),
+            SingleProjector(
+                namespace="profile_single",
+                orchestration_id="profile-guided-single-agent",
+            ),
         ),
     ):
         registry.register(

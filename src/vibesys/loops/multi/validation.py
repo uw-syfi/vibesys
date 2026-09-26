@@ -6,11 +6,11 @@ import hashlib
 import json
 from typing import TYPE_CHECKING
 
-from vibesys.agent_run import issue_board
 from vibesys.evaluators.validation_recipe import (
     FrameworkValidationResult,
     ValidationRecipeArtifact,
 )
+from vibesys.orchestration import artifacts
 
 _MAX_INPUT_FILES = 4096
 _MAX_INPUT_BYTES = 256 * 1024 * 1024
@@ -70,7 +70,7 @@ def _reusable_validation_result(
     input_digest: str,
 ) -> FrameworkValidationResult | None:
     """Return the newest matching framework PASS, if one exists."""
-    for artifact in reversed(issue_board.validation_result_artifact_paths(progress_path)):
+    for artifact in reversed(artifacts.validation_result_artifact_paths(progress_path)):
         try:
             payload = json.loads(artifact.read_text())
             results = payload.get("results", [])

@@ -15,6 +15,7 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipeArtifact,
 )
 from vibesys.loops.multi import validation
+from vibesys.orchestration import artifacts
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,13 +73,18 @@ def test_recipe_artifact_must_be_inside_workspace_and_match_schema(tmp_path: Pat
         validation._load_validation_recipes(tmp_path, "../outside.json")
 
 
-def test_reuse_selects_newest_matching_pass_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_reuse_selects_newest_matching_pass_only(tmp_path: Path) -> None:
+    """``_reusable_validation_result`` scans real, on-disk validation-ledger
+    artifacts (named so ``validation_result_artifact_paths``' sort order
+    puts the newest last), never a patched listing function.
+    """
     recipe = _recipe()
     digest = "same-inputs"
-    old = tmp_path / "old.json"
-    newest = tmp_path / "new.json"
+    progress_path = tmp_path / "progress.md"
+    ledger_root = artifacts.validation_artifact_root(progress_path)
+    ledger_root.mkdir(parents=True)
+    old = ledger_root / "round-0001-attempt-01.json"
+    newest = ledger_root / "round-0002-attempt-01.json"
     old_pass = FrameworkValidationResult(
         recipe=recipe, input_digest=digest, passed=True, output="old pass"
     )
@@ -98,14 +104,9 @@ def test_reuse_selects_newest_matching_pass_only(
             }
         )
     )
-    monkeypatch.setattr(
-        validation.issue_board, "validation_result_artifact_paths", lambda _path: [old, newest]
-    )
-    reused = validation._reusable_validation_result(tmp_path / "progress.md", recipe, digest)
+    reused = validation._reusable_validation_result(progress_path, recipe, digest)
     assert reused is not None
     assert reused.passed
     assert reused.reused
     assert reused.output == "new pass"
-    assert (
-        validation._reusable_validation_result(tmp_path / "progress.md", recipe, "changed") is None
-    )
+    assert validation._reusable_validation_result(progress_path, recipe, "changed") is None

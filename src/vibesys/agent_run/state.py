@@ -1,10 +1,11 @@
 """Authoritative agent run state models and their durable storage.
 
-# TODO(stack PR 07): remove. Glue re-export: the state types now live in
+# TODO(stack PR 09): remove. Glue re-export: the state types now live in
 # ``vibesys.search.hypothesis.state`` and ``vibesys.search.profile_focus.state``
 # (pure, no I/O). This module keeps the old import path and the mutating
 # ``AgentRunStateStore.save``/``.transition`` methods (not owned by ``search``,
-# which does no I/O) working for strategies not yet migrated.
+# which does no I/O) working for ``vibesys.api.chat_tools_server`` and its
+# test, whose migration in stack PR 09 removes the last caller.
 """
 
 from __future__ import annotations

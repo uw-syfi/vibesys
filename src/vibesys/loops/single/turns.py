@@ -2,83 +2,94 @@
 
 from __future__ import annotations
 
-import subprocess
-from typing import TYPE_CHECKING
+from dataclasses import replace
+from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
-from vibesys.agent_run.evidence import _pareto_archive_conflict
-from vibesys.agent_run.hypotheses import apply_strategy_updates
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import (
     InvalidPlanError,
     PlanCorrectionExhaustedError,
-    RoleIsolationError,
     UnsupportedProfilerError,
 )
 from vibesys.events import FrameworkSource
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.render.sink import output_sink
+from vibesys.prompts import PROMPTS_DIR
+from vibesys.prompts.contexts import display_path, domain_context, plan_focus_kwargs
 from vibesys.roles.common import Verdict
-from vibesys.roles.single_agent import SingleAgentRoundResponse
-from vibesys.schemas import (
-    SkillResourceSelection,
-    normalize_hypothesis_title,
+from vibesys.roles.designer import SINGLE_ORCHESTRATOR_PLAN, PlanContext
+from vibesys.roles.single_agent import (
+    SINGLE_COMBINED,
+    SingleAgentRoundContext,
+    SingleAgentRoundResponse,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.runtime import ReadOnly, Role
+from vibesys.schemas import SkillResourceSelection, normalize_hypothesis_title
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
-from vs_agent.api import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.attempts import AttemptState
-    from vibesys.agent_run.options import AgentOrchestrationOptions
-    from vibesys.agent_run.state import AgentRunState
+    from pathlib import Path
+
+    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.single.session import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis import HypothesisSearch
+    from vibesys.search.hypothesis.attempts import AttemptState
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.state import HypothesisState
     from vibesys.skills import ResolvedSkillSelection
-
-
-def _fallback_plan() -> OrchestratorPlan:
-    """Fail closed with the existing minimal health check plan."""
-    return OrchestratorPlan.model_validate(
-        {
-            "task": "Re-check minimal server boots and /health returns 200.",
-            "pass_criteria": "/health returns 200.",
-            "reasoning": "fallback: orchestrator produced no structured response",
-        }
-    )
 
 
 class SingleAgentTurns:
     """One designer and one combined implementer, reviewer, and profiler."""
 
-    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
-        """Bind the run's public capabilities and strategy options."""
+    def __init__(
+        self, ctx: RunContext, options: AgentOrchestrationOptions, search: HypothesisSearch
+    ) -> None:
+        """Bind the run's public capabilities, strategy options, and search policy.
+
+        Declares this run's progress-board path once with `ctx.progress`
+        (see `vibesys.orchestration.progress`): turns note pure, unwritten
+        Markdown blocks (see `vibesys.orchestration.progress_log`'s
+        `render_*` functions) via `ctx.progress.note`; only
+        `ctx.state.commit`/`ctx.gates.run` -- the host -- write them to disk.
+        """
         self.ctx = ctx
         self.options = options
+        self.search = search
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
         if self.modality is None and self.domain.name is constants.DomainName.LLM_SERVING:
             self.modality = "text_generation"
         self.objective = ctx.request.objective or ctx.request.input_bundle.objective
-        self.roadmap_path, self.progress_path = issue_board.resolve_paths(
+        self.roadmap_path, self.progress_path = memory.resolve_paths(
             self.workspace.path, options.memory_layout
         )
-        self.progress_location = issue_board.display_path(self.progress_path, self.workspace.path)
-        self.roadmap_location = issue_board.display_path(self.roadmap_path, self.workspace.path)
-        self.pareto_location = issue_board.display_path(
-            issue_board.pareto_archive_path(self.progress_path), self.workspace.path
+        ctx.progress.declare(self.progress_path)
+        self.progress_location = display_path(self.progress_path, self.workspace.path)
+        self.roadmap_location = display_path(self.roadmap_path, self.workspace.path)
+        self.pareto_location = display_path(
+            memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
         self.template_dir = PROMPTS_DIR / "loops" / "single"
+
+    def _write_plan_artifact(self, round_number: int, plan: OrchestratorPlan) -> Path:
+        """Persist the exact typed plan used by the framework for one round.
+
+        The host (`vibesys.orchestration.artifacts`) only knows how to write
+        an arbitrary `BaseModel`; this strategy owns the plan's type.
+        """
+        path = artifacts.plan_artifact_path(self.progress_path, round_number)
+        return artifacts.write_model(path, plan)
 
     async def open(self) -> None:
         """Start the two roles this strategy can invoke."""
@@ -102,26 +113,23 @@ class SingleAgentTurns:
 
     def _domain_context(self) -> dict[str, object]:
         view = self.ctx.environment.view
-        return {
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "reference_path": self.ctx.environment.reference_path,
-            "benchmark_command": view.paths.benchmark_command,
-            "accuracy_command": view.paths.accuracy_command,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "workspace_sources": self.ctx.environment.workspace_sources,
-        }
+        return domain_context(
+            modality=self.modality,
+            interface=self.options.interface,
+            reference_path=self.ctx.environment.reference_path,
+            benchmark_command=view.paths.benchmark_command,
+            accuracy_command=view.paths.accuracy_command,
+            runtime_notes=view.prompt_notes,
+            profile_execution=view.profile_execution,
+            workspace_sources=self.ctx.environment.workspace_sources,
+        ).model_dump()
 
-    def _plan_prompt(self, request: PlanRequest) -> str:
+    def _plan_context(self, request: PlanRequest) -> PlanContext:
         view = self.ctx.environment.view
         domain_orchestrator = render_domain_section(
             self.domain, DomainRole.ORCHESTRATOR, **self._domain_context()
         )
-        return render_template(
-            "orchestrator_plan_prompt.j2",
-            template_dir=self.template_dir,
-            objective=self.objective,
+        return PlanContext(
             objective_location=view.paths.objective,
             profiler_summary=request.profiler_summary,
             regression_info=request.carry.regression_info,
@@ -132,7 +140,6 @@ class SingleAgentTurns:
             plateau_warning=request.plateau_warning,
             domain_orchestrator=domain_orchestrator,
             runtime_notes=view.prompt_notes,
-            profile_execution=view.profile_execution,
             framework_benchmark_enabled=(
                 self.ctx.request.input_bundle.benchmark_result is not None
                 or self.ctx.request.input_bundle.benchmark_result_protocol is not None
@@ -142,10 +149,10 @@ class SingleAgentTurns:
             official_eval_cadence_due=(
                 request.provisional_candidates + 1 >= self.options.official_eval_every
             ),
-            **request.profile_guidance.plan_prompt_context(),
+            **plan_focus_kwargs(request.profile_guidance.plan_prompt_context()),
         )
 
-    def _validate_plan(self, plan: OrchestratorPlan, state: AgentRunState) -> None:
+    def _validate_plan(self, plan: OrchestratorPlan, state: HypothesisState) -> None:
         updates = [item.hypothesis_id for item in plan.hypothesis_updates]
         if len(updates) != len(set(updates)):
             raise InvalidPlanError.duplicate_updates()
@@ -153,53 +160,46 @@ class SingleAgentTurns:
             raise InvalidPlanError.self_reference()
         if state.by_id(plan.hypothesis_id) is not None:
             raise InvalidPlanError.reused_id(plan.hypothesis_id)
-        apply_strategy_updates(state.clone(), plan.hypothesis_updates)
+        self.search.validate_updates(state, plan.hypothesis_updates)
 
-    async def _designer_turn(self, prompt: str, message: str, label: str) -> OrchestratorPlan:
+    def _designer_role(self) -> Role:
+        """The orchestrator role, allow-listing this run's roadmap index.
+
+        A read-only role's allow-list is per-call (it depends on this run's
+        ``memory_layout``), so the role is built fresh here rather than
+        declared static in ``vibesys.roles.designer`` and ``vibesys.roles.single_agent``.
+        """
         allowed = (
             f"{self.roadmap_location.rstrip('/')}/index.md"
             if self.roadmap_location.endswith("/")
             else self.roadmap_location
         )
-        revision = await self.workspace.snapshot(f"{label}-input")
-        try:
-            return await self.designer.turn_structured(
-                message,
-                system_prompt=prompt,
-                response_cls=OrchestratorPlan,
-                fallback_factory=_fallback_plan,
-                label=label,
-                reuse_session=False,
-            )
-        finally:
-            changed = await self.workspace.pending_changes()
-            unauthorized = [
-                path for path in changed if path != allowed and not path.startswith(f"{allowed}/")
-            ]
-            if unauthorized:
-                await self.workspace.restore(revision, clean=True, preserve_paths=(allowed,))
-                remaining = [
-                    path
-                    for path in await self.workspace.pending_changes()
-                    if path != allowed and not path.startswith(f"{allowed}/")
-                ]
-                if remaining:
-                    raise RoleIsolationError(remaining)
-                self.ctx.log(
-                    f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
-                    f"attempted by orchestrator: {', '.join(unauthorized[:8])}"
-                )
+        return replace(SINGLE_ORCHESTRATOR_PLAN, access=ReadOnly(allow=(allowed,)))
 
     async def plan(self, request: PlanRequest) -> OrchestratorPlan:
-        """Ask for a new plan, with one correction for invalid lifecycle edits."""
-        prompt = self._plan_prompt(request)
+        """Ask for a new plan, with one correction for invalid lifecycle edits.
+
+        The retry here is state-dependent (a hypothesis ID collision against
+        this run's live state), which ``Role.check`` cannot express (it sees
+        only the parsed reply); so this wraps two plain ``ctx.agents.turn``
+        calls rather than using the role's own correction loop.
+        """
+        role = self._designer_role()
+        context = self._plan_context(request)
         feedback: str | None = None
         for attempt in range(2):
             label = (
                 f"round-{request.round_number}" + (f"-retry-{attempt}" if attempt else "") + "-plan"
             )
-            plan = await self._designer_turn(
-                prompt, feedback or "Produce this round's plan. Return only the JSON object.", label
+            plan = cast(
+                "OrchestratorPlan",
+                await self.ctx.agents.turn(
+                    role,
+                    agent=self.designer,
+                    context=context,
+                    message=feedback,
+                    label=label,
+                ),
             )
             plan.hypothesis_id = (
                 plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
@@ -226,8 +226,10 @@ class SingleAgentTurns:
                 )
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            issue_board.append_orchestrator_plan(self.progress_path, request.round_number, plan)
+            self._write_plan_artifact(request.round_number, plan)
+            self.ctx.progress.note(
+                progress_log.render_orchestrator_plan(request.round_number, plan)
+            )
             return plan
         raise PlanCorrectionExhaustedError
 
@@ -238,7 +240,7 @@ class SingleAgentTurns:
             return [], []
         sources = self.ctx.environment.skill_source_paths
         if not sources:
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "ignored skill recommendations because no skills are installed",
                 source=FrameworkSource.LOOP,
                 source_label="skills",
@@ -249,7 +251,7 @@ class SingleAgentTurns:
                 selections, build_skill_catalog(sources)
             )
         except (OSError, ValueError) as error:
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "ignored skill recommendations because the catalog is invalid",
                 detail=f"{type(error).__name__}: {error}",
                 source=FrameworkSource.LOOP,
@@ -257,9 +259,7 @@ class SingleAgentTurns:
             )
             return [], []
         for diagnostic in diagnostics:
-            output_sink().framework_warning(
-                diagnostic, source=FrameworkSource.LOOP, source_label="skills"
-            )
+            self.ctx.warning(diagnostic, source=FrameworkSource.LOOP, source_label="skills")
         return [
             SkillResourceSelection(
                 skill=item.skill,
@@ -280,63 +280,35 @@ class SingleAgentTurns:
             raise UnsupportedProfilerError
         return definition
 
-    def _combined_prompt(
-        self, request: AttemptRequest, state: AttemptState, skills: list[ResolvedSkillSelection]
-    ) -> str:
+    def _combined_context(
+        self, request: AttemptRequest, state: AttemptState
+    ) -> SingleAgentRoundContext:
         view = self.ctx.environment.view
         plan = request.plan
         profiler = self._profiler()
-        plan_artifact = issue_board.write_plan_artifact(
-            self.progress_path, request.round_number, plan
-        )
-        domain_context = self._domain_context()
-        return render_template(
-            "single_agent_round_prompt.j2",
-            template_dir=self.template_dir,
-            reference_path=self.ctx.environment.reference_path,
-            modality=self.modality,
-            interface=self.options.interface,
+        plan_artifact = self._write_plan_artifact(request.round_number, plan)
+        domain_ctx = self._domain_context()
+        return SingleAgentRoundContext(
             domain_single_agent=render_domain_section(
-                self.domain, DomainRole.SINGLE_AGENT, **domain_context
+                self.domain, DomainRole.SINGLE_AGENT, **domain_ctx
             ),
-            domain_profiler=render_domain_section(
-                self.domain, DomainRole.PROFILER, **domain_context
-            ),
-            task=plan.task,
-            pass_criteria=plan.pass_criteria,
-            hypothesis_id=plan.hypothesis_id,
-            hypothesis=plan.hypothesis,
-            activation_evidence=plan.activation_evidence,
-            falsification_criteria=plan.falsification_criteria,
-            expected_effect=plan.expected_effect,
-            minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
-            invariants=plan.invariants,
+            domain_profiler=render_domain_section(self.domain, DomainRole.PROFILER, **domain_ctx),
+            interface=self.options.interface,
+            objective_location=view.paths.objective,
+            plan_artifact_location=display_path(plan_artifact, self.workspace.path),
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
-            validation_location=issue_board.display_path(
-                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+            validation_location=display_path(
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            retry=state.retry,
             feedback=state.feedback,
-            objective=self.objective,
-            objective_location=view.paths.objective,
-            plan_artifact_location=issue_board.display_path(plan_artifact, self.workspace.path),
-            recommended_skills=skills,
-            profile_focus=request.last_profile_focus,
-            profiler_kind=self.ctx.environment.profiler_kind,
+            profiler_kind=self.ctx.environment.profiler_kind.value,
             profiler_support_name=profiler.support_name if profiler else None,
-            profiler_mcp_name=profiler.mcp_name if profiler else None,
-            supports_torch_profiler=self.domain.supports_torch_profiler,
             benchmark_command=view.paths.benchmark_command,
             accuracy_command=view.paths.accuracy_command,
             runtime_notes=view.prompt_notes,
-            profile_execution=view.profile_execution,
             official_evaluation_due=request.planned_official_reason is not None,
             official_evaluation_reason=request.planned_official_reason,
-            framework_benchmark_enabled=(
-                self.ctx.request.input_bundle.benchmark_result is not None
-                or self.ctx.request.input_bundle.benchmark_result_protocol is not None
-            ),
         )
 
     async def combined(
@@ -344,54 +316,34 @@ class SingleAgentTurns:
     ) -> SingleAgentRoundResponse:
         """Execute the combined role and apply the strategy's Pareto guard."""
         plan = request.plan
-        plan.recommended_skills, resolved = self._skills(plan.recommended_skills)
-        prompt = self._combined_prompt(request, state, resolved)
-        try:
-            response = await self.worker.turn_structured(
-                "Carry out the orchestrator's task above end-to-end "
-                "(implement, self-judge, profile) and return only the JSON object.",
-                system_prompt=prompt,
-                response_cls=SingleAgentRoundResponse,
-                fallback_factory=lambda: SingleAgentRoundResponse(
-                    summary="Single-agent produced no structured response.",
-                    expected_behavior="unknown",
-                    self_review="No structured response received.",
-                    feedback="No structured response received.",
-                    verdict=Verdict.FAIL,
-                    bottlenecks="",
-                    suggestions="",
-                    profile_analysis="",
-                ),
+        plan.recommended_skills, _ = self._skills(plan.recommended_skills)
+        context = self._combined_context(request, state)
+
+        async def mark_paid() -> None:
+            artifacts.write_implementer_start_marker(
+                self.progress_path, request.round_number, state.retry
+            )
+
+        response = cast(
+            "SingleAgentRoundResponse",
+            await self.ctx.agents.turn(
+                SINGLE_COMBINED,
+                agent=self.worker,
+                context=context,
+                session_key=plan.hypothesis_id,
                 label=f"round-{request.round_number}-retry-{state.retry}-single-agent",
-                reuse_session=True,
-                session_key=AgentSessionKey(SessionScope.HYPOTHESIS, plan.hypothesis_id),
-            )
-        except subprocess.TimeoutExpired as error:
-            response = SingleAgentRoundResponse(
-                summary="Single-agent invocation timed out.",
-                expected_behavior="unknown",
-                self_review=(
-                    f"The framework stopped the agent after {error.timeout:g} seconds "
-                    "without a structured response."
-                ),
-                feedback="Inspect retained evidence and return a schema-valid response on retry.",
-                verdict=Verdict.FAIL,
-                bottlenecks="",
-                suggestions="",
-                profile_analysis="",
-            )
-            self.ctx.log(
-                f"[single-agent] attempt {state.retry} timed out after {error.timeout:g} seconds"
-            )
+                before_paid=mark_paid,
+            ),
+        )
         response.skill_context_updates, _ = self._skills(response.skill_context_updates)
         if response.skill_context_updates:
             plan.recommended_skills, _ = self._skills(
                 [*plan.recommended_skills, *response.skill_context_updates]
             )
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-        conflict = _pareto_archive_conflict(
-            candidate_disposition=response.candidate_disposition,
-            candidate_metrics=dict(response.candidate_metrics),
+            self._write_plan_artifact(request.round_number, plan)
+        conflict = self.search.pareto_conflict(
+            disposition=response.candidate_disposition,
+            metrics=dict(response.candidate_metrics),
             records=request.records,
             space=state.agent_run_state.metrics,
         )
@@ -403,10 +355,7 @@ class SingleAgentTurns:
                     "verdict": Verdict.FAIL,
                 }
             )
-        issue_board.append_single_agent_round(
-            self.progress_path, request.round_number, state.retry, response
-        )
-        await self.workspace.snapshot(
-            f"round-{request.round_number}-retry-{state.retry}-single-agent"
+        self.ctx.progress.note(
+            progress_log.render_single_agent_round(request.round_number, state.retry, response)
         )
         return response
