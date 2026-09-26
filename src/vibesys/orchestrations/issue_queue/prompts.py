@@ -26,7 +26,7 @@ Build a production-ready inference server for the reference implementation at
 `{facts.reference_location}`. Inspect the reference and checker rather than
 substituting a generic model wrapper. Keep all candidate work in this workspace.
 
-Objective: {facts.objective or '<not specified>'}
+Objective: {facts.objective or "<not specified>"}
 
 {facts.environment_notes}
 
@@ -44,7 +44,9 @@ Objective: {facts.objective or '<not specified>'}
 """
 
 
-def implementer_message(issue: Issue, facts: RunFacts, prior_review: dict[str, object] | None) -> str:
+def implementer_message(
+    issue: Issue, facts: RunFacts, prior_review: dict[str, object] | None
+) -> str:
     """Request one bounded implementation attempt."""
     review = ""
     if prior_review is not None:
@@ -58,9 +60,9 @@ def implementer_message(issue: Issue, facts: RunFacts, prior_review: dict[str, o
 {issue.description}
 
 Reference: {facts.reference_location}
-Objective: {facts.objective or '<not specified>'}
+Objective: {facts.objective or "<not specified>"}
 {_commands(facts)}
-Runtime notes: {facts.environment_notes or '<none>'}
+Runtime notes: {facts.environment_notes or "<none>"}
 {review}
 Read `progress.md` for context, but do not edit it. Inspect the accuracy checker
 and benchmark interface before changing their integration points. Make the
@@ -81,7 +83,7 @@ Performance improvement is out of scope for this verdict. Inspect the candidate,
 maintain relevant pytest tests, run them, and use the accuracy checker when one
 is configured. A failing required correctness check requires a fail verdict.
 {_commands(facts)}
-Runtime notes: {facts.environment_notes or '<none>'}
+Runtime notes: {facts.environment_notes or "<none>"}
 
 Start the real service for an end-to-end `/health` and completion-stream smoke
 test. When the benchmark is configured, run a short sanity workload and require
@@ -119,8 +121,8 @@ def performance_message(
     return f"""Run performance evaluation {iteration}.
 
 {_commands(facts)}
-Runtime notes: {facts.environment_notes or '<none>'}
-Objective: {facts.objective or '<not specified>'}
+Runtime notes: {facts.environment_notes or "<none>"}
+Objective: {facts.objective or "<not specified>"}
 Reference: {facts.reference_location}
 {profiler}
 Configured load levels: {json.dumps(loads, sort_keys=True)}

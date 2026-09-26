@@ -196,7 +196,9 @@ async def _implement(run: _IssueQueueRun, issue: Issue, iteration: int) -> Issue
         note=response.summary[:200],
         payload=response.model_dump(mode="json"),
     )
-    append_progress(run.progress_path, f"Iteration {iteration}: implement issue #{issue.id}", response)
+    append_progress(
+        run.progress_path, f"Iteration {iteration}: implement issue #{issue.id}", response
+    )
     return updated
 
 

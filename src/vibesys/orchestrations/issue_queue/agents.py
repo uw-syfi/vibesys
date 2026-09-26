@@ -54,9 +54,7 @@ JUDGE = AgentRole(
     system_prompt=JUDGE_SYSTEM_PROMPT,
     tools=(SHELL, ISSUE_BOARD),
     workspace_access=WorkspaceAccess.READ_WRITE,
-    required_capabilities=frozenset(
-        {AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}
-    ),
+    required_capabilities=frozenset({AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}),
 )
 
 PERF_EVALUATOR = AgentRole(
@@ -64,9 +62,7 @@ PERF_EVALUATOR = AgentRole(
     system_prompt=PERFORMANCE_SYSTEM_PROMPT,
     tools=(SHELL, ISSUE_BOARD, PROFILER),
     workspace_access=WorkspaceAccess.READ_WRITE,
-    required_capabilities=frozenset(
-        {AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}
-    ),
+    required_capabilities=frozenset({AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}),
 )
 
 AGENTS = (IMPLEMENTER, JUDGE, PERF_EVALUATOR)

@@ -13,6 +13,7 @@ def _project(raw_state: BaseModel) -> PluginProjection:
     state = IssueQueueState.model_validate(raw_state)
     return PluginProjection(payload=state.model_dump(mode="json"))
 
+
 PLUGIN = OrchestrationPlugin(
     id="plain",
     agents=AGENTS,
