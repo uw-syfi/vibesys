@@ -13,9 +13,9 @@ not directly comparable. The bundle adapter validates the RF summary and maps
 the metrics to VibeSys result protocol 2.
 
 The evaluator injects the trusted RF engine path. For CPU-only request-path
-validation, run `python benchmark/cpu_smoke.py --request-factory-engine
-<RF_ENGINE>`; it uses a strict local fake completions server and a tiny local
-tokenizer fixture. The benchmark generates its deterministic text corpus in
+validation, run `uv run python -m tests.examples.request_factory_cpu_smoke
+--profile examples/model-serving/qwen3.5-397b-a17b-4xb200/benchmark/cpu_smoke.toml
+--request-factory-engine <RF_ENGINE>`. The benchmark generates its deterministic text corpus in
 the per-run temporary directory and sets the token-pool limit to the larger of
 twice the prompt length or the request count. It fails if RF warns that the
 pool is shorter than a prompt. Fake server metrics are not serving-performance
