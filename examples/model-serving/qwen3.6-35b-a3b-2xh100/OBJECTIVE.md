@@ -20,11 +20,16 @@ management.
 
 ## Workload
 
-Run the Request Factory benchmark through the bundle adapter. The evaluator
-may pass a different serving URL:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different serving URL:
 
 ```bash
-python3 benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model Qwen/Qwen3.6-35B-A3B \
+  --tokenizer Qwen/Qwen3.6-35B-A3B \
+  --tokenizer-revision 995ad96eacd98c81ed38be0c5b274b04031597b0 \
+  --request-count 64 \
+  --input-tokens 256 --output-tokens 128 --concurrency 16 --url <SERVER_URL>
 ```
 
 Default load:
