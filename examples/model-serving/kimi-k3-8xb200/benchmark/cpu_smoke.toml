@@ -7,7 +7,22 @@ benchmark_args = [
   "--concurrency", "2",
 ]
 response_style = "usage"
-failure_message_contains = "failed_steps"
+
+[[failure_cases]]
+mode = "http"
+message_contains = "failed_steps"
+
+[[failure_cases]]
+mode = "malformed-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "truncated-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "output-mismatch"
+message_contains = "output_mismatch_steps"
 
 [[request_shapes]]
 input_tokens = 16

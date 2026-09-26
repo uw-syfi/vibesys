@@ -130,6 +130,8 @@ def _prepare_kimi_tokenizer(directory: Path) -> Path:
 def _summary_metrics(summary: Mapping[str, Any], expected: int) -> dict[str, float]:
     replay = summary.get("replay")
     common = replay.get("common") if isinstance(replay, Mapping) else None
+    if not isinstance(replay, Mapping) or replay.get("kind") != "independent_requests":
+        raise ValueError("RF summary replay must describe independent_requests")
     if not isinstance(common, Mapping):
         raise ValueError("RF summary is missing replay.common")
     for key, value in {
