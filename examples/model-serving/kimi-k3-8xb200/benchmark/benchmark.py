@@ -41,11 +41,20 @@ def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) 
             writer.writerow((f"request-{index:04d}", 0, input_tokens, output_tokens))
 
 
+def _token_pool_limit(request_count: int, input_tokens: int) -> int:
+    return max(2 * input_tokens, request_count)
+
+
 def _write_corpus(path: Path, token_pool_limit: int) -> None:
-    seed = Path(__file__).with_name("corpus.txt").read_text(encoding="utf-8").strip()
     with path.open("w", encoding="utf-8") as corpus:
         for index in range(token_pool_limit):
-            corpus.write(f"{seed} sample {index} token sequence {index}\n")
+            corpus.write(f"Request Factory synthetic benchmark sequence sample {index}.\n")
+
+
+def _check_token_pool_warning(stderr: str) -> None:
+    warning = "synthetic content will repeat within a single request"
+    if warning in stderr:
+        raise RuntimeError(f"Request Factory reported an undersized token pool: {stderr.strip()}")
 
 
 def _summary_metrics(summary: Mapping[str, Any], expected: int) -> dict[str, float]:
@@ -91,8 +100,9 @@ def run(args: argparse.Namespace) -> int:
             temporary = Path(directory)
             trace = temporary / "requests.csv"
             corpus_path = Path(args.text_file) if args.text_file else temporary / "corpus.txt"
+            token_pool_limit = args.token_pool_limit
             if not args.text_file:
-                _write_corpus(corpus_path, args.token_pool_limit)
+                _write_corpus(corpus_path, token_pool_limit)
             summary_path = temporary / "summary.json"
             _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
             command = [
@@ -120,7 +130,7 @@ def run(args: argparse.Namespace) -> int:
                 "--max-concurrency",
                 str(args.concurrency),
                 "--token-pool-limit",
-                str(args.token_pool_limit),
+                str(token_pool_limit),
                 "--request-log",
                 "false",
                 "--timeline",
@@ -133,6 +143,7 @@ def run(args: argparse.Namespace) -> int:
                 print(completed.stdout, end="")
             if completed.stderr:
                 print(completed.stderr, end="", file=sys.stderr)
+            _check_token_pool_warning(completed.stderr)
             if completed.returncode != 0:
                 raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -157,9 +168,11 @@ def main() -> int:
     parser.add_argument("--input-tokens", type=int, default=_INPUT_TOKENS)
     parser.add_argument("--output-tokens", type=int, default=_OUTPUT_TOKENS)
     parser.add_argument("--concurrency", type=int, default=_CONCURRENCY)
-    parser.add_argument("--token-pool-limit", type=int, default=65_536)
+    parser.add_argument("--token-pool-limit", type=int)
     parser.add_argument("--text-file")
     args = parser.parse_args()
+    if args.token_pool_limit is None:
+        args.token_pool_limit = _token_pool_limit(args.request_count, args.input_tokens)
     if (
         min(
             args.request_count,
