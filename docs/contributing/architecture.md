@@ -197,6 +197,8 @@ graph TD
     vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
+    vibesys.orchestration.commands --> vibesys.orchestration._host
+    vibesys.orchestration.commands --> vibesys.orchestration.workspaces
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
@@ -237,6 +239,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.orchestration.agents
+    vibesys.orchestration.runtime --> vibesys.orchestration.commands
     vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
@@ -258,6 +261,11 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
+    vibesys.orchestrations --> vibesys
+    vibesys.orchestrations --> vibesys.errors
+    vibesys.orchestrations --> vibesys.prompts
+    vibesys.orchestrations --> vibesys.roles
+    vibesys.orchestrations --> vibesys.search.hypothesis
     vibesys.orchestrations.agent_options --> vibesys
     vibesys.orchestrations.agent_options --> vibesys.errors
     vibesys.orchestrations.agent_options --> vibesys.evaluators
@@ -535,6 +543,9 @@ graph TD
     vibesys.orchestration.agents --> vs_runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
+    vibesys.orchestration.commands --> vibesys.orchestration._host
+    vibesys.orchestration.commands --> vibesys.orchestration.workspaces
+    vibesys.orchestration.commands --> vs_runtime
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
@@ -585,6 +596,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.orchestration.agents
+    vibesys.orchestration.runtime --> vibesys.orchestration.commands
     vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
@@ -613,6 +625,12 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.orchestration.workspaces --> vs_runtime
+    vibesys.orchestrations --> vibesys
+    vibesys.orchestrations --> vibesys.errors
+    vibesys.orchestrations --> vibesys.prompts
+    vibesys.orchestrations --> vibesys.roles
+    vibesys.orchestrations --> vibesys.search.hypothesis
+    vibesys.orchestrations --> vs_prompts
     vibesys.orchestrations --> vs_runtime
     vibesys.orchestrations.agent_options --> vibesys
     vibesys.orchestrations.agent_options --> vibesys.errors
