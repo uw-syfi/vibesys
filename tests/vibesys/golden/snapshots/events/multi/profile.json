@@ -225,7 +225,7 @@
       "model": null,
       "provider": "fake",
       "stage": "profiler",
-      "system_prompt": "<text len=10667 sha256=c7d7ab1c1ccd70e9>",
+      "system_prompt": "<text len=16519 sha256=788139aee0253380>",
       "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
     },
     "round_label": "round-1-profiler",
@@ -249,7 +249,7 @@
     "agent_kind": "profiler",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=10667 sha256=c7d7ab1c1ccd70e9>",
+      "system_prompt": "<text len=16519 sha256=788139aee0253380>",
       "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
     },
     "round_label": "round-1-profiler",

@@ -306,7 +306,7 @@
       "model": null,
       "provider": "fake",
       "stage": "implementer",
-      "system_prompt": "<text len=6333 sha256=dca937ce7569d116>",
+      "system_prompt": "<text len=6563 sha256=894373bfcd45ddf8>",
       "user_prompt": "Carry out the orchestrator's task above end-to-end (implement, self-judge, profile) and return only the JSON object."
     },
     "round_label": "round-1-retry-1-single-agent",
@@ -330,7 +330,7 @@
     "agent_kind": "implementer",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=6333 sha256=dca937ce7569d116>",
+      "system_prompt": "<text len=6563 sha256=894373bfcd45ddf8>",
       "user_prompt": "Carry out the orchestrator's task above end-to-end (implement, self-judge, profile) and return only the JSON object."
     },
     "round_label": "round-1-retry-1-single-agent",
@@ -483,7 +483,7 @@
       "model": null,
       "provider": "fake",
       "stage": "implementer",
-      "system_prompt": "<text len=6497 sha256=f78d00dc4a88b26d>",
+      "system_prompt": "<text len=6727 sha256=77ce0820cc3ea0b5>",
       "user_prompt": "Carry out the orchestrator's task above end-to-end (implement, self-judge, profile) and return only the JSON object."
     },
     "round_label": "round-1-retry-2-single-agent",
@@ -507,7 +507,7 @@
     "agent_kind": "implementer",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=6497 sha256=f78d00dc4a88b26d>",
+      "system_prompt": "<text len=6727 sha256=77ce0820cc3ea0b5>",
       "user_prompt": "Carry out the orchestrator's task above end-to-end (implement, self-judge, profile) and return only the JSON object."
     },
     "round_label": "round-1-retry-2-single-agent",
