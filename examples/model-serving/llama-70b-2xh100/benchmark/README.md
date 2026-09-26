@@ -22,6 +22,13 @@ without a committed corpus fixture. There is no warmup phase in this workload. T
 methodology changes are intentional; do not compare the new score numerically
 with legacy benchmark results as if they were the same metric.
 
-For CPU-only request-path validation, point the benchmark at a strict fake
-OpenAI completions server and pass a local tokenizer fixture plus short token
-lengths. Fake-server throughput is not a serving-performance result.
+For CPU-only request-path validation, run the shared strict fake-server smoke:
+
+```bash
+uv run python -m tests.examples.request_factory_cpu_smoke \
+  --profile examples/model-serving/llama-70b-2xh100/benchmark/cpu_smoke.toml \
+  --request-factory-engine <RF_ENGINE>
+```
+
+The fake validates request shape, metrics, and failure propagation. Its
+throughput is not a serving-performance result.

@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+from tests.examples.request_factory_cpu_smoke import load_profile
 from tests.support import run_test_command
 
 from vibesys.api.request import load_input_bundle
@@ -30,6 +31,15 @@ def test_objectives_match_the_rf_protocol_metrics() -> None:
 
     assert 'name = "output_token_throughput_per_s"' in objective_text
     assert 'name = "p90_latency_ms"' in objective_text
+
+
+def test_cpu_smoke_profile_declares_the_expected_request_and_result_contract() -> None:
+    profile = load_profile(_BUNDLE_ROOT / "benchmark" / "cpu_smoke.toml")
+
+    assert profile.benchmark_path == _BENCHMARK
+    assert profile.shape_counts == {(16, 4): 8}
+    assert set(profile.metrics) == {"output_token_throughput_per_s", "p90_latency_ms"}
+    assert profile.required_fields["stream_options"] == {"include_usage": True}
 
 
 def test_benchmark_rejects_an_undersized_request_factory_token_pool(tmp_path: Path) -> None:
