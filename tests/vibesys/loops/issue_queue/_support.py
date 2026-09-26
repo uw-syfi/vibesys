@@ -24,6 +24,7 @@ from tests.vibesys.golden.harness import (
     _SharedFakeClient,
     write_minimal_input_bundle,
 )
+from tests.vibesys.loops.legacy_runner import run_orchestration
 
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
@@ -32,7 +33,6 @@ from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
 from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runner import run_orchestration
 from vibesys.roles.implementer import IssueImplementerResponse
 from vibesys.roles.judge import IssueJudgeResponse
 from vibesys.run.integration import LocalRunIntegration

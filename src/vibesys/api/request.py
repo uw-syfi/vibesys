@@ -20,7 +20,7 @@ Imports come directly from the core modules that own these symbols, not from
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
@@ -51,7 +51,6 @@ from vibesys.skills import resolve_skill_source_dirs
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.orchestration.contracts import Orchestrator
     from vibesys.profilers import ProfilerKind
     from vs_project.api import OrchestrationDescriptor
 
@@ -89,11 +88,7 @@ def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
     from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
 
     registration = built_in_orchestrations().resolve(descriptor.id)
-    if registration.plugin is not None:
-        registration.prepare_plugin(descriptor)
-        return
-    orchestrator = cast("type[Orchestrator]", registration.orchestrator)
-    orchestrator(descriptor)
+    registration.prepare_plugin(descriptor)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

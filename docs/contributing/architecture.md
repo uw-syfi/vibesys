@@ -94,7 +94,7 @@ graph TD
     vibesys.api.contracts --> vibesys.orchestration.environment
     vibesys.api.contracts --> vibesys.orchestration.request
     vibesys.api.contracts --> vibesys.orchestration.view
-    vibesys.api.evolve --> vibesys.loops.evolve
+    vibesys.api.evolve --> vibesys.orchestrations
     vibesys.api.testing --> vibesys.backends
     vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.backends --> vibesys
@@ -196,7 +196,6 @@ graph TD
     vibesys.orchestration.commands --> vibesys.orchestration._host
     vibesys.orchestration.commands --> vibesys.orchestration.workspaces
     vibesys.orchestration.contracts --> vibesys.context
-    vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.environment --> vibesys
@@ -272,6 +271,7 @@ graph TD
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
+    vibesys.orchestrations --> vibesys.search.population
     vibesys.orchestrations --> vibesys.search.profile_focus
     vibesys.orchestrations.agent_options --> vibesys
     vibesys.orchestrations.agent_options --> vibesys.errors
@@ -431,7 +431,7 @@ graph TD
     vibesys.api.contracts --> vibesys.orchestration.view
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
-    vibesys.api.evolve --> vibesys.loops.evolve
+    vibesys.api.evolve --> vibesys.orchestrations
     vibesys.api.testing --> vibesys.backends
     vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.backends --> vibesys
@@ -559,7 +559,6 @@ graph TD
     vibesys.orchestration.commands --> vs_runtime
     vibesys.orchestration.commands --> vs_sandbox
     vibesys.orchestration.contracts --> vibesys.context
-    vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vs_project
     vibesys.orchestration.contracts --> vs_runtime
@@ -653,6 +652,7 @@ graph TD
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
+    vibesys.orchestrations --> vibesys.search.population
     vibesys.orchestrations --> vibesys.search.profile_focus
     vibesys.orchestrations --> vs_issue_board
     vibesys.orchestrations --> vs_prompts

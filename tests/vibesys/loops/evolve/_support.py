@@ -26,6 +26,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, Unpack, cast
 from unittest.mock import AsyncMock, MagicMock, patch  # test-isolation: stubs and patches below
 
+from tests.vibesys.loops.legacy_runner import run_orchestration
+
 from vibesys.api.testing import FakeGateExecutor
 from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, DomainName
@@ -36,7 +38,6 @@ from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.evolve.orchestration import EvolveOptions, descriptor_from_options
 from vibesys.loops.evolve.state import EvolutionStateStore
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
 from vibesys.roles.common import Verdict

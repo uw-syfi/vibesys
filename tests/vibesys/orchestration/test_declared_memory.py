@@ -19,18 +19,18 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.loops.legacy_runner import LegacyOrchestrator, run_orchestration
 
 from vibesys.api import (
     ComputeBackend,
     Config,
     OrchestrationDescriptor,
-    OrchestrationRegistry,
     ProfilerKind,
     RunRequest,
-    create_session,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup
+from vibesys.run.integration import LocalRunIntegration
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -115,30 +115,27 @@ class _TransactionPolicy:
         return True
 
 
-def _discard_event(event: object) -> None:
-    del event
+def _run_legacy(request: RunRequest, policy: LegacyOrchestrator) -> bool:
+    """Exercise host-owned memory behavior without cataloging old policies."""
+    integration = LocalRunIntegration()
+    try:
+        return asyncio.run(run_orchestration(request, integration, policy))
+    finally:
+        integration.close()
 
 
 def test_rollback_style_restore_preserves_declared_memory(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    registry = OrchestrationRegistry()
-    registry.register("memory-preserving", _RestorePolicy)
-    session = create_session(_request(project_root), sink=_discard_event, registry=registry)
-    session.start()
-    result = asyncio.run(session.await_result())
-    assert result.succeeded
+    request = _request(project_root)
+    assert _run_legacy(request, _RestorePolicy(request.orchestration))
 
 
 def test_transaction_restore_preserves_declared_memory(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    registry = OrchestrationRegistry()
-    registry.register("memory-preserving", _TransactionPolicy)
-    session = create_session(_request(project_root), sink=_discard_event, registry=registry)
-    session.start()
-    result = asyncio.run(session.await_result())
-    assert result.succeeded
+    request = _request(project_root)
+    assert _run_legacy(request, _TransactionPolicy(request.orchestration))
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +202,6 @@ def test_declared_memory_survives_any_rollback(
     tmp_path = tmp_path_factory.mktemp("declared-memory-property")
     project_root = tmp_path / "project"
     _write_project(project_root)
-    registry = OrchestrationRegistry()
-    registry.register("memory-preserving", _RollbackPolicy)
     request = _request(project_root)
     request = request.model_copy(
         update={
@@ -221,7 +216,4 @@ def test_declared_memory_survives_any_rollback(
             )
         }
     )
-    session = create_session(request, sink=_discard_event, registry=registry)
-    session.start()
-    result = asyncio.run(session.await_result())
-    assert result.succeeded
+    assert _run_legacy(request, _RollbackPolicy(request.orchestration))

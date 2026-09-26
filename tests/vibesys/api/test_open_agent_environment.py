@@ -12,16 +12,19 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import BaseModel, ConfigDict
+
 from vibesys.api.session import _LocalRunSession
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.context import RunSetup
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.run.integration import RunResourceHandoff
 from vibesys.sandbox.run_environment import _cli_container_env, _cli_provider_env_and_auth_files
 from vibesys.skills import platform_skill_selection
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime.api import OrchestrationPlugin, RunHost
+from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -31,7 +34,6 @@ if TYPE_CHECKING:
 
     from vibesys.api.contracts import EventSink
     from vibesys.orchestration.request import RunRequest
-    from vibesys.orchestration.runtime import RunContext
     from vs_project.api import Project
 
 
@@ -91,19 +93,20 @@ def _handoff(
     )
 
 
-class _StubOrchestrator:
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        del descriptor
-        self.setup = RunSetup()
+class _StubOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    async def run(self, ctx: RunContext) -> bool:
-        del ctx
-        return True
+
+async def _run_stub(host: RunHost, options: BaseModel) -> PluginRunStatus:
+    del host, options
+    return PluginRunStatus.SUCCEEDED
 
 
 def _session_with_handoff(handoff: RunResourceHandoff) -> _LocalRunSession:
     registry = OrchestrationRegistry()
-    registry.register("stub", _StubOrchestrator)
+    registry.register_plugin(
+        OrchestrationPlugin(id="stub", agents=(), options=_StubOptions, orchestrate=_run_stub)
+    )
     request = SimpleNamespace(
         orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={})
     )

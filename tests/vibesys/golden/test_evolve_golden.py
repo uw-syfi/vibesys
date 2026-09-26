@@ -58,6 +58,7 @@ from tests.vibesys.golden.helpers import (
     prompt_text,
     read_events,
 )
+from tests.vibesys.loops.legacy_runner import run_orchestration
 
 from vibesys.api.testing import FakeGateExecutor
 from vibesys.config import Config, as_config
@@ -67,7 +68,6 @@ from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.evolve.orchestration import EvolveOptions, descriptor_from_options
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse

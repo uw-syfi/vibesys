@@ -14,26 +14,11 @@ from vs_project.api import OrchestrationDescriptor
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.orchestration.runtime import RunContext
     from vs_project.api import Project
     from vs_runtime.api import OrchestrationPlugin, PluginProjection
 
 
 type PluginSetupFactory = Callable[[BaseModel], RunSetup]
-
-
-class Orchestrator(Protocol):
-    """A descriptor-validated policy that controls one run."""
-
-    setup: RunSetup
-
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        """Validate the ID, config version, and typed options before setup."""
-        ...
-
-    async def run(self, ctx: RunContext) -> bool:
-        """Run policy control flow using the host capabilities."""
-        ...
 
 
 class OrchestrationProjector(Protocol):
@@ -104,30 +89,17 @@ def _plugin_run_view(
 
 @dataclass(frozen=True, slots=True)
 class OrchestrationRegistration:
-    """The execution class and optional read projection for one stable ID."""
+    """The runtime plugin and optional read projection for one stable ID."""
 
-    orchestrator: type[Orchestrator] | None = None
-    plugin: OrchestrationPlugin | None = None
+    plugin: OrchestrationPlugin
     plugin_setup: PluginSetupFactory | None = None
     projector: OrchestrationProjector | None = None
     portable_namespaces: tuple[str, ...] = ()
     state_family: str | None = None
 
-    def __post_init__(self) -> None:
-        """Require exactly one execution contract per registered ID."""
-        if (self.orchestrator is None) == (self.plugin is None):
-            message = "registration requires exactly one orchestrator or plugin"
-            raise ValueError(message)
-        if self.orchestrator is not None and self.plugin_setup is not None:
-            message = "legacy orchestrator registration cannot declare plugin setup"
-            raise ValueError(message)
-
     def prepare_plugin(self, descriptor: OrchestrationDescriptor) -> PreparedPlugin:
         """Validate and bind one plugin descriptor before run resources open."""
         plugin = self.plugin
-        if plugin is None:
-            message = "registration does not contain an orchestration plugin"
-            raise TypeError(message)
         if descriptor.id != plugin.id:
             message = (
                 f"selected orchestration {descriptor.id!r} does not match plugin {plugin.id!r}"
@@ -183,36 +155,11 @@ def project_run(
 
 
 class OrchestrationRegistry:
-    """Map stable orchestration IDs to concrete policy classes."""
+    """Map stable orchestration IDs to runtime plugins."""
 
     def __init__(self) -> None:
         """Create an empty registration table."""
         self._registrations: dict[str, OrchestrationRegistration] = {}
-
-    def register(
-        self,
-        kind: str,
-        orchestrator: type[Orchestrator],
-        *,
-        projector: OrchestrationProjector | None = None,
-        portable_namespaces: tuple[str, ...] = (),
-        state_family: str | None = None,
-    ) -> None:
-        """Register the policy constructor and its explicit read projection."""
-        try:
-            OrchestrationDescriptor(id=kind, config_version=1, options={})
-        except ValidationError as exc:
-            msg = f"invalid orchestration ID {kind!r}"
-            raise ValueError(msg) from exc
-        if kind in self._registrations:
-            msg = f"orchestration {kind!r} is already registered"
-            raise ValueError(msg)
-        self._registrations[kind] = OrchestrationRegistration(
-            orchestrator=orchestrator,
-            projector=projector,
-            portable_namespaces=portable_namespaces,
-            state_family=state_family,
-        )
 
     def register_plugin(
         self,
@@ -221,7 +168,12 @@ class OrchestrationRegistry:
         setup: PluginSetupFactory | None = None,
         state_family: str | None = None,
     ) -> None:
-        """Register an in-repository plugin in the same product catalog."""
+        """Register a runtime plugin in the product catalog."""
+        try:
+            OrchestrationDescriptor(id=plugin.id, config_version=plugin.config_version, options={})
+        except ValidationError as exc:
+            message = f"invalid orchestration plugin ID {plugin.id!r}"
+            raise ValueError(message) from exc
         if plugin.id in self._registrations:
             msg = f"orchestration {plugin.id!r} is already registered"
             raise ValueError(msg)

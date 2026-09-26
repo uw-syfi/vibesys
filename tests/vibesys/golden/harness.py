@@ -14,12 +14,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch  # test-isolation: seams scripted below
 
+from tests.vibesys.loops.legacy_runner import run_orchestration
+
 from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
-from vibesys.loops.registry import built_in_orchestrations
+from vibesys.loops.evolve.entrypoint import EvolveProjector
+from vibesys.loops.issue_queue.entrypoint import IssueQueueProjector
+from vibesys.loops.multi.orchestration import MultiProjector, ProfileMultiProjector
+from vibesys.loops.single.orchestration import SingleProjector
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import Project
@@ -28,9 +32,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from tests.vibesys.loops.legacy_runner import LegacyOrchestrator
+
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.constants import ComputeBackend
-    from vibesys.orchestration.contracts import Orchestrator
     from vs_agent.api import AgentClientProtocol
     from vs_agent.api.testing import FakeAgentClient
     from vs_project.api import OrchestrationDescriptor
@@ -103,7 +108,7 @@ def run_scripted(  # noqa: PLR0913  # LW-040006 [PLR0913]; the parameters are in
     *,
     orchestration_id: str,
     descriptor: OrchestrationDescriptor,
-    orchestrator_factory: type[Orchestrator],
+    orchestrator_factory: type[LegacyOrchestrator],
     runner: FakeAgentClient,
     exp_name: str = "golden",
     domain: str = "llm-serving",
@@ -137,7 +142,19 @@ def run_scripted(  # noqa: PLR0913  # LW-040006 [PLR0913]; the parameters are in
         profiler_kind=profiler_kind,
     )
 
-    projector = built_in_orchestrations().resolve(orchestration_id).projector
+    # The retired loop state schema differs from the plugin state schema.
+    # Preserve historical event snapshots until every golden is ported to the
+    # matching plugin, then delete this map with the test-only legacy runner.
+    projector = {
+        "single-agent": SingleProjector(),
+        "profile-guided-single-agent": SingleProjector(
+            namespace="profile_single", orchestration_id="profile-guided-single-agent"
+        ),
+        "multi-agent": MultiProjector(),
+        "profile-guided-multi-agent": ProfileMultiProjector(),
+        "plain": IssueQueueProjector(),
+        "evolve": EvolveProjector(),
+    }[orchestration_id]
 
     async def execute() -> bool:
         integration = LocalRunIntegration()

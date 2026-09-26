@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, ConfigDict
 from tests.support.run_execution import run_execution_record
 
 from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
-from vibesys.context import RunSetup
-from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
+from vibesys.orchestrations.evolve.models import EvolveState
 from vibesys.orchestrations.issue_queue import IssueQueueState
 from vibesys.search.population.models import PopulationConfig
 from vibesys.search.population.search import PopulationSearch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_runtime.api import OrchestrationPlugin, RunHost
+from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,6 +80,10 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
+    state = EvolveState(population=PopulationSearch(PopulationConfig(seed=0)).initial())
+    project.state.portable_namespace(manifest.run_id, "evolve").slot(
+        "state.json", EvolveState
+    ).save(state)
 
     store = open_run_store(project)
     direct = store.get_run(manifest.run_id)
@@ -85,12 +91,11 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.loop == "evolve"
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    store_ = EvolutionStateStore(project.state.portable_namespace(manifest.run_id, "evolve"))
-    state = store_.load() or EvolveState(
-        population=PopulationSearch(PopulationConfig(seed=0)).initial()
-    )
-    expected = store_.projection(state)
-    assert direct.projection == expected.model_dump(mode="json")
+    assert direct.projection == {
+        "population": state.population.model_dump(mode="json"),
+        "metric_space": state.metric_space.model_dump(mode="json"),
+        "generation": 0,
+    }
     assert store.list_runs() == [direct]
 
 
@@ -119,22 +124,34 @@ def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
     assert direct.status is RunStatus.UNKNOWN
     assert direct.projection is None
     assert store.list_runs() == [direct]
-    project.state.portable_namespace(manifest.run_id, "evidence").write_bytes(
+    project.state.portable_namespace(manifest.run_id, "team-search").write_bytes(
         "notes.txt", b"candidate review"
     )
     assert portable_history_snapshots(project, manifest.run_id) == ()
 
-    class EvidencePolicy:
-        def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-            del descriptor
-            self.setup = RunSetup()
+    class EvidenceOptions(BaseModel):
+        model_config = ConfigDict(extra="forbid")
 
-        async def run(self, ctx: object) -> bool:
-            del ctx
-            return True
+        workers: int
+
+    class EvidenceState(BaseModel):
+        revision: int = 0
+
+    async def run_evidence(host: RunHost, options: BaseModel) -> PluginRunStatus:
+        del host, options
+        return PluginRunStatus.SUCCEEDED
 
     registry = OrchestrationRegistry()
-    registry.register("team-search", EvidencePolicy, portable_namespaces=("evidence",))
+    registry.register_plugin(
+        OrchestrationPlugin(
+            id="team-search",
+            agents=(),
+            options=EvidenceOptions,
+            orchestrate=run_evidence,
+            state=EvidenceState,
+            config_version=2,
+        )
+    )
     snapshots = portable_history_snapshots(project, manifest.run_id, registry=registry)
     assert [file.relative_path.name for file in snapshots[0].files] == ["notes.txt"]
 

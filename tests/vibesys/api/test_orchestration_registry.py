@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
@@ -53,30 +53,29 @@ from vs_runtime.api import RunStatus as PluginRunStatus
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.orchestration.runtime import RunContext
-
-
-class _UnsupportedTeamDescriptorError(ValueError):
-    def __init__(self) -> None:
-        super().__init__("unsupported team-search descriptor")
-
 
 def _discard_event(event: CoreEvent) -> None:
     del event
 
 
-class _StubOrchestrator:
-    calls: ClassVar[list[RunRequest]] = []
-    result: ClassVar[bool] = True
+class _TeamOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        if descriptor.id != "team-search" or descriptor.config_version != 2:
-            raise _UnsupportedTeamDescriptorError
-        self.setup = RunSetup()
+    workers: int = Field(gt=0)
 
-    async def run(self, ctx: RunContext) -> bool:
-        self.calls.append(ctx.request)
-        return self.result
+
+_team_calls: list[str] = []
+
+
+async def _run_team(host: RunHost, options: BaseModel) -> PluginRunStatus:
+    _TeamOptions.model_validate(options)
+    _team_calls.append(host.run_id)
+    return PluginRunStatus.SUCCEEDED
+
+
+_TEAM_PLUGIN = OrchestrationPlugin(
+    id="team-search", agents=(), options=_TeamOptions, orchestrate=_run_team, config_version=2
+)
 
 
 class _PluginOptions(BaseModel):
@@ -161,11 +160,11 @@ def _custom_request(tmp_path: Path) -> RunRequest:
 
 def test_registry_rejects_duplicate_and_missing_ids() -> None:
     registry = OrchestrationRegistry()
-    registry.register("team-search", _StubOrchestrator)
+    registry.register_plugin(_TEAM_PLUGIN)
 
-    assert registry.resolve("team-search").orchestrator is _StubOrchestrator
+    assert registry.resolve("team-search").plugin is _TEAM_PLUGIN
     with pytest.raises(ValueError, match="already registered"):
-        registry.register("team-search", _StubOrchestrator)
+        registry.register_plugin(_TEAM_PLUGIN)
     with pytest.raises(ValueError, match="not registered"):
         registry.resolve("missing")
 
@@ -173,11 +172,18 @@ def test_registry_rejects_duplicate_and_missing_ids() -> None:
 @pytest.mark.parametrize("invalid_id", ["", " Team", "team/search", "TEAM", "a" * 129])
 def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> None:
     registry = OrchestrationRegistry()
-    with pytest.raises(ValueError, match="invalid orchestration ID"):
-        registry.register(invalid_id, _StubOrchestrator)
+    with pytest.raises(ValueError, match="invalid orchestration plugin ID"):
+        registry.register_plugin(
+            OrchestrationPlugin(
+                id=invalid_id, agents=(), options=_TeamOptions, orchestrate=_run_team
+            )
+        )
 
-    registry.register("team.v2", _StubOrchestrator)
-    assert registry.resolve("team.v2").orchestrator is _StubOrchestrator
+    versioned = OrchestrationPlugin(
+        id="team.v2", agents=(), options=_TeamOptions, orchestrate=_run_team
+    )
+    registry.register_plugin(versioned)
+    assert registry.resolve("team.v2").plugin is versioned
 
 
 def test_builtin_catalog_selects_only_plugins() -> None:
@@ -193,7 +199,6 @@ def test_builtin_catalog_selects_only_plugins() -> None:
     for kind, plugin in expected.items():
         registration = registry.resolve(kind)
         assert registration.plugin is plugin
-        assert registration.orchestrator is None
         assert registration.projector is not None
         assert registration.portable_namespaces == (kind,)
 
@@ -375,9 +380,9 @@ def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
 
 def test_session_executes_registered_policy_with_canonical_request(tmp_path: Path) -> None:
     request = _custom_request(tmp_path)
-    _StubOrchestrator.calls.clear()
+    _team_calls.clear()
     registry = OrchestrationRegistry()
-    registry.register("team-search", _StubOrchestrator)
+    registry.register_plugin(_TEAM_PLUGIN)
     events: list[CoreEvent] = []
 
     def record(event: CoreEvent) -> None:
@@ -389,7 +394,7 @@ def test_session_executes_registered_policy_with_canonical_request(tmp_path: Pat
     result = asyncio.run(session.await_result())
     view = session.view()
 
-    assert _StubOrchestrator.calls == [request]
+    assert _team_calls == [result.run_id]
     assert result.run_id.endswith("-custom-run")
     assert result.loop == "team-search"
     assert result.succeeded
@@ -405,50 +410,32 @@ class _Evidence(BaseModel):
     revision: int
 
 
-class _EvidencePolicy(_StubOrchestrator):
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        super().__init__(descriptor)
-        self.setup = RunSetup(state_namespace="evidence", state_slots={"state.json": _Evidence})
-
-    async def run(self, ctx: RunContext) -> bool:
-        await ctx.state.checkpoint(sequence=1, writes={"state.json": _Evidence(revision=4)})
-        return await super().run(ctx)
+async def _run_evidence(host: RunHost, options: BaseModel) -> PluginRunStatus:
+    _TeamOptions.model_validate(options)
+    await host.state.commit(_Evidence(revision=4))
+    return PluginRunStatus.SUCCEEDED
 
 
-class _EvidenceProjector:
-    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
-        state = (
-            project.state.portable_namespace(run_id, "evidence")
-            .slot("state.json", _Evidence)
-            .load_optional()
-        )
-        return RunView(
-            run_id=run_id,
-            loop=loop,
-            status=status,
-            projection={"revision": state.revision} if state is not None else None,
-        )
+def _project_evidence(state: BaseModel) -> PluginProjection:
+    evidence = _Evidence.model_validate(state)
+    return PluginProjection(payload={"revision": evidence.revision})
 
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
-        if namespace != "evidence" or not isinstance(state, _Evidence):
-            return None
-        return RunView(
-            run_id=run_id,
-            loop="team-search",
-            status=RunStatus.ACTIVE,
-            projection={"revision": state.revision},
-        )
+
+_EVIDENCE_PLUGIN = OrchestrationPlugin(
+    id="team-search",
+    agents=(),
+    options=_TeamOptions,
+    orchestrate=_run_evidence,
+    state=_Evidence,
+    project=_project_evidence,
+    config_version=2,
+)
 
 
 def test_projector_uses_same_committed_state_for_live_and_stored_views(tmp_path: Path) -> None:
     request = _custom_request(tmp_path)
     registry = OrchestrationRegistry()
-    registry.register(
-        "team-search",
-        _EvidencePolicy,
-        projector=_EvidenceProjector(),
-        portable_namespaces=("evidence",),
-    )
+    registry.register_plugin(_EVIDENCE_PLUGIN)
     session = create_session(request, sink=_discard_event, registry=registry)
     committed: list[RunView] = []
     session.on_committed_view(lambda view, _keys: committed.append(view))
@@ -480,8 +467,8 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
         }
     )
     registry = OrchestrationRegistry()
-    registry.register("team-search", _StubOrchestrator)
-    with pytest.raises(ValueError, match="unsupported team-search descriptor"):
+    registry.register_plugin(_TEAM_PLUGIN)
+    with pytest.raises(ValueError, match="requires config version 2"):
         create_session(request, sink=_discard_event, registry=registry)
     assert not (request.project_root / ".vibesys").exists()
 

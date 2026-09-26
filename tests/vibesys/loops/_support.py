@@ -24,11 +24,11 @@ from tests.vibesys.golden.harness import (
     _SharedFakeClient,
     write_minimal_input_bundle,
 )
+from tests.vibesys.loops.legacy_runner import run_orchestration
 
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runner import run_orchestration
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import Project
 
@@ -36,8 +36,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from tests.vibesys.loops.legacy_runner import LegacyOrchestrator
+
     from vibesys.backends.base import ComputeBackendImpl
-    from vibesys.orchestration.contracts import Orchestrator
     from vibesys.orchestration.gates import GateExecutor
     from vs_agent.api import AgentClientProtocol
     from vs_agent.api.testing import FakeAgentClient
@@ -88,7 +89,7 @@ def _build_request(
 
 async def _execute(  # noqa: PLR0913  # LW-040130 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     request: RunRequest,
-    orchestrator_factory: type[Orchestrator],
+    orchestrator_factory: type[LegacyOrchestrator],
     descriptor: OrchestrationDescriptor,
     runner: object,
     *,
@@ -115,7 +116,7 @@ async def _execute(  # noqa: PLR0913  # LW-040130 [PLR0913]; the parameters are 
 def run_agent_loop(  # noqa: PLR0913  # LW-040131 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     tmp_path: Path,
     runner: FakeAgentClient,
-    orchestrator_factory: type[Orchestrator],
+    orchestrator_factory: type[LegacyOrchestrator],
     descriptor: OrchestrationDescriptor,
     *,
     exp_name: str = "agent-test",
@@ -160,7 +161,7 @@ def run_agent_loop(  # noqa: PLR0913  # LW-040131 [PLR0913]; the parameters are 
 def run_agent_loop_expect_crash(  # noqa: PLR0913  # LW-040132 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     tmp_path: Path,
     runner: FakeAgentClient,
-    orchestrator_factory: type[Orchestrator],
+    orchestrator_factory: type[LegacyOrchestrator],
     descriptor: OrchestrationDescriptor,
     error: type[BaseException],
     *,

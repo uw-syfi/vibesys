@@ -50,7 +50,7 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
 )
-from vibesys.orchestration.contracts import OrchestrationRegistry, Orchestrator
+from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
@@ -84,7 +84,6 @@ __all__ = [
     "Objective",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
-    "Orchestrator",
     "PerfDeltaReason",
     "ProfilerKind",
     "RepositoryVisibility",

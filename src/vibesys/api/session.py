@@ -18,7 +18,7 @@ from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
 from vibesys.orchestration.contracts import project_run
-from vibesys.orchestration.runner import run_orchestration, run_plugin
+from vibesys.orchestration.runner import run_plugin
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import MCPServerSpec, expose_as_tools
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
     from vibesys.config import Config
-    from vibesys.orchestration.contracts import OrchestrationRegistry, Orchestrator
+    from vibesys.orchestration.contracts import OrchestrationRegistry
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
@@ -174,14 +174,8 @@ class _LocalRunSession:
             registry = built_in_orchestrations()
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
-        # Constructor validation precedes integration and run resource setup.
-        if self._registration.plugin is None:
-            orchestrator = cast("type[Orchestrator]", self._registration.orchestrator)
-            self._policy = orchestrator(request.orchestration)
-            self._prepared_plugin = None
-        else:
-            self._policy = None
-            self._prepared_plugin = self._registration.prepare_plugin(request.orchestration)
+        # Descriptor validation precedes integration and run resource setup.
+        self._prepared_plugin = self._registration.prepare_plugin(request.orchestration)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -305,13 +299,8 @@ class _LocalRunSession:
 
     async def _run(self) -> RunResult:
         request = self._request
-        policy = self._policy
         prepared_plugin = self._prepared_plugin
-        plugin = prepared_plugin.plugin if prepared_plugin is not None else None
-        setup = prepared_plugin.setup if prepared_plugin is not None else None
-        hints = (
-            policy.setup.start_hints if policy is not None else setup.start_hints if setup else None
-        )
+        hints = prepared_plugin.setup.start_hints
         try:
             self._integration.events.emit(
                 CoreEventType.RUN_STARTED,
@@ -320,33 +309,18 @@ class _LocalRunSession:
                     outer_loop=request.orchestration_id,
                     input=str(request.input_bundle.root),
                     max_rounds=hints.max_rounds if hints is not None else None,
-                    expected_roles=(
-                        hints.expected_roles
-                        if hints is not None
-                        else tuple(role.id for role in plugin.agents)
-                        if plugin is not None
-                        else ()
-                    ),
+                    expected_roles=hints.expected_roles if hints is not None else (),
                 ),
             )
-            if prepared_plugin is not None:
-                outcome = await run_plugin(
-                    request,
-                    self._integration,
-                    prepared_plugin,
-                    open_agent_environment=self.open_agent_environment,
-                    projector=self._registration.projector,
-                    agent_tool_bindings=AGENT_TOOL_BINDINGS,
-                )
-                succeeded = outcome.value == "succeeded"
-            else:
-                succeeded = await run_orchestration(
-                    request,
-                    self._integration,
-                    cast("Orchestrator", policy),
-                    open_agent_environment=self.open_agent_environment,
-                    projector=self._registration.projector,
-                )
+            outcome = await run_plugin(
+                request,
+                self._integration,
+                prepared_plugin,
+                open_agent_environment=self.open_agent_environment,
+                projector=self._registration.projector,
+                agent_tool_bindings=AGENT_TOOL_BINDINGS,
+            )
+            succeeded = outcome.value == "succeeded"
         except BaseException as exc:
             self._status = RunStatus.FAILED
             self._integration.events.emit(

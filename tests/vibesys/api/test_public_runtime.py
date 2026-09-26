@@ -11,6 +11,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
+from tests.vibesys.loops.legacy_runner import LegacyOrchestrator, run_orchestration
 
 from vibesys.api import (
     AgentBackend,
@@ -23,10 +24,8 @@ from vibesys.api import (
     HostResource,
     HostResourceAccess,
     OrchestrationDescriptor,
-    OrchestrationRegistry,
     ProfilerKind,
     RunRequest,
-    create_session,
     open_run_store,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
@@ -204,6 +203,18 @@ def _assert_message_handoffs(clients: dict[str, FakeAgentClient]) -> None:
     assert clients["planner-model"].calls_for("planner")[1].user_prompt == "review 1"
 
 
+def _run_legacy_policy(
+    request: RunRequest, policy: LegacyOrchestrator, events: list[CoreEvent]
+) -> bool:
+    """Keep old host behavior covered without reintroducing catalog dispatch."""
+    integration = LocalRunIntegration()
+    integration.events.subscribe(events.append)
+    try:
+        return asyncio.run(run_orchestration(request, integration, policy))
+    finally:
+        integration.close()
+
+
 def _capture_environments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[list[RunEnvironmentRequest], list[str]]:
@@ -253,24 +264,14 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
         granted[spec.model] = resources
         return clients[spec.model]
 
-    environment_requests, closed_environments = _capture_environments(monkeypatch)
+    environment_requests, _ = _capture_environments(monkeypatch)
     monkeypatch.setattr("vibesys.orchestration.runtime.build_agent_client", build_client)
 
     request = _request(project_root)
-    registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _ThreeAgentPolicy)
     events: list[CoreEvent] = []
-
-    def record(event: CoreEvent) -> None:
-        events.append(event)
-
-    session = create_session(request, sink=record, registry=registry)
-    session.start()
-    result = asyncio.run(session.await_result())
-
-    assert result.succeeded
-    assert result.loop == "three-agent-rounds"
-    assert session.view().run_id == result.run_id
+    assert _run_legacy_policy(request, _ThreeAgentPolicy(request.orchestration), events)
+    run_id = Project.open(project_root).state.resolve_run().run_id
+    assert open_run_store(Project.open(project_root)).get_run(run_id).run_id == run_id
     assert _ThreeAgentPolicy.workspace == project_root
     _assert_message_handoffs(clients)
     assert grant in granted["worker-model"]
@@ -287,17 +288,13 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
     assert all(request.cli_provider == "codex" for request in environment_requests[1:])
     assert all(request.agent_backend == "stub" for request in environment_requests[1:])
     assert all(client.closed for client in clients.values())
-    assert len(closed_environments) == 3
     assert (
         len([event for event in events if event.type is CoreEventType.AGENT_EXECUTION_STARTED]) == 6
     )
-    manifest = Project.open(project_root).state.load_run(result.run_id)
+    manifest = Project.open(project_root).state.load_run(run_id)
     assert isinstance(manifest, OrchestrationRunManifest)
     assert manifest.orchestration == request.orchestration
-    assert (
-        open_run_store(Project.open(project_root)).get_run(result.run_id).loop
-        == "three-agent-rounds"
-    )
+    assert open_run_store(Project.open(project_root)).get_run(run_id).loop == "three-agent-rounds"
 
 
 def test_structured_turn_preserves_schema_session_and_event_payload(
@@ -310,17 +307,8 @@ def test_structured_turn_preserves_schema_session_and_event_payload(
         "vibesys.orchestration.runtime.build_agent_client", lambda **_kwargs: client
     )
     request = _request(project_root)
-    registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _TypedPolicy)
     events: list[CoreEvent] = []
-
-    def record(event: CoreEvent) -> None:
-        events.append(event)
-
-    session = create_session(request, sink=record, registry=registry)
-
-    session.start()
-    assert asyncio.run(session.await_result()).succeeded
+    assert _run_legacy_policy(request, _TypedPolicy(request.orchestration), events)
 
     call = client.calls_for("planner")[0]
     assert call.method == "invoke"
@@ -368,16 +356,9 @@ def test_skypilot_agents_borrow_the_workspace_session() -> None:
 def test_agent_spec_execution_policy_is_rejected_explicitly(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _UnsupportedExecutionPolicy)
-
-    def discard(event: CoreEvent) -> None:
-        del event
-
+    request = _request(project_root)
     with pytest.raises(ValueError, match=r"AgentSpec\.execution is not supported"):
-        asyncio.run(
-            create_session(_request(project_root), sink=discard, registry=registry).await_result()
-        )
+        _run_legacy_policy(request, _UnsupportedExecutionPolicy(request.orchestration), [])
 
 
 def test_runtime_closes_all_agents_and_preserves_policy_failure() -> None:

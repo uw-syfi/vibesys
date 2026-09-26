@@ -1,10 +1,8 @@
 """Every registered strategy has a prompt folder, and vice versa.
 
 A strategy is its folder + one registry line + its prompt folder
-(``prompts/loops/<strategy>/``). This test derives "which folder backs a
-registered strategy" the same way :mod:`vibesys.plugin_catalog` does. Plugin
-declarations live in ``vibesys.orchestrations.<folder>``; the remaining legacy
-orchestrator lives in ``vibesys.loops.<folder>``.
+(``prompts/loops/<strategy>/``). Plugin declarations live in
+``vibesys.orchestrations.<folder>``.
 """
 
 from __future__ import annotations
@@ -21,13 +19,8 @@ def _registered_strategy_folders() -> set[str]:
     registry = built_in_orchestrations()
     folders = set()
     for registration in registry._registrations.values():  # noqa: SLF001  # LW-040196 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-        if registration.plugin is not None:
-            module = registration.plugin.orchestrate.__module__
-            prefix = "vibesys.orchestrations."
-        else:
-            assert registration.orchestrator is not None
-            module = registration.orchestrator.__module__
-            prefix = "vibesys.loops."
+        module = registration.plugin.orchestrate.__module__
+        prefix = "vibesys.orchestrations."
         assert module.startswith(prefix), f"registered policy {module!r} is not under {prefix}"
         folders.add(module.split(".")[2])
     return folders
