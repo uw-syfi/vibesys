@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import statistics
@@ -32,11 +33,12 @@ def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) 
             writer.writerow((f"request-{index:05d}", 0, input_tokens, output_tokens))
 
 
-def _write_corpus(path: Path, token_pool_limit: int) -> None:
-    seed = "The server processes a synthetic request and returns generated text"
+def _write_corpus(path: Path, token_pool_limit: int, content_key: str) -> None:
+    """Write deterministic, point-keyed content that prevents prompt replay across points."""
     with path.open("w", encoding="utf-8") as corpus:
         for index in range(token_pool_limit):
-            corpus.write(f"{seed} sample {index} token sequence {index}\n")
+            digest = hashlib.sha256(f"{content_key}:{index}".encode()).digest()
+            corpus.write(f"{int.from_bytes(digest[:8], byteorder='big') % 127}\n")
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -108,7 +110,7 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
         _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
         token_pool_limit = max(2 * args.input_tokens, args.request_count)
         corpus = temporary / "corpus.txt"
-        _write_corpus(corpus, token_pool_limit)
+        _write_corpus(corpus, token_pool_limit, label)
         command = [
             args.request_factory_engine,
             "--trace",
@@ -280,9 +282,6 @@ def run(args: argparse.Namespace) -> int:
                             "kind": "result",
                             "label": "",
                             "values": values,
-                            "artifacts": {"sweep": points},
-                            "metadata": {"selected_concurrency": selected["concurrency"]},
-                            "unit": "tok/s",
                         },
                         allow_nan=False,
                     )

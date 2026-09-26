@@ -58,6 +58,7 @@ class SmokeProfile(BaseModel):
     tokenizer: str | None = None
     corpus_text: str | None = None
     unique_prompt_tokens: bool = False
+    unique_prompts: bool = False
 
     @property
     def benchmark_path(self) -> Path:
@@ -97,6 +98,9 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
             shape = self._shape(body)
             if shape is not None:
                 self.server.observed_shapes[shape] += 1
+            prompt = body.get("prompt")
+            if isinstance(prompt, list) and all(isinstance(token, int) for token in prompt):
+                self.server.observed_prompts.append(tuple(prompt))
             if error:
                 self.server.errors.append(error)
             failure_mode = self.server.failure_mode
@@ -199,6 +203,7 @@ class _FakeServer(http.server.ThreadingHTTPServer):
         self.failure_mode = False
         self.errors: list[str] = []
         self.observed_shapes: Counter[tuple[int, int]] = Counter()
+        self.observed_prompts: list[tuple[int, ...]] = []
         self.lock = threading.Lock()
 
 
@@ -282,7 +287,12 @@ def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
                 f"unexpected request-shape counts: {server.observed_shapes}; "
                 f"expected {profile.shape_counts}"
             )
+            if profile.unique_prompts:
+                assert len(set(server.observed_prompts)) == len(server.observed_prompts), (
+                    "Request Factory replayed a prompt within the measured benchmark"
+                )
             server.observed_shapes.clear()
+            server.observed_prompts.clear()
             server.failure_mode = True
             _run_case(
                 profile,

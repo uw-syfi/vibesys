@@ -33,6 +33,9 @@ input tokens, and 128 output tokens. RF sends independent requests in saturated
 arrival mode, bounded by the point's concurrency. This fixed-volume workload
 replaces the former duration-limited bundle client; its scores should not be
 treated as directly comparable with older fixed-duration runs.
+Each coarse, midpoint, and confirmation invocation uses deterministic but
+distinct prompt content, so keeping one server alive does not turn later sweep
+points into prefix-cache replays of earlier points.
 
 Run the benchmark client on the same host as the server and send requests over
 loopback. This keeps external routing out of the measurements while exercising
@@ -51,6 +54,8 @@ Retain and report every sweep row. The canonical `aggregate_throughput` and
 point. RF's pinned aggregate summary has no p99 field, so the wrapper derives
 p99 from RF's per-request total-duration records. The RF workload count and
 token lengths are checked against each summary and request log.
+The protocol-v2 result stream contains only the selected metric row. The full
+sweep, repetitions, and selected concurrency remain in `--output-json`.
 
 ## Headline metric (`perf_metric`) and Pareto metrics — canonical fields, do not leave null
 
