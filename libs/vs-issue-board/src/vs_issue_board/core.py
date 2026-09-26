@@ -93,9 +93,7 @@ class IssueTracker(Protocol):
     def create(
         self,
         *,
-        # lint-waiver: LW-010197 [A002]; preserve the existing public `type` keyword.
-        # > Renaming it would create a second API shape for every tracker backend.
-        type: IssueType | str,  # noqa: A002
+        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-920407 [A002]; preserve the established public keyword across tracker backends.
         title: str,
         description: str,
         created_by: str,
@@ -108,7 +106,7 @@ class IssueTracker(Protocol):
         """Return a detached issue, or ``None`` if the identifier is absent."""
         ...
 
-    def update_status(  # noqa: PLR0913  # tracked: #288
+    def update_status(  # noqa: PLR0913  # lint-waiver: LW-920409 [PLR0913]; retain the tracker transition contract's named state, actor, iteration, and event fields.
         self,
         issue_id: int,
         status: IssueStatus | str,
@@ -147,9 +145,7 @@ class IssueTracker(Protocol):
         self,
         *,
         status: IssueStatus | str | None = None,
-        # lint-waiver: LW-010198 [A002]; preserve the existing public `type` filter keyword.
-        # > Renaming it would create a second API shape for every tracker backend.
-        type: IssueType | str | None = None,  # noqa: A002
+        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-920408 [A002]; preserve the established public filter keyword across tracker backends.
     ) -> builtins.list[Issue]:
         """List detached issues, optionally filtered by status and type."""
         ...
