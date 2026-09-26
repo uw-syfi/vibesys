@@ -9,7 +9,7 @@
   "decoder": null,
   "model": {
     "type": "WordLevel",
-    "vocab": {"Request": 0, "Factory": 1, "generates": 2, "independent": 3, "synthetic": 4, "prompts": 5, "from": 6, "a": 7, "deterministic": 8, "corpus": 9, "with": 10, "model": 11, "tokenizer": 12, "tokens": 13, "[UNK]": 14},
+    "vocab": {"Request": 0, "Factory": 1, "benchmark": 2, "sample": 3, "synthetic": 4, "workload": 5, "input": 6, "output": 7, "token": 8, "sequence": 9, "stream": 10, "generated": 11, "deterministic": 12, "prompt": 13, "context": 14, "model": 15, "[UNK]": 16},
     "unk_token": "[UNK]"
   }
 }
