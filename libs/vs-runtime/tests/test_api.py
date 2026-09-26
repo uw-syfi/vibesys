@@ -16,6 +16,7 @@ from vs_runtime.api import (
     AgentTool,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CommandResult,
     MetricDirection,
     OrchestrationPlugin,
     ProfileExecution,
@@ -244,6 +245,56 @@ def test_fake_workspace_models_root_revision_operations() -> None:
         assert not await workspace.try_restore("missing")
         with pytest.raises(WorkspaceRestoreError, match="missing"):
             await workspace.restore("missing")
+
+    asyncio.run(scenario())
+
+
+def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        workspace = host.workspaces.root
+        expected = CommandResult(output="profile data", exit_code=7, truncated=True)
+        host.commands.script(expected)
+
+        result = await host.commands.run(
+            ("profiler", "--label", "value with spaces"),
+            workspace=workspace,
+            timeout_seconds=30,
+        )
+
+        assert result is expected
+        assert host.commands.calls[0].argv == (
+            "profiler",
+            "--label",
+            "value with spaces",
+        )
+        assert host.commands.calls[0].workspace is workspace
+        assert host.commands.calls[0].timeout_seconds == 30
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("argv", "timeout_seconds"),
+    [
+        ((), None),
+        (("",), None),
+        (("command", "bad\0argument"), None),
+        (("command",), 0),
+    ],
+)
+def test_fake_commands_reject_invalid_requests_before_recording(
+    argv: tuple[str, ...], timeout_seconds: int | None
+) -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        with pytest.raises(ValueError, match="command"):
+            await host.commands.run(
+                argv,
+                workspace=host.workspaces.root,
+                timeout_seconds=timeout_seconds,
+            )
+        assert host.commands.calls == []
 
     asyncio.run(scenario())
 

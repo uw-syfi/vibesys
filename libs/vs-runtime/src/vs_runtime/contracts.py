@@ -241,6 +241,30 @@ class Workspaces(Protocol):
         ...
 
 
+class CommandResult(BaseModel):
+    """Bounded output from one sandboxed argv invocation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    output: str
+    exit_code: int | None = None
+    truncated: bool = False
+
+
+class Commands(Protocol):
+    """Sandboxed process execution scoped to a live run workspace."""
+
+    async def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run one argv without policy-authored shell composition."""
+        ...
+
+
 class State(Protocol):
     """Typed opaque policy-state durability bound to one plugin declaration."""
 
@@ -411,6 +435,11 @@ class RunHost(Protocol):
         """Return the cooperative operator-control capability."""
         ...
 
+    @property
+    def commands(self) -> Commands:
+        """Return sandboxed argv execution for policy-selected commands."""
+        ...
+
     def log(self, message: str) -> None:
         """Record a presentation-neutral run log message."""
         ...
@@ -458,6 +487,19 @@ def validate_member_id(member_id: str | None) -> None:
     """Reject an invalid optional stable member identifier."""
     if member_id is not None and re.fullmatch(r"[a-z0-9][a-z0-9._-]*", member_id) is None:
         message = f"invalid agent member ID {member_id!r}"
+        raise ValueError(message)
+
+
+def validate_command(argv: tuple[str, ...], timeout_seconds: int | None) -> None:
+    """Reject malformed argv and timeout values before opening execution effects."""
+    if not isinstance(argv, tuple) or not argv or not argv[0]:
+        message = "command argv must be a nonempty tuple with a nonempty executable"
+        raise ValueError(message)
+    if any(not isinstance(argument, str) or "\0" in argument for argument in argv):
+        message = "command argv must contain only NUL-free strings"
+        raise ValueError(message)
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        message = "command timeout must be positive"
         raise ValueError(message)
 
 

@@ -44,6 +44,7 @@ from vibesys.orchestration.agents import (
     _Agents,
     _LocalAgentHandle,
 )
+from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.environment import _Environment
 from vibesys.orchestration.gates import (
@@ -217,6 +218,7 @@ class RunContext:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self.control = _RunControl(integration, debug=request.debug)
+        self.commands = _Commands(self)
         self.state = _RunState(
             self,
             plugin.state if plugin is not None else None,

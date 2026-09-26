@@ -385,3 +385,25 @@ def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
     )
     assert [call.kind for call in designer.calls] == ["orchestrator"]
     assert [call.kind for call in implementer.calls] == ["implementer"]
+
+
+def test_plugin_command_execution_quotes_argv_and_scopes_to_workspace(tmp_path: Path) -> None:
+    role = AgentRole(id="unused", system_prompt="Unused.")
+
+    async def body(ctx: RunContext) -> None:
+        result = await ctx.commands.run(
+            (
+                "python",
+                "-c",
+                "import sys; print(sys.argv[1])",
+                "literal; printf not-a-second-command",
+            ),
+            workspace=ctx.workspaces.root,
+            timeout_seconds=10,
+        )
+
+        assert result.exit_code == 0
+        assert result.output.strip() == "literal; printf not-a-second-command"
+        assert not result.truncated
+
+    _run_with_clients(tmp_path, [], body, declaration=(role,))

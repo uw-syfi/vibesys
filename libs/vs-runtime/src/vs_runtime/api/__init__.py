@@ -11,6 +11,8 @@ from vs_runtime.contracts import (
     AgentTool,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CommandResult,
+    Commands,
     Control,
     Evaluation,
     MetricDirection,
@@ -30,6 +32,7 @@ from vs_runtime.contracts import (
     WorkspaceRef,
     WorkspaceRestoreError,
     Workspaces,
+    validate_command,
     validate_member_id,
 )
 
@@ -44,6 +47,8 @@ __all__ = [
     "AgentTool",
     "BenchmarkEvaluation",
     "BenchmarkObjective",
+    "CommandResult",
+    "Commands",
     "Control",
     "Evaluation",
     "MetricDirection",
@@ -63,5 +68,6 @@ __all__ = [
     "WorkspaceRef",
     "WorkspaceRestoreError",
     "Workspaces",
+    "validate_command",
     "validate_member_id",
 ]

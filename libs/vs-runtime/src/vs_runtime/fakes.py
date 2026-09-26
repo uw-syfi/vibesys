@@ -17,6 +17,7 @@ from vs_runtime.contracts import (
     AgentSession,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CommandResult,
     OrchestrationPlugin,
     RunFacts,
     RuntimeContractError,
@@ -25,6 +26,7 @@ from vs_runtime.contracts import (
     UnknownAgentRoleError,
     Workspace,
     WorkspaceRestoreError,
+    validate_command,
     validate_member_id,
     validate_objectives,
 )
@@ -199,6 +201,41 @@ class FakeWorkspaces:
     def root(self) -> Workspace:
         """Return the configured fake root workspace."""
         return self._root
+
+
+@dataclass(frozen=True, slots=True)
+class FakeCommandCall:
+    """One recorded sandboxed command request."""
+
+    argv: tuple[str, ...]
+    workspace: Workspace
+    timeout_seconds: int | None
+
+
+@dataclass(slots=True)
+class FakeCommands:
+    """Scriptable in-memory command execution with contract validation."""
+
+    results: list[CommandResult] = field(default_factory=list)
+    calls: list[FakeCommandCall] = field(default_factory=list)
+
+    def script(self, *results: CommandResult) -> None:
+        """Queue command results in invocation order."""
+        self.results.extend(results)
+
+    async def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Validate and record one command, returning its scripted result."""
+        validate_command(argv, timeout_seconds)
+        self.calls.append(FakeCommandCall(argv, workspace, timeout_seconds))
+        if self.results:
+            return self.results.pop(0)
+        return CommandResult(output="", exit_code=0)
 
 
 class FakeWorkspace:
@@ -486,6 +523,7 @@ class FakeRunHost:
         self._evaluation = FakeEvaluation(run_id=run_id)
         self._state = FakeState(plugin.state, self._workspaces.root)
         self._control = FakeControl()
+        self._commands = FakeCommands()
         self._logs: list[str] = []
         self._closed = False
 
@@ -523,6 +561,11 @@ class FakeRunHost:
     def control(self) -> FakeControl:
         """Return the deterministic cooperative-control capability."""
         return self._control
+
+    @property
+    def commands(self) -> FakeCommands:
+        """Return deterministic sandboxed command execution."""
+        return self._commands
 
     @property
     def logs(self) -> tuple[str, ...]:
