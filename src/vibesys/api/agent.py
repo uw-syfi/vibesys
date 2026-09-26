@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.loops.agent_options import options_from_descriptor
 from vibesys.loops.hypothesis_readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
@@ -17,6 +16,7 @@ from vibesys.loops.hypothesis_readmodel import (
     agent_projection,
 )
 from vibesys.orchestration.memory import framework_memory_paths
+from vibesys.orchestrations.agent_options import options_from_descriptor
 
 if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest

@@ -14,7 +14,7 @@ from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.loops.agent_options import (
+from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
     descriptor_from_options,
 )

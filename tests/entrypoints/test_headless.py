@@ -38,15 +38,15 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEventType
-from vibesys.loops.agent_options import (
-    AgentOrchestrationOptions,
-)
-from vibesys.loops.agent_options import (
-    descriptor_from_options as agent_descriptor,
-)
 from vibesys.loops.evolve.orchestration import EvolveOptions
 from vibesys.loops.evolve.orchestration import descriptor_from_options as evolve_descriptor
 from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
+from vibesys.orchestrations.agent_options import (
+    AgentOrchestrationOptions,
+)
+from vibesys.orchestrations.agent_options import (
+    descriptor_from_options as agent_descriptor,
+)
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project.api import (

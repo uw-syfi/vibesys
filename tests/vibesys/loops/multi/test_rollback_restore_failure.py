@@ -22,8 +22,8 @@ import pytest
 from tests.vibesys.loops._support import run_agent_loop
 
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse

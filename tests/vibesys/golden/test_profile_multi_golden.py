@@ -62,8 +62,8 @@ from vibesys.evaluators.gates import (
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.events import GateFinishedData
-from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import ProfileGuidedMultiAgentOrchestrator
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse

@@ -19,8 +19,8 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError, UnsupportedProfilerError
-from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,

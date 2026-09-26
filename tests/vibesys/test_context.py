@@ -40,12 +40,12 @@ from vibesys.evaluators.input_manifest import (
 )
 from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
-from vibesys.loops.agent_options import (
+from vibesys.orchestration.request import ResumeRef, RunRequest
+from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
     compare_resume_descriptors,
     descriptor_from_options,
 )
-from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
 from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
 from vibesys.run import (

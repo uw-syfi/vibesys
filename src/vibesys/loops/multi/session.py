@@ -53,8 +53,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
-    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
     from vibesys.roles.profiler import ProfilerSummary
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.search.profile_focus import ProfileFocusState

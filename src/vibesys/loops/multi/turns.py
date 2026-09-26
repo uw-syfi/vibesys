@@ -60,9 +60,9 @@ from vibesys.skills import build_skill_catalog, resolve_skill_selections
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
     from vibesys.schemas import SkillResourceSelection
     from vibesys.search.hypothesis import CarryOver, HypothesisSearch
     from vibesys.search.hypothesis.attempts import AttemptState, ImplementerReply

@@ -14,8 +14,8 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
-from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.orchestration import artifacts, memory, progress_log
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
