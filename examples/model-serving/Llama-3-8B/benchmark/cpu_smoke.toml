@@ -1,5 +1,6 @@
 benchmark = "examples/model-serving/Llama-3-8B/benchmark/benchmark.py"
-model = "meta-llama/Llama-3.1-8B-Instruct"
+model = "cpu-smoke-model"
+tokenizer = "tests/examples/fixtures/request_factory_tokenizer.json"
 benchmark_args = [
   "--request-count", "32",
   "--input-tokens", "16",
@@ -9,6 +10,7 @@ benchmark_args = [
 response_style = "token-chunks"
 failure_message_contains = "failed requests"
 required_fields = { temperature = 0, stream = true }
+unique_prompts = true
 
 [[request_shapes]]
 input_tokens = 16

@@ -8,7 +8,9 @@ latency only, so p99 is calculated from RF's per-request `total_duration_ms`
 records rather than approximated from a lower percentile. Each point builds a
 deterministic temporary text corpus and sets RF's token-pool limit to the
 larger of twice the prompt length or the request count. An RF warning that the
-token pool is too short fails the point.
+token pool is too short fails the point. The corpus is keyed by the point label,
+so coarse, midpoint, and confirmation invocations cannot replay identical
+prompt token sequences through the live server's prefix cache.
 
 Run the server on the same host as the benchmark and use loopback. Keep the
 server process alive for the whole sweep. The default trace has 512 independent
@@ -26,7 +28,9 @@ at the highest requested concurrency, the run fails instead of claiming a peak.
 The final `aggregate_throughput` and `p99_latency_ms` both come from the
 highest-throughput sustainable point. `--concurrencies` can supply another
 ascending comma-separated sweep; `--request-count`, `--input-tokens`, and
-`--output-tokens` control the trace shape. For CPU-only contract testing, run
+`--output-tokens` control the trace shape. The protocol-v2 stream reports only
+that selected row; `--output-json` retains the full sweep and selection metadata.
+For CPU-only contract testing, run
 the shared fake-server smoke with a local Request Factory engine:
 
 ```bash
