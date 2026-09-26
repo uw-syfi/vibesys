@@ -24,6 +24,6 @@ For CPU-only request-path validation, run
 --profile examples/model-serving/glm-5.2-8xb200/benchmark/cpu_smoke.toml
 --request-factory-engine /path/to/session_runner`. The shared harness uses a
 strict local fake completions server and a tiny local tokenizer. It validates
-prompt uniqueness, protocol-v2 output, and HTTP, malformed/truncated SSE, and
+request shape, protocol-v2 output, and HTTP, malformed/truncated SSE, and
 output-mismatch failures. Fake-server throughput is not a serving-performance
 result.
