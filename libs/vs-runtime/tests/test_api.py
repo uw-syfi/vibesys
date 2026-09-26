@@ -310,14 +310,13 @@ def test_fake_commands_reject_invalid_requests_before_recording(
     asyncio.run(scenario())
 
 
-def test_session_rejects_invalid_member_id_before_creation() -> None:
+@pytest.mark.parametrize("member_id", ["", "   ", "member\nline"])
+def test_session_rejects_invalid_member_id_before_creation(member_id: str) -> None:
     async def scenario() -> None:
         role = _role()
         host = FakeRunHost(_plugin(role))
         with pytest.raises(ValueError, match="invalid agent member ID"):
-            await host.agents.create_session(
-                role, workspace=_workspace(), member_id="invalid member"
-            )
+            await host.agents.create_session(role, workspace=_workspace(), member_id=member_id)
         assert host.agents.sessions == ()
 
     asyncio.run(scenario())

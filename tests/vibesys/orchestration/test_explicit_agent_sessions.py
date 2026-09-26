@@ -170,6 +170,7 @@ def test_sessions_fix_configuration_and_preserve_distinct_conversations(tmp_path
 
 
 def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path) -> None:
+    member_id = "H-01 / Trial #3"
     capabilities = AgentCapabilities(
         session_reuse=True,
         provider_session_resume=True,
@@ -188,7 +189,7 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
         one = await ctx.agents.create_session(
             role,
             workspace=ctx.workspaces.root,
-            member_id="candidate-1",
+            member_id=member_id,
         )
         assert one.binding.backend == "cli"
         assert one.binding.driver == "agentshim"
@@ -200,7 +201,7 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
         continued = await ctx.agents.create_session(
             role,
             workspace=ctx.workspaces.root,
-            member_id="candidate-1",
+            member_id=member_id,
         )
         assert await continued.turn("continue") == "two"
 
@@ -208,7 +209,7 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
 
     expected = AgentSessionKey(
         SessionScope.MEMBER,
-        "worker:workspace=root:candidate-1",
+        f"worker:workspace=root:{member_id}",
     )
     assert expected.durable
     assert first.calls[0].session_key == expected

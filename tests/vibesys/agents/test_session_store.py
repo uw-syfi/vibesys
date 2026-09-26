@@ -43,6 +43,7 @@ from vs_project.api import (
 
 HYPOTHESIS = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 ROLE = AgentSessionKey(SessionScope.ROLE, "judge")
+MEMBER = AgentSessionKey(SessionScope.MEMBER, "worker:workspace=root:H-01 / Trial #3")
 
 
 def _project(tmp_path: Path) -> Project:
@@ -115,12 +116,13 @@ def _checkpoint(
 def test_session_key_serializes_to_the_stored_form() -> None:
     assert str(HYPOTHESIS) == "hypothesis:H-01"
     assert AgentSessionKey.parse("hypothesis:H-01") == HYPOTHESIS
+    assert AgentSessionKey.parse(str(MEMBER)) == MEMBER
 
 
 def test_only_run_scoped_conversations_are_durable() -> None:
     assert HYPOTHESIS.durable
     assert AgentSessionKey(SessionScope.CHAT, "thread-9").durable
-    assert AgentSessionKey(SessionScope.MEMBER, "worker:workspace=root:candidate-1").durable
+    assert MEMBER.durable
     assert not ROLE.durable
 
 
@@ -166,12 +168,14 @@ def test_checkpoint_survives_a_new_store_instance(tmp_path: Path) -> None:
     project = _project(tmp_path)
     namespace = project.state.local_namespace("run-1", "agent")
 
-    _checkpoint(DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)), "thr-xyz")
+    _checkpoint(
+        DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)),
+        "thr-xyz",
+        key=MEMBER,
+    )
     # A fresh instance over the same slot models a resumed process: the on-disk
     # map, not any in-memory cache, is the source of truth.
-    reloaded = DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)).get(
-        HYPOTHESIS
-    )
+    reloaded = DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)).get(MEMBER)
 
     assert reloaded is not None
     assert reloaded.session_id == "thr-xyz"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -545,8 +546,13 @@ class OrchestrationPlugin:
 
 
 def validate_member_id(member_id: str | None) -> None:
-    """Reject an invalid optional stable member identifier."""
-    if member_id is not None and re.fullmatch(r"[a-z0-9][a-z0-9._-]*", member_id) is None:
+    """Require a nonempty logical identifier without control characters."""
+    invalid = member_id is not None and (
+        not isinstance(member_id, str)
+        or not member_id.strip()
+        or any(unicodedata.category(character) == "Cc" for character in member_id)
+    )
+    if invalid:
         message = f"invalid agent member ID {member_id!r}"
         raise ValueError(message)
 
