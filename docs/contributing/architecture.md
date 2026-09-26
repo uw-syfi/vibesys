@@ -62,6 +62,7 @@ graph TD
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
+    vs_runtime --> vs_sandbox
 ```
 
 ## Core layers
@@ -571,6 +572,7 @@ graph TD
     vibesys.orchestration.environment --> vibesys.runtime
     vibesys.orchestration.environment --> vibesys.sandbox
     vibesys.orchestration.environment --> vs_agent
+    vibesys.orchestration.environment --> vs_runtime
     vibesys.orchestration.environment --> vs_sandbox
     vibesys.orchestration.fake_gates --> vibesys.evaluators
     vibesys.orchestration.gates --> vibesys
@@ -718,5 +720,6 @@ graph TD
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
+    vs_runtime --> vs_sandbox
 ```
 [//]: # (tach-graph:end)

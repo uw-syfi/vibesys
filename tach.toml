@@ -204,7 +204,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.tools"
@@ -354,7 +354,7 @@ depends_on = []
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_sandbox"]
 
 [[modules]]
 path = "vs_agent"

@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.sandbox.model_requests import ModelRequestError
-from vibesys.sandbox.model_requests import reconcile_model_requests as stage_model_requests
+from vs_runtime.api.infrastructure import (
+    ModelRequestError,
+    ModelRequestReconciler,
+    create_model_request_reconciler,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,8 +111,13 @@ class AgentEnvironment(Protocol):
 class _Environment:
     """Generic execution facts and candidate deployment lifecycle."""
 
-    def __init__(self, host: HostResources) -> None:
+    def __init__(
+        self,
+        host: HostResources,
+        model_requests: ModelRequestReconciler | None = None,
+    ) -> None:
         self._host = host
+        self._model_requests = model_requests or create_model_request_reconciler()
 
     @property
     def view(self) -> RunEnvironmentView:
@@ -184,10 +192,9 @@ class _Environment:
             return None
         return await self._host._run_blocking(self._stage_model_requests, context)
 
-    @staticmethod
-    def _stage_model_requests(context: _RunResources) -> str | None:
+    def _stage_model_requests(self, context: _RunResources) -> str | None:
         try:
-            volumes = stage_model_requests(context.workspace, log=context.lprint)
+            volumes = self._model_requests.reconcile(context.workspace, log=context.lprint)
         except ModelRequestError as exc:
             context.lprint(f"[model-request] rejected: {exc}")
             return f"Model-weight request could not be satisfied: {exc}"
