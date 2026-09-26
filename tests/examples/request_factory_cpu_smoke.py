@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -26,6 +27,7 @@ from vs_evaluator_protocol.api import Hello, check_objectives, parse_records, re
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TOKENIZER = Path(__file__).with_name("fixtures") / "request_factory_tokenizer.json"
+_FIXED_TEXT_DRIVER = _ROOT / "resources" / "evaluators" / "request-factory" / "fixed_text.py"
 type FailureMode = Literal["http", "malformed-sse", "truncated-sse", "output-mismatch"]
 
 
@@ -277,7 +279,16 @@ def _run_case(
         "--vs-output",
         str(output_path),
     ]
-    completed = run_test_command(command, check=False, text=True, capture_output=True)
+    completed = run_test_command(
+        command,
+        check=False,
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER": str(_FIXED_TEXT_DRIVER),
+        },
+    )
     assert (completed.returncode == 0) == expect_success, (
         f"benchmark exit={completed.returncode}, expected success={expect_success}\n"
         f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
