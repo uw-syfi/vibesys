@@ -10,7 +10,13 @@ from vibesys.orchestrations.single.prompts import render_single_agent_prompt
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import SkillResourceSelection
-from vs_runtime.api import RunHost, SkillCatalogError, SkillResourceRequest, StructuredResponseError
+from vs_runtime.api import (
+    AgentTurnTimeoutError,
+    RunHost,
+    SkillCatalogError,
+    SkillResourceRequest,
+    StructuredResponseError,
+)
 
 if TYPE_CHECKING:
     from vibesys.roles.single_agent import SingleAgentRoundContext
@@ -43,17 +49,28 @@ class CombinedTurnRequest:
             raise ValueError(message)
 
 
-def _member_id(hypothesis_id: str) -> str:
-    """Encode every hypothesis ID injectively in the runtime's ID alphabet."""
-    return f"hypothesis-{hypothesis_id.encode('utf-8').hex()}"
-
-
 def _fallback_response() -> SingleAgentRoundResponse:
     return SingleAgentRoundResponse(
         summary="Single-agent produced no structured response.",
         expected_behavior="unknown",
         self_review="No structured response received.",
         feedback="No structured response received.",
+        verdict=Verdict.FAIL,
+        bottlenecks="",
+        suggestions="",
+        profile_analysis="",
+    )
+
+
+def _timeout_response(timeout_seconds: float) -> SingleAgentRoundResponse:
+    return SingleAgentRoundResponse(
+        summary="Single-agent invocation timed out.",
+        expected_behavior="unknown",
+        self_review=(
+            f"The framework stopped the agent after {timeout_seconds:g} seconds "
+            "without a structured response."
+        ),
+        feedback="Inspect retained evidence and return a schema-valid response on retry.",
         verdict=Verdict.FAIL,
         bottlenecks="",
         suggestions="",
@@ -117,7 +134,7 @@ class SingleAgentWorker:
             session = await self._host.agents.create_session(
                 IMPLEMENTER,
                 workspace=request.workspace,
-                member_id=_member_id(plan.hypothesis_id),
+                member_id=plan.hypothesis_id,
             )
             self._sessions[plan.hypothesis_id] = session
         elif session.workspace != request.workspace:
@@ -130,6 +147,8 @@ class SingleAgentWorker:
             )
         except StructuredResponseError:
             response = _fallback_response()
+        except AgentTurnTimeoutError as error:
+            response = _timeout_response(error.timeout_seconds)
         response.skill_context_updates = await _resolve_skills(
             self._host, response.skill_context_updates
         )

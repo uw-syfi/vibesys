@@ -23,7 +23,7 @@ from vibesys.search.hypothesis import (
     OrchestratorPlan,
 )
 from vs_loop_state.api import CandidateDisposition, RoundRecord
-from vs_runtime.api import StructuredResponseError
+from vs_runtime.api import AgentTurnTimeoutError, StructuredResponseError
 from vs_runtime.api.testing import FakeRunHost
 
 if TYPE_CHECKING:
@@ -151,7 +151,7 @@ def test_retry_preserves_one_named_session_and_new_prompt_evidence() -> None:
             assert first.verdict is Verdict.FAIL
             assert second.verdict is Verdict.PASS
             assert len(host.agents.sessions) == 1
-            assert host.agents.sessions[0].member_id is not None
+            assert host.agents.sessions[0].member_id == "H-01"
             assert [len(history) for _role, history, _message, _type in script.calls] == [0, 1]
             assert "Fix validation." in script.calls[1][2]
             assert all(call[3] is SingleAgentRoundResponse for call in script.calls)
@@ -174,8 +174,7 @@ def test_distinct_hypotheses_get_distinct_durable_identities_and_cleanup() -> No
             await worker.turn(_request(host.workspaces.root, _plan("H-02")))
             assert len(host.agents.sessions) == 2
             identities = [session.member_id for session in host.agents.sessions]
-            assert identities[0] != identities[1]
-            assert all(identity is not None for identity in identities)
+            assert identities == ["H-01", "H-02"]
             assert [len(history) for _role, history, _message, _type in script.calls] == [0, 0]
         finally:
             await worker.close()
@@ -301,6 +300,42 @@ def test_unparseable_turn_yields_failure_and_session_is_cleaned_up() -> None:
     response = asyncio.run(scenario())
     assert response.verdict is Verdict.FAIL
     assert "No structured response" in response.feedback
+    assert host.agents.sessions[0].closed
+
+
+def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -> None:
+    script = _Script(AgentTurnTimeoutError(12.5), _response())
+    host = _host(script)
+
+    async def scenario() -> tuple[SingleAgentRoundResponse, SingleAgentRoundResponse]:
+        worker = SingleAgentWorker(host, _search())
+        try:
+            plan = _plan("H-01")
+            first = await worker.turn(_request(host.workspaces.root, plan))
+            second = await worker.turn(
+                _request(
+                    host.workspaces.root,
+                    plan,
+                    attempt=AttemptState(
+                        agent_run_state=HypothesisState(),
+                        feedback=first.feedback,
+                        retry=1,
+                    ),
+                )
+            )
+            return first, second
+        finally:
+            await worker.close()
+            await host.close()
+
+    first, second = asyncio.run(scenario())
+    assert first.verdict is Verdict.FAIL
+    assert "12.5 seconds" in first.self_review
+    assert (
+        first.feedback == "Inspect retained evidence and return a schema-valid response on retry."
+    )
+    assert second.verdict is Verdict.PASS
+    assert len(host.agents.sessions) == 1
     assert host.agents.sessions[0].closed
 
 
