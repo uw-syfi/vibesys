@@ -1,10 +1,10 @@
 import json
-import os
 import tomllib
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from tests.support.example_registry import require_external_repos
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
 from vibesys.evaluators.input_manifest import InputBundle, load_project_task
@@ -13,24 +13,26 @@ from vs_project.api import Project, ProjectLayoutError
 PROJECT_ROOT = Path(__file__).parents[2]
 MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"
 DEATHSTAR_ROOT = MICROSERVICE_ROOT / "repositories" / "deathstarbench"
-# The DeathStarBench tasks live in a submodule, so a plain checkout does not
-# have them and these assertions skip. CI's ``validate-examples`` job fetches
-# the ``.vibesys`` directory and sets this, turning a missing external repository into a
-# failure rather than a silent loss of coverage.
-_REQUIRE_EXAMPLE_EXTERNAL_REPOS = os.environ.get("VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS") == "1"
+TRAIN_TICKET_ROOT = MICROSERVICE_ROOT / "repositories" / "train-ticket"
+# The DeathStarBench and Train Ticket tasks live in submodules, so a plain
+# checkout does not have them and these assertions skip. CI's ``validate-examples``
+# job fetches the ``.vibesys`` directories and sets this, turning a missing
+# external repository into a failure rather than a silent loss of coverage.
 try:
     DEATHSTAR_LAYOUT = Project.open(DEATHSTAR_ROOT)
     DEATHSTAR_LAYOUT.discover_tasks()
+    TRAIN_TICKET_LAYOUT = Project.open(TRAIN_TICKET_ROOT)
+    TRAIN_TICKET_LAYOUT.discover_tasks()
 except ProjectLayoutError as error:
-    if _REQUIRE_EXAMPLE_EXTERNAL_REPOS:
+    if require_external_repos():
         raise
     pytest.skip(
-        f"DeathStarBench repository example is not initialized: {error}"
+        f"Repository examples are not initialized: {error}"
         " (set VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1 to force)",
         allow_module_level=True,
     )
 DEATHSTAR_TASKS = {task.name.value: task for task in DEATHSTAR_LAYOUT.discover_tasks()}
-TRAIN_TICKET_TASK = MICROSERVICE_ROOT / "train-ticket" / ".vibesys" / "tasks" / "default"
+TRAIN_TICKET_TASK = TRAIN_TICKET_ROOT / ".vibesys" / "tasks" / "default"
 HOTEL_CORRECTNESS_ROOT = MICROSERVICE_ROOT / "hotel-correctness"
 HOTEL_TEMP_ROOT = Path("/") / "tmp" / "vibesys-hotel-reservation" / "otel"
 HOTEL_OWNER_ROOT = HOTEL_CORRECTNESS_ROOT / ".vibesys" / "tasks" / "compose"
@@ -38,8 +40,7 @@ HOTEL_BENCHMARK_ROOT = HOTEL_OWNER_ROOT / "benchmark"
 
 
 def _train_ticket_bundle() -> InputBundle:
-    project = Project.open(MICROSERVICE_ROOT / "train-ticket")
-    return load_project_task(project, project.select_task(None))
+    return load_project_task(TRAIN_TICKET_LAYOUT, TRAIN_TICKET_LAYOUT.select_task("default"))
 
 
 def _deathstar_bundle(task_name: str) -> InputBundle:

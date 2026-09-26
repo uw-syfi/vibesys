@@ -18,11 +18,13 @@ if TYPE_CHECKING:
 import pytest
 import yaml
 from pydantic import ValidationError
+from tests.support.example_registry import require_external_repo_checkout
 
 EVALUATOR_ROOT = Path(__file__).parents[2] / "resources/evaluators/microservice"
 EXAMPLES_ROOT = Path(__file__).parents[2] / "examples/microservices"
 SOCIAL_CONFIG = EXAMPLES_ROOT / "social-network-kubernetes/.vibesys/tasks/kubernetes/runtime.yaml"
-TRAIN_CONFIG = EXAMPLES_ROOT / "train-ticket-kubernetes/.vibesys/tasks/kubernetes/runtime.yaml"
+TRAIN_EXAMPLE = "examples/microservices/repositories/train-ticket"
+TRAIN_CONFIG = EXAMPLES_ROOT / "repositories/train-ticket/.vibesys/tasks/kubernetes/runtime.yaml"
 sys.path.insert(0, str(EVALUATOR_ROOT))
 
 from kubernetes_runtime import (  # noqa: E402  # lint-waiver: LW-006003; import the fixture module after adding its resource directory to sys.path.
@@ -937,9 +939,9 @@ def test_social_network_assets_build_and_override_candidate_services() -> None:
 
 
 def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
+    require_external_repo_checkout(TRAIN_EXAMPLE)
     candidate = tmp_path / "workspace"
-    source = candidate / "train-ticket"
-    source.mkdir(parents=True)
+    candidate.mkdir()
     config = runtime_cli.load_config(TRAIN_CONFIG)
 
     runner = _Runner()
@@ -964,7 +966,11 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
         "ts-route-service",
         "ts-price-service",
     }
-    assert all(build.context == Path("train-ticket") for build in config.image_builds)
+    # The repository is the candidate, so every image builds from the candidate root.
+    assert all(build.context == Path() for build in config.image_builds)
+    builds = [call for call in runner.calls if call[:2] == ["docker", "build"]]
+    assert len(builds) == len(config.image_builds)
+    assert {call[-1] for call in builds} == {str(candidate.resolve())}
     assert all(str(build.dockerfile).startswith("${CONFIG_DIR}/") for build in config.image_builds)
     assert "mvn -B" in dockerfile
     assert "COPY . ." in dockerfile

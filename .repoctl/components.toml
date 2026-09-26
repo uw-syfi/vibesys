@@ -2,7 +2,7 @@
 default_base = "main"
 jobs = ["python", "tui", "examples", "agent_image", "evaluators", "impact"]
 
-ignored_roots = ["website", "3rd_party", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
+ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
 
 [[discoveries]]
@@ -102,7 +102,7 @@ depends_on = ["example_validation", "microservice_evaluator"]
 
 [[components]]
 id = "example_validation"
-files = ["src/entrypoints/headless.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
+files = ["src/entrypoints/headless.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
 roots = ["src/vibesys/evaluators"]
 
 [[components]]

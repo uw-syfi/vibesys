@@ -31,7 +31,7 @@ from tests.support.example_registry import (
     Layout,
     external_repo_missing,
     load_registry,
-    require_external_repos,
+    require_external_repo_checkout,
     submodule_example_paths,
     suggested_entry,
     unregistered_examples,
@@ -47,7 +47,6 @@ if TYPE_CHECKING:
 
 REGISTRY = load_registry()
 ENTRIES = list(REGISTRY.example)
-_FETCH_HINT = "run `uv run python scripts/example_repositories.py`"
 
 
 def _param(entry: ExampleEntry, check: Check) -> object:
@@ -66,12 +65,8 @@ def _param(entry: ExampleEntry, check: Check) -> object:
 
 def _require_present(entry: ExampleEntry) -> None:
     """Fail (CI) or skip (local) when this external repo example is not fetched."""
-    if not external_repo_missing(entry):
-        return
-    message = f"{entry.path} is an external repo that is not fetched: {_FETCH_HINT}"
-    if require_external_repos():
-        pytest.fail(message)
-    pytest.skip(f"{message} (or set VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1 to fail instead)")
+    if external_repo_missing(entry):
+        require_external_repo_checkout(entry.path)
 
 
 def _tasks(entry: ExampleEntry) -> tuple[str, ...]:

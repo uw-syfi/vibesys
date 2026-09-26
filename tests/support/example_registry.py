@@ -15,12 +15,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
 
+import pytest
 from pydantic import BaseModel, ConfigDict, model_validator
 from scripts.example_repositories import is_example_repository_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "examples" / "registry.toml"
 REGISTRY_RELATIVE = "examples/registry.toml"
+
+FETCH_HINT = "run `uv run python scripts/example_repositories.py`"
 
 #: Directory names never descended into while looking for unregistered examples.
 _PRUNED_DIRS = frozenset({".git", "target", "node_modules", "__pycache__"})
@@ -131,7 +134,26 @@ def require_external_repos() -> bool:
 
 def external_repo_missing(entry: ExampleEntry) -> bool:
     """Whether ``entry`` is an external repo and its checkout is absent."""
-    return entry.external_repo and not (entry.root / ".vibesys" / "tasks").is_dir()
+    return entry.external_repo and not _checkout_present(entry.path)
+
+
+def _checkout_present(path: str) -> bool:
+    return (REPO_ROOT / path / ".vibesys" / "tasks").is_dir()
+
+
+def require_external_repo_checkout(path: str) -> None:
+    """Fail (CI) or skip (local) when the external repo example at ``path`` is not fetched.
+
+    ``path`` is the repo-relative example root. Tests that read files from an
+    external repo example call this first, so they neither error on a missing
+    file nor silently lose coverage where CI has fetched the checkout.
+    """
+    if _checkout_present(path):
+        return
+    message = f"{path} is an external repo that is not fetched: {FETCH_HINT}"
+    if require_external_repos():
+        pytest.fail(message)
+    pytest.skip(f"{message} (or set VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS=1 to fail instead)")
 
 
 def submodule_example_paths() -> set[str]:

@@ -203,6 +203,7 @@ src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-p
 extend-exclude = [
     "resources/skills",
     "examples/microservices/repositories/deathstarbench",
+    "examples/microservices/repositories/train-ticket",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
     # Verbatim transformers modeling code shipped as a bundle reference.
@@ -322,8 +323,8 @@ root = [
 
 [tool.ty.src]
 # Same tree the previous checker covered: first-party sources plus their
-# tests. `examples/`, `resources/skills/`, and `3rd_party/` vendor code
-# VibeSys does not own and are left out.
+# tests. `examples/` and `resources/skills/` vendor code VibeSys does not own
+# and are left out.
 include = [
     "src",
     "tests",
