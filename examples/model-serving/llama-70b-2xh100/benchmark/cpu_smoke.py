@@ -22,6 +22,8 @@ _TOKENIZER = Path(__file__).with_name("cpu_smoke_tokenizer.json")
 class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
     server: _FakeServer
 
+    # lint-waiver: LW-031726 [N802]; BaseHTTPRequestHandler dispatches POST to this exact name.
+    # > Renaming it would bypass the server's method dispatch; an alias adds needless indirection.
     def do_POST(self) -> None:  # noqa: N802
         request_bytes = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         try:
