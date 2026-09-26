@@ -51,7 +51,7 @@ def _plan(hypothesis_id: str, *, revert_to_round: int | None = None) -> Orchestr
         hypothesis_id=hypothesis_id,
         hypothesis="batching the prefill step removes per-request launch overhead",
         task="batch the prefill step",
-        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106
+        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # LW-040147 [S106]; the argument is a fixture literal, not a credential.
         reasoning="scripted: roll back then retry",
         revert_to_round=revert_to_round,
     )

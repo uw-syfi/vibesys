@@ -76,7 +76,7 @@ class _AttributionBackend(FakeComputeBackend):
     lookup cannot predict.
     """
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> FakeSandbox:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> FakeSandbox:  # noqa: ANN401  # LW-040138 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         sandbox = cast("FakeSandbox", super().make_sandbox(kind, **kwargs))
         sandbox.default_result = SandboxExecutionResult(
             output=_attribution_output(),
@@ -111,7 +111,7 @@ def _plan(hypothesis_id: str = "H-01") -> OrchestratorPlan:
         hypothesis_id=hypothesis_id,
         hypothesis="batching the prefill step removes per-request launch overhead",
         task="batch the prefill step",
-        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106
+        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # LW-040139 [S106]; the argument is a fixture literal, not a credential.
         reasoning="scripted",
     )
 

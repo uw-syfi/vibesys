@@ -77,7 +77,8 @@ class WorkspacePatchReader:
         """
         for value in (base, head):
             if _OBJECT_NAME.fullmatch(value) is None:
-                raise ValueError(f"not a commit object name: {value!r}")  # noqa: TRY003  # Names the rejected value.
+                message = f"not a commit object name: {value!r}"
+                raise ValueError(message)  # Names the rejected value.
         command = [
             "git",
             "diff",
@@ -89,7 +90,7 @@ class WorkspacePatchReader:
             *(f":(literal){path}" for path in paths),
         ]
         try:
-            result = subprocess.run(  # noqa: S603  # Fixed argv, validated revisions, literal pathspecs.
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010232 [S603]; Git receives validated revisions and literal pathspecs in a fixed non-shell argv.
                 command,
                 cwd=self._root,
                 capture_output=True,

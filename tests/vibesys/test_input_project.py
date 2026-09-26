@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,12 +12,15 @@ from vibesys.input_project import (
     materialize_input_project,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def _copy_dir(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
-def test_discover_input_project_finds_pyproject_next_to_reference(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_discover_input_project_finds_pyproject_next_to_reference(tmp_path: Path) -> None:
     input_dir = tmp_path / "queue-spsc"
     reference_dir = input_dir / "reference"
     reference_dir.mkdir(parents=True)
@@ -28,7 +31,9 @@ def test_discover_input_project_finds_pyproject_next_to_reference(tmp_path):  # 
     assert discover_input_project(None) is None
 
 
-def test_materialize_input_project_copies_and_rewrites_explicit_sdk_path_deps(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_materialize_input_project_copies_and_rewrites_explicit_sdk_path_deps(
+    tmp_path: Path,
+) -> None:
     project_root = tmp_path / "project"
     input_core = project_root / "sdk" / "queue-input-core"
     input_core.mkdir(parents=True)
@@ -69,7 +74,7 @@ def test_materialize_input_project_copies_and_rewrites_explicit_sdk_path_deps(tm
     assert (input_dir / "pyproject.toml").read_text() == source_pyproject
 
 
-def test_materialize_input_project_copies_transitive_sdk_deps(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_materialize_input_project_copies_transitive_sdk_deps(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     sdk = project_root / "sdk"
     common = sdk / "queue-common"
@@ -120,7 +125,7 @@ def test_materialize_input_project_copies_transitive_sdk_deps(tmp_path):  # noqa
     )
 
 
-def test_materialize_input_project_rejects_path_deps_outside_sdk(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_materialize_input_project_rejects_path_deps_outside_sdk(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     input_dir = project_root / "examples" / "data-structures" / "queue-spsc"
     input_dir.mkdir(parents=True)
@@ -142,10 +147,10 @@ def test_materialize_input_project_rejects_path_deps_outside_sdk(tmp_path):  # n
         )
 
 
-def test_materialize_input_project_uses_packaged_sdk_without_a_checkout(  # noqa: ANN201
-    tmp_path,  # noqa: ANN001
-    monkeypatch,  # noqa: ANN001
-):
+def test_materialize_input_project_uses_packaged_sdk_without_a_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project_root = tmp_path / "installed"
     packaged_sdk = tmp_path / "site-packages" / "vibesys" / "_sdk"
     vs_bench = packaged_sdk / "vs-bench"

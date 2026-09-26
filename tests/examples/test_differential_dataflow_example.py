@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
-import subprocess
 import sys
 import time
 import tomllib
@@ -11,6 +10,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.evaluators.input_manifest import load_input_bundle
 
@@ -82,7 +82,7 @@ def test_differential_dataflow_objective_matches_benchmark_contract(tmp_path: Pa
     true_binary = shutil.which("true")
     assert true_binary is not None
     output = tmp_path / "benchmark.json"
-    result = subprocess.run(  # noqa: S603
+    result = run_test_command(
         [
             sys.executable,
             str(_BUNDLE / "benchmark" / "benchmark.py"),
@@ -209,7 +209,9 @@ def test_crash_injection_times_out_when_candidate_emits_no_output(
     monkeypatch.setattr(crash_gate, "_CRASH_INJECTION_TIMEOUT_S", 0.05)
 
     started = time.monotonic()
-    crashed, ok, message = crash_gate._crash_then_restart(  # noqa: SLF001
+    # Invoke this focused fault-injection seam directly so the test does not
+    # build the example engine or run the entire multi-gate CLI.
+    crashed, ok, message = crash_gate._crash_then_restart(  # noqa: SLF001  # lint-waiver: LW-008508 [SLF001]; exercise timeout recovery without building the external engine or running unrelated CLI gates.
         sys.executable,
         ["-c", "import time; time.sleep(60)"],
         tmp_path,

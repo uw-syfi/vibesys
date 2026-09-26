@@ -17,7 +17,7 @@ from vs_agent.api import MCPServerSpec, expose_as_tools
 from vs_issue_board.api import IssueType
 
 
-def test_build_judge_spec_has_correct_shape():  # noqa: ANN201  # tracked: #288
+def test_build_judge_spec_has_correct_shape() -> None:
     spec = build_issue_mcp_spec(
         store_relpath="issues.json",
         creator="judge",
@@ -45,7 +45,7 @@ def test_build_judge_spec_has_correct_shape():  # noqa: ANN201  # tracked: #288
     assert spec.env == ()
 
 
-def test_build_perf_eval_spec_sorts_allowed_types_alphabetically():  # noqa: ANN201  # tracked: #288
+def test_build_perf_eval_spec_sorts_allowed_types_alphabetically() -> None:
     spec = build_issue_mcp_spec(
         store_relpath="issues.json",
         creator="perf_eval",
@@ -62,7 +62,7 @@ def test_build_perf_eval_spec_sorts_allowed_types_alphabetically():  # noqa: ANN
     assert args[args.index("--allowed-types") + 1] == "bug,feature,perf"
 
 
-def test_build_spec_omits_cap_flag_when_none():  # noqa: ANN201  # tracked: #288
+def test_build_spec_omits_cap_flag_when_none() -> None:
     spec = build_issue_mcp_spec(
         store_relpath="issues.json",
         creator="agent",
@@ -75,7 +75,7 @@ def test_build_spec_omits_cap_flag_when_none():  # noqa: ANN201  # tracked: #288
     assert "--cap" not in spec.args
 
 
-def test_build_spec_uses_provided_store_relpath():  # noqa: ANN201  # tracked: #288
+def test_build_spec_uses_provided_store_relpath() -> None:
     spec = build_issue_mcp_spec(
         store_relpath="custom/path/issues.json",
         creator="judge",
@@ -87,7 +87,7 @@ def test_build_spec_uses_provided_store_relpath():  # noqa: ANN201  # tracked: #
     assert spec.args[spec.args.index("custom/path/issues.json") - 1] == "vs_issue_board.mcp"
 
 
-def test_build_spec_matches_generic_tool_serving_hook():  # noqa: ANN201  # tracked: #288
+def test_build_spec_matches_generic_tool_serving_hook() -> None:
     """The board's spec must be exactly what the generic host-level hook produces.
 
     ``build_issue_mcp_spec`` no longer constructs ``MCPServerSpec`` itself: it

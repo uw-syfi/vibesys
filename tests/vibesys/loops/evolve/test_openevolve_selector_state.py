@@ -33,7 +33,6 @@ from tests.vibesys.loops.evolve._support import (
     _judge_response,
     _mutator_writes_callback,
     _project_dir,
-    ref_file,  # noqa: F401  # tracked: #288  # pytest fixture
 )
 
 from vs_agent.api.testing import FakeAgentClient
@@ -44,7 +43,7 @@ if TYPE_CHECKING:
 
 def test_openevolve_selector_writes_no_snapshot_directories(
     tmp_path: Path,
-    ref_file: str,  # noqa: F811  # tracked: #288
+    ref_file: str,
 ) -> None:
     """Drive 4 generations through the OpenEvolve selector, then assert (1)
     no ``openevolve``/``snapshots`` directory exists anywhere under the

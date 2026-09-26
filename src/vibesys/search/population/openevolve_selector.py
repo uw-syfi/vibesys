@@ -64,7 +64,7 @@ def objective_signature(space: MetricSpace) -> tuple[_PersistedObjective, ...]:
 class _SortedIterationSet(set[str]):
     """Set semantics with deterministic iteration for replaying OpenEvolve."""
 
-    def __iter__(self):  # noqa: ANN204
+    def __iter__(self):  # noqa: ANN204  # LW-040046 [ANN204]; the special method's return type is the private iterator this class defines.
         return iter(sorted(super().__iter__()))
 
 
@@ -113,7 +113,7 @@ def _load_files(database: ProgramDatabase, files: dict[str, str]) -> None:
         database.current_island = metadata.get("current_island", 0)
         database.island_generations = metadata.get("island_generations", [0] * len(saved_islands))
         database.last_migration_generation = metadata.get("last_migration_generation", 0)
-        database.feature_stats = database._deserialize_feature_stats(  # noqa: SLF001
+        database.feature_stats = database._deserialize_feature_stats(  # noqa: SLF001  # LW-040047 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
             metadata.get("feature_stats", {})
         )
     for relative, content in files.items():
@@ -121,7 +121,7 @@ def _load_files(database: ProgramDatabase, files: dict[str, str]) -> None:
             continue
         program = Program.from_dict(json.loads(content))
         database.programs[program.id] = program
-    database._reconstruct_islands(saved_islands)  # noqa: SLF001
+    database._reconstruct_islands(saved_islands)  # noqa: SLF001  # LW-040048 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
     if len(database.island_generations) != len(database.islands):
         database.island_generations = [0] * len(database.islands)
     if len(database.island_best_programs) != len(database.islands):
@@ -153,7 +153,7 @@ def _dump_files(database: ProgramDatabase, *, iteration: int) -> dict[str, str]:
             "current_island": database.current_island,
             "island_generations": database.island_generations,
             "last_migration_generation": database.last_migration_generation,
-            "feature_stats": database._serialize_feature_stats(),  # noqa: SLF001
+            "feature_stats": database._serialize_feature_stats(),  # noqa: SLF001  # LW-040049 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
         }
     )
     return files
@@ -202,7 +202,7 @@ def _normalize_upstream_collections(database: ProgramDatabase) -> None:
         database.archive = _SortedIterationSet(database.archive)
 
 
-def _canonicalize_new_programs(  # noqa: C901, PLR0912  # tracked: #288
+def _canonicalize_new_programs(  # noqa: C901, PLR0912  # LW-040050 [C901, PLR0912]; one sequential pass shares its state across the steps, which helper boundaries would scatter.
     database: ProgramDatabase, program_ids_before: set[str]
 ) -> None:
     """Replace upstream random IDs/timestamps with state-derived values."""
@@ -228,7 +228,8 @@ def _canonicalize_new_programs(  # noqa: C901, PLR0912  # tracked: #288
         )
         canonical_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"vibesys-openevolve:{identity}"))
         if canonical_id in database.programs or canonical_id in replacements.values():
-            raise RuntimeError(f"duplicate deterministic OpenEvolve program ID: {canonical_id}")  # noqa: TRY003
+            message = f"duplicate deterministic OpenEvolve program ID: {canonical_id}"
+            raise RuntimeError(message)
         replacements[program.id] = canonical_id
         program.id = canonical_id
         program.timestamp = float(program.iteration_found or database.last_iteration)
@@ -296,13 +297,13 @@ def select(
     *,
     k_top_inspirations: int,
     k_random_inspirations: int,
-    space: MetricSpace,  # noqa: ARG001  # tracked: #288
+    space: MetricSpace,  # noqa: ARG001  # LW-040051 [ARG001]; this scripted double accepts the production keyword arguments and ignores the ones it does not need.
 ) -> tuple[Proposal | None, OpenEvolveSelectorState]:
     """Sample a parent/inspirations from the upstream island database."""
     database = _build_database(state.config, seed=None)
     _load_files(database, state.files)
     database.set_current_island(state.current_island)
-    rng = random.Random()  # noqa: S311
+    rng = random.Random()  # noqa: S311  # LW-040052 [S311]; the generator only seeds deterministic search sampling and is not used for security.
     rng.setstate(state.rng_state)
 
     if not database.programs:
@@ -351,7 +352,7 @@ def select(
     )
 
 
-def admit(  # noqa: PLR0913  # tracked: #288
+def admit(  # noqa: PLR0913  # LW-040053 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     state: OpenEvolveSelectorState,
     individual: Individual,
     *,
@@ -369,7 +370,7 @@ def admit(  # noqa: PLR0913  # tracked: #288
     database = _build_database(state.config, seed=None)
     _load_files(database, state.files)
     database.set_current_island(state.current_island)
-    rng = random.Random()  # noqa: S311
+    rng = random.Random()  # noqa: S311  # LW-040054 [S311]; the generator only seeds deterministic search sampling and is not used for security.
     rng.setstate(state.rng_state)
 
     program_id = f"vibesys-{individual.id}"

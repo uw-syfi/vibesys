@@ -14,8 +14,11 @@ repository's contracts, architecture, tests, and affected callers.
 ## Workflow
 
 1. Resolve the review target and intent.
-   - Read `AGENTS.md`, `docs/contributing/coding-best-practices.md`, and every applicable
-     subtree instruction before judging the change.
+   - Read `AGENTS.md`, load the `software-design` skill and, when the diff
+     touches tests, the `testing` skill, and read every applicable subtree
+     instruction before judging the change. Read
+     `docs/contributing/coding-best-practices.md` when the diff touches size
+     limits or lint waivers.
    - Inspect repository status before switching branches or fetching a PR.
      Preserve user changes and prefer reviewing without mutating the worktree.
    - Read the PR title, body, linked issue, base/head commits, changed files,
@@ -56,6 +59,21 @@ repository's contracts, architecture, tests, and affected callers.
      extract a standalone reusable capability into `libs/` only when it has a
      real interface and reuse boundary. Flag both misplaced shared behavior and
      abstractions that add indirection without protecting a boundary.
+
+   - Run a design pass for any diff that adds or moves modules, interfaces,
+     dependencies, data flow, or config. Check the PR's `Design` section
+     against the diff: is the named owner right, is the stated interface the
+     one the diff exposes, does the direction of dependencies match, and is
+     every new `tach.toml` edge declared and justified. Scan the diff for the
+     red flags in `.agents/skills/software-design/references/red-flags.md`.
+     Look for an existing violating pattern that the diff extends, and for a
+     new or split module that does not declare its public interface.
+   - Then read across files, as an LLM reviewer, for problems linters cannot
+     see: one concept duplicated in several files, shallow wrappers that add a
+     layer without a new abstraction, callers reaching into a module's
+     internals, and an interface that some implementations only half support.
+     Treat these as findings only when they carry a material maintenance or
+     correctness consequence.
 
 4. Reproduce the bug when the PR is a bug fix.
    - Whenever practical, demonstrate the defect at the merge base and its

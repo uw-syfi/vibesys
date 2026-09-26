@@ -1,6 +1,11 @@
-from __future__ import annotations  # noqa: D100  # tracked: #288
+"""Formatting helpers for issue-board entries."""
 
-from vs_issue_board.core import Issue  # noqa: TC001  # tracked: #288
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vs_issue_board.core import Issue
 
 
 def format_issue_short(issue: Issue) -> str:

@@ -5,7 +5,7 @@ from pathlib import Path
 BUNDLE = Path("examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit")
 
 
-def test_llama_mlx_8bit_bundle_layout():  # noqa: ANN201  # tracked: #288
+def test_llama_mlx_8bit_bundle_layout() -> None:
     assert (BUNDLE / "README.md").is_file()
     assert (BUNDLE / "config.json").is_file()
     assert (BUNDLE / "requirements.txt").is_file()
@@ -16,7 +16,7 @@ def test_llama_mlx_8bit_bundle_layout():  # noqa: ANN201  # tracked: #288
     assert (BUNDLE / "benchmark" / "benchmark.py").is_file()
 
 
-def test_llama_mlx_8bit_metadata_points_to_target_model():  # noqa: ANN201  # tracked: #288
+def test_llama_mlx_8bit_metadata_points_to_target_model() -> None:
     meta = json.loads((BUNDLE / "reference" / "meta.json").read_text())
     assert meta["model_id"] == "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit"
     assert meta["revision"] == "142d428004044c37c441272c91316251d9aecc58"
@@ -26,7 +26,7 @@ def test_llama_mlx_8bit_metadata_points_to_target_model():  # noqa: ANN201  # tr
     assert config["quantization"] == {"group_size": 64, "bits": 8}
 
 
-def test_llama_mlx_8bit_reference_defaults_to_local_model_dir():  # noqa: ANN201  # tracked: #288
+def test_llama_mlx_8bit_reference_defaults_to_local_model_dir() -> None:
     tree = ast.parse((BUNDLE / "reference" / "reference.py").read_text())
     assignments = [
         node
@@ -39,7 +39,7 @@ def test_llama_mlx_8bit_reference_defaults_to_local_model_dir():  # noqa: ANN201
     assert "model" in ast.unparse(assignments[0])
 
 
-def test_llama_mlx_8bit_checker_and_benchmark_support_url_flags():  # noqa: ANN201  # tracked: #288
+def test_llama_mlx_8bit_checker_and_benchmark_support_url_flags() -> None:
     checker_source = (BUNDLE / "accuracy_checker" / "checker.py").read_text()
     benchmark_source = (BUNDLE / "benchmark" / "benchmark.py").read_text()
 
@@ -60,7 +60,7 @@ def test_llama_mlx_8bit_checker_and_benchmark_support_url_flags():  # noqa: ANN2
     assert "--dataset-revision" in benchmark_source
 
 
-def test_llama_mlx_8bit_pins_jsonschemabench_dataset_revision():  # noqa: ANN201  # tracked: #288
+def test_llama_mlx_8bit_pins_jsonschemabench_dataset_revision() -> None:
     checker_source = (BUNDLE / "accuracy_checker" / "checker.py").read_text()
     benchmark_source = (BUNDLE / "benchmark" / "benchmark.py").read_text()
     assert "epfl-dlab/JSONSchemaBench" in checker_source

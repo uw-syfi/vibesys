@@ -1,24 +1,28 @@
 """Namespace-scoped Kubernetes deployment lifecycle."""
 
-# ruff: noqa: D101, D102, D105, D107, PLR2004, TC003, TRY003, TRY004, TRY300, TRY301
-
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import subprocess
 import time
+import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic_core import PydanticCustomError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _OWNERSHIP_LABEL = "vibesys.dev/evaluator-owned"
+_MAX_NAMESPACE_PREFIX_LENGTH = 45
 _ALLOWED_KINDS = frozenset(
     {
         "ConfigMap",
@@ -42,6 +46,8 @@ class _StrictModel(BaseModel):
 
 
 class HTTPProbe(_StrictModel):
+    """HTTP readiness probe settings."""
+
     endpoint: str
     path: str
     status: int = Field(default=200, ge=100, le=599)
@@ -51,11 +57,15 @@ class HTTPProbe(_StrictModel):
     @classmethod
     def _absolute_path(cls, value: str) -> str:
         if not value.startswith("/"):
-            raise ValueError("HTTP probe path must start with '/'")
+            raise PydanticCustomError(
+                "invalid_http_probe_path", "HTTP probe path must start with '/'"
+            )
         return value
 
 
 class ServiceForward(_StrictModel):
+    """Port-forward process settings."""
+
     name: str
     resource: str
     remote_port: int = Field(gt=0, le=65535)
@@ -63,12 +73,16 @@ class ServiceForward(_StrictModel):
 
 
 class ImageOverride(_StrictModel):
+    """Container image override settings."""
+
     resource: str
     container: str
     image: str
 
 
 class ImageBuild(_StrictModel):
+    """Container image build settings."""
+
     name: str
     image: str
     context: Path
@@ -77,6 +91,8 @@ class ImageBuild(_StrictModel):
 
 
 class RestartDeployment(_StrictModel):
+    """Deployment restart settings."""
+
     name: str
     pod_selector: str
 
@@ -96,6 +112,8 @@ def _json_contains(actual: JsonValue, expected: JsonValue) -> bool:
 
 
 class KubernetesConfig(_StrictModel):
+    """Namespace-scoped deployment configuration."""
+
     context: str
     kubeconfig: Path | None = None
     namespace_prefix: str
@@ -113,15 +131,18 @@ class KubernetesConfig(_StrictModel):
     @field_validator("namespace_prefix")
     @classmethod
     def _namespace_prefix(cls, value: str) -> str:
-        if len(value) > 45 or not _DNS_LABEL.fullmatch(value):
-            raise ValueError("namespace_prefix must be a DNS label of at most 45 characters")
+        if len(value) > _MAX_NAMESPACE_PREFIX_LENGTH or not _DNS_LABEL.fullmatch(value):
+            raise PydanticCustomError(
+                "invalid_namespace_prefix",
+                "namespace_prefix must be a DNS label of at most 45 characters",
+            )
         return value
 
     @field_validator("manifests")
     @classmethod
     def _nonempty_manifests(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
         if not value:
-            raise ValueError("manifests must not be empty")
+            raise PydanticCustomError("empty_manifests", "manifests must not be empty")
         return value
 
     @field_validator("forwards")
@@ -132,23 +153,102 @@ class KubernetesConfig(_StrictModel):
             or len({item.name for item in value}) != len(value)
             or len({item.local_port for item in value}) != len(value)
         ):
-            raise ValueError("forwards must contain uniquely named endpoints")
+            raise PydanticCustomError(
+                "invalid_forwards", "forwards must contain uniquely named endpoints"
+            )
         return value
 
     @model_validator(mode="after")
     def _references_exist(self) -> KubernetesConfig:
         endpoint_names = {item.name for item in self.forwards}
         if self.primary_endpoint not in endpoint_names:
-            raise ValueError("primary_endpoint must name a configured forward")
+            raise PydanticCustomError(
+                "invalid_primary_endpoint", "primary_endpoint must name a configured forward"
+            )
         if any(probe.endpoint not in endpoint_names for probe in self.http_probes):
-            raise ValueError("HTTP probes must name configured forwards")
+            raise PydanticCustomError(
+                "invalid_http_probe_endpoint", "HTTP probes must name configured forwards"
+            )
         build_names = [item.name for item in self.image_builds]
         if len(set(build_names)) != len(build_names):
-            raise ValueError("image build names must be unique")
+            raise PydanticCustomError("duplicate_image_build", "image build names must be unique")
         return self
 
 
+class KubernetesLifecycleError(RuntimeError):
+    """Report lifecycle failures while preserving the RuntimeError contract."""
+
+    @classmethod
+    def command_failed(
+        cls, returncode: int, command: list[str], detail: str
+    ) -> KubernetesLifecycleError:
+        """Create an error for an unsuccessful Kubernetes command."""
+        return cls(f"command failed ({returncode}): {command!r}: {detail}")
+
+    @classmethod
+    def command_timed_out(
+        cls, timeout_seconds: float, command: list[str]
+    ) -> KubernetesLifecycleError:
+        """Create an error for a timed-out Kubernetes command."""
+        return cls(f"command timed out after {timeout_seconds:g}s: {command!r}")
+
+    @classmethod
+    def lifecycle_not_started(cls) -> KubernetesLifecycleError:
+        """Create an error when a lifecycle operation has not started."""
+        return cls("Kubernetes lifecycle has not started")
+
+    @classmethod
+    def lifecycle_already_started(cls) -> KubernetesLifecycleError:
+        """Create an error when start is called more than once."""
+        return cls("Kubernetes lifecycle is already started")
+
+    @classmethod
+    def namespace_uid_unavailable(cls) -> KubernetesLifecycleError:
+        """Create an error when namespace ownership cannot be recovered."""
+        return cls("created namespace response has no recoverable owned UID")
+
+    @classmethod
+    def namespace_uid_missing(cls) -> KubernetesLifecycleError:
+        """Create an error when the created namespace has no UID."""
+        return cls("created namespace response has no UID")
+
+    @classmethod
+    def deployments_already_stopped(cls) -> KubernetesLifecycleError:
+        """Create an error when configured deployments are already stopped."""
+        return cls("Kubernetes deployments are already stopped")
+
+    @classmethod
+    def ownership_changed(cls, namespace: str) -> KubernetesLifecycleError:
+        """Create an error when namespace ownership no longer matches."""
+        return cls(f"refusing to mutate namespace {namespace!r}: ownership changed")
+
+    @classmethod
+    def port_forward_exited(cls) -> KubernetesLifecycleError:
+        """Create an error when a port forward exits before readiness."""
+        return cls("kubectl port-forward exited before readiness")
+
+
+class KubernetesReadinessTimeoutError(TimeoutError):
+    """Report that HTTP readiness probes did not pass before the deadline."""
+
+    @classmethod
+    def for_last_error(cls, last_error: str) -> KubernetesReadinessTimeoutError:
+        """Create a timeout error including the last probe failure."""
+        return cls(f"Kubernetes HTTP readiness timed out: {last_error}")
+
+
+class KubernetesManifestMetadataError(TypeError):
+    """Report a Kubernetes manifest without a metadata mapping."""
+
+    @classmethod
+    def missing(cls) -> KubernetesManifestMetadataError:
+        """Create an error for a manifest without metadata."""
+        return cls("manifest object must contain metadata")
+
+
 class CommandRunner(Protocol):
+    """Callable protocol for running commands."""
+
     def __call__(
         self,
         command: list[str],
@@ -156,20 +256,36 @@ class CommandRunner(Protocol):
         cwd: Path,
         input_text: str | None = None,
         timeout_seconds: float,
-    ) -> subprocess.CompletedProcess[str]: ...
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a command and return its completed process."""
+        ...
 
 
 class ForwardProcess(Protocol):
-    def terminate(self) -> None: ...
-    def kill(self) -> None: ...
-    def wait(self, timeout: float | None = None) -> int: ...
-    def poll(self) -> int | None: ...
+    """Manage a Kubernetes port-forward subprocess."""
+
+    def terminate(self) -> None:
+        """Request graceful process termination."""
+        ...
+
+    def kill(self) -> None:
+        """Forcefully stop the process."""
+        ...
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Wait for process completion."""
+        ...
+
+    def poll(self) -> int | None:
+        """Return the process exit status if it has exited."""
+        ...
 
 
 def _default_runner(
     command: list[str], *, cwd: Path, input_text: str | None = None, timeout_seconds: float
 ) -> subprocess.CompletedProcess[str]:
     try:
+        # lint-waiver: LW-008038 [S603]; Kubernetes commands are supplied as controlled argv vectors and execute without a shell.
         return subprocess.run(  # noqa: S603
             command,
             cwd=cwd,
@@ -181,14 +297,26 @@ def _default_runner(
         )
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or "no output").strip()
-        raise RuntimeError(f"command failed ({error.returncode}): {command!r}: {detail}") from error
+        raise KubernetesLifecycleError.command_failed(error.returncode, command, detail) from error
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"command timed out after {timeout_seconds:g}s: {command!r}") from error
+        raise KubernetesLifecycleError.command_timed_out(timeout_seconds, command) from error
 
 
 def load_config(path: Path) -> KubernetesConfig:
     """Load a strict JSON or YAML lifecycle configuration."""
     return KubernetesConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def _resolve_image_references(image: str, built_images: dict[str, str]) -> str:
+    for name, built_image in built_images.items():
+        image = image.replace(f"${{IMAGE:{name}}}", built_image)
+    if "${IMAGE:" in image:
+        raise PydanticCustomError(
+            "unknown_image_build_reference",
+            "unknown image build reference: {image}",
+            {"image": image},
+        )
+    return image
 
 
 class KubernetesLifecycle:
@@ -203,6 +331,7 @@ class KubernetesLifecycle:
         runner: CommandRunner = _default_runner,
         popen: Callable[..., ForwardProcess] = subprocess.Popen,
     ) -> None:
+        """Create the namespace-scoped deployment runtime."""
         self.config = config
         self.candidate_dir = candidate_dir.resolve()
         self.config_dir = (config_dir or candidate_dir).resolve()
@@ -217,28 +346,37 @@ class KubernetesLifecycle:
 
     @property
     def namespace(self) -> str:
+        """Return the runtime namespace."""
         if self._namespace is None:
-            raise RuntimeError("Kubernetes lifecycle has not started")
+            raise KubernetesLifecycleError.lifecycle_not_started()
         return self._namespace
 
     @property
     def base_url(self) -> str:
+        """Return the service base URL."""
         return self.endpoints[self.config.primary_endpoint]
 
     @property
     def endpoints(self) -> dict[str, str]:
+        """Return service endpoints by name."""
         endpoints = {
             item.name: f"http://127.0.0.1:{item.local_port}" for item in self.config.forwards
         }
         if self.config.primary_endpoint not in endpoints:
-            raise ValueError(f"unknown primary_endpoint {self.config.primary_endpoint!r}")
+            raise PydanticCustomError(
+                "unknown_primary_endpoint",
+                "unknown primary_endpoint {primary_endpoint}",
+                {"primary_endpoint": repr(self.config.primary_endpoint)},
+            )
         return endpoints
 
     def __enter__(self) -> KubernetesLifecycle:
+        """Start deployment resources and return this runtime."""
         self.start()
         return self
 
     def __exit__(self, *_args: object) -> None:
+        """Stop resources created by this runtime."""
         self.close()
 
     def _kubectl(self, *arguments: str, namespaced: bool = False) -> list[str]:
@@ -266,7 +404,7 @@ class KubernetesLifecycle:
     def start(self) -> None:
         """Create and populate a fresh owned namespace, then expose its service."""
         if self._namespace is not None:
-            raise RuntimeError("Kubernetes lifecycle is already started")
+            raise KubernetesLifecycleError.lifecycle_already_started()
         namespace = f"{self.config.namespace_prefix}-{uuid.uuid4().hex[:12]}"
         manifest = self._render_manifests(namespace)
         token = uuid.uuid4().hex
@@ -302,10 +440,10 @@ class KubernetesLifecycle:
                 or not uid
                 or recovered_metadata.get("labels", {}).get(_OWNERSHIP_LABEL) != token
             ):
-                raise RuntimeError("created namespace response has no recoverable owned UID")
+                raise KubernetesLifecycleError.namespace_uid_unavailable()
             self._namespace, self._namespace_uid, self._ownership_token = namespace, uid, token
             self.close()
-            raise RuntimeError("created namespace response has no UID")
+            raise KubernetesLifecycleError.namespace_uid_missing()
         self._namespace = namespace
         self._namespace_uid = uid
         self._ownership_token = token
@@ -313,11 +451,7 @@ class KubernetesLifecycle:
             images = self._build_images(namespace)
             self._run("apply", "--filename", "-", namespaced=True, input_text=manifest)
             for override in self.config.image_overrides:
-                image = override.image
-                for name, built_image in images.items():
-                    image = image.replace(f"${{IMAGE:{name}}}", built_image)
-                if "${IMAGE:" in image:
-                    raise ValueError(f"unknown image build reference: {image}")
+                image = _resolve_image_references(override.image, images)
                 self._run(
                     "set",
                     "image",
@@ -345,7 +479,7 @@ class KubernetesLifecycle:
     def stop(self) -> None:
         """Stop configured Deployments while retaining the owned namespace."""
         if self._stopped_replicas is not None:
-            raise RuntimeError("Kubernetes deployments are already stopped")
+            raise KubernetesLifecycleError.deployments_already_stopped()
         self._verify_owned_namespace()
         self._stop_forwards()
         replicas: list[tuple[RestartDeployment, int]] = []
@@ -397,6 +531,7 @@ class KubernetesLifecycle:
 
     @property
     def services(self) -> tuple[str, ...]:
+        """Return service metadata for the deployed workloads."""
         result = self._run("get", "service", "--output", "json", namespaced=True)
         payload = json.loads(result.stdout)
         return tuple(sorted(item["metadata"]["name"] for item in payload.get("items", [])))
@@ -419,7 +554,7 @@ class KubernetesLifecycle:
     def _verify_owned_namespace(self) -> None:
         namespace, uid, token = self._namespace, self._namespace_uid, self._ownership_token
         if namespace is None or uid is None or token is None:
-            raise RuntimeError("Kubernetes lifecycle has not started")
+            raise KubernetesLifecycleError.lifecycle_not_started()
         found = self._runner(
             self._kubectl("get", "namespace", namespace, "--output", "json", namespaced=False),
             cwd=self.candidate_dir,
@@ -428,7 +563,7 @@ class KubernetesLifecycle:
         payload = json.loads(found.stdout)
         labels = payload.get("metadata", {}).get("labels", {})
         if payload.get("metadata", {}).get("uid") != uid or labels.get(_OWNERSHIP_LABEL) != token:
-            raise RuntimeError(f"refusing to mutate namespace {namespace!r}: ownership changed")
+            raise KubernetesLifecycleError.ownership_changed(namespace)
 
     def _stop_forwards(self) -> None:
         try:
@@ -456,32 +591,46 @@ class KubernetesLifecycle:
                 path = root / relative
             path = path.resolve()
             if relative.is_absolute() or not path.is_relative_to(root) or not path.is_file():
-                raise ValueError(f"manifest escapes its trusted root or is not a file: {relative}")
+                raise PydanticCustomError(
+                    "invalid_manifest_path",
+                    "manifest escapes its trusted root or is not a file: {relative}",
+                    {"relative": str(relative)},
+                )
             text = path.read_text(encoding="utf-8").replace("${NAMESPACE}", namespace)
             for document in yaml.safe_load_all(text):
                 if document is None:
                     continue
                 if not isinstance(document, dict) or document.get("kind") not in _ALLOWED_KINDS:
                     kind = document.get("kind") if isinstance(document, dict) else None
-                    raise ValueError(f"unsupported or cluster-scoped manifest kind: {kind!r}")
+                    raise PydanticCustomError(
+                        "unsupported_manifest_kind",
+                        "unsupported or cluster-scoped manifest kind: {kind}",
+                        {"kind": repr(kind)},
+                    )
                 metadata = document.get("metadata")
                 if not isinstance(metadata, dict):
-                    raise ValueError("manifest object must contain metadata")
+                    raise KubernetesManifestMetadataError.missing()
                 declared = metadata.get("namespace")
                 if declared not in {None, namespace}:
-                    raise ValueError(
-                        f"manifest namespace {declared!r} does not match {namespace!r}"
+                    raise PydanticCustomError(
+                        "manifest_namespace_mismatch",
+                        "manifest namespace {declared} does not match {namespace}",
+                        {"declared": repr(declared), "namespace": repr(namespace)},
                     )
                 metadata["namespace"] = namespace
                 rendered.append(yaml.safe_dump(document, sort_keys=True))
         if not rendered:
-            raise ValueError("manifests contain no Kubernetes objects")
+            raise PydanticCustomError("empty_manifests", "manifests contain no Kubernetes objects")
         return "---\n".join(rendered)
 
     def _candidate_path(self, relative: Path) -> Path:
         resolved = (self.candidate_dir / relative).resolve()
         if relative.is_absolute() or not resolved.is_relative_to(self.candidate_dir):
-            raise ValueError(f"candidate path escapes candidate directory: {relative}")
+            raise PydanticCustomError(
+                "invalid_candidate_path",
+                "candidate path escapes candidate directory: {relative}",
+                {"relative": str(relative)},
+            )
         return resolved
 
     def _dockerfile_path(self, configured: Path) -> Path:
@@ -491,7 +640,11 @@ class KubernetesLifecycle:
             path = root / raw.removeprefix("${CONFIG_DIR}/")
             resolved = path.resolve()
             if not resolved.is_relative_to(root):
-                raise ValueError(f"Dockerfile escapes config directory: {configured}")
+                raise PydanticCustomError(
+                    "invalid_dockerfile_path",
+                    "Dockerfile escapes config directory: {configured}",
+                    {"configured": str(configured)},
+                )
             return resolved
         return self._candidate_path(configured)
 
@@ -564,24 +717,35 @@ class KubernetesLifecycle:
         last_error = "no attempt"
         while time.monotonic() < deadline:
             if any(forward.poll() is not None for forward in self._forwards):
-                raise RuntimeError("kubectl port-forward exited before readiness")
+                raise KubernetesLifecycleError.port_forward_exited()
             try:
                 for probe in self.config.http_probes:
-                    with urllib.request.urlopen(  # noqa: S310
-                        f"{self.endpoints[probe.endpoint]}{probe.path}", timeout=2
-                    ) as response:
+                    url = f"{self.endpoints[probe.endpoint]}{probe.path}"
+                    opener = urllib.request.OpenerDirector()
+                    opener.add_handler(urllib.request.HTTPHandler())
+                    opener.add_handler(urllib.request.HTTPSHandler())
+                    with opener.open(url, timeout=2) as response:
                         if response.status != probe.status:
-                            raise RuntimeError(
+                            last_error = (
                                 f"{probe.path} returned {response.status}, expected {probe.status}"
                             )
+                            break
                         if probe.json_contains is not None:
                             payload = json.load(response)
                             if not _json_contains(payload, probe.json_contains):
-                                raise RuntimeError(
+                                last_error = (
                                     f"{probe.path} JSON does not contain {probe.json_contains!r}"
                                 )
-                return
-            except Exception as error:  # noqa: BLE001
+                                break
+                else:
+                    return
+            except (
+                OSError,
+                TimeoutError,
+                ValueError,
+                urllib.error.URLError,
+                http.client.HTTPException,
+            ) as error:
                 last_error = str(error)
-                time.sleep(0.25)
-        raise TimeoutError(f"Kubernetes HTTP readiness timed out: {last_error}")
+            time.sleep(0.25)
+        raise KubernetesReadinessTimeoutError.for_last_error(last_error)

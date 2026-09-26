@@ -16,7 +16,7 @@ never reusing conversation history across issues. ``Reuse()`` restores the
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: path constants patched below
 
 from tests.vibesys.orchestration.harness import run_with_context
 
@@ -80,6 +80,7 @@ def test_reuse_policy_sends_no_reuse_session_bool_and_no_session_key(tmp_path: P
 
         prompts_root = tmp_path / f"prompts_fixture_{role.id}"
         _write_fixture_template(prompts_root, role.id)
+        # test-isolation: redirects a module-level path constant that has no injection seam.
         with patch("vibesys.orchestration.agents.PROMPTS_DIR", prompts_root):
             run_with_context(tmp_path, runner, body)
 

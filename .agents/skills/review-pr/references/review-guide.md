@@ -90,7 +90,7 @@ Ask of new abstractions:
 
 ## Python 3.12
 
-- Expect typed Python consistent with strict Pyright. Avoid `Any` or casts that
+- Expect typed Python that passes `ty` (`./scripts/check_types.sh`). Avoid `Any` or casts that
   hide an uncertain boundary; preserve type information through registries,
   callbacks, serialization, and async code.
 - Use Pydantic models for configuration, metadata, persisted state, structured
@@ -104,7 +104,7 @@ Ask of new abstractions:
   generators for cleanup across exceptional exits.
 - Favor observable-contract tests with Pytest/Hypothesis over private call
   structure. When relevant, run focused tests, `./scripts/check_format.sh`,
-  `./scripts/check_lint.sh`, and Pyright for affected typed packages.
+  `./scripts/check_lint.sh`, and `./scripts/check_types.sh` for affected typed packages.
 
 ## TypeScript TUI
 
@@ -191,8 +191,10 @@ that prevent domain prose from leaking into neutral or unrelated prompts.
 
 For skill changes, also verify that the frontmatter description triggers on the
 intended requests without being overly broad, instructions are imperative and
-actionable, references are discoverable directly from `SKILL.md`, and
-`quick_validate.py` passes.
+actionable, and references are discoverable directly from `SKILL.md`. For
+skills under `resources/skills/`, also run
+`uv run pytest tests/entrypoints/test_skills_wiring.py`, which runs
+`validate_skill_tree`.
 
 ## Documentation And Example Drift
 

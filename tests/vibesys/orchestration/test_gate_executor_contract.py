@@ -19,17 +19,18 @@ from __future__ import annotations
 import contextlib
 import sys
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock  # test-isolation: inert collaborators below
 
 import pytest
 
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
+    BenchmarkContract,
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
 from vibesys.evaluators.input_manifest import BenchmarkResult
-from vibesys.evaluators.metrics import Objective
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.orchestration.fake_gates import FakeGateExecutor
 from vibesys.orchestration.gates import _GateInputs, _RealGateExecutor
@@ -49,20 +50,23 @@ def _ctx(
     *, sandbox: Sandbox, accuracy_command: str | None, benchmark_command: str | None
 ) -> _GateInputs:
     """Bind a `_GateInputs` around *sandbox* with no evaluator-input tampering."""
+    # test-isolation: the real executor needs only inert git, events, and view collaborators for this input
     git = MagicMock()
     git.trusted_input_changes.return_value = []
     return _GateInputs(
+        # test-isolation: the real executor needs only inert git, events, and view collaborators for this input
         events=MagicMock(),
         judge_backend=sandbox,
         judge_accuracy_command=accuracy_command,
         judge_benchmark_command=benchmark_command,
+        # test-isolation: the real executor needs only inert git, events, and view collaborators for this input
         run_environment_view=MagicMock(),
         git=git,
     )
 
 
 @contextlib.contextmanager
-def _captured_gate_events():  # noqa: ANN202
+def _captured_gate_events():  # noqa: ANN202  # LW-040119 [ANN202]; the helper is private to this test module and its return type is the local closure type.
     """Collect the process-sink events the real executor publishes."""
     seen: list[CoreEvent] = []
     unsubscribe = output_sink().subscribe(seen.append)
@@ -256,7 +260,11 @@ class TestGateExecutorContract:
             # Unscripted: the fake's default matches the real "not declared" skip.
 
         result = executor.run_benchmark(
-            ctx, result_spec=None, result_protocol=None, process_id="bench-1", output_slug="bench-1"
+            ctx,
+            contract=BenchmarkContract(),
+            space=MetricSpace(),
+            process_id="bench-1",
+            output_slug="bench-1",
         )
 
         assert isinstance(result, BenchmarkGateResult)
@@ -287,9 +295,8 @@ class TestGateExecutorContract:
 
         result = executor.run_benchmark(
             ctx,
-            result_spec=_SCALAR_SPEC,
-            result_protocol=None,
-            objectives=objectives,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(objectives=objectives),
             process_id="bench-2",
             output_slug="bench-2",
         )
@@ -323,8 +330,8 @@ class TestGateExecutorContract:
 
         result = executor.run_benchmark(
             ctx,
-            result_spec=_SCALAR_SPEC,
-            result_protocol=None,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="bench-3",
             output_slug="bench-3",
         )
@@ -346,8 +353,8 @@ class TestGateExecutorContract:
             with _captured_gate_events() as seen:
                 executor.run_benchmark(
                     ctx,
-                    result_spec=_SCALAR_SPEC,
-                    result_protocol=None,
+                    contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+                    space=MetricSpace(),
                     process_id="bench-4",
                     output_slug="bench-4",
                     round_label="round-7",
@@ -366,8 +373,8 @@ class TestGateExecutorContract:
             )
             executor.run_benchmark(
                 ctx,
-                result_spec=_SCALAR_SPEC,
-                result_protocol=None,
+                contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+                space=MetricSpace(),
                 process_id="bench-4",
                 output_slug="bench-4",
                 round_label="round-7",

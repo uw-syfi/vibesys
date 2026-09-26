@@ -98,7 +98,8 @@ def _resolve_selector(
         )
         return ("openevolve" if infer_openevolve else "vibesys"), config
     if requested == "vibesys" and config is not None:
-        raise ValueError("OpenEvolve configuration requires the OpenEvolve search policy")  # noqa: TRY003
+        message = "OpenEvolve configuration requires the OpenEvolve search policy"
+        raise ValueError(message)
     return requested, config
 
 
@@ -126,7 +127,8 @@ class EvolveRun:
         existing = state_store.load()
         recorded_space = state_store.load_metric_space()
         if recorded_space not in {space, MetricSpace()}:
-            raise ValueError("recorded evolve metric space differs from the run descriptor")  # noqa: TRY003
+            message = "recorded evolve metric space differs from the run descriptor"
+            raise ValueError(message)
         selector, openevolve_config = _resolve_selector(options, existing)
         config = PopulationConfig(
             space=space,
@@ -296,7 +298,7 @@ class EvolveRun:
     async def run_generation(self, generation: int) -> None:
         """Evaluate and admit every not-yet-admitted slot of one generation."""
         await self.begin_generation(generation)
-        assert self.state.generation_start is not None  # noqa: S101  # set by begin_generation
+        assert self.state.generation_start is not None  # noqa: S101  # LW-040149 [S101]; set by begin_generation.
         proposals = self._proposals(self.state.generation_start)
         total = self.options.children_per_generation
         pending = range(self.state.admitted_slots + 1, total + 1)
@@ -337,7 +339,7 @@ class EvolveRun:
         try:
             if parent_commit:
                 await self.host.workspaces.root.restore(parent_commit, clean=True)
-        except Exception:  # noqa: BLE001  # preserve the skipped-candidate policy
+        except Exception:  # noqa: BLE001  # LW-020016 [BLE001]; a failing candidate is skipped by policy, so the generation continues without it.
             self.host.warning(
                 f"could not check out parent {parent.id} "
                 f"(commit {parent_commit[:8] if parent_commit else 'n/a'}); skipping candidate",

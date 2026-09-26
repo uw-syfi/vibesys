@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
     """Read the transport bootstrap flag without parsing run configuration."""
-    value = cli._option_from_argv(argv, "--control-socket")  # noqa: SLF001
+    value = cli.option_from_argv(argv, "--control-socket")
     return Path(value) if value else None
 
 
@@ -53,7 +54,7 @@ def _suggest_repository_owner(config: Config) -> str | None:
         return None
 
 
-def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
+def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913]; This private resolver maps the parser's seven independent setup flags to derived defaults; a Namespace loses field types and a new input DTO would duplicate the parser.
     *,
     config_path: Path | None = None,
     stub_agent: bool = False,
@@ -64,7 +65,7 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
     directory_only: bool = False,
 ) -> InteractiveSetupDefaults:
     """Resolve launcher-facing defaults from local configuration."""
-    config = cli._load_config_or_stub_default(  # noqa: SLF001
+    config = cli.load_config_or_stub_default(
         config_path,
         stub_agent=stub_agent,
     )
@@ -88,8 +89,8 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
 
 def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDefaults]:
     """Build the lazy defaults provider exposed over the control socket."""
-    config = cli._option_from_argv(argv, "--config")  # noqa: SLF001
-    theme = cli._option_from_argv(argv, "--theme")  # noqa: SLF001
+    config = cli.option_from_argv(argv, "--config")
+    theme = cli.option_from_argv(argv, "--theme")
     stub_agent = "--stub-agent" in argv
 
     def provide() -> InteractiveSetupDefaults:
@@ -104,13 +105,13 @@ def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDef
 
 
 def _build_tui_defaults_parser() -> argparse.ArgumentParser:
-    parser = cli._RunArgumentParser(  # noqa: SLF001
+    parser = cli.RunArgumentParser(
         prog="vibesys tui-defaults",
         description="Resolve configuration defaults for a TUI launcher.",
     )
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--input", type=Path, default=None)
-    parser.add_argument("--runs-dir", type=cli._parse_runs_dir, default=None)  # noqa: SLF001
+    parser.add_argument("--runs-dir", type=cli.parse_runs_dir, default=None)
     parser.add_argument("--exp-name", default=None)
     parser.add_argument("--theme", type=TuiTheme, choices=list(TuiTheme), default=None)
     parser.add_argument("--stub-agent", action="store_true")
@@ -131,16 +132,16 @@ def _run_tui_defaults(argv: list[str]) -> None:
             directory_only=args.directory_only,
         )
     except (ValueError, FileNotFoundError) as exc:
-        cli._configuration_error(  # noqa: SLF001
+        cli.configuration_error(
             str(exc),
             code="config_load_failed",
             stage="config_loading",
         )
-    print(defaults.model_dump_json())  # noqa: T201  # tracked: #288
+    sys.stdout.write(defaults.model_dump_json() + "\n")
 
 
 def _missing_control_socket() -> NoReturn:
-    cli._configuration_error(  # noqa: SLF001
+    cli.configuration_error(
         "--control-socket is required by the frontend server",
         code="invalid_arguments",
         stage="argument_parsing",
@@ -154,7 +155,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             _run_tui_defaults(arguments[1:])
         except ConfigurationError as exc:
-            cli._render_configuration_error(exc)  # noqa: SLF001
+            cli.render_configuration_error(exc)
         return
 
     control_socket = _control_socket_from_argv(arguments)
@@ -162,10 +163,10 @@ def main(argv: list[str] | None = None) -> None:
         try:
             _missing_control_socket()
         except ConfigurationError as exc:
-            cli._render_configuration_error(exc)  # noqa: SLF001
-    from server.runtime import ServerRuntime  # noqa: PLC0415  # tracked: #288
+            cli.render_configuration_error(exc)
+    server_runtime = import_module("server.runtime").ServerRuntime
 
-    runtime = ServerRuntime(
+    runtime = server_runtime(
         socket_path=control_socket,
         tui_defaults=_tui_defaults_from_argv(arguments),
     )

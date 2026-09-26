@@ -79,7 +79,7 @@ class AgentHandle(Protocol):
         """Send one turn and return its text; labels are policy-defined."""
         ...
 
-    async def turn_structured(  # noqa: PLR0913
+    async def turn_structured(  # noqa: PLR0913  # lint-waiver: LW-020037 [PLR0913]; AgentHandle.turn_structured is the public typed-turn contract, and its keyword options are independent.
         self,
         message: str,
         *,

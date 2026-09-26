@@ -24,9 +24,7 @@ import shlex
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, Unpack, cast
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock, patch  # test-isolation: stubs and patches below
 
 from vibesys.api.testing import FakeGateExecutor
 from vibesys.config import Config, as_config
@@ -135,6 +133,7 @@ class _FakeRunContext:
         if git is not None:
             self.git = git
             self.workspaces = SimpleNamespace(
+                # test-isolation: stubs run-context collaborators and module seams that have no fake yet
                 root=SimpleNamespace(candidate_patch=AsyncMock(side_effect=git.candidate_patch))
             )
         if run_environment is not None:
@@ -154,13 +153,16 @@ class _FakeRunContext:
 
             self.environment = SimpleNamespace(
                 candidate_runtime=candidate_runtime,
+                # test-isolation: stubs run-context collaborators and module seams that have no fake yet
                 teardown_deployment=AsyncMock(
                     side_effect=lambda name: active_environment.teardown_deployment(name, log=log)
                 ),
             )
+        # test-isolation: stubs run-context collaborators and module seams that have no fake yet
         self.events = events if events is not None else MagicMock()
         self.judge_accuracy_command: str | None = None
         self.judge_benchmark_command: str | None = None
+        # test-isolation: stubs run-context collaborators and module seams that have no fake yet
         self.judge_backend = MagicMock()
         self._log = log
 
@@ -208,36 +210,6 @@ class _SharedFakeClient:
         """The scripted client remains available to other role handles."""
 
 
-@pytest.fixture
-def ref_file(tmp_path: Path) -> str:
-    """Reference *file* + sibling OBJECTIVE.md.
-
-    A single-file reference avoids the model-weight resolution that a
-    reference *directory* triggers, keeping the fixture independent of any
-    developer-host HF cache state.
-    """
-    model_dir = tmp_path / "input_model"
-    model_dir.mkdir()
-    ref = model_dir / "ref.py"
-    ref.write_text("def predict(x): return x * 2\n")
-    (model_dir / "OBJECTIVE.md").write_text("Maximize tok/s throughput.\n")
-    (model_dir / "vibesys.input.toml").write_text(
-        """version = 1
-
-[agent]
-domain = "llm-serving"
-
-[accuracy]
-command = ["python", "-c", "print('ok')"]
-
-[benchmark]
-command = ["python", "-c", "print('ok')"]
-""",
-        encoding="utf-8",
-    )
-    return str(ref)
-
-
 def _judge_response(verdict: Literal["pass", "fail"]) -> JudgeResponse:
     """The default judge verdict for a scripted round."""
     return JudgeResponse(
@@ -263,7 +235,7 @@ def _default_profiler_responses(n: int, *, start: float = 10.0) -> list[Profiler
     return [_profiler_response(start + i) for i in range(n)]
 
 
-def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # tracked: #288
+def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # LW-040153 [ANN202];  tracked: #288.
     """Build an ``on_invoke`` callback that simulates a real mutator edit.
 
     Without a file change the cold-start snapshot is a no-op and no commit is
@@ -271,7 +243,7 @@ def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # tracked:
     to actually change on every mutator (``kind="implementer"``) call.
     """
 
-    def _write(call):  # noqa: ANN001, ANN202  # tracked: #288
+    def _write(call):  # noqa: ANN001, ANN202  # LW-040154 [ANN001, ANN202];  tracked: #288.
         if call.kind != "implementer":
             return
         n = len(fake.calls_for("implementer"))
@@ -408,11 +380,14 @@ def _invoke_loop(
             integration.close()
 
     with (
+        # test-isolation: stubs run-context collaborators and module seams that have no fake yet
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
+        # test-isolation: stubs run-context collaborators and module seams that have no fake yet
         patch(
             "vibesys.orchestration.runtime.build_agent_client",
             side_effect=lambda **_kwargs: _SharedFakeClient(runner),
         ),
+        # test-isolation: stubs run-context collaborators and module seams that have no fake yet
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
     ):
         return asyncio.run(execute())
@@ -429,9 +404,10 @@ def _invoke_bootstrap(
     """Exercise bootstrap through a valid one-generation run contract."""
     overrides: _EvolveLoopKwargs = {"max_generations": 1}
     overrides.update(kwargs)
+    # test-isolation: stubs run-context collaborators and module seams that have no fake yet
     with patch(
         "vibesys.loops.evolve.run.EvolveRun._proposals",
-        lambda self, generation_start: [None] * self.options.children_per_generation,  # noqa: ARG005
+        lambda self, generation_start: [None] * self.options.children_per_generation,  # noqa: ARG005  # LW-040155 [ARG005]; the lambda stands in for a method with a fixed signature and ignores the arguments it does not need.
     ):
         return _invoke_loop(
             tmp_path,
@@ -455,6 +431,7 @@ def _evolution_descriptor() -> OrchestrationDescriptor:
 def _evolution_state_store(project_root: Path) -> EvolutionStateStore:
     project = Project.open(project_root)
     run = project.state.resolve_run()
+    # test-isolation: stubs run-context collaborators and module seams that have no fake yet
     state = RunState(project, MagicMock(history_root=project.root, run_id=run.run_id), run.run_id)
     return EvolutionStateStore(state.portable(RunStateNamespace.EVOLVE))
 

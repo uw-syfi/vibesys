@@ -18,7 +18,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: backend swap below
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -67,7 +67,9 @@ def _old_dump_files(database: ProgramDatabase, *, iteration: int) -> dict[str, s
 @contextmanager
 def _backend(load_files: object, dump_files: object) -> Iterator[None]:
     with (
+        # test-isolation: the equivalence check swaps the selector's file backend to compare old and new
         patch.object(openevolve_selector, "_load_files", load_files),
+        # test-isolation: the equivalence check swaps the selector's file backend to compare old and new
         patch.object(openevolve_selector, "_dump_files", dump_files),
     ):
         yield
@@ -153,8 +155,8 @@ def test_in_memory_backend_matches_old_file_backend(
     )
 
     new_load_files, new_dump_files = (
-        openevolve_selector._load_files,  # noqa: SLF001
-        openevolve_selector._dump_files,  # noqa: SLF001
+        openevolve_selector._load_files,  # noqa: SLF001  # LW-040080 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
+        openevolve_selector._dump_files,  # noqa: SLF001  # LW-040081 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
     )
 
     with _backend(new_load_files, new_dump_files):
@@ -200,8 +202,8 @@ def _drive_repeatedly(
 ) -> None:
     """Assert ``repeats`` independent replays of the same input agree."""
     new_load_files, new_dump_files = (
-        openevolve_selector._load_files,  # noqa: SLF001
-        openevolve_selector._dump_files,  # noqa: SLF001
+        openevolve_selector._load_files,  # noqa: SLF001  # LW-040082 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
+        openevolve_selector._dump_files,  # noqa: SLF001  # LW-040083 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
     )
     with _backend(new_load_files, new_dump_files):
         traces = [_drive(config, perf_metrics) for _ in range(repeats)]

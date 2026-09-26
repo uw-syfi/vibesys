@@ -163,7 +163,7 @@ class ProtocolReport:
 
     def _checked_row(self, values: Mapping[str, float]) -> dict[str, float]:
         """Validate and filter a measured row against the declared metrics."""
-        assert self._metrics is not None  # noqa: S101 -- guarded by emit()
+        assert self._metrics is not None
         row: dict[str, float] = {}
         for name, value in values.items():
             spec = self._metrics.get(name)

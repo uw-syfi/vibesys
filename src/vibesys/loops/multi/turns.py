@@ -369,7 +369,7 @@ Write bounded durable profile evidence only below
                     mcp_servers=[spec] if spec is not None else None,
                 ),
             )
-        except Exception as error:  # noqa: BLE001  # profile evidence is optional
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020021 [BLE001]; profile evidence is optional, so a profiler failure is reported and the round proceeds without it.
             self.ctx.warning(
                 "profiler failed",
                 detail=str(error),

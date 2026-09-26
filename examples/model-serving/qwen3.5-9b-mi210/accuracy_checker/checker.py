@@ -22,25 +22,11 @@ from pathlib import Path
 # Runnable as a script (`python accuracy_checker/checker.py`) or as a module:
 # both `accuracy_checker` and `reference` are packages under the bundle root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from accuracy_checker.resume import evaluate_resume
 from accuracy_checker.targets import EngineTarget, HFTarget, HttpTarget, Target
+from accuracy_checker.thresholds import Thresholds
 
 GOLDEN = Path(__file__).with_name("golden.json")
-
-
-@dataclass(frozen=True)
-class Thresholds:
-    """Fixed before any optimized engine was evaluated; calibration evidence in README.md."""
-
-    # A golden position whose HF top-1 beats top-2 by less than this (nats) is a near-tie.
-    near_tie_margin: float = 0.5
-    # Teacher-forced: candidate argmax must equal HF top-1 at every non-near-tie position.
-    max_decisive_flips: int = 0
-    # Teacher-forced |candidate logprob - HF logprob| of the golden token, over all positions.
-    max_mean_abs_dlogprob: float = 0.05
-    max_p99_abs_dlogprob: float = 0.25
-    # Free-running greedy: every divergence from golden must happen at a near-tie position ...
-    # ... and the mean matched-prefix fraction across prompts must stay above this floor.
-    min_mean_prefix_fraction: float = 0.5
 
 
 @dataclass
@@ -151,6 +137,27 @@ def evaluate(target: Target, golden: dict, th: Thresholds, log=print) -> tuple[b
     return passed, summary
 
 
+def run_gate(target: Target, golden: dict, th: Thresholds, log=print) -> tuple[bool, dict]:
+    """The full gate: base checks, plus the resume and stream checks for a server target."""
+    if not isinstance(target, HttpTarget):
+        return evaluate(target, golden, th, log)
+    # Resume check first, so its chained rounds resume from the end of a finished
+    # request, not from the middle of the base check's 64-token generation.
+    log("cache-resume check:")
+    resume_passed, resume = evaluate_resume(target, golden, th, log)
+    log("base checks:")
+    passed, summary = evaluate(target, golden, th, log)
+    summary["resume_check"] = resume
+    case = golden["cases"][0]
+    err = target.stream_matches(case["prompt_ids"], 16, target.greedy(case["prompt_ids"], 16))
+    summary["stream_check"] = err or "ok"
+    log(f"stream protocol check: {err or 'ok'}")
+    passed = passed and resume_passed and err is None
+    summary["passed"] = passed
+    log(f"gate: {'PASS' if passed else 'FAIL'}")
+    return passed, summary
+
+
 # ----------------------------------------------------------------------------- fault injection
 
 
@@ -208,13 +215,7 @@ def main() -> None:
         case "hf" | "hf-nofla":
             target = HFTarget(args.model, use_fla=args.target == "hf")
     print(f"target: {target.name}")
-    passed, summary = evaluate(target, golden, Thresholds())
-    if isinstance(target, HttpTarget):
-        case = golden["cases"][0]
-        err = target.stream_matches(case["prompt_ids"], 16, target.greedy(case["prompt_ids"], 16))
-        summary["stream_check"] = err or "ok"
-        print(f"stream protocol check: {err or 'ok'}")
-        passed = passed and err is None
+    passed, summary = run_gate(target, golden, Thresholds())
     if args.json_out:
         args.json_out.write_text(json.dumps(summary, indent=1))
     sys.exit(0 if passed else 1)

@@ -72,7 +72,8 @@ def _generate_journal(path: Path, target_bytes: int) -> int:
 
 
 def _worker(path: Path) -> None:
-    from server.events import EventStore  # noqa: PLC0415  # implementation selected by PYTHONPATH
+    # lint-waiver: LW-008027 [PLC0415]; Keep EventStore import time outside the measured attach interval.
+    from server.events import EventStore  # noqa: PLC0415
 
     started = time.perf_counter()
     store = EventStore(path, run_id="benchmark")
@@ -100,7 +101,8 @@ def _measure(python: Path, module_root: Path, source: Path) -> Measurement:
     environment["PYTHONPATH"] = os.pathsep.join(
         [source_path, environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [source_path]
     )
-    result = subprocess.run(  # noqa: S603  # explicit benchmark interpreter and script
+    # lint-waiver: LW-008042 [S603]; The benchmark invokes the selected Python executable with this script and a fixed worker mode.
+    result = subprocess.run(  # noqa: S603
         [str(python), str(Path(__file__).resolve()), "--worker", str(source)],
         check=True,
         capture_output=True,

@@ -162,7 +162,7 @@ def normalize_event(event: dict[str, Any], *, workspace: Path | None = None) -> 
 _EVENT_STRING_LIMIT = 200
 
 
-def _collapse_long_strings(value: Any) -> Any:  # noqa: ANN401
+def _collapse_long_strings(value: Any) -> Any:  # noqa: ANN401  # LW-040008 [ANN401]; the helper walks arbitrary JSON-like values, so Any is the accurate type.
     if isinstance(value, str) and len(value) > _EVENT_STRING_LIMIT:
         digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
         return f"<text len={len(value)} sha256={digest}>"

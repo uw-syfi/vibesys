@@ -5,7 +5,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
@@ -59,6 +58,7 @@ class BootstrapContext(BaseModel):
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from vibesys.config import LoadLevelCfg
     from vibesys.evaluators.perf_reply import IssuePerfEvalResponse
@@ -382,9 +382,8 @@ class _IssueQueueTurns:
     ) -> list[MCPServerSpec]:
         agent = self.judge_agent if creator == "judge" else self.perf_agent
         if not agent.capabilities.mcp_servers:
-            raise RuntimeError(  # noqa: TRY003
-                f"agent backend {agent.backend_name!r} cannot expose issue-board tools"
-            )
+            message = f"agent backend {agent.backend_name!r} cannot expose issue-board tools"
+            raise RuntimeError(message)
         return [
             build_issue_mcp_spec(
                 store_relpath="issues.json",

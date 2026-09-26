@@ -30,7 +30,6 @@ left to the user.
 
 from __future__ import annotations
 
-from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -51,6 +50,8 @@ from vibesys.roles.profiler import CANDIDATE_PROFILERS, CandidateProfilerContext
 from vibesys.search.population.models import CandidateOutcome, Individual
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vibesys.evaluators.metrics import MetricSpace, Objective
     from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
     from vibesys.orchestration.runtime import RunContext, WorkspaceHandle
@@ -133,7 +134,7 @@ async def _discard_working_tree(ctx: RunContext) -> None:
     """Drop any uncommitted changes left by a failed mutation attempt."""
     try:
         await ctx.workspaces.root.restore("HEAD", clean=True)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # LW-010256 [BLE001]; cleanup warnings must not replace an earlier candidate failure.
         ctx.warning(
             "discard working tree failed",
             detail=str(exc),
@@ -188,7 +189,7 @@ def _candidate_runtime_notes(
     return runtime.prompt_notes, runtime.deployment_name
 
 
-async def _run_mutator(  # noqa: PLR0913  # tracked: #288
+async def _run_mutator(  # noqa: PLR0913  # lint-waiver: LW-020007 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     agents: dict[str, AgentHandle],
     *,
@@ -247,7 +248,7 @@ async def _run_mutator(  # noqa: PLR0913  # tracked: #288
     )
 
 
-async def _run_judge(  # noqa: PLR0913  # tracked: #288
+async def _run_judge(  # noqa: PLR0913  # lint-waiver: LW-020008 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     agents: dict[str, AgentHandle],
     *,
@@ -310,7 +311,7 @@ def _format_objectives_for_profiler(objectives: Sequence[Objective]) -> str:
     )
 
 
-async def _run_profiler(  # noqa: PLR0913  # tracked: #288
+async def _run_profiler(  # noqa: PLR0913  # lint-waiver: LW-020009 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     agents: dict[str, AgentHandle],
     *,
@@ -368,7 +369,7 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
                 workspace=scope or ctx.workspaces.root,
             ),
         )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # LW-010265 [BLE001]; configured profiler failures become framework warnings so the run continues without profile data.
         ctx.warning(
             "profiler failed", detail=str(exc), source=FrameworkSource.LOOP, round_label=label
         )
@@ -403,7 +404,7 @@ async def _run_framework_benchmark_gate(
     )
 
 
-async def _run_candidate_gates(  # noqa: PLR0913  # tracked: #288
+async def _run_candidate_gates(  # noqa: PLR0913  # lint-waiver: LW-020010 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     *,
     generation: int,
@@ -485,7 +486,7 @@ def _candidate_fitness(
     )
 
 
-async def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
+async def _evaluate_candidate(  # noqa: PLR0913  # lint-waiver: LW-020011 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     agents: dict[str, AgentHandle],
     *,
@@ -521,7 +522,7 @@ async def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         + f"; inspirations={[i.id for i in inspirations]}"
     )
 
-    def outcome(  # noqa: PLR0913  # tracked: #288
+    def outcome(  # noqa: PLR0913  # LW-040148 [PLR0913];  tracked: #288.
         *,
         passed: bool,
         summary: str,
@@ -617,7 +618,7 @@ async def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         await _teardown_candidate_deployment(ctx, cand_deployment, keep=keep_deployments)
 
 
-async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
+async def _evaluate_in_subcontext(  # noqa: PLR0913  # LW-020012 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     *,
     generation: int,
@@ -654,7 +655,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
         )
     try:
         scope = await ctx.workspaces.fork(commit)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # LW-010257 [BLE001]; arbitrary provider setup failures are reported as a failed candidate.
         ctx.warning(
             f"candidate {label} setup failed",
             detail=str(exc),
@@ -698,7 +699,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             # detached commit first so durable population state cannot name an
             # object that Git is then free to prune.
             await ctx.workspaces.root.retain(label, outcome.commit)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # LW-010258 [BLE001]; evaluator failures become candidate outcomes so the generation can continue.
         ctx.warning(
             f"candidate {label} evaluation raised",
             detail=str(exc),
@@ -716,7 +717,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     finally:
         try:
             await scope.discard()
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:  # noqa: BLE001  # LW-010259 [BLE001]; teardown failure is reported without hiding the candidate result.
             ctx.warning(
                 f"candidate {label} teardown failed",
                 detail=str(exc),
@@ -842,7 +843,7 @@ class _BootstrapAdapter:
         if wip_seed is not None and wip_seed.commit:
             try:
                 await self.ctx.workspaces.root.restore(wip_seed.commit, clean=True)
-            except Exception:  # noqa: BLE001  # recover by rebuilding from reference
+            except Exception:  # noqa: BLE001  # LW-020013 [BLE001]; any failure to restore the WIP seed falls back to rebuilding from the reference.
                 self.ctx.warning(
                     f"could not check out WIP seed {wip_seed.id} "
                     f"(commit {wip_seed.commit[:8]}); starting from reference",
@@ -864,7 +865,7 @@ class _BootstrapAdapter:
         """
         try:
             current = self.ctx.workspaces.root.revision
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:  # noqa: BLE001  # LW-010260 [BLE001]; a failed best-effort revision read is reported while retaining the verified seed.
             self.ctx.warning(
                 "reading the workspace revision failed",
                 detail=str(exc),
@@ -948,7 +949,7 @@ class _BootstrapAdapter:
         )
 
 
-async def _bootstrap_seed(  # noqa: PLR0913  # tracked: #288
+async def _bootstrap_seed(  # noqa: PLR0913  # lint-waiver: LW-020014 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     agents: dict[str, AgentHandle],
     *,
