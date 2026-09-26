@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Check that every Ruff suppression has a reason and a manifest entry.
+"""Check that every Ruff suppression has a source ID and reason.
 
-The manifest uses stable waiver IDs rather than source line numbers. Each ID
-appears in a comment immediately before its ``# noqa`` directive, with a short
-explanation of why the rule is suppressed. The check parses Ruff's configured Python
-file set, tokenizes comments so strings and docstrings do not count, and uses
-the Python AST to ensure each suppression belongs to a source node.
+Each ID appears beside its ``# noqa`` directive, with a short explanation of
+why the rule is suppressed. The check scans Ruff's configured Python file set,
+tokenizes comments so strings and docstrings do not count, and uses the Python
+AST to ensure each suppression belongs to a source node.
 
 Usage:
-    uv run python scripts/check_lint_waivers.py.
+    uv run python scripts/check_lint_waivers.py
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from __future__ import annotations
 import argparse
 import ast
 import fnmatch
-import json
 import re
 import sys
 import tokenize
@@ -24,12 +22,11 @@ import tomllib
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-DEFAULT_MANIFEST = Path("lint_waivers.jsonl")
 DEFAULT_PYPROJECT = Path("pyproject.toml")
 DEFAULT_EXCLUDED_DIRS = frozenset(
     {
@@ -52,20 +49,9 @@ NOQA_RE = re.compile(
 )
 WAIVER_RE = re.compile(r"#\s*(?:lint-waiver:\s*)?(LW-\d{6})(?:\s+\[([A-Z0-9, ]+)\])?\s*;\s*(.*)$")
 WAIVER_CONTINUATION_RE = re.compile(r"#\s*(?:lint-waiver\+:|>\s*)(.*)$")
-WAIVER_ID_RE = re.compile(r"LW-\d{6}\Z")
-
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
 EXIT_TOOL_ERROR = 2
-
-
-@dataclass(frozen=True)
-class ManifestWaiver:
-    """One tracked suppression site."""
-
-    waiver_id: str
-    path: str
-    rules: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -77,72 +63,6 @@ class SourceWaiver:
     rules: tuple[str, ...]
     line: int
     reason: str
-
-
-def parse_manifest(path: Path, repo_root: Path) -> tuple[list[ManifestWaiver], list[str]]:
-    """Load JSONL entries and report malformed or duplicate IDs."""
-    failures: list[str] = []
-    waivers: list[ManifestWaiver] = []
-    ids: set[str] = set()
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        return [], [f"{path}: cannot be read ({exc})"]
-
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        try:
-            value: object = json.loads(line)
-        except json.JSONDecodeError as exc:
-            failures.append(f"{path}:{line_number}: invalid JSON ({exc.msg})")
-            continue
-        waiver, error = parse_manifest_entry(value, repo_root, path, line_number)
-        if error is not None:
-            failures.append(error)
-        if waiver is None:
-            continue
-        waiver_id = waiver.waiver_id
-        if waiver_id in ids:
-            failures.append(f"{path}:{line_number}: duplicate id {waiver_id}")
-            continue
-        ids.add(waiver_id)
-        waivers.append(waiver)
-    return waivers, failures
-
-
-def parse_manifest_entry(
-    value: object, repo_root: Path, manifest_path: Path, line_number: int
-) -> tuple[ManifestWaiver | None, str | None]:
-    """Validate one manifest object and convert it to a typed waiver."""
-    if not isinstance(value, dict):
-        return None, f"{manifest_path}:{line_number}: entry must be a JSON object"
-    waiver_id = value.get("id")
-    relative_path = value.get("path")
-    rules = value.get("rules")
-    if not isinstance(waiver_id, str) or not WAIVER_ID_RE.fullmatch(waiver_id):
-        return None, f"{manifest_path}:{line_number}: id must match LW-NNNNNN"
-    if not isinstance(relative_path, str) or not relative_path:
-        return None, f"{manifest_path}:{line_number}: path must be a non-empty string"
-    if not _valid_manifest_path(repo_root, relative_path):
-        return None, f"{manifest_path}:{line_number}: path must name a repository Python file"
-    if not _valid_rules(rules):
-        return None, f"{manifest_path}:{line_number}: rules must be a non-empty unique list"
-    return ManifestWaiver(waiver_id, Path(relative_path).as_posix(), tuple(sorted(rules))), None
-
-
-def _valid_manifest_path(repo_root: Path, relative_path: str) -> bool:
-    candidate = (repo_root / relative_path).resolve()
-    return candidate.is_relative_to(repo_root.resolve()) and candidate.suffix == ".py"
-
-
-def _valid_rules(rules: object) -> TypeGuard[list[str]]:
-    return (
-        isinstance(rules, list)
-        and bool(rules)
-        and all(isinstance(rule, str) and rule for rule in rules)
-        and len(set(rules)) == len(rules)
-    )
 
 
 def discover_ruff_files(repo_root: Path) -> tuple[list[Path], str | None]:
@@ -305,11 +225,9 @@ def _rule_counts(rulesets: Iterable[tuple[str, ...]]) -> dict[tuple[str, ...], i
 def audit(
     repo_root: Path,
     files: list[Path],
-    manifest_waivers: list[ManifestWaiver],
-    manifest_failures: list[str] | None = None,
 ) -> list[str]:
-    """Compare source comments to the central manifest."""
-    failures = list(manifest_failures or [])
+    """Validate source waivers and require repository-wide unique IDs."""
+    failures: list[str] = []
     found: dict[str, SourceWaiver] = {}
     for path in files:
         source_waivers, source_failures = scan_source_file(path, repo_root)
@@ -324,46 +242,26 @@ def audit(
                 continue
             found[waiver.waiver_id] = waiver
 
-    recorded = {waiver.waiver_id: waiver for waiver in manifest_waivers}
-    for waiver_id, waiver in sorted(found.items()):
-        entry = recorded.get(waiver_id)
-        if entry is None:
-            failures.append(
-                f"{waiver.path}:{waiver.line}: {waiver_id} is missing from the manifest"
-            )
-        elif entry.path != waiver.path or entry.rules != waiver.rules:
-            failures.append(
-                f"{waiver.path}:{waiver.line}: {waiver_id} does not match its manifest path/rules"
-            )
-    for waiver_id, entry in sorted(recorded.items()):
-        if waiver_id not in found:
-            failures.append(f"{entry.path}: manifest waiver {waiver_id} has no source comment")
     return failures
 
 
 def main() -> int:
-    """Run the manifest/source audit."""
+    """Run the source waiver audit."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="repository root")
-    parser.add_argument("--manifest", type=Path, default=None, help="waiver JSONL path")
     args = parser.parse_args()
     repo_root = args.root.resolve()
-    manifest_path = args.manifest or repo_root / DEFAULT_MANIFEST
-    if not manifest_path.is_absolute():
-        manifest_path = repo_root / manifest_path
-
-    manifest_waivers, manifest_failures = parse_manifest(manifest_path, repo_root)
     files, discovery_error = discover_ruff_files(repo_root)
     if discovery_error is not None:
         print(f"check_lint_waivers: {discovery_error}", file=sys.stderr)
         return EXIT_TOOL_ERROR
-    failures = audit(repo_root, files, manifest_waivers, manifest_failures)
+    failures = audit(repo_root, files)
     if failures:
-        print("Lint waiver manifest violations:")
+        print("Lint waiver violations:")
         for failure in failures:
             print(f"  {failure}")
         return EXIT_VIOLATIONS
-    print(f"All {len(manifest_waivers)} Ruff waiver(s) have a unique manifest entry and reason.")
+    print("All Ruff waivers have unique IDs and source reasons.")
     return EXIT_OK
 
 

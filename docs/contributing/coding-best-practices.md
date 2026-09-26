@@ -121,41 +121,44 @@ The thresholds live in `pyproject.toml` (`[tool.ruff.lint]`,
 
 ### Ratchets
 
-The escape hatches below are temporary migration debt and are being removed as
-the affected code is refactored. Fix new violations by splitting or simplifying
-the affected code. A specific exception is allowed when the code has a concrete
-reason to keep it; record that reason next to the suppression and track it in the
-manifest described below.
+These ratchets keep violations from growing and reject stale suppressions. Fix
+new violations directly by default. A lint suppression is an explicit opt-out
+and is allowed only when reasonable lint-compliant fixes would make the design
+more hacky than keeping the current code. List the alternatives considered and
+explain why each would be worse in the source rationale. Effort, time, and
+pre-existing violations are not sufficient reasons.
 
 - **Python functions.** A site-level `# noqa: <rule>` waives a rule at one call
   site. Ruff's `RUF100` fails on a waiver that no longer suppresses anything,
-  so refactoring a function requires deleting its waiver and manifest entry.
+  so refactoring a function requires deleting its waiver.
 - **Python Ruff suppressions.** Every `# noqa` directive in Ruff's Python file
-  set, including a file-level `# ruff: noqa`, has a unique ID and an entry in
-  `lint_waivers.jsonl`. Put the ID and a specific reason beside the directive:
+  set, including a file-level `# ruff: noqa`, has a unique ID and a specific
+  reason beside the directive:
 
   ```python
-  run_fixed_command()  # noqa: S603  # LW-000042; fixed argv is passed with shell=False
-  # > The wrapper does not accept shell syntax from the caller.
+  run_fixed_command()  # noqa: S603  # LW-000042; keep argv execution at this boundary.
+  # > A helper adds indirection without changing this command boundary; shell=True
+  # > weakens the argv safety guarantee. Keeping the direct call is simpler.
   ```
 
-  For import suppressions, put the reason in a nearby standalone comment so
+  For import suppressions, put the rationale in a nearby standalone comment so
   Ruff's import sorter can still process the import block:
 
   ```python
-  # lint-waiver: LW-000043 [PLC0415]; this dependency is optional at startup
+  # lint-waiver: LW-000043 [PLC0415]; keep the optional import inside its guarded path.
+  # > Moving it to module scope imports the dependency unconditionally; a loader
+  # > wrapper obscures this single guarded use without adding reuse.
   def load_optional_backend():
       from optional_backend import Backend  # noqa: PLC0415
   ```
 
-  The JSONL entry records the ID, repository-relative path, and exact rule set.
-  It deliberately has no line number, so ordinary edits above the site do not
-  invalidate the entry. Keep the ID if the suppression moves within a file;
-  update its path or rules when those change. Delete the entry when removing the
-  suppression. The source reason is required even when the waiver is temporary.
-  Continue a long reason on following `# > ...` comment lines. CI runs
+  Keep the ID if the suppression moves within a file. The source rationale is
+  required even when the waiver is temporary. Continue it on
+  following `# > ...` comment lines. CI runs
   `uv run python scripts/check_lint_waivers.py` (the `python-checks` job) to
-  validate the source and manifest.
+  check rationale presence, rule annotations, and ID uniqueness across the
+  repository. Reviewers assess whether the listed alternatives justify the
+  opt-out; the scanner cannot judge the rationale's substance.
 - **TypeScript.** A `// biome-ignore lint/<group>/<rule>: pre-existing; tracked: #288`
   comment waives one site. Biome reports a suppression that no longer
   suppresses anything as an unused-suppression diagnostic, so stale waivers
