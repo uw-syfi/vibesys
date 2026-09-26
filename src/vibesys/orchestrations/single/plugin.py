@@ -1,7 +1,5 @@
 """Explicit declarations of the single-agent orchestration presets."""
 
-from typing import cast
-
 from pydantic import BaseModel
 
 from vibesys.orchestrations.hypothesis_readmodel import project_hypothesis_state
@@ -17,7 +15,7 @@ from vs_runtime.api import OrchestrationPlugin, PluginProjection
 
 def _project(raw_state: BaseModel) -> PluginProjection:
     """Project the single-agent aggregate into its public policy view."""
-    return project_hypothesis_state(cast("SingleState", raw_state).search)
+    return project_hypothesis_state(SingleState.model_validate(raw_state).search)
 
 
 PLUGIN = OrchestrationPlugin(

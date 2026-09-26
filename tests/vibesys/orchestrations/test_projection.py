@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from vibesys.api.agent import AgentRunProjection
 from vibesys.orchestrations.multi import (
@@ -125,3 +126,22 @@ def test_profile_guidance_does_not_change_the_public_run_projection() -> None:
     assert profile_project is not None
 
     assert profile_project(profile_state) == plain_project(plain_state)
+
+
+@pytest.mark.parametrize(
+    ("plugin", "wrong_state_plugin"),
+    [
+        (SINGLE_PLUGIN, MULTI_PLUGIN),
+        (MULTI_PLUGIN, SINGLE_PLUGIN),
+    ],
+    ids=("single-rejects-multi", "multi-rejects-single"),
+)
+def test_plugin_projection_rejects_another_plugins_state_model(
+    plugin: OrchestrationPlugin,
+    wrong_state_plugin: OrchestrationPlugin,
+) -> None:
+    project = plugin.project
+    assert project is not None
+
+    with pytest.raises(ValidationError, match="Input should be a valid dictionary"):
+        project(_plugin_state(wrong_state_plugin))
