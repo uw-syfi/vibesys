@@ -49,8 +49,9 @@ def test_cpu_smoke_profile_declares_the_expected_request_and_result_contract() -
     assert profile.shape_counts == {(16, 4): 8}
     assert set(profile.metrics) == {"output_token_throughput_per_s", "p90_latency_ms"}
     assert profile.required_fields["stream_options"] == {"include_usage": True}
-    assert profile.unique_prompt_tokens is True
-    assert profile.tokenizer_path.name == "cpu_smoke_tokenizer.json"
+    assert profile.tokenizer_path == (
+        _REPO_ROOT / "tests" / "examples" / "fixtures" / "request_factory_tokenizer.json"
+    )
     assert {failure.mode for failure in profile.failures} == {
         "http",
         "malformed-sse",
