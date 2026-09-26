@@ -29,10 +29,10 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from framework.api import RunView
     from vibesys.context import RunSetup, _RunResources
     from vibesys.events import FrameworkSource
     from vibesys.orchestration.request import RunRequest
-    from vibesys.orchestration.view import RunView
     from vibesys.run.event_journal import EventJournal
     from vibesys.runtime import AgentDefinition, AgentHandle, WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView

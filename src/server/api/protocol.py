@@ -14,7 +14,7 @@ from server.events import RunEvent
 from server.execution import ActiveAgentExecution
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vs_loop_state.api import (
+from vibesys.api import (
     CandidateDisposition,
     HypothesisOutcome,
     HypothesisResolution,

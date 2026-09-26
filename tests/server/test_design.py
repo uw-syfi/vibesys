@@ -16,11 +16,11 @@ from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
 from vibesys.api.contracts import RunStatus
 from vibesys.loops.hypothesis_readmodel import project_run_view
+from vibesys.loops.state.api import RoundRecord
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

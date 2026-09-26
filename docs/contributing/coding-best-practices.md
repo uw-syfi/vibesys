@@ -33,9 +33,8 @@ size limits, lint waivers, and doc links.
 - Nontrivial candidate-facing APIs, ABIs, ownership rules, and service
   protocols go in `CANDIDATE_CONTRACT.md`; evaluator internals and trust-model
   discussion go in a separate design document.
-- Library-to-library edges are limited to `vs_project` on `vs_loop_state`, and
-  `vs_agent` on `vs_sandbox`, `vs_loop_state`, and `vs_project`. Reject any
-  other new lib edge in review.
+- Library-to-library edges are limited to `vs_agent` on `vs_sandbox` and
+  `vs_project`. Reject any other new lib edge in review.
 - Keep compatibility wrappers thin; new behavior lives in the canonical module.
 
 ## External CLI Tools

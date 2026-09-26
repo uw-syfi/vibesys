@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+from framework.api import SessionScope
+from vibesys.loops.state.api import CandidateDisposition
 from vibesys.roles.common import SkillResourceSelection, Verdict
 from vibesys.runtime import Keyed, Role, Writes
-from vs_agent.api import SessionScope
-from vs_loop_state.api import CandidateDisposition
 
 
 class SingleAgentRoundContext(BaseModel):

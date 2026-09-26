@@ -8,7 +8,7 @@ from tests.support.run_execution import run_execution_record
 
 from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
-from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
+from vibesys.loops.state.api import PlainLoopCursor, PlainPerformanceRecord
 from vs_project.api import (
     Project,
     ProjectStateError,

@@ -27,14 +27,14 @@ from pydantic import (
     field_validator,
 )
 
+from framework.api import ProjectStateError
 from vibesys.run.git_tracker import FrameworkSnapshotStatus
-from vs_project.api import ProjectStateError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from framework.api import Project
     from vibesys.run.git_tracker import GitTracker
-    from vs_project.api import Project
 
 _JOURNAL_SCHEMA_VERSION: Literal[4] = 4
 _GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"

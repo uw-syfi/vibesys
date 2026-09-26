@@ -39,10 +39,9 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from framework.api import Project, ToolSpec, serve_stdio
 from vibesys.api.store import open_run_store
 from vibesys.loops.hypothesis_readmodel import agent_projection
-from vs_agent.api import ToolSpec, serve_stdio
-from vs_project.api import Project
 
 if TYPE_CHECKING:
     from vibesys.api.store import RunStore

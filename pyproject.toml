@@ -52,11 +52,11 @@ vibesys = "entrypoints.launcher:main"
 vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "domains/README.md", "_resources/**/*", "_sdk/**/*", "sandbox/images/**"]
 entrypoints = ["py.typed", "_tui/**/*"]
 server = ["py.typed"]
+framework = ["py.typed"]
 vs_evaluator_protocol = ["py.typed"]
 vs_feature_flags = ["py.typed"]
 vs_github = ["py.typed"]
 vs_issue_board = ["py.typed"]
-vs_loop_state = ["py.typed"]
 vs_project = ["py.typed"]
 vs_prompts = ["py.typed"]
 vs_sandbox = ["py.typed"]
@@ -90,7 +90,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "sdk/vs-bench/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
@@ -114,7 +114,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "server", "vibesys", "vs_evaluator_protocol", "vs_feature_flags", "vs_github", "vs_issue_board", "vs_loop_state", "vs_project", "vs_prompts", "vs_sandbox", "vs_agent", "vs_bench"]
+source = ["entrypoints", "server", "framework", "vibesys", "vs_evaluator_protocol", "vs_feature_flags", "vs_github", "vs_issue_board", "vs_project", "vs_prompts", "vs_sandbox", "vs_agent", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
@@ -196,7 +196,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -313,7 +313,6 @@ root = [
     "libs/vs-feature-flags/src",
     "libs/vs-github/src",
     "libs/vs-issue-board/src",
-    "libs/vs-loop-state/src",
     "libs/vs-project/src",
     "libs/vs-prompts/src",
     "libs/vs-sandbox/src",
@@ -337,8 +336,6 @@ include = [
     "libs/vs-github/tests",
     "libs/vs-issue-board/src",
     "libs/vs-issue-board/tests",
-    "libs/vs-loop-state/src",
-    "libs/vs-loop-state/tests",
     "libs/vs-project/src",
     "libs/vs-project/tests",
     "libs/vs-prompts/src",

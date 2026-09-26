@@ -161,7 +161,7 @@ def reconcile_model_requests(
     if not requests:
         return []
 
-    ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
+    ensure_model_volume = import_module("framework.api").ensure_model_volume
 
     allow = _allow_prefixes()
     volumes: list[str] = []

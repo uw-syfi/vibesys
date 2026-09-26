@@ -13,6 +13,20 @@ from typing import TextIO, cast, overload
 
 from pydantic import BaseModel
 
+from framework.api import (
+    AgentBackend,
+    HostResource,
+    HostResourceAccess,
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
+    Project,
+    ProjectPathPolicy,
+    RunExecutionRecord,
+    Sandbox,
+    agent_driver_supports_mcp_servers,
+    generate_run_id,
+    task_agent_host_resources,
+)
 from vibesys import backends, boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
 from vibesys.backends.base import ComputeBackendImpl
@@ -89,19 +103,6 @@ from vibesys.sandbox.run_environment import (
     run_environment_record,
 )
 from vibesys.skills import SkillSelection, platform_skill_selection
-from vs_agent.api import (
-    AgentBackend,
-    agent_driver_supports_mcp_servers,
-    task_agent_host_resources,
-)
-from vs_project.api import (
-    OrchestrationDescriptor,
-    OrchestrationRunManifest,
-    Project,
-    RunExecutionRecord,
-    generate_run_id,
-)
-from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy, Sandbox
 
 
 @dataclass(frozen=True, slots=True)

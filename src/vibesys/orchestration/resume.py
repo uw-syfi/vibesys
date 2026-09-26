@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vs_project.api import OrchestrationDescriptor
+    from framework.api import OrchestrationDescriptor
 
 
 @dataclass(frozen=True, slots=True)

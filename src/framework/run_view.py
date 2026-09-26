@@ -19,16 +19,10 @@ class RunResult(BaseModel):
 
 
 class RunStatus(StrEnum):
-    """Lifecycle status `vibesys.api` can report for a run.
+    """Lifecycle status for a run projection.
 
-    Deliberately a narrower, separately-owned vocabulary from `EventStatus`
-    (not a re-export): `RunQuery.view` on a live session reports `ACTIVE`
-    while its loop is running, then `COMPLETED`/`FAILED` from the same
-    `RUN_FINISHED`/`RUN_FAILED` transition `create_session` already emits as
-    `EventStatus.COMPLETED`/`EventStatus.FAILED` (see `session.py`). `RunStore`
-    projects a run from its durable files alone, which carry no lifecycle
-    field, so it always reports `UNKNOWN` rather than guessing whether the
-    process that wrote them is still attached.
+    ``UNKNOWN`` is used when durable run data contains no reliable lifecycle
+    field; consumers must not infer whether the writing process is still live.
     """
 
     UNKNOWN = "unknown"
@@ -40,10 +34,9 @@ class RunStatus(StrEnum):
 class RoundSummary(BaseModel):
     """One round, in the strategy-agnostic shape the host needs to derive events.
 
-    Every strategy projector that has a round concept populates this (today
-    only the agent read model does; evolve/issue_queue leave `RunView.rounds`
-    empty). The host diffs these typed fields to derive `ROUND_FINISHED`
-    without reading any policy-owned projection shape.
+    A projector fills this when its policy has a round concept. The execution
+    host diffs these fields to derive round events without reading
+    policy-owned projection shapes.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -63,10 +56,9 @@ class RunView(BaseModel):
     The selected orchestration owns the payload schema. An absent projection
     means that the policy has no persisted read model or is unavailable.
 
-    `rounds` and `experiment_revision` are typed, strategy-agnostic fields a
-    projector populates alongside `projection` so the host
-    (`orchestration.runtime`) can derive `ROUND_FINISHED`/`EXPERIMENTS_CHANGED`
-    by diffing them, without depending on any one policy's projection shape.
+    ``rounds`` and ``experiment_revision`` are typed, strategy-agnostic fields
+    a projector populates alongside ``projection`` so the execution host can
+    derive events without depending on a policy's projection shape.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

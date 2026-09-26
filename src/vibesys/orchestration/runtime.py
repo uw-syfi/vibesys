@@ -30,14 +30,22 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, asynccontextmanager
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from framework.api import (
+    AgentBackend,
+    AgentExecutionPolicy,
+    AgentSessionState,
+    SynchronizedSessionStore,
+    build_agent_client,
+)
 from vibesys.context import (
     borrow_run_agent_environment,
     open_run_resources,
     open_scoped_agent_environment,
 )
 from vibesys.events import FrameworkSource, RunConfiguredData
+from vibesys.loops.testing import VibeSysScriptedResponses
 from vibesys.orchestration.agents import (
     _Agents,
     _LocalAgentHandle,
@@ -60,12 +68,11 @@ from vibesys.orchestration.workspaces import (
     _Workspaces,
 )
 from vibesys.render.sink import output_sink
-from vibesys.run.agent_sessions import SynchronizedSessionStore
-from vs_agent.api import AgentExecutionPolicy, AgentSessionState, build_agent_client
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
+    from framework.api import AgentClientProtocol
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.context import RunSetup, _RunResources
     from vibesys.orchestration.environment import AgentEnvironment
@@ -74,7 +81,6 @@ if TYPE_CHECKING:
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition, WorkspaceScope
-    from vs_agent.api import AgentClientProtocol
 
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
@@ -405,21 +411,27 @@ class RunContext:
             backends = (
                 {definition.id: opened.backends["chat"]} if opened.backends is not None else None
             )
-            agent_client_factory = self._agent_client_factory or build_agent_client
-            client = agent_client_factory(
-                spec=definition.spec,
-                session_store=self._session_store,
-                backends=backends,
-                skill_source_dirs=list(opened.skill_source_dirs),
-                skill_selection=opened.skill_selection,
-                run_log_file=context.run_log_file,
-                use_docker=opened.use_docker,
-                log_dir=context.log_dir,
-                host_resources=(*opened.host_resources, *definition.resources),
-                project_path_policy=opened.project_path_policy,
-                require_host_sandbox=not opened.use_docker,
-                events=output_sink(),
+            agent_client_factory = cast(
+                "Callable[..., AgentClientProtocol]",
+                self._agent_client_factory or build_agent_client,
             )
+            factory_options: dict[str, object] = {
+                "spec": definition.spec,
+                "session_store": self._session_store,
+                "backends": backends,
+                "skill_source_dirs": list(opened.skill_source_dirs),
+                "skill_selection": opened.skill_selection,
+                "run_log_file": context.run_log_file,
+                "use_docker": opened.use_docker,
+                "log_dir": context.log_dir,
+                "host_resources": (*opened.host_resources, *definition.resources),
+                "project_path_policy": opened.project_path_policy,
+                "require_host_sandbox": not opened.use_docker,
+                "events": output_sink(),
+            }
+            if self._agent_client_factory is None and definition.spec.backend is AgentBackend.STUB:
+                factory_options["response_scenario"] = VibeSysScriptedResponses()
+            client = agent_client_factory(**factory_options)
             resources.callback(client.close)
             handle = _LocalAgentHandle(
                 definition,

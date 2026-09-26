@@ -20,6 +20,7 @@ from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.hypothesis_readmodel import project_committed_run_view, project_run_view
+from vibesys.loops.state.api import MetricComparison, PerfProvenance, RoundRecord
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -36,7 +37,6 @@ from vibesys.search.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.search.hypothesis.transitions import reproject_run_evidence
-from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

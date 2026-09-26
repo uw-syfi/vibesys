@@ -9,20 +9,20 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from framework.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
+from vibesys.loops.state.api import PlainLoopCursor, PlainPerformanceRecord
 from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.roles.implementer import ISSUE_IMPLEMENTER, IssueImplementerContext
 from vibesys.roles.judge import ISSUE_JUDGE, IssueJudgeContext
 from vibesys.roles.perf_eval import ISSUE_PERF_EVAL, IssuePerfEvalContext
-from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vs_issue_board.api import (
     Issue,
     IssueBoard,
     IssueType,
 )
-from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "issue_queue"
 IssueQueuePhase = Literal["implementer", "judge", "perf_eval"]

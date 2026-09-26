@@ -27,8 +27,8 @@ from vibesys.profilers import ProfilerKind
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import DockerSandbox as DockerSandboxType
-    from vs_sandbox.api import (
+    from framework.api import DockerSandbox as DockerSandboxType
+    from framework.api import (
         HostResource,
         LocalShellSandbox,
         Sandbox,
@@ -89,7 +89,7 @@ class CudaBackend:
         resources: Sequence[HostResource] = (),
     ) -> Sandbox:
         """Construct a sandbox configured for CUDA execution."""
-        sandbox_api = import_module("vs_sandbox.api")
+        sandbox_api = import_module("framework.api")
         docker_sandbox_class = sandbox_api.DockerSandbox
 
         bind_mounts = bind_mounts or []
@@ -174,13 +174,13 @@ class CudaBackend:
         # before the casts make the branch-specific operations type-check.
         for kind, sb in self._sandboxes:
             if kind is SandboxKind.DOCKER:
-                sandbox_api = import_module("vs_sandbox.api")
+                sandbox_api = import_module("framework.api")
                 docker_sandbox_type = cast("type[DockerSandboxType]", sandbox_api.DockerSandbox)
                 if not isinstance(sb, docker_sandbox_type):
                     raise AssertionError
                 sb.restart_with_gpus(self._docker_gpu_spec())
             elif kind is SandboxKind.LOCAL:
-                sandbox_api = import_module("vs_sandbox.api")
+                sandbox_api = import_module("framework.api")
                 local_sandbox_type = cast("type[LocalShellSandbox]", sandbox_api.LocalShellSandbox)
                 if not isinstance(sb, local_sandbox_type):
                     raise AssertionError

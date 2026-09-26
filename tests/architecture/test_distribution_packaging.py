@@ -26,17 +26,16 @@ INTERNAL_DISTRIBUTIONS = {
     "vs-feature-flags",
     "vs-github",
     "vs-issue-board",
-    "vs-loop-state",
     "vs-project",
     "vs-prompts",
     "vs-sandbox",
 }
 INTERNAL_IMPORT_PACKAGES = {
+    "framework",
     "vs_evaluator_protocol",
     "vs_feature_flags",
     "vs_github",
     "vs_issue_board",
-    "vs_loop_state",
     "vs_project",
     "vs_prompts",
     "vs_sandbox",
@@ -168,7 +167,9 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
 
     assert {"entrypoints", "server", "vibesys", *INTERNAL_IMPORT_PACKAGES} <= set(packages)
     assert "vibesys.prompts.backend.cuda" in packages
+    assert "framework.api" in packages
     assert package_dirs["vibesys"] == "src/vibesys"
+    assert package_dirs["framework"] == "src/framework"
     assert package_dirs["entrypoints"] == "src/entrypoints"
     assert package_dirs["server"] == "src/server"
     assert package_dirs["vs_feature_flags"] == ("libs/vs-feature-flags/src/vs_feature_flags")

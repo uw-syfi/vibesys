@@ -1,10 +1,10 @@
-"""Host-level adapter from ``vs_agent``'s generic tool descriptors to MCP specs.
+"""Host-level adapter from framework tool descriptors to MCP specs.
 
-A strategy describes an MCP tool server as primitives (``vs_agent.expose_as_tools``
-builds a :class:`~vs_agent.api.StdioServerDescriptor` from a module and argv, the
-same shape :mod:`vs_agent.mcp_server` serves generically inside the subprocess).
+A strategy describes an MCP tool server as primitives (``framework.api.expose_as_tools``
+builds a :class:`~framework.api.StdioServerDescriptor` from a module and argv, the
+same shape the agent framework serves generically inside the subprocess).
 This module is the one place that turns that descriptor into the concrete
-:class:`~vs_agent.api.MCPServerSpec` a driver launches, so no strategy hand-builds
+:class:`~framework.api.MCPServerSpec` a driver launches, so no strategy hand-builds
 an ``MCPServerSpec`` itself.
 """
 
@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_agent.api import MCPServerSpec
+from framework.api import MCPServerSpec
 
 if TYPE_CHECKING:
-    from vs_agent.api import StdioServerDescriptor
+    from framework.api import StdioServerDescriptor
 
 
 def mcp_spec_from_descriptor(descriptor: StdioServerDescriptor) -> MCPServerSpec:

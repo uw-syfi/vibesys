@@ -14,25 +14,38 @@ the run, so the loop, ``--resume`` reprojection, and the server read path all
 compare within the same space instead of being handed a tolerance through a
 call chain (issue #507).
 
-``MetricComparison`` itself is defined in ``vs_loop_state`` and re-exported
-here: a round record stores the comparison the framework made, and that library
-must not import loop code.
+``MetricComparison`` is owned here because it describes evaluator semantics;
+persisted loop records import it as a value.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from pydantic.dataclasses import dataclass
-
-from vs_loop_state.api import MetricComparison
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
 
 __all__ = ["Measurement", "MetricComparison", "MetricSpace", "Objective"]
+
+
+class MetricComparison(StrEnum):
+    """How one measurement relates to the measurement it is compared against.
+
+    ``WITHIN_NOISE`` means both readings exist on the same axis and their
+    difference does not exceed its declared tolerance. ``INCOMPARABLE`` means
+    a comparison could not run because a reading is missing or the axis has no
+    known direction.
+    """
+
+    BETTER = "better"
+    WORSE = "worse"
+    WITHIN_NOISE = "within_noise"
+    INCOMPARABLE = "incomparable"
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))

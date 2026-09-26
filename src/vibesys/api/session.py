@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
+from framework.api import HostResource, HostResourceAccess, MCPServerSpec, Project, expose_as_tools
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
@@ -20,9 +21,6 @@ from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
-from vs_agent.api import MCPServerSpec, expose_as_tools
-from vs_project.api import Project
-from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,6 +28,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from framework.api import ProjectPathPolicy, Sandbox
     from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
     from vibesys.config import Config
     from vibesys.orchestration.contracts import OrchestrationRegistry
@@ -37,7 +36,6 @@ if TYPE_CHECKING:
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
-    from vs_sandbox.api import ProjectPathPolicy, Sandbox
 
 
 class RunQuery(Protocol):

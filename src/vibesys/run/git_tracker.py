@@ -6,7 +6,7 @@ New code should import ``GitTracker`` from ``vs_project`` directly.
 
 from __future__ import annotations
 
-from vs_project.api import FrameworkSnapshotStatus, GitTracker
+from framework.api import FrameworkSnapshotStatus, GitTracker
 
 __all__ = [
     "FrameworkSnapshotStatus",

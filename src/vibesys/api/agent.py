@@ -19,7 +19,7 @@ from vibesys.loops.hypothesis_readmodel import (
 from vibesys.orchestration.memory import framework_memory_paths
 
 if TYPE_CHECKING:
-    from vs_project.api import OrchestrationRunManifest
+    from framework.api import OrchestrationRunManifest
 
 
 def is_agent_run_manifest(manifest: OrchestrationRunManifest) -> bool:

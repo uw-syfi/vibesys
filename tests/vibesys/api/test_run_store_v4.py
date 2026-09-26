@@ -11,9 +11,9 @@ from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
 from vibesys.context import RunSetup
 from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
+from vibesys.loops.state.api import PlainLoopCursor
 from vibesys.search.population.models import PopulationConfig
 from vibesys.search.population.search import PopulationSearch
-from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

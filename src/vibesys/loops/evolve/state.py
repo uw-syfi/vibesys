@@ -25,7 +25,7 @@ from vibesys.evaluators.metrics import MetricSpace
 from vibesys.search.population.models import PopulationState
 
 if TYPE_CHECKING:
-    from vs_project.api import StateNamespace, StateSlot
+    from framework.api import StateNamespace, StateSlot
 
 _STATE_FILE = "state.json"
 _METRICS_FILE = "metrics.json"

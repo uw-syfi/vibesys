@@ -6,7 +6,7 @@ code should import ``RunLogger`` from ``vs_project`` directly.
 
 from __future__ import annotations
 
-from vs_project.api import RunLogger, strip_ansi
+from framework.api import RunLogger, strip_ansi
 
 __all__ = [
     "RunLogger",

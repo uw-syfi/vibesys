@@ -11,6 +11,7 @@ from typing import Self
 
 from pydantic import ValidationError
 
+from framework.api import Project, is_project_state_path
 from vibesys.evaluators.input_manifest import (
     MANIFEST_NAME,
     EvaluatorInput,
@@ -19,7 +20,6 @@ from vibesys.evaluators.input_manifest import (
     render_input_manifest,
 )
 from vibesys.run.workspace import CopySpec, GitSourceSpec, InputProjectSpec, Workspace
-from vs_project.api import Project, is_project_state_path
 
 _PRIVATE_PROJECT_ENTRY_NAMES = frozenset({".git", "agent.toml"})
 

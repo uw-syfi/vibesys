@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
+from framework.api import AgentSessionKey, SessionScope
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.context import _execution_status
 from vibesys.events import (
@@ -50,7 +51,6 @@ from vibesys.runtime import (
 )
 from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
-from vs_agent.api import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator, Mapping
@@ -58,16 +58,16 @@ if TYPE_CHECKING:
     from contextlib import ExitStack
     from typing import TextIO
 
-    from vibesys.constants import ComputeBackend
-    from vibesys.context import _RunResources
-    from vibesys.orchestration._host import HostResources, _WorkspaceHandleLike
-    from vibesys.orchestration.workspaces import WorkspaceHandle
-    from vs_agent.api import (
+    from framework.api import (
         AgentCapabilities,
         AgentClientProtocol,
         AgentProgress,
         MCPServerSpec,
     )
+    from vibesys.constants import ComputeBackend
+    from vibesys.context import _RunResources
+    from vibesys.orchestration._host import HostResources, _WorkspaceHandleLike
+    from vibesys.orchestration.workspaces import WorkspaceHandle
 
 T = TypeVar("T", bound=BaseModel)
 

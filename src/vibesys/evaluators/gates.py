@@ -10,6 +10,13 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from framework.api import (
+    Hello,
+    ProtocolError,
+    check_objectives,
+    parse_records,
+    read_measurement,
+)
 from vibesys.evaluators.input_manifest import benchmark_output_argument
 from vibesys.events import (
     CoreEventType,
@@ -20,20 +27,13 @@ from vibesys.events import (
     SubprocessOutputData,
 )
 from vibesys.render.sink import output_sink
-from vs_evaluator_protocol.api import (
-    Hello,
-    ProtocolError,
-    check_objectives,
-    parse_records,
-    read_measurement,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from framework.api import SandboxExecutionResult
     from vibesys.evaluators.input_manifest import BenchmarkResult
     from vibesys.evaluators.metrics import MetricSpace, Objective
-    from vs_sandbox.api import SandboxExecutionResult
 
 
 class _GateEvents(Protocol):

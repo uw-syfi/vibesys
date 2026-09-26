@@ -30,8 +30,8 @@ from vibesys.search.hypothesis.state import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.loops.state.api import PerfProvenance, RoundRecord
     from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-    from vs_loop_state.api import PerfProvenance, RoundRecord
 
 # ``hypothesis_outcome`` values that mark a hypothesis campaign as failed, for
 # rollback-target resolution. A record with no outcome yet is never "failed".

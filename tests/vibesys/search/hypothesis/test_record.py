@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.loops.state.api import RoundRecord
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
@@ -19,7 +20,6 @@ from vibesys.search.hypothesis.attempts import (
 )
 from vibesys.search.hypothesis.record import RecordInput, build_round_record
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-from vs_loop_state.api import RoundRecord
 
 
 def _record_input() -> RecordInput:

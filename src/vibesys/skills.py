@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-import vs_agent.api as _agent_api
+import framework.api as _agent_api
+from framework.api import SkillSelection
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
-from vs_agent.api import SkillSelection
 
 NULL_SKILL_SELECTION = _agent_api.NULL_SKILL_SELECTION
 

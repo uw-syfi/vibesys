@@ -5,20 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from framework.api import RunStatus, RunView
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.loops.issue_queue.loop import IssueQueueRun
 from vibesys.loops.issue_queue.orchestration import compare_resume, options_from_descriptor
-from vibesys.orchestration.view import RunStatus, RunView
+from vibesys.loops.state.api import PlainLoopCursor, PlainPerformanceSnapshot
 from vibesys.roles.common import Verdict
 from vs_issue_board.api import Issue, IssueStatus
-from vs_loop_state.api import PlainLoopCursor, PlainPerformanceSnapshot
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from framework.api import OrchestrationDescriptor, Project
     from vibesys.orchestration.runtime import RunContext
     from vs_issue_board.api import IssueBoard
-    from vs_project.api import OrchestrationDescriptor, Project
 
 
 def resume_point(state: PlainLoopCursor, board: IssueBoard) -> tuple[int, str, int | None]:

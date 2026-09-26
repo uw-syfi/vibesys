@@ -9,13 +9,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-import vs_agent.api as _agent_api
+import framework.api as _agent_api
 
 # AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
 # used directly below. CommandResultPayload and JsonResultPayload are only the
-# ToolResultPayload union members; re-exported here (like vs_loop_state's
+# ToolResultPayload union members; re-exported here (like vibesys.loops.state's
 # enums in vibesys.schemas) so existing importers of vibesys.events keep working.
-from vs_agent.api import (
+from framework.api import (
     AgentOutputChannel,
     AgentStatusData,
     TodoItemData,

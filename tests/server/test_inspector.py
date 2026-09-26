@@ -8,9 +8,9 @@ from tests.support.run_execution import run_execution_record
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
+from vibesys.loops.state.api import RoundRecord
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
 

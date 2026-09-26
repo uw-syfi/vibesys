@@ -15,6 +15,7 @@ from pydantic import (
     BaseModel,
 )
 
+from vibesys.api.testing import VibeSysScriptedResponses
 from vibesys.events import (
     AgentOutputChunkData,
     CoreEvent,
@@ -97,7 +98,13 @@ def _of_type(events: list[CoreEvent], event_type: CoreEventType) -> list[CoreEve
 
 
 def test_scripted_mode_answers_a_structured_turn(tmp_path: Path) -> None:
-    plan = _invoke_plan(FakeDriver(turn=[assistant_text("planning...")]), tmp_path)
+    plan = _invoke_plan(
+        FakeDriver(
+            turn=[assistant_text("planning...")],
+            response_scenario=VibeSysScriptedResponses(),
+        ),
+        tmp_path,
+    )
 
     assert isinstance(plan, OrchestratorPlan)
     assert plan.hypothesis_id == "H-01"
@@ -238,7 +245,10 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(
 
 
 def test_scripted_rounds_advance_the_hypothesis_story(tmp_path: Path) -> None:
-    driver = FakeDriver(turn=[assistant_text("planning...")])
+    driver = FakeDriver(
+        turn=[assistant_text("planning...")],
+        response_scenario=VibeSysScriptedResponses(),
+    )
 
     first = _invoke_plan(driver, tmp_path, round_label="round 1")
     third = _invoke_plan(driver, tmp_path, round_label="round 3")

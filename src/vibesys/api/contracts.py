@@ -10,18 +10,22 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from framework.api import MCPServerSpec, OrchestrationDescriptor, RunResult, RunStatus, RunView
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 
 # Objective/MetricSpace are shared evaluator contracts.
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEvent, EventStatus
+from vibesys.loops.state.api import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
+    JudgeVerdict,
+    PerfDeltaReason,
+)
 from vibesys.orchestration.environment import AgentEnvironment
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.view import RunResult, RunStatus, RunView
-from vibesys.schemas import CandidateDisposition, PerfDeltaReason
-from vs_agent.api import MCPServerSpec
-from vs_project.api import OrchestrationDescriptor
 
 __all__ = [
     "AgentEnvironment",
@@ -32,6 +36,9 @@ __all__ = [
     "CoreEvent",
     "EventSink",
     "EventStatus",
+    "HypothesisOutcome",
+    "HypothesisResolution",
+    "JudgeVerdict",
     "MCPServerSpec",
     "MetricSpace",
     "Objective",

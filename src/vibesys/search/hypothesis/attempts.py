@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
+    from vibesys.loops.state.api import JudgeVerdict, PerfProvenance
     from vibesys.schemas import CandidateDisposition, HypothesisOutcome
     from vibesys.search.hypothesis.state import HypothesisState
-    from vs_loop_state.api import JudgeVerdict, PerfProvenance
 
 
 class CandidateReply(Protocol):
@@ -69,7 +69,7 @@ class JudgeReviewed:
     """An independent judge audited this attempt and returned a verdict.
 
     ``verdict`` carries the persisted pass/fail vocabulary
-    (``vs_loop_state.JudgeVerdict``, minus its ``"deferred"`` member), not
+    (``vibesys.loops.state.JudgeVerdict``, minus its ``"deferred"`` member), not
     ``vibesys.roles.common.Verdict``: search must never import roles. A
     caller in ``loops/`` translates a role reply's ``Verdict`` to this string
     at the turn boundary.

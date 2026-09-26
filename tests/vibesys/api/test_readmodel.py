@@ -13,6 +13,7 @@ from typing import Literal, TypedDict, Unpack
 from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
 from vibesys.loops.hypothesis_readmodel import project_run_view as _project_run_view
+from vibesys.loops.state.api import RoundRecord
 from vibesys.schemas import CandidateDisposition, derive_hypothesis_title
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import (
@@ -24,7 +25,6 @@ from vibesys.search.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.search.hypothesis.transitions import measurement_delta_reason
-from vs_loop_state.api import RoundRecord
 
 
 def _project_agent_view(

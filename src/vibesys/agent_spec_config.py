@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_agent.api import DEFAULT_CLI_PROVIDER, AgentBackend, AgentSpec, Driver
+from framework.api import DEFAULT_CLI_PROVIDER, AgentBackend, AgentSpec, Driver
 
 if TYPE_CHECKING:
     from vibesys.config import Config

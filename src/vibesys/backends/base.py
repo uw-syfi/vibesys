@@ -18,15 +18,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from vs_sandbox.api import LocalShellSandbox, SandboxLifecycle
+from framework.api import LocalShellSandbox, SandboxLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from framework.api import HostResource, Sandbox, SandboxLifecycleHooks
     from vibesys.constants import ComputeBackend
     from vibesys.profilers import ProfilerKind
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 
 class SandboxKind(StrEnum):

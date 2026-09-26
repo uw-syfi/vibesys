@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.loops.state.api import RoundHistory
 from vibesys.search.hypothesis import cadence, transitions
 from vibesys.search.hypothesis.results import (
     AttemptBudget,
@@ -30,7 +31,6 @@ from vibesys.search.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
 )
-from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -9,13 +9,13 @@ depend on.
 
 from __future__ import annotations
 
+from framework.api import GitTrackerEvents, NullGitTrackerEvents
 from vibesys.events import (
     CoreEventType,
     FrameworkSource,
     WorkspaceSnapshotData,
 )
 from vibesys.render.sink import output_sink
-from vs_project.api import GitTrackerEvents, NullGitTrackerEvents
 
 __all__ = [
     "CoreGitTrackerEvents",

@@ -30,7 +30,7 @@ from vibesys.profilers import ProfilerKind
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from framework.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
@@ -86,7 +86,7 @@ class LocalBackend:
         """Create a local or supported Docker sandbox for this backend."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
+        docker_sandbox = import_module("framework.api").DockerSandbox
 
         # extra_init_commands is accepted for ComputeBackendImpl protocol
         # parity (LocalEnvironment.open() passes it unconditionally) but never

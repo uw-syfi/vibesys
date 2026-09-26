@@ -12,6 +12,7 @@ it composes lives in ``vs_sandbox.api.testing``.
 from __future__ import annotations
 
 from vibesys.backends.fake import FakeComputeBackend
+from vibesys.loops.testing import VibeSysScriptedResponses
 from vibesys.orchestration.fake_gates import (
     DEFAULT_ACCURACY_RESULT,
     DEFAULT_BENCHMARK_RESULT,
@@ -27,4 +28,5 @@ __all__ = [
     "FakeBenchmarkCall",
     "FakeComputeBackend",
     "FakeGateExecutor",
+    "VibeSysScriptedResponses",
 ]

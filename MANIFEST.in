@@ -13,7 +13,6 @@ graft libs/vs-evaluator-protocol/src
 graft libs/vs-feature-flags/src
 graft libs/vs-github/src
 graft libs/vs-issue-board/src
-graft libs/vs-loop-state/src
 graft libs/vs-project/src
 graft libs/vs-sandbox/src
 

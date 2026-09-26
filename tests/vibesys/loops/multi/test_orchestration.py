@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from framework.api import RunStatus
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.errors import ConfigurationError, InvalidStrategyOptionsError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
@@ -28,7 +29,6 @@ from vibesys.loops.single.orchestration import (
     SingleAgentOrchestrator,
     SingleProjector,
 )
-from vibesys.orchestration.view import RunStatus
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_project.api import (
     OrchestrationDescriptor,

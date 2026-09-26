@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
+from vibesys.loops.state.api import RoundRecord
 from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 from vibesys.search.hypothesis.state import (
     Hypothesis,
@@ -25,7 +26,6 @@ from vibesys.search.profile_focus import (
     ProfileGuidedComponent,
     ProfileImprovementSample,
 )
-from vs_loop_state.api import RoundRecord
 
 
 def _plan(identifier: str) -> OrchestratorPlan:

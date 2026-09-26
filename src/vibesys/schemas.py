@@ -16,25 +16,54 @@ stays here for the same reason ``OrchestratorPlan`` needed it here before its
 move: it is shared by both ``search.hypothesis.plan`` and
 ``vibesys.roles.common``, and ``search`` must never depend on ``vibesys.roles``.
 
-This module has no local imports besides the dependency-free ``vs_loop_state``
-leaf lib, so templates and tests can pull schemas in without dragging in the
-rest of the agent runtime.
+This module stays below roles, search, and loop-state records so shared values
+can flow upward without creating a dependency cycle.
 """
 
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-import vs_loop_state.api as _loop_state_api
 
-CandidateDisposition = _loop_state_api.CandidateDisposition
-HypothesisOutcome = _loop_state_api.HypothesisOutcome
-PerfDeltaReason = _loop_state_api.PerfDeltaReason
+class HypothesisOutcome(StrEnum):
+    """Implementer-owned status for the active experimental hypothesis."""
 
-# HypothesisOutcome, CandidateDisposition, and PerfDeltaReason live in
-# vs_loop_state so that server code can import them without deep-importing
-# vibesys internals. Re-exported here so existing call sites outside this
-# refactor's scope keep working unchanged.
+    CONTINUE = "continue"
+    SUPPORTED = "supported"
+    NOMINATED = "nominated"
+    DISPROVEN = "disproven"
+    IMPLEMENTATION_FAILED = "implementation_failed"
+    INCONCLUSIVE = "inconclusive"
+    BLOCKED = "blocked"
+
+
+class CandidateDisposition(StrEnum):
+    """How a measured candidate should be retained independently of its hypothesis."""
+
+    UNASSESSED = "unassessed"
+    DISCARD = "discard"
+    PREREQUISITE = "prerequisite"
+    PARETO_FRONTIER = "pareto_frontier"
+
+
+class PerfDeltaReason(StrEnum):
+    """Why a headline measurement carries no causal delta."""
+
+    NO_BASELINE_YET = "no_baseline_yet"
+    BASELINE_UNRESOLVED = "baseline_unresolved"
+    NOT_FRAMEWORK_MEASURED = "not_framework_measured"
+
+
+class HypothesisResolution(StrEnum):
+    """Resolution after all available hypothesis evidence is known."""
+
+    PROVEN = "proven"
+    DISPROVEN = "disproven"
+    INCONCLUSIVE = "inconclusive"
+    IMPLEMENTATION_FAILED = "implementation_failed"
+    BLOCKED = "blocked"
+    REJECTED = "rejected"
+    UNMEASURED = "unmeasured"
 
 
 class PerfTrend(StrEnum):

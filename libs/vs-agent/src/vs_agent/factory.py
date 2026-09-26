@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.contracts import AgentClientProtocol
+    from vs_agent.fake_response import AgentResponseScenario
     from vs_agent.session_store import SessionStore
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
@@ -62,6 +63,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
+    response_scenario: AgentResponseScenario | None = None,
 ) -> AgentClientProtocol:
     """Build the configured application-level agent service from ``spec``."""
     host_resources = tuple(host_resources)
@@ -79,7 +81,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             StubAgentClient,
         )
 
-        return StubAgentClient(event_sink=events)
+        return StubAgentClient(event_sink=events, response_scenario=response_scenario)
 
     if backend != AgentBackend.CLI:
         message = f"unknown agent backend: {backend.value!r}"

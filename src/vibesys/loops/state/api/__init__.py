@@ -5,26 +5,22 @@ data, and serializers produce the corresponding state payloads. Filesystem
 persistence is owned by ``vs_project.api``.
 """
 
-from vs_loop_state.agent import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    HypothesisResolution,
+from vibesys.evaluators.metrics import MetricComparison
+from vibesys.loops.state.agent import (
     JudgeVerdict,
-    PerfDeltaReason,
     PerfProvenance,
     RoundHistory,
     RoundRecord,
     parse_round_record,
     serialize_round_record,
 )
-from vs_loop_state.evolve import (
+from vibesys.loops.state.evolve import (
     IndividualRecord,
     PopulationSnapshot,
     parse_population_snapshot,
     serialize_population_snapshot,
 )
-from vs_loop_state.metrics import MetricComparison
-from vs_loop_state.plain import (
+from vibesys.loops.state.plain import (
     PlainLoopCursor,
     PlainPerformanceRecord,
     PlainPerformanceSnapshot,
@@ -32,6 +28,12 @@ from vs_loop_state.plain import (
     parse_plain_performance_snapshot,
     serialize_plain_loop_cursor,
     serialize_plain_performance_snapshot,
+)
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
+    PerfDeltaReason,
 )
 
 __all__ = [

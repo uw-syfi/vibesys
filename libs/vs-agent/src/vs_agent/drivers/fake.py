@@ -15,10 +15,8 @@ AgentEvent` values built with the module-level helpers below
 :func:`tool_result`, :func:`todo_write`, :func:`usage`), rather than through
 count knobs: what a test asserts on is what it wrote.
 
-Structured turns answer with :func:`~vs_agent.scripted_rounds.
-scripted_round_payload` unless the caller supplies its own ``answer``, so a
-scripted run completes loop rounds on the happy path even when a test only
-cares about the event stream.
+Turn text comes from the configured ``answer``. If omitted, the fake returns
+generic text; callers that need structured behavior supply their own answer.
 """
 
 from __future__ import annotations
@@ -39,7 +37,7 @@ from vs_agent.contracts import (
     AgentUsage,
 )
 from vs_agent.events import CommandResultPayload
-from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
+from vs_agent.fake_response import AgentResponseContext, AgentResponseScenario
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -100,14 +98,6 @@ class FakeDriverError(RuntimeError):
         """Describe session creation after the fake driver was closed."""
         return cls("fake agent driver is closed")
 
-    @classmethod
-    def missing_scripted_artifact(cls, schema_name: str) -> FakeDriverError:
-        """Describe an output schema without a corresponding scripted artifact."""
-        return cls(
-            f"no scripted artifact for response schema {schema_name!r}; add one to "
-            "vs_agent.scripted_rounds so scripted runs keep covering this role"
-        )
-
 
 class FakeSession:
     """One fake conversation. Its state is which scripted turn runs next."""
@@ -118,11 +108,13 @@ class FakeSession:
         spec: AgentSessionSpec,
         turns: tuple[tuple[AgentEvent, ...], ...],
         answer: BaseModel | Mapping[str, object] | str | None,
+        response_scenario: AgentResponseScenario | None,
     ) -> None:
         """Create a session bound to ``turns``/``answer`` for ``spec``'s role."""
         self._spec = spec
         self._turns = turns
         self._answer = answer
+        self._response_scenario = response_scenario
         self._invocations = 0
         self._closed = False
         self._resumed_session_id: str | None = None
@@ -136,16 +128,18 @@ class FakeSession:
         if self._closed:
             raise FakeDriverError.session_closed()
         self._invocations += 1
-        # A labelled turn keeps the loop's own round numbering, so scripted
-        # artifacts line up with the round the caller thinks it is running.
-        # An unlabelled turn falls back to this session's invocation count.
-        round_index = round_number_from_label(request.label) if request.label else self._invocations
         events = self._turns[min(self._invocations, len(self._turns)) - 1]
         for event in events:
             if observer is not None:
                 observer.on_event(event)
         return AgentTurnResult(
-            text=_turn_text(self._answer, request, round_index),
+            text=_turn_text(
+                self._answer,
+                request,
+                role=self._spec.role,
+                turn_number=self._invocations,
+                response_scenario=self._response_scenario,
+            ),
             usage=_turn_usage(events),
             # An adopted session ID is echoed back so a resumed run's continuity
             # is observable; otherwise each session mints its own stable ID.
@@ -181,6 +175,7 @@ class FakeDriver:
         turn: Sequence[AgentEvent] | None = None,
         turns: Sequence[Sequence[AgentEvent]] | None = None,
         answer: BaseModel | Mapping[str, object] | str | None = None,
+        response_scenario: AgentResponseScenario | None = None,
     ) -> None:
         """Create a driver whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -190,11 +185,10 @@ class FakeDriver:
         session has run more turns than ``turns`` has entries, its last entry
         keeps repeating. ``turn=[...]`` is sugar for ``turns=[[...]]``.
         Passing neither runs a turn that emits no events. ``answer`` sets the
-        text or structured payload every turn returns; when omitted, a
-        structured turn falls back to
-        :func:`~vs_agent.scripted_rounds.scripted_round_payload` for the
-        requested response schema and round, so tests that only assert on the
-        event stream need not pass one.
+        text or structured payload every turn returns. If omitted,
+        ``response_scenario`` may provide a structured response; otherwise the
+        fake returns generic text regardless of whether the request declares
+        an output schema.
         """
         if turn is not None and turns is not None:
             raise FakeDriverError.conflicting_turn_inputs()
@@ -208,6 +202,7 @@ class FakeDriver:
             resolved_turns = ((),)
         self._turns = resolved_turns
         self._answer = answer
+        self._response_scenario = response_scenario
         self._sessions: list[FakeSession] = []
         self._closed = False
 
@@ -220,7 +215,12 @@ class FakeDriver:
         """Create one fake conversation for ``spec``."""
         if self._closed:
             raise FakeDriverError.driver_closed()
-        session = FakeSession(spec=spec, turns=self._turns, answer=self._answer)
+        session = FakeSession(
+            spec=spec,
+            turns=self._turns,
+            answer=self._answer,
+            response_scenario=self._response_scenario,
+        )
         self._sessions.append(session)
         return session
 
@@ -334,17 +334,25 @@ def _turn_usage(events: tuple[AgentEvent, ...]) -> AgentUsage:
 def _turn_text(
     answer: BaseModel | Mapping[str, object] | str | None,
     request: AgentTurnRequest,
-    round_index: int,
+    *,
+    role: str,
+    turn_number: int,
+    response_scenario: AgentResponseScenario | None,
 ) -> str:
     if answer is not None:
         return _serialize_answer(answer)
-    schema = request.output_schema
-    if schema is None:
-        return f"Fake agent completed {request.label or 'a turn'} with no workspace changes."
-    payload = scripted_round_payload(schema.__name__, round_index)
-    if payload is None:
-        raise FakeDriverError.missing_scripted_artifact(schema.__name__)
-    return json.dumps(payload)
+    if response_scenario is not None:
+        scenario_answer = response_scenario.respond(
+            AgentResponseContext(
+                role=role,
+                output_schema=request.output_schema,
+                round_label=request.label,
+                turn_number=turn_number,
+            )
+        )
+        if scenario_answer is not None:
+            return _serialize_answer(scenario_answer)
+    return f"Fake agent completed {request.label or 'a turn'} with no workspace changes."
 
 
 def _serialize_answer(answer: BaseModel | Mapping[str, object] | str) -> str:

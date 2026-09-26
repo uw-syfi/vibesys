@@ -41,6 +41,22 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
+from framework.api import (
+    DOCKER_PROVIDER_ENV,
+    AgentBackend,
+    BeforeReadyContext,
+    HostResource,
+    HostResourceAccess,
+    ProjectPathPolicy,
+    RunEnvironmentRecord,
+    RunResourceRequest,
+    SandboxLifecycleHooks,
+    auth_bind_mounts,
+    auth_copy_paths,
+    auth_env_passthrough,
+    auth_env_vars,
+    auth_paths,
+)
 from vibesys.backends import SandboxKind
 from vibesys.constants import PROJECT_ROOT
 from vibesys.evaluators import (
@@ -65,23 +81,6 @@ from vibesys.sandbox.modal_evaluator import encode_setup_command
 from vibesys.skypilot.bridge import SkyPilotBridge
 from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
 from vibesys.skypilot.runner import SkyPilotJobRunner, stable_cluster_name
-from vs_agent.api import (
-    DOCKER_PROVIDER_ENV,
-    AgentBackend,
-    auth_bind_mounts,
-    auth_copy_paths,
-    auth_env_passthrough,
-    auth_env_vars,
-    auth_paths,
-)
-from vs_project.api import RunEnvironmentRecord, RunResourceRequest
-from vs_sandbox.api import (
-    BeforeReadyContext,
-    HostResource,
-    HostResourceAccess,
-    ProjectPathPolicy,
-    SandboxLifecycleHooks,
-)
 
 _RunEnvironmentName = Literal["local", "docker", "modal", "skypilot"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
@@ -124,11 +123,10 @@ for attempt in range(5):
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from framework.api import Sandbox, StateNamespace
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.domains.environment import EnvironmentBindMount
     from vibesys.evaluators.input_manifest import WorkspaceSource
-    from vs_project.api import StateNamespace
-    from vs_sandbox.api import Sandbox
 
 
 @dataclass(frozen=True)
@@ -942,7 +940,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         # HOME of the user the container runs as, the agent image's
         # non-root ``agent`` user, not root. Deferred: the Docker sandbox
         # module imports the agent stack, which this module must not load.
-        agent_home = import_module("vs_sandbox.api").AGENT_HOME
+        agent_home = import_module("framework.api").AGENT_HOME
 
         modal_auth = Path.home() / ".modal.toml"
         if modal_auth.exists():
@@ -1056,7 +1054,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         meta_path = request.ref_dir / "meta.json"
         if not meta_path.exists():
             return
-        ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
+        ensure_model_volume = import_module("framework.api").ensure_model_volume
 
         meta = json.loads(meta_path.read_text())
         model_id = meta.get("model_id")
@@ -1094,7 +1092,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         draft_meta_path = request.ref_dir / "draft_meta.json"
         if not draft_meta_path.exists():
             return None
-        ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
+        ensure_model_volume = import_module("framework.api").ensure_model_volume
 
         draft_meta = json.loads(draft_meta_path.read_text())
         draft_model_id = draft_meta.get("model_id")

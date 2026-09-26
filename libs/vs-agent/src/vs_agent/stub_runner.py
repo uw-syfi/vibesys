@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, TypeVar
 from pydantic import BaseModel
 
 from vs_agent.contracts import AgentCapabilities, MCPServerSpec
-from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
+from vs_agent.fake_response import AgentResponseContext, AgentResponseScenario
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
@@ -21,13 +21,20 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class StubAgentClient:
-    """Return valid canned responses without invoking an external agent."""
+    """Return deterministic responses without invoking an external agent."""
 
     backend_name = "stub"
 
-    def __init__(self, *, event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK) -> None:
-        """Create a stateless deterministic client."""
+    def __init__(
+        self,
+        *,
+        event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        response_scenario: AgentResponseScenario | None = None,
+    ) -> None:
+        """Create a deterministic client with an optional structured scenario."""
         self._sink = event_sink
+        self._response_scenario = response_scenario
+        self._turn_number = 0
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -81,21 +88,33 @@ class StubAgentClient:
     ) -> T:
         """Emit a deterministic stub response for one requested agent turn."""
         del workspace, system_prompt, user_prompt, progress, kwargs
+        self._turn_number += 1
         self._sink.agent_output(
             f"[stub-agent] {round_label}: starting {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
         )
         time.sleep(0.05)
-        response = scripted_round_payload(
-            response_cls.__name__, round_number_from_label(round_label)
-        )
         self._sink.agent_output(
             f"[stub-agent] {round_label}: completed {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
         )
-        return response_cls.model_validate(response) if response is not None else fallback_factory()
+        if self._response_scenario is None:
+            return fallback_factory()
+        response = self._response_scenario.respond(
+            AgentResponseContext(
+                role=kind,
+                output_schema=response_cls,
+                round_label=round_label,
+                turn_number=self._turn_number,
+            )
+        )
+        if response is None:
+            return fallback_factory()
+        if isinstance(response, BaseModel):
+            return response  # ty: ignore[invalid-return-type]
+        return response_cls.model_validate(response)
 
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010192 [PLR0913]; Preserve StubAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,

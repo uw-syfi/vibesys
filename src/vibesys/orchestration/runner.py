@@ -9,13 +9,13 @@ from vibesys.orchestration.runtime import RunContext
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from framework.api import AgentClientProtocol
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.orchestration.contracts import OrchestrationProjector, Orchestrator
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
-    from vs_agent.api import AgentClientProtocol
 
 
 async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.

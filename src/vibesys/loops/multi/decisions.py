@@ -18,12 +18,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from vibesys.loops.state.api import RoundRecord
     from vibesys.roles.profiler import ProfilerSummary
     from vibesys.search.hypothesis import CarryOver
     from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
     from vibesys.search.profile_focus import FocusView
-    from vs_loop_state.api import RoundRecord
 
 
 @dataclass(frozen=True)

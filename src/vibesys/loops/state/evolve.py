@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from vs_loop_state._codec import (
+from vibesys.loops.state._codec import (
     JsonObject,
     invalid_state,
     parse_json_object,

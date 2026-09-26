@@ -15,6 +15,13 @@ from vibesys.sandbox.model_requests import reconcile_model_requests as stage_mod
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from framework.api import (
+        HostResource,
+        MCPServerSpec,
+        ProjectPathPolicy,
+        Sandbox,
+        SandboxExecutionResult,
+    )
     from vibesys.config import Config
     from vibesys.context import _RunResources
     from vibesys.evaluators.input_manifest import WorkspaceSource
@@ -24,8 +31,6 @@ if TYPE_CHECKING:
     from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentView
     from vibesys.skills import SkillSelection
-    from vs_agent.api import MCPServerSpec
-    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox, SandboxExecutionResult
 
 
 class AgentEnvironment(Protocol):

@@ -15,6 +15,7 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipeArtifact,
 )
 from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.loops.state.api import RoundRecord
 from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.contexts import display_path
@@ -40,7 +41,6 @@ from vibesys.search.hypothesis.transitions import (
     terminal_workspace_notice,
     trusted_candidate_records,
 )
-from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

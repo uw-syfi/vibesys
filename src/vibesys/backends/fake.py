@@ -2,7 +2,7 @@
 
 No GPU probing, no container runtime, no subprocess: every sandbox
 ``make_sandbox`` returns is an in-memory
-:class:`~vs_sandbox.api.testing.FakeSandbox`, one per ``(kind, id)`` pair so
+:class:`~framework.api.FakeSandbox`, one per ``(kind, id)`` pair so
 a caller that opens more than one sandbox kind gets independent scripts.
 ``make_monitor``/``reselect_device`` are no-ops, matching a backend with no
 contention monitor.
@@ -12,16 +12,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from framework.api import FakeSandbox
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox.api.testing import FakeSandbox
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
+    from framework.api import HostResource, Sandbox, SandboxLifecycleHooks
     from vibesys.backends.base import ContentionMonitor, SandboxKind
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 
 class FakeComputeBackend:

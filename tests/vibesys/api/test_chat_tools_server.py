@@ -21,10 +21,10 @@ from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
 from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.loops.state.api import RoundRecord
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vs_agent.api import register_tool
-from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord, RunExecutionRecord
 
 if TYPE_CHECKING:

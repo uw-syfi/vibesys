@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_loop_state.api import (
+from vibesys.loops.state.api import (
     PlainLoopCursor,
     PlainPerformanceRecord,
     PlainPerformanceSnapshot,
 )
 
 if TYPE_CHECKING:
-    from vs_project.api import StateNamespace, StateSlot
+    from framework.api import StateNamespace, StateSlot
 
 _CURSOR_FILE = "state.json"
 _PERFORMANCE_FILE = "perf/metrics.json"

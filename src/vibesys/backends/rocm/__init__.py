@@ -49,7 +49,7 @@ from vibesys.profilers import ProfilerKind
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from framework.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
 # Pinned rather than ``:latest`` for reproducibility and because the
@@ -172,7 +172,7 @@ class RocmBackend:
         """Create a local or ROCm-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
+        docker_sandbox = import_module("framework.api").DockerSandbox
 
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})

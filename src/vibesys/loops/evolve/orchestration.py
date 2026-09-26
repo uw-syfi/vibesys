@@ -7,11 +7,11 @@ from typing import Annotated, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from framework.api import OrchestrationDescriptor
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.search.population.models import OpenEvolveSelectorConfig
-from vs_project.api import OrchestrationDescriptor
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 

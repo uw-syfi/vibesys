@@ -13,14 +13,19 @@ the resource-handoff seam) so they never import their private home modules.
 
 from __future__ import annotations
 
+from framework.api import AgentBackend, AgentSpec, HostResource, HostResourceAccess
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api.contracts import (
+    CandidateDisposition,
     Config,
     ConfigurationDiagnostic,
     ConfigurationError,
     CoreEvent,
     EventStatus,
+    HypothesisOutcome,
+    HypothesisResolution,
+    JudgeVerdict,
     MetricSpace,
     Objective,
     OrchestrationDescriptor,
@@ -59,8 +64,6 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run.integration import RunResourceHandoff
 from vibesys.run.run_control import RunStopped
 from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
-from vs_agent.api import AgentBackend, AgentSpec
-from vs_sandbox.api import HostResource, HostResourceAccess
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
@@ -70,6 +73,7 @@ __all__ = [
     "AgentHandle",
     "AgentOutputChunkData",
     "AgentSpec",
+    "CandidateDisposition",
     "ComputeBackend",
     "Config",
     "ConfigurationDiagnostic",
@@ -80,6 +84,9 @@ __all__ = [
     "EventStatus",
     "HostResource",
     "HostResourceAccess",
+    "HypothesisOutcome",
+    "HypothesisResolution",
+    "JudgeVerdict",
     "MetricSpace",
     "Objective",
     "OrchestrationDescriptor",

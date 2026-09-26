@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
+from framework.api import RoundSummary, RunStatus, RunView
+from vibesys.loops.state.api import HypothesisResolution
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -22,11 +23,10 @@ from vibesys.schemas import (
     derive_hypothesis_title,
 )
 from vibesys.search.hypothesis import HypothesisSearch
-from vs_loop_state.api import HypothesisResolution
 
 if TYPE_CHECKING:
+    from vibesys.loops.state.api import RoundRecord
     from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-    from vs_loop_state.api import RoundRecord
 
 
 class HypothesisRoundView(BaseModel):

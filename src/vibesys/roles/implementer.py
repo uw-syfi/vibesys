@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+from framework.api import SessionScope
+from vibesys.loops.state.api import CandidateDisposition, HypothesisOutcome
 from vibesys.roles.common import SkillResourceSelection
 from vibesys.runtime import Keyed, Reuse, Role, Writes
 from vibesys.skills import ResolvedSkillSelection
-from vs_agent.api import SessionScope
 from vs_issue_board.api import Issue
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 
 
 class ImplementerContext(BaseModel):

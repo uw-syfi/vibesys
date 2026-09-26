@@ -12,6 +12,7 @@ from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.hypothesis_readmodel import project_run_view
+from vibesys.loops.state.api import RoundRecord
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import (
     Hypothesis,
@@ -19,7 +20,6 @@ from vibesys.search.hypothesis.state import (
     HypothesisState,
 )
 from vibesys.search.hypothesis.transitions import reproject_run_evidence
-from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

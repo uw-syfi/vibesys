@@ -11,16 +11,16 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from framework.api import RunResourceRequest
 from vibesys.constants import DomainName
 from vibesys.evaluators.packages import (
     EvaluatorPackageRequirement,
     resolve_evaluator_package,
 )
-from vs_project.api import RunResourceRequest
 
 if TYPE_CHECKING:
+    from framework.api import Project, TaskDirectory
     from vibesys.evaluators.packages import ResolvedEvaluatorPackage
-    from vs_project.api import Project, TaskDirectory
 
 MANIFEST_NAME = "vibesys.input.toml"
 _MIN_COMMIT_HASH_LENGTH = 7

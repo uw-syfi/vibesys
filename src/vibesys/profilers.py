@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from vibesys.constants import DomainName
 
 if TYPE_CHECKING:
-    from vs_agent.api import MCPServerSpec
+    from framework.api import MCPServerSpec
 
 
 class ProfilerKind(StrEnum):
@@ -31,7 +31,7 @@ class ProfilerKind(StrEnum):
 
 def mcp_spec(profiler_kind: ProfilerKind) -> MCPServerSpec | None:
     """Build the analysis server grant for a selected profiler."""
-    mcp_server_spec = import_module("vs_agent.api").MCPServerSpec
+    mcp_server_spec = import_module("framework.api").MCPServerSpec
 
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.loops.state.api import PerfDeltaReason, RoundRecord
 from vibesys.search.hypothesis import (
     HypothesisConfig,
     HypothesisResolution,
@@ -25,7 +26,6 @@ from vibesys.search.hypothesis import (
 from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.search.hypothesis.transitions import append_round, start_hypothesis
-from vs_loop_state.api import PerfDeltaReason, RoundRecord
 
 _NOISY_OPS = MetricSpace(
     objectives=(Objective(name="total_ops_per_sec", direction="max"),), relative_noise=0.05

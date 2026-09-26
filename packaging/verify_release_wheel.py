@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 PYPI_FILE_SIZE_LIMIT = 100_000_000
 FRAMEWORK_PACKAGES = (
     "vibesys",
+    "framework",
     "entrypoints",
     "server",
     "headless",
@@ -43,7 +44,6 @@ FRAMEWORK_PACKAGES = (
     "vs_feature_flags",
     "vs_github",
     "vs_issue_board",
-    "vs_loop_state",
     "vs_project",
     "vs_prompts",
     "vs_sandbox",
@@ -55,7 +55,6 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-feature-flags",
         "vs-github",
         "vs-issue-board",
-        "vs-loop-state",
         "vs-project",
         "vs-prompts",
         "vs-sandbox",
@@ -73,7 +72,6 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-feature-flags/src/vs_feature_flags"): PurePosixPath("vs_feature_flags"),
     Path("libs/vs-github/src/vs_github"): PurePosixPath("vs_github"),
     Path("libs/vs-issue-board/src/vs_issue_board"): PurePosixPath("vs_issue_board"),
-    Path("libs/vs-loop-state/src/vs_loop_state"): PurePosixPath("vs_loop_state"),
     Path("libs/vs-project/src/vs_project"): PurePosixPath("vs_project"),
     Path("libs/vs-prompts/src/vs_prompts"): PurePosixPath("vs_prompts"),
     Path("libs/vs-sandbox/src/vs_sandbox"): PurePosixPath("vs_sandbox"),

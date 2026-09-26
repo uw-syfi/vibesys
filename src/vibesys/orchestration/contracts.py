@@ -7,16 +7,14 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
-from vibesys.orchestration.view import RunView
-from vs_project.api import OrchestrationDescriptor
+from framework.api import OrchestrationDescriptor, RunView
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from framework.api import Project, RunStatus
     from vibesys.context import RunSetup
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.orchestration.view import RunStatus
-    from vs_project.api import Project
 
 
 class Orchestrator(Protocol):

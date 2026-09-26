@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.loops.multi.session import _TerminalPolicy
+from vibesys.loops.state.api import RoundRecord
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vibesys.search.hypothesis import (
@@ -43,7 +44,6 @@ from vibesys.search.hypothesis.attempts import (
     JudgeSkipReason,
 )
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-from vs_loop_state.api import RoundRecord
 
 # --- helpers -----------------------------------------------------------
 

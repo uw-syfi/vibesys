@@ -7,14 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from framework.api import RunResult as InternalResult
+from framework.api import RunStatus as InternalStatus
+from framework.api import RunView as InternalView
 from vibesys.api import ResumeRef, RunRequest, RunResult, RunStatus, RunView
 from vibesys.api import contracts as api_contracts
 from vibesys.orchestration.environment import AgentEnvironment
 from vibesys.orchestration.request import ResumeRef as InternalResumeRef
 from vibesys.orchestration.request import RunRequest as InternalRequest
-from vibesys.orchestration.view import RunResult as InternalResult
-from vibesys.orchestration.view import RunStatus as InternalStatus
-from vibesys.orchestration.view import RunView as InternalView
 
 
 def test_public_dtos_reexport_internal_classes() -> None:
@@ -29,7 +29,7 @@ def test_public_dtos_reexport_internal_classes() -> None:
 def test_internal_dtos_do_not_import_public_api() -> None:
     script = (
         "import sys; "
-        "import vibesys.orchestration.request, vibesys.orchestration.view, "
+        "import vibesys.orchestration.request, framework.api, "
         "vibesys.orchestration.environment; "
         "assert 'vibesys.api' not in sys.modules"
     )

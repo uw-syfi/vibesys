@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from vs_loop_state.api import (
+from vibesys.loops.state.api import (
     PlainLoopCursor,
     PlainPerformanceRecord,
     PlainPerformanceSnapshot,

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-import vs_agent.api as agent_api
+import framework.api as agent_api
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence

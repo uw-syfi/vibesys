@@ -18,6 +18,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
+from framework.api import RoundSummary, RunStatus, RunView
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
@@ -26,7 +27,6 @@ from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runtime import RunContext
 from vibesys.orchestration.state import _emit_commit_events
-from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor

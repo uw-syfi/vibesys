@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from framework.api import OrchestrationDescriptor
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration import OrchestrationResumeDecision
-from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import BenchmarkResult

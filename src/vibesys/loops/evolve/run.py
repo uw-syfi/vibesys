@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from framework.api import CandidateProgress
 from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.gates import BenchmarkContract
 from vibesys.evaluators.metrics import MetricSpace
@@ -39,7 +40,6 @@ from vibesys.search.population.models import (
     Proposal,
 )
 from vibesys.search.population.search import PopulationSearch
-from vs_agent.api import CandidateProgress
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

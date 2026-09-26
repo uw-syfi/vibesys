@@ -11,14 +11,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import (
+    from framework.api import (
         AgentCapabilities,
         AgentSessionKey,
         AgentSpec,
+        HostResource,
         MCPServerSpec,
         SessionScope,
     )
-    from vs_sandbox.api import HostResource
 
 T = TypeVar("T", bound=BaseModel)
 

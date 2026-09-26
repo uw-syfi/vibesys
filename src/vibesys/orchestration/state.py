@@ -26,10 +26,9 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from framework.api import RoundSummary, RunView, StateNamespace, StateSlot
     from vibesys.events import CoreEventData
     from vibesys.orchestration._host import HostResources
-    from vibesys.orchestration.view import RoundSummary, RunView
-    from vs_project.api import StateNamespace, StateSlot
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -282,7 +281,7 @@ def _emit_commit_events(events: _EventSink, before: RunView | None, after: RunVi
     """Emit the round/experiment events one `commit` newly made observable.
 
     Diffs `RunView.rounds`/`experiment_revision`, the typed fields every
-    strategy projector populates (see `vibesys.orchestration.view.RunView`);
+    strategy projector populates (see `framework.api.RunView`);
     a strategy that leaves them empty/`None` (no round concept) naturally
     yields no diff, so this holds no knowledge of any one policy's shape.
     """

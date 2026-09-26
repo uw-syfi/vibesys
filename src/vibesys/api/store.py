@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from framework.api import HostResource, HostResourceAccess
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.contracts import project_run
-from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from framework.api import OrchestrationRunManifest, Project, StateSnapshot
     from vibesys.api.contracts import RunView
     from vibesys.orchestration.contracts import OrchestrationRegistry
-    from vs_project.api import OrchestrationRunManifest, Project, StateSnapshot
 
 
 class RunStore(Protocol):

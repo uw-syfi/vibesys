@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from vs_loop_state.api import (
+from vibesys.loops.state.api import (
     JudgeVerdict,
     RoundHistory,
     RoundRecord,

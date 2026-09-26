@@ -10,11 +10,11 @@ import pytest
 
 from entrypoints.cli import _build_plain_parser as build_parser
 from entrypoints.headless import main
+from framework.api import RunResult
 from vibesys.config import Config
 from vibesys.constants import (
     DEFAULT_COMPUTE_BACKEND,
 )
-from vibesys.orchestration.view import RunResult
 from vibesys.repository import (
     RepositoryVisibility,
 )

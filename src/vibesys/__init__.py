@@ -8,6 +8,6 @@ dependencies via package-level re-exports.
 
 Import what you need by full module path, e.g.::
 
-    from vs_agent.api import build_agent_client
+    from framework.api import build_agent_client
     from vibesys.api import create_session
 """

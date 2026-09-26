@@ -5,20 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from framework.api import RunStatus, RunView
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.evolve.orchestration import compare_resume, options_from_descriptor
 from vibesys.loops.evolve.run import EvolveRun
 from vibesys.loops.evolve.state import EvolutionProjection, EvolutionStateStore, EvolveState
-from vibesys.orchestration.view import RunStatus, RunView
 from vibesys.search.population.models import PopulationConfig
 from vibesys.search.population.search import PopulationSearch
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from framework.api import OrchestrationDescriptor, Project
     from vibesys.orchestration.runtime import RunContext
-    from vs_project.api import OrchestrationDescriptor, Project
 
 
 class _UncommittedSelectionError(RuntimeError):

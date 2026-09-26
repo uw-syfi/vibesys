@@ -1,12 +1,11 @@
 """In-memory, configurable :class:`AgentClientProtocol` test double.
 
-Where :class:`~vs_agent.stub_runner.StubAgentClient` returns the same scripted
-rounds with no configuration, ``FakeAgentClient`` lets a test assert what a
+``FakeAgentClient`` lets a test assert what a
 caller actually sent (prompts, MCP servers, session keys), inject specific or
 failing responses, and observe streamed output and session-reuse behavior.
-Zero-config it behaves like the stub (scripted structured responses, a fixed
-default text); every call is recorded as a :class:`FakeInvocation` for direct
-assertions.
+With no configured structured response it uses the supplied
+``fallback_factory``; text calls return a fixed default. Every call is recorded
+as a :class:`FakeInvocation` for direct assertions.
 
 This module stays schema-agnostic (no ``vibesys`` core imports) and driver-
 agnostic (no ``agentshim``/``omnigent`` imports): callers enqueue already-
@@ -15,14 +14,14 @@ constructed response objects, and this module never runs an external agent.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, TypeVar
 
 from pydantic import BaseModel
 
 from vs_agent.contracts import AgentCapabilities, MCPServerSpec
-from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
+from vs_agent.fake_response import AgentResponseContext, AgentResponseScenario
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
@@ -36,7 +35,7 @@ T = TypeVar("T", bound=BaseModel)
 #: configured for the call's ``kind`` and no module-wide default was set.
 DEFAULT_TEXT = "Fake agent inspected the trajectory."
 
-type ResponseValue = BaseModel | dict[str, object]
+type ResponseValue = BaseModel | Mapping[str, object]
 type ResponseSource = ResponseValue | Callable[[FakeInvocation], ResponseValue]
 type TextSource = str | Callable[[FakeInvocation], str]
 
@@ -86,7 +85,7 @@ class _FailureState:
 
 def _materialize_response(source: ResponseSource, invocation: FakeInvocation) -> ResponseValue:
     """Resolve a configured structured-response source, calling it if callable."""
-    if isinstance(source, BaseModel | dict):
+    if isinstance(source, BaseModel | Mapping):
         return source
     return source(invocation)
 
@@ -112,10 +111,9 @@ def _pop(queues: dict[str, list[_PopT]], kind: str) -> _PopT | None:
 class FakeAgentClient:
     """Configurable in-memory double for :class:`~vs_agent.contracts.AgentClientProtocol`.
 
-    Zero-config it behaves like :class:`~vs_agent.stub_runner.StubAgentClient`:
-    ``invoke`` returns a scripted round payload (or ``fallback_factory()`` when
-    the response model is unscripted) and ``invoke_text`` returns a fixed
-    default sentence. Configured through the chained ``enqueue``/``set_*``/
+    With no configured response or injected scenario, ``invoke`` returns the
+    caller's ``fallback_factory()``; ``invoke_text`` returns a fixed default
+    sentence. Configured through the chained ``enqueue``/``set_*``/
     ``fail``/``on_invoke`` methods, it can return specific responses per agent
     ``kind``, fail on demand, stream output through the injected event sink,
     and track provider-session reuse.
@@ -133,12 +131,15 @@ class FakeAgentClient:
         session_reuse: bool = False,
         capabilities: AgentCapabilities | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        response_scenario: AgentResponseScenario | None = None,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
 
         ``capabilities`` overrides the reported feature set (e.g. to report
         ``mcp_servers=True`` for a backend that hosts issue-board tools); when
         omitted it is ``AgentCapabilities(session_reuse=session_reuse)``.
+        ``response_scenario`` supplies optional structured answers after any
+        explicitly queued or constant response has been considered.
         """
         # Instance attribute shadows the class default so a test can report a
         # different backend (e.g. "cli") without subclassing.
@@ -153,6 +154,7 @@ class FakeAgentClient:
         )
         self._session_reuse = self._capabilities.session_reuse
         self._sink = event_sink
+        self._response_scenario = response_scenario
         self._default_text: TextSource = DEFAULT_TEXT
 
         self.calls: list[FakeInvocation] = []
@@ -168,6 +170,7 @@ class FakeAgentClient:
         self._model_for_kind: dict[str, str] = {}
         self._stream_chunks: dict[str, list[str]] = {}
         self._on_invoke_callbacks: list[Callable[[FakeInvocation], None]] = []
+        self._structured_turn_number = 0
 
         self._sessions: dict[AgentSessionKey, str] = {}
         self._last_turn_sessions: dict[AgentSessionKey, str] = {}
@@ -353,6 +356,7 @@ class FakeAgentClient:
         session_key: AgentSessionKey | None = None,
     ) -> T:
         """Run one structured turn against the configured/scripted response."""
+        self._structured_turn_number += 1
         invocation = self._record(
             method="invoke",
             kind=kind,
@@ -495,13 +499,17 @@ class FakeAgentClient:
             return fallback_factory()
         if source is None:
             source = self._constants.get(kind)
-        if source is None:
-            scripted = scripted_round_payload(
-                response_cls.__name__, round_number_from_label(invocation.round_label)
+        if source is None and self._response_scenario is not None:
+            source = self._response_scenario.respond(
+                AgentResponseContext(
+                    role=kind,
+                    output_schema=response_cls,
+                    round_label=invocation.round_label,
+                    turn_number=self._structured_turn_number,
+                )
             )
-            if scripted is None:
-                return fallback_factory()
-            return response_cls.model_validate(scripted)
+        if source is None:
+            return fallback_factory()
         value = _materialize_response(source, invocation)
         if isinstance(value, BaseModel):
             # A model instance is returned as-is; the caller enqueued it (rather

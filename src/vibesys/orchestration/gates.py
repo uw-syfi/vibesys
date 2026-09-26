@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from framework.api import Sandbox
     from vibesys.context import _RunResources
     from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration._host import HostResources
@@ -42,7 +43,6 @@ if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
     from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
-    from vs_sandbox.api import Sandbox
 
 
 class GateExecutor(Protocol):

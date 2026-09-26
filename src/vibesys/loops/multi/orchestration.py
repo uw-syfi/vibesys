@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from framework.api import RunStatus, RunView
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.errors import InvalidStrategyOptionsError
 from vibesys.loops.agent_options import (
@@ -23,15 +24,14 @@ from vibesys.loops.agent_options import (
 from vibesys.loops.hypothesis_readmodel import project_run_view
 from vibesys.loops.multi.session import MultiSession
 from vibesys.orchestration import memory
-from vibesys.orchestration.view import RunStatus, RunView
 from vibesys.search.hypothesis.attempts import AttemptDecision
 from vibesys.search.hypothesis.state import HypothesisState, load_hypothesis_state
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from framework.api import OrchestrationDescriptor, Project
     from vibesys.orchestration.runtime import RunContext
-    from vs_project.api import OrchestrationDescriptor, Project
 
 MULTI_ID = "multi-agent"
 PROFILE_MULTI_ID = "profile-guided-multi-agent"

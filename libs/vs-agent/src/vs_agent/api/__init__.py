@@ -72,6 +72,7 @@ if TYPE_CHECKING:
 
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_driver_supports_mcp_servers
+    from vs_agent.fake_response import AgentResponseScenario
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -167,8 +168,13 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
+    response_scenario: AgentResponseScenario | None = None,
 ) -> AgentClientProtocol:
-    """Build an agent service through the application composition module."""
+    """Build an agent service through the application composition module.
+
+    ``response_scenario`` supplies deterministic structured responses to the
+    stub backend. Other backends execute their configured agent driver.
+    """
     from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
         build_agent_client as build,
     )
@@ -186,4 +192,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         require_host_sandbox=require_host_sandbox,
         session_store=session_store,
         events=events,
+        response_scenario=response_scenario,
     )

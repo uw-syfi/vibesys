@@ -51,8 +51,8 @@ from vibesys.skills import resolve_skill_source_dirs
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from framework.api import OrchestrationDescriptor
     from vibesys.profilers import ProfilerKind
-    from vs_project.api import OrchestrationDescriptor
 
 __all__ = [
     "CLI_PROFILER_CHOICES",

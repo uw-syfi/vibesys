@@ -37,7 +37,7 @@ from vibesys.profilers import ProfilerKind
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from framework.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 # AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
 # PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries
@@ -127,7 +127,7 @@ class TrainiumBackend:
         """Create a local or Trainium-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
+        docker_sandbox = import_module("framework.api").DockerSandbox
 
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})

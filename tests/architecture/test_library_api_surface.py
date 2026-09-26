@@ -15,7 +15,6 @@ import pytest
         "vs_github.api",
         "vs_issue_board.api",
         "vs_issue_board.api.mcp",
-        "vs_loop_state.api",
         "vs_project.api",
         "vs_prompts.api",
         "vs_sandbox.api",

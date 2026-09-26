@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from framework.api import OrchestrationDescriptor
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration import OrchestrationResumeDecision
-from vs_project.api import OrchestrationDescriptor
 
 
 class IssueQueueOptions(BaseModel):

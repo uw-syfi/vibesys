@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from framework.api import RoundProgress
 from vibesys.errors import StrategySessionError
 from vibesys.loops.single.attribution import run_attribution
 from vibesys.loops.single.turns import SingleAgentTurns
@@ -32,7 +33,6 @@ from vibesys.search.hypothesis.record import RecordInput, build_round_record
 from vibesys.search.hypothesis.results import Continue, Finished, NewHypothesis
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig
-from vs_agent.api import RoundProgress
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping

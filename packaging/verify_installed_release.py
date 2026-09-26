@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Never, cast
 
 from entrypoints.launcher import bundled_tui
+from framework.api import RunStatus
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.input_project import materialize_input_project
 from vibesys.loops.registry import built_in_orchestrations
 from vibesys.orchestration.contracts import project_run
-from vibesys.orchestration.view import RunStatus
 from vibesys.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.resource_paths import (
     default_skill_roots,
@@ -35,6 +35,7 @@ from vs_project.api import Project, ProjectError
 
 FRAMEWORK_PACKAGES = (
     "vibesys",
+    "framework",
     "entrypoints",
     "server",
     "headless",
@@ -43,7 +44,6 @@ FRAMEWORK_PACKAGES = (
     "vs_feature_flags",
     "vs_github",
     "vs_issue_board",
-    "vs_loop_state",
     "vs_project",
     "vs_prompts",
     "vs_sandbox",

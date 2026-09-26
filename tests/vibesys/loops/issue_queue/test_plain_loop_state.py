@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from vibesys.loops.issue_queue.entrypoint import resume_point
+from vibesys.loops.state.api import PlainLoopCursor
 from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
-from vs_loop_state.api import PlainLoopCursor
 
 
 def _make_store(tmp_path: Path) -> IssueBoard:

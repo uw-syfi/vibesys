@@ -45,6 +45,7 @@ from vibesys.loops.agent_options import (
     compare_resume_descriptors,
     descriptor_from_options,
 )
+from vibesys.loops.state.api import PlainLoopCursor
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
 from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
@@ -54,7 +55,6 @@ from vibesys.run import (
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vibesys.search.hypothesis.state import HypothesisState
-from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationRunManifest, Project
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle, SandboxLifecycleHooks
 
