@@ -25,18 +25,22 @@ TorchRefProtocolType: TypeAlias = type[TorchRefProtocolT]
 
 
 class LncSubscriptable(Generic[TorchRefProtocolT]):
-    def __init__(self, func: Callable, protocol: TorchRefProtocolType):
+    def __init__(
+        self,
+        func: Callable[..., TorchRefProtocolT],
+        protocol: TorchRefProtocolType,
+    ):
         self._func = func
         self._lnc: int = 0
         self._shard_id: int = 0
         _verify_protocol_sync(func, protocol)
 
-    def __getitem__(self, lnc: int) -> TorchRefProtocolT:
-        def wrapper(*args, **kwargs):
+    def __getitem__(self, lnc: int) -> Callable[..., TorchRefProtocolT]:
+        def wrapper(*args, **kwargs) -> TorchRefProtocolT:
             self._lnc = lnc
             return self._func(*args, **kwargs)
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     def __call__(self, *args, **kwargs):
         raise TypeError(

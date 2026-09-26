@@ -10,21 +10,23 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.evaluators.gates import (
     _BENCHMARK_OUTPUT_PREFIX,
+    BenchmarkContract,
     read_protocol_benchmark,
     run_accuracy_gate,
     run_benchmark_gate,
 )
 from vibesys.evaluators.input_manifest import BenchmarkResult
-from vibesys.evaluators.metrics import Objective
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import (
     CoreEvent,
     CoreEventType,
@@ -36,6 +38,9 @@ from vibesys.events import (
 from vibesys.render.sink import output_sink
 from vs_sandbox.api import SandboxExecutionResult
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 _SCALAR_SPEC = BenchmarkResult(json_argument="--out", metric="tok_per_sec")
 
 
@@ -45,10 +50,10 @@ class _ShellJudgeBackend:
     def __init__(self) -> None:
         self.commands: list[str] = []
 
-    def execute(self, command, timeout=None):  # noqa: ANN001, ANN202  # tracked: #288
+    def execute(self, command: str, timeout: float | None = None) -> SandboxExecutionResult:
         self.commands.append(command)
-        proc = subprocess.run(  # noqa: S603  # tracked: #288
-            ["bash", "-c", command],  # noqa: S607  # tracked: #288
+        proc = run_test_command(
+            ["bash", "-c", command],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -136,7 +141,8 @@ def test_benchmark_gate_fails_instead_of_reporting_a_stale_result() -> None:
     try:
         result = run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug=slug,
         )
@@ -158,7 +164,11 @@ def test_benchmark_gate_removes_its_transport_artifact(tmp_path: Path) -> None:
     """
     ctx = _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path))
     result = run_benchmark_gate(
-        ctx, result_spec=_SCALAR_SPEC, process_id="benchmark", output_slug="9-2"
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="9-2",
     )
     assert result.passed
     assert result.outcome.metric_value == 42.0
@@ -166,14 +176,22 @@ def test_benchmark_gate_removes_its_transport_artifact(tmp_path: Path) -> None:
 
     ctx = _gate_ctx(_writer_command("this is not json", tmp_path))
     result = run_benchmark_gate(
-        ctx, result_spec=_SCALAR_SPEC, process_id="benchmark", output_slug="9-2"
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="9-2",
     )
     assert not result.passed
     assert not _transport_artifact(ctx.judge_backend.commands[0]).exists()
 
     ctx = _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path, fail_after_write=True))
     result = run_benchmark_gate(
-        ctx, result_spec=_SCALAR_SPEC, process_id="benchmark", output_slug="9-2"
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="9-2",
     )
     assert not result.passed
     assert not _transport_artifact(ctx.judge_backend.commands[0]).exists()
@@ -197,7 +215,8 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
         def __init__(self) -> None:
             self.commands: list[str] = []
 
-        def execute(self, command, timeout=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
+        def execute(self, command: str, timeout: float | None = None) -> SandboxExecutionResult:
+            del timeout
             self.commands.append(command)
             if "cat " not in command:  # the cleanup rm
                 return SandboxExecutionResult(output="", exit_code=0)
@@ -213,7 +232,8 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
     try:
         first = run_benchmark_gate(
             _gate_ctx_with(_TimingOutBackend()),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="7-0",
         )
@@ -223,7 +243,8 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
 
         second = run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="7-0",
         )
@@ -240,7 +261,8 @@ def test_benchmark_gate_rejects_an_output_slug_that_is_not_one_segment(slug: str
     with pytest.raises(ValueError, match="output_slug"):
         run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug=slug,
         )
@@ -264,9 +286,8 @@ def test_benchmark_gate_keeps_the_evaluator_declared_direction(tmp_path: Path) -
     )
     result = run_benchmark_gate(
         _gate_ctx(_writer_command(stream, tmp_path)),
-        result_spec=None,
-        result_protocol=2,
-        objectives=(),
+        contract=BenchmarkContract(result_protocol=2),
+        space=MetricSpace(),
         process_id="benchmark",
         output_slug="4-0",
     )
@@ -296,7 +317,7 @@ def test_configured_objective_overrides_the_declared_direction() -> None:
 
 
 @contextlib.contextmanager
-def _captured_events():  # noqa: ANN202
+def _captured_events() -> Iterator[list[CoreEvent]]:
     """Collect every core event the gate publishes on the process sink."""
     seen: list[CoreEvent] = []
     unsubscribe = output_sink().subscribe(seen.append)
@@ -391,7 +412,8 @@ def test_benchmark_gate_pass_emits_the_metric_and_no_benchmark_result(tmp_path: 
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path)),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="9-2",
             round_label="round-9",
@@ -423,9 +445,8 @@ def test_benchmark_gate_protocol_pass_reports_the_declared_unit(tmp_path: Path) 
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx(_writer_command(stream, tmp_path)),
-            result_spec=None,
-            result_protocol=2,
-            objectives=(),
+            contract=BenchmarkContract(result_protocol=2),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="4-0",
         )
@@ -441,7 +462,8 @@ def test_benchmark_gate_failure_emits_a_failed_gate_finished(tmp_path: Path) -> 
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx(_writer_command("this is not json", tmp_path)),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="9-3",
         )
@@ -459,10 +481,100 @@ def test_benchmark_gate_undeclared_contract_emits_nothing() -> None:
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=None,
+            contract=BenchmarkContract(),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="1-0",
         )
 
     assert not result.executed
     assert _gate_events(seen) == []
+
+
+def test_accuracy_gate_turns_a_backend_error_into_failing_feedback() -> None:
+    ctx = _accuracy_ctx()
+    ctx.judge_backend.execute.side_effect = RuntimeError("sandbox down")
+
+    result = run_accuracy_gate(ctx, process_id="acc")
+
+    assert not result.passed
+    assert result.executed
+    assert result.output == "accuracy command could not be executed: sandbox down"
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ('{"tok_per_sec": "fast"}', "'tok_per_sec' is not numeric"),
+        ('{"tok_per_sec": true}', "'tok_per_sec' is not numeric"),
+        ('{"tok_per_sec": NaN}', "'tok_per_sec' is not finite"),
+        ('{"tok_per_sec": Infinity}', "'tok_per_sec' is not finite"),
+    ],
+)
+def test_benchmark_gate_rejects_non_finite_or_non_numeric_metrics(
+    tmp_path: Path, payload: str, message: str
+) -> None:
+    result = run_benchmark_gate(
+        _gate_ctx(_writer_command(payload, tmp_path)),
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-0",
+    )
+
+    assert not result.passed
+    assert f"invalid benchmark result: {message}" in result.output
+
+
+def test_benchmark_gate_fails_when_output_lacks_the_result_frame() -> None:
+    backend = MagicMock()
+    backend.execute.return_value = SandboxExecutionResult(
+        output="benchmark ran\n", exit_code=0, stdout="benchmark ran\n"
+    )
+
+    result = run_benchmark_gate(
+        _gate_ctx_with(backend),
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-1",
+    )
+
+    assert not result.passed
+    assert result.output == "benchmark ran\nbenchmark output did not include its result JSON"
+
+
+def test_benchmark_gate_refuses_to_run_after_evaluator_files_were_modified() -> None:
+    backend = MagicMock()
+    ctx = _gate_ctx_with(backend)
+    ctx.trusted_input_changes.return_value = ["bench.py"]
+
+    result = run_benchmark_gate(
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-2",
+    )
+
+    assert not result.passed
+    assert "Evaluator-owned files were modified: bench.py" in result.output
+    backend.execute.assert_not_called()
+
+
+def test_benchmark_gate_turns_a_backend_error_into_failing_feedback() -> None:
+    backend = MagicMock()
+    backend.execute.side_effect = RuntimeError("no sandbox")
+
+    result = run_benchmark_gate(
+        _gate_ctx_with(backend),
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-3",
+    )
+
+    assert not result.passed
+    assert "benchmark command could not be executed: no sandbox" in result.output
+    # The cleanup `rm -f` is still attempted, and its own failure is swallowed.
+    assert "rm -f --" in backend.execute.call_args.args[0]

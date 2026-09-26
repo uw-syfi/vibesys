@@ -91,6 +91,9 @@ jobs:
       - name: Run Python quality checks
         run: ./support/repoctl/repoctl run-checks --group python_quality
 
+      - name: Check Python lint waiver manifest
+        run: uv run python scripts/check_lint_waivers.py
+
   # Python type checking is unnecessary when the Python watch set is untouched.
   typecheck:
     needs: changes

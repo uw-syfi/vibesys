@@ -4,6 +4,7 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 """
 
 # Capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-040101 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from __future__ import annotations
 import asyncio
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
     AccuracyGateResult,
+    BenchmarkContract,
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
     emit_gate_finished,
@@ -24,7 +26,8 @@ from vibesys.evaluators.gates import (
     run_accuracy_gate,
     run_benchmark_gate,
 )
-from vibesys.events import GateKind
+from vibesys.evaluators.metrics import MetricSpace
+from vibesys.events import GateFinishedData, GateKind
 from vibesys.orchestration import progress_log
 
 if TYPE_CHECKING:
@@ -32,7 +35,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
-    from vibesys.evaluators.input_manifest import BenchmarkResult
     from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
@@ -66,16 +68,14 @@ class GateExecutor(Protocol):
         """Run the trusted accuracy command for one candidate."""
         ...
 
-    def run_benchmark(  # noqa: PLR0913  # mirrors run_benchmark_gate's own field count
+    def run_benchmark(  # noqa: PLR0913  # LW-040102 [PLR0913]; mirrors run_benchmark_gate's own field count.
         self,
         ctx: _GateInputs,
         *,
-        result_spec: BenchmarkResult | None = None,
-        result_protocol: Literal[2] | None = None,
-        objectives: Sequence[Objective] = (),
+        contract: BenchmarkContract,
+        space: MetricSpace,
         process_id: str,
         output_slug: str,
-        timeout_seconds: int | None = None,
         execution_base: str | None = None,
         round_label: str | None = None,
     ) -> BenchmarkGateResult:
@@ -104,28 +104,24 @@ class _RealGateExecutor:
             round_label=round_label,
         )
 
-    def run_benchmark(  # noqa: PLR0913  # mirrors run_benchmark_gate's own field count
+    def run_benchmark(  # noqa: PLR0913  # LW-040103 [PLR0913]; mirrors run_benchmark_gate's own field count.
         self,
         ctx: _GateInputs,
         *,
-        result_spec: BenchmarkResult | None = None,
-        result_protocol: Literal[2] | None = None,
-        objectives: Sequence[Objective] = (),
+        contract: BenchmarkContract,
+        space: MetricSpace,
         process_id: str,
         output_slug: str,
-        timeout_seconds: int | None = None,
         execution_base: str | None = None,
         round_label: str | None = None,
     ) -> BenchmarkGateResult:
         """Delegate to the module-level trusted benchmark gate."""
         return run_benchmark_gate(
             ctx,
-            result_spec=result_spec,
-            result_protocol=result_protocol,
-            objectives=objectives,
+            contract=contract,
+            space=space,
             process_id=process_id,
             output_slug=output_slug,
-            timeout_seconds=timeout_seconds,
             execution_base=execution_base,
             round_label=round_label,
         )
@@ -249,7 +245,11 @@ class _Evaluator:
     def _reuse_accuracy(self, label: str | None) -> AccuracyGateResult:
         command = self._host.environment.view.paths.accuracy_command
         emit_gate_started(GateKind.ACCURACY, command=command, round_label=label)
-        emit_gate_finished(GateKind.ACCURACY, passed=True, reused=True, round_label=label)
+        emit_gate_finished(
+            GateFinishedData(gate=GateKind.ACCURACY, reused=True),
+            passed=True,
+            round_label=label,
+        )
         return AccuracyGateResult(
             command=command,
             passed=True,
@@ -274,18 +274,20 @@ class _Evaluator:
             return await self._host._run_blocking(
                 executor.run_benchmark,
                 context,
-                result_spec=bundle.benchmark_result,
-                result_protocol=bundle.benchmark_result_protocol,
-                objectives=options.objectives,
+                contract=BenchmarkContract(
+                    result_spec=bundle.benchmark_result,
+                    result_protocol=bundle.benchmark_result_protocol,
+                    timeout_seconds=timeout,
+                ),
+                space=MetricSpace(objectives=tuple(options.objectives)),
                 process_id=output_slug,
                 output_slug=output_slug,
-                timeout_seconds=timeout,
                 execution_base=options.execution_base,
                 round_label=options.label,
             )
 
     @staticmethod
-    def _write_accuracy_gate(  # noqa: PLR0913  # mirrors render_framework_accuracy_gate's own field count
+    def _write_accuracy_gate(  # noqa: PLR0913  # LW-040104 [PLR0913]; mirrors render_framework_accuracy_gate's own field count.
         progress_path: Path | None,
         round_number: int,
         retry: int,
@@ -311,7 +313,7 @@ class _Evaluator:
             ),
         )
 
-    async def run(  # noqa: PLR0913  # one call replaces four strategies' hand-rolled sequencing
+    async def run(  # noqa: PLR0913  # LW-040105 [PLR0913]; one call replaces four strategies' hand-rolled sequencing.
         self,
         *,
         round_number: int,

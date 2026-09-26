@@ -463,6 +463,7 @@ def _tracked_files(source_root: Path) -> tuple[Path, ...]:
     if git is None:
         raise ReleaseWheelError.untracked_source_root(source_root)
     try:
+        # lint-waiver: LW-008036 [S603]; This invokes the resolved Git executable with fixed `-C`/`ls-files` arguments.
         result = subprocess.run(  # noqa: S603
             [git, "-C", str(source_root), "ls-files", "-z"],
             check=True,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 
     import agentshim
 
+    from server.chat.session import ChatAgentClient
+    from server.controller import RunController
+    from server.execution import ExecutionTracker
+    from vs_agent.api import AgentClientProtocol
 _SHARED_STATE_DIR = "/state/server/chat"
 _FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR)
 _CONTINUATION_PROMPT = experiment_chat_continuation_prompt(_SHARED_STATE_DIR)
@@ -39,22 +43,25 @@ _TOOL_SERVERS = (
 
 def _chat(
     tmp_path: Path,
-    client: Any,  # noqa: ANN401  # Any ChatAgentClient implementation.
+    client: AgentClientProtocol,
     *,
     thread_id: str | None = None,
-    executions: Any = None,  # noqa: ANN401  # Any ExecutionTracker stand-in.
-    controller: Any = None,  # noqa: ANN401  # Any RunController stand-in.
+    executions: ExecutionTracker | None = None,
+    controller: RunController | None = None,
 ) -> ExperimentChatSession:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     if controller is None:
-        controller = MagicMock()
-        controller.start_agent_execution.return_value = SimpleNamespace(execution_id="exec-1")
+        mock_controller = MagicMock()
+        mock_controller.start_agent_execution.return_value = SimpleNamespace(execution_id="exec-1")
+        controller = cast("RunController", mock_controller)
     return ExperimentChatSession(
         ExperimentChatDependencies(
             controller=controller,
-            executions=MagicMock() if executions is None else executions,
-            agent_client=client,
+            executions=(
+                cast("ExecutionTracker", MagicMock()) if executions is None else executions
+            ),
+            agent_client=cast("ChatAgentClient", client),
             session_key=AgentSessionKey(SessionScope.CHAT, thread_id or "default"),
             chat_thread_id=thread_id,
             workspace=workspace,

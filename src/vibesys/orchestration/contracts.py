@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
+from vibesys.orchestration.view import RunView
 from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
     from vibesys.context import RunSetup
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.orchestration.view import RunStatus, RunView
+    from vibesys.orchestration.view import RunStatus
     from vs_project.api import Project
 
 
@@ -56,8 +57,6 @@ class OrchestrationRegistration:
 
 def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
     """Identity and status view for a policy without a read projection."""
-    from vibesys.orchestration.view import RunView  # noqa: PLC0415
-
     return RunView(run_id=run_id, loop=loop, status=status)
 
 

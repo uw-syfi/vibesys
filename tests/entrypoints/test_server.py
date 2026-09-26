@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 import entrypoints.server as server_entrypoint
+import server.runtime as runtime_module
 from entrypoints.server import _control_socket_from_argv, _headless_argv, main
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_control_socket_argument_forms() -> None:
@@ -63,8 +68,6 @@ def test_server_runtime_drives_the_built_run_request(
     `ServerRuntime.drive`, which owns the `create_session` call (and the core
     `LocalRunIntegration`) internally.
     """
-    import server.runtime as runtime_module  # noqa: PLC0415
-
     integration = object()
     invocation = object()
     request = object()
@@ -78,10 +81,10 @@ def test_server_runtime_drives_the_built_run_request(
             observed["tui_defaults"] = tui_defaults
             self.integration = integration
 
-        def run(self, callback):  # noqa: ANN001, ANN202
+        def run(self, callback: Callable[[], object]) -> None:
             observed["result"] = callback()
 
-        def drive(self, driven_request):  # noqa: ANN001, ANN202
+        def drive(self, driven_request: object) -> None:
             observed["driven_request"] = driven_request
 
     monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)

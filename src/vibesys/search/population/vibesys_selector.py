@@ -34,6 +34,7 @@ __all__ = [
 
 # The axis ``best`` orders on when the task declares no objectives.
 _SCALAR_AXIS = Objective(name="perf_metric", direction="max")
+_MIN_SCORE_SPREAD = 1e-12
 
 
 def passed_individuals(individuals: Sequence[Individual]) -> list[Individual]:
@@ -49,7 +50,8 @@ def _headline_space(space: MetricSpace) -> MetricSpace:
 
 def _headline_reading(individual: Individual, headline: MetricSpace) -> Measurement | None:
     primary = headline.primary
-    assert primary is not None  # noqa: S101  # guaranteed by _headline_space
+    if primary is None:
+        return None
     value = individual.metrics.get(primary.name, individual.perf_metric)
     if value is None:
         return None
@@ -93,7 +95,7 @@ def _scalar_softmax_parent(
         return ranked[0]
     scores = [space.signed_primary(i.perf_metric) for i in ranked if i.perf_metric is not None]
     lo, hi = min(scores), max(scores)
-    if hi - lo < 1e-12:  # noqa: PLR2004
+    if hi - lo < _MIN_SCORE_SPREAD:
         return rng.choice(ranked)
     normed = [(score - lo) / (hi - lo) for score in scores]
     t = max(temperature, 1e-6)
@@ -125,7 +127,7 @@ def _select_parent(
     return _scalar_softmax_parent(individuals, rng=rng, temperature=temperature, space=space)
 
 
-def _select_inspirations(  # noqa: PLR0913  # tracked: #288
+def _select_inspirations(  # noqa: PLR0913  # LW-040059 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     individuals: Sequence[Individual],
     *,
     parent_id: int | None,
@@ -172,7 +174,7 @@ def _select_inspirations(  # noqa: PLR0913  # tracked: #288
     return top + rnd
 
 
-def select(  # noqa: PLR0913  # tracked: #288
+def select(  # noqa: PLR0913  # LW-040060 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     individuals: Sequence[Individual],
     *,
     rng: random.Random,

@@ -143,14 +143,14 @@ class HypothesisSearch:
             parent_commit=parent_commit,
         )
         hypothesis = new_state.active_hypothesis
-        assert hypothesis is not None  # noqa: S101  # start_hypothesis always activates one
+        assert hypothesis is not None  # noqa: S101  # start_hypothesis always activates one  # LW-040040 [S101]; the invariant is established by the call just above, and the assert narrows the optional type for the checker.
         return StartedHypothesis(state=new_state, hypothesis=hypothesis, rollback=rollback)
 
     def attempts(self, *, retry: int) -> AttemptBudget:
         """Return this attempt's position within the round's retry budget."""
         return AttemptBudget(retry=retry, max_retries=self.config.max_retries_per_round)
 
-    def review_due(  # noqa: PLR0913
+    def review_due(  # noqa: PLR0913  # LW-040041 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         *,
         round_number: int,
@@ -190,7 +190,7 @@ class HypothesisSearch:
             candidate_ready=candidate_ready,
         )
 
-    def close_round(  # noqa: PLR0913
+    def close_round(  # noqa: PLR0913  # LW-040042 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         state: HypothesisState,
         *,
@@ -306,7 +306,7 @@ class HypothesisSearch:
 
     def format_metric_row(self, record: RoundRecord, *, space: MetricSpace) -> str:
         """Render one round record's candidate metrics against *space*'s objectives."""
-        return transitions._format_metric_row(  # noqa: SLF001  # same package
+        return transitions._format_metric_row(  # noqa: SLF001  # same package  # LW-040043 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
             transitions.record_candidate_metrics(record), space.objectives
         )
 
@@ -321,7 +321,7 @@ class HypothesisSearch:
         return transitions.measurement_delta_reason(hypothesis)
 
 
-def _next_active(  # noqa: PLR0913
+def _next_active(  # noqa: PLR0913  # LW-040044 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     hypothesis: Hypothesis,
     *,
     keeps_active: bool,
@@ -353,7 +353,7 @@ def _next_active(  # noqa: PLR0913
     return next_active
 
 
-def _carry_over(  # noqa: PLR0913
+def _carry_over(  # noqa: PLR0913  # LW-040045 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     prior: CarryOver,
     *,
     passed: bool,

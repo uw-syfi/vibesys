@@ -84,21 +84,24 @@ def restore_uncommitted_evolve_state(workspace: RecoveryWorkspace) -> None:
     or evaluating marker remains unsafe even if only its cursor is dirty.
     """
     if workspace.dirty_paths(exclude=(_CURSOR_FILE,)):
-        raise EvolveResumeError(  # noqa: TRY003
+        message = (
             "uncommitted evolve state beyond the generation cursor may contain paid work; "
             "resuming would risk replaying it"
         )
+        raise EvolveResumeError(message)
     if _CURSOR_FILE not in workspace.dirty_paths():
         return
     committed = workspace.committed_bytes(_CURSOR_FILE)
     if committed is None:
-        raise EvolveResumeError("evolve has no committed generation cursor to restore")  # noqa: TRY003
+        message = "evolve has no committed generation cursor to restore"
+        raise EvolveResumeError(message)
     cursor = GenerationCursor.model_validate_json(committed)
     if cursor.active is not None and cursor.active.phase in {"planning", "evaluating"}:
-        raise EvolveResumeError(  # noqa: TRY003
+        message = (
             f"committed evolve generation {cursor.active.generation} stopped during "
             f"{cursor.active.phase}; paid work may have started"
         )
+        raise EvolveResumeError(message)
     workspace.restore_file(_CURSOR_FILE)
 
 

@@ -10,7 +10,7 @@ recording, streamed output, ``on_invoke`` side effects, session reuse, and
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, override
 
 import pytest
 from pydantic import BaseModel
@@ -18,8 +18,10 @@ from pydantic import BaseModel
 from vs_agent.contracts import AgentCapabilities
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.sink import AgentEventSink
 
 if TYPE_CHECKING:
+    from vs_agent.api import AgentProgress, MCPServerSpec
     from vs_agent.events import AgentOutputChannel, AgentStatusData, TodoItemData, ToolResultPayload
 
 
@@ -30,13 +32,14 @@ class _Response(BaseModel):
     detail: str = ""
 
 
-class _CapturingSink:
+class _CapturingSink(AgentEventSink):
     """Minimal :class:`AgentEventSink` that records every ``agent_output`` call."""
 
     def __init__(self) -> None:
         self.outputs: list[tuple[str, AgentOutputChannel, str | None, str | None]] = []
 
-    def agent_output(  # noqa: PLR0913  # tracked: #288
+    @override
+    def agent_output(
         self,
         content: str,
         *,
@@ -49,7 +52,8 @@ class _CapturingSink:
         del status, invocation_id
         self.outputs.append((content, channel, agent_kind, round_label))
 
-    def tool_call(  # noqa: PLR0913  # tracked: #288
+    @override
+    def tool_call(
         self,
         tool: str,
         args: dict[str, Any],
@@ -62,7 +66,8 @@ class _CapturingSink:
     ) -> None:
         del tool, args, call_id, status, agent_kind, round_label, invocation_id
 
-    def tool_result(  # noqa: PLR0913  # tracked: #288
+    @override
+    def tool_result(
         self,
         tool: str,
         content: str,
@@ -86,7 +91,8 @@ class _CapturingSink:
     ) -> None:
         del todos, agent_kind, round_label, invocation_id
 
-    def usage_update(  # noqa: PLR0913  # tracked: #288
+    @override
+    def usage_update(
         self,
         input_tokens: int,
         *,
@@ -99,6 +105,17 @@ class _CapturingSink:
         del input_tokens, context_window, model, agent_kind, round_label, invocation_id
 
 
+class _InvokeOptions(TypedDict, total=False):
+    """Optional invocation inputs shared by structured and text turns."""
+
+    env: dict[str, str] | None
+    invocation_id: str | None
+    progress: AgentProgress | None
+    mcp_servers: list[MCPServerSpec] | None
+    reuse_session: bool | None
+    session_key: AgentSessionKey | None
+
+
 def _fallback() -> _Response:
     return _Response(verdict="fallback")
 
@@ -108,7 +125,7 @@ def _invoke(
     *,
     kind: str = "judge",
     round_label: str = "round 4",
-    **kwargs: Any,  # noqa: ANN401
+    **kwargs: Unpack[_InvokeOptions],
 ) -> _Response:
     return client.invoke(
         kind=kind,
@@ -127,7 +144,7 @@ def _invoke_text(
     *,
     kind: str = "judge",
     round_label: str = "round 4",
-    **kwargs: Any,  # noqa: ANN401
+    **kwargs: Unpack[_InvokeOptions],
 ) -> str:
     return client.invoke_text(
         kind=kind,

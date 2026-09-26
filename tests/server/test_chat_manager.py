@@ -48,7 +48,7 @@ def _events(path: Path) -> list[dict]:
     ]
 
 
-def test_created_thread_routes_chat_and_stamps_events(tmp_path):  # noqa: ANN001, ANN201
+def test_created_thread_routes_chat_and_stamps_events(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.install_default_handler(
         lambda question: ChatAnswer(text=f"default: {question}", invocation_id="exec-default")
@@ -74,7 +74,7 @@ def test_created_thread_routes_chat_and_stamps_events(tmp_path):  # noqa: ANN001
     assert chats[0]["agent_kind"] == "chat"
 
 
-def test_chat_records_carry_the_answering_invocation_id(tmp_path):  # noqa: ANN001, ANN201
+def test_chat_records_carry_the_answering_invocation_id(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.install_default_handler(
         lambda question: ChatAnswer(text=f"default: {question}", invocation_id="exec-default")
@@ -94,7 +94,7 @@ def test_chat_records_carry_the_answering_invocation_id(tmp_path):  # noqa: ANN0
     ]
 
 
-def test_fallback_answers_take_fresh_invocation_identities(tmp_path):  # noqa: ANN001, ANN201
+def test_fallback_answers_take_fresh_invocation_identities(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
     parts.chat.chat("what happened?")
@@ -109,24 +109,25 @@ def test_fallback_answers_take_fresh_invocation_identities(tmp_path):  # noqa: A
     assert len(set(ids)) == len(ids) == 2
 
 
-def test_unknown_thread_returns_clear_answer_without_event(tmp_path):  # noqa: ANN001, ANN201
+def test_unknown_thread_returns_clear_answer_without_event(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     answer = parts.chat.chat("hello?", thread_id="missing-thread")
     assert "Unknown experiment chat thread 'missing-thread'" in answer
     assert all(event["type"] != "chat" for event in _events(tmp_path))
 
 
-def test_thread_creation_without_factory_is_rejected(tmp_path):  # noqa: ANN001, ANN201
+def test_thread_creation_without_factory_is_rejected(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     with pytest.raises(RuntimeError, match="chat threads are not available"):
         parts.chat.create_thread()
 
 
-def test_factory_validation_error_propagates_without_event(tmp_path):  # noqa: ANN001, ANN201
+def test_factory_validation_error_propagates_without_event(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
     def rejecting_factory(*_args: object) -> ChatThreadHandle:
-        raise ValueError("agent driver 'omnigent' does not support provider 'gemini'")  # noqa: TRY003
+        _failure_message = "agent driver 'omnigent' does not support provider 'gemini'"
+        raise ValueError(_failure_message)
 
     parts.chat.set_thread_factory(rejecting_factory)
     with pytest.raises(ValueError, match="does not support provider 'gemini'"):
@@ -134,7 +135,7 @@ def test_factory_validation_error_propagates_without_event(tmp_path):  # noqa: A
     assert all(event["type"] != "chat_thread_created" for event in _events(tmp_path))
 
 
-def test_threads_replay_and_rebuild_on_demand(tmp_path):  # noqa: ANN001, ANN201
+def test_threads_replay_and_rebuild_on_demand(tmp_path: Path) -> None:
     first = build_server_parts(tmp_path)
     first.chat.set_thread_factory(_factory([], "first"))
     spec = first.chat.create_thread(driver="agentshim", provider="claude")
@@ -152,7 +153,7 @@ def test_threads_replay_and_rebuild_on_demand(tmp_path):  # noqa: ANN001, ANN201
     assert calls == [(spec.thread_id, "agentshim", "claude", "gpt-default")]
 
 
-def test_first_message_titles_an_untitled_thread_once(tmp_path):  # noqa: ANN001, ANN201
+def test_first_message_titles_an_untitled_thread_once(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.set_thread_factory(_factory([], "answer"))
     spec = parts.chat.create_thread()
@@ -166,7 +167,7 @@ def test_first_message_titles_an_untitled_thread_once(tmp_path):  # noqa: ANN001
     assert parts.chat.threads()[0].title == "explain why the benchmark throughput…"
 
 
-def test_explicit_title_is_authoritative(tmp_path):  # noqa: ANN001, ANN201
+def test_explicit_title_is_authoritative(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.set_thread_factory(_factory([], "answer"))
     spec = parts.chat.create_thread(title="  perf deep dive  ")
@@ -178,7 +179,7 @@ def test_explicit_title_is_authoritative(tmp_path):  # noqa: ANN001, ANN201
     assert parts.chat.threads()[0].title == "perf deep dive"
 
 
-def test_cleared_threads_stop_routing_but_keep_replayable_specs(tmp_path):  # noqa: ANN001, ANN201
+def test_cleared_threads_stop_routing_but_keep_replayable_specs(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.set_thread_factory(_factory([], "answer"))
     spec = parts.chat.create_thread()
@@ -188,7 +189,7 @@ def test_cleared_threads_stop_routing_but_keep_replayable_specs(tmp_path):  # no
     assert [thread.thread_id for thread in parts.chat.threads()] == [spec.thread_id]
 
 
-def test_api_creates_threads_and_routes_threaded_chat(tmp_path):  # noqa: ANN001, ANN201
+def test_api_creates_threads_and_routes_threaded_chat(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.set_thread_factory(_factory([], "thread-agent"))
 
@@ -209,7 +210,7 @@ def test_api_creates_threads_and_routes_threaded_chat(tmp_path):  # noqa: ANN001
     ]
 
 
-def test_chat_options_group_by_provider_and_mark_run_model(tmp_path):  # noqa: ANN001, ANN201
+def test_chat_options_group_by_provider_and_mark_run_model(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.set_run_settings(
         ChatRunSettings(
@@ -236,13 +237,13 @@ def test_chat_options_group_by_provider_and_mark_run_model(tmp_path):  # noqa: A
     assert not any(option.default for option in claude.models)
 
 
-def test_chat_options_are_absent_before_run_settings_attach(tmp_path):  # noqa: ANN001, ANN201
+def test_chat_options_are_absent_before_run_settings_attach(tmp_path: Path) -> None:
     response = build_server_parts(tmp_path).api.execute(ChatOptionsQuery())
     assert response.ok is True
     assert response.chat_options is None
 
 
-def test_api_passes_optional_thread_choices_to_factory(tmp_path):  # noqa: ANN001, ANN201
+def test_api_passes_optional_thread_choices_to_factory(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     calls: list[tuple[str, str | None, str | None, str | None]] = []
     parts.chat.set_thread_factory(_factory(calls, "thread-agent"))

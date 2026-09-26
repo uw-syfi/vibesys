@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: module seams patched below
 
 from tests.vibesys.golden.harness import _SharedFakeClient, write_minimal_input_bundle
 
@@ -76,11 +76,14 @@ def run_with_context[R](
             integration.close()
 
     with (
+        # test-isolation: the harness patches module constants and the local sandbox factory, which have no injection seam
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
+        # test-isolation: the harness patches module constants and the local sandbox factory, which have no injection seam
         patch(
             "vibesys.orchestration.runtime.build_agent_client",
             side_effect=lambda **_kwargs: _SharedFakeClient(runner),
         ),
+        # test-isolation: the harness patches module constants and the local sandbox factory, which have no injection seam
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
     ):
         return asyncio.run(execute())

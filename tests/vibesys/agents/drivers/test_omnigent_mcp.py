@@ -1,7 +1,5 @@
 """Contract tests for VibeSys's native Omnigent MCP adapter."""
 
-# ruff: noqa: TRY003
-
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +16,7 @@ from vs_agent.drivers._omnigent_mcp import OmnigentMCPError, OmnigentMCPTools
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from pathlib import Path
 
 
 @dataclass
@@ -55,7 +54,7 @@ class _FakeManager:
     tool_names: ClassVar[set[str]] = {"profiler__analyze"}
     failures: ClassVar[dict[str, str]] = {}
 
-    def __init__(self, *, stdio_cwd: Any) -> None:  # noqa: ANN401
+    def __init__(self, *, stdio_cwd: object) -> None:
         self.stdio_cwd = stdio_cwd
         self.specs: list[_FakeAgentSpec] = []
         self.calls: list[tuple[Any, ...]] = []
@@ -63,7 +62,7 @@ class _FakeManager:
         self.shutdown_override: Callable[[], Awaitable[None]] | None = None
         self.instances.append(self)
 
-    async def schemas_for(self, spec: _FakeAgentSpec) -> Any:  # noqa: ANN401
+    async def schemas_for(self, spec: _FakeAgentSpec) -> SimpleNamespace:
         self.specs.append(spec)
         return SimpleNamespace(
             schemas=list(self.schemas),
@@ -89,6 +88,21 @@ class _FakeManager:
         self.shutdown_calls += 1
 
 
+def _native_api(
+    manager: type[_FakeManager] = _FakeManager,
+    *,
+    validation: SimpleNamespace | None = None,
+) -> SimpleNamespace:
+    validation_result = validation or SimpleNamespace(valid=True, errors=[])
+    return SimpleNamespace(
+        agent_spec=_FakeAgentSpec,
+        executor_spec=_FakeExecutorSpec,
+        server_config=_FakeMCPServerConfig,
+        manager=manager,
+        validate=lambda _spec: validation_result,
+    )
+
+
 @pytest.fixture(autouse=True)
 def fake_native_api(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeManager.instances.clear()
@@ -105,13 +119,7 @@ def fake_native_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         subject,
         "_native_mcp_api",
-        lambda: subject._NativeMCPAPI(  # noqa: SLF001
-            agent_spec=_FakeAgentSpec,
-            executor_spec=_FakeExecutorSpec,
-            server_config=_FakeMCPServerConfig,
-            manager=_FakeManager,
-            validate=lambda _spec: SimpleNamespace(valid=True, errors=[]),
-        ),
+        _native_api,
     )
 
 
@@ -132,7 +140,7 @@ def _servers() -> tuple[MCPServerSpec, ...]:
     )
 
 
-def test_create_translates_multiple_servers_and_preserves_native_schemas(tmp_path) -> None:  # noqa: ANN001
+def test_create_translates_multiple_servers_and_preserves_native_schemas(tmp_path: Path) -> None:
     tools = asyncio.run(
         OmnigentMCPTools.create(
             servers=_servers(),
@@ -166,7 +174,7 @@ def test_create_translates_multiple_servers_and_preserves_native_schemas(tmp_pat
     assert not tools.handles("sys_os_read")
 
 
-def test_dispatch_uses_native_manager_and_current_provider_session_id(tmp_path) -> None:  # noqa: ANN001
+def test_dispatch_uses_native_manager_and_current_provider_session_id(tmp_path: Path) -> None:
     session_id = ["provider-session-1"]
     tools = asyncio.run(
         OmnigentMCPTools.create(
@@ -188,7 +196,9 @@ def test_dispatch_uses_native_manager_and_current_provider_session_id(tmp_path) 
     ]
 
 
-def test_connection_failure_closes_manager_without_exposing_server_environment(tmp_path) -> None:  # noqa: ANN001
+def test_connection_failure_closes_manager_without_exposing_server_environment(
+    tmp_path: Path,
+) -> None:
     _FakeManager.failures = {"profiler": "connection refused"}
     sensitive_value = "must-not-appear"
     server = MCPServerSpec(
@@ -211,25 +221,21 @@ def test_connection_failure_closes_manager_without_exposing_server_environment(t
     assert _FakeManager.instances[0].shutdown_calls == 1
 
 
-def test_cancelled_discovery_closes_manager(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+def test_cancelled_discovery_closes_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     started = asyncio.Event()
 
     class BlockingManager(_FakeManager):
-        async def schemas_for(self, spec: _FakeAgentSpec) -> Any:  # noqa: ANN401
+        async def schemas_for(self, spec: _FakeAgentSpec) -> SimpleNamespace:
             self.specs.append(spec)
             started.set()
-            await asyncio.Future()
+            return await asyncio.Future[SimpleNamespace]()
 
     monkeypatch.setattr(
         subject,
         "_native_mcp_api",
-        lambda: subject._NativeMCPAPI(  # noqa: SLF001
-            agent_spec=_FakeAgentSpec,
-            executor_spec=_FakeExecutorSpec,
-            server_config=_FakeMCPServerConfig,
-            manager=BlockingManager,
-            validate=lambda _spec: SimpleNamespace(valid=True, errors=[]),
-        ),
+        lambda: _native_api(BlockingManager),
     )
 
     async def cancel_setup() -> None:
@@ -251,7 +257,7 @@ def test_cancelled_discovery_closes_manager(tmp_path, monkeypatch: pytest.Monkey
     assert BlockingManager.instances[-1].shutdown_calls == 1
 
 
-def test_close_is_idempotent_and_closed_tools_cannot_dispatch(tmp_path) -> None:  # noqa: ANN001
+def test_close_is_idempotent_and_closed_tools_cannot_dispatch(tmp_path: Path) -> None:
     async def exercise() -> tuple[OmnigentMCPTools, _FakeManager]:
         tools = await OmnigentMCPTools.create(
             servers=_servers()[:1],
@@ -272,7 +278,7 @@ def test_close_is_idempotent_and_closed_tools_cannot_dispatch(tmp_path) -> None:
         asyncio.run(tools.dispatch("profiler__analyze", {}))
 
 
-def test_duplicate_server_names_are_rejected_before_manager_creation(tmp_path) -> None:  # noqa: ANN001
+def test_duplicate_server_names_are_rejected_before_manager_creation(tmp_path: Path) -> None:
     duplicated = (
         MCPServerSpec(name="same", command="one"),
         MCPServerSpec(name="same", command="two"),
@@ -292,7 +298,7 @@ def test_duplicate_server_names_are_rejected_before_manager_creation(tmp_path) -
 
 
 def test_native_validation_error_preserves_field_path_and_skips_connection(
-    tmp_path,  # noqa: ANN001
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     validation_error = SimpleNamespace(
@@ -302,13 +308,7 @@ def test_native_validation_error_preserves_field_path_and_skips_connection(
     monkeypatch.setattr(
         subject,
         "_native_mcp_api",
-        lambda: subject._NativeMCPAPI(  # noqa: SLF001
-            agent_spec=_FakeAgentSpec,
-            executor_spec=_FakeExecutorSpec,
-            server_config=_FakeMCPServerConfig,
-            manager=_FakeManager,
-            validate=lambda _spec: SimpleNamespace(valid=False, errors=[validation_error]),
-        ),
+        lambda: _native_api(validation=SimpleNamespace(valid=False, errors=[validation_error])),
     )
 
     with pytest.raises(
@@ -327,7 +327,7 @@ def test_native_validation_error_preserves_field_path_and_skips_connection(
     assert _FakeManager.instances == []
 
 
-def test_close_can_retry_after_shutdown_failure(tmp_path) -> None:  # noqa: ANN001
+def test_close_can_retry_after_shutdown_failure(tmp_path: Path) -> None:
     tools = asyncio.run(
         OmnigentMCPTools.create(
             servers=_servers()[:1],
@@ -344,7 +344,8 @@ def test_close_can_retry_after_shutdown_failure(tmp_path) -> None:  # noqa: ANN0
         nonlocal shutdown_attempts
         shutdown_attempts += 1
         if shutdown_attempts == 1:
-            raise RuntimeError("cleanup failed")
+            _failure_message = "cleanup failed"
+            raise RuntimeError(_failure_message)
 
     manager.shutdown_override = flaky_shutdown
 
@@ -355,7 +356,7 @@ def test_close_can_retry_after_shutdown_failure(tmp_path) -> None:  # noqa: ANN0
     assert shutdown_attempts == 2
 
 
-def test_same_bare_tool_name_from_multiple_servers_stays_namespaced(tmp_path) -> None:  # noqa: ANN001
+def test_same_bare_tool_name_from_multiple_servers_stays_namespaced(tmp_path: Path) -> None:
     _FakeManager.schemas = [
         {"type": "function", "name": "one__status", "parameters": {}},
         {"type": "function", "name": "two__status", "parameters": {}},
@@ -377,3 +378,94 @@ def test_same_bare_tool_name_from_multiple_servers_stays_namespaced(tmp_path) ->
 
     assert tools is not None
     assert [schema["name"] for schema in tools.schemas] == ["one__status", "two__status"]
+
+
+_REAL_NATIVE_API = vars(subject)["_native_mcp_api"]
+
+
+def test_real_native_api_exposes_the_pinned_omnigent_classes() -> None:
+    pytest.importorskip("omnigent")
+
+    api = _REAL_NATIVE_API()
+
+    assert api.manager.__name__ == "RunnerMcpManager"
+    assert api.agent_spec.__name__ == "AgentSpec"
+    assert api.server_config.__name__ == "MCPServerConfig"
+    assert callable(api.validate)
+
+
+def test_missing_native_mcp_api_reports_import_detail_and_remedy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "omnigent.runner.mcp_manager", None)
+
+    with pytest.raises(
+        OmnigentMCPError, match=r"not importable \((Import|ModuleNotFound)Error"
+    ) as caught:
+        _REAL_NATIVE_API()
+
+    assert "uv sync" in str(caught.value)
+    assert isinstance(caught.value.__cause__, ImportError)
+
+
+def test_dependency_error_constructor_names_error_type_and_message() -> None:
+    error = OmnigentMCPError.dependency_unavailable(ModuleNotFoundError("no omnigent"))
+
+    assert str(error).startswith(
+        "Omnigent MCP support is not importable (ModuleNotFoundError: no omnigent)."
+    )
+
+
+def _built(tmp_path: Path) -> OmnigentMCPTools:
+    tools = OmnigentMCPTools.build(
+        servers=_servers()[:1],
+        workspace=tmp_path,
+        harness="codex",
+        session_id=lambda: None,
+    )
+    assert tools is not None
+    return tools
+
+
+def test_build_returns_none_without_servers(tmp_path: Path) -> None:
+    assert (
+        OmnigentMCPTools.build(
+            servers=(), workspace=tmp_path, harness="codex", session_id=lambda: None
+        )
+        is None
+    )
+
+
+def test_lifecycle_misuse_is_rejected_with_specific_errors(tmp_path: Path) -> None:
+    tools = _built(tmp_path)
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        asyncio.run(tools.dispatch("profiler__analyze", {}))
+    asyncio.run(tools.initialize())
+    with pytest.raises(RuntimeError, match="already initialized"):
+        asyncio.run(tools.initialize())
+    with pytest.raises(RuntimeError, match="do not contain 'other__tool'"):
+        asyncio.run(tools.dispatch("other__tool", {}))
+
+    closed = _built(tmp_path)
+    asyncio.run(closed.close())
+    with pytest.raises(RuntimeError, match="tools are closed"):
+        asyncio.run(closed.initialize())
+
+
+def test_failed_discovery_with_failed_cleanup_keeps_first_error_and_adds_note(
+    tmp_path: Path,
+) -> None:
+    _FakeManager.failures = {"profiler": "connection refused"}
+    tools = _built(tmp_path)
+
+    async def failing_shutdown() -> None:
+        message = "shutdown broke"
+        raise OSError(message)
+
+    _FakeManager.instances[0].shutdown_override = failing_shutdown
+
+    with pytest.raises(OmnigentMCPError, match="connection refused") as caught:
+        asyncio.run(tools.initialize())
+
+    assert caught.value.__notes__ == ["Omnigent MCP cleanup also failed: shutdown broke"]

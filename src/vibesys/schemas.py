@@ -25,11 +25,11 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from vs_loop_state.api import (
-    CandidateDisposition,  # noqa: F401
-    HypothesisOutcome,  # noqa: F401
-    PerfDeltaReason,  # noqa: F401
-)
+import vs_loop_state.api as _loop_state_api
+
+CandidateDisposition = _loop_state_api.CandidateDisposition
+HypothesisOutcome = _loop_state_api.HypothesisOutcome
+PerfDeltaReason = _loop_state_api.PerfDeltaReason
 
 # HypothesisOutcome, CandidateDisposition, and PerfDeltaReason live in
 # vs_loop_state so that server code can import them without deep-importing
@@ -37,7 +37,9 @@ from vs_loop_state.api import (
 # refactor's scope keep working unchanged.
 
 
-class PerfTrend(StrEnum):  # noqa: D101  # tracked: #288
+class PerfTrend(StrEnum):
+    """Direction of observed performance change across rounds."""
+
     IMPROVED = "improved"
     REGRESSED = "regressed"
     MIXED = "mixed"
@@ -72,7 +74,8 @@ class SkillResourceSelection(BaseModel):
     def _strip_required_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")  # noqa: TRY003  # tracked: #288
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
         return value
 
 

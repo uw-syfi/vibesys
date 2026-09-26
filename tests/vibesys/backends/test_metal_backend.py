@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,15 +15,18 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 from vs_sandbox.api import LocalShellSandbox
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _make_backend(tmp_path) -> LocalBackend:  # noqa: ANN001  # tracked: #288
+
+def _make_backend(tmp_path: Path) -> LocalBackend:
     impl = backends.get(ComputeBackend.METAL, log_dir=tmp_path / "logs")
     assert isinstance(impl, LocalBackend)
     return impl
 
 
 class TestMetalRegistry:
-    def test_metal_in_registry(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_metal_in_registry(self, tmp_path: Path) -> None:
         impl = backends.get(ComputeBackend.METAL, log_dir=tmp_path)
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.METAL
@@ -30,7 +34,7 @@ class TestMetalRegistry:
 
 
 class TestMetalSandbox:
-    def test_local_returns_local_shell_backend(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_local_returns_local_shell_backend(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)
         workspace = tmp_path / "ws"
         workspace.mkdir()
@@ -42,7 +46,7 @@ class TestMetalSandbox:
         )
         assert isinstance(sb, LocalShellSandbox)
 
-    def test_docker_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_docker_raises(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)
         # Metal-specific identity: message names metal + the MPS/Apple reason.
         with pytest.raises(ValueError, match="metal backend only supports local execution"):
@@ -54,11 +58,11 @@ class TestMetalSandbox:
 
 
 class TestMetalDevice:
-    def test_no_monitor(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_monitor(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)
         assert impl.make_monitor(tmp_path) is None
 
-    def test_reselect_is_noop(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reselect_is_noop(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)
         # No-op: doesn't raise, doesn't change selected_device.
         impl.reselect_device()
@@ -66,7 +70,7 @@ class TestMetalDevice:
 
 
 class TestMetalCli:
-    def test_argparse_accepts_metal(self):  # noqa: ANN201  # tracked: #288
+    def test_argparse_accepts_metal(self) -> None:
         parser = argparse.ArgumentParser()
         _add_common_args(parser)
         ns = parser.parse_args(["--backend", "metal"])

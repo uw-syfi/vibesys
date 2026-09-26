@@ -12,8 +12,17 @@ listed in ``[tool.ty.environment] root``.
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
+from resources.profilers.nsys.analyze_nsys import (
+    _build_string_map,
+    _short_kernel_name,
+    analyze_cpu_overhead,
+    analyze_gpu_idle_gaps,
+    analyze_kernels,
+    analyze_memory_ops,
+)
 
 from vibesys.roles.profiler import ProfilerResponse
 from vs_agent.runner import parse_typed_response_text
@@ -23,7 +32,7 @@ from vs_agent.runner import parse_typed_response_text
 # ---------------------------------------------------------------------------
 
 
-def test_profiler_response_creation():  # noqa: ANN201  # tracked: #288
+def test_profiler_response_creation() -> None:
     resp = ProfilerResponse(
         analysis="GPU is 85% busy, attention kernels dominate.",
         bottlenecks="1. flash_fwd_kernel (45% GPU time)\n2. rmsnorm_kernel (8%, 60 launches)",
@@ -34,7 +43,7 @@ def test_profiler_response_creation():  # noqa: ANN201  # tracked: #288
     assert "FlashInfer" in resp.suggestions
 
 
-def test_profiler_response_from_dict():  # noqa: ANN201  # tracked: #288
+def test_profiler_response_from_dict() -> None:
     data = {
         "analysis": "CPU launch overhead exceeds GPU exec time.",
         "bottlenecks": "Launch-bound: CPU/GPU ratio 1.7x",
@@ -44,7 +53,7 @@ def test_profiler_response_from_dict():  # noqa: ANN201  # tracked: #288
     assert resp.analysis == data["analysis"]
 
 
-def test_profiler_response_serialization():  # noqa: ANN201  # tracked: #288
+def test_profiler_response_serialization() -> None:
     resp = ProfilerResponse(
         analysis="Analysis.",
         bottlenecks="Bottlenecks.",
@@ -61,7 +70,7 @@ def test_profiler_response_serialization():  # noqa: ANN201  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def _profiler_json(**overrides):  # noqa: ANN003, ANN202  # tracked: #288
+def _profiler_json(**overrides: object) -> str:
     data = {
         "analysis": "Kernel analysis here.",
         "bottlenecks": "Top bottleneck: attention at 45%.",
@@ -71,32 +80,32 @@ def _profiler_json(**overrides):  # noqa: ANN003, ANN202  # tracked: #288
     return json.dumps(data)
 
 
-def test_parse_profiler_response_raw_json():  # noqa: ANN201  # tracked: #288
+def test_parse_profiler_response_raw_json() -> None:
     text = _profiler_json()
     resp = parse_typed_response_text(text, ProfilerResponse)
     assert resp is not None
     assert resp.analysis == "Kernel analysis here."
 
 
-def test_parse_profiler_response_fenced_json():  # noqa: ANN201  # tracked: #288
+def test_parse_profiler_response_fenced_json() -> None:
     text = f"```json\n{_profiler_json()}\n```"
     resp = parse_typed_response_text(text, ProfilerResponse)
     assert resp is not None
     assert "attention" in resp.bottlenecks
 
 
-def test_parse_profiler_response_with_surrounding_text():  # noqa: ANN201  # tracked: #288
+def test_parse_profiler_response_with_surrounding_text() -> None:
     text = f"Here is the analysis:\n{_profiler_json()}\nDone."
     resp = parse_typed_response_text(text, ProfilerResponse)
     assert resp is not None
 
 
-def test_parse_profiler_response_empty():  # noqa: ANN201  # tracked: #288
+def test_parse_profiler_response_empty() -> None:
     assert parse_typed_response_text("", ProfilerResponse) is None
     assert parse_typed_response_text("no json here", ProfilerResponse) is None
 
 
-def test_parse_profiler_response_invalid_json():  # noqa: ANN201  # tracked: #288
+def test_parse_profiler_response_invalid_json() -> None:
     assert parse_typed_response_text("{invalid json}", ProfilerResponse) is None
 
 
@@ -106,7 +115,7 @@ def test_parse_profiler_response_invalid_json():  # noqa: ANN201  # tracked: #28
 
 
 @pytest.fixture
-def nsys_db(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def nsys_db(tmp_path: Path) -> str:
     """Create a minimal nsys-like SQLite database for testing."""
     db_path = tmp_path / "test.sqlite"
     conn = sqlite3.connect(str(db_path))
@@ -170,11 +179,7 @@ def nsys_db(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     return str(db_path)
 
 
-def test_analyze_kernels(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
-    from resources.profilers.nsys.analyze_nsys import (  # noqa: PLC0415  # tracked: #288
-        _build_string_map,
-        analyze_kernels,
-    )
+def test_analyze_kernels(nsys_db: str) -> None:
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -187,11 +192,7 @@ def test_analyze_kernels(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
     assert "Total GPU kernel time" in result
 
 
-def test_analyze_cpu_overhead(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
-    from resources.profilers.nsys.analyze_nsys import (  # noqa: PLC0415  # tracked: #288
-        _build_string_map,
-        analyze_cpu_overhead,
-    )
+def test_analyze_cpu_overhead(nsys_db: str) -> None:
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -204,11 +205,7 @@ def test_analyze_cpu_overhead(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
     assert "cudaDeviceSynchronize" in result or "1 calls" in result
 
 
-def test_analyze_gpu_idle_gaps(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
-    from resources.profilers.nsys.analyze_nsys import (  # noqa: PLC0415  # tracked: #288
-        _build_string_map,
-        analyze_gpu_idle_gaps,
-    )
+def test_analyze_gpu_idle_gaps(nsys_db: str) -> None:
 
     conn = sqlite3.connect(nsys_db)
     strings = _build_string_map(conn)
@@ -220,10 +217,7 @@ def test_analyze_gpu_idle_gaps(nsys_db):  # noqa: ANN001, ANN201  # tracked: #28
     assert "idle gaps" in result.lower() or "Idle gaps" in result
 
 
-def test_analyze_memory_ops(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
-    from resources.profilers.nsys.analyze_nsys import (  # noqa: PLC0415  # tracked: #288
-        analyze_memory_ops,
-    )
+def test_analyze_memory_ops(nsys_db: str) -> None:
 
     conn = sqlite3.connect(nsys_db)
     result = analyze_memory_ops(conn)
@@ -232,10 +226,7 @@ def test_analyze_memory_ops(nsys_db):  # noqa: ANN001, ANN201  # tracked: #288
     assert "HtoD" in result
 
 
-def test_short_kernel_name():  # noqa: ANN201  # tracked: #288
-    from resources.profilers.nsys.analyze_nsys import (  # noqa: PLC0415  # tracked: #288
-        _short_kernel_name,
-    )
+def test_short_kernel_name() -> None:
 
     assert (
         _short_kernel_name("void at::native::vectorized_elementwise_kernel<4, float>")

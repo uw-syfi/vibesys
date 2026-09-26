@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import IO, TYPE_CHECKING, Protocol
 import yaml
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from vibesys.skypilot.config import ResolvedSkyPilotResources
 
@@ -36,25 +37,110 @@ _SKY_JOB_CANCELLED = 103
 class SkyPilotCLIError(RuntimeError):
     """Base error for the SkyPilot external process boundary."""
 
+    @classmethod
+    def executable_not_found(cls, executable: str) -> SkyPilotCLIError:
+        """Describe a missing SkyPilot executable."""
+        return cls(f"SkyPilot executable {executable!r} was not found")
+
 
 class SkyPilotTimeoutError(SkyPilotCLIError):
     """Raised when a SkyPilot control-plane command times out."""
+
+    @classmethod
+    def waiting_timed_out(cls, detail: str) -> SkyPilotTimeoutError:
+        """Describe a cluster wait that exhausted its remaining deadline."""
+        return cls(detail)
+
+    @classmethod
+    def operation_deadline_exceeded(cls) -> SkyPilotTimeoutError:
+        """Describe a SkyPilot operation that exceeded its deadline."""
+        return cls("SkyPilot operation exceeded its deadline")
+
+    @classmethod
+    def command_timed_out(cls, timeout: float | None) -> SkyPilotTimeoutError:
+        """Describe a SkyPilot process that exceeded its timeout."""
+        return cls(f"SkyPilot command timed out after {timeout} seconds")
 
 
 class SkyPilotControlPlaneError(SkyPilotCLIError):
     """Raised when a SkyPilot lifecycle command exits unsuccessfully."""
 
+    @classmethod
+    def logs_failed(cls, returncode: int) -> SkyPilotControlPlaneError:
+        """Describe a failed SkyPilot log retrieval command."""
+        return cls(f"SkyPilot logs failed with exit code {returncode}")
+
+    @classmethod
+    def operation_failed(cls, operation: str, returncode: int) -> SkyPilotControlPlaneError:
+        """Describe a failed SkyPilot lifecycle command."""
+        return cls(f"SkyPilot {operation} failed with exit code {returncode}")
+
 
 class SkyPilotOutputError(SkyPilotCLIError):
     """Raised when SkyPilot emits malformed machine-readable output."""
+
+    @classmethod
+    def invalid_status_json(cls) -> SkyPilotOutputError:
+        """Describe a cluster status response that is not JSON."""
+        return cls("SkyPilot status returned invalid JSON")
+
+    @classmethod
+    def status_missing_cluster_list(cls) -> SkyPilotOutputError:
+        """Describe a cluster status response without a cluster list."""
+        return cls("SkyPilot status JSON must contain a cluster list")
+
+    @classmethod
+    def duplicate_jobs(cls, job_name: str) -> SkyPilotOutputError:
+        """Describe duplicate job records for one requested name."""
+        return cls(f"SkyPilot queue returned duplicate jobs named {job_name!r}")
+
+    @classmethod
+    def invalid_job_id(cls) -> SkyPilotOutputError:
+        """Describe a queue record whose job ID is not an integer."""
+        return cls("SkyPilot queue returned a non-integer job ID")
+
+    @classmethod
+    def job_id_changed(cls, job_name: str, expected: int, actual: int) -> SkyPilotOutputError:
+        """Describe a job whose persisted ID changed in the remote queue."""
+        return cls(f"SkyPilot job {job_name!r} changed ID from {expected} to {actual}")
+
+    @classmethod
+    def unknown_job_status(cls) -> SkyPilotOutputError:
+        """Describe a queue record with an unrecognized job status."""
+        return cls("SkyPilot queue returned an unknown job status")
+
+    @classmethod
+    def invalid_queue_json(cls) -> SkyPilotOutputError:
+        """Describe a queue response that is not JSON."""
+        return cls("SkyPilot queue returned invalid JSON")
+
+    @classmethod
+    def queue_missing_job_list(cls) -> SkyPilotOutputError:
+        """Describe a queue response without a job list for the cluster."""
+        return cls("SkyPilot queue JSON must map the cluster name to a job list")
 
 
 class SkyPilotClusterNotReadyError(SkyPilotCLIError):
     """Raised when a cluster does not reach a reusable state in time."""
 
+    @classmethod
+    def unknown_status(cls, name: str) -> SkyPilotClusterNotReadyError:
+        """Describe a cluster whose reported status is unknown."""
+        return cls(f"SkyPilot cluster {name!r} has an unknown status")
+
+    @classmethod
+    def became_unavailable(cls, name: str, status: str) -> SkyPilotClusterNotReadyError:
+        """Describe a cluster that left initialization before becoming ready."""
+        return cls(f"SkyPilot cluster {name!r} became {status} while initializing")
+
 
 class SkyPilotJobStateError(SkyPilotCLIError):
     """Raised when SkyPilot reports an invalid or indeterminate remote job state."""
+
+    @classmethod
+    def logs_indicate_unknown_state(cls, returncode: int, job_id: int) -> SkyPilotJobStateError:
+        """Describe an indeterminate state code returned while reading job logs."""
+        return cls(f"SkyPilot logs returned job state code {returncode} for job {job_id}")
 
 
 class ClusterStatus(StrEnum):
@@ -129,7 +215,7 @@ class SubprocessCommandRunner:
     ) -> ProcessResult:
         """Run one command while optionally forwarding output."""
         normalized = tuple(str(part) for part in argv)
-        process = subprocess.Popen(  # noqa: S603  # fixed external CLI boundary
+        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-009052 [S603]; execute the caller's argv directly with no shell at the external CLI adapter boundary.
             normalized,
             cwd=cwd,
             stdout=subprocess.PIPE,
@@ -153,18 +239,20 @@ class SubprocessCommandRunner:
                 if sink is not None:
                     try:
                         sink(line)
-                    except Exception as exc:  # noqa: BLE001  # keep draining both pipes
+                    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009053 [BLE001]; a sink callback must not stop draining either subprocess pipe.
                         with sink_errors_lock:
                             if not sink_errors:
                                 sink_errors.append(exc)
 
-        assert process.stdout is not None  # noqa: S101  # requested PIPE
-        assert process.stderr is not None  # noqa: S101  # requested PIPE
+        if process.stdout is None or process.stderr is None:
+            raise AssertionError
+        stdout = process.stdout
+        stderr = process.stderr
         stdout_thread = threading.Thread(
-            target=forward, args=(process.stdout, stdout_parts, stdout_sink), daemon=True
+            target=forward, args=(stdout, stdout_parts, stdout_sink), daemon=True
         )
         stderr_thread = threading.Thread(
-            target=forward, args=(process.stderr, stderr_parts, stderr_sink), daemon=True
+            target=forward, args=(stderr, stderr_parts, stderr_sink), daemon=True
         )
         stdout_thread.start()
         stderr_thread.start()
@@ -240,7 +328,8 @@ def build_task_document(
 ) -> dict[str, object]:
     """Build the provider-neutral subset of one SkyPilot task document."""
     if not command:
-        raise ValueError("SkyPilot task command must not be empty")  # noqa: TRY003
+        message = "SkyPilot task command must not be empty"
+        raise ValueError(message)
     resource_document: dict[str, object] = {
         "infra": resources.infra,
         "accelerators": f"{resources.accelerator_type}:{resources.accelerators_per_node}",
@@ -275,7 +364,7 @@ def build_task_document(
 class SkyPilotJobRunner:
     """Inspect, launch, use, cancel, and release named SkyPilot clusters."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-009054 [PLR0913]; separate test seams for clock, sleep, subprocess, and job naming remain independently injectable.
         self,
         command_runner: CommandRunner | None = None,
         *,
@@ -299,9 +388,7 @@ class SkyPilotJobRunner:
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
-            raise SkyPilotOutputError(  # noqa: TRY003
-                "SkyPilot status returned invalid JSON"
-            ) from exc
+            raise SkyPilotOutputError.invalid_status_json() from exc
         entries = (
             payload
             if isinstance(payload, list)
@@ -310,9 +397,7 @@ class SkyPilotJobRunner:
             else None
         )
         if not isinstance(entries, list):
-            raise SkyPilotOutputError(  # noqa: TRY003
-                "SkyPilot status JSON must contain a cluster list"
-            )
+            raise SkyPilotOutputError.status_missing_cluster_list()
         for entry in entries:
             if not isinstance(entry, dict) or entry.get("name") != name:
                 continue
@@ -355,14 +440,12 @@ class SkyPilotJobRunner:
         if current is not None and current.status is ClusterStatus.INIT:
             return self._wait_for_cluster(name, deadline)
         if current is not None and current.status is ClusterStatus.UNKNOWN:
-            raise SkyPilotClusterNotReadyError(  # noqa: TRY003
-                f"SkyPilot cluster {name!r} has an unknown status"
-            )
+            raise SkyPilotClusterNotReadyError.unknown_status(name)
         if current is not None:
             self.release(name, timeout=self._remaining(deadline, default=60) or 60)
         return self.launch(name, resources, timeout=self._remaining(deadline))
 
-    def run(  # noqa: PLR0913
+    def run(  # noqa: PLR0913  # lint-waiver: LW-009055 [PLR0913]; streaming callbacks and resume identity are independent controls of one public job operation.
         self,
         cluster_name: str,
         resources: ResolvedSkyPilotResources,
@@ -379,7 +462,8 @@ class SkyPilotJobRunner:
     ) -> JobResult:
         """Submit a detached task, identify it, then stream logs to completion."""
         if log_tail < 0:
-            raise ValueError("SkyPilot log tail must be nonnegative")  # noqa: TRY003
+            message = "SkyPilot log tail must be nonnegative"
+            raise ValueError(message)
         deadline = None if timeout is None else self._monotonic() + timeout
         resolved_job_name = job_name or self._job_name_factory()
         if existing_job_id is None:
@@ -416,13 +500,9 @@ class SkyPilotJobRunner:
         elif result.returncode == _SKY_JOB_CANCELLED:
             status = JobStatus.CANCELLED
         elif result.returncode in {_SKY_JOB_NOT_FINISHED, _SKY_JOB_NOT_FOUND}:
-            raise SkyPilotJobStateError(  # noqa: TRY003
-                f"SkyPilot logs returned job state code {result.returncode} for job {job_id}"
-            )
+            raise SkyPilotJobStateError.logs_indicate_unknown_state(result.returncode, job_id)
         else:
-            raise SkyPilotControlPlaneError(  # noqa: TRY003
-                f"SkyPilot logs failed with exit code {result.returncode}"
-            )
+            raise SkyPilotControlPlaneError.logs_failed(result.returncode)
         return JobResult(
             status=status,
             sky_exit_code=result.returncode,
@@ -447,21 +527,17 @@ class SkyPilotJobRunner:
         if not matches:
             return None
         if len(matches) != 1:
-            raise SkyPilotOutputError(  # noqa: TRY003
-                f"SkyPilot queue returned duplicate jobs named {job_name!r}"
-            )
+            raise SkyPilotOutputError.duplicate_jobs(job_name)
         record = matches[0]
         remote_id = record.get("job_id")
         if not isinstance(remote_id, int) or isinstance(remote_id, bool):
-            raise SkyPilotOutputError("SkyPilot queue returned a non-integer job ID")  # noqa: TRY003
+            raise SkyPilotOutputError.invalid_job_id()
         if job_id is not None and remote_id != job_id:
-            raise SkyPilotOutputError(  # noqa: TRY003
-                f"SkyPilot job {job_name!r} changed ID from {job_id} to {remote_id}"
-            )
+            raise SkyPilotOutputError.job_id_changed(job_name, job_id, remote_id)
         try:
             status = RemoteJobStatus(str(record.get("status", "RUNNING")).upper())
         except ValueError as exc:
-            raise SkyPilotOutputError("SkyPilot queue returned an unknown job status") from exc  # noqa: TRY003
+            raise SkyPilotOutputError.unknown_job_status() from exc
         return RemoteJobInfo(remote_id, job_name, status)
 
     def _wait_for_cluster(self, name: str, deadline: float | None) -> ClusterInfo:
@@ -472,9 +548,7 @@ class SkyPilotJobRunner:
                 return current
             if current is None or current.status is not ClusterStatus.INIT:
                 observed = "absent" if current is None else current.status.value
-                raise SkyPilotClusterNotReadyError(  # noqa: TRY003
-                    f"SkyPilot cluster {name!r} became {observed} while initializing"
-                )
+                raise SkyPilotClusterNotReadyError.became_unavailable(name, observed)
             self._pause(deadline, f"SkyPilot cluster {name!r} remained INIT")
 
     def _discover_job_id(self, cluster_name: str, job_name: str, deadline: float | None) -> int:
@@ -496,12 +570,10 @@ class SkyPilotJobRunner:
         try:
             payload = json.loads(stdout)
         except json.JSONDecodeError as exc:
-            raise SkyPilotOutputError("SkyPilot queue returned invalid JSON") from exc  # noqa: TRY003
+            raise SkyPilotOutputError.invalid_queue_json() from exc
         records = payload.get(cluster_name) if isinstance(payload, dict) else None
         if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
-            raise SkyPilotOutputError(  # noqa: TRY003
-                "SkyPilot queue JSON must map the cluster name to a job list"
-            )
+            raise SkyPilotOutputError.queue_missing_job_list()
         return records
 
     def _cancel_or_release(self, cluster_name: str, job_id: int) -> None:
@@ -514,7 +586,7 @@ class SkyPilotJobRunner:
         if deadline is not None:
             remaining = deadline - self._monotonic()
             if remaining <= 0:
-                raise SkyPilotTimeoutError(detail)
+                raise SkyPilotTimeoutError.waiting_timed_out(detail)
             self._sleep(min(self._poll_interval, remaining))
         else:
             self._sleep(self._poll_interval)
@@ -524,7 +596,7 @@ class SkyPilotJobRunner:
             return default
         remaining = deadline - self._monotonic()
         if remaining <= 0:
-            raise SkyPilotTimeoutError("SkyPilot operation exceeded its deadline")  # noqa: TRY003
+            raise SkyPilotTimeoutError.operation_deadline_exceeded()
         return remaining
 
     def cancel(self, cluster_name: str, job_id: int, *, timeout: float = 60) -> None:
@@ -539,9 +611,7 @@ class SkyPilotJobRunner:
         result = self._invoke([self._executable, *arguments], timeout=timeout)
         if result.returncode != 0:
             operation = arguments[0] if arguments else "command"
-            raise SkyPilotControlPlaneError(  # noqa: TRY003
-                f"SkyPilot {operation} failed with exit code {result.returncode}"
-            )
+            raise SkyPilotControlPlaneError.operation_failed(operation, result.returncode)
         return result
 
     def _invoke(
@@ -560,29 +630,14 @@ class SkyPilotJobRunner:
                 stderr_sink=stderr_sink,
             )
         except FileNotFoundError as exc:
-            raise SkyPilotCLIError(  # noqa: TRY003
-                f"SkyPilot executable {self._executable!r} was not found"
-            ) from exc
+            raise SkyPilotCLIError.executable_not_found(self._executable) from exc
         except subprocess.TimeoutExpired as exc:
-            raise SkyPilotTimeoutError(  # noqa: TRY003
-                f"SkyPilot command timed out after {timeout} seconds"
-            ) from exc
+            raise SkyPilotTimeoutError.command_timed_out(timeout) from exc
 
     @staticmethod
-    def _task_file(document: dict[str, object]):  # noqa: ANN205
-        class _TaskFile:
-            def __init__(self, value: dict[str, object]) -> None:
-                self._value = value
-                self._temporary: tempfile.TemporaryDirectory[str] | None = None
-
-            def __enter__(self) -> Path:
-                self._temporary = tempfile.TemporaryDirectory(prefix="vibesys-skypilot-")
-                path = Path(self._temporary.name) / "task.yaml"
-                path.write_text(yaml.safe_dump(self._value, sort_keys=False), encoding="utf-8")
-                return path
-
-            def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-                if self._temporary is not None:
-                    self._temporary.cleanup()
-
-        return _TaskFile(document)
+    @contextmanager
+    def _task_file(document: dict[str, object]) -> Generator[Path]:
+        with tempfile.TemporaryDirectory(prefix="vibesys-skypilot-") as directory:
+            path = Path(directory) / "task.yaml"
+            path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            yield path

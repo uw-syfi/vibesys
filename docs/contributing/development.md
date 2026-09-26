@@ -6,7 +6,9 @@ bundles, and the TUI.
 
 ## Before you change code
 
-- Read [`docs/contributing/coding-best-practices.md`](coding-best-practices.md).
+- Load the `software-design` skill for every code change and the `testing` skill for
+  any test work (see [Coding best practices](coding-best-practices.md) for where they
+  live and for size limits, lint waivers, and doc links).
 - Adding or moving an example? Register it in `examples/registry.toml`; see
   [Adding an example](examples.md).
 - Keep changes within the owning package and preserve the framework boundaries.
@@ -223,8 +225,9 @@ Runs `ruff check .` across the whole repository. Fix automatically where
 possible with `--fix`; the remaining errors need manual attention. Test
 files that trigger false-positive rules (e.g. `S106` on fixture arguments,
 `ANN001`/`ANN201` on helpers, `PLR0913` on builder functions) can suppress
-them with a file-level `# ruff: noqa: <codes>` comment at the top of the
-file.
+them at the site with `# noqa: <code>`. Every suppression, including a
+file-level `# ruff: noqa`, needs a `LW-` waiver ID, a reason, and an entry in
+`lint_waivers.jsonl`; see [Ratchets](coding-best-practices.md#ratchets).
 
 ### Coverage
 
@@ -233,8 +236,10 @@ The test job enforces two independent coverage floors:
 **Repo-wide floor — 75 %**  
 `uv run pytest` (with `--cov` already wired in via `pyproject.toml`) must
 reach 75 % combined statement + branch coverage across the tracked packages
-(`vibesys`, `vs_evaluator_protocol`, `vs_feature_flags`, `vs_github`,
-`vs_issue_board`, `vs_loop_state`, `vs_project`, `vs_sandbox`, and `vs_bench`).
+(`entrypoints`, `server`, `vibesys`, `vs_agent`, `vs_bench`,
+`vs_evaluator_protocol`, `vs_feature_flags`, `vs_github`, `vs_issue_board`,
+`vs_loop_state`, `vs_project`, `vs_prompts`, and `vs_sandbox`; the list is
+`[tool.coverage.run] source` in `pyproject.toml`).
 
 **Per-module floor — 40 %**  
 `scripts/check_coverage_floor.py` reads `coverage.json` and rejects any

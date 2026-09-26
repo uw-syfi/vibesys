@@ -89,11 +89,11 @@ class _WorkspacesLike(Protocol):
         """Return this run's non-isolated (parent-tree) workspace."""
         ...
 
-    def _resources_for(self, scope: Any) -> _RunResources:  # noqa: ANN401
+    def _resources_for(self, scope: Any) -> _RunResources:  # noqa: ANN401  # LW-040086 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         """Resolve the resource assembly for a scope (parent tree if ``None``)."""
         ...
 
-    def _scope_of(self, scope: Any) -> WorkspaceScope | None:  # noqa: ANN401
+    def _scope_of(self, scope: Any) -> WorkspaceScope | None:  # noqa: ANN401  # LW-040087 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         """Normalize a scope or workspace handle to a plain ``WorkspaceScope``."""
         ...
 
@@ -151,29 +151,27 @@ class _GateExecutorLike(Protocol):
 
     def run_accuracy(
         self,
-        ctx: Any,  # noqa: ANN401
+        ctx: Any,  # noqa: ANN401  # LW-040088 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         *,
         process_id: str,
         timeout_seconds: int | None = None,
         execution_command: str | None = None,
         round_label: str | None = None,
-    ) -> Any:  # noqa: ANN401
+    ) -> Any:  # noqa: ANN401  # LW-040089 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         """Run the trusted accuracy command for one candidate."""
         ...
 
-    def run_benchmark(  # noqa: PLR0913
+    def run_benchmark(  # noqa: PLR0913  # LW-040090 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
-        ctx: Any,  # noqa: ANN401
+        ctx: Any,  # noqa: ANN401  # LW-040091 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         *,
-        result_spec: Any = None,  # noqa: ANN401
-        result_protocol: Any = None,  # noqa: ANN401
-        objectives: Any = (),  # noqa: ANN401
+        contract: Any,  # noqa: ANN401  # LW-040092 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
+        space: Any,  # noqa: ANN401  # LW-040093 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         process_id: str,
         output_slug: str,
-        timeout_seconds: int | None = None,
         execution_base: str | None = None,
         round_label: str | None = None,
-    ) -> Any:  # noqa: ANN401
+    ) -> Any:  # noqa: ANN401  # LW-040094 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         """Run the trusted benchmark result contract for one candidate."""
         ...
 

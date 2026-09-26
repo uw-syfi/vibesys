@@ -52,7 +52,7 @@ def _plan(hypothesis_id: str) -> OrchestratorPlan:
         hypothesis_id=hypothesis_id,
         hypothesis="batching the prefill step removes per-request launch overhead",
         task="batch the prefill step",
-        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106
+        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # LW-040137 [S106]; the argument is a fixture literal, not a credential.
         reasoning="scripted",
     )
 

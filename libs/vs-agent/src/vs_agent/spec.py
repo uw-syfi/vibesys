@@ -58,11 +58,14 @@ class AgentSpec:
 
     def __post_init__(self) -> None:
         """Reject a provider the resolved driver does not support."""
-        from vs_agent.catalog import agent_catalog  # noqa: PLC0415  # avoid import cycle
+        from vs_agent.catalog import (  # noqa: PLC0415  # lint-waiver: LW-010190 [PLC0415]; Keep agent_catalog  # avoid import cycle lazy in AgentSpec.__post_init__ so unused providers and import cycles stay unloaded.
+            agent_catalog,  # avoid import cycle
+        )
 
         supported = agent_catalog()[self.driver].providers
         if self.provider not in supported:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"agent driver {self.driver.value!r} does not support provider "
                 f"{self.provider!r}; supported providers: {', '.join(supported)}"
             )
+            raise ValueError(message)
