@@ -1,6 +1,5 @@
 benchmark = "resources/evaluators/request-factory/fixed_text.py"
 model = "cpu-smoke-model"
-tokenizer = "examples/model-serving/glm-5.2-8xb200/benchmark/cpu_smoke_tokenizer.json"
 benchmark_args = [
   "--request-count", "8",
   "--input-tokens", "16",
@@ -8,8 +7,6 @@ benchmark_args = [
   "--concurrency", "2",
 ]
 response_style = "usage"
-unique_prompt_tokens = true
-
 [[failure_cases]]
 mode = "http"
 message_contains = "failed_steps"
