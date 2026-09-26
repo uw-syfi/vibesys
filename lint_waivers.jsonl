@@ -402,16 +402,16 @@
 {"id": "LW-020026", "path": "src/vibesys/loops/profile_multi/turns.py", "rules": ["BLE001"]}
 {"id": "LW-020027", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
 {"id": "LW-020028", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
-{"id": "LW-020029", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
-{"id": "LW-020030", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
-{"id": "LW-020031", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
-{"id": "LW-020032", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
-{"id": "LW-020033", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
+{"id": "LW-020029", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR0913"]}
+{"id": "LW-020030", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR0913"]}
+{"id": "LW-020031", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["BLE001"]}
+{"id": "LW-020032", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["BLE001"]}
+{"id": "LW-020033", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["BLE001"]}
 {"id": "LW-020034", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
 {"id": "LW-020035", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
 {"id": "LW-020036", "path": "src/vibesys/orchestration/runtime.py", "rules": ["BLE001"]}
 {"id": "LW-020037", "path": "src/vibesys/runtime.py", "rules": ["PLR0913"]}
-{"id": "LW-020038", "path": "src/vibesys/orchestration/runtime.py", "rules": ["SLF001"]}
+{"id": "LW-020038", "path": "src/vibesys/orchestration/agents.py", "rules": ["SLF001"]}
 {"id": "LW-030001", "path": "tests/vibesys/api/test_agent_facade.py", "rules": ["S603"]}
 {"id": "LW-030002", "path": "tests/vibesys/api/test_orchestration_dto_boundary.py", "rules": ["S603"]}
 {"id": "LW-030003", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
@@ -433,7 +433,6 @@
 {"id": "LW-040004", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
 {"id": "LW-040005", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
 {"id": "LW-040006", "path": "tests/vibesys/golden/harness.py", "rules": ["PLR0913"]}
-{"id": "LW-040007", "path": "tests/vibesys/golden/harness.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040008", "path": "tests/vibesys/golden/helpers.py", "rules": ["ANN401"]}
 {"id": "LW-040009", "path": "tests/vibesys/golden/test_multi_golden.py", "rules": ["S106"]}
 {"id": "LW-040010", "path": "tests/vibesys/golden/test_multi_golden.py", "rules": ["ANN202"]}
@@ -449,7 +448,6 @@
 {"id": "LW-040020", "path": "tests/vibesys/golden/test_single_golden.py", "rules": ["S106"]}
 {"id": "LW-040021", "path": "tests/vibesys/golden/test_single_golden.py", "rules": ["ANN202"]}
 {"id": "LW-040022", "path": "tests/vibesys/golden/test_single_golden.py", "rules": ["ANN001", "ANN202", "ARG001"]}
-{"id": "LW-040023", "path": "tests/vibesys/golden/test_single_golden.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040024", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040025", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040026", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
@@ -512,3 +510,40 @@
 {"id": "LW-040083", "path": "tests/vibesys/search/population/test_openevolve_selector_equivalence.py", "rules": ["SLF001"]}
 {"id": "LW-040084", "path": "tests/vibesys/search/profile_focus/test_focus.py", "rules": ["ANN001", "ANN202"]}
 {"id": "LW-040085", "path": "tests/vibesys/search/profile_focus/test_focus.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040086", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040087", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040088", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040089", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040090", "path": "src/vibesys/orchestration/_host.py", "rules": ["PLR0913"]}
+{"id": "LW-040091", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040092", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040093", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040094", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
+{"id": "LW-040096", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR2004"]}
+{"id": "LW-040097", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR0913"]}
+{"id": "LW-040098", "path": "src/vibesys/orchestration/artifacts.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040099", "path": "src/vibesys/orchestration/environment.py", "rules": ["SLF001"]}
+{"id": "LW-040100", "path": "src/vibesys/orchestration/fake_gates.py", "rules": ["PLR0913"]}
+{"id": "LW-040101", "path": "src/vibesys/orchestration/gates.py", "rules": ["SLF001"]}
+{"id": "LW-040102", "path": "src/vibesys/orchestration/gates.py", "rules": ["PLR0913"]}
+{"id": "LW-040103", "path": "src/vibesys/orchestration/gates.py", "rules": ["PLR0913"]}
+{"id": "LW-040104", "path": "src/vibesys/orchestration/gates.py", "rules": ["PLR0913"]}
+{"id": "LW-040105", "path": "src/vibesys/orchestration/gates.py", "rules": ["PLR0913"]}
+{"id": "LW-040106", "path": "src/vibesys/orchestration/progress_log.py", "rules": ["PLR0913"]}
+{"id": "LW-040107", "path": "src/vibesys/orchestration/runtime.py", "rules": ["SLF001"]}
+{"id": "LW-040108", "path": "src/vibesys/orchestration/runtime.py", "rules": ["F401"]}
+{"id": "LW-040109", "path": "src/vibesys/orchestration/runtime.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040110", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
+{"id": "LW-040111", "path": "src/vibesys/orchestration/state.py", "rules": ["SLF001"]}
+{"id": "LW-040112", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["SLF001"]}
+{"id": "LW-040113", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["N818"]}
+{"id": "LW-040114", "path": "tests/vibesys/api/test_runtime_commit_events.py", "rules": ["SLF001"]}
+{"id": "LW-040115", "path": "tests/vibesys/orchestration/test_agents_turn.py", "rules": ["PLR0913"]}
+{"id": "LW-040116", "path": "tests/vibesys/orchestration/test_agents_turn.py", "rules": ["ANN202"]}
+{"id": "LW-040117", "path": "tests/vibesys/orchestration/test_agents_turn.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040118", "path": "tests/vibesys/orchestration/test_artifacts.py", "rules": ["ANN202"]}
+{"id": "LW-040119", "path": "tests/vibesys/orchestration/test_gate_executor_contract.py", "rules": ["ANN202"]}
+{"id": "LW-040120", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["ANN401"]}
+{"id": "LW-040121", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["ANN401"]}
+{"id": "LW-040122", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["FBT001"]}
+{"id": "LW-040123", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["FBT001"]}

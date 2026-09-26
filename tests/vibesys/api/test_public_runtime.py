@@ -481,12 +481,12 @@ def test_root_environment_and_trusted_evaluator_capabilities(tmp_path: Path) -> 
             assert execution.exit_code == 0
             assert "host-ok" in execution.output
 
-            accuracy = await ctx.evaluator.check("host-probe", label="host-probe")
+            accuracy = await ctx.gates.check("host-probe", label="host-probe")
             assert accuracy.passed
-            reused = await ctx.evaluator.reuse_accuracy(label="host-probe")
+            reused = await ctx.gates.reuse_accuracy(label="host-probe")
             assert reused.passed
             assert not reused.executed
-            benchmark = await ctx.evaluator.measure("host-probe")
+            benchmark = await ctx.gates.measure("host-probe")
             assert not benchmark.executed
 
     try:

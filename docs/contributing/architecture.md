@@ -98,6 +98,8 @@ graph TD
     vibesys.api.contracts --> vibesys.orchestration.request
     vibesys.api.contracts --> vibesys.orchestration.view
     vibesys.api.evolve --> vibesys.loops.evolve
+    vibesys.api.testing --> vibesys.backends
+    vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.backends --> vibesys
     vibesys.context --> vibesys
     vibesys.context --> vibesys.backends
@@ -185,29 +187,76 @@ graph TD
     vibesys.loops.single --> vibesys.search.hypothesis
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
+    vibesys.orchestration._host --> vibesys
+    vibesys.orchestration._host --> vibesys.context
+    vibesys.orchestration._host --> vibesys.orchestration.request
+    vibesys.orchestration._host --> vibesys.orchestration.view
+    vibesys.orchestration._host --> vibesys.run
+    vibesys.orchestration._host --> vibesys.runtime
+    vibesys.orchestration._host --> vibesys.sandbox
+    vibesys.orchestration.agents --> vibesys
+    vibesys.orchestration.agents --> vibesys.context
+    vibesys.orchestration.agents --> vibesys.orchestration._host
+    vibesys.orchestration.agents --> vibesys.orchestration.workspaces
+    vibesys.orchestration.agents --> vibesys.prompts
+    vibesys.orchestration.agents --> vibesys.run
+    vibesys.orchestration.agents --> vibesys.runtime
+    vibesys.orchestration.artifacts --> vibesys
+    vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
+    vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.environment --> vibesys
+    vibesys.orchestration.environment --> vibesys.context
+    vibesys.orchestration.environment --> vibesys.evaluators
+    vibesys.orchestration.environment --> vibesys.orchestration._host
+    vibesys.orchestration.environment --> vibesys.orchestration.workspaces
+    vibesys.orchestration.environment --> vibesys.runtime
+    vibesys.orchestration.environment --> vibesys.sandbox
+    vibesys.orchestration.fake_gates --> vibesys.evaluators
+    vibesys.orchestration.gates --> vibesys
+    vibesys.orchestration.gates --> vibesys.context
+    vibesys.orchestration.gates --> vibesys.evaluators
+    vibesys.orchestration.gates --> vibesys.orchestration._host
+    vibesys.orchestration.gates --> vibesys.orchestration.progress_log
+    vibesys.orchestration.gates --> vibesys.orchestration.workspaces
+    vibesys.orchestration.gates --> vibesys.run
+    vibesys.orchestration.gates --> vibesys.runtime
+    vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
     vibesys.orchestration.runner --> vibesys.backends
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
     vibesys.orchestration.runner --> vibesys.orchestration.environment
+    vibesys.orchestration.runner --> vibesys.orchestration.gates
     vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
-    vibesys.orchestration.runtime --> vibesys.evaluators
+    vibesys.orchestration.runtime --> vibesys.orchestration.agents
+    vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
+    vibesys.orchestration.runtime --> vibesys.orchestration.gates
+    vibesys.orchestration.runtime --> vibesys.orchestration.progress
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.state
+    vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
-    vibesys.orchestration.runtime --> vibesys.sandbox
+    vibesys.orchestration.state --> vibesys
+    vibesys.orchestration.state --> vibesys.orchestration._host
+    vibesys.orchestration.state --> vibesys.orchestration.progress_log
+    vibesys.orchestration.state --> vibesys.orchestration.view
+    vibesys.orchestration.workspaces --> vibesys
+    vibesys.orchestration.workspaces --> vibesys.context
+    vibesys.orchestration.workspaces --> vibesys.orchestration._host
+    vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.run --> vibesys
@@ -353,6 +402,8 @@ graph TD
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
     vibesys.api.evolve --> vibesys.loops.evolve
+    vibesys.api.testing --> vibesys.backends
+    vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
@@ -469,13 +520,49 @@ graph TD
     vibesys.loops.single --> vs_project
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
+    vibesys.orchestration._host --> vibesys
+    vibesys.orchestration._host --> vibesys.context
+    vibesys.orchestration._host --> vibesys.orchestration.request
+    vibesys.orchestration._host --> vibesys.orchestration.view
+    vibesys.orchestration._host --> vibesys.run
+    vibesys.orchestration._host --> vibesys.runtime
+    vibesys.orchestration._host --> vibesys.sandbox
+    vibesys.orchestration.agents --> vibesys
+    vibesys.orchestration.agents --> vibesys.context
+    vibesys.orchestration.agents --> vibesys.orchestration._host
+    vibesys.orchestration.agents --> vibesys.orchestration.workspaces
+    vibesys.orchestration.agents --> vibesys.prompts
+    vibesys.orchestration.agents --> vibesys.run
+    vibesys.orchestration.agents --> vibesys.runtime
+    vibesys.orchestration.agents --> vs_agent
+    vibesys.orchestration.artifacts --> vibesys
+    vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vs_project
+    vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.environment --> vibesys
+    vibesys.orchestration.environment --> vibesys.context
+    vibesys.orchestration.environment --> vibesys.evaluators
+    vibesys.orchestration.environment --> vibesys.orchestration._host
+    vibesys.orchestration.environment --> vibesys.orchestration.workspaces
+    vibesys.orchestration.environment --> vibesys.runtime
+    vibesys.orchestration.environment --> vibesys.sandbox
     vibesys.orchestration.environment --> vs_agent
     vibesys.orchestration.environment --> vs_sandbox
+    vibesys.orchestration.fake_gates --> vibesys.evaluators
+    vibesys.orchestration.gates --> vibesys
+    vibesys.orchestration.gates --> vibesys.context
+    vibesys.orchestration.gates --> vibesys.evaluators
+    vibesys.orchestration.gates --> vibesys.orchestration._host
+    vibesys.orchestration.gates --> vibesys.orchestration.progress_log
+    vibesys.orchestration.gates --> vibesys.orchestration.workspaces
+    vibesys.orchestration.gates --> vibesys.run
+    vibesys.orchestration.gates --> vibesys.runtime
+    vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.gates --> vs_sandbox
+    vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
@@ -484,6 +571,7 @@ graph TD
     vibesys.orchestration.runner --> vibesys.backends
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
     vibesys.orchestration.runner --> vibesys.orchestration.environment
+    vibesys.orchestration.runner --> vibesys.orchestration.gates
     vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
@@ -491,16 +579,28 @@ graph TD
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
-    vibesys.orchestration.runtime --> vibesys.evaluators
+    vibesys.orchestration.runtime --> vibesys.orchestration.agents
+    vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
+    vibesys.orchestration.runtime --> vibesys.orchestration.gates
+    vibesys.orchestration.runtime --> vibesys.orchestration.progress
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.state
+    vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
-    vibesys.orchestration.runtime --> vibesys.sandbox
     vibesys.orchestration.runtime --> vs_agent
-    vibesys.orchestration.runtime --> vs_project
-    vibesys.orchestration.runtime --> vs_sandbox
+    vibesys.orchestration.state --> vibesys
+    vibesys.orchestration.state --> vibesys.orchestration._host
+    vibesys.orchestration.state --> vibesys.orchestration.progress_log
+    vibesys.orchestration.state --> vibesys.orchestration.view
+    vibesys.orchestration.state --> vs_project
+    vibesys.orchestration.tools --> vs_agent
+    vibesys.orchestration.workspaces --> vibesys
+    vibesys.orchestration.workspaces --> vibesys.context
+    vibesys.orchestration.workspaces --> vibesys.orchestration._host
+    vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys

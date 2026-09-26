@@ -241,7 +241,7 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
         _patch_attribution(),
         # test-isolation: no injectable attribution or gate seam yet; scripted out here
         patch(
-            "vibesys.orchestration.runtime.run_accuracy_gate",
+            "vibesys.orchestration.gates.run_accuracy_gate",
             side_effect=_scripted_accuracy_gate(passed=True),
         ),
     ):

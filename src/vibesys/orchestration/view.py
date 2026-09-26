@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
@@ -36,11 +37,36 @@ class RunStatus(StrEnum):
     FAILED = "failed"
 
 
+class RoundSummary(BaseModel):
+    """One round, in the strategy-agnostic shape the host needs to derive events.
+
+    Every strategy projector that has a round concept populates this (today
+    only the agent read model does; evolve/issue_queue leave `RunView.rounds`
+    empty). The host diffs these typed fields to derive `ROUND_FINISHED`
+    without reading any policy-owned projection shape.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    number: int
+    status: Literal["completed", "failed"]
+    attempts: int
+    judge_verdict: Literal["pass", "fail", "skipped"] | None = None
+    perf_metric: float | None = None
+    perf_unit: str | None = None
+    profile_skipped: bool = False
+
+
 class RunView(BaseModel):
     """Read-only run identity, lifecycle, and a policy-owned JSON projection.
 
     The selected orchestration owns the payload schema. An absent projection
     means that the policy has no persisted read model or is unavailable.
+
+    `rounds` and `experiment_revision` are typed, strategy-agnostic fields a
+    projector populates alongside `projection` so the host
+    (`orchestration.runtime`) can derive `ROUND_FINISHED`/`EXPERIMENTS_CHANGED`
+    by diffing them, without depending on any one policy's projection shape.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -49,3 +75,5 @@ class RunView(BaseModel):
     loop: str
     status: RunStatus
     projection: dict[str, JsonValue] | None = None
+    rounds: tuple[RoundSummary, ...] = ()
+    experiment_revision: int | None = None

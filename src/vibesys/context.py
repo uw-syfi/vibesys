@@ -120,6 +120,17 @@ class RunSetup:
     ) = None
     resume_recovery: Callable[[RecoveryWorkspace], None] | None = None
     start_hints: RunStartHints | None = None
+    memory_paths: tuple[str, ...] = ()
+    """Workspace-relative paths the strategy writes agent memory into.
+
+    The host preserves these across ``workspaces.adopt``/``restore``/``transaction``
+    so a rollback never destroys progress notes written since the revision
+    being restored to. The one exception is ``ctx.agents.turn``'s
+    ``ReadOnly``-role isolation revert: it passes ``preserve_memory=False``,
+    so a stray write a read-only role was not authorized to make is fully
+    reverted even when it lands inside a declared-memory path, instead of
+    surviving the restore and then failing the post-restore isolation check.
+    """
 
     def __post_init__(self) -> None:
         """Reject incomplete policy-owned state slot declarations."""
