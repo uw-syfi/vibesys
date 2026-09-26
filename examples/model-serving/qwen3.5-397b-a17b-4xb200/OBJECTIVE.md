@@ -37,11 +37,16 @@ concurrent decode, with none of it delegated to an existing serving engine.
 
 ## Workload
 
-Run the Request Factory benchmark through the bundle adapter. The evaluator
-may pass a different serving URL:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different serving URL:
 
 ```bash
-python3 benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model Qwen/Qwen3.5-397B-A17B \
+  --tokenizer Qwen/Qwen3.5-397B-A17B \
+  --tokenizer-revision 8472618112abcbd45acbcdc58436aff4233c23f7 \
+  --request-count 64 \
+  --input-tokens 2048 --output-tokens 512 --concurrency 48 --url <SERVER_URL>
 ```
 
 Default load:

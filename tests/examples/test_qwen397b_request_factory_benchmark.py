@@ -8,6 +8,7 @@ from vibesys.api.request import load_input_bundle
 
 _REPO_ROOT = Path(__file__).parents[2]
 _BUNDLE_ROOT = _REPO_ROOT / "examples" / "model-serving" / "qwen3.5-397b-a17b-4xb200"
+_BENCHMARK = _REPO_ROOT / "resources" / "evaluators" / "request-factory" / "fixed_text.py"
 
 
 def test_bundle_runs_the_benchmark_through_the_pinned_rf_adapter() -> None:
@@ -15,11 +16,27 @@ def test_bundle_runs_the_benchmark_through_the_pinned_rf_adapter() -> None:
 
     assert bundle.manifest.evaluator is not None
     assert bundle.manifest.evaluator.name == "vibesys-evaluator-request-factory"
-    assert bundle.manifest.benchmark.entrypoint == "request-factory-adapter"
-    assert bundle.manifest.benchmark.args == ("benchmark/benchmark.py",)
+    assert bundle.manifest.benchmark.entrypoint == "request-factory-fixed-text-v1"
+    assert bundle.manifest.benchmark.args == (
+        "--model",
+        "Qwen/Qwen3.5-397B-A17B",
+        "--tokenizer",
+        "Qwen/Qwen3.5-397B-A17B",
+        "--tokenizer-revision",
+        "8472618112abcbd45acbcdc58436aff4233c23f7",
+        "--request-count",
+        "64",
+        "--input-tokens",
+        "2048",
+        "--output-tokens",
+        "512",
+        "--concurrency",
+        "48",
+    )
     assert bundle.benchmark_result_protocol == 2
     assert bundle.benchmark_output_argument == "--vs-output"
-    assert bundle.benchmark_command[-1] == "benchmark/benchmark.py"
+    assert "fixed_text.py" in bundle.benchmark_command[1]
+    assert bundle.benchmark_command[-2:] == ("--concurrency", "48")
 
 
 def test_objectives_match_the_rf_protocol_metrics() -> None:
@@ -32,7 +49,13 @@ def test_objectives_match_the_rf_protocol_metrics() -> None:
 def test_cpu_smoke_profile_declares_the_expected_request_and_result_contract() -> None:
     profile = load_profile(_BUNDLE_ROOT / "benchmark" / "cpu_smoke.toml")
 
-    assert profile.benchmark_path == _BUNDLE_ROOT / "benchmark" / "benchmark.py"
+    assert profile.benchmark_path == _BENCHMARK
     assert profile.shape_counts == {(16, 4): 8}
     assert set(profile.metrics) == {"output_token_throughput_per_s", "p90_latency_ms"}
     assert profile.required_fields["stream_options"] == {"include_usage": True}
+    assert {failure.mode for failure in profile.failures} == {
+        "http",
+        "malformed-sse",
+        "truncated-sse",
+        "output-mismatch",
+    }
