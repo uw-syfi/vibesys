@@ -1,15 +1,19 @@
-Benchmark for the Trainium Llama-3-8B server.
+# Benchmark
 
-Warm, closed-loop throughput. Fixed input/output token lengths (default
-128/256/512). It **warms up** first (compiles each bucket; untimed) and then
-measures **closed-loop concurrency** (keeps C requests in flight for a fixed
-duration, sweeping C) so the headline reflects *steady-state* throughput, not
-cold-compile or queue-wait time.
+Request Factory owns synthetic token generation, `/v1/completions` transport,
+and per-request timing. The bundle wrapper executes the full matrix of input /
+output lengths `128,256,512` by concurrency `1,2,4,8`. Every matrix point uses
+64 independent requests, RF saturated arrival mode, and the declared maximum
+concurrency. It retains every matrix result and selects the highest
+output-token throughput as `aggregate_throughput`.
 
-Run:
-    python benchmark.py --url http://localhost:8000 \
-        --lengths 128,256,512 --concurrency 1,2,4,8 \
-        --duration 20 --warmup-requests 2 --output-json /tmp/bench.json
+This replaces the prior duration-driven sweep and its bundle-local tokenizer
+fallback with a fixed-volume RF workload. The original request lengths,
+concurrency matrix, and zero-temperature setting are preserved. Comparisons
+with historical scores should account for the fixed-volume methodology.
 
-Headline metric: `aggregate_throughput` = peak steady-state output tok/s across
-the (length, concurrency) sweep.
+The VibeSys benchmark result is rejected if RF reports any failed or
+output-mismatched request, if the expected trace count is incomplete, or if the
+request log does not show the declared input and output lengths. For a CPU-only
+contract check, use a local tokenizer and deterministic OpenAI-compatible
+completions fake with the benchmark adapter.
