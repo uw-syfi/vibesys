@@ -39,7 +39,6 @@ from vibesys.context import (
 )
 from vibesys.events import FrameworkSource, RunConfiguredData
 from vibesys.orchestration.agents import (
-    _active_progress,  # noqa: F401  # LW-040108 [F401]; re-export, see below.
     _Agents,
     _LocalAgentHandle,
 )

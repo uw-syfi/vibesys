@@ -19,10 +19,7 @@ from vibesys.events import CoreEvent, EventStatus
 from vibesys.orchestration.environment import AgentEnvironment
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.view import RunResult, RunStatus, RunView
-from vibesys.schemas import (
-    CandidateDisposition,
-    PerfDeltaReason,
-)
+from vibesys.schemas import CandidateDisposition, PerfDeltaReason
 from vs_agent.api import MCPServerSpec
 from vs_project.api import OrchestrationDescriptor
 

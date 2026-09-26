@@ -9,10 +9,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
-    from vibesys.schemas import (
-        CandidateDisposition,
-        HypothesisOutcome,
-    )
+    from vibesys.schemas import CandidateDisposition, HypothesisOutcome
     from vibesys.search.hypothesis.state import HypothesisState
     from vs_loop_state.api import JudgeVerdict, PerfProvenance
 

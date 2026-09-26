@@ -498,7 +498,6 @@
 {"id": "LW-040105", "path": "src/vibesys/orchestration/gates.py", "rules": ["PLR0913"]}
 {"id": "LW-040106", "path": "src/vibesys/orchestration/progress_log.py", "rules": ["PLR0913"]}
 {"id": "LW-040107", "path": "src/vibesys/orchestration/runtime.py", "rules": ["SLF001"]}
-{"id": "LW-040108", "path": "src/vibesys/orchestration/runtime.py", "rules": ["F401"]}
 {"id": "LW-040110", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
 {"id": "LW-040111", "path": "src/vibesys/orchestration/state.py", "rules": ["SLF001"]}
 {"id": "LW-040112", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["SLF001"]}
@@ -562,3 +561,4 @@
 {"id": "LW-040191", "path": "tests/vibesys/loops/evolve/test_evolve_crash_resume.py", "rules": ["ARG005"]}
 {"id": "LW-040194", "path": "tests/vibesys/orchestration/test_agents_turn_differential_evolve.py", "rules": ["ANN202"]}
 {"id": "LW-040195", "path": "tests/vibesys/orchestration/test_agents_turn_differential_evolve.py", "rules": ["ANN001"]}
+{"id": "LW-040196", "path": "tests/vibesys/architecture/test_prompt_folder_registry_parity.py", "rules": ["SLF001"]}

@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from vibesys.evaluators.metrics import Measurement
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-)
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vibesys.search.hypothesis.attempts import recorded_judge_verdict
 from vibesys.search.hypothesis.transitions import (
     ResolutionEvidence,
