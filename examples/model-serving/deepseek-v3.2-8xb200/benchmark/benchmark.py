@@ -41,6 +41,13 @@ def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) 
             writer.writerow((f"request-{index:04d}", 0, input_tokens, output_tokens))
 
 
+def _write_corpus(path: Path, token_pool_limit: int) -> None:
+    seed = Path(__file__).with_name("corpus.txt").read_text(encoding="utf-8").strip()
+    with path.open("w", encoding="utf-8") as corpus:
+        for index in range(token_pool_limit):
+            corpus.write(f"{seed} sample {index} token sequence {index}\n")
+
+
 def _summary_metrics(summary: Mapping[str, Any], expected: int) -> dict[str, float]:
     replay = summary.get("replay")
     common = replay.get("common") if isinstance(replay, Mapping) else None
@@ -83,6 +90,9 @@ def run(args: argparse.Namespace) -> int:
         with tempfile.TemporaryDirectory(prefix="vibesys-rf-deepseek-") as directory:
             temporary = Path(directory)
             trace = temporary / "requests.csv"
+            corpus_path = Path(args.text_file) if args.text_file else temporary / "corpus.txt"
+            if not args.text_file:
+                _write_corpus(corpus_path, args.token_pool_limit)
             summary_path = temporary / "summary.json"
             _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
             command = [
@@ -92,7 +102,7 @@ def run(args: argparse.Namespace) -> int:
                 "--input-file-format",
                 "text-generation-independent",
                 "--text-file",
-                str(Path(__file__).with_name("corpus.txt")),
+                str(corpus_path),
                 "--tokenizer",
                 args.tokenizer,
                 "--model",
@@ -109,6 +119,8 @@ def run(args: argparse.Namespace) -> int:
                 "saturated",
                 "--max-concurrency",
                 str(args.concurrency),
+                "--token-pool-limit",
+                str(args.token_pool_limit),
                 "--request-log",
                 "false",
                 "--timeline",
@@ -145,9 +157,24 @@ def main() -> int:
     parser.add_argument("--input-tokens", type=int, default=_INPUT_TOKENS)
     parser.add_argument("--output-tokens", type=int, default=_OUTPUT_TOKENS)
     parser.add_argument("--concurrency", type=int, default=_CONCURRENCY)
+    parser.add_argument("--token-pool-limit", type=int, default=65_536)
+    parser.add_argument("--text-file")
     args = parser.parse_args()
-    if min(args.request_count, args.input_tokens, args.output_tokens, args.concurrency) <= 0:
-        parser.error("request count, token lengths, and concurrency must be positive")
+    if (
+        min(
+            args.request_count,
+            args.input_tokens,
+            args.output_tokens,
+            args.concurrency,
+            args.token_pool_limit,
+        )
+        <= 0
+    ):
+        parser.error(
+            "request count, token lengths, concurrency, and token-pool-limit must be positive"
+        )
+    if args.token_pool_limit < args.input_tokens:
+        parser.error("token-pool-limit must be at least input-tokens")
     return run(args)
 
 
