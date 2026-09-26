@@ -302,32 +302,47 @@ def _run_fixed_text(engine: Path, output: Path) -> subprocess.CompletedProcess[s
     )
 
 
-def test_task_adapter_injects_engine_before_task_arguments(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter = _load_script("adapter.py")
-    captured: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(adapter.os, "execv", lambda path, argv: captured.append((path, argv)))
+def test_task_adapter_injects_engine_and_shared_driver(tmp_path: Path) -> None:
+    capture = tmp_path / "capture.py"
+    capture.write_text(
+        """\
+import json
+import os
+import sys
 
-    assert (
-        adapter.main(
-            ["--engine", "/trusted/session_runner", "--", "benchmark.py", "--url", "server"]
-        )
-        == 0
+print(json.dumps({
+    "arguments": sys.argv[1:],
+    "fixed_text_driver": os.environ["VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER"],
+}))
+""",
+        encoding="utf-8",
     )
-    assert captured == [
-        (
+    completed = run_test_command(
+        [
             sys.executable,
-            [
-                sys.executable,
-                "benchmark.py",
-                "--request-factory-engine",
-                "/trusted/session_runner",
-                "--url",
-                "server",
-            ],
-        )
-    ]
+            str(_PACKAGE_ROOT / "adapter.py"),
+            "--engine",
+            "/trusted/session_runner",
+            "--",
+            str(capture),
+            "--url",
+            "server",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    observed = json.loads(completed.stdout)
+    assert observed == {
+        "arguments": [
+            "--request-factory-engine",
+            "/trusted/session_runner",
+            "--url",
+            "server",
+        ],
+        "fixed_text_driver": str(_FIXED_TEXT),
+    }
 
 
 @pytest.mark.parametrize(
