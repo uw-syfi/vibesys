@@ -1,0 +1,44 @@
+benchmark = "resources/evaluators/request-factory/fixed_text.py"
+model = "cpu-smoke-model"
+benchmark_args = [
+  "--request-count", "8",
+  "--input-tokens", "16",
+  "--output-tokens", "4",
+  "--concurrency", "2",
+]
+response_style = "usage"
+[[failure_cases]]
+mode = "http"
+message_contains = "failed_steps"
+
+[[failure_cases]]
+mode = "malformed-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "truncated-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "output-mismatch"
+message_contains = "output_mismatch_steps"
+
+[[request_shapes]]
+input_tokens = 16
+output_tokens = 4
+count = 8
+
+[metrics.output_token_throughput_per_s]
+unit = "tok/s"
+direction = "max"
+
+[metrics.p90_latency_ms]
+unit = "ms"
+direction = "min"
+
+[required_fields]
+temperature = 0
+stream = true
+ignore_eos = true
+return_token_ids = true
+stream_options = { include_usage = true }

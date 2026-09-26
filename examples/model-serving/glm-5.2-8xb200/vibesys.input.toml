@@ -8,9 +8,19 @@ command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 600
 
 [benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
+entrypoint = "request-factory-fixed-text-v1"
+args = [
+  "--model", "zai-org/GLM-5.2",
+  "--tokenizer", "zai-org/GLM-5.2",
+  "--tokenizer-revision", "cf457fa734ab149ffef225f80893eb38c6ff5cdc",
+  "--request-count", "256",
+  "--input-tokens", "8192",
+  "--output-tokens", "1024",
+  "--concurrency", "64",
+]
 timeout_seconds = 1800
+result_protocol = 2
 
-[benchmark.result]
-json_argument = "--output-json"
-metric = "aggregate_throughput"
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
