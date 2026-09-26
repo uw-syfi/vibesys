@@ -1,9 +1,8 @@
 """Drive one real strategy ``run(ctx)`` end-to-end against a scripted
 :class:`~vs_agent.api.testing.FakeAgentClient`, the same pattern
-``tests/vibesys/loops/evolve/test_evolutionary_loop.py`` and
-``tests/vibesys/loops/issue_queue/test_plain_loop.py`` already use for their
-own strategies. This module generalizes that pattern across every registered
-strategy so golden tests can capture exactly what a scripted round writes
+``tests/vibesys/loops/evolve/test_evolutionary_loop.py`` already uses for its
+strategy. This module generalizes that pattern across the remaining legacy
+strategies so golden tests can capture exactly what a scripted round writes
 and emits, without a real agent CLI or sandbox.
 """
 
@@ -20,7 +19,6 @@ from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.loops.evolve.entrypoint import EvolveProjector
-from vibesys.loops.issue_queue.entrypoint import IssueQueueProjector
 from vibesys.loops.multi.orchestration import MultiProjector, ProfileMultiProjector
 from vibesys.loops.single.orchestration import SingleProjector
 from vibesys.orchestration.request import RunRequest
@@ -152,7 +150,6 @@ def run_scripted(  # noqa: PLR0913  # LW-040006 [PLR0913]; the parameters are in
         ),
         "multi-agent": MultiProjector(),
         "profile-guided-multi-agent": ProfileMultiProjector(),
-        "plain": IssueQueueProjector(),
         "evolve": EvolveProjector(),
     }[orchestration_id]
 

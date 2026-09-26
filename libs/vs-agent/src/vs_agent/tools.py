@@ -2,8 +2,7 @@
 
 ``vs_agent`` never launches a subprocess or builds a core MCP server spec
 itself: it only describes what a subprocess-hosted server would look like.
-A vibesys-owned module (the analogue of
-``vibesys.loops.issue_queue.loop.build_issue_mcp_spec``) turns a
+A vibesys-owned composition module turns a
 :class:`StdioServerDescriptor` into the actual
 ``vs_agent.contracts.MCPServerSpec`` that a driver launches. This
 module does not import that type.
@@ -68,8 +67,8 @@ def expose_as_tools(
 
     Primitives only: ``entrypoint_module`` and ``entrypoint_args`` are what
     the subprocess's own CLI parses to rebuild its :class:`ToolSpec` list
-    from scratch, mirroring ``build_issue_mcp_spec``'s primitive-argv
-    approach. No live object crosses the subprocess boundary.
+    from scratch, mirroring the issue-board tool's primitive-argv approach.
+    No live object crosses the subprocess boundary.
     """
     return StdioServerDescriptor(
         name=name,

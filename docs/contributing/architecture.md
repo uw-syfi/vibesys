@@ -16,11 +16,13 @@ Views: a package-level overview, the `vibesys` core modules, and the full
 module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
 `vibesys.orchestration` owns the internal contract, runner, runtime, and generic
-run projections. Concrete implementations live under sibling `vibesys.loops`
-packages; `vibesys.loops.registry` alone registers them. Tach records each
-policy dependency. Orchestration-specific logic, including agent configuration and
-resume policy, belongs in `vibesys`, not `vs_project`. `vs_project` owns generic
-project layout and persistence operations.
+run projections. Explicit orchestration plugins, including the issue queue,
+live under `vibesys.orchestrations`; remaining legacy implementations live
+under sibling `vibesys.loops` packages. `vibesys.plugin_catalog` registers the
+plugins. Tach records each policy dependency. Orchestration-specific logic,
+including agent configuration and resume policy, belongs in `vibesys`, not
+`vs_project`. `vs_project` owns generic project layout and persistence
+operations.
 The v4 manifest separates policy-specific descriptor options from the generic
 `execution` record. The latter is derived from `RunRequest` and resolved host
 settings, including the concrete profiler. Resume checks it before setup.
@@ -129,17 +131,6 @@ graph TD
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.runtime
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.view
     vibesys.loops.evolve.entrypoint --> vibesys.search.population
-    vibesys.loops.issue_queue --> vibesys
-    vibesys.loops.issue_queue --> vibesys.context
-    vibesys.loops.issue_queue --> vibesys.errors
-    vibesys.loops.issue_queue --> vibesys.evaluators
-    vibesys.loops.issue_queue --> vibesys.orchestration
-    vibesys.loops.issue_queue --> vibesys.orchestration.runtime
-    vibesys.loops.issue_queue --> vibesys.orchestration.tools
-    vibesys.loops.issue_queue --> vibesys.orchestration.view
-    vibesys.loops.issue_queue --> vibesys.prompts
-    vibesys.loops.issue_queue --> vibesys.roles
-    vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.multi --> vibesys
     vibesys.loops.multi --> vibesys.context
     vibesys.loops.multi --> vibesys.domains
@@ -477,21 +468,6 @@ graph TD
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.view
     vibesys.loops.evolve.entrypoint --> vibesys.search.population
     vibesys.loops.evolve.entrypoint --> vs_project
-    vibesys.loops.issue_queue --> vibesys
-    vibesys.loops.issue_queue --> vibesys.context
-    vibesys.loops.issue_queue --> vibesys.errors
-    vibesys.loops.issue_queue --> vibesys.evaluators
-    vibesys.loops.issue_queue --> vibesys.orchestration
-    vibesys.loops.issue_queue --> vibesys.orchestration.runtime
-    vibesys.loops.issue_queue --> vibesys.orchestration.tools
-    vibesys.loops.issue_queue --> vibesys.orchestration.view
-    vibesys.loops.issue_queue --> vibesys.prompts
-    vibesys.loops.issue_queue --> vibesys.roles
-    vibesys.loops.issue_queue --> vibesys.runtime
-    vibesys.loops.issue_queue --> vs_agent
-    vibesys.loops.issue_queue --> vs_issue_board
-    vibesys.loops.issue_queue --> vs_loop_state
-    vibesys.loops.issue_queue --> vs_project
     vibesys.loops.multi --> vibesys
     vibesys.loops.multi --> vibesys.context
     vibesys.loops.multi --> vibesys.domains

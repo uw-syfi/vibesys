@@ -40,13 +40,14 @@ from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEventType
 from vibesys.loops.evolve.orchestration import EvolveOptions
 from vibesys.loops.evolve.orchestration import descriptor_from_options as evolve_descriptor
-from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.orchestrations.agent_options import (
     descriptor_from_options as agent_descriptor,
 )
+from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
+from vibesys.orchestrations.issue_queue import IssueQueueOptions
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project.api import (
@@ -56,11 +57,12 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_runtime.api import RunStatus as PluginRunStatus
 
 _LOOP_RUN_TARGETS = {
-    "agent": "vibesys.api.session.run_orchestration",
-    "plain": "vibesys.api.session.run_orchestration",
-    "evolve": "vibesys.api.session.run_orchestration",
+    "agent": "vibesys.api.session.run_plugin",
+    "plain": "vibesys.api.session.run_plugin",
+    "evolve": "vibesys.api.session.run_plugin",
 }
 
 
@@ -267,7 +269,13 @@ def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
         max_attempts_per_issue=4,
         max_issues_per_perf_eval=2,
     )
-    return _RecordedRun(descriptor_from_options(options))
+    return _RecordedRun(
+        OrchestrationDescriptor(
+            id=ISSUE_QUEUE_PLUGIN.id,
+            config_version=ISSUE_QUEUE_PLUGIN.config_version,
+            options=options.model_dump(mode="json"),
+        )
+    )
 
 
 def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
@@ -1838,7 +1846,7 @@ def test_main_routes_to_the_selected_loop(
 ) -> None:
     """The selected descriptor reaches the shared orchestration runner."""
     project = _write_input_project(tmp_path)
-    runner = AsyncMock(return_value=True)
+    runner = AsyncMock(return_value=PluginRunStatus.SUCCEEDED)
     monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], runner)
     argv = ["vibesys", "--outer-loop", loop, "--input", str(project)]
 
@@ -1860,7 +1868,9 @@ def test_dispatch_owns_headless_rendering(
     project = _write_input_project(tmp_path)
     renderer = Mock()
     monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
-    monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        _LOOP_RUN_TARGETS["agent"], AsyncMock(return_value=PluginRunStatus.SUCCEEDED)
+    )
 
     cli.dispatch(["--input", str(project)])
 
