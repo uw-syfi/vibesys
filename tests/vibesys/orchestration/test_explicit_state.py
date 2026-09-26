@@ -27,8 +27,8 @@ from vs_runtime.api import (
     RunStatus,
     RuntimeContractError,
     StateModelError,
-    WorkspaceRef,
 )
+from vs_runtime.api.testing import FakeWorkspace
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -195,7 +195,7 @@ def test_real_state_adapter_rejects_wrong_models_and_non_root_workspaces(tmp_pat
                 await run.state.commit(_ChildState())
             with pytest.raises(RuntimeContractError, match="live root workspace"):
                 await run.state.commit(
-                    _State(), workspace=WorkspaceRef(path=run.workspaces.root.path)
+                    _State(), workspace=FakeWorkspace(path=run.workspaces.root.path)
                 )
 
     try:

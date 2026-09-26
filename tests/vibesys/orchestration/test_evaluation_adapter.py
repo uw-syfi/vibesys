@@ -29,8 +29,8 @@ from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
     RuntimeContractError,
-    WorkspaceRef,
 )
+from vs_runtime.api.testing import FakeWorkspace
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -231,7 +231,7 @@ def test_adapter_rejects_workspace_not_owned_by_the_run(tmp_path: Path) -> None:
 
     async def body(ctx: RunContext) -> None:
         with pytest.raises(TypeError, match="live handle"):
-            await ctx.evaluation.accuracy(WorkspaceRef(path=ctx.workspaces.root.path))
+            await ctx.evaluation.accuracy(FakeWorkspace(path=ctx.workspaces.root.path))
 
     _run(tmp_path, executor, body)
     assert executor.accuracy_calls == []
