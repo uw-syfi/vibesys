@@ -488,10 +488,14 @@ class _ExplicitAgentSession:
             model=agent.model,
             reasoning_effort=agent.reasoning_effort,
         )
+        # Candidate workspace IDs are runtime-generated and change when a
+        # retained revision is reopened. The policy-owned member ID is the
+        # durable identity; callers must choose distinct IDs for distinct
+        # conversations, regardless of their current physical workspace.
         self._session_key = (
             AgentSessionKey(
                 SessionScope.MEMBER,
-                f"{role.id}:workspace={workspace.id or 'root'}:{member_id}",
+                f"{role.id}:{member_id}",
             )
             if member_id is not None
             else AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")

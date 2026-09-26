@@ -243,7 +243,7 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
 
     expected = AgentSessionKey(
         SessionScope.MEMBER,
-        f"worker:workspace=root:{member_id}",
+        f"worker:{member_id}",
     )
     assert expected.durable
     assert first.calls[0].session_key == expected
