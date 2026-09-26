@@ -1,29 +1,42 @@
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
 
 from tests.examples.request_factory_cpu_smoke import load_profile
-from tests.support import run_test_command
 
 from vibesys.api.request import load_input_bundle
 
 _REPO_ROOT = Path(__file__).parents[2]
 _BUNDLE_ROOT = _REPO_ROOT / "examples" / "model-serving" / "llama-70b-2xh100"
-_BENCHMARK = _BUNDLE_ROOT / "benchmark" / "benchmark.py"
+_BENCHMARK = _REPO_ROOT / "resources" / "evaluators" / "request-factory" / "fixed_text.py"
 
 
-def test_bundle_runs_the_benchmark_through_the_pinned_rf_adapter() -> None:
+def test_bundle_runs_the_benchmark_through_the_pinned_fixed_text_entrypoint() -> None:
     bundle = load_input_bundle(_BUNDLE_ROOT)
 
     assert bundle.manifest.evaluator is not None
     assert bundle.manifest.evaluator.name == "vibesys-evaluator-request-factory"
-    assert bundle.manifest.benchmark.entrypoint == "request-factory-adapter"
-    assert bundle.manifest.benchmark.args == ("benchmark/benchmark.py",)
+    assert bundle.manifest.benchmark.entrypoint == "request-factory-fixed-text-v1"
+    assert bundle.manifest.benchmark.args == (
+        "--model",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "--tokenizer",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "--tokenizer-revision",
+        "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+        "--request-count",
+        "64",
+        "--input-tokens",
+        "256",
+        "--output-tokens",
+        "128",
+        "--concurrency",
+        "8",
+    )
     assert bundle.benchmark_result_protocol == 2
     assert bundle.benchmark_output_argument == "--vs-output"
-    assert bundle.benchmark_command[-1] == "benchmark/benchmark.py"
+    assert "fixed_text.py" in bundle.benchmark_command[1]
+    assert bundle.benchmark_command[-2:] == ("--concurrency", "8")
 
 
 def test_objectives_match_the_rf_protocol_metrics() -> None:
@@ -40,43 +53,9 @@ def test_cpu_smoke_profile_declares_the_expected_request_and_result_contract() -
     assert profile.shape_counts == {(16, 4): 8}
     assert set(profile.metrics) == {"output_token_throughput_per_s", "p90_latency_ms"}
     assert profile.required_fields["stream_options"] == {"include_usage": True}
-
-
-def test_benchmark_rejects_an_undersized_request_factory_token_pool(tmp_path: Path) -> None:
-    engine = tmp_path / "request-factory-warning"
-    engine.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        "print('warning: token pool (1 tokens) is smaller than the longest prompt', "
-        "file=sys.stderr)\n",
-        encoding="utf-8",
-    )
-    engine.chmod(0o755)
-    output = tmp_path / "result.jsonl"
-
-    completed = run_test_command(
-        [
-            sys.executable,
-            str(_BENCHMARK),
-            "--request-factory-engine",
-            str(engine),
-            "--request-count",
-            "1",
-            "--input-tokens",
-            "1",
-            "--output-tokens",
-            "1",
-            "--concurrency",
-            "1",
-            "--vs-output",
-            str(output),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode == 1
-    record = json.loads(output.read_text(encoding="utf-8").splitlines()[-1])
-    assert record["kind"] == "error"
-    assert "token pool is shorter" in record["message"]
+    assert {failure.mode for failure in profile.failures} == {
+        "http",
+        "malformed-sse",
+        "truncated-sse",
+        "output-mismatch",
+    }

@@ -15,7 +15,10 @@ The VibeSys protocol-v2 metrics are:
 
 RF sends token-ID prompts using the served model tokenizer, sets
 `ignore_eos=true`, and measures completion token IDs rather than inferring token
-count from SSE chunk count. The adapter generates a deterministic temporary text
+count from SSE chunk count. The tokenizer is pinned to Hugging Face revision
+`6f6073b423013f6a7d4d9f39144961bfbfbc386b`; the evaluator resolves that exact
+cached snapshot or downloads that exact `tokenizer.json` before RF starts. The
+evaluator entrypoint generates a deterministic temporary text
 corpus and bounds RF's token pool to at least twice the longest prompt (and the
 request count), so the prompt data is sufficient for the configured workload
 without a committed corpus fixture. There is no warmup phase in this workload. These
@@ -30,5 +33,6 @@ uv run python -m tests.examples.request_factory_cpu_smoke \
   --request-factory-engine <RF_ENGINE>
 ```
 
-The fake validates request shape, metrics, and failure propagation. Its
+The fake validates request shape, the protocol-v2 result through its public
+reader, and HTTP, malformed/truncated SSE, and output-mismatch failures. Its
 throughput is not a serving-performance result.
