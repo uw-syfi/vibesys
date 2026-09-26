@@ -121,7 +121,7 @@ def _fallback_combined() -> SingleAgentRoundResponse:
 
 
 def _timeout_fallback_combined(timeout: float) -> SingleAgentRoundResponse:
-    """Used when the turn hit ``subprocess.TimeoutExpired`` (a6e361c1 text)."""
+    """Used when the agent turn exceeded its configured timeout (a6e361c1 text)."""
     return SingleAgentRoundResponse(
         summary="Single-agent invocation timed out.",
         expected_behavior="unknown",

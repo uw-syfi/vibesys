@@ -31,6 +31,7 @@ from vibesys.events import CommandResultPayload, JsonResultPayload
 from vibesys.roles.judge import JudgeResponse
 from vs_agent.api import (
     AgentEvent,
+    AgentTurnTimeoutError,
     MCPServerSpec,
 )
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
@@ -558,8 +559,9 @@ def test_timeout_poisons_session_and_cleanup_is_idempotent(tmp_path: Path) -> No
     executor = _FakeExecutor([], delay=0.1)
     driver, session = _session(tmp_path, executor)
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(AgentTurnTimeoutError) as raised:
         session.run_turn(AgentTurnRequest("slow", timeout=timedelta(milliseconds=1)))
+    assert raised.value.timeout_seconds == pytest.approx(0.001)
     with pytest.raises(RuntimeError, match="must be reset"):
         session.run_turn(AgentTurnRequest("again"))
 
@@ -567,6 +569,66 @@ def test_timeout_poisons_session_and_cleanup_is_idempotent(tmp_path: Path) -> No
     session.close()
     driver.close()
     assert executor.close_calls == 1
+
+
+def test_timeout_is_preserved_when_cancelled_turn_cleanup_fails(tmp_path: Path) -> None:
+    cleanup_error = RuntimeError("turn cleanup failed")
+
+    class CleanupFailingExecutor(_FakeExecutor):
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
+                try:
+                    await asyncio.Event().wait()
+                    yield object()
+                finally:
+                    raise cleanup_error
+
+            return stream()
+
+    driver, session = _session(tmp_path, CleanupFailingExecutor([]))
+
+    with pytest.raises(AgentTurnTimeoutError) as raised:
+        session.run_turn(AgentTurnRequest("slow", timeout=timedelta(milliseconds=1)))
+
+    assert raised.value.timeout_seconds == pytest.approx(0.001)
+    driver.close()
+
+
+def test_inner_timeout_error_is_not_reclassified_as_the_turn_deadline(tmp_path: Path) -> None:
+    inner_error = TimeoutError("inner provider operation timed out")
+
+    class InnerTimeoutExecutor(_FakeExecutor):
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
+                for event in self.events:
+                    yield event
+                raise inner_error
+
+            return stream()
+
+    driver, session = _session(tmp_path, InnerTimeoutExecutor([]))
+
+    with pytest.raises(TimeoutError) as raised:
+        session.run_turn(AgentTurnRequest("one", timeout=timedelta(seconds=30)))
+
+    assert raised.value is inner_error
+    driver.close()
 
 
 def test_session_cleanup_closes_owned_os_environments(tmp_path: Path) -> None:

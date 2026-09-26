@@ -17,7 +17,6 @@ a backend.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -36,6 +35,7 @@ from vs_agent.contracts import (
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
+    AgentTurnTimeoutError,
     AgentUsage,
     MCPServerSpec,
     SessionDisposition,
@@ -552,22 +552,11 @@ class AgentShimSession:
         self._turn_count = 0
 
     def _turn(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
-        """Run one turn, reporting a timeout the way every VibeSys caller expects."""
+        """Run one turn, translating the library timeout to the driver contract."""
         try:
             return self._session.turn(request)
         except agentshim.CliTimeoutError as exc:
-            # Loops fail closed on ``subprocess.TimeoutExpired`` and read its
-            # ``timeout``; the library raises its own type, so translate here
-            # rather than teaching every catch site a second exception.
-            #
-            # Only the provider name goes in ``cmd``. ``str(TimeoutExpired)``
-            # renders the whole command, and the argv the library timed out on
-            # is the transformed one: a containerized turn's is a
-            # ``docker exec -e KEY=VALUE ...`` line carrying every environment
-            # value the sandbox was built with, which callers log verbatim.
-            raise subprocess.TimeoutExpired(
-                cmd=[self._profile.binary], timeout=exc.timeout
-            ) from exc
+            raise AgentTurnTimeoutError(exc.timeout) from exc
 
     def _renew_codex_thread_if_needed(self, result: agentshim.TurnResult) -> bool:
         """Retire an over-budget Codex thread, reporting whether it was dropped.

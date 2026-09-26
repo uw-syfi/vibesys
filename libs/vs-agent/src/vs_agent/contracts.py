@@ -22,6 +22,15 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
+class AgentTurnTimeoutError(TimeoutError):
+    """An agent turn exceeded its configured wall-clock budget."""
+
+    def __init__(self, timeout_seconds: float) -> None:
+        """Record the configured budget, independent of driver mechanism."""
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
+
+
 class SessionDisposition(StrEnum):
     """Whether a session remains safe to use after a turn."""
 
@@ -177,7 +186,7 @@ class AgentSession(Protocol):
         request: AgentTurnRequest,
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
-        """Add one turn to the conversation and return its raw result."""
+        """Add one turn or raise :class:`AgentTurnTimeoutError` on timeout."""
         ...
 
     def resume_provider_session(self, session_id: str) -> bool:

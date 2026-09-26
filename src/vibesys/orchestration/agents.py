@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import subprocess
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -51,10 +50,17 @@ from vibesys.runtime import (
 )
 from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import (
+    AgentSessionKey,
+    SessionScope,
+)
+from vs_agent.api import (
+    AgentTurnTimeoutError as DriverAgentTurnTimeoutError,
+)
 from vs_runtime.api import (
     AgentBinding,
     AgentRole,
+    AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
     StructuredResponseError,
@@ -527,28 +533,31 @@ class _ExplicitAgentSession:
         label = f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
-            if response is None:
-                result: str | T = await self._agent.turn(
-                    message,
-                    system_prompt=self._role.system_prompt,
-                    label=label,
-                    session_key=self._session_key,
-                    reuse_session=True,
-                )
-            else:
+            try:
+                if response is None:
+                    result: str | T = await self._agent.turn(
+                        message,
+                        system_prompt=self._role.system_prompt,
+                        label=label,
+                        session_key=self._session_key,
+                        reuse_session=True,
+                    )
+                else:
 
-                def parse_failure() -> T:
-                    raise StructuredResponseError(self._role.id, response)
+                    def parse_failure() -> T:
+                        raise StructuredResponseError(self._role.id, response)
 
-                result = await self._agent.turn_structured(
-                    message,
-                    response_cls=response,
-                    fallback_factory=parse_failure,
-                    system_prompt=self._role.system_prompt,
-                    label=label,
-                    session_key=self._session_key,
-                    reuse_session=True,
-                )
+                    result = await self._agent.turn_structured(
+                        message,
+                        response_cls=response,
+                        fallback_factory=parse_failure,
+                        system_prompt=self._role.system_prompt,
+                        label=label,
+                        session_key=self._session_key,
+                        reuse_session=True,
+                    )
+            except DriverAgentTurnTimeoutError as error:
+                raise AgentTurnTimeoutError(error.timeout_seconds) from error
         finally:
             if self._role.workspace_access is WorkspaceAccess.READ_ONLY:
                 changes = await self._workspace.pending_changes()
@@ -713,7 +722,7 @@ class _Agents:
         reverting (and raising :class:`RoleIsolationError` if unrevertable)
         unauthorized edits from a :class:`~vibesys.runtime.ReadOnly` role,
         ``role.fallback()`` (or ``role.timeout_fallback(seconds)`` when the
-        role declares one) on ``subprocess.TimeoutExpired`` (every role, not
+        role declares one) on ``AgentTurnTimeoutError`` (every role, not
         just today's multi/profile_multi implementer), up to
         ``role.max_corrections`` reprompts while ``role.check(reply)``
         returns an error, and skill-selection filtering when
@@ -785,12 +794,13 @@ class _Agents:
                         reuse_session=reuse_session,
                         mcp_servers=mcp_servers,
                     )
-                except subprocess.TimeoutExpired as error:
+                except DriverAgentTurnTimeoutError as error:
                     host.log(
-                        f"[{role.id}] attempt {attempt} timed out after {error.timeout:g} seconds"
+                        f"[{role.id}] attempt {attempt} timed out after "
+                        f"{error.timeout_seconds:g} seconds"
                     )
                     reply = (
-                        role.timeout_fallback(error.timeout)
+                        role.timeout_fallback(error.timeout_seconds)
                         if role.timeout_fallback is not None
                         else role.fallback()
                     )

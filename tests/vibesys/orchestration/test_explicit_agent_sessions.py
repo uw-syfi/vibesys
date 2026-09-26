@@ -8,7 +8,7 @@ from collections import deque
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -19,14 +19,24 @@ from vibesys.orchestration.runtime import RunContext
 from vibesys.orchestrations.single import PLUGIN
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api import AgentCapabilities, AgentSessionKey, SessionScope
+from vs_agent.api import (
+    AgentCapabilities,
+    AgentSessionKey,
+    SessionScope,
+)
+from vs_agent.api import (
+    AgentTurnTimeoutError as DriverAgentTurnTimeoutError,
+)
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
     AgentTool,
+    AgentTurnTimeoutError,
     OrchestrationPlugin,
+    RunHost,
+    RunStatus,
     RuntimeContractError,
     SessionClosedError,
     StructuredResponseError,
@@ -46,6 +56,10 @@ if TYPE_CHECKING:
 
 class _Reply(BaseModel):
     value: int
+
+
+class _Options(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class _RecordingClient(FakeAgentClient):
@@ -229,6 +243,39 @@ def test_typed_parse_failure_is_not_replaced_by_a_fallback(tmp_path: Path) -> No
             await session.turn("invalid", response=_Reply)
 
     _run_with_clients(tmp_path, [client], body, declaration=(role,))
+
+
+def test_plugin_policy_receives_only_the_runtime_timeout_contract(tmp_path: Path) -> None:
+    driver_error = DriverAgentTurnTimeoutError(12.5)
+    client = FakeAgentClient(session_reuse=True).fail("worker", driver_error, times=1)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    observed: list[AgentTurnTimeoutError] = []
+
+    async def orchestrate(ctx: RunHost, _options: BaseModel) -> RunStatus:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        try:
+            await session.turn("work")
+        except AgentTurnTimeoutError as error:
+            observed.append(error)
+            return RunStatus.SUCCEEDED
+        return RunStatus.FAILED
+
+    plugin = OrchestrationPlugin(
+        id="timeout-policy",
+        agents=(role,),
+        options=_Options,
+        orchestrate=orchestrate,
+    )
+
+    async def body(ctx: RunContext) -> RunStatus:
+        return await plugin.orchestrate(ctx, _Options())
+
+    status = _run_with_clients(tmp_path, [client], body, declaration=plugin)
+
+    assert status is RunStatus.SUCCEEDED
+    assert len(observed) == 1
+    assert observed[0].timeout_seconds == 12.5
+    assert observed[0].__cause__ is driver_error
 
 
 def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path: Path) -> None:

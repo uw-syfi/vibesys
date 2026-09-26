@@ -14,6 +14,7 @@ from vs_runtime.api import (
     AgentCapability,
     AgentRole,
     AgentTool,
+    AgentTurnTimeoutError,
     BenchmarkEvaluation,
     BenchmarkObjective,
     CommandResult,
@@ -103,6 +104,14 @@ def test_role_is_a_strict_complete_declaration() -> None:
                 "config_profile": "hidden alias",
             }
         )
+
+
+def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:
+    error = AgentTurnTimeoutError(12.5)
+
+    assert error.timeout_seconds == 12.5
+    assert str(error) == "agent turn timed out after 12.5 seconds"
+    assert isinstance(error, RuntimeError)
 
 
 def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:

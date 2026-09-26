@@ -142,7 +142,7 @@ turn end to end and returns a typed reply. It owns:
   reverting unauthorized changes after the turn (raising `RoleIsolationError`
   if they cannot be reverted); `access.allow` names paths the role may still
   write;
-- timeout fallback: `subprocess.TimeoutExpired` resolves to
+- timeout fallback: `vs_agent.api.AgentTurnTimeoutError` resolves to
   `role.timeout_fallback(seconds)` if declared, else `role.fallback()`, for
   every role, not just the strategies that used to special-case it;
 - structured-reply correction retries while `role.check(reply)` returns an

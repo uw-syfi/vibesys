@@ -178,7 +178,7 @@ class Role:
     filter_skills: bool = False
     message: str = "Return only the JSON object."
     timeout_fallback: Callable[[float], BaseModel] | None = None
-    """Optional distinct reply for ``subprocess.TimeoutExpired``, given the
+    """Optional distinct reply for an agent-turn timeout, given the
     configured timeout in seconds. Defaults to ``fallback()`` (called with no
     arguments) when unset, so existing roles are unaffected."""
 

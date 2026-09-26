@@ -24,6 +24,7 @@ from vs_agent.contracts import (
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
+    AgentTurnTimeoutError,
     AgentUsage,
 )
 from vs_agent.drivers._omnigent_lifecycle import CloseLifecycle as _CloseLifecycle
@@ -793,10 +794,21 @@ class OmnigentSession:
                 observer=observer,
             )
             if request.timeout is not None:
-                return (
-                    await asyncio.wait_for(turn, timeout=request.timeout.total_seconds()),
-                    None,
-                )
+                timeout_seconds = request.timeout.total_seconds()
+                turn_task = asyncio.create_task(turn)
+                try:
+                    done, _pending = await asyncio.wait((turn_task,), timeout=timeout_seconds)
+                except asyncio.CancelledError:
+                    turn_task.cancel()
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await turn_task
+                    raise
+                if done:
+                    return turn_task.result(), None
+                turn_task.cancel()
+                with contextlib.suppress(Exception, asyncio.CancelledError):
+                    await turn_task
+                return None, AgentTurnTimeoutError(timeout_seconds)
             return await turn, None
         except asyncio.CancelledError:
             raise

@@ -21,6 +21,15 @@ class RuntimeContractError(RuntimeError):
     """Base class for rejected runtime operations."""
 
 
+class AgentTurnTimeoutError(RuntimeContractError):
+    """An agent session turn exceeded its configured wall-clock budget."""
+
+    def __init__(self, timeout_seconds: float) -> None:
+        """Record the budget so orchestration policy can choose its response."""
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
+
+
 class WorkspaceRestoreError(RuntimeContractError):
     """A workspace could not materialize a requested retained revision."""
 
@@ -206,7 +215,7 @@ class AgentSession(Protocol):
     async def turn(
         self, message: str, *, response: type[ResponseT] | None = None
     ) -> str | ResponseT:
-        """Add one turn, returning text or a value validated as ``response``."""
+        """Add one turn or raise :class:`AgentTurnTimeoutError` on timeout."""
         ...
 
     async def close(self) -> None:

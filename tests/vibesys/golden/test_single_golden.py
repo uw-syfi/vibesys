@@ -27,7 +27,6 @@ Three scenarios cover the main round path without every branch:
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import patch  # test-isolation: seams scripted below
 
@@ -57,6 +56,7 @@ from vibesys.schemas import (
     CandidateDisposition,
 )
 from vibesys.search.hypothesis import OrchestratorPlan
+from vs_agent.api import AgentTurnTimeoutError
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -214,13 +214,10 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
 
 
 def test_timeout_scenario_golden(tmp_path: Path) -> None:
-    """The combined turn times out: post-fix behavior at HEAD synthesizes a
-    FAIL ``SingleAgentRoundResponse`` (``single/turns.py`` catches
-    ``subprocess.TimeoutExpired``) instead of propagating the exception.
-    """
+    """A timed-out combined turn synthesizes a failing round response."""
     runner = FakeAgentClient(backend_name="stub")
     runner.enqueue("orchestrator", _plan())
-    runner.fail("implementer", subprocess.TimeoutExpired(cmd="agent", timeout=30.0), times=1)
+    runner.fail("implementer", AgentTurnTimeoutError(30.0), times=1)
 
     descriptor = descriptor_from_options(
         _options(max_retries_per_round=1), orchestration_id=_ORCHESTRATION_ID

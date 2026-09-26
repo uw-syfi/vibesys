@@ -13,7 +13,6 @@ renders exclusively through it).
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import patch  # test-isolation: workspace methods patched below
 
@@ -35,7 +34,7 @@ from vibesys.runtime import (
     Writes,
 )
 from vibesys.schemas import SkillResourceSelection
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import AgentSessionKey, AgentTurnTimeoutError, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -299,7 +298,7 @@ def test_timeout_falls_back_for_every_access_mode(
     tmp_path: Path, access: ReadOnly | Writes
 ) -> None:
     runner = FakeAgentClient(backend_name="stub")
-    runner.fail("testrole", subprocess.TimeoutExpired(cmd="agent", timeout=5.0), times=1)
+    runner.fail("testrole", AgentTurnTimeoutError(5.0), times=1)
 
     async def body(ctx: RunContext) -> BaseModel:
         agent = await _spawn(ctx)

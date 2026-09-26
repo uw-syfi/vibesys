@@ -326,7 +326,7 @@
   {
     "agent_kind": "implementer",
     "data": {
-      "error": "TimeoutExpired: Command 'agent' timed out after <DURATION>",
+      "error": "AgentTurnTimeoutError: agent turn timed out after <DURATION>",
       "kind": "agent_execution_finished",
       "result": null
     },
@@ -338,7 +338,7 @@
   {
     "agent_kind": "implementer",
     "data": {
-      "error": "TimeoutExpired: Command 'agent' timed out after <DURATION>",
+      "error": "AgentTurnTimeoutError: agent turn timed out after <DURATION>",
       "kind": "invocation_finished",
       "result": null
     },
