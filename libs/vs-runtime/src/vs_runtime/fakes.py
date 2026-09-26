@@ -236,6 +236,7 @@ class FakeCommandCall:
     argv: tuple[str, ...]
     workspace: Workspace
     timeout_seconds: int | None
+    output_argument: str | None = None
 
 
 @dataclass(slots=True)
@@ -259,6 +260,22 @@ class FakeCommands:
         """Validate and record one command, returning its scripted result."""
         validate_command(argv, timeout_seconds)
         self.calls.append(FakeCommandCall(argv, workspace, timeout_seconds))
+        if self.results:
+            return self.results.pop(0)
+        return CommandResult(output="", exit_code=0)
+
+    async def capture_output(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        output_argument: str,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Record one runtime-managed output capture and return its script."""
+        validate_command(argv, timeout_seconds)
+        validate_command((output_argument,), None)
+        self.calls.append(FakeCommandCall(argv, workspace, timeout_seconds, output_argument))
         if self.results:
             return self.results.pop(0)
         return CommandResult(output="", exit_code=0)

@@ -296,6 +296,25 @@ class Commands(Protocol):
         """Run one argv without policy-authored shell composition."""
         ...
 
+    async def capture_output(
+        self,
+        argv: tuple[str, ...],
+        *,
+        workspace: Workspace,
+        output_argument: str,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run argv with a runtime-owned output file and return its bounded contents.
+
+        The runtime appends ``output_argument`` and the temporary path, reads
+        the file after a successful command, and attempts to remove it on every
+        path. A failed command returns its ordinary diagnostic output and exit
+        status. Failure to remove the artifact raises ``RuntimeContractError``
+        unless another exception is already propagating, in which case the
+        cleanup failure is attached as an exception note.
+        """
+        ...
+
 
 class SkillResourceRequest(BaseModel):
     """Policy-neutral request to resolve resources from one installed skill."""

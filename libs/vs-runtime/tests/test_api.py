@@ -346,6 +346,20 @@ def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
         )
         assert host.commands.calls[0].workspace is workspace
         assert host.commands.calls[0].timeout_seconds == 30
+        assert host.commands.calls[0].output_argument is None
+
+        captured = CommandResult(output='{"version":1}', exit_code=0)
+        host.commands.script(captured)
+        result = await host.commands.capture_output(
+            ("profiler", "--mode", "summary"),
+            workspace=workspace,
+            output_argument="--result-file",
+            timeout_seconds=45,
+        )
+        assert result is captured
+        assert host.commands.calls[1].argv == ("profiler", "--mode", "summary")
+        assert host.commands.calls[1].output_argument == "--result-file"
+        assert host.commands.calls[1].timeout_seconds == 45
 
     asyncio.run(scenario())
 

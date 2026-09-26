@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -34,6 +35,7 @@ from vs_runtime.api import (
     AgentRole,
     AgentTool,
     AgentTurnTimeoutError,
+    CommandResult,
     OrchestrationPlugin,
     RunHost,
     RunStatus,
@@ -46,7 +48,6 @@ from vs_runtime.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
     from typing import TypeVar
 
     from vs_runtime.api import AgentSession
@@ -472,21 +473,38 @@ def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
             "reasoning": "launch overhead dominates",
         },
     )
-    implementer = FakeAgentClient(session_reuse=True).enqueue(
+    implementer = FakeAgentClient(
+        capabilities=AgentCapabilities(
+            session_reuse=True,
+            provider_session_resume=True,
+        )
+    ).enqueue(
         "implementer",
         {
             "summary": "implemented batching",
             "expected_behavior": "higher throughput",
             "self_review": "reviewed the diff and ran checks",
             "feedback": "",
-            "verdict": "approve",
+            "verdict": "pass",
+            "bottlenecks": "launch overhead",
+            "suggestions": "batch prefill",
+            "profile_analysis": "batching should reduce launches",
         },
     )
 
     async def body(ctx: RunContext) -> None:
         status = await PLUGIN.orchestrate(
             ctx,
-            PLUGIN.options.model_validate({"objective": "Improve request throughput."}),
+            PLUGIN.options.model_validate(
+                {
+                    "interface": "inprocess",
+                    "max_rounds": 1,
+                    "max_retries_per_round": 1,
+                    "judge_every": 1,
+                    "official_eval_every": 1,
+                    "memory_layout": "files",
+                }
+            ),
         )
         assert status.value == "succeeded"
 
@@ -520,3 +538,129 @@ def test_plugin_command_execution_quotes_argv_and_scopes_to_workspace(tmp_path: 
         assert not result.truncated
 
     _run_with_clients(tmp_path, [], body, declaration=(role,))
+
+
+def test_plugin_command_capture_owns_bounded_output_file_lifecycle(tmp_path: Path) -> None:
+    role = AgentRole(id="unused", system_prompt="Unused.")
+
+    async def body(ctx: RunContext) -> None:
+        result = await ctx.commands.capture_output(
+            (
+                "python",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "path = Path(sys.argv[-1]); path.write_text(str(path))"
+                ),
+            ),
+            workspace=ctx.workspaces.root,
+            output_argument="--result-file",
+            timeout_seconds=10,
+        )
+
+        assert result.exit_code == 0
+        assert result.output
+        cleanup = await ctx.commands.run(
+            (
+                "python",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "raise SystemExit(Path(sys.argv[1]).exists())"
+                ),
+                result.output,
+            ),
+            workspace=ctx.workspaces.root,
+        )
+        assert cleanup.exit_code == 0
+
+        failed = await ctx.commands.capture_output(
+            (
+                "python",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "path = Path(sys.argv[-1]); path.write_text('unused'); "
+                    "print(path); raise SystemExit(7)"
+                ),
+            ),
+            workspace=ctx.workspaces.root,
+            output_argument="--result-file",
+        )
+        assert failed.exit_code == 7
+        failed_cleanup = await ctx.commands.run(
+            (
+                "python",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "raise SystemExit(Path(sys.argv[1]).exists())"
+                ),
+                failed.output.splitlines()[0],
+            ),
+            workspace=ctx.workspaces.root,
+        )
+        assert failed_cleanup.exit_code == 0
+
+        empty = await ctx.commands.capture_output(
+            (
+                "python",
+                "-c",
+                "from pathlib import Path; import sys; Path(sys.argv[-1]).write_text('')",
+            ),
+            workspace=ctx.workspaces.root,
+            output_argument="--result-file",
+        )
+        assert empty == CommandResult(output="", exit_code=0)
+
+        large = await ctx.commands.capture_output(
+            (
+                "python",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "Path(sys.argv[-1]).write_text('x' * 150000)"
+                ),
+            ),
+            workspace=ctx.workspaces.root,
+            output_argument="--result-file",
+        )
+        assert large.truncated
+        assert len(large.output) < 150_000
+
+    _run_with_clients(tmp_path, [], body, declaration=(role,))
+
+
+def test_plugin_command_capture_reports_cleanup_failure(tmp_path: Path) -> None:
+    role = AgentRole(id="unused", system_prompt="Unused.")
+
+    async def body(ctx: RunContext) -> None:
+        with pytest.raises(
+            RuntimeContractError,
+            match="without a readable captured output file",
+        ) as captured:
+            await ctx.commands.capture_output(
+                (
+                    "python",
+                    "-c",
+                    (
+                        "from pathlib import Path; import sys; "
+                        "path = Path(sys.argv[-1]); "
+                        "Path('capture-path.txt').write_text(str(path)); "
+                        "path.unlink(); path.mkdir()"
+                    ),
+                ),
+                workspace=ctx.workspaces.root,
+                output_argument="--result-file",
+            )
+        assert any(
+            "could not remove a captured command output file" in note
+            for note in captured.value.__notes__
+        )
+
+    try:
+        _run_with_clients(tmp_path, [], body, declaration=(role,))
+    finally:
+        recorded = tmp_path / "project" / "capture-path.txt"
+        if recorded.exists():
+            Path(recorded.read_text()).rmdir()
