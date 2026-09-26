@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestrations.multi.files import MultiFiles
-    from vibesys.orchestrations.multi.models import MultiOptions
+    from vibesys.orchestrations.multi.models import MultiOptions, ProfileGuidedMultiOptions
     from vibesys.search.hypothesis import (
         AttemptState,
         CarryOver,
@@ -54,6 +54,7 @@ if TYPE_CHECKING:
         HypothesisState,
     )
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.search.profile_focus import FocusView
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 
@@ -68,6 +69,7 @@ class PlanRequest:
     plateau_warning: str | None
     provisional_candidates: int
     workspace: Workspace
+    guidance: FocusView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +82,7 @@ class AttemptRequest:
     records: tuple[RoundRecord, ...]
     active_hypothesis: Hypothesis
     workspace: Workspace
+    guidance: FocusView | None
 
 
 def _fallback_pre_round() -> PreRoundDecision:
@@ -186,7 +189,7 @@ class MultiAgentTurns:
     def __init__(
         self,
         host: RunHost,
-        options: MultiOptions,
+        options: MultiOptions | ProfileGuidedMultiOptions,
         search: HypothesisSearch,
         files: MultiFiles,
     ) -> None:
@@ -273,6 +276,22 @@ class MultiAgentTurns:
             provisional_candidates=request.provisional_candidates,
             official_eval_cadence_due=(
                 request.provisional_candidates + 1 >= self.options.official_eval_every
+            ),
+            active_component=(
+                request.guidance.active_component if request.guidance is not None else None
+            ),
+            ledger_text=(request.guidance.ledger_text if request.guidance is not None else None),
+            ranked_bottlenecks=(
+                [
+                    {
+                        "component": item.name,
+                        "cost_share": item.share * 100,
+                        "evidence": item.evidence,
+                    }
+                    for item in request.guidance.ranked_bottlenecks
+                ]
+                if request.guidance is not None
+                else []
             ),
         )
 
@@ -443,6 +462,9 @@ production path cannot be measured safely.
             recommended_skills=resolved,
             prior_attempt_artifact_locations=self.files.prior_implementer_locations(
                 request.round_number
+            ),
+            active_component=(
+                request.guidance.active_component if request.guidance is not None else None
             ),
         )
 

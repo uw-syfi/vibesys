@@ -6,9 +6,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vibesys.evaluators import input_manifest
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_runtime.api import AccuracyReceipt
+
+_ProfileGuidedInput = input_manifest.ProfileGuidedInput
 
 
 class MultiOptions(AgentOrchestrationOptions):
@@ -23,6 +26,22 @@ class MultiOptions(AgentOrchestrationOptions):
             raise ValueError(message)
         if self.memory_layout not in {"files", "directories"}:
             message = f"unsupported multi-agent memory_layout {self.memory_layout!r}"
+            raise ValueError(message)
+        return self
+
+
+class ProfileGuidedMultiOptions(AgentOrchestrationOptions):
+    """Strict production descriptor options for the profiling-on preset."""
+
+    profile_guided: _ProfileGuidedInput
+
+    @model_validator(mode="after")
+    def _registered_values(self) -> ProfileGuidedMultiOptions:
+        if self.interface not in {"inprocess", "service"}:
+            message = f"unsupported profile-guided multi-agent interface {self.interface!r}"
+            raise ValueError(message)
+        if self.memory_layout not in {"files", "directories"}:
+            message = f"unsupported profile-guided multi-agent memory_layout {self.memory_layout!r}"
             raise ValueError(message)
         return self
 
@@ -48,4 +67,4 @@ class MultiState(BaseModel):
     accuracy_receipt: AccuracyReceipt | None = None
 
 
-__all__ = ["MultiOptions", "MultiState", "PaidAttempt"]
+__all__ = ["MultiOptions", "MultiState", "PaidAttempt", "ProfileGuidedMultiOptions"]

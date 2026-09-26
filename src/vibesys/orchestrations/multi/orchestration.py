@@ -1,4 +1,4 @@
-"""Plain multi-agent hypothesis search over explicit runtime capabilities."""
+"""Multi-agent hypothesis search over explicit runtime capabilities."""
 
 from __future__ import annotations
 
@@ -6,8 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
+from vibesys.orchestrations.multi.attribution import run_attribution
 from vibesys.orchestrations.multi.files import MultiFiles
-from vibesys.orchestrations.multi.models import MultiOptions, MultiState, PaidAttempt
+from vibesys.orchestrations.multi.models import (
+    MultiOptions,
+    MultiState,
+    PaidAttempt,
+    ProfileGuidedMultiOptions,
+)
 from vibesys.orchestrations.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
 from vibesys.roles.common import Verdict
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
@@ -28,6 +34,12 @@ from vibesys.search.hypothesis import (
     build_round_record,
 )
 from vibesys.search.hypothesis import cadence as hypothesis_cadence
+from vibesys.search.profile_focus import (
+    FocusView,
+    ProfileFocus,
+    ProfileFocusConfig,
+    ProfileFocusState,
+)
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
@@ -50,7 +62,11 @@ class _SelectedRound:
     attempt: AttemptState
 
 
-def _benchmark_objectives(options: MultiOptions) -> tuple[BenchmarkObjective, ...]:
+MultiRunOptions = MultiOptions | ProfileGuidedMultiOptions
+_PROFILE_MEASUREMENT_REASON = "profile-guided component measurement"
+
+
+def _benchmark_objectives(options: MultiRunOptions) -> tuple[BenchmarkObjective, ...]:
     return tuple(
         BenchmarkObjective(
             name=item.name,
@@ -146,10 +162,10 @@ class _TerminalPolicy:
         )
 
 
-class _PlainMultiRun:
-    """One run's multi-role control state and policy-owned resources."""
+class _MultiRun:
+    """One plain or profile-guided multi-role run."""
 
-    def __init__(self, host: RunHost, options: MultiOptions) -> None:
+    def __init__(self, host: RunHost, options: MultiRunOptions) -> None:
         self.host = host
         self.options = options
         self.workspace = host.workspaces.root
@@ -167,6 +183,18 @@ class _PlainMultiRun:
         self.state = MultiState()
         self.carry: CarryOver
         self.round_number = 1
+        profile = options.profile_guided
+        self.profile_focus = (
+            ProfileFocus(
+                ProfileFocusConfig(
+                    plateau_min_rounds=profile.min_measured_rounds,
+                    min_relative_improvement=profile.min_relative_improvement,
+                )
+            )
+            if profile is not None
+            else None
+        )
+        self.label_prefix = "profile_multi" if profile is not None else "multi"
 
     @property
     def records(self) -> list[RoundRecord]:
@@ -190,7 +218,10 @@ class _PlainMultiRun:
         self.files.write_pareto(
             self.search.archive_summary(self.records, space=self.state.search.metrics)
         )
-        await self._commit(workspace=self.workspace, label="multi: initialize policy state")
+        await self._commit(
+            workspace=self.workspace,
+            label=f"{self.label_prefix}: initialize policy state",
+        )
 
     async def run(self) -> RunStatus:
         try:
@@ -222,6 +253,7 @@ class _PlainMultiRun:
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
             context = decision.context
+            guidance = await self._prepare_profile_guidance()
             profile_decision = await self.turns.pre_round(
                 number,
                 context.carry,
@@ -242,6 +274,7 @@ class _PlainMultiRun:
                     plateau_warning=context.plateau_warning,
                     provisional_candidates=context.provisional_candidates,
                     workspace=self.workspace,
+                    guidance=guidance,
                 )
             )
             started = self.search.start(
@@ -255,7 +288,7 @@ class _PlainMultiRun:
             hypothesis = started.hypothesis
             await self._commit(
                 workspace=self.workspace,
-                label=f"multi: start hypothesis {plan.hypothesis_id}",
+                label=f"{self.label_prefix}: start hypothesis {plan.hypothesis_id}",
             )
             if started.rollback is not None:
                 hypothesis = await self._apply_rollback(hypothesis, started.rollback)
@@ -271,12 +304,16 @@ class _PlainMultiRun:
             self.host.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
             )
+            guidance = None
         reason = self.search.official_due(
             records=self.records,
             round_number=number,
             requested=plan.request_official_evaluation,
             candidate_ready=True,
         )
+        focus_state = self._focus_state()
+        if focus_state is not None and focus_state.active_component:
+            reason = reason or _PROFILE_MEASUREMENT_REASON
         request = AttemptRequest(
             round_number=number,
             plan=plan,
@@ -284,6 +321,7 @@ class _PlainMultiRun:
             records=tuple(self.records),
             active_hypothesis=hypothesis,
             workspace=self.workspace,
+            guidance=guidance,
         )
         attempt = AttemptState(
             agent_run_state=self.state.search,
@@ -310,7 +348,7 @@ class _PlainMultiRun:
         self.state = self.state.model_copy(update={"search": updated}, deep=True)
         await self._commit(
             workspace=self.workspace,
-            label=f"multi: set hypothesis {hypothesis.hypothesis_id} parent",
+            label=f"{self.label_prefix}: set hypothesis {hypothesis.hypothesis_id} parent",
         )
         return hypothesis
 
@@ -335,7 +373,9 @@ class _PlainMultiRun:
             },
             deep=True,
         )
-        await self._commit(label=f"multi: start round {self.round_number} attempt {retry}")
+        await self._commit(
+            label=f"{self.label_prefix}: start round {self.round_number} attempt {retry}"
+        )
 
     async def _run_attempts(self, selected: _SelectedRound) -> None:
         first = self._first_attempt(selected)
@@ -479,7 +519,9 @@ class _PlainMultiRun:
         self.state = self.state.model_copy(update={"search": updated}, deep=True)
         await self._commit(
             workspace=self.workspace,
-            label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            label=(
+                f"{self.label_prefix}: checkpoint hypothesis {selected.request.plan.hypothesis_id}"
+            ),
         )
 
     async def _approve_candidate(self, selected: _SelectedRound) -> None:
@@ -596,9 +638,23 @@ class _PlainMultiRun:
                 model=binding.model,
             )
         )
+        search_state = self.state.search
+        if self.profile_focus is not None:
+            focused = self.profile_focus.record(
+                self._require_focus_state(),
+                round_number=record.round_number,
+                passed=attempt.passed and record.official_evaluation,
+                relative_improvement=(
+                    record.perf_delta_pct / 100 if record.perf_delta_pct is not None else None
+                ),
+            )
+            search_state = search_state.model_copy(
+                update={"profile_guidance": focused},
+                deep=True,
+            )
         next_step = implementation.next_step if implementation is not None else None
         closed = self.search.close_round(
-            self.state.search,
+            search_state,
             hypothesis=hypothesis,
             record=record,
             records=self.records,
@@ -630,7 +686,7 @@ class _PlainMultiRun:
         self.carry = closed.carry
         await self._commit(
             workspace=self.workspace,
-            label=f"multi: close round {self.round_number}",
+            label=f"{self.label_prefix}: close round {self.round_number}",
         )
         self.round_number += 1
 
@@ -645,7 +701,7 @@ class _PlainMultiRun:
                 message = "multi-agent run has no trusted input baseline"
                 raise RuntimeError(message)
             await self.workspace.restore(baseline, clean=True)
-            await self.workspace.snapshot("multi: restore trusted input baseline")
+            await self.workspace.snapshot(f"{self.label_prefix}: restore trusted input baseline")
             self.host.log("no trusted winner; restored the input baseline")
             return
         if winner.commit is None:
@@ -656,14 +712,50 @@ class _PlainMultiRun:
             label=f"selected-round-{winner.round_number:04d}",
         )
         await self.workspace.restore(winner.commit, clean=True)
-        await self.workspace.snapshot(f"multi: select round {winner.round_number}")
+        await self.workspace.snapshot(f"{self.label_prefix}: select round {winner.round_number}")
         self.host.log(f"selected trusted winner from round {winner.round_number}")
+
+    def _focus_state(self) -> ProfileFocusState | None:
+        if self.profile_focus is None:
+            return None
+        return self.state.search.profile_guidance or self.profile_focus.initial()
+
+    def _require_focus_state(self) -> ProfileFocusState:
+        state = self._focus_state()
+        if state is None:
+            message = "profile focus state requested for a plain multi-agent run"
+            raise RuntimeError(message)
+        return state
+
+    async def _prepare_profile_guidance(self) -> FocusView | None:
+        profile = self.options.profile_guided
+        if profile is None or self.profile_focus is None:
+            return None
+        attribution = await run_attribution(self.host, profile, workspace=self.workspace)
+        focused = self.profile_focus.observe(
+            self._require_focus_state(),
+            round_number=self.round_number,
+            bottlenecks=attribution,
+        )
+        search = self.state.search.model_copy(
+            update={"profile_guidance": focused},
+            deep=True,
+        )
+        self.state = self.state.model_copy(update={"search": search}, deep=True)
+        await self._commit(label=f"profile-guided: prepare round {self.round_number}")
+        return self.profile_focus.focus(focused)
 
 
 async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
     """Run the plain multi-agent policy against the explicit runtime API."""
     options = MultiOptions.model_validate(raw_options)
-    return await _PlainMultiRun(host, options).run()
+    return await _MultiRun(host, options).run()
 
 
-__all__ = ["orchestrate"]
+async def orchestrate_profile_guided(host: RunHost, raw_options: BaseModel) -> RunStatus:
+    """Run profile-guided multi-agent search against the explicit runtime API."""
+    options = ProfileGuidedMultiOptions.model_validate(raw_options)
+    return await _MultiRun(host, options).run()
+
+
+__all__ = ["orchestrate", "orchestrate_profile_guided"]
