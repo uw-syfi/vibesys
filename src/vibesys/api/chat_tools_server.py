@@ -9,7 +9,7 @@ tools. A chat agent driver launches `python -m vibesys.api.chat_tools_server
 --run-id <id> --project-root <path>` per `vibesys.api.session
 ._OpenedAgentEnvironment.investigation_tools`; this module rebuilds its own
 tool list from those two primitives, mirroring
-`vs_issue_board.mcp`'s standalone-server shape.
+`vs_issue_tracker.mcp`'s standalone-server shape.
 
 Tool set:
 

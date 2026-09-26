@@ -10,15 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_issue_board.core import IssueBoard
-from vs_issue_board.progress import FileProgressLog, ProgressLog
+from vs_issue_tracker.core import IssueBoard
+from vs_issue_tracker.progress import FileProgressLog, ProgressLog
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_issue_board.core import Issue, IssueTracker
-    from vs_issue_board.policy import CreateIssuePolicy
+    from vs_issue_tracker.core import Issue, IssueTracker
+    from vs_issue_tracker.policy import CreateIssuePolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +91,7 @@ class LocalIssueTrackerSession:
         """Describe a local issue server configured with the per-turn grant."""
         args = [
             "-m",
-            "vs_issue_board.mcp",
+            "vs_issue_tracker.mcp",
             self._tool_store_path,
             "--creator",
             grant.creator,

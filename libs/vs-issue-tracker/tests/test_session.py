@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from vs_issue_board.api import (
+from vs_issue_tracker.api import (
     CreateIssuePolicy,
     IssueTrackerSession,
     IssueType,
@@ -40,7 +40,7 @@ def test_local_session_unifies_tracker_progress_and_tool_grant(tmp_path: Path) -
     assert server.env == ()
     assert server.args == (
         "-m",
-        "vs_issue_board.mcp",
+        "vs_issue_tracker.mcp",
         "issues.json",
         "--creator",
         "judge",

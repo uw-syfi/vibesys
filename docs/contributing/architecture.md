@@ -53,7 +53,7 @@ graph TD
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_feature_flags
     vibesys --> vs_github
-    vibesys --> vs_issue_board
+    vibesys --> vs_issue_tracker
     vibesys --> vs_loop_state
     vibesys --> vs_project
     vibesys --> vs_prompts
@@ -468,7 +468,7 @@ graph TD
     vibesys.loops.issue_queue --> vibesys.roles
     vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.issue_queue --> vs_agent
-    vibesys.loops.issue_queue --> vs_issue_board
+    vibesys.loops.issue_queue --> vs_issue_tracker
     vibesys.loops.issue_queue --> vs_loop_state
     vibesys.loops.issue_queue --> vs_project
     vibesys.loops.multi --> vibesys
@@ -613,7 +613,7 @@ graph TD
     vibesys.roles --> vibesys.search.hypothesis
     vibesys.roles --> vibesys.search.population
     vibesys.roles --> vs_agent
-    vibesys.roles --> vs_issue_board
+    vibesys.roles --> vs_issue_tracker
     vibesys.roles --> vs_loop_state
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends

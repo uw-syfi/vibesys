@@ -36,7 +36,7 @@ from vibesys.roles.implementer import IssueImplementerContext
 from vibesys.roles.judge import IssueJudgeContext
 from vibesys.roles.mutator import MutatorContext
 from vibesys.search.population.models import Individual
-from vs_issue_board.api import Issue
+from vs_issue_tracker.api import Issue
 
 if TYPE_CHECKING:
     from collections.abc import Callable

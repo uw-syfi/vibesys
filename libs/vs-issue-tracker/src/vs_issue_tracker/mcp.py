@@ -7,9 +7,10 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vs_issue_board.core import IssueBoard, IssueStatus, IssueTracker, IssueType
-from vs_issue_board.format import format_issue_full, format_issue_short
-from vs_issue_board.policy import CreateIssuePolicy, create_issue_under_policy
+from vs_issue_tracker.core import IssueStatus, IssueTracker, IssueType
+from vs_issue_tracker.format import format_issue_full, format_issue_short
+from vs_issue_tracker.github import open_issue_tracker
+from vs_issue_tracker.policy import CreateIssuePolicy, create_issue_under_policy
 
 _ALL_TYPES: frozenset[IssueType] = frozenset({IssueType.BUG, IssueType.FEATURE, IssueType.PERF})
 
@@ -44,7 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "store_path",
         type=Path,
-        help="Path to the issues JSON file to expose.",
+        nargs="?",
+        help="Path to the issues JSON file to expose (omit for GitHub mode).",
+    )
+    parser.add_argument(
+        "--github-repository",
+        help="Use GitHub Issues in OWNER/REPOSITORY instead of local JSON.",
     )
     parser.add_argument(
         "--creator",
@@ -78,8 +84,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_server(args: argparse.Namespace) -> FastMCP:
-    """Build the standalone JSON-backed issue MCP server."""
-    tracker = IssueBoard(args.store_path)
+    """Build the standalone MCP server for local JSON or GitHub storage."""
+    if args.github_repository is not None:
+        if args.store_path is not None:
+            raise ValueError("choose either store_path or --github-repository")  # noqa: TRY003  # tracked: #288
+        local_path = Path("issues.json")
+        tracker = open_issue_tracker(
+            "github",
+            local_path=local_path,
+            repository=args.github_repository,
+        )
+    else:
+        if args.store_path is None:
+            raise ValueError("store_path is required unless --github-repository is set")  # noqa: TRY003  # tracked: #288
+        tracker = open_issue_tracker("local", local_path=args.store_path)
     policy = CreateIssuePolicy(
         creator=args.creator,
         iteration=args.iteration,

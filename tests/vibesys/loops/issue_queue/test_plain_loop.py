@@ -32,7 +32,7 @@ from vibesys.loops.issue_queue.orchestration import descriptor_from_options
 from vibesys.roles.common import Verdict
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_issue_board.api import IssueBoard, IssueStatus
+from vs_issue_tracker.api import IssueBoard, IssueStatus
 from vs_project.api import OrchestrationRunManifest, Project
 
 if TYPE_CHECKING:

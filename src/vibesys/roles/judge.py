@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.roles.common import SkillResourceSelection, Verdict
 from vibesys.runtime import Fresh, ReadOnly, Reuse, Role, Writes
-from vs_issue_board.api import Issue
+from vs_issue_tracker.api import Issue
 
 
 class JudgeContext(BaseModel):

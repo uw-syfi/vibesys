@@ -42,7 +42,7 @@ FRAMEWORK_PACKAGES = (
     "vs_evaluator_protocol",
     "vs_feature_flags",
     "vs_github",
-    "vs_issue_board",
+    "vs_issue_tracker",
     "vs_loop_state",
     "vs_project",
     "vs_prompts",
@@ -54,7 +54,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-evaluator-protocol",
         "vs-feature-flags",
         "vs-github",
-        "vs-issue-board",
+        "vs-issue-tracker",
         "vs-loop-state",
         "vs-project",
         "vs-prompts",
@@ -72,7 +72,7 @@ _PACKAGE_SOURCE_ROOTS = {
     ),
     Path("libs/vs-feature-flags/src/vs_feature_flags"): PurePosixPath("vs_feature_flags"),
     Path("libs/vs-github/src/vs_github"): PurePosixPath("vs_github"),
-    Path("libs/vs-issue-board/src/vs_issue_board"): PurePosixPath("vs_issue_board"),
+    Path("libs/vs-issue-tracker/src/vs_issue_tracker"): PurePosixPath("vs_issue_tracker"),
     Path("libs/vs-loop-state/src/vs_loop_state"): PurePosixPath("vs_loop_state"),
     Path("libs/vs-project/src/vs_project"): PurePosixPath("vs_project"),
     Path("libs/vs-prompts/src/vs_prompts"): PurePosixPath("vs_prompts"),
@@ -112,7 +112,7 @@ _REQUIRED_TUI_FILES = (
 )
 _EXPECTED_ENTRY_POINTS = {
     "vibesys": "entrypoints.launcher:main",
-    "vibesys-issue-mcp": "vs_issue_board.mcp:main",
+    "vibesys-issue-mcp": "vs_issue_tracker.mcp:main",
 }
 _DIST_INFO_FILES = frozenset(
     {

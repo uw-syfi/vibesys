@@ -11,7 +11,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-evaluator-protocol/src"),
     Path("libs/vs-feature-flags/src"),
     Path("libs/vs-github/src"),
-    Path("libs/vs-issue-board/src"),
+    Path("libs/vs-issue-tracker/src"),
     Path("libs/vs-loop-state/src"),
     Path("libs/vs-project/src"),
     Path("libs/vs-prompts/src"),

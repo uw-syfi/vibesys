@@ -110,3 +110,39 @@ def test_missing_gh_has_install_guidance() -> None:
 
     with pytest.raises(GitHubCLIUnavailableError, match=r"https://cli\.github\.com"):
         GitHubCLI(_runner=missing_runner).ensure_authenticated()
+
+
+def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
+    runner = RecordingRunner(
+        [
+            _result(stdout='[{"number": 8}]'),
+            _result(stdout='{"number": 8}'),
+            _result(stdout="https://github.com/owner/repo/issues/9\n"),
+            _result(),
+            _result(),
+            _result(),
+            _result(),
+        ]
+    )
+    github = GitHubCLI(_runner=runner)
+
+    assert github.list_issues("owner/repo") == [{"number": 8}]
+    assert github.view_issue("owner/repo", 8) == {"number": 8}
+    assert (
+        github.create_issue("owner/repo", title="title", body="body", labels=["vibesys:type/bug"])
+        == 9
+    )
+    github.edit_issue("owner/repo", 8, add_labels=["vibesys:status/blocked"])
+    github.comment_issue("owner/repo", 8, "metadata")
+    github.set_issue_state("owner/repo", 8, issue_open=False)
+    github.ensure_label("owner/repo", "vibesys:type/bug")
+
+    assert [call[0][1:4] for call in runner.calls] == [
+        ["issue", "list", "--repo"],
+        ["issue", "view", "8"],
+        ["issue", "create", "--repo"],
+        ["issue", "edit", "8"],
+        ["issue", "comment", "8"],
+        ["issue", "close", "8"],
+        ["label", "create", "vibesys:type/bug"],
+    ]

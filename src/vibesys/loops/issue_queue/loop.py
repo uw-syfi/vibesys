@@ -12,19 +12,19 @@ from pydantic import BaseModel, ConfigDict
 
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
+from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.roles.implementer import ISSUE_IMPLEMENTER, IssueImplementerContext
 from vibesys.roles.judge import ISSUE_JUDGE, IssueJudgeContext
 from vibesys.roles.perf_eval import ISSUE_PERF_EVAL, IssuePerfEvalContext
-from vs_agent.api import RoundProgress
-from vs_issue_board.api import (
-    CreateIssuePolicy,
+from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
+from vs_issue_tracker.api import (
     Issue,
     IssueTracker,
-    IssueTrackerSession,
     IssueType,
     ProgressLog,
-    open_local_issue_tracker_session,
+    open_issue_tracker,
+    open_progress_log,
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
@@ -63,7 +63,8 @@ class BootstrapContext(BaseModel):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
+    from pathlib import Path
 
     from vibesys.config import LoadLevelCfg
     from vibesys.evaluators.perf_reply import IssuePerfEvalResponse
@@ -72,6 +73,50 @@ if TYPE_CHECKING:
     from vibesys.roles.implementer import IssueImplementerResponse
     from vibesys.roles.judge import IssueJudgeResponse
     from vibesys.runtime import AgentHandle
+
+
+def build_issue_mcp_spec(  # noqa: PLR0913  # tracked: #288
+    *,
+    store_relpath: str | None,
+    creator: str,
+    iteration: int,
+    cap: int | None,
+    allowed_types: set[IssueType],
+    tracker_backend: str = "local",
+    tracker_repository: str | None = None,
+) -> MCPServerSpec:
+    """Describe the issue-board MCP server and its per-phase policy.
+
+    Goes through the host's generic tool-serving descriptor
+    (``vs_agent.expose_as_tools``) instead of hand-building an
+    ``MCPServerSpec``; only the issue-board-specific argv stays here.
+    """
+    entrypoint_args = [
+        "--creator",
+        creator,
+        "--iteration",
+        str(iteration),
+        "--allowed-types",
+        ",".join(sorted(issue_type.value for issue_type in allowed_types)),
+    ]
+    if cap is not None:
+        entrypoint_args += ["--cap", str(cap)]
+    if tracker_backend == "github":
+        if tracker_repository is None:
+            raise ValueError("tracker_repository is required for the GitHub issue MCP server")  # noqa: TRY003  # tracked: #288
+        entrypoint_module = "vs_issue_tracker.mcp"
+        entrypoint_args += ["--github-repository", tracker_repository]
+    else:
+        if store_relpath is None:
+            raise ValueError("store_relpath is required for the local issue MCP server")  # noqa: TRY003  # tracked: #288
+        entrypoint_module = "vs_issue_tracker.mcp"
+        entrypoint_args.insert(0, store_relpath)
+    descriptor = expose_as_tools(
+        name="vibesys-issues",
+        entrypoint_module=entrypoint_module,
+        entrypoint_args=tuple(entrypoint_args),
+    )
+    return mcp_spec_from_descriptor(descriptor)
 
 
 # ---------------------------------------------------------------------------
@@ -207,22 +252,25 @@ class IssueQueueRun:
         state_store = IssueQueueStateStore(portable)
         local_dir = host.state.local_namespace.external_directory()
         issues_dir = local_dir / "issues"
-        board: IssueTracker | None = None
+        board: IssueTracker
 
-        def render_changed_issues() -> None:
-            if board is not None:
-                render_all(issues_dir, board.list())
+        def render_issues() -> None:
+            render_all(issues_dir, board.list())
 
-        tracker_session = open_local_issue_tracker_session(
-            store_path=host.workspaces.root.path / "issues.json",
-            progress_path=local_dir / "progress.md",
-            tool_store_path="issues.json",
-            on_change=render_changed_issues,
-            view_sink=lambda issues: render_all(issues_dir, issues),
+        board = open_issue_tracker(
+            options.tracker_backend,
+            local_path=host.workspaces.root.path / "issues.json",
+            repository=options.tracker_repository,
+            on_change=render_issues if options.tracker_backend == "local" else None,
         )
-        board = tracker_session.tracker
-        tracker_session.refresh()
-        progress_log = tracker_session.progress
+        progress_log = open_progress_log(
+            options.tracker_backend,
+            local_path=local_dir / "progress.md",
+            repository=options.tracker_repository,
+            run_id=host.request.exp_name or host.request.project_root.name,
+        )
+        if options.tracker_backend == "local":
+            render_issues()
         persisted = await host.state.slot("state.json", PlainLoopCursor).load()
         turns = _IssueQueueTurns(
             host=host,
@@ -230,10 +278,13 @@ class IssueQueueRun:
             judge_agent=await host.agents.spawn(host.agents.default_definition("judge")),
             perf_agent=await host.agents.spawn(host.agents.default_definition("perf_eval")),
             board=board,
-            tracker_session=tracker_session,
             state_store=state_store,
             prompt=prompt,
             progress_log=progress_log,
+            render_issues=render_issues if options.tracker_backend == "local" else None,
+            tracker_backend=options.tracker_backend,
+            tracker_repository=options.tracker_repository,
+            issues_dir=issues_dir,
             perf_metrics_location=portable.agent_visible_path("perf/metrics.json"),
             max_issues_per_perf_eval=options.max_issues_per_perf_eval,
             load_levels=host.request.config.perf_eval.load_levels,
@@ -345,13 +396,35 @@ class _IssueQueueTurns:
     judge_agent: AgentHandle
     perf_agent: AgentHandle
     board: IssueTracker
-    tracker_session: IssueTrackerSession
     state_store: IssueQueueStateStore
     prompt: Prompt
     progress_log: ProgressLog
+    render_issues: Callable[[], None] | None
+    tracker_backend: str
+    tracker_repository: str | None
+    issues_dir: Path
     perf_metrics_location: str
     max_issues_per_perf_eval: int
     load_levels: list[LoadLevelCfg] | None
+
+    def _issue_mcp_spec(
+        self, *, creator: str, iteration: int, cap: int, allowed_types: set[IssueType]
+    ) -> list[MCPServerSpec]:
+        agent = self.judge_agent if creator == "judge" else self.perf_agent
+        if not agent.capabilities.mcp_servers:
+            message = f"agent backend {agent.backend_name!r} cannot expose issue-board tools"
+            raise RuntimeError(message)
+        return [
+            build_issue_mcp_spec(
+                store_relpath="issues.json" if self.tracker_backend == "local" else None,
+                creator=creator,
+                iteration=iteration,
+                cap=cap,
+                allowed_types=allowed_types,
+                tracker_backend=self.tracker_backend,
+                tracker_repository=self.tracker_repository,
+            )
+        ]
 
     async def implement(self, issue: Issue) -> IssueImplementerResponse:
         host = self.host
@@ -413,21 +486,18 @@ class _IssueQueueTurns:
                 ),
                 message=user_prompt,
                 label=f"judge issue #{issue.id} att{issue.attempts}",
-                tool_servers=[
-                    self.tracker_session.issue_tool_server(
-                        CreateIssuePolicy(
-                            creator="judge",
-                            iteration=iteration,
-                            cap=1,
-                            allowed_types=frozenset({IssueType.BUG}),
-                        )
-                    )
-                ],
+                mcp_servers=self._issue_mcp_spec(
+                    creator="judge",
+                    iteration=iteration,
+                    cap=1,
+                    allowed_types={IssueType.BUG},
+                ),
                 backend=host.request.backend,
             ),
         )
         response = reply.model_copy(update={"issue_id": issue.id})
-        self.tracker_session.refresh()
+        if self.render_issues is not None:
+            self.render_issues()
         self.progress_log.append(_format_progress_from_judge(iteration, issue, response))
         await host.workspaces.root.snapshot(
             f"iter-{iteration}-judge-{issue.id}-att{issue.attempts}"
@@ -457,22 +527,17 @@ class _IssueQueueTurns:
                 ),
                 message=user_prompt,
                 label=f"perf_eval iter {iteration}",
-                tool_servers=[
-                    self.tracker_session.issue_tool_server(
-                        CreateIssuePolicy(
-                            creator="perf_eval",
-                            iteration=iteration,
-                            cap=self.max_issues_per_perf_eval,
-                            allowed_types=frozenset(
-                                {IssueType.BUG, IssueType.FEATURE, IssueType.PERF}
-                            ),
-                        )
-                    )
-                ],
+                mcp_servers=self._issue_mcp_spec(
+                    creator="perf_eval",
+                    iteration=iteration,
+                    cap=self.max_issues_per_perf_eval,
+                    allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
+                ),
                 backend=host.request.backend,
             ),
         )
-        self.tracker_session.refresh()
+        if self.render_issues is not None:
+            self.render_issues()
         self.progress_log.append(_format_progress_from_perf_eval(iteration, response))
         self.state_store.append_performance(
             PlainPerformanceRecord(

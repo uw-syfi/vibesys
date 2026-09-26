@@ -37,7 +37,7 @@ from vibesys.roles.implementer import IssueImplementerResponse
 from vibesys.roles.judge import IssueJudgeResponse
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.schemas import PerfTrend
-from vs_issue_board.api import IssueBoard, IssueType
+from vs_issue_tracker.api import IssueBoard, IssueType
 from vs_project.api import Project
 
 if TYPE_CHECKING:

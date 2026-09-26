@@ -32,17 +32,16 @@
 # undeclared.
 #
 # Libs form a DAG by review: every lib edge is explicit here. The edges are
-# `vs_project` -> `vs_loop_state` and `vs_agent` -> {`vs_sandbox`,
-# `vs_loop_state`, `vs_project`} (vs_agent constructs agents over sandboxes,
-# reads loop-state schemas, and persists agent sessions to project state).
-# Reject any other lib-to-lib edge.
+# `vs_project` -> `vs_loop_state`, `vs_agent` -> {`vs_sandbox`,
+# `vs_loop_state`, `vs_project`}, and `vs_issue_tracker` -> `vs_github` for its
+# GitHub-backed tracker and progress-log implementations.
 
 source_roots = [
     "src",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-feature-flags/src",
     "libs/vs-github/src",
-    "libs/vs-issue-board/src",
+    "libs/vs-issue-tracker/src",
     "libs/vs-loop-state/src",
     "libs/vs-project/src",
     "libs/vs-prompts/src",
@@ -205,6 +204,11 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
+path = "vibesys.orchestration.tools"
+layer = "orchestration_host"
+depends_on = ["vs_agent"]
+
+[[modules]]
 # Host-owned agent memory (roadmap, progress log, Pareto archive): pure path
 # resolution plus the file writes strategies used to hand-roll via the
 # dissolved vibesys.agent_run.issue_board.
@@ -257,7 +261,7 @@ depends_on = []
 # vibesys.orchestration.runtime (ctx.agents.turn) and loops/.
 path = "vibesys.roles"
 layer = "roles_search"
-depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population", "vibesys.search.hypothesis"]
+depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_tracker", "vibesys.search.population", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops"
@@ -277,7 +281,7 @@ depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vi
 [[modules]]
 path = "vibesys.loops.issue_queue"
 layer = "loops"
-depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.errors"]
+depends_on = ["vs_issue_tracker", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.evolve"
@@ -355,9 +359,9 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
-path = "vs_issue_board"
+path = "vs_issue_tracker"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_github"]
 
 [[modules]]
 path = "vs_evaluator_protocol"
@@ -400,7 +404,7 @@ from = ["vs_github"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]
-from = ["vs_issue_board"]
+from = ["vs_issue_tracker"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]

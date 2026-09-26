@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from vibesys.loops.issue_queue.entrypoint import resume_point
-from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
+from vs_issue_tracker.api import IssueBoard, IssueStatus, IssueType
 from vs_loop_state.api import PlainLoopCursor
 
 

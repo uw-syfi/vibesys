@@ -34,7 +34,7 @@ Board files are split across two roots (investigated, not assumed):
 
 - The project workspace (``run.workspace``, i.e. ``host.workspaces.root.path``)
   holds the canonical, git-tracked ``issues.json`` written by
-  ``vs_issue_board.api.IssueBoard``.
+  ``vs_issue_tracker.api.IssueBoard``.
 - The machine-local run-state directory (outside the project workspace, a
   sibling of ``tmp_path`` per ``isolated_vibesys_state_home`` in
   ``tests/conftest.py``) holds the local ``progress.md`` plus the

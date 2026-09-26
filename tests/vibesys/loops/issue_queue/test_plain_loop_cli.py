@@ -43,6 +43,11 @@ class TestBuildParser:
         args = parser.parse_args([])
         assert args.max_issues_per_perf_eval == 3
 
+    def test_tracker_defaults_to_local(self) -> None:
+        args = build_parser().parse_args([])
+        assert args.tracker_backend == "local"
+        assert args.tracker_repository is None
+
     def test_default_resume_is_none(self) -> None:
         parser = build_parser()
         args = parser.parse_args([])
@@ -158,7 +163,32 @@ class TestMain:
             assert request.orchestration.options["max_rounds"] == 7
             assert request.orchestration.options["max_attempts_per_issue"] == 4
             assert request.orchestration.options["max_issues_per_perf_eval"] == 2
+            assert request.orchestration.options["tracker_backend"] == "local"
+            assert request.orchestration.options["tracker_repository"] is None
             assert request.runs_dir == Path("runs").resolve()
+
+    def test_main_persists_github_tracker_selection(self) -> None:
+        with (
+            patch(
+                "sys.argv",
+                [
+                    *self._BASE_ARGV,
+                    "--tracker-backend",
+                    "github",
+                    "--tracker-repository",
+                    "owner/repo",
+                ],
+            ),
+            self._patch_config(),
+            patch(
+                "entrypoints.cli.loops._execute_run_request",
+                return_value=self._result(succeeded=True),
+            ) as mock_run,
+        ):
+            main()
+            options = mock_run.call_args.args[0].orchestration.options
+            assert options["tracker_backend"] == "github"
+            assert options["tracker_repository"] == "owner/repo"
 
     def test_main_forwards_agent_backend_and_cli_provider(self) -> None:
         with (

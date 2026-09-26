@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration import OrchestrationResumeDecision
@@ -10,7 +13,7 @@ from vs_project.api import OrchestrationDescriptor
 
 
 class IssueQueueOptions(BaseModel):
-    """Resolved, strict plain-loop settings persisted in a v4 descriptor."""
+    """Resolved plain-loop settings, including its selected issue backend."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -18,6 +21,25 @@ class IssueQueueOptions(BaseModel):
     max_rounds: int = Field(gt=0)
     max_attempts_per_issue: int = Field(gt=0)
     max_issues_per_perf_eval: int = Field(gt=0)
+    tracker_backend: Literal["local", "github"] = "local"
+    tracker_repository: str | None = None
+
+    @field_validator("tracker_repository")
+    @classmethod
+    def _validate_repository(cls, value: str | None) -> str | None:
+        """Require an unqualified GitHub OWNER/REPOSITORY slug."""
+        if value is not None and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value) is None:
+            raise ValueError("tracker_repository must use OWNER/REPOSITORY format")  # noqa: TRY003  # tracked: #288
+        return value
+
+    @model_validator(mode="after")
+    def _validate_backend(self) -> IssueQueueOptions:
+        """Require the repository setting to match the selected backend."""
+        if self.tracker_backend == "github" and self.tracker_repository is None:
+            raise ValueError("tracker_repository is required when tracker_backend is github")  # noqa: TRY003  # tracked: #288
+        if self.tracker_backend == "local" and self.tracker_repository is not None:
+            raise ValueError("tracker_repository is only valid when tracker_backend is github")  # noqa: TRY003  # tracked: #288
+        return self
 
 
 def descriptor_from_options(options: IssueQueueOptions) -> OrchestrationDescriptor:

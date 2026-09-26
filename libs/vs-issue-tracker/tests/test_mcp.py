@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from vs_issue_board.api import CreateIssuePolicy, IssueBoard, IssueType
-from vs_issue_board.api.mcp import build_tracker_server
-from vs_issue_board.mcp import build_parser, build_server
+from vs_issue_tracker.api import CreateIssuePolicy, IssueBoard, IssueType
+from vs_issue_tracker.api.mcp import build_tracker_server
+from vs_issue_tracker.mcp import build_parser, build_server
 
 
 def _ns(tmp_path: Path, *extra: str) -> Namespace:
