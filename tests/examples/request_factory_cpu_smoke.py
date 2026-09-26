@@ -70,6 +70,7 @@ class SmokeProfile(BaseModel):
     tokenizer: str | None = None
     corpus_text: str | None = None
     unique_prompt_tokens: bool = False
+    unique_prompts: bool = False
 
     @model_validator(mode="after")
     def _has_failure_contract(self) -> SmokeProfile:
@@ -119,13 +120,7 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
             body = {}
             error = f"invalid JSON request: {exc}"
 
-        with self.server.lock:
-            shape = self._shape(body)
-            if shape is not None:
-                self.server.observed_shapes[shape] += 1
-            if error:
-                self.server.errors.append(error)
-            failure_mode = self.server.failure_mode
+        failure_mode = self.server.record(self._shape(body), body.get("prompt"), error)
 
         if error:
             self.send_error(400, error)
@@ -234,7 +229,21 @@ class _FakeServer(http.server.ThreadingHTTPServer):
         self.failure_mode: FailureMode | None = None
         self.errors: list[str] = []
         self.observed_shapes: Counter[tuple[int, int]] = Counter()
+        self.observed_prompts: list[tuple[int, ...]] = []
         self.lock = threading.Lock()
+
+    def record(
+        self, shape: tuple[int, int] | None, prompt: object, error: str | None
+    ) -> FailureMode | None:
+        """Record one request and return its deterministic failure mode."""
+        with self.lock:
+            if shape is not None:
+                self.observed_shapes[shape] += 1
+            if isinstance(prompt, list) and all(isinstance(token, int) for token in prompt):
+                self.observed_prompts.append(tuple(prompt))
+            if error:
+                self.errors.append(error)
+            return self.failure_mode
 
 
 def _benchmark_args(profile: SmokeProfile, output_path: Path) -> tuple[str, ...]:
@@ -331,8 +340,13 @@ def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
                 f"unexpected request-shape counts: {server.observed_shapes}; "
                 f"expected {profile.shape_counts}"
             )
+            if profile.unique_prompts:
+                assert len(set(server.observed_prompts)) == len(server.observed_prompts), (
+                    "Request Factory replayed a prompt within the measured benchmark"
+                )
             for index, failure in enumerate(profile.failures):
                 server.observed_shapes.clear()
+                server.observed_prompts.clear()
                 server.failure_mode = failure.mode
                 _run_case(
                     profile,
