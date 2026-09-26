@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 _BUNDLE = Path(__file__).parents[2] / "examples" / "model-serving" / "Llama-3-8B"
 _BENCHMARK = _BUNDLE / "benchmark" / "benchmark.py"
 _FAKE_ENGINE = Path(__file__).with_name("fakes") / "request_factory_sweep_engine.py"
+_FAKE_MODULES = Path(__file__).with_name("fakes")
+_TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
 
 
 def test_llama3_8b_uses_request_factory_and_declares_pareto_metrics() -> None:
@@ -56,6 +58,59 @@ def test_llama3_8b_cpu_smoke_profile_declares_benchmark_contract() -> None:
     assert set(profile.metrics) == {"aggregate_throughput", "p99_latency_ms"}
     assert profile.unique_prompts is True
     assert profile.tokenizer_path.name == "request_factory_tokenizer.json"
+
+
+def test_default_tokenizer_resolves_an_exact_revision_before_rf(tmp_path: Path) -> None:
+    tokenizer = tmp_path / "snapshot" / "tokenizer.json"
+    tokenizer.parent.mkdir()
+    tokenizer.write_text("{}", encoding="utf-8")
+    download_capture = tmp_path / "download.json"
+    rf_capture = tmp_path / "rf.jsonl"
+    output = tmp_path / "result.jsonl"
+    state = tmp_path / "state.json"
+    environment = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, (str(_FAKE_MODULES), os.environ.get("PYTHONPATH", "")))
+        ),
+        "HF_FAKE_CAPTURE": str(download_capture),
+        "HF_FAKE_LOCAL_PATH": str(tokenizer),
+        "RF_FAKE_POINTS": json.dumps({"1": [[100.0, 10.0], [100.0, 10.0]]}),
+        "RF_FAKE_STATE": str(state),
+        "RF_FAKE_CAPTURE": str(rf_capture),
+    }
+
+    completed = run_test_command(
+        [
+            sys.executable,
+            _BENCHMARK,
+            "--request-factory-engine",
+            _FAKE_ENGINE,
+            "--request-count",
+            "1",
+            "--input-tokens",
+            "2",
+            "--output-tokens",
+            "1",
+            "--concurrencies",
+            "1",
+            "--vs-output",
+            output,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(download_capture.read_text(encoding="utf-8")) == {
+        "repo_id": "meta-llama/Llama-3.1-8B-Instruct",
+        "filename": "tokenizer.json",
+        "revision": _TOKENIZER_REVISION,
+    }
+    invocations = [json.loads(line) for line in rf_capture.read_text(encoding="utf-8").splitlines()]
+    assert {invocation["tokenizer"] for invocation in invocations} == {str(tokenizer)}
 
 
 def _run_sweep(

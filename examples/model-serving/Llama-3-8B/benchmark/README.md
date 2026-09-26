@@ -19,6 +19,11 @@ RF's saturated arrival mode bounded by the selected concurrency. This replaces
 the previous fixed-duration client run with a fixed-volume RF trace; retain this
 methodology change when comparing results across the migration.
 
+The production tokenizer is resolved from
+`meta-llama/Llama-3.1-8B-Instruct` at immutable revision
+`0e9e39f249a16976918f6564b8830bc894c89659`. CPU smoke and manual runs may
+still pass an explicit local `--tokenizer` path.
+
 The default coarse sweep uses concurrency `1,2,4,8,16,32,64,128`. The wrapper
 retains every point, flags failures, a throughput falloff beyond 5%, or a p99
 latency increase over 2x without a throughput gain beyond 3% as a suspected
