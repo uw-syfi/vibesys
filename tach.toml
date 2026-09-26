@@ -167,11 +167,11 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.loops.registry", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestrations.hypothesis_readmodel"]
+depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestrations.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.orchestration.memory", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel"]
+depends_on = ["vibesys.plugin_catalog", "vs_project", "vibesys.orchestration.memory", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -339,7 +339,7 @@ depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 [[modules]]
 path = "vibesys.orchestrations"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.domains", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.prompts", "vibesys.roles", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.domains", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.prompts", "vibesys.roles", "vs_issue_board", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys._model_config"
@@ -436,7 +436,7 @@ expose = ["api", "api\\..*"]
 from = ["vs_runtime"]
 
 [[interfaces]]
-expose = ["agent_options", "hypothesis_readmodel", "single"]
+expose = ["agent_options", "hypothesis_readmodel", "issue_queue", "issue_queue\\..*", "multi", "multi\\..*", "single", "single\\..*"]
 from = ["vibesys.orchestrations"]
 
 [[interfaces]]
@@ -562,12 +562,18 @@ depends_on = ["vibesys", "vibesys.errors", "vibesys.evaluators", "vibesys.orches
 # vibesys.orchestrations because strategies never import each other.
 path = "vibesys.orchestrations.hypothesis_readmodel"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state"]
+depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.loops.registry"
 layer = "loops"
-depends_on = [ "vibesys.loops.evolve.entrypoint", "vibesys.orchestration.contracts", "vibesys.loops.multi", "vibesys.loops.single", "vibesys.loops.issue_queue"]
+depends_on = ["vibesys.plugin_catalog"]
+
+[[modules]]
+# Thin product composition: in-repository plugins plus the temporary private
+# RunSetup adapter. Evolve remains on the legacy arm until its plugin lands.
+path = "vibesys.plugin_catalog"
+depends_on = ["vibesys.context", "vibesys.errors", "vibesys.loops.evolve.entrypoint", "vibesys.orchestration", "vibesys.orchestration.contracts", "vibesys.orchestration.memory", "vibesys.orchestrations", "vibesys.orchestrations.agent_options", "vs_project"]
 
 [[modules]]
 path = "vibesys.loops.evolve.entrypoint"

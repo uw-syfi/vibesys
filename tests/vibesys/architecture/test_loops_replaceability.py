@@ -4,9 +4,9 @@ Replaceability means: a strategy is its folder + one registry line + its
 prompt folder. Concretely:
 
   1. No strategy package imports another strategy package (peers never
-     import each other; only ``vibesys.loops.registry`` imports all of them).
+     import each other; product composition imports the remaining legacy one).
   2. Nothing outside ``vibesys.loops`` imports a strategy package directly;
-     the only doorway in is ``vibesys.loops.registry``.
+     the only doorways are product composition and the evolve API adapter.
 
 Both checks are pure ``ast`` scans over ``src/vibesys`` so they stay cheap and
 do not require importing the package under test.
@@ -29,6 +29,8 @@ _ALLOWED_EXTERNAL_STRATEGY_IMPORTS = {
     # evolve's orchestration module directly for `resolve_openevolve_options`
     # instead of going through the registry. Tracked debt, not yet rewired.
     "api/evolve.py",
+    # Final-shape product composition keeps only evolve on the legacy arm.
+    "plugin_catalog.py",
 }
 
 
@@ -84,6 +86,5 @@ def test_nothing_outside_loops_imports_a_strategy_package_except_the_registry() 
                 continue
             violations.append(f"{rel} imports {module_name}")
     assert not violations, (
-        "only vibesys.loops.registry may import a strategy package directly: "
-        + "; ".join(violations)
+        "only product composition may import a strategy package directly: " + "; ".join(violations)
     )

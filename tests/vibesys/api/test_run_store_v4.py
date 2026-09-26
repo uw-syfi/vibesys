@@ -11,9 +11,9 @@ from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
 from vibesys.context import RunSetup
 from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
+from vibesys.orchestrations.issue_queue import IssueQueueState
 from vibesys.search.population.models import PopulationConfig
 from vibesys.search.population.search import PopulationSearch
-from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
@@ -32,11 +32,21 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
         run_environment=RunEnvironmentRecord(name="local"),
         execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
-            id="plain", config_version=1, options={"max_rounds": 3}
+            id="plain",
+            config_version=1,
+            options={
+                "max_rounds": 3,
+                "max_attempts_per_issue": 2,
+                "max_issues_per_perf_eval": 2,
+            },
         ),
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
+    expected = IssueQueueState(round_idx=1, bootstrap_done=True)
+    project.state.portable_namespace(manifest.run_id, "plain").slot(
+        "state.json", IssueQueueState
+    ).save(expected)
 
     store = open_run_store(project)
     direct = store.get_run(manifest.run_id)
@@ -46,7 +56,7 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert type(direct.loop) is str
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    assert direct.projection == PlainLoopCursor().model_dump(mode="json")
+    assert direct.projection == expected.model_dump(mode="json")
     assert len(listed) == 1
     assert listed[0] == direct
 
@@ -145,7 +155,7 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
-    project.state.portable_namespace(manifest.run_id, "profile_multi").write_bytes(
+    project.state.portable_namespace(manifest.run_id, "profile-guided-multi-agent").write_bytes(
         "agent.json", b"{}"
     )
     project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")

@@ -74,20 +74,20 @@ graph TD
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
-    vibesys.api --> vibesys.loops.registry
     vibesys.api --> vibesys.orchestration._common
     vibesys.api --> vibesys.orchestration.contracts
     vibesys.api --> vibesys.orchestration.request
     vibesys.api --> vibesys.orchestration.runner
     vibesys.api --> vibesys.orchestrations.hypothesis_readmodel
+    vibesys.api --> vibesys.plugin_catalog
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.runtime
     vibesys.api --> vibesys.sandbox
-    vibesys.api.agent --> vibesys.loops.registry
     vibesys.api.agent --> vibesys.orchestration.memory
     vibesys.api.agent --> vibesys.orchestrations.agent_options
     vibesys.api.agent --> vibesys.orchestrations.hypothesis_readmodel
+    vibesys.api.agent --> vibesys.plugin_catalog
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.evaluators
@@ -157,11 +157,7 @@ graph TD
     vibesys.loops.multi --> vibesys.runtime
     vibesys.loops.multi --> vibesys.search.hypothesis
     vibesys.loops.multi --> vibesys.search.profile_focus
-    vibesys.loops.registry --> vibesys.loops.evolve.entrypoint
-    vibesys.loops.registry --> vibesys.loops.issue_queue
-    vibesys.loops.registry --> vibesys.loops.multi
-    vibesys.loops.registry --> vibesys.loops.single
-    vibesys.loops.registry --> vibesys.orchestration.contracts
+    vibesys.loops.registry --> vibesys.plugin_catalog
     vibesys.loops.single --> vibesys
     vibesys.loops.single --> vibesys.context
     vibesys.loops.single --> vibesys.domains
@@ -272,6 +268,7 @@ graph TD
     vibesys.orchestrations --> vibesys.errors
     vibesys.orchestrations --> vibesys.evaluators
     vibesys.orchestrations --> vibesys.orchestrations.agent_options
+    vibesys.orchestrations --> vibesys.orchestrations.hypothesis_readmodel
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
@@ -283,6 +280,14 @@ graph TD
     vibesys.orchestrations.hypothesis_readmodel --> vibesys
     vibesys.orchestrations.hypothesis_readmodel --> vibesys.orchestration.view
     vibesys.orchestrations.hypothesis_readmodel --> vibesys.search.hypothesis
+    vibesys.plugin_catalog --> vibesys.context
+    vibesys.plugin_catalog --> vibesys.errors
+    vibesys.plugin_catalog --> vibesys.loops.evolve.entrypoint
+    vibesys.plugin_catalog --> vibesys.orchestration
+    vibesys.plugin_catalog --> vibesys.orchestration.contracts
+    vibesys.plugin_catalog --> vibesys.orchestration.memory
+    vibesys.plugin_catalog --> vibesys.orchestrations
+    vibesys.plugin_catalog --> vibesys.orchestrations.agent_options
     vibesys.prompts --> vibesys
     vibesys.prompts --> vibesys.evaluators
     vibesys.render --> vibesys
@@ -400,12 +405,12 @@ graph TD
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
-    vibesys.api --> vibesys.loops.registry
     vibesys.api --> vibesys.orchestration._common
     vibesys.api --> vibesys.orchestration.contracts
     vibesys.api --> vibesys.orchestration.request
     vibesys.api --> vibesys.orchestration.runner
     vibesys.api --> vibesys.orchestrations.hypothesis_readmodel
+    vibesys.api --> vibesys.plugin_catalog
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.runtime
@@ -413,10 +418,10 @@ graph TD
     vibesys.api --> vs_agent
     vibesys.api --> vs_project
     vibesys.api --> vs_sandbox
-    vibesys.api.agent --> vibesys.loops.registry
     vibesys.api.agent --> vibesys.orchestration.memory
     vibesys.api.agent --> vibesys.orchestrations.agent_options
     vibesys.api.agent --> vibesys.orchestrations.hypothesis_readmodel
+    vibesys.api.agent --> vibesys.plugin_catalog
     vibesys.api.agent --> vs_project
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
@@ -507,11 +512,7 @@ graph TD
     vibesys.loops.multi --> vs_agent
     vibesys.loops.multi --> vs_loop_state
     vibesys.loops.multi --> vs_project
-    vibesys.loops.registry --> vibesys.loops.evolve.entrypoint
-    vibesys.loops.registry --> vibesys.loops.issue_queue
-    vibesys.loops.registry --> vibesys.loops.multi
-    vibesys.loops.registry --> vibesys.loops.single
-    vibesys.loops.registry --> vibesys.orchestration.contracts
+    vibesys.loops.registry --> vibesys.plugin_catalog
     vibesys.loops.single --> vibesys
     vibesys.loops.single --> vibesys.context
     vibesys.loops.single --> vibesys.domains
@@ -648,10 +649,12 @@ graph TD
     vibesys.orchestrations --> vibesys.errors
     vibesys.orchestrations --> vibesys.evaluators
     vibesys.orchestrations --> vibesys.orchestrations.agent_options
+    vibesys.orchestrations --> vibesys.orchestrations.hypothesis_readmodel
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
     vibesys.orchestrations --> vibesys.search.profile_focus
+    vibesys.orchestrations --> vs_issue_board
     vibesys.orchestrations --> vs_prompts
     vibesys.orchestrations --> vs_runtime
     vibesys.orchestrations.agent_options --> vibesys
@@ -663,6 +666,16 @@ graph TD
     vibesys.orchestrations.hypothesis_readmodel --> vibesys.orchestration.view
     vibesys.orchestrations.hypothesis_readmodel --> vibesys.search.hypothesis
     vibesys.orchestrations.hypothesis_readmodel --> vs_loop_state
+    vibesys.orchestrations.hypothesis_readmodel --> vs_runtime
+    vibesys.plugin_catalog --> vibesys.context
+    vibesys.plugin_catalog --> vibesys.errors
+    vibesys.plugin_catalog --> vibesys.loops.evolve.entrypoint
+    vibesys.plugin_catalog --> vibesys.orchestration
+    vibesys.plugin_catalog --> vibesys.orchestration.contracts
+    vibesys.plugin_catalog --> vibesys.orchestration.memory
+    vibesys.plugin_catalog --> vibesys.orchestrations
+    vibesys.plugin_catalog --> vibesys.orchestrations.agent_options
+    vibesys.plugin_catalog --> vs_project
     vibesys.prompts --> vibesys
     vibesys.prompts --> vibesys.evaluators
     vibesys.prompts --> vs_prompts

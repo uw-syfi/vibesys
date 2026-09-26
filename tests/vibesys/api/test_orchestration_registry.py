@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from vibesys.api import (
     ComputeBackend,
     Config,
+    ConfigurationError,
     OrchestrationRegistry,
     ProfilerKind,
     RunRequest,
@@ -23,17 +24,22 @@ from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
-from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
-from vibesys.loops.multi.orchestration import (
-    MultiAgentOrchestrator,
-    ProfileGuidedMultiAgentOrchestrator,
-)
-from vibesys.loops.registry import built_in_orchestrations
-from vibesys.loops.single.orchestration import (
-    ProfileGuidedSingleAgentOrchestrator,
-    SingleAgentOrchestrator,
-)
 from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.orchestration.memory import declared_memory_paths
+from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
+from vibesys.orchestrations.multi import (
+    PLUGIN as MULTI_PLUGIN,
+)
+from vibesys.orchestrations.multi import (
+    PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
+)
+from vibesys.orchestrations.single import (
+    PLUGIN as SINGLE_PLUGIN,
+)
+from vibesys.orchestrations.single import (
+    PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
+)
+from vibesys.plugin_catalog import built_in_orchestrations
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     AgentRole,
@@ -177,20 +183,137 @@ def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> No
     assert registry.resolve("team.v2").orchestrator is _StubOrchestrator
 
 
-def test_builtin_ids_resolve_to_distinct_concrete_orchestrators() -> None:
+def test_builtin_catalog_selects_plugins_and_keeps_only_evolve_legacy() -> None:
     registry = built_in_orchestrations()
     expected = {
-        "multi-agent": MultiAgentOrchestrator,
-        "single-agent": SingleAgentOrchestrator,
-        "profile-guided-multi-agent": ProfileGuidedMultiAgentOrchestrator,
-        "profile-guided-single-agent": ProfileGuidedSingleAgentOrchestrator,
-        "plain": IssueQueueOrchestrator,
-        "evolve": EvolveOrchestrator,
+        "multi-agent": MULTI_PLUGIN,
+        "single-agent": SINGLE_PLUGIN,
+        "profile-guided-multi-agent": PROFILE_MULTI_PLUGIN,
+        "profile-guided-single-agent": PROFILE_SINGLE_PLUGIN,
+        "plain": ISSUE_QUEUE_PLUGIN,
     }
-    for kind, implementation in expected.items():
+    for kind, plugin in expected.items():
         registration = registry.resolve(kind)
-        assert registration.orchestrator is implementation
+        assert registration.plugin is plugin
+        assert registration.orchestrator is None
         assert registration.projector is not None
+        assert registration.portable_namespaces == (kind,)
+
+    legacy = registry.resolve("evolve")
+    assert legacy.orchestrator is EvolveOrchestrator
+    assert legacy.plugin is None
+    assert legacy.projector is not None
+
+
+def test_builtin_plugin_setup_is_private_product_wiring() -> None:
+    registry = built_in_orchestrations()
+    agent_options = {
+        "interface": "service",
+        "max_rounds": 4,
+        "max_retries_per_round": 2,
+        "judge_every": 1,
+        "official_eval_every": 3,
+        "memory_layout": "directories",
+    }
+    descriptors = (
+        OrchestrationDescriptor(id="single-agent", config_version=1, options=agent_options),
+        OrchestrationDescriptor(id="multi-agent", config_version=1, options=agent_options),
+    )
+    for descriptor in descriptors:
+        registration = registry.resolve(descriptor.id)
+        prepared = registration.prepare_plugin(descriptor)
+        assert prepared.plugin.id == descriptor.id
+        assert descriptor.options == agent_options
+        assert prepared.options.max_rounds == descriptor.options["max_rounds"]
+        assert prepared.setup.start_hints is not None
+        assert prepared.setup.start_hints.max_rounds == 4
+        assert prepared.setup.memory_paths == declared_memory_paths()
+        assert prepared.setup.resume_policy is not None
+
+    plain = OrchestrationDescriptor(
+        id="plain",
+        config_version=1,
+        options={
+            "max_rounds": 5,
+            "max_attempts_per_issue": 2,
+            "max_issues_per_perf_eval": 3,
+            "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
+        },
+    )
+    prepared_plain = registry.resolve("plain").prepare_plugin(plain)
+    assert plain.options["load_levels"] == [{"rate": 4, "duration": 20, "max_tokens": 64}]
+    assert prepared_plain.options.max_rounds == plain.options["max_rounds"]
+    assert prepared_plain.setup.start_hints is not None
+    assert prepared_plain.setup.start_hints.max_rounds == 5
+    assert prepared_plain.setup.memory_paths == ()
+    assert prepared_plain.setup.resume_policy is not None
+
+
+def test_builtin_plugins_allow_only_increased_total_budget_on_resume() -> None:
+    registry = built_in_orchestrations()
+    recorded = OrchestrationDescriptor(
+        id="plain",
+        config_version=1,
+        options={
+            "max_rounds": 2,
+            "max_attempts_per_issue": 2,
+            "max_issues_per_perf_eval": 3,
+            "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
+        },
+    )
+    prepared = registry.resolve(recorded.id).prepare_plugin(recorded)
+    compare = prepared.setup.resume_policy
+    assert compare is not None
+
+    increased = recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 3}})
+    decision = compare(recorded, increased)
+    assert decision.descriptor == increased
+    assert decision.requires_clean_workspace
+
+    changed_levels = recorded.model_copy(
+        update={
+            "options": {
+                **recorded.options,
+                "load_levels": [{"rate": 8, "duration": 20, "max_tokens": 64}],
+            }
+        }
+    )
+    with pytest.raises(ConfigurationError, match="load_levels"):
+        compare(recorded, changed_levels)
+    with pytest.raises(ConfigurationError, match="cannot decrease"):
+        compare(
+            recorded, recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 1}})
+        )
+
+
+def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
+    registry = built_in_orchestrations()
+    recorded = OrchestrationDescriptor(
+        id="single-agent",
+        config_version=1,
+        options={
+            "interface": "service",
+            "max_rounds": 2,
+            "max_retries_per_round": 2,
+            "judge_every": 1,
+            "official_eval_every": 3,
+            "memory_layout": "directories",
+        },
+    )
+    compare = registry.resolve(recorded.id).prepare_plugin(recorded).setup.resume_policy
+    assert compare is not None
+
+    changed = recorded.model_copy(
+        update={"options": {**recorded.options, "judge_every": 2, "max_rounds": 3}}
+    )
+    with pytest.raises(ConfigurationError, match="judge_every"):
+        compare(recorded, changed)
+
+    wrong_preset = recorded.model_copy(
+        update={"options": {**recorded.options, "profile_guided": {"command": ["true"]}}}
+    )
+    with pytest.raises(ValidationError, match="profile_guided"):
+        compare(recorded, wrong_preset)
 
 
 def test_session_executes_registered_policy_with_canonical_request(tmp_path: Path) -> None:

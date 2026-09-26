@@ -166,8 +166,8 @@ class _LocalRunSession:
         self._request = request
         self._sink = sink
         if registry is None:
-            # lint-waiver: LW-020004 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
-            from vibesys.loops.registry import (  # noqa: PLC0415
+            # lint-waiver: LW-020004 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
+            from vibesys.plugin_catalog import (  # noqa: PLC0415
                 built_in_orchestrations,
             )
 

@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 def is_agent_run_manifest(manifest: OrchestrationRunManifest) -> bool:
     """Identify runs whose registered projection uses agent-run state."""
-    # lint-waiver: LW-020002 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
-    from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
+    # lint-waiver: LW-020002 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
+    from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
 
     try:
         registration = built_in_orchestrations().resolve(manifest.orchestration.id)

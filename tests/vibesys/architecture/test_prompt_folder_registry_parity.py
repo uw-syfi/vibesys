@@ -2,16 +2,16 @@
 
 A strategy is its folder + one registry line + its prompt folder
 (``prompts/loops/<strategy>/``). This test derives "which folder backs a
-registered strategy" the same way ``vibesys.loops.registry`` does: each
-registration's orchestrator class lives in ``vibesys.loops.<folder>...``, so
-its ``__module__`` names the folder.
+registered strategy" the same way :mod:`vibesys.plugin_catalog` does. Plugin
+declarations live in ``vibesys.orchestrations.<folder>``; the remaining legacy
+orchestrator lives in ``vibesys.loops.<folder>``.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from vibesys.loops.registry import built_in_orchestrations
+from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.prompts import PROMPTS_DIR
 
 _PROMPTS_LOOPS = Path(PROMPTS_DIR) / "loops"
@@ -21,10 +21,14 @@ def _registered_strategy_folders() -> set[str]:
     registry = built_in_orchestrations()
     folders = set()
     for registration in registry._registrations.values():  # noqa: SLF001  # LW-040196 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-        module = registration.orchestrator.__module__
-        assert module.startswith("vibesys.loops."), (
-            f"registered orchestrator {module!r} is not under vibesys.loops"
-        )
+        if registration.plugin is not None:
+            module = registration.plugin.orchestrate.__module__
+            prefix = "vibesys.orchestrations."
+        else:
+            assert registration.orchestrator is not None
+            module = registration.orchestrator.__module__
+            prefix = "vibesys.loops."
+        assert module.startswith(prefix), f"registered policy {module!r} is not under {prefix}"
         folders.add(module.split(".")[2])
     return folders
 
