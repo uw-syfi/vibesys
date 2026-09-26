@@ -220,13 +220,14 @@ def _latest_judge_review(issue: Issue) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_bootstrap_issue(
+def _ensure_bootstrap_issue(  # noqa: PLR0913
     store: IssueBoard,
     *,
     state: PlainLoopState,
     state_store: PlainStateStore,
     ctx: LoopContext,
     prompt: Prompt,
+    domain: DomainName,
 ) -> None:
     """Auto-create the initial feature issue on the first run.
 
@@ -236,6 +237,7 @@ def _ensure_bootstrap_issue(
         return
     description = prompt.render(
         "bootstrap_issue.j2",
+        domain=domain,
         reference_path=ctx.ref_name,
         accuracy_command=ctx.judge_accuracy_command,
         benchmark_command=ctx.judge_benchmark_command,
@@ -243,7 +245,7 @@ def _ensure_bootstrap_issue(
     )
     issue = store.create(
         type=IssueType.FEATURE,
-        title="Build FastAPI inference server for the reference model",
+        title="Build FastAPI inference server for the reference model" if domain == DomainName.LLM_SERVING else "Implement the solution for the reference task",
         description=description,
         created_by="loop:bootstrap",
         iteration=max(state.round_idx + 1, 1),
@@ -404,6 +406,7 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
             state_store=state_store,
             ctx=ctx,
             prompt=prompt,
+            domain=domain,
         )
 
         # On resume, give every previously BLOCKED issue a fresh attempt
