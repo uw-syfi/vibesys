@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-train="$repo_root/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml"
+train="$repo_root/examples/microservices/repositories/train-ticket/.vibesys/tasks/default/benchmark/workload.toml"
 social="$repo_root/examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml"
 hotel="$repo_root/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml"
 compose="$repo_root/examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml"

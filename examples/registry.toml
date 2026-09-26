@@ -64,15 +64,12 @@ external_repo = true
 skips = [{ check = "path-refs", reason = "external repo checkout has no candidate source for ${PROJECT_ROOT} paths to point at" }]
 
 [[example]]
+path = "examples/microservices/repositories/train-ticket"
+layout = "task"
+external_repo = true
+
+[[example]]
 path = "examples/microservices/social-network-kubernetes"
-layout = "task"
-
-[[example]]
-path = "examples/microservices/train-ticket"
-layout = "task"
-
-[[example]]
-path = "examples/microservices/train-ticket-kubernetes"
 layout = "task"
 
 [[example]]

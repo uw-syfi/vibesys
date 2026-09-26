@@ -20,10 +20,6 @@
 	branch = main
 	shallow = true
 	update = none
-[submodule "3rd_party/train-ticket"]
-	path = 3rd_party/train-ticket
-	url = git@github.com:FudanSELab/train-ticket.git
-	update = none
 [submodule "inputs/show-o2-1.5B-HQ/reference/Show-o"]
 	path = examples/model-serving/show-o2-1.5B-HQ/reference/Show-o
 	url = https://github.com/showlab/Show-o.git
@@ -36,6 +32,11 @@
 [submodule "examples/microservices/repositories/deathstarbench"]
 	path = examples/microservices/repositories/deathstarbench
 	url = https://github.com/vibesys-playground/DeathStarBench.git
+	branch = vibesys
+	shallow = true
+[submodule "examples/microservices/repositories/train-ticket"]
+	path = examples/microservices/repositories/train-ticket
+	url = https://github.com/vibesys-playground/train-ticket.git
 	branch = vibesys
 	shallow = true
 [submodule "examples/model-serving/repositories/vllm"]

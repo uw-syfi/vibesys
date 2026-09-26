@@ -43,7 +43,6 @@ PUBLISHED_ROOTS = ("docs",)
 # so enforcing them here would only pin us to upstream's bugs.
 EXCLUDED_PREFIXES = (
     "third_party/",
-    "3rd_party/",
     "node_modules/",
     "resources/skills/neuron-agentic-development/",
 )
