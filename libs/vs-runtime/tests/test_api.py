@@ -31,6 +31,7 @@ from vs_runtime.api import (
     UnknownAgentRoleError,
     WorkspaceAccess,
     WorkspaceRestoreError,
+    WorkspaceSourceFact,
 )
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 
@@ -119,6 +120,7 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
         domain_id="llm_serving",
         environment_notes="Run the service through its public endpoint.",
         profile_execution=ProfileExecution.REMOTE,
+        workspace_sources=(WorkspaceSourceFact(name="runtime", dest="src/runtime"),),
     )
     host = FakeRunHost(_plugin(), facts=facts)
 
@@ -127,12 +129,19 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
         host.facts.__setattr__("domain_id", "generic")
     with pytest.raises(ValidationError):
         RunFacts.model_validate({"domain_id": "generic", "backend": "modal"})
+    with pytest.raises(ValidationError):
+        facts.workspace_sources[0].__setattr__("dest", "other")
+    with pytest.raises(ValidationError):
+        RunFacts(domain_id="generic", objective_location="")
 
 
 def test_fake_run_facts_have_a_policy_neutral_default() -> None:
     host = FakeRunHost(_plugin())
 
     assert host.facts == RunFacts(domain_id="generic")
+    assert host.facts.objective_location == "OBJECTIVE.md"
+    assert host.facts.reference_location == "."
+    assert host.facts.profiler_id == "none"
 
 
 def test_same_session_continues_and_second_creation_is_fresh() -> None:

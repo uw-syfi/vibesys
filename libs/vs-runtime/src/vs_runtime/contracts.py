@@ -355,6 +355,15 @@ class ProfileExecution(StrEnum):
     REMOTE = "remote"
 
 
+class WorkspaceSourceFact(BaseModel):
+    """Minimal immutable display facts for one pinned workspace source."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    dest: str = Field(min_length=1)
+
+
 class RunFacts(BaseModel):
     """Immutable prompt-visible facts resolved before orchestration starts."""
 
@@ -363,6 +372,14 @@ class RunFacts(BaseModel):
     domain_id: str = Field(min_length=1)
     environment_notes: str = ""
     profile_execution: ProfileExecution = ProfileExecution.LOCAL
+    objective_location: str = Field(default="OBJECTIVE.md", min_length=1)
+    reference_location: str = Field(default=".", min_length=1)
+    accuracy_command: str | None = Field(default=None, min_length=1)
+    benchmark_command: str | None = Field(default=None, min_length=1)
+    accuracy_configured: bool = False
+    benchmark_configured: bool = False
+    profiler_id: str = Field(default="none", min_length=1)
+    workspace_sources: tuple[WorkspaceSourceFact, ...] = ()
 
 
 class MetricDirection(StrEnum):

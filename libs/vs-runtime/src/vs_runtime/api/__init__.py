@@ -38,6 +38,7 @@ from vs_runtime.contracts import (
     WorkspaceRef,
     WorkspaceRestoreError,
     Workspaces,
+    WorkspaceSourceFact,
     validate_command,
     validate_member_id,
 )
@@ -79,6 +80,7 @@ __all__ = [
     "WorkspaceAccess",
     "WorkspaceRef",
     "WorkspaceRestoreError",
+    "WorkspaceSourceFact",
     "Workspaces",
     "validate_command",
     "validate_member_id",

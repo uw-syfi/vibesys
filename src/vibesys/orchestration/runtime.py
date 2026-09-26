@@ -67,7 +67,7 @@ from vibesys.orchestration.workspaces import (
 from vibesys.render.sink import output_sink
 from vibesys.run.agent_sessions import SynchronizedSessionStore
 from vs_agent.api import AgentExecutionPolicy, AgentSessionState, build_agent_client
-from vs_runtime.api import ProfileExecution, RunFacts
+from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -383,10 +383,25 @@ class RunContext:
     def _prepare(self) -> None:
         """Open the canonical run context once."""
         resources = self._ensure_resources()
+        bundle = self.request.input_bundle
+        view = resources.run_environment_view
         self._facts = RunFacts(
-            domain_id=self.request.input_bundle.domain.value,
-            environment_notes=resources.run_environment_view.prompt_notes,
-            profile_execution=ProfileExecution(resources.run_environment_view.profile_execution),
+            domain_id=bundle.domain.value,
+            environment_notes=view.prompt_notes,
+            profile_execution=ProfileExecution(view.profile_execution),
+            objective_location=view.paths.objective,
+            reference_location=resources.ref_name,
+            accuracy_command=view.paths.accuracy_command,
+            benchmark_command=view.paths.benchmark_command,
+            accuracy_configured=bool(view.paths.accuracy_command),
+            benchmark_configured=(
+                bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
+            ),
+            profiler_id=resources.profiler_kind.value,
+            workspace_sources=tuple(
+                WorkspaceSourceFact(name=source.name, dest=source.dest)
+                for source in bundle.workspace_sources
+            ),
         )
 
     async def _spawn(

@@ -22,7 +22,6 @@ from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     OrchestrationPlugin,
     ProfileExecution,
-    RunFacts,
     RunHost,
     RunStatus,
     RuntimeContractError,
@@ -259,11 +258,17 @@ def test_real_run_facts_map_prepared_input_and_environment_once(tmp_path: Path) 
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             facts = run.facts
-            assert facts == RunFacts(
-                domain_id="generic",
-                environment_notes="",
-                profile_execution=ProfileExecution.LOCAL,
-            )
+            assert facts.domain_id == "generic"
+            assert facts.environment_notes == ""
+            assert facts.profile_execution is ProfileExecution.LOCAL
+            assert str(project_root) in facts.objective_location
+            assert facts.reference_location == "."
+            assert facts.accuracy_command == "true"
+            assert facts.benchmark_command == "true"
+            assert facts.accuracy_configured
+            assert not facts.benchmark_configured
+            assert facts.profiler_id == "none"
+            assert facts.workspace_sources == ()
             assert run.facts is facts
 
     try:
