@@ -30,6 +30,10 @@ repository's contracts, architecture, tests, and affected callers.
      check it against the diff.
    - Call out material ambiguity instead of silently choosing an
      interpretation.
+   - For every new lint suppression, check that the source rationale lists
+     reasonable lint-compliant alternatives and explains why each would make
+     the design more hacky. Flag suppressions justified only by convenience,
+     time, or pre-existing violations.
    - Do not submit a GitHub review, comment, approval, or change request unless
      the user explicitly asks for that external write.
 

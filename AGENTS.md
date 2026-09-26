@@ -45,6 +45,9 @@ Checks:
 
 - A bug fix needs a regression test that fails at the merge base and passes at
   the head.
+- Treat lint suppressions as explicit opt-outs. Add one only after considering
+  reasonable lint-compliant alternatives, and explain in the source comment why
+  each would make the design more hacky than keeping the current code.
 - Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and the narrowest
   relevant `uv run pytest` target before handing work back. Size limits and
   lint-waiver mechanics are in

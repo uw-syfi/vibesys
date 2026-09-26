@@ -80,6 +80,11 @@ section.
     land the contract step. Read
     [references/evolving.md](references/evolving.md) when you refactor, split,
     migrate, or change a contract.
+11. **Lint suppressions are explicit opt-outs.** First consider reasonable
+    lint-compliant fixes. Suppress only when those fixes would make the design
+    more hacky than retaining the current code. In the source rationale, list
+    the alternatives considered and explain why each is worse. Effort, time,
+    and existing violations are not reasons by themselves.
 
 ## Before handing back
 
