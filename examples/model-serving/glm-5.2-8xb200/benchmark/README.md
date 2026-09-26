@@ -1,15 +1,19 @@
-# GLM-5.2 Throughput Benchmark
+# GLM-5.2 Request Factory benchmark
 
-Closed-loop streaming `/v1/completions` benchmark with concurrency 64,
-long synthetic prompts (~8192 tokens, distinct per request rather than a
-shared prefix), and 1024-token outputs. Designed for the from-scratch FP8
-sparse-MoE GLM-5.2 server across 8xB200. The benchmark emits
-`aggregate_throughput` and `p99_latency_ms` as top-level fields for Pareto
-optimization.
+Request Factory drives the OpenAI-compatible `/v1/completions` endpoint using
+256 independent requests at saturation, concurrency 64, 8192-token synthetic
+prompts, and 1024-token output targets. The bundle fixes these values; the
+adapter writes the RF trace and passes it to the pinned VibeSys RF evaluator.
 
-Run against a live server:
+The VibeSys protocol-v2 objectives are `output_token_throughput_per_s` and
+`p90_latency_ms`. RF counts completion token IDs and reports end-to-end latency,
+instead of counting nonempty SSE chunks and reporting p99 latency as the legacy
+driver did. The fixed trace replaces its 120-second rolling window. These
+methodology changes are intentional; scores are not directly comparable with
+legacy benchmark results. RF failure, incomplete-step, and output-length
+mismatch counts must all be zero or the benchmark fails.
 
-    python benchmark.py --url http://localhost:8000 --output-json result.json
-
-Do not lower prompt length, duration, concurrency, or `max_tokens` to inflate
-the score; the evaluator fixes these.
+For CPU-only request-path validation, run `python benchmark/cpu_smoke.py
+--request-factory-engine /path/to/session_runner`. It uses a strict local fake
+completions server and a tiny local tokenizer. Fake-server throughput is not a
+serving-performance result.
