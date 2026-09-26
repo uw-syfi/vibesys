@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TypeAlias, TypeVar, overload
@@ -242,14 +242,27 @@ class FakeAgentSessions:
         for session in reversed(self._sessions):
             await session.close()
 
+    async def close_workspace_sessions(self, workspace: Workspace) -> None:
+        """Invalidate every public session bound to a discarded workspace."""
+        for session in self._sessions:
+            if session.workspace is workspace:
+                await session.close()
+
 
 class FakeWorkspaces:
     """In-memory owner of one root and its isolated candidate workspaces."""
 
-    def __init__(self, root: FakeWorkspace, *, supports_parallel_candidates: bool = False) -> None:
+    def __init__(
+        self,
+        root: FakeWorkspace,
+        *,
+        supports_parallel_candidates: bool = False,
+        invalidate_sessions: Callable[[Workspace], Awaitable[None]] | None = None,
+    ) -> None:
         """Bind the fake capability to one root and a fixed isolation capability."""
         self._root = root
         self._supports_parallel_candidates = supports_parallel_candidates
+        self._invalidate_sessions = invalidate_sessions
         self._candidates: list[FakeCandidateWorkspace] = []
         self._patches: dict[str, str] = {}
         self.export_patch_calls: list[str] = []
@@ -283,6 +296,7 @@ class FakeWorkspaces:
         workspace_id = f"candidate-{len(self._candidates) + 1}"
         candidate = FakeCandidateWorkspace(
             owner=self,
+            invalidate_sessions=self._invalidate_sessions,
             config=_FakeCandidateConfig(
                 workspace_id=workspace_id,
                 path=self._root.path / workspace_id,
@@ -586,6 +600,7 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self,
         *,
         owner: FakeWorkspaces,
+        invalidate_sessions: Callable[[Workspace], Awaitable[None]] | None,
         config: _FakeCandidateConfig,
     ) -> None:
         """Bind a candidate to the one fake run that created it."""
@@ -597,6 +612,7 @@ class FakeCandidateWorkspace(FakeWorkspace):
             known_revisions=config.known_revisions,
         )
         self._owner = owner
+        self._invalidate_sessions = invalidate_sessions
         self._discarded = False
 
     @property
@@ -640,6 +656,10 @@ class FakeCandidateWorkspace(FakeWorkspace):
 
     async def discard(self) -> None:
         """Release this fake candidate idempotently."""
+        if self._discarded:
+            return
+        if self._invalidate_sessions is not None:
+            await self._invalidate_sessions(self)
         self._discarded = True
 
     def _require_open(self) -> None:
@@ -881,14 +901,15 @@ class FakeRunHost:
         self._facts = (
             RunFacts(domain_id="generic", objective="Test objective.") if facts is None else facts
         )
-        self._workspaces = FakeWorkspaces(
-            FakeWorkspace(path=project_root),
-            supports_parallel_candidates=supports_parallel_candidates,
-        )
         self._agents = FakeAgentSessions(
             plugin.agents,
             responder=responder,
             bindings=agent_bindings,
+        )
+        self._workspaces = FakeWorkspaces(
+            FakeWorkspace(path=project_root),
+            supports_parallel_candidates=supports_parallel_candidates,
+            invalidate_sessions=self._agents.close_workspace_sessions,
         )
         self._evaluation = FakeEvaluation(run_id=run_id)
         self._state = FakeState(plugin.state, self._workspaces.root)

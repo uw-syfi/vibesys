@@ -419,6 +419,29 @@ def test_fake_candidate_creation_rejects_unsupported_runs() -> None:
     asyncio.run(scenario())
 
 
+def test_fake_candidate_discard_invalidates_bound_sessions() -> None:
+    async def scenario() -> None:
+        role = _role()
+        host = FakeRunHost(_plugin(role), supports_parallel_candidates=True)
+        candidate = await host.workspaces.create_candidate()
+        candidate_sessions = (
+            await host.agents.create_session(role, workspace=candidate),
+            await host.agents.create_session(role, workspace=candidate),
+        )
+        root_session = await host.agents.create_session(role, workspace=host.workspaces.root)
+
+        await candidate.discard()
+        await candidate.discard()
+
+        assert not root_session.closed
+        for session in candidate_sessions:
+            assert session.closed
+            with pytest.raises(SessionClosedError):
+                await session.turn("too late")
+
+    asyncio.run(scenario())
+
+
 def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
     async def scenario() -> None:
         host = FakeRunHost(_plugin(_role()))

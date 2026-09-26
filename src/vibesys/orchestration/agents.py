@@ -738,6 +738,12 @@ class _Agents:
         for session in reversed(self._sessions):
             await session.close()
 
+    def _mark_workspace_closed(self, workspace: Workspace) -> None:
+        """Invalidate public sessions before their workspace resources close."""
+        for session in self._sessions:
+            if session.workspace is workspace:
+                session._mark_closed()
+
     def _mark_closed(self) -> None:
         """Mark every public session closed before host-owned teardown."""
         for session in self._sessions:

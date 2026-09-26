@@ -232,12 +232,12 @@ class RunContext:
         )
         self.gates = _Evaluator(self)
         self.evaluation = _EvaluationAdapter(self, self.gates)
-        self.workspaces = _Workspaces(self)
         self.agents = _Agents(
             self,
             agent_roles,
             agent_tool_bindings,
         )
+        self.workspaces = _Workspaces(self, self.agents._mark_workspace_closed)
         self.environment = _Environment(self)
         self.progress = _Progress(self)
 

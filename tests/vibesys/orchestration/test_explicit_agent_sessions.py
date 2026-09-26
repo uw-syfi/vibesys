@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -508,6 +508,37 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     )
     assert resolved_workspaces
     assert client.closed
+
+
+def test_candidate_discard_invalidates_its_public_sessions(tmp_path: Path) -> None:
+    candidate_clients = (FakeAgentClient(session_reuse=True), FakeAgentClient(session_reuse=True))
+    root_client = FakeAgentClient(session_reuse=True)
+    role = AgentRole(id="worker", system_prompt="Work in the candidate.")
+
+    async def body(ctx: RunContext) -> None:
+        ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-040118 [SLF001]; candidate support is an environment input and this integration seam avoids replacing runtime code.
+            ctx.environment.view,
+            supports_parallel_candidate_evaluation=True,
+        )
+        candidate = await ctx.workspaces.create_candidate()
+        candidate_sessions = (
+            await ctx.agents.create_session(role, workspace=candidate),
+            await ctx.agents.create_session(role, workspace=candidate),
+        )
+        root_session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+
+        await candidate.discard()
+        await candidate.discard()
+
+        assert not root_session.closed
+        for session in candidate_sessions:
+            assert session.closed
+            with pytest.raises(SessionClosedError):
+                await session.turn("too late")
+
+    clients = [*candidate_clients, root_client]
+    _run_with_clients(tmp_path, clients, body, declaration=(role,))
+    assert all(client.closed for client in clients)
 
 
 def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) -> None:
