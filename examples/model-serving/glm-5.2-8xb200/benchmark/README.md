@@ -2,9 +2,10 @@
 
 Request Factory drives the OpenAI-compatible `/v1/completions` endpoint using
 256 independent requests at saturation, concurrency 64, 8192-token synthetic
-prompts, and 1024-token output targets. The adapter materializes a deterministic
-synthetic corpus with a 65,536-token pool, writes the RF trace, and passes it to
-the pinned VibeSys RF evaluator.
+prompts, and 1024-token output targets. The adapter generates a deterministic
+synthetic corpus in a temporary directory and explicitly sizes the token pool
+to at least twice the prompt length or the request count, whichever is larger.
+It fails if RF reports an undersized pool.
 
 The VibeSys protocol-v2 objectives are `output_token_throughput_per_s` and
 `p90_latency_ms`. RF counts completion token IDs and reports end-to-end latency,
