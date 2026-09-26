@@ -391,12 +391,10 @@ def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -
     observed: list[str] = []
 
     async def orchestrate(host: RunHost, _options: BaseModel) -> RunStatus:
-        try:
-            await host.agents.create_session(role, workspace=host.workspaces.root)
-        except RuntimeContractError as error:
-            observed.append(str(error))
-            return RunStatus.SUCCEEDED
-        return RunStatus.FAILED
+        agent_session = await host.agents.create_session(role, workspace=host.workspaces.root)
+        observed.append(agent_session.binding.backend)
+        await agent_session.close()
+        return RunStatus.SUCCEEDED
 
     plugin = OrchestrationPlugin(
         id="composed-profiler",
@@ -415,7 +413,7 @@ def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -
     result = asyncio.run(session.await_result())
 
     assert result.succeeded
-    assert observed == ["agent driver lacks required capabilities: mcp_servers"]
+    assert observed == ["stub"]
 
 
 def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
