@@ -1,187 +1,156 @@
+#!/usr/bin/env python3
+"""Prepare Kimi-K3's tokenizer, then delegate to the shared RF text driver."""
+
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
-import math
-import random
-import time
-from typing import Any
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-import httpx
-
-
-def percentile(sorted_vals: list[float], p: float) -> float:
-    if not sorted_vals:
-        return float("nan")
-    k = (len(sorted_vals) - 1) * p / 100.0
-    f = math.floor(k)
-    c = math.ceil(k)
-    if f == c:
-        return sorted_vals[int(k)]
-    return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
-
-
-def stats(values: list[float], multiplier: float = 1000.0) -> dict[str, float] | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    return {
-        "mean": sum(ordered) / len(ordered) * multiplier,
-        "p50": percentile(ordered, 50) * multiplier,
-        "p90": percentile(ordered, 90) * multiplier,
-        "p95": percentile(ordered, 95) * multiplier,
-        "p99": percentile(ordered, 99) * multiplier,
-    }
-
-
-def prompts(prompt_len: int, pool_size: int) -> list[str]:
-    base = " ".join(f"topic{i % 127}" for i in range(prompt_len))
-    return [base for _ in range(pool_size)]
-
-
-async def send_request(
-    client: httpx.AsyncClient,
-    url: str,
-    prompt: str,
-    max_tokens: int,
-    temperature: float,
-    timeout: float,
-) -> dict[str, Any]:
-    body = {
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": True,
-    }
-    started = time.perf_counter()
-    first_token = None
-    done = None
-    output_tokens = 0
-    try:
-        async with client.stream("POST", url, json=body, timeout=timeout) as response:
-            response.raise_for_status()
-            async for raw_line in response.aiter_lines():
-                if not raw_line.startswith("data: "):
-                    continue
-                payload = raw_line[len("data: ") :].strip()
-                if payload == "[DONE]":
-                    done = time.perf_counter()
-                    break
-                chunk = json.loads(payload)
-                text = (chunk.get("choices") or [{}])[0].get("text") or ""
-                if text:
-                    output_tokens += 1
-                    if first_token is None:
-                        first_token = time.perf_counter()
-    except Exception as exc:
-        return {
-            "error": str(exc),
-            "total_latency": time.perf_counter() - started,
-            "ttft": None,
-            "tpot": None,
-            "output_tokens": output_tokens,
-        }
-    if done is None:
-        done = time.perf_counter()
-    return {
-        "error": None,
-        "total_latency": done - started,
-        "ttft": None if first_token is None else first_token - started,
-        "tpot": None
-        if first_token is None or output_tokens <= 1
-        else (done - first_token) / (output_tokens - 1),
-        "output_tokens": output_tokens,
-    }
-
-
-async def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
-    rng = random.Random(args.seed)
-    prompt_pool = prompts(args.prompt_len, args.prompt_pool_size)
-    url = args.url.rstrip("/") + args.endpoint
-    results: list[dict[str, Any]] = []
-    started = time.perf_counter()
-
-    async with httpx.AsyncClient() as client:
-
-        async def worker() -> None:
-            while time.perf_counter() - started < args.duration:
-                prompt = rng.choice(prompt_pool)
-                results.append(
-                    await send_request(
-                        client,
-                        url,
-                        prompt,
-                        args.max_tokens,
-                        args.temperature,
-                        args.timeout,
-                    )
-                )
-
-        await asyncio.gather(*(worker() for _ in range(args.concurrency)))
-
-    wall = time.perf_counter() - started
-    successes = [r for r in results if r["error"] is None]
-    errors = [r for r in results if r["error"] is not None]
-    ttft = stats([r["ttft"] for r in successes if r["ttft"] is not None])
-    tpot = stats([r["tpot"] for r in successes if r["tpot"] is not None])
-    latency = stats([r["total_latency"] for r in successes])
-    total_tokens = sum(r["output_tokens"] for r in successes)
-    output = {
-        "config": {
-            "url": url,
-            "concurrency": args.concurrency,
-            "duration": args.duration,
-            "max_tokens": args.max_tokens,
-            "temperature": args.temperature,
-            "prompt_len": args.prompt_len,
-            "prompt_pool_size": args.prompt_pool_size,
-            "seed": args.seed,
-        },
-        "num_requests": len(results),
-        "num_completed": len(successes),
-        "num_failed": len(errors),
-        "actual_duration": wall,
-        "total_tokens": total_tokens,
-        "aggregate_throughput": total_tokens / wall if wall > 0 else 0,
-        "request_throughput": len(successes) / wall if wall > 0 else 0,
-        "ttft": ttft,
-        "tpot": tpot,
-        "total_latency": latency,
-        "p99_ttft_ms": None if ttft is None else ttft["p99"],
-        "p99_tpot_ms": None if tpot is None else tpot["p99"],
-        "p99_latency_ms": None if latency is None else latency["p99"],
-        "errors": errors[:5],
-    }
-
-    print(f"Completed {len(successes)}/{len(results)} requests")
-    print(f"Aggregate throughput: {output['aggregate_throughput']:.2f} tok/s")
-    if output["p99_latency_ms"] is not None:
-        print(f"p99 latency: {output['p99_latency_ms']:.2f} ms")
-    if args.output_json:
-        with open(args.output_json, "w") as f:
-            json.dump(output, f, indent=2)
-    return output
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Closed-loop streaming throughput benchmark for Kimi-K3 (MoE serving)."
+_MODEL = "moonshotai/Kimi-K3"
+_TOKENIZER_REVISION = "f831ab66814297da540d832a5235f8e904f29d06"
+_TOKENIZER_BASE_SIZE = 163_584
+_TOKENIZER_RESERVED_SIZE = 256
+_TOKENIZER_PATTERN = "|".join(
+    (
+        r"[\p{Han}]+",
+        r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*"
+        r"[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?",
+        r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+"
+        r"[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?",
+        r"\p{N}{1,3}",
+        r" ?[^\s\p{L}\p{N}]+[\r\n]*",
+        r"\s*[\r\n]+",
+        r"\s+(?!\S)",
+        r"\s+",
     )
+)
+_NAMED_TOKENS = {
+    163_584: "[BOS]",
+    163_585: "[EOS]",
+    163_586: "<|end_of_msg|>",
+    163_587: "<|open|>",
+    163_588: "<|close|>",
+    163_589: "<|sep|>",
+    163_590: "[start_header_id]",
+    163_591: "[end_header_id]",
+    163_593: "[EOT]",
+    163_602: "<|media_begin|>",
+    163_603: "<|media_content|>",
+    163_604: "<|media_end|>",
+    163_605: "<|media_pad|>",
+    163_649: "<osagent_mode>",
+    163_838: "[UNK]",
+    163_839: "[PAD]",
+}
+_FIXED_TEXT_DRIVER_ENV = "VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER"
+_REQUESTS = 256
+_INPUT_TOKENS = 4096
+_OUTPUT_TOKENS = 2048
+_CONCURRENCY = 32
+
+
+def _prepare_kimi_tokenizer(directory: Path) -> Path:
+    """Convert Kimi's pinned tiktoken vocabulary to RF's tokenizer.json format."""
+    from huggingface_hub import hf_hub_download
+    from tiktoken.load import load_tiktoken_bpe
+    from transformers.convert_slow_tokenizer import TikTokenConverter
+
+    vocab_file = hf_hub_download(
+        repo_id=_MODEL,
+        filename="tiktoken.model",
+        revision=_TOKENIZER_REVISION,
+    )
+    mergeable_ranks = load_tiktoken_bpe(vocab_file)
+    if len(mergeable_ranks) != _TOKENIZER_BASE_SIZE:
+        raise ValueError(
+            f"Kimi tokenizer has {len(mergeable_ranks)} base tokens, "
+            f"expected {_TOKENIZER_BASE_SIZE} at revision {_TOKENIZER_REVISION}"
+        )
+    special_tokens = [
+        _NAMED_TOKENS.get(token_id, f"<|reserved_token_{token_id}|>")
+        for token_id in range(
+            _TOKENIZER_BASE_SIZE,
+            _TOKENIZER_BASE_SIZE + _TOKENIZER_RESERVED_SIZE,
+        )
+    ]
+    tokenizer = TikTokenConverter(
+        vocab_file,
+        _TOKENIZER_PATTERN,
+        False,
+        special_tokens,
+    ).converted()
+    tokenizer_path = directory / "tokenizer.json"
+    tokenizer.save(str(tokenizer_path))
+    return tokenizer_path
+
+
+def run(args: argparse.Namespace) -> int:
+    """Keep tokenizer resources alive while the shared driver runs."""
+    driver = os.environ.get(_FIXED_TEXT_DRIVER_ENV)
+    if driver is None or not Path(driver).is_file():
+        raise RuntimeError(
+            f"{_FIXED_TEXT_DRIVER_ENV} must name the installed fixed-text driver; "
+            "run this benchmark through request-factory-adapter"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="vibesys-rf-kimi-") as directory:
+        tokenizer_path = (
+            Path(args.tokenizer) if args.tokenizer else _prepare_kimi_tokenizer(Path(directory))
+        )
+        command = [
+            sys.executable,
+            driver,
+            "--request-factory-engine",
+            args.request_factory_engine,
+            "--url",
+            args.url,
+            "--model",
+            args.model,
+            "--tokenizer",
+            str(tokenizer_path),
+            "--request-count",
+            str(args.request_count),
+            "--input-tokens",
+            str(args.input_tokens),
+            "--output-tokens",
+            str(args.output_tokens),
+            "--concurrency",
+            str(args.concurrency),
+        ]
+        if args.vs_output:
+            command.extend(("--vs-output", args.vs_output))
+        # lint-waiver: LW-031732 [S603]; the evaluator exports the installed driver path,
+        # > and every workload value is forwarded as an argv element without a shell.
+        completed = subprocess.run(command, check=False)  # noqa: S603
+        return completed.returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--request-factory-engine", required=True)
+    parser.add_argument("--vs-output")
     parser.add_argument("--url", default="http://localhost:8000")
-    parser.add_argument("--endpoint", default="/v1/completions")
-    parser.add_argument("--concurrency", type=int, default=32)
-    parser.add_argument("--duration", type=float, default=120)
-    parser.add_argument("--max-tokens", type=int, default=2048)
-    parser.add_argument("--temperature", type=float, default=0)
-    parser.add_argument("--prompt-len", type=int, default=4096)
-    parser.add_argument("--prompt-pool-size", type=int, default=64)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--timeout", type=float, default=600)
-    parser.add_argument("--output-json", default=None)
+    parser.add_argument("--model", default=_MODEL)
+    parser.add_argument(
+        "--tokenizer",
+        help=(
+            "existing tokenizer.json path; by default convert Kimi-K3's tiktoken.model "
+            f"at pinned revision {_TOKENIZER_REVISION}"
+        ),
+    )
+    parser.add_argument("--request-count", type=int, default=_REQUESTS)
+    parser.add_argument("--input-tokens", type=int, default=_INPUT_TOKENS)
+    parser.add_argument("--output-tokens", type=int, default=_OUTPUT_TOKENS)
+    parser.add_argument("--concurrency", type=int, default=_CONCURRENCY)
     args = parser.parse_args()
-    asyncio.run(run_benchmark(args))
+    if min(args.request_count, args.input_tokens, args.output_tokens, args.concurrency) <= 0:
+        parser.error("request count, token lengths, and concurrency must be positive")
+    return run(args)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
