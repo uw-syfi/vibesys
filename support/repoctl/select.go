@@ -4,7 +4,103 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"repoctl/internal/gitrepo"
 )
+
+func appendUniquePaths(paths, added []string) []string {
+	seen := make(map[string]bool, len(paths)+len(added))
+	for _, path := range paths {
+		seen[path] = true
+	}
+	for _, path := range added {
+		if !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	return paths
+}
+
+func selectChangedRecords(baseGraph, headGraph graph, changes []gitrepo.Change) (plan, error) {
+	basePaths, headPaths, allPaths := []string{}, []string{}, []string{}
+	for _, change := range changes {
+		switch change.Status[0] {
+		case 'A':
+			headPaths = append(headPaths, change.Path)
+			allPaths = append(allPaths, change.Path)
+		case 'C':
+			headPaths = append(headPaths, change.NewPath)
+			allPaths = append(allPaths, change.NewPath)
+		case 'D':
+			basePath := change.Path
+			basePaths = append(basePaths, basePath)
+			allPaths = append(allPaths, basePath)
+		default:
+			if change.Status[0] == 'R' {
+				basePaths = append(basePaths, change.OldPath)
+				headPaths = append(headPaths, change.NewPath)
+				allPaths = append(allPaths, change.OldPath, change.NewPath)
+			} else {
+				basePaths = append(basePaths, change.Path)
+				headPaths = append(headPaths, change.Path)
+				allPaths = append(allPaths, change.Path)
+			}
+		}
+	}
+	basePaths = appendUniquePaths(nil, basePaths)
+	headPaths = appendUniquePaths(nil, headPaths)
+	allPaths = appendUniquePaths(nil, allPaths)
+
+	basePlan := plan{Jobs: map[string]bool{}}
+	if len(basePaths) > 0 && len(baseGraph.Jobs) > 0 {
+		var err error
+		basePlan, err = baseGraph.selectPaths(basePaths)
+		if err != nil {
+			return plan{}, fmt.Errorf("base revision: %w", err)
+		}
+	}
+	// A deleted path can still select the current version of its component when
+	// the component remains configured, keeping current package checks runnable.
+	for _, path := range basePaths {
+		if len(headGraph.owners(path)) > 0 {
+			headPaths = append(headPaths, path)
+		}
+	}
+	headPaths = appendUniquePaths(nil, headPaths)
+	headPlan, err := headGraph.selectPaths(headPaths)
+	if err != nil {
+		return plan{}, err
+	}
+	for job, selected := range basePlan.Jobs {
+		if selected {
+			if _, exists := headPlan.Jobs[job]; exists {
+				headPlan.Jobs[job] = true
+				for _, reason := range basePlan.JobReasons[job] {
+					headPlan.JobReasons[job] = append(headPlan.JobReasons[job], "base revision: "+reason)
+				}
+			}
+		}
+	}
+	headPlan.ChangedPaths = allPaths
+	return headPlan, nil
+}
+
+func mergePlans(primary, additional plan) plan {
+	for job, selected := range additional.Jobs {
+		primary.Jobs[job] = primary.Jobs[job] || selected
+		primary.JobReasons[job] = appendUniquePaths(primary.JobReasons[job], additional.JobReasons[job])
+	}
+	for component, reasons := range additional.Components {
+		primary.Components[component] = appendUniquePaths(primary.Components[component], reasons)
+	}
+	for name, values := range additional.Collections {
+		primary.Collections[name] = appendUniquePaths(primary.Collections[name], values)
+		sort.Strings(primary.Collections[name])
+	}
+	primary.ChangedPaths = appendUniquePaths(primary.ChangedPaths, additional.ChangedPaths)
+	return primary
+}
 
 func matchingRootLength(c component, path string) int {
 	longest := -1

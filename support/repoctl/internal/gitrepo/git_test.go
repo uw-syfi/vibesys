@@ -1,9 +1,11 @@
-package main
+package gitrepo
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -73,21 +75,21 @@ func TestParseNameStatusZRejectsMalformedRecords(t *testing.T) {
 
 func TestWorktreePathsIncludesStagedUnstagedUntrackedAndRename(t *testing.T) {
 	root := t.TempDir()
-	initGitRepo(t, root)
+	initTestRepo(t, root)
 	for _, name := range []string{"staged.txt", "unstaged.txt", "old.txt", "deleted.txt"} {
-		writeFixtureFile(t, root, name, "original\n")
+		writeTestFile(t, root, name, "original\n")
 	}
-	commitFixture(t, root, "initial")
-	writeFixtureFile(t, root, "staged.txt", "staged\n")
+	commitTestFixture(t, root, "initial")
+	writeTestFile(t, root, "staged.txt", "staged\n")
 	gitTest(t, root, "add", "staged.txt")
-	writeFixtureFile(t, root, "unstaged.txt", "unstaged\n")
+	writeTestFile(t, root, "unstaged.txt", "unstaged\n")
 	gitTest(t, root, "mv", "old.txt", "renamed.txt")
 	if err := os.Remove(filepath.Join(root, "deleted.txt")); err != nil {
 		t.Fatal(err)
 	}
-	writeFixtureFile(t, root, "untracked.txt", "new\n")
+	writeTestFile(t, root, "untracked.txt", "new\n")
 
-	got, err := worktreePaths(root)
+	got, err := WorktreePaths(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +105,40 @@ func TestWorktreePathsIncludesStagedUnstagedUntrackedAndRename(t *testing.T) {
 			t.Fatalf("unexpected worktree path %q in %q", path, got)
 		}
 	}
-	if got := appendUniquePaths([]string{"staged.txt", "committed.txt"}, got); len(got) != len(want)+1 {
-		t.Fatalf("combined paths contain duplicates: %q", got)
+}
+
+func initTestRepo(t *testing.T, root string) {
+	t.Helper()
+	gitTest(t, root, "init", "-q")
+	gitTest(t, root, "config", "user.email", "repoctl-test@example.invalid")
+	gitTest(t, root, "config", "user.name", "repoctl test")
+}
+
+func writeTestFile(t *testing.T, root, name, contents string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitTestFixture(t *testing.T, root, message string) string {
+	t.Helper()
+	gitTest(t, root, "add", "-A")
+	gitTest(t, root, "commit", "-qm", message)
+	return gitTest(t, root, "rev-parse", "HEAD")
+}
+
+func gitTest(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
