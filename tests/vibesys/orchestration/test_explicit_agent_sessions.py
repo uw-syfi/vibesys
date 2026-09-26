@@ -20,6 +20,7 @@ from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runtime import RunContext
+from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestrations.single import PLUGIN
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
@@ -507,6 +508,70 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     )
     assert resolved_workspaces
     assert client.closed
+
+
+def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) -> None:
+    client = FakeAgentClient(
+        capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True)
+    ).enqueue_text("judge", "reviewed")
+    role = AgentRole(
+        id="judge",
+        system_prompt="Review the issue.",
+        tools=(AgentTool(id="issue-board"),),
+    )
+
+    async def body(ctx: RunContext) -> None:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        assert await session.turn("review") == "reviewed"
+
+    _run_with_clients(
+        tmp_path,
+        [client],
+        body,
+        declaration=(role,),
+        configuration=_RunConfiguration(tool_bindings=AGENT_TOOL_BINDINGS),
+    )
+    assert client.calls[0].mcp_servers == [
+        MCPServerSpec(
+            name="vibesys-issue-board",
+            command="python",
+            args=(
+                "-m",
+                "vibesys.orchestrations.issue_queue.tool_server",
+                "issues.json",
+                ".vibesys/issue-tool-policy.json",
+            ),
+        )
+    ]
+
+
+def test_issue_queue_plugin_can_create_all_declared_sessions(tmp_path: Path) -> None:
+    capabilities = AgentCapabilities(
+        session_reuse=True,
+        provider_session_resume=True,
+        mcp_servers=True,
+    )
+    clients = [FakeAgentClient(capabilities=capabilities) for _role in ISSUE_QUEUE_PLUGIN.agents]
+
+    async def body(ctx: RunContext) -> None:
+        sessions = [
+            await ctx.agents.create_session(
+                role,
+                workspace=ctx.workspaces.root,
+                member_id=f"issue-queue-{role.id}",
+            )
+            for role in ISSUE_QUEUE_PLUGIN.agents
+        ]
+        assert [session.role for session in sessions] == list(ISSUE_QUEUE_PLUGIN.agents)
+
+    _run_with_clients(
+        tmp_path,
+        clients,
+        body,
+        declaration=ISSUE_QUEUE_PLUGIN,
+        configuration=_RunConfiguration(tool_bindings=AGENT_TOOL_BINDINGS),
+    )
+    assert all(client.closed for client in clients)
 
 
 def test_intrinsic_shell_tool_does_not_bind_an_mcp_server(tmp_path: Path) -> None:
