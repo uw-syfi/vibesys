@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
 from vibesys.events import FrameworkSource
 from vibesys.runtime import WorkspaceScope
-from vs_runtime.api import RuntimeContractError
 from vs_runtime.api import WorkspaceRestoreError as RuntimeWorkspaceRestoreError
 
 if TYPE_CHECKING:
@@ -240,13 +239,6 @@ class CandidateWorkspaceHandle(WorkspaceHandle):
         super().__init__(owner, scope)
         self._discarded = False
 
-    async def export_patch(self, revision: str) -> str:
-        """Export a candidate-owned patch using this workspace's tracker."""
-        if self._discarded:
-            message = "candidate workspace is closed"
-            raise RuntimeContractError(message)
-        return await self._owner._candidate_patch(revision, scope=self._scope)
-
     async def discard(self) -> None:
         """Release the isolated workspace idempotently."""
         if self._discarded:
@@ -377,6 +369,10 @@ class _Workspaces:
             preserve_paths=preserve_paths,
             preserve_memory=preserve_memory,
         )
+
+    async def export_patch(self, revision: str) -> str:
+        """Export a retained revision against the trusted-input baseline."""
+        return await self._candidate_patch(revision)
 
     async def _adopt_revision(
         self,

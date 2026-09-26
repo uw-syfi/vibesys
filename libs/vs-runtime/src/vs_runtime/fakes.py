@@ -236,6 +236,8 @@ class FakeWorkspaces:
         self._root = root
         self._supports_parallel_candidates = supports_parallel_candidates
         self._candidates: list[FakeCandidateWorkspace] = []
+        self._patches: dict[str, str] = {}
+        self.export_patch_calls: list[str] = []
         self._closed = False
 
     @property
@@ -283,6 +285,19 @@ class FakeWorkspaces:
             message = f"candidate revision is not retained by this run: {revision!r}"
             raise RuntimeContractError(message)
         await self._root.restore(revision)
+
+    async def export_patch(self, revision: str) -> str:
+        """Export one retained revision against the fake trusted baseline."""
+        if not self._root.knows_revision(revision):
+            raise _UnknownWorkspaceRevisionError(revision)
+        self.export_patch_calls.append(revision)
+        return self._patches.get(revision, f"patch for {revision}")
+
+    def set_patch(self, revision: str, patch: str) -> None:
+        """Configure the canonical patch exported for a retained revision."""
+        if not self._root.knows_revision(revision):
+            raise _UnknownWorkspaceRevisionError(revision)
+        self._patches[revision] = patch
 
     def retain_candidate_revision(self, revision: str) -> None:
         """Keep a snapshotted candidate revision reachable from the root."""
@@ -568,7 +583,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         )
         self._owner = owner
         self._discarded = False
-        self._patches: dict[str, str] = {}
 
     @property
     def discarded(self) -> bool:
@@ -586,13 +600,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         """Return the recorded candidate revision while resources are live."""
         self._require_open()
         return super().revision
-
-    def set_patch(self, revision: str, patch: str) -> None:
-        """Configure the patch exported for a known revision."""
-        self._require_open()
-        if not self.knows_revision(revision):
-            raise _UnknownWorkspaceRevisionError(revision)
-        self._patches[revision] = patch
 
     async def snapshot(self, label: str) -> str:
         """Record a candidate revision while the workspace is live."""
@@ -615,13 +622,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         """Retain a candidate revision while the workspace is live."""
         self._require_open()
         await super().retain(revision, label=label)
-
-    async def export_patch(self, revision: str) -> str:
-        """Return the configured candidate-owned patch for a known revision."""
-        self._require_open()
-        if not self.knows_revision(revision):
-            raise _UnknownWorkspaceRevisionError(revision)
-        return self._patches.get(revision, f"patch for {revision}")
 
     async def discard(self) -> None:
         """Release this fake candidate idempotently."""

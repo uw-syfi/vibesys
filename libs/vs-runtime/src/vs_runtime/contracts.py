@@ -159,10 +159,6 @@ class Workspace(Protocol):
 class CandidateWorkspace(Workspace, Protocol):
     """One isolated candidate workspace owned by its creating run."""
 
-    async def export_patch(self, revision: str) -> str:
-        """Export ``revision`` against the immutable trusted-input baseline."""
-        ...
-
     async def discard(self) -> None:
         """Release the isolated workspace; safe to call more than once."""
         ...
@@ -295,6 +291,10 @@ class Workspaces(Protocol):
 
     async def adopt(self, revision: str) -> None:
         """Materialize a retained candidate revision in the root workspace."""
+        ...
+
+    async def export_patch(self, revision: str) -> str:
+        """Export a retained revision against the trusted-input baseline."""
         ...
 
 

@@ -536,7 +536,7 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
             assert "queue.py" in await scoped.pending_changes()
             revision = await scoped.snapshot("scoped candidate")
             assert scoped.revision == revision
-            assert "VALUE = 3" in await scoped.export_patch(revision)
+            assert "VALUE = 3" in await ctx.workspaces.export_patch(revision)
             await scoped.restore(parent_revision)
             assert (scoped.path / "queue.py").read_text() == "VALUE = 1\n"
             await scoped.restore(revision)

@@ -352,14 +352,16 @@ def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None
         first_revision = await first.snapshot("candidate one")
         second_revision = await second.snapshot("candidate two")
         assert first_revision != second_revision
-        first.set_patch(first_revision, "diff --git a/queue.py b/queue.py")
-        assert await first.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
+        host.workspaces.set_patch(first_revision, "diff --git a/queue.py b/queue.py")
+        assert (
+            await host.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
+        )
 
         await first.discard()
         await first.discard()
         assert first.discarded
         with pytest.raises(RuntimeContractError, match="closed"):
-            await first.export_patch(first_revision)
+            await first.snapshot("too late")
 
         await host.workspaces.adopt(first_revision)
         assert await host.workspaces.root.try_restore(first_revision)
