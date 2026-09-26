@@ -4,7 +4,13 @@ import pytest
 from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
-from vibesys.agent_run.hypotheses import (
+from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
+from vibesys.search.hypothesis.state import (
+    Hypothesis,
+    HypothesisState,
+    HypothesisStrategy,
+)
+from vibesys.search.hypothesis.transitions import (
     append_round,
     apply_strategy_updates,
     project_round_evidence,
@@ -12,17 +18,13 @@ from vibesys.agent_run.hypotheses import (
     start_hypothesis,
     update_active_hypothesis,
 )
-from vibesys.agent_run.state import (
-    AgentRunState,
-    Hypothesis,
-    HypothesisStrategy,
+from vibesys.search.profile_focus import (
     ProfileAttributionSample,
-    ProfileGuidanceState,
+    ProfileFocusState,
     ProfileGuidanceStatus,
     ProfileGuidedComponent,
     ProfileImprovementSample,
 )
-from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 
@@ -66,11 +68,11 @@ def test_profile_guidance_cursor_must_name_the_single_active_component() -> None
     open_a = ProfileGuidedComponent(name="a")
     open_b = ProfileGuidedComponent(name="b")
     with pytest.raises(ValidationError, match="component names must be unique"):
-        ProfileGuidanceState(components=[open_a, open_a.model_copy()])
+        ProfileFocusState(components=[open_a, open_a.model_copy()])
     active = ProfileGuidedComponent(name="a", status=ProfileGuidanceStatus.ACTIVE)
     with pytest.raises(ValidationError, match="only active component"):
-        ProfileGuidanceState(components=[active, open_b])
-    state = ProfileGuidanceState(active_component="a", components=[active, open_b])
+        ProfileFocusState(components=[active, open_b])
+    state = ProfileFocusState(active_component="a", components=[active, open_b])
     assert state.active_component == "a"
 
 
@@ -97,16 +99,16 @@ def test_active_hypothesis_must_be_known_and_strategically_available() -> None:
         strategy=HypothesisStrategy.PARKED,
     )
     with pytest.raises(ValidationError, match="must name a known hypothesis"):
-        AgentRunState(active_hypothesis_id="nope", hypotheses=[parked])
+        HypothesisState(active_hypothesis_id="nope", hypotheses=[parked])
     with pytest.raises(ValidationError, match="strategically available"):
-        AgentRunState(active_hypothesis_id="H-1", hypotheses=[parked])
+        HypothesisState(active_hypothesis_id="H-1", hypotheses=[parked])
 
 
 def test_start_hypothesis_rejects_active_blank_and_duplicate_ids() -> None:
-    started = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    started = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     with pytest.raises(ValueError, match="another is active"):
         start_hypothesis(started, _plan("H-2"), started_round=2)
-    idle = AgentRunState(hypotheses=started.hypotheses)
+    idle = HypothesisState(hypotheses=started.hypotheses)
     with pytest.raises(ValueError, match="hypothesis ID must not be blank"):
         start_hypothesis(
             idle, _plan("H-2").model_copy(update={"hypothesis_id": "  "}), started_round=2
@@ -116,12 +118,12 @@ def test_start_hypothesis_rejects_active_blank_and_duplicate_ids() -> None:
 
 
 def test_update_active_hypothesis_requires_the_active_id() -> None:
-    started = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    started = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     other = Hypothesis(hypothesis_id="H-2", plan=_plan("H-2"), started_round=1)
     with pytest.raises(ValueError, match="must preserve the active hypothesis ID"):
         update_active_hypothesis(started, other)
     with pytest.raises(ValueError, match="when none is active"):
-        update_active_hypothesis(AgentRunState(), other)
+        update_active_hypothesis(HypothesisState(), other)
     checkpoint = started.active_hypothesis
     assert checkpoint is not None
     checkpoint.feedback = "keep going"
@@ -132,8 +134,8 @@ def test_update_active_hypothesis_requires_the_active_id() -> None:
 
 def test_append_round_rejects_missing_mismatched_and_duplicate_rounds() -> None:
     with pytest.raises(ValueError, match="no hypothesis is active"):
-        append_round(AgentRunState(), _round(1, "H-1"), keep_active=False)
-    started = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+        append_round(HypothesisState(), _round(1, "H-1"), keep_active=False)
+    started = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     with pytest.raises(ValueError, match="must match the active hypothesis"):
         append_round(started, _round(1, "H-2"), keep_active=False)
     kept = append_round(started, _round(1, "H-1"), keep_active=True)
@@ -151,16 +153,16 @@ def test_project_round_evidence_rejects_foreign_and_duplicate_rounds() -> None:
     )
     with pytest.raises(ValueError, match="must match its owning hypothesis"):
         project_round_evidence(
-            hypothesis, _round(2, "H-2"), prior_rounds=[], space=AgentRunState().metrics
+            hypothesis, _round(2, "H-2"), prior_rounds=[], space=HypothesisState().metrics
         )
     with pytest.raises(ValueError, match="round 1 already belongs to hypothesis"):
         project_round_evidence(
-            hypothesis, _round(1, "H-1"), prior_rounds=[], space=AgentRunState().metrics
+            hypothesis, _round(1, "H-1"), prior_rounds=[], space=HypothesisState().metrics
         )
 
 
 def test_reprojection_rejects_a_round_owned_by_an_unknown_hypothesis() -> None:
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     # Appending in place bypasses field validation, modelling a corrupted checkpoint.
     state.hypotheses[0].rounds.append(_round(1, "ghost"))
     with pytest.raises(ValueError, match="round 1 names unknown hypothesis 'ghost'"):
@@ -168,7 +170,7 @@ def test_reprojection_rejects_a_round_owned_by_an_unknown_hypothesis() -> None:
 
 
 def test_strategy_updates_reject_duplicate_hypothesis_ids() -> None:
-    started = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    started = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     completed = append_round(started, _round(1, "H-1"), keep_active=False)
     update = HypothesisStrategyUpdate(hypothesis_id="H-1", disposition="parked", reason="later")
     with pytest.raises(ValueError, match="duplicate strategy update for hypothesis 'H-1'"):

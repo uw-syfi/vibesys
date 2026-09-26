@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from vibesys import roles
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.runtime import Role
@@ -48,14 +46,6 @@ def _role_search_names() -> dict[int, str]:
     return by_id
 
 
-@pytest.mark.skip(
-    reason=(
-        "TODO(stack PR 09): unskip. Strategies (loops/multi, loops/single, ...) "
-        "have not yet been migrated to call through vibesys.roles; they land in "
-        "stack PRs 07-09. Until then no Role in the catalog is reachable from "
-        "loops/, so this always fails."
-    )
-)
 def test_every_role_in_the_catalog_is_used_by_a_registered_strategy() -> None:
     """Every ``Role`` any strategy uses lives in ``roles/``; the converse:
     every ``Role`` declared in ``roles/`` is reachable from a registered

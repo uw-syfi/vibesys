@@ -17,8 +17,6 @@ import ast
 import re
 from pathlib import Path
 
-import pytest
-
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ROLES = _SRC / "roles"
 _LOOPS = _SRC / "loops"
@@ -89,13 +87,6 @@ def _is_role_call(call: ast.Call) -> bool:
     return False
 
 
-@pytest.mark.skip(
-    reason=(
-        "TODO(stack PR 09): unskip. Strategies have not yet been migrated to "
-        "call through vibesys.roles; they land in stack PRs 07-09. Until then "
-        "no Role is reachable from loops/, so this always fails."
-    )
-)
 def test_every_declared_role_is_referenced_by_a_loops_module() -> None:
     role_names = _role_names() - _ALLOWED_UNUSED_ROLE_NAMES
     loops_source = "\n".join(path.read_text() for path in _LOOPS.rglob("*.py"))
