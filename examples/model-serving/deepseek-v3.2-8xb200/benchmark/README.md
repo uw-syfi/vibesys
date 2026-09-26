@@ -2,8 +2,9 @@
 
 Request Factory drives the OpenAI-compatible `/v1/completions` endpoint using
 256 independent requests at saturation, concurrency 64, 8192-token synthetic
-prompts, and 1024-token output targets. The bundle fixes these values; the
-adapter writes the RF trace and passes it to the pinned VibeSys RF evaluator.
+prompts, and 1024-token output targets. The adapter materializes a deterministic
+synthetic corpus with a 65,536-token pool, writes the RF trace, and passes it to
+the pinned VibeSys RF evaluator.
 
 The VibeSys protocol-v2 objectives are `output_token_throughput_per_s` and
 `p90_latency_ms`. RF counts completion token IDs and reports end-to-end latency,
@@ -15,5 +16,6 @@ mismatch counts must all be zero or the benchmark fails.
 
 For CPU-only request-path validation, run `python benchmark/cpu_smoke.py
 --request-factory-engine /path/to/session_runner`. It uses a strict local fake
-completions server and a tiny local tokenizer. Fake-server throughput is not a
+completions server and a tiny local tokenizer. It verifies full prompt length
+and distinct token IDs within each prompt. Fake-server throughput is not a
 serving-performance result.
