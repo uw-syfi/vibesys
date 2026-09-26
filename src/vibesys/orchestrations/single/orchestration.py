@@ -1,4 +1,4 @@
-"""Plain multi-round hypothesis search over explicit runtime capabilities."""
+"""Single-agent hypothesis search over explicit runtime capabilities."""
 
 from __future__ import annotations
 
@@ -13,10 +13,16 @@ from vibesys.errors import UnsupportedProfilerError
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.single.agents import IMPLEMENTER
+from vibesys.orchestrations.single.attribution import run_attribution
 from vibesys.orchestrations.single.combined import CombinedTurnRequest, SingleAgentWorker
 from vibesys.orchestrations.single.designer import DesignerPlanRequest, request_plan
 from vibesys.orchestrations.single.files import SingleFiles
-from vibesys.orchestrations.single.models import PaidAttempt, SingleOptions, SingleState
+from vibesys.orchestrations.single.models import (
+    PaidAttempt,
+    ProfileGuidedSingleOptions,
+    SingleOptions,
+    SingleState,
+)
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.roles.common import Verdict
 from vibesys.roles.designer import PlanContext
@@ -32,6 +38,12 @@ from vibesys.search.hypothesis import (
     PerformanceProjection,
     RecordInput,
     build_round_record,
+)
+from vibesys.search.profile_focus import (
+    FocusView,
+    ProfileFocus,
+    ProfileFocusConfig,
+    ProfileFocusState,
 )
 from vs_runtime.api import (
     BenchmarkObjective,
@@ -62,7 +74,11 @@ class _SelectedRound:
     attempt: AttemptState
 
 
-def _benchmark_objectives(options: SingleOptions) -> tuple[BenchmarkObjective, ...]:
+SingleRunOptions = SingleOptions | ProfileGuidedSingleOptions
+_PROFILE_MEASUREMENT_REASON = "profile-guided component measurement"
+
+
+def _benchmark_objectives(options: SingleRunOptions) -> tuple[BenchmarkObjective, ...]:
     return tuple(
         BenchmarkObjective(
             name=item.name,
@@ -74,10 +90,10 @@ def _benchmark_objectives(options: SingleOptions) -> tuple[BenchmarkObjective, .
     )
 
 
-class _PlainSingleRun:
-    """One run's ordinary control state and policy-owned resources."""
+class _SingleRun:
+    """One plain or profile-guided run's control state and owned resources."""
 
-    def __init__(self, host: RunHost, options: SingleOptions) -> None:
+    def __init__(self, host: RunHost, options: SingleRunOptions) -> None:
         self.host = host
         self.options = options
         self.workspace = host.workspaces.root
@@ -94,6 +110,18 @@ class _PlainSingleRun:
         self.state = SingleState()
         self.carry: CarryOver
         self.round_number = 1
+        profile = options.profile_guided
+        self.profile_focus = (
+            ProfileFocus(
+                ProfileFocusConfig(
+                    plateau_min_rounds=profile.min_measured_rounds,
+                    min_relative_improvement=profile.min_relative_improvement,
+                )
+            )
+            if profile is not None
+            else None
+        )
+        self.label_prefix = "profile_single" if profile is not None else "single"
 
     async def initialize(self) -> None:
         """Recover plugin state and durably initialize policy-owned files."""
@@ -106,7 +134,7 @@ class _PlainSingleRun:
         self.files.write_pareto(self.search.archive_summary(resumed.rounds, space=resumed.metrics))
         await self._commit(
             workspace=self.workspace,
-            label="single: initialize policy state",
+            label=f"{self.label_prefix}: initialize policy state",
         )
 
     async def run(self) -> RunStatus:
@@ -158,7 +186,10 @@ class _PlainSingleRun:
             deep=True,
         )
         await self._commit(
-            label=(f"single: start round {self.round_number} {IMPLEMENTER.id} turn {turn_number}")
+            label=(
+                f"{self.label_prefix}: start round {self.round_number} "
+                f"{IMPLEMENTER.id} turn {turn_number}"
+            )
         )
 
     async def _select_round(self) -> _SelectedRound:
@@ -172,13 +203,14 @@ class _PlainSingleRun:
             message = "hypothesis search finished before the configured round cursor"
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
+            guidance = await self._prepare_profile_guidance()
             plan = await request_plan(
                 self.host,
                 self.search,
                 DesignerPlanRequest(
                     round_number=self.round_number,
                     state=self.state.search,
-                    context=self._plan_context(decision.context),
+                    context=self._plan_context(decision.context, guidance),
                     workspace=self.workspace,
                 ),
             )
@@ -195,7 +227,7 @@ class _PlainSingleRun:
             self.files.note_plan(self.round_number, plan)
             await self._commit(
                 workspace=self.workspace,
-                label=f"single: start hypothesis {plan.hypothesis_id}",
+                label=f"{self.label_prefix}: start hypothesis {plan.hypothesis_id}",
             )
             hypothesis = started.hypothesis
             if started.rollback is not None:
@@ -218,6 +250,9 @@ class _PlainSingleRun:
             requested=plan.request_official_evaluation,
             candidate_ready=True,
         )
+        focus_state = self._focus_state()
+        if focus_state is not None and focus_state.active_component:
+            official_reason = official_reason or _PROFILE_MEASUREMENT_REASON
         attempt = AttemptState(
             agent_run_state=self.state.search,
             feedback=hypothesis.feedback,
@@ -249,7 +284,7 @@ class _PlainSingleRun:
         self.state = self.state.model_copy(update={"search": updated}, deep=True)
         await self._commit(
             workspace=self.workspace,
-            label=f"single: set hypothesis {hypothesis.hypothesis_id} parent",
+            label=f"{self.label_prefix}: set hypothesis {hypothesis.hypothesis_id} parent",
         )
         return hypothesis
 
@@ -298,7 +333,13 @@ class _PlainSingleRun:
                 selected.hypothesis.feedback = response.feedback
                 await self._checkpoint_hypothesis(selected)
                 continue
-            if selected.official_reason is None:
+            official_reason = self.search.official_due(
+                records=self.records,
+                round_number=selected.round_number,
+                requested=selected.plan.request_official_evaluation,
+                candidate_ready=True,
+            )
+            if official_reason is None:
                 selected.attempt.passed = True
                 self.files.note_evaluation(
                     self.round_number,
@@ -306,7 +347,7 @@ class _PlainSingleRun:
                     "- decision: deferred\n- reason: cadence not due\n",
                 )
                 return
-            selected.attempt.official_reason = selected.official_reason
+            selected.attempt.official_reason = official_reason
             if await self._official_evaluation(selected):
                 return
 
@@ -319,7 +360,7 @@ class _PlainSingleRun:
         self.state = self.state.model_copy(update={"search": updated}, deep=True)
         await self._commit(
             workspace=self.workspace,
-            label=f"single: checkpoint hypothesis {selected.plan.hypothesis_id}",
+            label=(f"{self.label_prefix}: checkpoint hypothesis {selected.plan.hypothesis_id}"),
         )
 
     async def _official_evaluation(self, selected: _SelectedRound) -> bool:
@@ -420,8 +461,21 @@ class _PlainSingleRun:
                 model=binding.model,
             )
         )
+        state = self.state.search
+        if self.profile_focus is not None:
+            official = record.official_evaluation
+            relative_improvement = (
+                record.perf_delta_pct / 100 if record.perf_delta_pct is not None else None
+            )
+            focused = self.profile_focus.record(
+                self._require_focus_state(),
+                round_number=record.round_number,
+                passed=attempt.passed and official,
+                relative_improvement=relative_improvement,
+            )
+            state = state.model_copy(update={"profile_guidance": focused}, deep=True)
         closed = self.search.close_round(
-            self.state.search,
+            state,
             hypothesis=selected.hypothesis,
             record=record,
             records=self.records,
@@ -444,7 +498,8 @@ class _PlainSingleRun:
         )
         self.carry = closed.carry
         await self._commit(
-            workspace=self.workspace, label=f"single: close round {self.round_number}"
+            workspace=self.workspace,
+            label=f"{self.label_prefix}: close round {self.round_number}",
         )
         self.round_number += 1
 
@@ -459,7 +514,7 @@ class _PlainSingleRun:
                 message = "single-agent run has no trusted input baseline"
                 raise RuntimeError(message)
             await self.workspace.restore(baseline, clean=True)
-            await self.workspace.snapshot("single: restore trusted input baseline")
+            await self.workspace.snapshot(f"{self.label_prefix}: restore trusted input baseline")
             self.host.log("no trusted winner; restored the input baseline")
             return
         if winner.commit is None:
@@ -470,7 +525,7 @@ class _PlainSingleRun:
             label=f"selected-round-{winner.round_number:04d}",
         )
         await self.workspace.restore(winner.commit, clean=True)
-        await self.workspace.snapshot(f"single: select round {winner.round_number}")
+        await self.workspace.snapshot(f"{self.label_prefix}: select round {winner.round_number}")
         self.host.log(f"selected trusted winner from round {winner.round_number}")
 
     def _domain_context(self) -> dict[str, object]:
@@ -486,7 +541,11 @@ class _PlainSingleRun:
             "workspace_sources": tuple(item.model_dump() for item in facts.workspace_sources),
         }
 
-    def _plan_context(self, context: PlanningContext) -> PlanContext:
+    def _plan_context(
+        self,
+        context: PlanningContext,
+        guidance: FocusView | None,
+    ) -> PlanContext:
         facts = self.host.facts
         domain = resolve_domain(DomainName(facts.domain_id))
         last = self.state.last_response
@@ -520,7 +579,56 @@ class _PlainSingleRun:
             official_eval_cadence_due=(
                 context.provisional_candidates + 1 >= self.options.official_eval_every
             ),
+            active_component=guidance.active_component if guidance is not None else None,
+            ledger_text=guidance.ledger_text if guidance is not None else None,
+            ranked_bottlenecks=(
+                [
+                    {
+                        "component": item.name,
+                        "cost_share": item.share * 100,
+                        "evidence": item.evidence,
+                    }
+                    for item in guidance.ranked_bottlenecks
+                ]
+                if guidance is not None
+                else []
+            ),
         )
+
+    def _focus_state(self) -> ProfileFocusState | None:
+        if self.profile_focus is None:
+            return None
+        return self.state.search.profile_guidance or self.profile_focus.initial()
+
+    def _require_focus_state(self) -> ProfileFocusState:
+        state = self._focus_state()
+        if state is None:
+            message = "profile focus state requested for a plain single-agent run"
+            raise RuntimeError(message)
+        return state
+
+    async def _prepare_profile_guidance(self) -> FocusView | None:
+        profile = self.options.profile_guided
+        if profile is None or self.profile_focus is None:
+            return None
+        attribution = await run_attribution(
+            self.host,
+            profile,
+            workspace=self.workspace,
+            round_number=self.round_number,
+        )
+        focused = self.profile_focus.observe(
+            self._require_focus_state(),
+            round_number=self.round_number,
+            bottlenecks=attribution,
+        )
+        search = self.state.search.model_copy(
+            update={"profile_guidance": focused},
+            deep=True,
+        )
+        self.state = self.state.model_copy(update={"search": search}, deep=True)
+        await self._commit(label=f"profile-guided: prepare round {self.round_number}")
+        return self.profile_focus.focus(focused)
 
     def _combined_context(self, selected: _SelectedRound) -> SingleAgentRoundContext:
         facts = self.host.facts
@@ -562,7 +670,13 @@ class _PlainSingleRun:
 async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
     """Run the plain single-agent policy against the explicit runtime API."""
     options = SingleOptions.model_validate(raw_options)
-    return await _PlainSingleRun(host, options).run()
+    return await _SingleRun(host, options).run()
 
 
-__all__ = ["orchestrate"]
+async def orchestrate_profile_guided(host: RunHost, raw_options: BaseModel) -> RunStatus:
+    """Run profile-guided single-agent search against the explicit runtime API."""
+    options = ProfileGuidedSingleOptions.model_validate(raw_options)
+    return await _SingleRun(host, options).run()
+
+
+__all__ = ["orchestrate", "orchestrate_profile_guided"]

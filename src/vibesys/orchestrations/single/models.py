@@ -1,4 +1,4 @@
-"""Policy-owned values for the plain single-agent orchestration."""
+"""Policy-owned values for the single-agent orchestration presets."""
 
 from __future__ import annotations
 
@@ -6,10 +6,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vibesys.evaluators import input_manifest
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
 from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_runtime.api import AccuracyReceipt
+
+_ProfileGuidedInput = input_manifest.ProfileGuidedInput
 
 
 class SingleOptions(AgentOrchestrationOptions):
@@ -24,6 +27,24 @@ class SingleOptions(AgentOrchestrationOptions):
             raise ValueError(message)
         if self.memory_layout not in {"files", "directories"}:
             message = f"unsupported single-agent memory_layout {self.memory_layout!r}"
+            raise ValueError(message)
+        return self
+
+
+class ProfileGuidedSingleOptions(AgentOrchestrationOptions):
+    """Strict production descriptor options for the profiling-on preset."""
+
+    profile_guided: _ProfileGuidedInput
+
+    @model_validator(mode="after")
+    def _registered_values(self) -> ProfileGuidedSingleOptions:
+        if self.interface not in {"inprocess", "service"}:
+            message = f"unsupported profile-guided single-agent interface {self.interface!r}"
+            raise ValueError(message)
+        if self.memory_layout not in {"files", "directories"}:
+            message = (
+                f"unsupported profile-guided single-agent memory_layout {self.memory_layout!r}"
+            )
             raise ValueError(message)
         return self
 
@@ -51,4 +72,4 @@ class SingleState(BaseModel):
     last_response: SingleAgentRoundResponse | None = None
 
 
-__all__ = ["PaidAttempt", "SingleOptions", "SingleState"]
+__all__ = ["PaidAttempt", "ProfileGuidedSingleOptions", "SingleOptions", "SingleState"]
