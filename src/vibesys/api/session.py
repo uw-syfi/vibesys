@@ -174,20 +174,13 @@ class _LocalRunSession:
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
         # Constructor validation precedes integration and run resource setup.
-        plugin = self._registration.plugin
-        if plugin is None:
+        if self._registration.plugin is None:
             orchestrator = cast("type[Orchestrator]", self._registration.orchestrator)
             self._policy = orchestrator(request.orchestration)
-            self._plugin_options: BaseModel | None = None
+            self._prepared_plugin = None
         else:
-            if request.orchestration.config_version != plugin.config_version:
-                message = (
-                    f"orchestration {plugin.id!r} requires config version "
-                    f"{plugin.config_version}, got {request.orchestration.config_version}"
-                )
-                raise ValueError(message)
             self._policy = None
-            self._plugin_options = plugin.options.model_validate(request.orchestration.options)
+            self._prepared_plugin = self._registration.prepare_plugin(request.orchestration)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -312,8 +305,12 @@ class _LocalRunSession:
     async def _run(self) -> RunResult:
         request = self._request
         policy = self._policy
-        plugin = self._registration.plugin
-        hints = policy.setup.start_hints if policy is not None else None
+        prepared_plugin = self._prepared_plugin
+        plugin = prepared_plugin.plugin if prepared_plugin is not None else None
+        setup = prepared_plugin.setup if prepared_plugin is not None else None
+        hints = (
+            policy.setup.start_hints if policy is not None else setup.start_hints if setup else None
+        )
         try:
             self._integration.events.emit(
                 CoreEventType.RUN_STARTED,
@@ -331,13 +328,11 @@ class _LocalRunSession:
                     ),
                 ),
             )
-            if plugin is not None:
-                options = cast("BaseModel", self._plugin_options)
+            if prepared_plugin is not None:
                 outcome = await run_plugin(
                     request,
                     self._integration,
-                    plugin,
-                    options,
+                    prepared_plugin,
                     open_agent_environment=self.open_agent_environment,
                     projector=self._registration.projector,
                 )

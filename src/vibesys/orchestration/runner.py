@@ -9,16 +9,18 @@ from vibesys.orchestration.runtime import RunContext
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pydantic import BaseModel
-
     from vibesys.backends.base import ComputeBackendImpl
-    from vibesys.orchestration.contracts import OrchestrationProjector, Orchestrator
+    from vibesys.orchestration.contracts import (
+        OrchestrationProjector,
+        Orchestrator,
+        PreparedPlugin,
+    )
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import OrchestrationPlugin, RunStatus
+    from vs_runtime.api import RunStatus
 
 
 async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
@@ -64,8 +66,7 @@ async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parame
 async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime collaborators retain independent ownership.
     request: RunRequest,
     integration: LocalRunIntegration,
-    plugin: OrchestrationPlugin,
-    options: BaseModel,
+    prepared: PreparedPlugin,
     *,
     open_agent_environment: Callable[..., AgentEnvironment] | None = None,
     projector: OrchestrationProjector | None = None,
@@ -73,10 +74,12 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     gate_executor: GateExecutor | None = None,
 ) -> RunStatus:
-    """Open the runtime adapter and invoke one validated plugin."""
+    """Open the runtime adapter and invoke one prepared plugin."""
+    plugin = prepared.plugin
     async with RunContext.open(
         request,
         integration,
+        setup=prepared.setup,
         open_agent_environment=open_agent_environment,
         projector=projector,
         agent_client_factory=agent_client_factory,
@@ -84,4 +87,4 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
         gate_executor=gate_executor,
         plugin=plugin,
     ) as ctx:
-        return await plugin.orchestrate(ctx, options)
+        return await plugin.orchestrate(ctx, prepared.options)

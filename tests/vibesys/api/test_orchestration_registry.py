@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from vibesys.api import (
     ComputeBackend,
@@ -20,7 +20,7 @@ from vibesys.api import (
     open_run_store,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.context import RunSetup
+from vibesys.context import RunSetup, RunStartHints
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
@@ -33,7 +33,10 @@ from vibesys.loops.single.orchestration import (
     ProfileGuidedSingleAgentOrchestrator,
     SingleAgentOrchestrator,
 )
+from vibesys.orchestration import OrchestrationResumeDecision
 from vs_project.api import OrchestrationDescriptor, Project
+from vs_runtime.api import AgentRole, OrchestrationPlugin, RunHost
+from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,6 +65,50 @@ class _StubOrchestrator:
     async def run(self, ctx: RunContext) -> bool:
         self.calls.append(ctx.request)
         return self.result
+
+
+class _PluginOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_rounds: int = Field(gt=0)
+
+
+class _PluginState(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    completed_rounds: int
+
+
+async def _run_plugin(host: RunHost, options: BaseModel) -> PluginRunStatus:
+    parsed = _PluginOptions.model_validate(options)
+    await host.state.commit(_PluginState(completed_rounds=parsed.max_rounds))
+    return PluginRunStatus.SUCCEEDED
+
+
+_SETUP_PLUGIN = OrchestrationPlugin(
+    id="setup-plugin",
+    agents=(AgentRole(id="worker", system_prompt="Complete the assigned work."),),
+    options=_PluginOptions,
+    orchestrate=_run_plugin,
+    state=_PluginState,
+)
+
+
+def _accept_resume(
+    _recorded: OrchestrationDescriptor, _requested: OrchestrationDescriptor
+) -> OrchestrationResumeDecision:
+    return OrchestrationResumeDecision(descriptor=None)
+
+
+def _plugin_setup(options: BaseModel) -> RunSetup:
+    parsed = _PluginOptions.model_validate(options)
+    return RunSetup(
+        state_namespace="setup-state",
+        state_slots={"state.json": _PluginState},
+        resume_policy=_accept_resume,
+        start_hints=RunStartHints(max_rounds=parsed.max_rounds),
+        memory_paths=(".vibesys-memory/progress.md",),
+    )
 
 
 def _custom_request(tmp_path: Path) -> RunRequest:
@@ -236,3 +283,88 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
     with pytest.raises(ValueError, match="unsupported team-search descriptor"):
         create_session(request, sink=_discard_event, registry=registry)
     assert not (request.project_root / ".vibesys").exists()
+
+
+def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
+    request = _custom_request(tmp_path).model_copy(
+        update={
+            "orchestration": OrchestrationDescriptor(
+                id=_SETUP_PLUGIN.id,
+                config_version=1,
+                options={"max_rounds": 3},
+            )
+        }
+    )
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        _SETUP_PLUGIN,
+        setup=_plugin_setup,
+        portable_namespaces=("setup-state",),
+    )
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(request, sink=record, registry=registry)
+    session.start()
+
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+    started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
+    assert isinstance(started.data, RunStartedData)
+    assert started.data.max_rounds == 3
+    assert started.data.expected_roles == ("worker",)
+    stored = (
+        Project.open(request.project_root)
+        .state.portable_namespace(result.run_id, "setup-state")
+        .slot("state.json", _PluginState)
+        .load_optional()
+    )
+    assert stored == _PluginState(completed_rounds=3)
+    prepared = registry.resolve(_SETUP_PLUGIN.id).prepare_plugin(request.orchestration)
+    assert prepared.setup is not None
+    assert prepared.setup.resume_policy is _accept_resume
+    assert prepared.setup.start_hints is not None
+    assert prepared.setup.start_hints.expected_roles == ("worker",)
+    assert prepared.setup.memory_paths == (".vibesys-memory/progress.md",)
+
+
+def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path: Path) -> None:
+    request = _custom_request(tmp_path).model_copy(
+        update={
+            "orchestration": OrchestrationDescriptor(
+                id=_SETUP_PLUGIN.id,
+                config_version=1,
+                options={"max_rounds": 3, "unknown": True},
+            )
+        }
+    )
+    registry = OrchestrationRegistry()
+    registry.register_plugin(_SETUP_PLUGIN, setup=_plugin_setup)
+
+    with pytest.raises(ValidationError, match="unknown"):
+        create_session(request, sink=_discard_event, registry=registry)
+
+    assert not (request.project_root / ".vibesys").exists()
+
+
+def test_registered_plugin_without_setup_derives_roles_from_declaration(tmp_path: Path) -> None:
+    request = _custom_request(tmp_path).model_copy(
+        update={
+            "orchestration": OrchestrationDescriptor(
+                id=_SETUP_PLUGIN.id,
+                config_version=1,
+                options={"max_rounds": 1},
+            )
+        }
+    )
+    registry = OrchestrationRegistry()
+    registry.register_plugin(_SETUP_PLUGIN)
+
+    prepared = registry.resolve(_SETUP_PLUGIN.id).prepare_plugin(request.orchestration)
+
+    assert prepared.setup.start_hints is not None
+    assert prepared.setup.start_hints.max_rounds is None
+    assert prepared.setup.start_hints.expected_roles == ("worker",)

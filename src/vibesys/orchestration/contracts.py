@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
+from vibesys.context import RunSetup, RunStartHints
 from vibesys.orchestration.view import RunView
 from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
-    from vibesys.context import RunSetup
     from vibesys.orchestration.runtime import RunContext
     from vibesys.orchestration.view import RunStatus
     from vs_project.api import Project
     from vs_runtime.api import OrchestrationPlugin
+
+
+type PluginSetupFactory = Callable[[BaseModel], RunSetup]
 
 
 class Orchestrator(Protocol):
@@ -52,6 +57,7 @@ class OrchestrationRegistration:
 
     orchestrator: type[Orchestrator] | None = None
     plugin: OrchestrationPlugin | None = None
+    plugin_setup: PluginSetupFactory | None = None
     projector: OrchestrationProjector | None = None
     portable_namespaces: tuple[str, ...] = ()
     state_family: str | None = None
@@ -61,6 +67,57 @@ class OrchestrationRegistration:
         if (self.orchestrator is None) == (self.plugin is None):
             message = "registration requires exactly one orchestrator or plugin"
             raise ValueError(message)
+        if self.orchestrator is not None and self.plugin_setup is not None:
+            message = "legacy orchestrator registration cannot declare plugin setup"
+            raise ValueError(message)
+
+    def prepare_plugin(self, descriptor: OrchestrationDescriptor) -> PreparedPlugin:
+        """Validate and bind one plugin descriptor before run resources open."""
+        plugin = self.plugin
+        if plugin is None:
+            message = "registration does not contain an orchestration plugin"
+            raise TypeError(message)
+        if descriptor.id != plugin.id:
+            message = (
+                f"selected orchestration {descriptor.id!r} does not match plugin {plugin.id!r}"
+            )
+            raise ValueError(message)
+        if descriptor.config_version != plugin.config_version:
+            message = (
+                f"orchestration {plugin.id!r} requires config version "
+                f"{plugin.config_version}, got {descriptor.config_version}"
+            )
+            raise ValueError(message)
+        options = plugin.options.model_validate(descriptor.options)
+        setup = self.plugin_setup(options) if self.plugin_setup is not None else RunSetup()
+        _validate_plugin_setup(plugin, setup)
+        setup = replace(
+            setup,
+            start_hints=replace(
+                setup.start_hints or RunStartHints(),
+                expected_roles=tuple(role.id for role in plugin.agents),
+            ),
+        )
+        return PreparedPlugin(plugin=plugin, options=options, setup=setup)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedPlugin:
+    """One descriptor-validated runtime plugin and its VibeSys host setup."""
+
+    plugin: OrchestrationPlugin
+    options: BaseModel
+    setup: RunSetup
+
+
+def _validate_plugin_setup(plugin: OrchestrationPlugin, setup: RunSetup) -> None:
+    """Keep the plugin state declaration authoritative over host storage setup."""
+    if setup.state_namespace is None:
+        return
+    expected = {"state.json": plugin.state} if plugin.state is not None else None
+    if setup.state_slots != expected:
+        message = "plugin setup state slots must match the plugin's declared state model"
+        raise ValueError(message)
 
 
 def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
@@ -119,6 +176,7 @@ class OrchestrationRegistry:
         self,
         plugin: OrchestrationPlugin,
         *,
+        setup: PluginSetupFactory | None = None,
         projector: OrchestrationProjector | None = None,
         portable_namespaces: tuple[str, ...] = (),
         state_family: str | None = None,
@@ -129,6 +187,7 @@ class OrchestrationRegistry:
             raise ValueError(msg)
         self._registrations[plugin.id] = OrchestrationRegistration(
             plugin=plugin,
+            plugin_setup=setup,
             projector=projector,
             portable_namespaces=portable_namespaces,
             state_family=state_family,

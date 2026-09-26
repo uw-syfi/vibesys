@@ -90,13 +90,7 @@ def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
 
     registration = built_in_orchestrations().resolve(descriptor.id)
     if registration.plugin is not None:
-        if descriptor.config_version != registration.plugin.config_version:
-            message = (
-                f"orchestration {descriptor.id!r} requires config version "
-                f"{registration.plugin.config_version}, got {descriptor.config_version}"
-            )
-            raise ValueError(message)
-        registration.plugin.options.model_validate(descriptor.options)
+        registration.prepare_plugin(descriptor)
         return
     orchestrator = cast("type[Orchestrator]", registration.orchestrator)
     orchestrator(descriptor)

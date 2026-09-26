@@ -198,7 +198,9 @@ class RunContext:
             agent_roles = plugin.agents
             setup = replace(
                 setup,
-                state_namespace=plugin.id if plugin.state is not None else None,
+                state_namespace=(
+                    setup.state_namespace or plugin.id if plugin.state is not None else None
+                ),
                 state_slots={"state.json": plugin.state} if plugin.state is not None else None,
             )
         self.request = request
