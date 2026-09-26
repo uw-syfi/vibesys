@@ -15,7 +15,7 @@ from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.hypothesis_readmodel import project_run_view
+from vibesys.orchestrations.hypothesis_readmodel import project_run_view
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.search.hypothesis import OrchestratorPlan

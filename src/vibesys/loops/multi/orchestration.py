@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.errors import InvalidStrategyOptionsError
-from vibesys.loops.hypothesis_readmodel import project_run_view
 from vibesys.loops.multi.session import MultiSession
 from vibesys.orchestration import memory
 from vibesys.orchestration.view import RunStatus, RunView
@@ -24,6 +23,7 @@ from vibesys.orchestrations.agent_options import (
     compare_resume_descriptors,
     options_from_descriptor,
 )
+from vibesys.orchestrations.hypothesis_readmodel import project_run_view
 from vibesys.search.hypothesis.attempts import AttemptDecision
 from vibesys.search.hypothesis.state import HypothesisState, load_hypothesis_state
 

@@ -1,8 +1,8 @@
 """Project authoritative hypothesis-search state into typed run views.
 
 The boundary models copy recorded facts without inferring resolutions. Lives
-next to :mod:`vibesys.loops.registry`, not inside any one strategy folder,
-because every hypothesis-driven strategy's registered projector
+directly under :mod:`vibesys.orchestrations`, not inside any one strategy
+folder, because every hypothesis-driven strategy's registered projector
 (``MultiProjector``, ``SingleProjector``, ``ProfileMultiProjector``,
 ``ProfileSingleProjector``) shares it; strategies never import each other, so
 shared read-model logic cannot live inside one strategy's package.

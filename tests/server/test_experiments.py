@@ -19,7 +19,10 @@ from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEnt
 from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.loops.hypothesis_readmodel import project_committed_run_view, project_run_view
+from vibesys.orchestrations.hypothesis_readmodel import (
+    project_committed_run_view,
+    project_run_view,
+)
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,

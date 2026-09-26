@@ -12,7 +12,7 @@ from typing import Literal, TypedDict, Unpack
 
 from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.hypothesis_readmodel import project_run_view as _project_run_view
+from vibesys.orchestrations.hypothesis_readmodel import project_run_view as _project_run_view
 from vibesys.schemas import CandidateDisposition, derive_hypothesis_title
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import (

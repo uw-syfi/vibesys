@@ -11,7 +11,7 @@ from server.api.performance import build_performance_context, summarize_objectiv
 from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.loops.hypothesis_readmodel import project_run_view
+from vibesys.orchestrations.hypothesis_readmodel import project_run_view
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import (
     Hypothesis,
