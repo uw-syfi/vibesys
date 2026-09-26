@@ -45,6 +45,50 @@ TurnResponder: TypeAlias = Callable[
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class FakeModelVolumeRequest:
+    """One model-volume effect observed by a fake provisioner."""
+
+    model_id: str
+    revision: str | None
+
+
+class FakeModelVolumeProvisioner:
+    """Deterministic in-memory model-volume provisioner for composition tests."""
+
+    def __init__(self) -> None:
+        """Create an empty successful provisioner."""
+        self._requests: list[FakeModelVolumeRequest] = []
+        self._volumes: dict[FakeModelVolumeRequest, str] = {}
+        self._failure: Exception | None = None
+
+    @property
+    def requests(self) -> tuple[FakeModelVolumeRequest, ...]:
+        """Return provision attempts in call order."""
+        return tuple(self._requests)
+
+    def fail_with(self, error: Exception | None) -> None:
+        """Configure an error for subsequent provision attempts."""
+        self._failure = error
+
+    def __call__(
+        self,
+        model_id: str,
+        *,
+        revision: str | None = None,
+        log: Callable[[str], object] = print,
+    ) -> str:
+        """Record one request and return a stable volume name for its identity."""
+        del log
+        request = FakeModelVolumeRequest(model_id=model_id, revision=revision)
+        self._requests.append(request)
+        if self._failure is not None:
+            raise self._failure
+        if request not in self._volumes:
+            self._volumes[request] = f"fake-model-volume-{len(self._volumes) + 1}"
+        return self._volumes[request]
+
+
 class _UnknownWorkspaceRevisionError(ValueError):
     def __init__(self, revision: str) -> None:
         super().__init__(f"workspace revision is not retained: {revision!r}")
