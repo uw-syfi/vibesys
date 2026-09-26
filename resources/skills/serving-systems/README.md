@@ -79,7 +79,9 @@ vibesys-skills/
 │   │                             floor, hardware, profiler + flashinfer,
 │   │                             flashattention, sdpa, cuda-graph,
 │   │                             triton-kernels, attention-backend-comparison
-│   ├── rocm/                     floor, hardware, profiler, aiter
+│   ├── rocm/                     floor, hardware, profiler, aiter,
+│   │                             measurement-protocol, counter-triage,
+│   │                             roofline, aiter-engagement
 │   ├── trainium/                 floor, hardware, profiler + neuron-pytorch,
 │   │                             nxd-inference, nxd-kv-cache,
 │   │                             neuron-flash-attention

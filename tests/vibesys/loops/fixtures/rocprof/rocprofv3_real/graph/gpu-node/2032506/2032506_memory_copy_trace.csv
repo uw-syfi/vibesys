@@ -1,0 +1,2 @@
+Kind,Direction,Stream_Id,Source_Agent_Id,Destination_Agent_Id,Correlation_Id,Start_Timestamp,End_Timestamp
+MEMORY_COPY,MEMORY_COPY_HOST_TO_DEVICE,0,Agent 0,Agent 1,16421,2297252847036680,2297252847040840

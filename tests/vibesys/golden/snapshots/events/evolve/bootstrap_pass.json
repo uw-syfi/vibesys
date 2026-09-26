@@ -374,7 +374,7 @@
       "model": null,
       "provider": "fake",
       "stage": "profiler",
-      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "system_prompt": "<text len=9300 sha256=366f8e9c9661f810>",
       "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
     },
     "round_label": "gen-0-cand-1-profiler",
@@ -398,7 +398,7 @@
     "agent_kind": "profiler",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "system_prompt": "<text len=9300 sha256=366f8e9c9661f810>",
       "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
     },
     "round_label": "gen-0-cand-1-profiler",
@@ -786,7 +786,7 @@
       "model": null,
       "provider": "fake",
       "stage": "profiler",
-      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "system_prompt": "<text len=9300 sha256=366f8e9c9661f810>",
       "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
     },
     "round_label": "gen-1-cand-1-profiler",
@@ -810,7 +810,7 @@
     "agent_kind": "profiler",
     "data": {
       "kind": "invocation_started",
-      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "system_prompt": "<text len=9300 sha256=366f8e9c9661f810>",
       "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
     },
     "round_label": "gen-1-cand-1-profiler",

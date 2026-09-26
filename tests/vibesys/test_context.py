@@ -14,6 +14,7 @@ from vibesys.config import Config
 from vibesys.context import (
     RunSetup,
     WorkspaceResourceSpec,
+    _profiler_support_extra,
     _RunResources,
     create_workspace_resources,
     open_run_resources,
@@ -45,7 +46,8 @@ from vibesys.loops.agent_options import (
     descriptor_from_options,
 )
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
+from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
+from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
 from vibesys.run import (
     LocalRunIntegration,
     RunStateNamespace,
@@ -860,3 +862,24 @@ def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
     assert sys.stderr is original_stderr
     assert "colored diagnostic" in run_log_path.read_text()
     assert "\033[31m" not in run_log_path.read_text()
+
+
+def test_profiler_support_extra_includes_shared_runtime_and_declared_extras() -> None:
+    """rocprof declares torch as an extra plugin dir; profilers_common is universal."""
+    definition = profiler_definition(ProfilerKind.ROCPROF)
+
+    extra = _profiler_support_extra(definition)
+    names = [name for _path, name in extra]
+
+    assert names[0] == PROFILERS_COMMON_STAGED_NAME
+    assert "torch_profiler" in names
+    for path, _name in extra:
+        assert Path(path).is_dir()
+
+
+def test_profiler_support_extra_without_declared_extras_is_just_the_shared_runtime() -> None:
+    definition = profiler_definition(ProfilerKind.NSYS)
+
+    extra = _profiler_support_extra(definition)
+
+    assert [name for _path, name in extra] == [PROFILERS_COMMON_STAGED_NAME]

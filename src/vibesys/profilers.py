@@ -20,6 +20,7 @@ class ProfilerKind(StrEnum):
     AUTO = "auto"
     NONE = "none"
     NSYS = "nsys"
+    ROCPROF = "rocprof"
     OTEL = "otel"
     TORCH = "torch"
     NEURON = "neuron"
@@ -54,6 +55,12 @@ class ProfilerDefinition:
     kind: ProfilerKind
     domains: frozenset[DomainName]
     requires_domain_torch_support: bool = False
+    # Other profiler kinds whose support directories are staged alongside
+    # this one's, e.g. rocprof also exposes the torch analyzer's tools, so
+    # rocprof stages torch_profiler/ too. Each entry must be a runnable
+    # ProfilerKind with its own ProfilerDefinition; the staged sibling
+    # directory name is that definition's own ``support_name``.
+    extra_support_kinds: frozenset[ProfilerKind] = frozenset()
 
     @property
     def support_name(self) -> str:
@@ -100,6 +107,14 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
         ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        # The rocprof MCP server also exposes the torch analyzer's tools
+        # (torch.profiler traces are a useful cross-check alongside rocprofv3
+        # captures), so torch_profiler/ is staged alongside rocprof_profiler/.
+        ProfilerDefinition(
+            ProfilerKind.ROCPROF,
+            frozenset({DomainName.LLM_SERVING}),
+            extra_support_kinds=frozenset({ProfilerKind.TORCH}),
+        ),
         ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(
             ProfilerKind.TORCH,

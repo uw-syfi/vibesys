@@ -48,20 +48,43 @@ The benchmark command is `{{ benchmark_command }}`.
 
 {% endif %}
 
-## Analysis toolkit — `{{ profiler_mcp_name }}` MCP tools OR shell
+## Start with `profiling_capabilities`
+
+Call `profiling_capabilities()` first, every round. It reports what this
+host actually supports (torch/CUDA-or-ROCm version, GPU visibility) so you
+can pick a capture approach before attempting one that can't work here.
+
+## Analysis toolkit: `{{ profiler_mcp_name }}` MCP tools OR shell
 
 If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly. Otherwise, shell out to the same subcommand on `python {{ profiler_support_name }}/analyze_torch_profile.py`.
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `tables(report)` | `python {{ profiler_support_name }}/analyze_torch_profile.py tables <report>` | Overview: event categories + totals. Start here. |
+| `certify(trace)` | `... certify <trace>` | **Run this first** on a raw `*.pt.trace.json(.gz)` trace. PASS/WARN/FAIL on kernel/op counts, `record_shapes` coverage, step markers, GPU-busy fraction, and graph-replay attribution: each failure names the exact re-capture fix. |
+| `tables(report)` | `python {{ profiler_support_name }}/analyze_torch_profile.py tables <report>` | Overview: event categories + totals. |
 | `kernels(report, top=15)` | `... kernels <report> --top 15` | Top GPU kernels by self-CUDA time. |
 | `operators(report, top=15)` | `... operators <report> --top 15` | Top operators (aten::*, torch::*) by self-CPU time. |
-| `cpu_overhead(report)` | `... cpu-overhead <report>` | CPU-vs-GPU ratio — detects launch-bound / compute-bound. |
+| `cpu_overhead(report)` | `... cpu-overhead <report>` | CPU-vs-GPU ratio: detects launch-bound / compute-bound. |
 | `memory(report)` | `... memory <report>` | Memory allocation / transfer events. |
-| `summary(report, top=15)` | `... summary <report>` | All-in-one: overhead + kernels + operators + memory. |
+| `gemm_shapes(trace, top=20, out=None)` | `... gemm-shapes <trace> --top 20 [--out shapes.json]` | Ranked (M, N, K, dtype) GEMM demand from `aten::mm`/`addmm`/`bmm`/`baddbmm`/`linear`/`matmul`/`_scaled_mm`, weighted by call count and correlated GPU kernel time. `--out` writes JSON usable as GEMM-tuning input (e.g. hipBLASLt/AITER). |
+| `roofline(trace, device=None, peak_tflops=None, peak_gbps=None, top=20)` | `... roofline <trace> [--device mi210\|mi300x\|mi300a\|mi325x\|mi355x\|h100] [--peak-tflops X --peak-gbps Y]` | Achieved TFLOP/s, GB/s, arithmetic intensity, and compute-vs-memory bound per GEMM/attention op. Device peaks auto-detect from the trace when omitted. |
+| `summary(report, top=15)` | `... summary <report>` | All-in-one: certify (on a raw trace) + overhead + kernels + operators + memory. |
 
-Start with `tables`, then pick the analyses that matter most for the current architecture.
+`kernels`/`operators`/`cpu_overhead`/`memory`/`tables`/`summary` accept either
+a raw `*.pt.trace.json(.gz)` trace or the JSON `capture` writes: the raw
+trace is converted in-process. `certify`/`gemm_shapes`/`roofline` need the raw
+trace itself: shape and kernel-correlation detail a summarized report does
+not carry.
+
+**Certify before analyzing.** Run `certify` on any raw trace before trusting
+`gemm_shapes`, `roofline`, or a per-op reading from `kernels`/`operators`. A
+FAIL means the trace cannot support the claim you are about to make; a WARN
+means the number is usable but degraded (e.g. per-op attribution is unreliable
+under a graph replay). Re-capture using the fix each item names rather than
+reporting a number the trace cannot support.
+
+Start with `tables`, then `certify`, then pick the analyses that matter most
+for the current architecture.
 
 Suggestions are advisory. Report visibility limits rather than declaring the
 optimization loop blocked on new profiler infrastructure. When capture is
@@ -70,7 +93,7 @@ that could still discriminate candidate mechanisms.
 
 ## Capturing a profile
 
-Capture is the long-running step — run it first, then call the MCP tools on the resulting JSON.
+Capture is the long-running step: run it first, then call the MCP tools on the resulting JSON.
 
 {% if profile_execution == "remote" %}
 ### Remote capture (REQUIRED on this run)
@@ -86,9 +109,32 @@ captured and explain which entry point or command the implementer must add.
 
 If a remote profiling command fails (entrypoint missing, function errors, JSON empty, returned dict missing required keys, etc.), record the exact error in `analysis` and surface the missing contract as a `suggestions` item. A profile run that produces fabricated or unrelated numbers is worse than a profile run that admits it could not capture.
 {% else %}
-### Mode A: In-process (default)
+### `profile_ops`: generic in-process capture (preferred)
 
-Loads the candidate implementation directly and profiles the domain's hot path in a loop. Captures kernel-level detail but may not cover service, batching, or queueing overhead.
+`profile_ops` wraps the candidate's own entry point with an in-process
+`torch.profiler` injection and returns a capture id (a raw
+`*.pt.trace.json(.gz)` trace), using the same lifecycle arguments every
+`profile_*` tool shares: `command`, `env`, `cwd`, `ready_command`,
+`load_command`, `stop_signal`, `grace_s`, `timeout_s`, plus
+`record_shapes=True`. **`record_shapes` is required**: without it, `certify`
+will FAIL and `gemm_shapes`/`roofline` have no shapes to extract.
+
+Fill `command`/`env` from the candidate's declared startup contract, and
+check the engine-specific profiling notes in your skills, if any, before
+assuming a profiler contract: some engines expose an environment-variable
+plus HTTP-endpoint contract, others a Python keyword argument to their own
+in-process API, and this has changed across releases of the same engine, so
+an assumed contract can silently no-op (e.g. a stop-profile endpoint that
+404s because it was never wired up in the installed build). Prefer a
+single-process, non-serving `command` that exits on its own once the
+workload finishes, with an untraced warmup baked in (compiles kernels /
+captures graphs so they don't pollute the profiled window) before the
+traced region: this sidesteps any clean-exit-only capture requirement
+entirely instead of relying on a graceful-shutdown path that may not be
+verified. If a server capture is unavoidable, set `stop_signal` to a
+graceful signal (never a hard kill) and give `grace_s` a generous value.
+
+Without the MCP server attached, drive the same capture directly:
 
 ```
 python {{ profiler_support_name }}/analyze_torch_profile.py capture \
@@ -96,16 +142,56 @@ python {{ profiler_support_name }}/analyze_torch_profile.py capture \
   --output /tmp/prof.json
 ```
 
-Use the exact capture command above only when it matches the domain's artifact contract. Otherwise, adapt the capture workflow to the domain context and benchmark harness.
+Use the exact capture command above only when it matches the domain's artifact contract. Otherwise, adapt the capture workflow to the domain context and benchmark harness, still filling `command`/`env` the same way.
 
-### Mode B: Server-path (optional)
+### Server-path (optional): instrument the server directly
 
-Include HTTP, async, and batching overhead by instrumenting the server with two admin endpoints and using `capture-server`. See the docstring of `analyze_torch_profile.py` for the required `/admin/profile/start` and `/admin/profile/stop` contract.
+Use this only when the candidate has no in-process entry point `profile_ops`
+can wrap. Include HTTP, async, and batching overhead by instrumenting the
+server with two admin endpoints and using `capture-server`. See the
+docstring of `analyze_torch_profile.py` for the required
+`/admin/profile/start` and `/admin/profile/stop` contract.
+
+**Run `certify` on the resulting trace before anything else** (see
+"Certify before analyzing" above): this is where a missing `record_shapes`
+or an unexpectedly graph-mode capture shows up.
+
+**Post-capture hang (ROCm).** Exiting the `torch.profiler` context (directly
+or via a candidate's own stop-profile call) can hang for several minutes
+with no further log output (reproduced on both ROCm 6.4/torch 2.9.1 and
+ROCm 7.2.3/torch 2.12, so treat it as a standing ROCm risk rather than a
+version-pinned bug). This is a process-teardown hang, **not** a data-loss
+issue: the trace file is complete and valid on disk the moment its
+size/mtime stops advancing, well before the process would otherwise exit.
+Give `timeout_s`/`grace_s` a generous value and treat a timeout-forced exit
+as success-with-a-known-hang rather than a failure once the trace file is
+confirmed on disk; do not block indefinitely or leave a stuck GPU for the
+next round.
+
+### Warm targets: repeated windows without relaunching
+
+`start_target(command, ...)` launches a process once and keeps it running;
+`profile_ops(target=<id>, load_command=..., duration_s=...)` then takes a
+profiling window against it (`load_command` bounds the window: it must run
+long enough for real work to happen). Call `stop_target(target)` when done,
+or let the server's own exit stop it automatically. Use this when the same
+process needs several before/after windows (e.g. comparing two request
+shapes on one already-warmed-up server) rather than paying a fresh launch
+(weight load, warmup, KV init) per window; overhead of leaving a target
+armed but idle between windows is negligible. `record_shapes`/`delay_s`/
+`setup_command` are fixed when the target was started, not per-window.
+
+If `command` already opens its own, separate `torch.profiler` session
+in-process (check the candidate's declared profiler contract before
+assuming otherwise), pass `inject=False` to `profile_ops`: this skips
+arming a second, competing session, which otherwise crashes the
+CUPTI/roctracer/kineto backend outright rather than raising a catchable
+error.
 {% endif %}
 
 {% include "profilers/_observer_effect.j2" %}
 
-## Performance metric — do not duplicate an accepted canonical run
+## Performance metric: do not duplicate an accepted canonical run
 
 The profiler is read-only and does not create a new candidate. If `progress/`
 already contains a recent accepted canonical evaluation for the current
@@ -119,14 +205,14 @@ headline metric is appropriate only when no accepted evaluation exists and the
 domain's profiling workflow necessarily produces a canonical benchmark artifact.
 In that exceptional case:
 
-1. The OBJECTIVE block above (rendered verbatim from `OBJECTIVE.md`) names the headline field — look for a line like `Headline metric: <field_name>` referencing a specific JSON field of the benchmark tool's output. This is the only authoritative source for the field name.
+1. The OBJECTIVE block above (rendered verbatim from `OBJECTIVE.md`) names the headline field: look for a line like `Headline metric: <field_name>` referencing a specific JSON field of the benchmark tool's output. This is the only authoritative source for the field name.
 2. Run the canonical benchmark with its documented output flag.
-3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units — round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
+3. Read **that exact field** from the benchmark JSON. Set `perf_metric` to its numeric value and `perf_unit` to that field's name (e.g. `"median_tok_per_sec"`). Do not substitute a different field, do not invert it, do not convert units: round N's perf_unit must equal round N-1's perf_unit unless the OBJECTIVE itself changed.
 
 **Forbidden**:
 
 - Picking a different field from the benchmark output because you "think it's more meaningful". The OBJECTIVE is authoritative.
-- Reporting per-replay timings, per-kernel throughput, or single-operation extrapolations as `perf_metric` — they ignore end-to-end effects and can misrepresent real behavior. Use them only in `analysis` and `bottlenecks` text.
+- Reporting per-replay timings, per-kernel throughput, or single-operation extrapolations as `perf_metric`: they ignore end-to-end effects and can misrepresent real behavior. Use them only in `analysis` and `bottlenecks` text.
 - Recording the secondary/parenthetical number ("also: …") that the benchmark may print alongside the primary metric for human readers.
 
 If you cannot run the benchmark this round, set `perf_metric: null` rather than substituting a derived number.

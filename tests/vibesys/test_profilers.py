@@ -308,6 +308,33 @@ def test_headroom_profiler_domains_and_preflight() -> None:
     assert preflight_profiler_kind(ProfilerKind.HEADROOM).usable
 
 
+def test_rocprof_profiler_domains_and_preflight() -> None:
+    definition = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF]
+
+    assert definition.domains == frozenset({DomainName.LLM_SERVING})
+    assert not definition.requires_domain_torch_support
+    assert ProfilerKind.ROCPROF in allowed_profiler_kinds(DomainName.LLM_SERVING)
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(DomainName.GENERIC)
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(DomainName.MICROSERVICES)
+    # rocprofv3/rocprof-compute normally run inside the ROCm container, like
+    # nsys on CUDA; no host command-availability check, to avoid a false
+    # negative on an editor host that never runs the profiler itself.
+    assert preflight_profiler_kind(ProfilerKind.ROCPROF).usable
+    # The rocprof MCP server also exposes the torch analyzer's tools, so
+    # torch_profiler/ is staged alongside rocprof_profiler/.
+    assert definition.extra_support_kinds == frozenset({ProfilerKind.TORCH})
+
+
+def test_extra_support_kinds_default_empty_and_are_runnable_kinds() -> None:
+    for kind, definition in PROFILER_DEFINITIONS.items():
+        if kind is ProfilerKind.ROCPROF:
+            continue
+        assert definition.extra_support_kinds == frozenset()
+    for definition in PROFILER_DEFINITIONS.values():
+        for extra_kind in definition.extra_support_kinds:
+            assert extra_kind in PROFILER_DEFINITIONS
+
+
 @pytest.mark.parametrize("kind", [ProfilerKind.AUTO, ProfilerKind.NONE])
 def test_profiler_definition_rejects_non_runnable_kinds(kind: ProfilerKind) -> None:
     with pytest.raises(ValueError, match=f"Profiler {kind.value!r} is not runnable"):

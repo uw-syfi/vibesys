@@ -10,9 +10,10 @@ carry over. What differs is plumbing:
   the ``video`` and ``render`` groups.
 * The runtime ships in the ROCm PyTorch image (``rocm/pytorch``).
 * Device selection uses ``HIP_VISIBLE_DEVICES`` and ``rocm-smi``.
-* Profiling uses ``torch.profiler``, which works unmodified on ROCm.
-  ``rocprofv3`` / ``omniperf`` are the system- and kernel-altitude tools
-  but are not wired as a dedicated :class:`ProfilerKind` yet.
+* Profiling defaults to :attr:`ProfilerKind.ROCPROF`, the ``rocprofv3`` /
+  ``rocprof-compute`` toolkit (system trace, PMC counters, ATT, kernel-altitude
+  counters). ``torch.profiler`` remains selectable via ``--profiler torch``
+  and works unmodified on ROCm.
 
 .. warning::
 
@@ -119,7 +120,7 @@ class RocmBackend:
     """
 
     name = ComputeBackend.ROCM
-    profiler_kind = ProfilerKind.TORCH
+    profiler_kind = ProfilerKind.ROCPROF
 
     def __init__(
         self,

@@ -456,7 +456,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
         profile_execution="remote",
     )
 
-    assert "### Mode A: In-process" in local
+    assert "`profile_ops`: generic in-process capture" in local
     assert "### Remote capture (REQUIRED on this run)" not in local
     assert "### Remote capture (REQUIRED on this run)" in remote
     assert "representative workload must run on the remote candidate path" in remote

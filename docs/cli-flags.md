@@ -31,7 +31,7 @@ Several flags look independent, but they combine into one execution contract:
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, or a Docker container (the same container whether launched directly or via `--modal`/SkyPilot). |
-| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
 | Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--extra-skills`, `--no-skills` | Override the preset skill roots, stack extra skills on top of the presets, or disable skill loading. |
@@ -314,7 +314,7 @@ prompts and input-owned candidate-contract documentation.
 | Backend | Intended target | Sandbox support | Device handling | Default profiler behavior |
 | --- | --- | --- | --- | --- |
 | `cuda` | NVIDIA GPU serving systems. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Local/Docker use `nsys`; Modal uses `torch` when `--profiler auto`. |
-| `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Use `none` unless the runtime provides a compatible profiler. |
+| `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Local/Docker use `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
 | `metal` | Apple Silicon / MPS targets. | Local only. | No device selection or monitor. | Local `auto` resolves through the local runtime default. |
 | `trainium` | AWS Trainium / NeuronCore targets. | Local and Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
 | `cpu` | CPU-only service/data-structure targets. | Local and Docker. | No device selection or monitor. | Generic workloads on Linux select `linux_cpu`; macOS selects `macos_cpu`; other systems select no profiler. |
@@ -364,6 +364,7 @@ supported by this CLI.
 | --- | --- |
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
+| `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
 | `otel` | OpenTelemetry service, span, datastore, and critical-path latency for microservice benchmarks. Needs an input bundle that provisions instrumentation and a collector; `auto` selects it when the bundle's benchmark command declares both `--telemetry-output` and `--trace-graph-json`, and resolves to `none` otherwise. |

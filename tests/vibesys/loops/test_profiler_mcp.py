@@ -6,11 +6,17 @@ itself is the ``mcp`` package's responsibility.
 """
 
 import asyncio
+import contextlib
 import importlib.util
 import json
+import os
+import select
 import sqlite3
 import sys
-from collections.abc import Callable, Sequence
+import textwrap
+import threading
+import time
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Protocol
@@ -64,6 +70,11 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly() -> None:
     assert nsys is not None
     assert nsys.name == "vibesys-nsys-profiler"
     assert nsys.args == ("nsys_profiler/server.py",)
+
+    rocprof = mcp_spec(ProfilerKind.ROCPROF)
+    assert rocprof is not None
+    assert rocprof.name == "vibesys-rocprof-profiler"
+    assert rocprof.args == ("rocprof_profiler/server.py",)
 
     torch = mcp_spec(ProfilerKind.TORCH)
     assert torch is not None
@@ -123,6 +134,14 @@ def headroom_server_mod() -> ModuleType:
     return _load_module(
         "_headroom_server",
         _REPO / "resources" / "profilers" / "headroom" / "server.py",
+    )
+
+
+@pytest.fixture(scope="module")
+def rocprof_server_mod() -> ModuleType:
+    return _load_module(
+        "_rocprof_server",
+        _REPO / "resources" / "profilers" / "rocprof" / "server.py",
     )
 
 
@@ -773,17 +792,106 @@ def _trace_graph() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _chrome_trace_events(  # noqa: ANN202  # LW-910183; this private helper's return type is intentionally left loose; annotating it now is separate cleanup work
+    *,
+    include_step_marker: bool = True,
+    record_shapes: bool = True,
+    num_calls: int = 2,
+    graph_launch: bool = False,
+    device_name: str = "AMD Instinct MI210",
+):
+    """Build a minimal, Kineto-shaped raw Chrome trace with one GEMM (aten::addmm).
+
+    Shape: bias(11008), mat1 (32, 4096) x mat2 (4096, 11008), bf16. Each call
+    gets its own cpu_op -> hip_runtime launch -> kernel triple, linked by
+    "External id" and "correlation" the way roctracer/Kineto traces link them
+    (see ``_build_op_to_kernels`` in ``analyze_torch_profile.py``).
+    """
+    events: list[dict] = [{"ph": "M", "name": "process_name", "pid": 1, "args": {"name": "python"}}]
+    if include_step_marker:
+        events.append(
+            {
+                "ph": "X",
+                "cat": "user_annotation",
+                "name": "ProfilerStep#1",
+                "pid": 1,
+                "tid": 1,
+                "ts": 0,
+                "dur": 5000,
+                "args": {},
+            }
+        )
+    ts = 100
+    for i in range(num_calls):
+        args = {
+            "Input type": ["c10::BFloat16", "c10::BFloat16", "c10::BFloat16"],
+            "External id": 1000 + i,
+        }
+        if record_shapes:
+            args["Input Dims"] = [[11008], [32, 4096], [4096, 11008]]
+        events.append(
+            {
+                "ph": "X",
+                "cat": "cpu_op",
+                "name": "aten::addmm",
+                "pid": 1,
+                "tid": 1,
+                "ts": ts,
+                "dur": 200,
+                "args": args,
+            }
+        )
+        events.append(
+            {
+                "ph": "X",
+                "cat": "hip_runtime",
+                "name": "hipLaunchKernel",
+                "pid": 1,
+                "tid": 1,
+                "ts": ts + 10,
+                "dur": 5,
+                "args": {"External id": 1000 + i, "correlation": 5000 + i},
+            }
+        )
+        kernel_name = "hipGraphLaunch" if graph_launch else "Cijk_Ailk_Bljk_HHS_BH_MT128x128"
+        events.append(
+            {
+                "ph": "X",
+                "cat": "kernel",
+                "name": kernel_name,
+                "pid": 0,
+                "tid": 2,
+                "ts": ts + 20,
+                "dur": 300,
+                "args": {"correlation": 5000 + i, "device": 0},
+            }
+        )
+        ts += 400
+    return {
+        "schemaVersion": 1,
+        "deviceProperties": [{"id": 0, "name": device_name}],
+        "traceEvents": events,
+    }
+
+
 class TestTorchMcpServer:
     def test_registers_expected_tools(self, torch_server_mod: ModuleType) -> None:
         server = torch_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
+            "profile_ops",
+            "start_target",
+            "stop_target",
+            "targets",
             "tables",
             "kernels",
             "operators",
             "cpu_overhead",
             "memory",
             "summary",
+            "certify",
+            "gemm_shapes",
+            "roofline",
         }
 
     def test_tables_tool_reports_prof_json_overview(
@@ -866,6 +974,104 @@ class TestTorchMcpServer:
         out = asyncio.run(_call_tool(server, "kernels", report=str(prof), top=5))
         # flash_fwd_kernel is the bigger one and should appear first.
         assert out.index("flash_fwd_kernel") < out.index("rms_norm_kernel")
+
+    def test_kernels_tool_also_accepts_a_raw_chrome_trace(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910184; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=2)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "kernels", report=str(trace)))
+        assert "Cijk_Ailk_Bljk_HHS_BH_MT128x128" in out
+
+    def test_certify_passes_a_well_formed_trace(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910185; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(trace)))
+        assert "record_shapes" in out
+        assert "step_markers" in out
+        assert "[PASS]" in out
+
+    def test_certify_fails_without_record_shapes(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910186; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(record_shapes=False, num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(trace)))
+        assert "Trace certification: FAIL" in out
+        assert "record_shapes=True" in out
+
+    def test_certify_flags_graph_replay_as_degraded_attribution(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910187; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(graph_launch=True, num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(trace)))
+        assert "graph_replay" in out
+        assert "hipGraphLaunch" in out
+
+    def test_certify_rejects_a_summarized_report(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910188; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        prof = tmp_path / "prof.json"
+        prof.write_text(
+            json.dumps(
+                {"version": 1, "total_cuda_time_us": 1.0, "total_cpu_time_us": 1.0, "events": []}
+            )
+        )
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(prof)))
+        assert out.startswith("error:")
+        assert "not a raw Kineto/Chrome trace" in out
+
+    def test_gemm_shapes_dedups_and_ranks_by_gpu_time(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910189; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=3)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "gemm_shapes", trace=str(trace), top=5))
+        assert "32x11008x4096" in out
+        # Three identical-shape calls collapse into one deduplicated row.
+        assert out.count("addmm") == 1
+        assert out.count("32x11008x4096") == 1
+
+    def test_gemm_shapes_writes_ranked_json_when_out_given(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910190; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=2)))
+        out_path = tmp_path / "shapes.json"
+
+        server = torch_server_mod.build_server()
+        asyncio.run(_call_tool(server, "gemm_shapes", trace=str(trace), out=str(out_path)))
+
+        written = json.loads(out_path.read_text())
+        assert written[0]["op"] == "addmm"
+        assert written[0]["m"] == 32
+        assert written[0]["n"] == 11008
+        assert written[0]["k"] == 4096
+        assert written[0]["call_count"] == 2
+
+    def test_roofline_classifies_bound_and_reports_device_peaks(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910191; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "roofline", trace=str(trace)))
+        assert "MI210" in out
+        # A skinny M=32 GEMM at this shape is memory-bound on MI210.
+        assert "memory" in out
+
+    def test_roofline_prefers_explicit_peaks_over_autodetect(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910192; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(
+            json.dumps(_chrome_trace_events(num_calls=1, device_name="Unrecognized GPU"))
+        )
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(
+            _call_tool(server, "roofline", trace=str(trace), peak_tflops=100.0, peak_gbps=1000.0)
+        )
+        assert "100.0 TFLOP/s" in out
+        assert "1000 GB/s" in out
 
 
 # ---------------------------------------------------------------------------
@@ -990,3 +1196,586 @@ class TestHeadroomMcpServer:
         out = asyncio.run(_call_tool(server, "summary", report=str(bogus)))
         assert out.startswith("error:")
         assert "not a headroom report" in out
+
+
+# ---------------------------------------------------------------------------
+# rocprof MCP server
+# ---------------------------------------------------------------------------
+
+_ROCPROF_FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
+
+
+def _rocprof_kernel_trace_dir(tmp_path: Path) -> Path:
+    """A minimal single-process rocprofv3 kernel-trace directory."""
+    d = tmp_path / "gpu-node-01" / "4242"
+    d.mkdir(parents=True)
+    (d / "out_kernel_trace.csv").write_text(
+        "Kernel_Name,Agent_Id,Queue_Id,Correlation_Id,Start_Timestamp,End_Timestamp,Pid\n"
+        "flash_attn_decode_kernel,0,0,1,1000,2000,4242\n"
+    )
+    return tmp_path
+
+
+# A minimal fake rocprofv3 for the MCP-layer profile_timeline smoke test below
+# (the deep behavior coverage for capture.py's profile_* tools lives in
+# tests/vibesys/loops/test_rocprof_capture.py -- this only proves server.py's
+# wiring reaches capture.py correctly). No SIGINT handling is needed here:
+# the smoke test uses a trivial bounded command with no load_command.
+_FAKE_ROCPROFV3_TIMELINE_SOURCE = textwrap.dedent(
+    f"""
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    argv = sys.argv[1:]
+    out_dir = None
+    for i, tok in enumerate(argv):
+        if tok == "-d" and i + 1 < len(argv):
+            out_dir = argv[i + 1]
+            break
+    wrapped = argv[argv.index("--") + 1 :] if "--" in argv else []
+    rc = subprocess.Popen(wrapped).wait() if wrapped else 0
+    if rc == 0 and out_dir:
+        out_path = Path(out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        src = Path({str(_ROCPROF_FIXTURES)!r}) / "kernel_trace" / "out_kernel_trace.csv"
+        if src.is_file():
+            shutil.copy(src, out_path / "out_kernel_trace.csv")
+    sys.exit(rc)
+    """
+)
+
+
+def _install_fake_rocprofv3_timeline_only(bin_dir: Path) -> Path:
+    path = bin_dir / "rocprofv3"
+    path.write_text(f"#!{sys.executable}\n{_FAKE_ROCPROFV3_TIMELINE_SOURCE}")
+    path.chmod(0o755)
+    return path
+
+
+# -- MCP-level responsiveness / cancellation / busy-guard smoke tests --------
+#
+# These exercise the async wiring (server.py's `async def profile_timeline`
+# + mcp_async.run_cancellable) through FastMCP's own in-memory
+# `call_tool`/`list_tools` -- the "in-memory client/server" the pinned
+# mcp<2 SDK provides, no stdio subprocess needed (see mcp_async.py's
+# docstring). The deep capture_runtime-level coverage for cancel_event/
+# exclusive_capture lives in test_capture_runtime.py; this proves the MCP
+# tool wrapper actually reaches that machinery, not just capture_runtime in
+# isolation.
+
+_SLOW_TARGET_SOURCE = textwrap.dedent(
+    """
+    import os
+    import signal
+    import sys
+
+    # Keep the fifo's write end open for the process's whole life: the test
+    # observes the target's death as EOF on the read end.
+    handle = open(sys.argv[1], "w")
+    handle.write(str(os.getpid()))
+    handle.flush()
+    signal.pause()
+    """
+)
+
+
+def _install_slow_target(tmp_path: Path) -> Path:
+    path = tmp_path / "slow_target.py"
+    path.write_text(_SLOW_TARGET_SOURCE)
+    return path
+
+
+class _PidChannel:
+    """A FIFO the slow target reports its pid on, awaited without polling.
+
+    The read end is opened (non-blocking) before the target starts, so the
+    target's ``open(fifo, "w")`` succeeds immediately, and the event loop is
+    woken by the fd becoming readable rather than by a timer.
+    """
+
+    def __init__(self, path: Path) -> None:
+        os.mkfifo(path)
+        self.path = path
+        self._fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+
+    async def wait_for_start(self, capture_task: asyncio.Future[str]) -> None:
+        """Return once the target has reported in, or fail if the capture ends first."""
+        loop = asyncio.get_running_loop()
+        readable = asyncio.Event()
+        loop.add_reader(self._fd, readable.set)
+        waiter = asyncio.ensure_future(readable.wait())
+        try:
+            await asyncio.wait({waiter, capture_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            loop.remove_reader(self._fd)
+            waiter.cancel()
+        if not readable.is_set():
+            diag = f"capture_task.done()={capture_task.done()}"
+            if capture_task.done():
+                exc = capture_task.exception()
+                diag += f" exception={exc!r}"
+                if exc is None:
+                    diag += f" result={capture_task.result()!r}"
+            raise AssertionError(f"target never started: {diag}")  # noqa: TRY003  # LW-910203; this is a boundary error that deliberately embeds the offending value for the operator to act on
+        os.read(self._fd, 64)
+
+    def wait_for_target_exit(self, *, timeout_s: float = 30.0) -> bool:
+        """True once the target has exited: its held-open write end closes, giving EOF.
+
+        ``timeout_s`` only bounds the failure case where the process leaked.
+        """
+        readable, _, _ = select.select([self._fd], [], [], timeout_s)
+        return bool(readable) and os.read(self._fd, 64) == b""
+
+    def close(self) -> None:
+        os.close(self._fd)
+
+
+class _WorkerTracker:
+    """``run_worker`` seam Fake: runs the real ``run_cancellable``, tracking in-flight workers.
+
+    A cancelled call's worker thread is "abandoned" (anyio's
+    ``abandon_on_cancel=True``): it keeps escalating the target and releasing
+    the exclusive-capture slot in its own ``finally`` after the coroutine that
+    awaited cancellation has already returned. ``wait_idle`` blocks on a
+    condition until every such worker has returned, so it cannot race a
+    subsequent capture.
+    """
+
+    def __init__(self, run_cancellable: Callable[..., Awaitable[str]]) -> None:
+        self._run_cancellable = run_cancellable
+        self._in_flight = 0
+        self._idle = threading.Condition()
+
+    async def __call__(
+        self,
+        fn: Callable[..., str],
+        /,
+        *args: object,
+        cancel_event: threading.Event,
+        **kwargs: object,
+    ) -> str:
+        with self._idle:
+            self._in_flight += 1
+
+        def tracked(*call_args: object, **call_kwargs: object) -> str:
+            try:
+                return fn(*call_args, **call_kwargs)
+            finally:
+                with self._idle:
+                    self._in_flight -= 1
+                    self._idle.notify_all()
+
+        return await self._run_cancellable(tracked, *args, cancel_event=cancel_event, **kwargs)
+
+    def wait_idle(self, *, timeout_s: float = 30.0) -> bool:
+        """``timeout_s`` only bounds the failure case where a worker never returns."""
+        with self._idle:
+            return self._idle.wait_for(lambda: self._in_flight == 0, timeout=timeout_s)
+
+
+_FAKE_PANDAS_PYTHON_SOURCE = textwrap.dedent(
+    """\
+    #!/bin/sh
+    if [ "$1" = "-c" ]; then
+        echo 2.2.2
+    else
+        echo "rocprofiler-compute version: 3.1.0"
+    fi
+    """
+)
+
+
+def _install_fake_rocm(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A minimal ROCm tree plus a stand-in deps interpreter, selected via env vars."""
+    bin_dir = root / "bin"
+    lib_dir = root / "lib"
+    bin_dir.mkdir(parents=True)
+    lib_dir.mkdir()
+    for name in ("rocprof-compute", "rocprof"):
+        tool = bin_dir / name
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+    (lib_dir / "libaqlprofile64.so").write_bytes(b"")
+    fake_python = root / "fake-python"
+    fake_python.write_text(_FAKE_PANDAS_PYTHON_SOURCE)
+    fake_python.chmod(0o755)
+    monkeypatch.setenv("ROCM_PATH", str(root))
+    monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_BIN", str(bin_dir / "rocprof-compute"))
+    monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_PYTHON", str(fake_python))
+
+
+class TestRocprofMcpServer:
+    @pytest.fixture(autouse=True)
+    def _reset_capture_slot(self, rocprof_server_mod: ModuleType) -> Iterator[None]:
+        """Every test starts and ends with no capture holding the in-process slot.
+
+        ``capture_runtime``'s exclusive-capture slot is process-global
+        module state (see ``test_capture_runtime.py``'s own reset fixture):
+        a cancelled capture's worker thread releases it only once its
+        (possibly still-escalating) teardown finishes, which can outlast
+        the coroutine that awaited its cancellation. Without this reset, a
+        cancellation test earlier in this class can leave the slot held
+        into the next test and make an unrelated capture spuriously report
+        "busy".
+        """
+        rocprof_server_mod.capture_runtime.release_capture_slot()
+        yield
+        rocprof_server_mod.capture_runtime.release_capture_slot()
+
+    def test_registers_expected_tools(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # LW-910195; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        # Built from the live server rather than assumed: counter_sets/
+        # counter_plan/att_plan were folded into profiling_capabilities, and
+        # compute_doctor was folded into it too (reached via
+        # capture.profiling_capabilities() -> _capability_compute_block()).
+        # certify/gemm_shapes/roofline are only registered when the torch
+        # analyzer module is importable as a sibling; since
+        # resources/profilers/torch/analyze_torch_profile.py exists on disk
+        # in this repo, they ARE registered in this test environment.
+        server = rocprof_server_mod.build_server()
+        names = asyncio.run(_list_tool_names(server))
+        assert names == {
+            # capabilities + capture tools (capture.py)
+            "profiling_capabilities",
+            "profile_timeline",
+            "profile_counters",
+            "profile_kernel_deep",
+            "profile_instructions",
+            "profile_ops",
+            "start_target",
+            "stop_target",
+            "targets",
+            # capture store: list / summarize / diff
+            "captures",
+            "summary",
+            "compare",
+            # analyze_rocprof.py: rocprofv3 system trace
+            "files",
+            "kernels",
+            "families",
+            "idle_gaps",
+            "cpu_overhead",
+            "memory",
+            "graphs",
+            "host_idle",
+            "query",
+            # counters.py: PMC counter sets
+            "counter_report",
+            "counter_triage",
+            # att.py: Advanced Thread Trace
+            "att_hotspots",
+            # compute.py: rocprof-compute analyze drill-down
+            "compute_analyze",
+            # analyze_torch_profile.py: cross-check torch-side analysis
+            "certify",
+            "gemm_shapes",
+            "roofline",
+            # kernel_bench.py: microbenchmark + paired A/B
+            "bench_parse",
+            "bench_compare",
+            "bench_verdict",
+        }
+
+    def test_registers_fewer_tools_when_torch_analyzer_is_unavailable(
+        self, rocprof_server_mod: ModuleType
+    ) -> None:
+        server = rocprof_server_mod.build_server(import_sibling=lambda _name: None)
+        names = asyncio.run(_list_tool_names(server))
+
+        assert "certify" not in names
+        assert "gemm_shapes" not in names
+        assert "roofline" not in names
+        assert "profile_timeline" in names
+
+    def test_kernels_tool_reports_from_a_kernel_trace_directory(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
+        report = _rocprof_kernel_trace_dir(tmp_path)
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "kernels", report=str(report), top=5))
+        assert "flash_attn_decode_kernel" in out
+
+    def test_counter_report_tool_merges_pmc_passes(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # LW-910196; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        dirs = [
+            str(_ROCPROF_FIXTURES / "pmc" / "l2"),
+            str(_ROCPROF_FIXTURES / "pmc" / "hbm"),
+            str(_ROCPROF_FIXTURES / "kernel_trace"),
+        ]
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "counter_report", dirs=dirs, top=15, arch="gfx90a"))
+        assert "flash_attn_decode_kernel" in out
+        assert "L2 hit rate:" in out
+
+    def test_counter_triage_tool_classifies_bottlenecks(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # LW-910197; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        dirs = [str(_ROCPROF_FIXTURES / "pmc" / "occupancy_low")]
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "counter_triage", dirs=dirs, arch="gfx90a", top=15))
+        assert "gemv_lowocc_kernel" in out
+        assert "OCCUPANCY-LIMITED" in out
+
+    def test_att_hotspots_tool_ranks_stall_hotspots(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # LW-910198; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        dispatch_dir = _ROCPROF_FIXTURES / "att" / "ui_output_agent_123_dispatch_1"
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "att_hotspots", dispatch_dir=str(dispatch_dir), top=5))
+        assert "Stall category totals" in out
+
+    def test_profiling_capabilities_tool_reports_all_compute_checks_passed(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # compute_doctor is gone as a standalone tool; its diagnosis is now
+        # reached via profiling_capabilities() -> capture._capability_compute_block()
+        # -> compute.cmd_doctor, which locates everything through env vars.
+        _install_fake_rocm(tmp_path / "rocm", monkeypatch)
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "profiling_capabilities"))
+        assert "[OK]" in out
+        assert "All checks passed." in out
+
+    def test_profiling_capabilities_tool_reports_missing_compute_binary_as_a_fix(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_BIN", str(tmp_path / "no-such-rocprof-compute"))
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "profiling_capabilities"))
+        assert "[FAIL] rocprof-compute binary: not found" in out
+        assert "Fixes:" in out
+
+    def test_compute_analyze_tool_falls_back_to_raw_csvs(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_BIN", str(tmp_path / "no-such-rocprof-compute"))
+        workload = tmp_path / "workload"
+        workload.mkdir()
+        (workload / "pmc_perf.csv").write_text("a,b\n1,2\n")
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "compute_analyze", workload_dir=str(workload)))
+        assert "falling back to raw CSVs" in out
+        assert "pmc_perf.csv" in out
+
+    def test_bench_parse_tool_extracts_wall_ms_lines(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910199; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        log = tmp_path / "driver.log"
+        log.write_text("wall_ms: 12.5\nwall_ms: 13.0\n")
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "bench_parse", log=str(log)))
+        assert json.loads(out) == {"wall_ms": [12.5, 13.0]}
+
+    def test_bench_compare_tool_reports_a_decisive_verdict(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910200; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        file_a = tmp_path / "a.json"
+        file_b = tmp_path / "b.json"
+        file_a.write_text(json.dumps({"wall_ms": [10.0, 10.1, 9.9, 10.0]}))
+        file_b.write_text(json.dumps({"wall_ms": [8.0, 8.1, 7.9, 8.0]}))
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(
+            _call_tool(server, "bench_compare", file_a=str(file_a), file_b=str(file_b))
+        )
+        assert "DECISIVE" in out
+
+    def test_bench_verdict_tool_reports_a_paired_verdict(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910201; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        samples = tmp_path / "pairs.json"
+        samples.write_text(
+            json.dumps(
+                {
+                    "pairs": [
+                        [10.0, 8.0],
+                        [10.0, 8.1],
+                        [10.0, 7.9],
+                        [10.0, 8.0],
+                    ]
+                }
+            )
+        )
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "bench_verdict", samples=str(samples)))
+        assert "DECISIVE" in out
+
+    # -- new curated-surface smoke tests: prove server.py's wiring, not the
+    # -- deep capture.py behavior (that's tests/vibesys/loops/test_rocprof_capture.py) --
+
+    def test_profiling_capabilities_tool_smoke(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # LW-910202; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "profiling_capabilities"))
+        assert out
+        assert "rocprofv3" in out
+
+    def test_profile_timeline_tool_with_fake_rocprofv3_returns_ok(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bin_dir = tmp_path / "fakebin"
+        bin_dir.mkdir()
+        _install_fake_rocprofv3_timeline_only(bin_dir)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "profile_timeline", command="true"))
+
+        assert "): ok" in out
+
+    def test_captures_tool_with_no_captures_reports_the_empty_message(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        server = rocprof_server_mod.build_server()
+
+        out = asyncio.run(_call_tool(server, "captures"))
+
+        assert "(no captures" in out
+
+    def test_summary_and_compare_tools_with_a_bogus_capture_id_return_clean_error_text(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        server = rocprof_server_mod.build_server()
+
+        summary_out = asyncio.run(_call_tool(server, "summary", capture_id="bogus-capture-id"))
+        compare_out = asyncio.run(_call_tool(server, "compare", a="bogus-a", b="bogus-b"))
+
+        # This module's own clean "error: ..." text, not a raised exception
+        # turned into FastMCP's own error shape or a stack trace.
+        assert summary_out.startswith("error:")
+        assert compare_out.startswith("error:")
+
+    def test_profile_counters_tool_with_an_unknown_set_returns_error_string(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # capture.profile_counters *raises* ValueError for bad input; the
+        # profile_counters tool wrapper in server.py catches ValueError and
+        # returns f"error: {exc}" instead of letting it propagate.
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        server = rocprof_server_mod.build_server()
+
+        out = asyncio.run(
+            _call_tool(server, "profile_counters", command="true", sets=["bogus-set-xyz"])
+        )
+
+        assert out.startswith("error:")
+
+    def _slow_capture_server(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[_McpServer, _WorkerTracker, _PidChannel, str]:
+        bin_dir = tmp_path / "fakebin"
+        bin_dir.mkdir()
+        _install_fake_rocprofv3_timeline_only(bin_dir)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        pid_channel = _PidChannel(tmp_path / "target.pid")
+        slow_script = _install_slow_target(tmp_path)
+        tracker = _WorkerTracker(rocprof_server_mod.mcp_async.run_cancellable)
+        server = rocprof_server_mod.build_server(run_worker=tracker)
+        return server, tracker, pid_channel, f"{sys.executable} {slow_script} {pid_channel.path}"
+
+    def _assert_target_and_slot_released(
+        self, rocprof_server_mod: ModuleType, tracker: _WorkerTracker, pid_channel: _PidChannel
+    ) -> None:
+        assert pid_channel.wait_for_target_exit(), "target process leaked past cancellation"
+        # The cancelled call's worker thread keeps running (escalating, then
+        # releasing the exclusive-capture slot in its own `finally`) after the
+        # coroutine that awaited cancellation has already returned. Wait for
+        # that teardown to finish so it can't race a subsequent test's own
+        # capture.
+        assert tracker.wait_idle(), "capture worker never returned after cancellation"
+        assert rocprof_server_mod.capture_runtime.active_capture() is None, (
+            "capture slot still held after cancellation settled"
+        )
+
+    def test_profile_timeline_tool_stays_responsive_to_other_calls_while_a_capture_runs(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server, tracker, pid_channel, command = self._slow_capture_server(
+            rocprof_server_mod, tmp_path, monkeypatch
+        )
+
+        async def run() -> None:
+            capture_task = asyncio.ensure_future(
+                _call_tool(server, "profile_timeline", command=command)
+            )
+            await pid_channel.wait_for_start(capture_task)
+
+            # A cheap call, made while the capture is still in flight, must
+            # return promptly instead of waiting behind it on the event
+            # loop -- this is the whole point of running the capture off
+            # the main loop.
+            cheap_out = await asyncio.wait_for(_call_tool(server, "captures"), timeout=3.0)
+            assert cheap_out
+            assert not capture_task.done()
+
+            capture_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await capture_task
+
+        try:
+            asyncio.run(run())
+            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+        finally:
+            pid_channel.close()
+
+    def test_profile_timeline_tool_returns_busy_for_a_second_concurrent_capture(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server, tracker, pid_channel, command = self._slow_capture_server(
+            rocprof_server_mod, tmp_path, monkeypatch
+        )
+
+        async def run() -> str:
+            capture_task = asyncio.ensure_future(
+                _call_tool(server, "profile_timeline", command=command)
+            )
+            await pid_channel.wait_for_start(capture_task)
+
+            busy_out = await asyncio.wait_for(
+                _call_tool(server, "profile_timeline", command="true"), timeout=3.0
+            )
+
+            capture_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await capture_task
+            return busy_out
+
+        try:
+            busy_out = asyncio.run(run())
+            assert busy_out.startswith("busy: capture ")
+            assert "timeline" in busy_out
+            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+        finally:
+            pid_channel.close()
+
+    def test_profile_timeline_tool_cancellation_stops_the_target_process(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server, tracker, pid_channel, command = self._slow_capture_server(
+            rocprof_server_mod, tmp_path, monkeypatch
+        )
+
+        async def run() -> None:
+            task = asyncio.ensure_future(_call_tool(server, "profile_timeline", command=command))
+            await pid_channel.wait_for_start(task)
+
+            # Simulates a client-initiated cancellation (e.g. an MCP client
+            # tearing down after its own timeout): cancelling the awaiting
+            # task must not just stop watching -- it must stop the capture.
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(task, timeout=0.5)
+
+        start = time.monotonic()
+        try:
+            asyncio.run(run())
+            elapsed = time.monotonic() - start
+
+            # Bounded by capture_runtime's poll chunk + escalation, not by the
+            # target's own (never reached) indefinite wait.
+            assert elapsed < 10.0
+            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+        finally:
+            pid_channel.close()

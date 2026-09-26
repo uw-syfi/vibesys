@@ -1,0 +1,60 @@
+   [32mINFO[0m    |-> [rocprof] 2 metrics
+   [32mINFO[0m    |-> [rocprof] TCC_EA_WRREQ_LEVEL_sum, TCC_EA_ATOMIC_LEVEL_sum
+   [32mINFO[0m    |-> [rocprof] 
+   [32mINFO[0m    |-> [rocprof] ROCPRofiler: 0 contexts collected, output directory /tmp/rpl_data_260923_225027_2019039/input0_results_260923_225027
+   [32mINFO[0m    |-> [rocprof] File '/scratch/user/campaign/amd-profiler/rocprof_compute/workloads/pmc_perf_9.csv' is generating
+   [32mINFO[0m    |-> [rocprof] 
+   [32mINFO[0m 
+   [32mINFO[0m [profiling] Current input file: /scratch/user/campaign/amd-profiler/rocprof_compute/workloads/perfmon/timestamps.txt
+   [32mINFO[0m    |-> [rocprof] 
+   [32mINFO[0m    |-> [rocprof] [0;31mWARNING: We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.[0m
+   [32mINFO[0m    |-> [rocprof] 
+   [32mINFO[0m    |-> [rocprof] RPL: on '260923_225049' from '/opt/rocm-6.4.1' in '/home1/user'
+   [32mINFO[0m    |-> [rocprof] RPL: profiling '""/scratch/user/mi210-smoke/venv/bin/python /scratch/user/campaign/amd-profiler/workload.py""'
+   [32mINFO[0m    |-> [rocprof] RPL: input file '/scratch/user/campaign/amd-profiler/rocprof_compute/workloads/perfmon/timestamps.txt'
+   [32mINFO[0m    |-> [rocprof] RPL: output dir '/tmp/rpl_data_260923_225049_2019250'
+   [32mINFO[0m    |-> [rocprof] RPL: result dir '/tmp/rpl_data_260923_225049_2019250/input0_results_260923_225049'
+   [32mINFO[0m    |-> [rocprof] gemm 4096x4096x4096 bf16: 20 iters in 0.0230s -> 1.152 ms/iter
+   [32mINFO[0m    |-> [rocprof] elementwise axpy fp32 256MB: 20 iters in 0.0151s -> 0.753 ms/iter
+   [32mINFO[0m    |-> [rocprof] workload done (4096, 4096) (67108864,)
+   [32mINFO[0m    |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_260923_225049_2019250/input0.xml"
+   [32mINFO[0m    |-> [rocprof] gpu_index =
+   [32mINFO[0m    |-> [rocprof] kernel = gemm
+   [32mINFO[0m    |-> [rocprof] range =
+   [32mINFO[0m    |-> [rocprof] 0 metrics
+   [32mINFO[0m    |-> [rocprof] 
+   [32mINFO[0m    |-> [rocprof] ROCPRofiler: 0 contexts collected, output directory /tmp/rpl_data_260923_225049_2019250/input0_results_260923_225049
+   [32mINFO[0m    |-> [rocprof] File '/scratch/user/campaign/amd-profiler/rocprof_compute/workloads/timestamps.csv' is generating
+   [32mINFO[0m    |-> [rocprof] 
+Traceback (most recent call last):
+  File "/opt/rocm-6.4.1/bin/rocprof-compute", line 156, in <module>
+    main()
+  File "/opt/rocm-6.4.1/bin/rocprof-compute", line 144, in main
+    rocprof_compute.run_profiler()
+  File "/opt/rocm-6.4.1/libexec/rocprofiler-compute/utils/utils.py", line 53, in wrap_function
+    result = function(*args, **kwargs)
+  File "/opt/rocm-6.4.1/libexec/rocprofiler-compute/rocprof_compute_base.py", line 286, in run_profiler
+    profiler.post_processing()
+  File "/opt/rocm-6.4.1/libexec/rocprofiler-compute/utils/utils.py", line 53, in wrap_function
+    result = function(*args, **kwargs)
+  File "/opt/rocm-6.4.1/libexec/rocprofiler-compute/rocprof_compute_profile/profiler_rocprof_v1.py", line 100, in post_processing
+    self.join_prof()
+  File "/opt/rocm-6.4.1/libexec/rocprofiler-compute/utils/utils.py", line 53, in wrap_function
+    result = function(*args, **kwargs)
+  File "/opt/rocm-6.4.1/libexec/rocprofiler-compute/rocprof_compute_profile/profiler_base.py", line 115, in join_prof
+    key = _df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
+  File "/usr/local/lib64/python3.9/site-packages/pandas/core/frame.py", line 9183, in groupby
+    return DataFrameGroupBy(
+  File "/usr/local/lib64/python3.9/site-packages/pandas/core/groupby/groupby.py", line 1329, in __init__
+    grouper, exclusions, obj = get_grouper(
+  File "/usr/local/lib64/python3.9/site-packages/pandas/core/groupby/grouper.py", line 1043, in get_grouper
+    raise KeyError(gpr)
+KeyError: 'Grid_Size'
+
+real	6m3.474s
+user	3m45.194s
+sys	2m57.310s
+profile exit=1
+/scratch/user/campaign/amd-profiler/rocprof_compute/workloads
+/scratch/user/campaign/amd-profiler/rocprof_compute/workloads/perfmon
+resolved WDIR=

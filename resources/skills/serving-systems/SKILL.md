@@ -26,6 +26,8 @@ The default-on optimizations are **not the same across hardware**, and applying 
 
 **Open `references/platforms/<backend>/floor.md` for the backend present in this workspace.** Only that platform's directory is materialized, so there is no ambiguity about which applies.
 
+**Read past `floor.md` before writing a conclusion.** Each platform directory also holds the measurement discipline: turning a counter capture into a bound verdict, proving which kernel library actually ran, and the A/B protocol for before/after claims. Before quoting a "compute-bound"/"bandwidth-bound" verdict, a percent-of-peak or percent-of-bandwidth number, or a kernel-library-tuning recommendation, use that discipline instead of estimating from assumed model geometry (weight bytes, layer split, KV head/dim): an assumption is a hypothesis, not a measurement.
+
 ## Portable contracts vs platform implementations
 
 Topics split into two kinds, and the distinction is load-bearing:
@@ -112,6 +114,7 @@ Written against NVIDIA-first upstream trees; ROCm paths exist in vLLM and SGLang
 - [`references/engines/sglang.md`](references/engines/sglang.md) — SGLang source-code lookup.
 - [`references/engines/trtllm.md`](references/engines/trtllm.md) — TensorRT-LLM source-code lookup.
 - [`references/engines/vllm.md`](references/engines/vllm.md) — vLLM source-code lookup.
+- [`references/engines/vllm-profiling.md`](references/engines/vllm-profiling.md) — vLLM profiling capture quirks: multi-process default, offline single-process capture, torch.profiler interface, post-capture hang.
 
 ### API / benchmark / profiler tooling
 
@@ -128,6 +131,8 @@ Written against NVIDIA-first upstream trees; ROCm paths exist in vLLM and SGLang
 - [`references/tooling/performance-modeling.md`](references/tooling/performance-modeling.md) — Analytical serving-performance modeling — roofline, Amdahl bounds, end-to-end time accounting, architecture ceilings, profiler calibration, and plateau-driven hypothesis selection.
 
 - [`references/tooling/profiler.md`](references/tooling/profiler.md) — Profiling discipline and altitudes. The contract is portable; the concrete toolchain is per-platform.
+
+- [`references/tooling/profiling-serving-engines.md`](references/tooling/profiling-serving-engines.md) — Index: how to fill the generic capture tools' lifecycle arguments (command, env, ready_command, stop_signal, grace_s) for a serving engine, linking to each engine's own profiling file under `engines/`.
 
 - [`references/tooling/serving-benchmark.md`](references/tooling/serving-benchmark.md) — Benchmark an LLM serving endpoint — TTFT, TPOT, ITL, end-to-end latency, throughput, p50/p95/p99 across concurrency and ISL/OSL sweeps.
 

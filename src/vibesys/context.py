@@ -42,6 +42,7 @@ from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.request import RunRequest
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
+    ProfilerDefinition,
     ProfilerKind,
     preflight_profiler_kind,
     profiler_definition,
@@ -50,7 +51,11 @@ from vibesys.profilers import (
 from vibesys.render.log import log_and_print
 from vibesys.render.run_log import RunLogRenderer
 from vibesys.render.sink import output_sink
-from vibesys.resource_paths import profiler_support_dir
+from vibesys.resource_paths import (
+    PROFILERS_COMMON_STAGED_NAME,
+    profiler_support_common_dir,
+    profiler_support_dir,
+)
 from vibesys.run import (
     DeviceLease,
     ExperimentRepository,
@@ -141,6 +146,26 @@ class RunSetup:
         if self.state_namespace == "":
             message = "RunSetup.state_namespace must be nonempty"
             raise ValueError(message)
+
+
+def _profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, str], ...]:
+    """Directories staged as siblings of an active profiler's support dir.
+
+    Always includes the shared ``capture_runtime`` support package (staged
+    as ``profilers_common``), plus each of the definition's declared
+    ``extra_support_kinds`` (staged under their own ``support_name``, e.g.
+    ``torch_profiler`` alongside ``rocprof_profiler``).
+    """
+    extra: list[tuple[str, str]] = []
+    common_dir = profiler_support_common_dir()
+    if common_dir is not None:
+        extra.append((str(common_dir), PROFILERS_COMMON_STAGED_NAME))
+    for extra_kind in sorted(definition.extra_support_kinds):
+        extra_definition = profiler_definition(extra_kind)
+        extra_dir = profiler_support_dir(extra_kind.value)
+        if extra_dir is not None:
+            extra.append((str(extra_dir), extra_definition.support_name))
+    return tuple(extra)
 
 
 def _execution_status(error: BaseException | None) -> EventStatus:
@@ -514,12 +539,14 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
         with boot_trace.span("workspace_materialize"):
             profiler_support_path: str | None = None
             profiler_support_name: str | None = None
+            profiler_support_extra: tuple[tuple[str, str], ...] = ()
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS:
                 definition = profiler_definition(resolved_profiler_kind)
                 profiler_support_name = definition.support_name
                 default_support = profiler_support_dir(definition.kind.value)
                 if default_support is not None:
                     profiler_support_path = str(default_support)
+                profiler_support_extra = _profiler_support_extra(definition)
 
             input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
@@ -623,6 +650,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             project_excluded_dirs = set(workspace_files.excluded_dirs)
             if profiler_support_name is not None:
                 project_excluded_dirs.add(profiler_support_name)
+            project_excluded_dirs.update(name for _path, name in profiler_support_extra)
             git = GitTracker(
                 project_root,
                 run_id=run_id,
@@ -795,6 +823,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                 profiler_support_name=profiler_support_name,
                 workspace_sources=(),
                 extra_input_excludes=environment_patch.copy_excludes,
+                profiler_support_extra=profiler_support_extra,
             )
             workspace_files.setup(plan, existing=True)
 
@@ -887,6 +916,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                 evaluator_tools_root=evaluator_tools_root,
                 profiler_support_path=profiler_support_path,
                 profiler_support_name=profiler_support_name,
+                profiler_support_extra=profiler_support_extra,
                 git_history_root=git.history_root,
                 environment_bind_mounts=environment_patch.bind_mounts,
                 log=logger.lprint,
@@ -935,6 +965,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             profiler_kind=resolved_profiler_kind,
             profiler_support_path=profiler_support_path,
             profiler_support_name=profiler_support_name,
+            profiler_support_extra=profiler_support_extra,
             skill_source_paths=skill_source_paths,
             ref_name=ref_name,
             environment_hooks=hooks,
@@ -1193,6 +1224,7 @@ def _assemble_workspace_resources(
         evaluator_tools_root=parent.evaluator_tools_root,
         profiler_support_path=parent.profiler_support_path,
         profiler_support_name=parent.profiler_support_name,
+        profiler_support_extra=parent.profiler_support_extra,
         git_history_root=parent.git.history_root,
         environment_bind_mounts=parent.environment_patch.bind_mounts,
         log=logger.lprint,
@@ -1230,6 +1262,7 @@ def _assemble_workspace_resources(
         profiler_kind=parent.profiler_kind,
         profiler_support_path=parent.profiler_support_path,
         profiler_support_name=parent.profiler_support_name,
+        profiler_support_extra=parent.profiler_support_extra,
         skill_source_paths=parent.skill_source_paths,
         ref_name=parent.ref_name,
         environment_hooks=parent.environment_hooks,
@@ -1282,6 +1315,7 @@ class _RunResources:
         profiler_kind: ProfilerKind,
         profiler_support_path: str | None,
         profiler_support_name: str | None,
+        profiler_support_extra: tuple[tuple[str, str], ...],
         skill_source_paths: list[Path],
         ref_name: str,
         environment_hooks: EnvironmentHooks,
@@ -1325,6 +1359,7 @@ class _RunResources:
         self.profiler_kind = profiler_kind
         self.profiler_support_path = profiler_support_path
         self.profiler_support_name = profiler_support_name
+        self.profiler_support_extra = profiler_support_extra
         self._skill_source_paths = skill_source_paths
         self.skills_for_agents = [src.name for src in skill_source_paths]
         self.ref_name = ref_name

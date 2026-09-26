@@ -288,6 +288,56 @@ def test_profiler_prompts_calibrate_observer_effects() -> None:
         assert "must not be converted into exclusive phase shares" in rendered
 
 
+def test_llm_serving_profiler_prompts_point_to_engine_and_rocm_references() -> None:
+    """The profiler .j2 templates stay domain-neutral; the concrete
+    ``serving-systems/references/...`` pointers must still reach a serving
+    agent through the llm-serving domain's own ``profiler`` section rather
+    than silently vanishing.
+    """
+    context = _NEUTRAL_CONTEXT | {"modality": "text_generation"}
+    domain_profiler = _domain_section(DomainName.LLM_SERVING, "profiler", context)
+
+    for pointer in (
+        "serving-systems/references/tooling/profiling-serving-engines.md",
+        "serving-systems/references/engines/",
+        "serving-systems/references/platforms/rocm/profiler.md",
+    ):
+        assert pointer in domain_profiler
+
+    for template_name, extra_kwargs in (
+        (
+            "profilers/torch.j2",
+            {
+                "profiler_support_name": "torch_profiler",
+                "profiler_mcp_name": "vibesys-torch-profiler",
+            },
+        ),
+        (
+            "profilers/rocprof.j2",
+            {
+                "profiler_support_name": "rocprof_profiler",
+                "profiler_mcp_name": "vibesys-rocprof-profiler",
+            },
+        ),
+    ):
+        rendered = render_template(
+            template_name,
+            template_dir=_TEMPLATE_DIR,
+            profile_focus="serving benchmark hotspots",
+            benchmark_command=context["benchmark_command"],
+            modality=context["modality"],
+            domain_profiler=domain_profiler,
+            runtime_notes=context["runtime_notes"],
+            profile_execution=context["profile_execution"],
+            objective=context["objective"],
+            profiler_campaign_context="",
+            **extra_kwargs,
+        )
+        assert "serving-systems/references/tooling/profiling-serving-engines.md" in rendered
+        assert "serving-systems/references/engines/" in rendered
+        assert "serving-systems/references/platforms/rocm/profiler.md" in rendered
+
+
 def test_microservice_otel_profiler_uses_critical_path_as_diagnostic_evidence() -> None:
     context = _NEUTRAL_CONTEXT
     rendered = render_template(
