@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.api.contracts import RunResult, RunStatus
+from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
@@ -335,6 +336,7 @@ class _LocalRunSession:
                     prepared_plugin,
                     open_agent_environment=self.open_agent_environment,
                     projector=self._registration.projector,
+                    agent_tool_bindings=AGENT_TOOL_BINDINGS,
                 )
                 succeeded = outcome.value == "succeeded"
             else:

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.runtime import RunContext
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.orchestration.contracts import (
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
-    from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import RunStatus
+    from vs_agent.api import AgentClientProtocol, MCPServerSpec
+    from vs_runtime.api import RunStatus, Workspace
 
 
 async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
@@ -73,6 +73,8 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     gate_executor: GateExecutor | None = None,
+    agent_tool_bindings: Mapping[str, Callable[[object, Workspace], tuple[MCPServerSpec, ...]]]
+    | None = None,
 ) -> RunStatus:
     """Open the runtime adapter and invoke one prepared plugin."""
     plugin = prepared.plugin
@@ -85,6 +87,7 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
         gate_executor=gate_executor,
+        agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
     ) as ctx:
         return await plugin.orchestrate(ctx, prepared.options)

@@ -42,6 +42,7 @@ from vibesys.context import (
 from vibesys.events import FrameworkSource, RunConfiguredData
 from vibesys.orchestration.agents import (
     _Agents,
+    _AgentToolResolver,
     _LocalAgentHandle,
 )
 from vibesys.orchestration.commands import _Commands
@@ -70,7 +71,7 @@ from vs_agent.api import AgentExecutionPolicy, AgentSessionState, build_agent_cl
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Mapping
 
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.context import _RunResources
@@ -167,6 +168,7 @@ class RunContext:
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         gate_executor: GateExecutor | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
+        agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
         plugin: OrchestrationPlugin | None = None,
     ) -> None:
         """Bind request, policy setup, and the application control channel.
@@ -231,7 +233,11 @@ class RunContext:
         self.gates = _Evaluator(self)
         self.evaluation = _EvaluationAdapter(self, self.gates)
         self.workspaces = _Workspaces(self)
-        self.agents = _Agents(self, agent_roles)
+        self.agents = _Agents(
+            self,
+            agent_roles,
+            agent_tool_bindings,
+        )
         self.environment = _Environment(self)
         self.progress = _Progress(self)
 
@@ -337,6 +343,7 @@ class RunContext:
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         gate_executor: GateExecutor | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
+        agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
         plugin: OrchestrationPlugin | None = None,
     ) -> AsyncIterator[RunContext]:
         """Construct and close the run, including after cancellation or setup failure."""
@@ -355,6 +362,7 @@ class RunContext:
             backend_factory=backend_factory,
             gate_executor=gate_executor,
             agent_roles=agent_roles,
+            agent_tool_bindings=agent_tool_bindings,
             plugin=plugin,
         )
         try:

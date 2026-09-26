@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
+from vibesys.api import OrchestrationRegistry, create_session
+from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
@@ -23,6 +26,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import (
     AgentCapabilities,
     AgentSessionKey,
+    MCPServerSpec,
     SessionScope,
 )
 from vs_agent.api import (
@@ -43,11 +47,12 @@ from vs_runtime.api import (
     SessionClosedError,
     StructuredResponseError,
     UnknownAgentRoleError,
+    Workspace,
     WorkspaceAccess,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Mapping
     from typing import TypeVar
 
     from vs_runtime.api import AgentSession
@@ -61,6 +66,17 @@ class _Reply(BaseModel):
 
 class _Options(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+@dataclass(frozen=True, slots=True)
+class _RunConfiguration:
+    client_factory: Callable[..., _RecordingClient | FakeAgentClient] | None = None
+    profiler_kind: ProfilerKind = ProfilerKind.NONE
+    domain: str = "generic"
+    agent_backend: str = "stub"
+    tool_bindings: Mapping[str, Callable[[object, Workspace], tuple[MCPServerSpec, ...]]] | None = (
+        None
+    )
 
 
 class _RecordingClient(FakeAgentClient):
@@ -78,7 +94,7 @@ class _RecordingClient(FakeAgentClient):
         super().close()
 
 
-def _write_project(root: Path) -> None:
+def _write_project(root: Path, *, domain: str = "generic") -> None:
     root.mkdir(parents=True)
     (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
@@ -86,12 +102,18 @@ def _write_project(root: Path) -> None:
     (root / "memory" / "allowed.txt").write_text("before\n")
     (root / "memory" / "seed.txt").write_text("seed\n")
     (root / "vibesys.input.toml").write_text(
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        f'version = 1\n[agent]\ndomain = "{domain}"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
     )
 
 
-def _request(project_root: Path, *, orchestration_id: str = "explicit-sessions") -> RunRequest:
+def _request(
+    project_root: Path,
+    *,
+    orchestration_id: str = "explicit-sessions",
+    profiler_kind: ProfilerKind = ProfilerKind.NONE,
+    agent_backend: str = "stub",
+) -> RunRequest:
     return RunRequest(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=orchestration_id, config_version=1, options={}),
@@ -99,9 +121,9 @@ def _request(project_root: Path, *, orchestration_id: str = "explicit-sessions")
         input_bundle=load_input_bundle(project_root),
         objective="Improve the queue.",
         exp_name="explicit-sessions",
-        agent_backend="stub",
+        agent_backend=agent_backend,
         cli_provider="claude",
-        profiler_kind=ProfilerKind.NONE,
+        profiler_kind=profiler_kind,
         backend=ComputeBackend.CPU,
     )
 
@@ -112,10 +134,11 @@ def _run_with_clients(
     body: Callable[[RunContext], Awaitable[_Result]],
     *,
     declaration: tuple[AgentRole, ...] | OrchestrationPlugin,
-    client_factory: Callable[..., _RecordingClient | FakeAgentClient] | None = None,
+    configuration: _RunConfiguration | None = None,
 ) -> _Result:
+    configuration = configuration or _RunConfiguration()
     project_root = tmp_path / "project"
-    _write_project(project_root)
+    _write_project(project_root, domain=configuration.domain)
     available = deque(clients)
     integration = LocalRunIntegration()
 
@@ -126,11 +149,17 @@ def _run_with_clients(
         plugin = declaration if isinstance(declaration, OrchestrationPlugin) else None
         roles = () if plugin is not None else cast("tuple[AgentRole, ...]", declaration)
         async with RunContext.open(
-            _request(project_root, orchestration_id=plugin.id if plugin else "explicit-sessions"),
+            _request(
+                project_root,
+                orchestration_id=plugin.id if plugin else "explicit-sessions",
+                profiler_kind=configuration.profiler_kind,
+                agent_backend=configuration.agent_backend,
+            ),
             integration,
             setup=RunSetup(),
-            agent_client_factory=client_factory or create_client,
+            agent_client_factory=configuration.client_factory or create_client,
             agent_roles=roles,
+            agent_tool_bindings=configuration.tool_bindings,
             plugin=plugin,
         ) as ctx:
             return await body(ctx)
@@ -322,6 +351,180 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
     assert client.closed
 
 
+def test_session_rejects_unknown_tool_before_spawning(tmp_path: Path) -> None:
+    role = AgentRole(
+        id="tool-user",
+        system_prompt="Use the declared tool.",
+        tools=(AgentTool(id="unknown"),),
+    )
+
+    async def body(ctx: RunContext) -> None:
+        with pytest.raises(RuntimeContractError, match="unsupported agent tools: unknown"):
+            await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+
+    _run_with_clients(tmp_path, [], body, declaration=(role,))
+
+
+def test_direct_host_has_no_implicit_profiler_tool_binding(tmp_path: Path) -> None:
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Analyze the profile.",
+        tools=(AgentTool(id="profiler"),),
+    )
+
+    async def body(ctx: RunContext) -> None:
+        with pytest.raises(RuntimeContractError, match="unsupported agent tools: profiler"):
+            await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+
+    _run_with_clients(tmp_path, [], body, declaration=(role,))
+
+
+def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Analyze the profile.",
+        tools=(AgentTool(id="profiler"),),
+    )
+    observed: list[str] = []
+
+    async def orchestrate(host: RunHost, _options: BaseModel) -> RunStatus:
+        try:
+            await host.agents.create_session(role, workspace=host.workspaces.root)
+        except RuntimeContractError as error:
+            observed.append(str(error))
+            return RunStatus.SUCCEEDED
+        return RunStatus.FAILED
+
+    plugin = OrchestrationPlugin(
+        id="composed-profiler",
+        agents=(role,),
+        options=_Options,
+        orchestrate=orchestrate,
+    )
+    registry = OrchestrationRegistry()
+    registry.register_plugin(plugin)
+    session = create_session(
+        _request(project_root, orchestration_id=plugin.id),
+        sink=lambda _event: None,
+        registry=registry,
+    )
+
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+    assert observed == ["agent driver lacks required capabilities: mcp_servers"]
+
+
+def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
+    tmp_path: Path,
+) -> None:
+    client = FakeAgentClient(session_reuse=True)
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Analyze the profile.",
+        tools=(AgentTool(id="profiler"),),
+    )
+
+    async def body(ctx: RunContext) -> None:
+        with pytest.raises(RuntimeContractError, match="mcp_servers"):
+            await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+
+    _run_with_clients(
+        tmp_path,
+        [client],
+        body,
+        declaration=(role,),
+        configuration=_RunConfiguration(tool_bindings=AGENT_TOOL_BINDINGS),
+    )
+    assert client.closed
+    assert not client.calls
+
+
+def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
+    tmp_path: Path,
+) -> None:
+    client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True))
+    client.enqueue_text("profiler", "analysis").enqueue("profiler", _Reply(value=4))
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Analyze the profile.",
+        tools=(AgentTool(id="profiler"),),
+    )
+
+    async def body(ctx: RunContext) -> None:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        assert await session.turn("inspect") == "analysis"
+        assert await session.turn("summarize", response=_Reply) == _Reply(value=4)
+
+    _run_with_clients(
+        tmp_path,
+        [client],
+        body,
+        declaration=(role,),
+        configuration=_RunConfiguration(
+            profiler_kind=ProfilerKind.OTEL,
+            domain="microservices",
+            agent_backend="cli",
+            tool_bindings=AGENT_TOOL_BINDINGS,
+        ),
+    )
+    assert client.calls[0].mcp_servers is client.calls[1].mcp_servers
+    assert client.calls[0].mcp_servers == [
+        MCPServerSpec(
+            name="vibesys-otel-profiler",
+            command="python",
+            args=("otel_profiler/server.py",),
+        )
+    ]
+
+
+def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
+    client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True))
+    role = AgentRole(
+        id="worker",
+        system_prompt="Use the workspace-scoped tool.",
+        tools=(AgentTool(id="workspace-tool"),),
+    )
+    resolved_workspaces: list[Workspace] = []
+
+    def bind_tool(_host: object, workspace: Workspace) -> tuple[MCPServerSpec, ...]:
+        resolved_workspaces.append(workspace)
+        return (MCPServerSpec(name="workspace-tool", command="tool-server"),)
+
+    async def body(ctx: RunContext) -> None:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        assert resolved_workspaces == [ctx.workspaces.root]
+        await session.close()
+
+    _run_with_clients(
+        tmp_path,
+        [client],
+        body,
+        declaration=(role,),
+        configuration=_RunConfiguration(tool_bindings={"workspace-tool": bind_tool}),
+    )
+    assert resolved_workspaces
+    assert client.closed
+
+
+def test_intrinsic_shell_tool_does_not_bind_an_mcp_server(tmp_path: Path) -> None:
+    client = FakeAgentClient(session_reuse=True).enqueue_text("worker", "done")
+    role = AgentRole(
+        id="worker",
+        system_prompt="Work in the shell.",
+        tools=(AgentTool(id="shell"),),
+    )
+
+    async def body(ctx: RunContext) -> None:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        assert await session.turn("work") == "done"
+
+    _run_with_clients(tmp_path, [client], body, declaration=(role,))
+    assert client.calls[0].mcp_servers is None
+
+
 def test_read_only_session_restores_writes_and_early_close_is_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -458,7 +661,7 @@ def test_canceled_session_construction_closes_the_opened_agent(tmp_path: Path) -
         [],
         body,
         declaration=(role,),
-        client_factory=create_client,
+        configuration=_RunConfiguration(client_factory=create_client),
     )
 
 
