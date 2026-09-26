@@ -225,9 +225,11 @@ Runs `ruff check .` across the whole repository. Fix automatically where
 possible with `--fix`; the remaining errors need manual attention. Test
 files that trigger false-positive rules (e.g. `S106` on fixture arguments,
 `ANN001`/`ANN201` on helpers, `PLR0913` on builder functions) can suppress
-them at the site with `# noqa: <code>`. Every suppression, including a
-file-level `# ruff: noqa`, needs a `LW-` waiver ID, a reason, and an entry in
-`lint_waivers.jsonl`; see [Ratchets](coding-best-practices.md#ratchets).
+them at the site with `# noqa: <code>` only when reasonable lint-compliant
+alternatives would make the design more hacky. List those alternatives and why
+each is worse in the source rationale. Every suppression, including a
+file-level `# ruff: noqa`, needs a `LW-` waiver ID and that rationale; see
+[Ratchets](coding-best-practices.md#ratchets).
 
 ### Coverage
 
