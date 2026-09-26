@@ -8,8 +8,16 @@ command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 600
 
 [benchmark]
-entrypoint = "request-factory-adapter"
-args = ["benchmark/benchmark.py"]
+entrypoint = "request-factory-fixed-text-v1"
+args = [
+  "--model", "deepseek-ai/DeepSeek-V3.2",
+  "--tokenizer", "deepseek-ai/DeepSeek-V3.2",
+  "--tokenizer-revision", "a7e62ac04ecb2c0a54d736dc46601c5606cf10a6",
+  "--request-count", "256",
+  "--input-tokens", "8192",
+  "--output-tokens", "1024",
+  "--concurrency", "64",
+]
 timeout_seconds = 1800
 result_protocol = 2
 
