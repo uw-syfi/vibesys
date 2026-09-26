@@ -1,187 +1,158 @@
+#!/usr/bin/env python3
+"""Run the fixed Qwen3.5 serving workload through Request Factory."""
+
 from __future__ import annotations
 
 import argparse
-import asyncio
+import csv
 import json
 import math
-import random
-import time
+import subprocess
+import sys
+import tempfile
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
-import httpx
+_MODEL = "Qwen/Qwen3.5-397B-A17B"
+_DEFAULT_REQUESTS = 64
+_DEFAULT_INPUT_TOKENS = 2048
+_DEFAULT_OUTPUT_TOKENS = 512
+_DEFAULT_CONCURRENCY = 48
+_METRICS = {
+    "output_token_throughput_per_s": {"unit": "tok/s", "direction": "max"},
+    "p90_latency_ms": {"unit": "ms", "direction": "min"},
+}
 
 
-def percentile(sorted_vals: list[float], p: float) -> float:
-    if not sorted_vals:
-        return float("nan")
-    k = (len(sorted_vals) - 1) * p / 100.0
-    f = math.floor(k)
-    c = math.ceil(k)
-    if f == c:
-        return sorted_vals[int(k)]
-    return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
+def _write_record(path: Path | None, record: Mapping[str, Any]) -> None:
+    if path is None:
+        return
+    with path.open("a", encoding="utf-8") as output:
+        output.write(json.dumps(record, allow_nan=False) + "\n")
+        output.flush()
 
 
-def stats(values: list[float], multiplier: float = 1000.0) -> dict[str, float] | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    return {
-        "mean": sum(ordered) / len(ordered) * multiplier,
-        "p50": percentile(ordered, 50) * multiplier,
-        "p90": percentile(ordered, 90) * multiplier,
-        "p95": percentile(ordered, 95) * multiplier,
-        "p99": percentile(ordered, 99) * multiplier,
+def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) -> None:
+    with path.open("w", newline="", encoding="utf-8") as trace:
+        writer = csv.writer(trace)
+        writer.writerow(("id", "arrival_time", "input_len", "output_len"))
+        for index in range(count):
+            writer.writerow((f"request-{index:04d}", 0, input_tokens, output_tokens))
+
+
+def _summary_metrics(summary: Mapping[str, Any], expected_requests: int) -> dict[str, float]:
+    replay = summary.get("replay")
+    common = replay.get("common") if isinstance(replay, Mapping) else None
+    if not isinstance(common, Mapping):
+        raise ValueError("RF summary is missing replay.common")
+
+    checks = {
+        "failed_steps": 0,
+        "attempted_steps": expected_requests,
+        "success_steps": expected_requests,
+        "output_mismatch_steps": 0,
     }
+    for key, expected in checks.items():
+        actual = common.get(key)
+        if isinstance(actual, bool) or not isinstance(actual, int) or actual != expected:
+            raise ValueError(f"RF summary {key}={actual!r}, expected {expected}")
 
-
-def prompts(prompt_len: int, pool_size: int) -> list[str]:
-    base = " ".join(f"topic{i % 127}" for i in range(prompt_len))
-    return [base for _ in range(pool_size)]
-
-
-async def send_request(
-    client: httpx.AsyncClient,
-    url: str,
-    prompt: str,
-    max_tokens: int,
-    temperature: float,
-    timeout: float,
-) -> dict[str, Any]:
-    body = {
-        "prompt": prompt,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": True,
+    values = {
+        "output_token_throughput_per_s": common.get("output_token_throughput_per_s"),
+        "p90_latency_ms": common.get("total_duration_ms_p90"),
     }
-    started = time.perf_counter()
-    first_token = None
-    done = None
-    output_tokens = 0
+    result: dict[str, float] = {}
+    for name, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"RF summary metric {name} is missing or not numeric: {value!r}")
+        number = float(value)
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"RF summary metric {name} is invalid: {value!r}")
+        result[name] = number
+    if result["output_token_throughput_per_s"] <= 0:
+        raise ValueError("RF summary output-token throughput must be positive")
+    return result
+
+
+def run(args: argparse.Namespace) -> int:
+    output_path = Path(args.vs_output) if args.vs_output else None
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("", encoding="utf-8")
+        _write_record(output_path, {"kind": "hello", "protocol": 2, "metrics": _METRICS})
+
     try:
-        async with client.stream("POST", url, json=body, timeout=timeout) as response:
-            response.raise_for_status()
-            async for raw_line in response.aiter_lines():
-                if not raw_line.startswith("data: "):
-                    continue
-                payload = raw_line[len("data: ") :].strip()
-                if payload == "[DONE]":
-                    done = time.perf_counter()
-                    break
-                chunk = json.loads(payload)
-                text = (chunk.get("choices") or [{}])[0].get("text") or ""
-                if text:
-                    output_tokens += 1
-                    if first_token is None:
-                        first_token = time.perf_counter()
+        with tempfile.TemporaryDirectory(prefix="vibesys-rf-qwen397b-") as directory:
+            temporary = Path(directory)
+            trace_path = temporary / "requests.csv"
+            summary_path = temporary / "summary.json"
+            _write_trace(trace_path, args.request_count, args.input_tokens, args.output_tokens)
+            command = [
+                args.request_factory_engine,
+                "--trace",
+                str(trace_path),
+                "--input-file-format",
+                "text-generation-independent",
+                "--text-file",
+                str(Path(__file__).resolve().parent / "corpus.txt"),
+                "--tokenizer",
+                args.tokenizer,
+                "--model",
+                args.model,
+                "--backend",
+                "openai",
+                "--dialect",
+                "openai",
+                "--base-url",
+                args.url.rstrip("/") + "/v1",
+                "--temperature",
+                "0",
+                "--arrival-mode",
+                "saturated",
+                "--max-concurrency",
+                str(args.concurrency),
+                "--request-log",
+                "false",
+                "--timeline",
+                "false",
+                "--summary-path",
+                str(summary_path),
+            ]
+            completed = subprocess.run(command, check=False, text=True, capture_output=True)
+            if completed.stdout:
+                print(completed.stdout, end="")
+            if completed.stderr:
+                print(completed.stderr, end="", file=sys.stderr)
+            if completed.returncode != 0:
+                raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            values = _summary_metrics(summary, args.request_count)
+            _write_record(output_path, {"kind": "result", "label": "", "values": values})
+            print(json.dumps({"metrics": values}, sort_keys=True))
+            return 0
     except Exception as exc:
-        return {
-            "error": str(exc),
-            "total_latency": time.perf_counter() - started,
-            "ttft": None,
-            "tpot": None,
-            "output_tokens": output_tokens,
-        }
-    if done is None:
-        done = time.perf_counter()
-    return {
-        "error": None,
-        "total_latency": done - started,
-        "ttft": None if first_token is None else first_token - started,
-        "tpot": None
-        if first_token is None or output_tokens <= 1
-        else (done - first_token) / (output_tokens - 1),
-        "output_tokens": output_tokens,
-    }
+        _write_record(output_path, {"kind": "error", "message": str(exc)})
+        print(f"benchmark failed: {exc}", file=sys.stderr)
+        return 1
 
 
-async def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
-    rng = random.Random(args.seed)
-    prompt_pool = prompts(args.prompt_len, args.prompt_pool_size)
-    url = args.url.rstrip("/") + args.endpoint
-    results: list[dict[str, Any]] = []
-    started = time.perf_counter()
-
-    async with httpx.AsyncClient() as client:
-
-        async def worker() -> None:
-            while time.perf_counter() - started < args.duration:
-                prompt = rng.choice(prompt_pool)
-                results.append(
-                    await send_request(
-                        client,
-                        url,
-                        prompt,
-                        args.max_tokens,
-                        args.temperature,
-                        args.timeout,
-                    )
-                )
-
-        await asyncio.gather(*(worker() for _ in range(args.concurrency)))
-
-    wall = time.perf_counter() - started
-    successes = [r for r in results if r["error"] is None]
-    errors = [r for r in results if r["error"] is not None]
-    ttft = stats([r["ttft"] for r in successes if r["ttft"] is not None])
-    tpot = stats([r["tpot"] for r in successes if r["tpot"] is not None])
-    latency = stats([r["total_latency"] for r in successes])
-    total_tokens = sum(r["output_tokens"] for r in successes)
-    output = {
-        "config": {
-            "url": url,
-            "concurrency": args.concurrency,
-            "duration": args.duration,
-            "max_tokens": args.max_tokens,
-            "temperature": args.temperature,
-            "prompt_len": args.prompt_len,
-            "prompt_pool_size": args.prompt_pool_size,
-            "seed": args.seed,
-        },
-        "num_requests": len(results),
-        "num_completed": len(successes),
-        "num_failed": len(errors),
-        "actual_duration": wall,
-        "total_tokens": total_tokens,
-        "aggregate_throughput": total_tokens / wall if wall > 0 else 0,
-        "request_throughput": len(successes) / wall if wall > 0 else 0,
-        "ttft": ttft,
-        "tpot": tpot,
-        "total_latency": latency,
-        "p99_ttft_ms": None if ttft is None else ttft["p99"],
-        "p99_tpot_ms": None if tpot is None else tpot["p99"],
-        "p99_latency_ms": None if latency is None else latency["p99"],
-        "errors": errors[:5],
-    }
-
-    print(f"Completed {len(successes)}/{len(results)} requests")
-    print(f"Aggregate throughput: {output['aggregate_throughput']:.2f} tok/s")
-    if output["p99_latency_ms"] is not None:
-        print(f"p99 latency: {output['p99_latency_ms']:.2f} ms")
-    if args.output_json:
-        with open(args.output_json, "w") as f:
-            json.dump(output, f, indent=2)
-    return output
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Closed-loop streaming throughput benchmark for Qwen3.5-397B-A17B (MoE serving)."
-    )
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--request-factory-engine", required=True)
+    parser.add_argument("--vs-output")
     parser.add_argument("--url", default="http://localhost:8000")
-    parser.add_argument("--endpoint", default="/v1/completions")
-    parser.add_argument("--concurrency", type=int, default=48)
-    parser.add_argument("--duration", type=float, default=90)
-    parser.add_argument("--max-tokens", type=int, default=512)
-    parser.add_argument("--temperature", type=float, default=0)
-    parser.add_argument("--prompt-len", type=int, default=2048)
-    parser.add_argument("--prompt-pool-size", type=int, default=64)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--timeout", type=float, default=600)
-    parser.add_argument("--output-json", default=None)
+    parser.add_argument("--model", default=_MODEL)
+    parser.add_argument("--tokenizer", default=_MODEL)
+    parser.add_argument("--request-count", type=int, default=_DEFAULT_REQUESTS)
+    parser.add_argument("--input-tokens", type=int, default=_DEFAULT_INPUT_TOKENS)
+    parser.add_argument("--output-tokens", type=int, default=_DEFAULT_OUTPUT_TOKENS)
+    parser.add_argument("--concurrency", type=int, default=_DEFAULT_CONCURRENCY)
     args = parser.parse_args()
-    asyncio.run(run_benchmark(args))
+    if min(args.request_count, args.input_tokens, args.output_tokens, args.concurrency) <= 0:
+        parser.error("request count, token lengths, and concurrency must be positive")
+    return run(args)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

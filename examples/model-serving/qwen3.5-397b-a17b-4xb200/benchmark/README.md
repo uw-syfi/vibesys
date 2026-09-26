@@ -1,14 +1,18 @@
-# Qwen3.5-397B-A17B Throughput Benchmark
+# Qwen3.5-397B-A17B Request Factory Benchmark
 
-Closed-loop streaming `/v1/completions` benchmark with concurrency 48,
-long synthetic prompts (~2048 tokens), and 512-token outputs. Designed for
-the from-scratch hybrid Gated-DeltaNet/MoE Qwen3.5-397B-A17B server across
-4 B200s. The benchmark emits `aggregate_throughput` and `p99_latency_ms` as
-top-level fields for Pareto optimization.
+Request Factory replays 64 independent streamed `/v1/completions` requests
+under saturated load, with maximum concurrency 48. Each prompt has 2048 tokens
+and requests up to 512 output tokens. The workload targets the from-scratch
+hybrid Gated-DeltaNet/MoE Qwen3.5-397B-A17B server across 4 B200s.
 
-Run against a live server:
+Exact token lengths replace the old approximate word count, and the fixed
+trace replaces the legacy 90-second duration window. RF counts completion
+token IDs rather than nonempty SSE chunks and reports p90 rather than p99
+latency. These methodology changes are intentional; old and new scores are
+not directly comparable. The bundle adapter validates the RF summary and maps
+the metrics to VibeSys result protocol 2.
 
-    python benchmark.py --url http://localhost:8000 --output-json result.json
-
-Do not lower prompt length, duration, concurrency, or `max_tokens` to inflate
-the score; the evaluator fixes these.
+The evaluator injects the trusted RF engine path. For CPU-only request-path
+validation, run `python benchmark/cpu_smoke.py --request-factory-engine
+<RF_ENGINE>`; it uses a strict local fake completions server and a tiny local
+tokenizer fixture. Fake server metrics are not serving-performance results.
