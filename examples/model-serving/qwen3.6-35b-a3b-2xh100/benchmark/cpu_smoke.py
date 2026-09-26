@@ -20,6 +20,7 @@ _TOKENIZER = Path(__file__).with_name("cpu_smoke_tokenizer.json")
 class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
     server: _FakeServer
 
+    # lint-waiver: LW-019831 [N802]; BaseHTTPRequestHandler dispatches the exact HTTP verb method name, so changing it would break the fake server.
     def do_POST(self) -> None:  # noqa: N802
         request_bytes = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         try:
