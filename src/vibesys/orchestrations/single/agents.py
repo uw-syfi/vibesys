@@ -17,7 +17,7 @@ DESIGNER = AgentRole(
         "creating, and return only the requested structured response."
     ),
     tools=(SHELL,),
-    workspace_access=WorkspaceAccess.READ_ONLY,
+    workspace_access=WorkspaceAccess.LIMITED,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )
 

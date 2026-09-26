@@ -262,7 +262,10 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.orchestrations --> vibesys
+    vibesys.orchestrations --> vibesys.domains
     vibesys.orchestrations --> vibesys.errors
+    vibesys.orchestrations --> vibesys.evaluators
+    vibesys.orchestrations --> vibesys.orchestrations.agent_options
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
@@ -626,7 +629,10 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.orchestration.workspaces --> vs_runtime
     vibesys.orchestrations --> vibesys
+    vibesys.orchestrations --> vibesys.domains
     vibesys.orchestrations --> vibesys.errors
+    vibesys.orchestrations --> vibesys.evaluators
+    vibesys.orchestrations --> vibesys.orchestrations.agent_options
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis

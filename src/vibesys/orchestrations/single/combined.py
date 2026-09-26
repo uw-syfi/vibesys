@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from vibesys.roles.single_agent import SingleAgentRoundContext
     from vibesys.search.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
     from vibesys.search.hypothesis.state import RoundRecord
-    from vs_runtime.api import AgentSession, Workspace
+    from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +180,14 @@ class SingleAgentWorker:
         self._closed = True
         for session in reversed(tuple(self._sessions.values())):
             await session.close()
+
+    def binding(self, hypothesis_id: str) -> AgentBinding:
+        """Return runtime attribution for a hypothesis whose turn has started."""
+        try:
+            return self._sessions[hypothesis_id].binding
+        except KeyError as error:
+            message = f"hypothesis {hypothesis_id!r} has no implementer session"
+            raise ValueError(message) from error
 
 
 __all__ = ["CombinedTurnRequest", "SingleAgentWorker"]

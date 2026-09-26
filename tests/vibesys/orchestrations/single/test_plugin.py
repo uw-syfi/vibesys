@@ -1,52 +1,83 @@
-"""Public behavior of the single-agent orchestration policy slice."""
+"""Public behavior of the plain single-agent orchestration plugin."""
 
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
-from pathlib import Path
+from collections import deque
+from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestrations.single import PLUGIN
 from vibesys.orchestrations.single.models import PaidAttempt, SingleState
-from vs_runtime.api import AccuracyReceipt, AgentRole, RunStatus, StructuredResponseError
-from vs_runtime.api.testing import FakeRunHost
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.search.hypothesis import OrchestratorPlan
+from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, RunFacts, RunStatus
+from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from pydantic import BaseModel
+
+    from vs_runtime.api import AgentRole
+
 
 DESIGNER, IMPLEMENTER = PLUGIN.agents
 
 
-def _plan(*, updates: tuple[dict[str, str], ...] = ()) -> dict[str, object]:
-    return {
-        "hypothesis_id": "batch-prefill",
-        "hypothesis": "batching prefill removes per-request launch overhead",
-        "task": "batch the prefill step",
-        "pass_criteria": "throughput improves without an accuracy regression",
-        "reasoning": "launch overhead dominates the trace",
-        "hypothesis_updates": updates,
-    }
+def _options(**changes: object) -> BaseModel:
+    return PLUGIN.options.model_validate(
+        {
+            "interface": "service",
+            "max_rounds": 2,
+            "max_retries_per_round": 2,
+            "judge_every": 1,
+            "official_eval_every": 10,
+            "memory_layout": "directories",
+            **changes,
+        }
+    )
 
 
-def _result(verdict: str, *, feedback: str = "") -> dict[str, object]:
-    return {
-        "summary": "implemented batched prefill",
-        "expected_behavior": "higher steady-state throughput",
-        "self_review": "reviewed the diff and ran checks",
-        "feedback": feedback,
-        "verdict": verdict,
-    }
+def _plan(hypothesis_id: str, **changes: object) -> OrchestratorPlan:
+    return OrchestratorPlan.model_validate(
+        {
+            "hypothesis_id": hypothesis_id,
+            "hypothesis": "Batching removes per-request overhead.",
+            "title": "Batch prefill",
+            "task": "Batch prefill requests.",
+            "pass_criteria": "Throughput improves without an accuracy regression.",
+            "reasoning": "The trace shows repeated launch overhead.",
+            **changes,
+        }
+    )
+
+
+def _response(**changes: object) -> SingleAgentRoundResponse:
+    return SingleAgentRoundResponse.model_validate(
+        {
+            "summary": "Implemented batching.",
+            "expected_behavior": "Fewer launches.",
+            "self_review": "Correctness checks passed.",
+            "feedback": "",
+            "verdict": Verdict.PASS,
+            "bottlenecks": "Launch overhead.",
+            "suggestions": "Try larger batches.",
+            "profile_analysis": "Launch time fell.",
+            **changes,
+        }
+    )
 
 
 class _Script:
-    """Deterministic role response queues over the runtime Fake seam."""
-
-    def __init__(self) -> None:
-        self._replies: dict[str, deque[object]] = defaultdict(deque)
+    def __init__(self, *replies: object) -> None:
+        self.replies = deque(replies)
         self.calls: list[tuple[str, tuple[str, ...], str]] = []
-
-    def enqueue(self, role: AgentRole, *replies: object) -> None:
-        self._replies[role.id].extend(replies)
 
     def respond(
         self,
@@ -56,140 +87,306 @@ class _Script:
         _response: type[BaseModel] | None,
     ) -> object:
         self.calls.append((role.id, history, message))
-        reply = self._replies[role.id].popleft()
+        reply = self.replies.popleft()
         if isinstance(reply, BaseException):
             raise reply
         return reply
 
 
-def _run(script: _Script, options: BaseModel | None = None) -> tuple[RunStatus, FakeRunHost]:
+def _run(
+    path: Path,
+    script: _Script,
+    *,
+    options: BaseModel | None = None,
+    facts: RunFacts | None = None,
+    configure: Callable[[FakeRunHost], None] | None = None,
+) -> tuple[RunStatus, FakeRunHost]:
     async def scenario() -> tuple[RunStatus, FakeRunHost]:
         host = FakeRunHost(
             PLUGIN,
-            project_root=Path("/candidate"),
+            project_root=path,
+            facts=facts,
             responder=script.respond,
         )
-        status = await PLUGIN.orchestrate(
-            host,
-            options or PLUGIN.options.model_validate({"objective": "Improve request throughput."}),
-        )
-        await host.close()
-        return status, host
+        if configure is not None:
+            configure(host)
+        try:
+            status = await PLUGIN.orchestrate(host, options or _options())
+            return status, host
+        finally:
+            await host.close()
 
     return asyncio.run(scenario())
 
 
-def test_plugin_declares_fixed_roles_and_strict_options() -> None:
+def test_plugin_declares_production_options_and_rejects_wrong_preset_polarity() -> None:
     assert PLUGIN.id == "single-agent"
     assert PLUGIN.agents == (DESIGNER, IMPLEMENTER)
-    assert DESIGNER.system_prompt
-    assert IMPLEMENTER.system_prompt
     assert PLUGIN.state is SingleState
 
-    with pytest.raises(ValidationError):
-        PLUGIN.options.model_validate({"objective": "speed up", "unknown": True})
+    with pytest.raises(ValidationError, match="interface"):
+        _options(interface="socket")
+    with pytest.raises(ValidationError, match="memory_layout"):
+        _options(memory_layout="unknown")
+    with pytest.raises(ValidationError, match="profile_guided"):
+        _options(profile_guided={"min_measured_rounds": 2})
+    with pytest.raises(ValidationError, match="unexpected_option"):
+        _options(unexpected_option=True)
 
 
-def test_single_state_owns_paid_attempt_and_accuracy_resume_data() -> None:
-    state = SingleState(
-        last_paid_attempt=PaidAttempt(
-            round_number=2,
-            hypothesis_id="batch-prefill",
-            attempt=1,
-        ),
-        accuracy_receipt=AccuracyReceipt(
-            run_id="run-1",
-            workspace_id=None,
-            revision="candidate-revision",
-        ),
-    )
+def test_multi_round_search_checkpoints_paid_turns_and_policy_files(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response(), _plan("H-02"), _response())
 
-    serialized = state.model_dump_json(round_trip=True)
-    restored = SingleState.model_validate_json(serialized)
-
-    assert restored == state
-    assert restored.search.hypotheses == []
-
-
-def test_invalid_plan_gets_one_correction_in_the_same_session() -> None:
-    script = _Script()
-    script.enqueue(
-        DESIGNER,
-        _plan(updates=({"hypothesis_id": "batch-prefill", "reason": "self-update"},)),
-        _plan(),
-    )
-    script.enqueue(IMPLEMENTER, _result("approve"))
-
-    status, host = _run(script)
+    status, host = _run(tmp_path, script)
 
     assert status is RunStatus.SUCCEEDED
-    designer_calls = [call for call in script.calls if call[0] == DESIGNER.id]
-    assert [len(call[1]) for call in designer_calls] == [0, 1]
-    assert "rejected" in designer_calls[1][2]
-    assert host.logs[0].startswith("designer plan rejected")
+    assert host.control.checkpoints == 2
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    assert [record.hypothesis_id for record in state.search.rounds] == ["H-01", "H-02"]
+    assert state.last_paid_attempt is None
+    assert state.last_response == _response()
+    recorded_markers = [
+        commit.value.last_paid_attempt
+        for commit in host.state.commits
+        if isinstance(commit.value, SingleState) and commit.value.last_paid_attempt is not None
+    ]
+    markers = [
+        marker
+        for index, marker in enumerate(recorded_markers)
+        if index == 0 or marker != recorded_markers[index - 1]
+    ]
+    assert markers == [
+        PaidAttempt(
+            round_number=1,
+            role_id=IMPLEMENTER.id,
+            member_id="H-01",
+            turn_number=1,
+        ),
+        PaidAttempt(
+            round_number=2,
+            role_id=IMPLEMENTER.id,
+            member_id="H-02",
+            turn_number=1,
+        ),
+    ]
+    assert (tmp_path / "roadmap" / "index.md").is_file()
+    assert (tmp_path / "progress" / "plans" / "round-0001.json").is_file()
+    assert (tmp_path / "progress" / "round-0002.md").is_file()
+    assert [role for role, _history, _message in script.calls] == [
+        DESIGNER.id,
+        IMPLEMENTER.id,
+        DESIGNER.id,
+        IMPLEMENTER.id,
+    ]
 
 
-def test_failed_review_retries_in_the_same_implementation_session() -> None:
-    script = _Script()
-    script.enqueue(DESIGNER, _plan())
-    script.enqueue(
-        IMPLEMENTER,
-        _result("revise", feedback="accuracy regressed"),
-        _result("approve"),
+def test_official_evaluation_records_runtime_binding_and_selects_winner(
+    tmp_path: Path,
+) -> None:
+    script = _Script(_plan("H-01"), _response())
+    facts = RunFacts(
+        domain_id="generic",
+        accuracy_configured=True,
+        benchmark_configured=True,
+        accuracy_command="check-accuracy",
+        benchmark_command="measure-throughput",
     )
 
-    status, _host = _run(script)
+    def configure(host: FakeRunHost) -> None:
+        host.evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=120.0,
+                metric_direction="max",
+                metric_unit="requests/s",
+                row={"throughput": 120.0},
+            )
+        )
+
+    status, host = _run(
+        tmp_path,
+        script,
+        options=_options(
+            max_rounds=1,
+            official_eval_every=1,
+            metric_space=MetricSpace(objectives=(Objective(name="throughput", direction="max"),)),
+        ),
+        facts=facts,
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    record = state.search.rounds[0]
+    assert record.official_evaluation
+    assert record.perf_metric == 120.0
+    assert record.perf_provenance == "framework"
+    assert record.implementer_driver == "fake"
+    assert host.evaluation.accuracy_calls
+    assert host.evaluation.benchmark_calls[0].objectives[0].name == "throughput"
+    workspace = host.workspaces.root
+    assert isinstance(workspace, FakeWorkspace)
+    assert workspace.retained == {"selected-round-0001": record.commit}
+
+
+def test_failed_review_retries_in_one_named_session(tmp_path: Path) -> None:
+    script = _Script(
+        _plan("H-01"),
+        _response(verdict=Verdict.FAIL, feedback="accuracy regressed"),
+        _response(),
+    )
+
+    status, host = _run(tmp_path, script, options=_options(max_rounds=1))
 
     assert status is RunStatus.SUCCEEDED
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
-    assert [len(call[1]) for call in implementer_calls] == [0, 1]
+    assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "accuracy regressed" in implementer_calls[1][2]
+    implementer_sessions = [
+        session for session in host.agents.sessions if session.role.id == IMPLEMENTER.id
+    ]
+    assert len(implementer_sessions) == 1
+    assert implementer_sessions[0].member_id == "H-01"
 
 
-def test_retry_exhaustion_is_a_policy_failure() -> None:
-    script = _Script()
-    script.enqueue(DESIGNER, _plan())
-    script.enqueue(
-        IMPLEMENTER,
-        _result("revise", feedback="first failure"),
-        _result("revise", feedback="second failure"),
+def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response(), _response())
+
+    def configure(host: FakeRunHost) -> None:
+        host.evaluation.script_accuracy(
+            AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
+            AccuracyEvaluation(executed=True),
+        )
+        host.evaluation.script_benchmark(
+            BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0)
+        )
+
+    status, host = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=1, official_eval_every=1),
+        facts=RunFacts(domain_id="generic", accuracy_configured=True, benchmark_configured=True),
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    assert len(host.evaluation.accuracy_calls) == 2
+    assert len(host.evaluation.benchmark_calls) == 1
+    implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
+    assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
+    assert "accuracy regressed" in implementer_calls[1][2]
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    assert state.search.rounds[0].official_evaluation
+    assert state.search.rounds[0].perf_provenance == "framework"
+
+
+def test_paid_attempt_is_not_repeated_after_interrupted_turn(tmp_path: Path) -> None:
+    async def scenario() -> tuple[FakeRunHost, _Script]:
+        script = _Script(_plan("H-01"), RuntimeError("agent disconnected"), _response())
+        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=script.respond)
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(host, _options(max_rounds=1))
+            assert all(session.closed for session in host.agents.sessions)
+            interrupted = await host.state.load(SingleState)
+            assert interrupted is not None
+            assert interrupted.last_paid_attempt == PaidAttempt(
+                round_number=1,
+                role_id=IMPLEMENTER.id,
+                member_id="H-01",
+                turn_number=1,
+            )
+            assert await PLUGIN.orchestrate(host, _options(max_rounds=1)) is RunStatus.SUCCEEDED
+            assert all(session.closed for session in host.agents.sessions)
+            return host, script
+        finally:
+            await host.close()
+
+    host, script = asyncio.run(scenario())
+    assert [role for role, _history, _message in script.calls] == [
+        DESIGNER.id,
+        IMPLEMENTER.id,
+        IMPLEMENTER.id,
+    ]
+    sessions = [session for session in host.agents.sessions if session.role.id == IMPLEMENTER.id]
+    assert [session.member_id for session in sessions] == ["H-01", "H-01"]
+    assert all(session.closed for session in host.agents.sessions)
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    assert state.last_paid_attempt is None
+    assert len(state.search.rounds) == 1
+
+
+def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> None:
+    script = _Script(
+        _plan("H-01"),
+        _response(),
+        _plan("H-02", revert_to_round=1),
+        _response(),
+    )
+
+    status, host = _run(tmp_path, script)
+
+    assert status is RunStatus.SUCCEEDED
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    first, _second = state.search.rounds
+    hypothesis = state.search.by_id("H-02")
+    assert hypothesis is not None
+    assert hypothesis.revert_applied
+    assert hypothesis.revert_commit == first.commit
+    assert hypothesis.parent_commit == first.commit
+    assert all(session.closed for session in host.agents.sessions)
+
+
+def test_no_trusted_winner_restores_baseline(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response(verdict=Verdict.FAIL, feedback="broken"))
+
+    status, host = _run(tmp_path, script, options=_options(max_rounds=1, max_retries_per_round=1))
+
+    assert status is RunStatus.SUCCEEDED
+    workspace = host.workspaces.root
+    assert isinstance(workspace, FakeWorkspace)
+    assert workspace.retained == {}
+    assert "no trusted winner; restored the input baseline" in host.logs
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    assert not state.search.rounds[0].passed
+
+
+def test_selected_profiler_support_name_and_agent_metric_provenance(tmp_path: Path) -> None:
+    script = _Script(
+        _plan("H-01"),
+        _response(perf_metric=90.0, perf_unit="throughput"),
     )
 
     status, host = _run(
+        tmp_path,
         script,
-        PLUGIN.options.model_validate(
-            {"objective": "Improve request throughput.", "max_retries_per_round": 1}
-        ),
+        options=_options(max_rounds=1, official_eval_every=1),
+        facts=RunFacts(domain_id="generic", profiler_id="linux_cpu"),
     )
-
-    assert status is RunStatus.FAILED
-    assert host.logs[-1] == "implementation retry budget exhausted"
-
-
-def test_second_invalid_plan_propagates_policy_error() -> None:
-    script = _Script()
-    invalid = _plan(updates=({"hypothesis_id": "batch-prefill", "reason": "self-update"},))
-    script.enqueue(DESIGNER, invalid, invalid)
-
-    with pytest.raises(ValueError, match="cannot update itself"):
-        _run(script)
-
-
-def test_structured_response_fallback_and_retry_are_plugin_policy() -> None:
-    script = _Script()
-    script.enqueue(DESIGNER, StructuredResponseError(DESIGNER.id, PLUGIN.options))
-    script.enqueue(
-        IMPLEMENTER,
-        StructuredResponseError(IMPLEMENTER.id, PLUGIN.options),
-        _result("approve"),
-    )
-
-    status, host = _run(script)
 
     assert status is RunStatus.SUCCEEDED
-    assert host.logs[:2] == (
-        "designer returned no structured plan; using the policy fallback",
-        "implementer returned no structured result; applying fallback",
+    implementer_prompt = next(
+        message for role, _history, message in script.calls if role == IMPLEMENTER.id
     )
-    implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
-    assert "schema-valid response" in implementer_calls[1][2]
+    assert "linux_cpu_profiler" in implementer_prompt
+    state = asyncio.run(host.state.load(SingleState))
+    assert state is not None
+    assert state.search.rounds[0].perf_provenance == "implementer"
+
+
+def test_file_memory_layout_owns_plain_policy_artifacts(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response())
+
+    status, _host = _run(tmp_path, script, options=_options(max_rounds=1, memory_layout="files"))
+
+    assert status is RunStatus.SUCCEEDED
+    assert (tmp_path / "roadmap.md").is_file()
+    assert (tmp_path / "progress.md").is_file()
+    assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").is_file()

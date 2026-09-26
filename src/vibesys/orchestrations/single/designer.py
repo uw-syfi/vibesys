@@ -108,7 +108,11 @@ async def request_plan(
     A single run-owned designer session carries the rejected plan into its
     correction turn. Resource cleanup occurs on success, failure, and cancellation.
     """
-    session = await host.agents.create_session(DESIGNER, workspace=request.workspace)
+    session = await host.agents.create_session(
+        DESIGNER,
+        workspace=request.workspace,
+        writable_paths=(request.context.roadmap_location,),
+    )
     try:
         try:
             plan = await session.turn(

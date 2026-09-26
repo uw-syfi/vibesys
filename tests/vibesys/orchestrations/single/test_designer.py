@@ -22,7 +22,7 @@ from vibesys.search.hypothesis import (
     HypothesisStrategyUpdate,
     OrchestratorPlan,
 )
-from vs_runtime.api import StructuredResponseError
+from vs_runtime.api import StructuredResponseError, WorkspaceAccess
 from vs_runtime.api.testing import FakeRunHost
 
 if TYPE_CHECKING:
@@ -144,6 +144,8 @@ def test_designer_renders_context_normalizes_plan_and_resolves_skills() -> None:
     assert "progress/roadmap.md" in script.calls[0][1]
     assert "Use the allocated device." in script.calls[0][1]
     assert len(host.agents.sessions) == 1
+    assert host.agents.sessions[0].role.workspace_access is WorkspaceAccess.LIMITED
+    assert host.agents.sessions[0].writable_paths == ("progress/roadmap.md",)
     assert host.agents.sessions[0].closed
     assert any("missing.md" in line for line in host.logs)
 

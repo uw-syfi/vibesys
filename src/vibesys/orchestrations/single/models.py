@@ -1,33 +1,42 @@
-"""Policy-owned values for the single-agent orchestration slice."""
+"""Policy-owned values for the plain single-agent orchestration."""
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
+from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_runtime.api import AccuracyReceipt
 
 
-class SingleOptions(BaseModel):
-    """Strict options understood by the first single-agent policy slice."""
+class SingleOptions(AgentOrchestrationOptions):
+    """Strict production descriptor options for the profiling-off preset."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    profile_guided: Literal[None] = None
 
-    objective: str = Field(min_length=1)
-    max_retries_per_round: int = Field(default=2, ge=0)
+    @model_validator(mode="after")
+    def _registered_values(self) -> SingleOptions:
+        if self.interface not in {"inprocess", "service"}:
+            message = f"unsupported single-agent interface {self.interface!r}"
+            raise ValueError(message)
+        if self.memory_layout not in {"files", "directories"}:
+            message = f"unsupported single-agent memory_layout {self.memory_layout!r}"
+            raise ValueError(message)
+        return self
 
 
 class PaidAttempt(BaseModel):
-    """Durable proof that one paid implementation attempt was started."""
+    """Durable proof that one implementer attempt was started."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     round_number: Annotated[int, Field(gt=0)]
-    hypothesis_id: str = Field(min_length=1)
-    attempt: Annotated[int, Field(gt=0)]
+    role_id: str = Field(min_length=1)
+    member_id: str = Field(min_length=1)
+    turn_number: Annotated[int, Field(gt=0)]
 
 
 class SingleState(BaseModel):
@@ -39,96 +48,7 @@ class SingleState(BaseModel):
     search: HypothesisState = Field(default_factory=HypothesisState)
     last_paid_attempt: PaidAttempt | None = None
     accuracy_receipt: AccuracyReceipt | None = None
+    last_response: SingleAgentRoundResponse | None = None
 
 
-class HypothesisUpdate(BaseModel):
-    """One lifecycle update proposed for an earlier hypothesis."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    hypothesis_id: str = Field(min_length=1)
-    reason: str = Field(min_length=1)
-
-
-class SinglePlan(BaseModel):
-    """A designer-selected hypothesis and bounded implementation task."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    hypothesis_id: str = Field(min_length=1)
-    hypothesis: str = Field(min_length=1)
-    task: str = Field(min_length=1)
-    pass_criteria: str = Field(min_length=1)
-    reasoning: str = Field(min_length=1)
-    hypothesis_updates: tuple[HypothesisUpdate, ...] = ()
-
-
-class Verdict(StrEnum):
-    """The combined implementer and self-review decision."""
-
-    APPROVE = "approve"
-    REVISE = "revise"
-
-
-class SingleAgentResult(BaseModel):
-    """Combined implementation and self-review response for one attempt."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    summary: str = Field(min_length=1)
-    expected_behavior: str = Field(min_length=1)
-    self_review: str = Field(min_length=1)
-    feedback: str = ""
-    verdict: Verdict
-
-
-class InvalidSinglePlanError(ValueError):
-    """A parsed designer plan violates hypothesis lifecycle policy."""
-
-    @classmethod
-    def duplicate_updates(cls) -> InvalidSinglePlanError:
-        """Describe repeated lifecycle edits for one prior hypothesis."""
-        return cls("hypothesis_updates contains duplicate identifiers")
-
-    @classmethod
-    def self_update(cls) -> InvalidSinglePlanError:
-        """Describe a new hypothesis attempting to update itself."""
-        return cls("a new hypothesis cannot update itself")
-
-
-def fallback_plan() -> SinglePlan:
-    """Choose the conservative plan used after an unparseable designer reply."""
-    return SinglePlan.model_validate(
-        {
-            "hypothesis_id": "fallback-health-check",
-            "hypothesis": "the minimal service path may not satisfy its health contract",
-            "task": "Re-check that the minimal server boots and its health endpoint responds.",
-            "pass_criteria": "The health endpoint returns a successful response.",
-            "reasoning": "fallback: the designer produced no structured response",
-        }
-    )
-
-
-def fallback_result() -> SingleAgentResult:
-    """Treat an unparseable implementation reply as a failed self-review."""
-    return SingleAgentResult(
-        summary="The agent produced no structured implementation response.",
-        expected_behavior="unknown",
-        self_review="No structured response was available to review.",
-        feedback="Return a complete schema-valid response on retry.",
-        verdict=Verdict.REVISE,
-    )
-
-
-__all__ = [
-    "HypothesisUpdate",
-    "InvalidSinglePlanError",
-    "PaidAttempt",
-    "SingleAgentResult",
-    "SingleOptions",
-    "SinglePlan",
-    "SingleState",
-    "Verdict",
-    "fallback_plan",
-    "fallback_result",
-]
+__all__ = ["PaidAttempt", "SingleOptions", "SingleState"]
