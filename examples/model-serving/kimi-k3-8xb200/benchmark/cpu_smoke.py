@@ -71,6 +71,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return f"prompt must have {self.server.input_tokens} token IDs"
         if any(isinstance(token, bool) or not isinstance(token, int) for token in prompt):
             return "prompt must contain integer token IDs"
+        if len(set(prompt)) != len(prompt):
+            return "prompt token IDs must not repeat or be truncated"
         if body.get("max_tokens") != self.server.output_tokens:
             return f"max_tokens must be {self.server.output_tokens}"
         if body.get("temperature") != 0 or body.get("stream") is not True:
@@ -119,6 +121,10 @@ def _run_case(engine: str, server: _FakeServer, output: Path, expect_success: bo
         str(server.output_tokens),
         "--concurrency",
         "2",
+        "--token-pool-limit",
+        "16",
+        "--text-file",
+        str(Path(__file__).with_name("cpu_smoke_corpus.txt")),
         "--vs-output",
         str(output),
     ]
