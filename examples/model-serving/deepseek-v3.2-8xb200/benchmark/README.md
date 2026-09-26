@@ -15,8 +15,9 @@ methodology changes are intentional; scores are not directly comparable with
 legacy benchmark results. RF failure, incomplete-step, and output-length
 mismatch counts must all be zero or the benchmark fails.
 
-For CPU-only request-path validation, run `python benchmark/cpu_smoke.py
---request-factory-engine /path/to/session_runner`. It uses a strict local fake
-completions server and a tiny local tokenizer. It verifies full prompt length
-and distinct token IDs within each prompt. Fake-server throughput is not a
-serving-performance result.
+For CPU-only request-path validation, run
+`uv run python -m tests.examples.request_factory_cpu_smoke
+--profile examples/model-serving/deepseek-v3.2-8xb200/benchmark/cpu_smoke.toml
+--request-factory-engine /path/to/session_runner`. The shared harness uses a
+strict local fake completions server and a tiny local tokenizer. Fake-server
+throughput is not a serving-performance result.
