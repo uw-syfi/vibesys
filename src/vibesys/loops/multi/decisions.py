@@ -16,7 +16,7 @@ from vibesys.schemas import HypothesisOutcome
 if TYPE_CHECKING:
     from vibesys.agent_run.attempts import AttemptState
     from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import ProfilerSummary
+    from vibesys.evaluators.perf_reply import ProfilerSummary
     from vibesys.search.hypothesis import OrchestratorPlan
 
     # ImplementerReply is the structural protocol AttemptState.implementation

@@ -20,6 +20,7 @@ from vibesys.errors import (
     RoleIsolationError,
     UnsupportedProfilerError,
 )
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
 from vibesys.profilers import (
     ProfilerDefinition,
@@ -32,13 +33,12 @@ from vibesys.profilers import (
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
 from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-    ProfilerSummary,
     SkillResourceSelection,
-    Verdict,
     normalize_hypothesis_title,
 )
 from vibesys.search.hypothesis import OrchestratorPlan

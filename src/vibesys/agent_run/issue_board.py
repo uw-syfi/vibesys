@@ -19,18 +19,18 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.schemas import (
+from vibesys.evaluators.validation_recipe import (
     FrameworkValidationResult,
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-    ProfilerSummary,
-    SingleAgentRoundResponse,
     ValidationRecipeArtifact,
 )
 
 if TYPE_CHECKING:
     from vibesys.evaluators.gates import AccuracyGateResult, BenchmarkGateResult
+    from vibesys.evaluators.perf_reply import ProfilerSummary
+    from vibesys.roles.implementer import ImplementerResponse
+    from vibesys.roles.judge import JudgeResponse
+    from vibesys.roles.pre_round import PreRoundDecision
+    from vibesys.roles.single_agent import SingleAgentRoundResponse
     from vibesys.search.hypothesis import OrchestratorPlan
 
 MEMORY_LAYOUTS = ("files", "directories")

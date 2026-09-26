@@ -27,11 +27,7 @@ from vibesys.search.population.models import (
 
 if TYPE_CHECKING:
     from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-
-    # TODO(stack PR 06): import from vibesys.evaluators.perf_reply once  # noqa: FIX002, TD003  # LW-040055 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
-    # schemas.py dissolves; at BASE, ProfilerSummary still lives in
-    # vibesys.schemas.
-    from vibesys.schemas import ProfilerSummary
+    from vibesys.evaluators.perf_reply import ProfilerSummary
 
 __all__ = ["PopulationSearch", "candidate_fitness"]
 

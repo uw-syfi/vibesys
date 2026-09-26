@@ -19,6 +19,7 @@ from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
 from vibesys.constants import DomainName
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.loops.profile_multi.controller import HypothesisEngine, ProfileGuidanceView
 from vibesys.loops.profile_multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.profile_multi.turns import (
@@ -29,14 +30,13 @@ from vibesys.loops.profile_multi.turns import (
     _unauthorized_paths,
 )
 from vibesys.profilers import ProfilerKind
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
 from vibesys.schemas import (
     HypothesisOutcome,
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-    ProfilerSummary,
     SkillResourceSelection,
-    Verdict,
 )
 from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 

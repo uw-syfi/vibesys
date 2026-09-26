@@ -9,8 +9,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vibesys.evaluators.validation_recipe import (
+    FrameworkValidationResult,
+    ValidationRecipe,
+    ValidationRecipeArtifact,
+)
 from vibesys.loops.multi import validation
-from vibesys.schemas import FrameworkValidationResult, ValidationRecipe, ValidationRecipeArtifact
 
 if TYPE_CHECKING:
     from pathlib import Path

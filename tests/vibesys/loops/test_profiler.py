@@ -24,9 +24,7 @@ from resources.profilers.nsys.analyze_nsys import (
     analyze_memory_ops,
 )
 
-from vibesys.schemas import (
-    ProfilerResponse,
-)
+from vibesys.roles.profiler import ProfilerResponse
 from vs_agent.runner import parse_typed_response_text
 
 # ---------------------------------------------------------------------------

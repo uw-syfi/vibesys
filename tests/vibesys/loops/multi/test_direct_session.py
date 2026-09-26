@@ -22,6 +22,7 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
+from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
 from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, RoundSelection
 from vibesys.loops.multi.session import (
     MultiRound,
@@ -29,13 +30,11 @@ from vibesys.loops.multi.session import (
     MultiSessionError,
     _TerminalPolicy,
 )
-from vibesys.schemas import (
-    HypothesisOutcome,
-    ImplementerResponse,
-    JudgeResponse,
-    ValidationRecipeArtifact,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.schemas import HypothesisOutcome
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:

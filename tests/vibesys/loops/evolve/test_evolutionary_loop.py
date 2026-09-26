@@ -30,6 +30,7 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.evaluators.input_manifest import BenchmarkResult, load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import FrameworkWarningData
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.evolve.loop import (
@@ -56,11 +57,12 @@ from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
+from vibesys.roles.common import Verdict
+from vibesys.roles.judge import JudgeResponse
 from vibesys.run import EventJournal, GitTracker, RunState, RunStateNamespace
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
-from vibesys.schemas import JudgeResponse, ProfilerSummary, Verdict
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import (
     OrchestrationDescriptor,

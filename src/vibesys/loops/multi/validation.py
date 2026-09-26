@@ -7,7 +7,10 @@ import json
 from typing import TYPE_CHECKING
 
 from vibesys.agent_run import issue_board
-from vibesys.schemas import FrameworkValidationResult, ValidationRecipeArtifact
+from vibesys.evaluators.validation_recipe import (
+    FrameworkValidationResult,
+    ValidationRecipeArtifact,
+)
 
 _MAX_INPUT_FILES = 4096
 _MAX_INPUT_BYTES = 256 * 1024 * 1024
@@ -15,7 +18,7 @@ _MAX_INPUT_BYTES = 256 * 1024 * 1024
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.schemas import ValidationRecipe
+    from vibesys.evaluators.validation_recipe import ValidationRecipe
 
 
 def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:

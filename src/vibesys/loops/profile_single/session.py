@@ -36,6 +36,7 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -48,7 +49,7 @@ from vibesys.loops.profile_single.hypothesis import HypothesisEngine, ProfileGui
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
 from vibesys.orchestration.runtime import MeasurementOptions, WorkspaceRestoreError
 from vibesys.render.sink import output_sink
-from vibesys.schemas import ProfilerSummary, Verdict
+from vibesys.roles.common import Verdict
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 

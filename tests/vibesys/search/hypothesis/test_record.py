@@ -6,12 +6,10 @@ from dataclasses import replace
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
-
-# TODO(stack PR 06): import ImplementerResponse from vibesys.roles.implementer once it exists.  # noqa: FIX002, TD003  # LW-040061 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
+from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    ImplementerResponse,
 )
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.attempts import (

@@ -22,7 +22,10 @@ from vibesys.agent_run.state import (
 )
 from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
-from vibesys.schemas import CandidateDisposition, derive_hypothesis_title
+from vibesys.schemas import (
+    CandidateDisposition,
+    derive_hypothesis_title,
+)
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 

@@ -25,9 +25,11 @@ from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 # TODO(stack PR 07): import from vibesys.loops.multi.session once it takes a  # noqa: FIX002, TD003  # LW-040071 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 # HypothesisConfig; at BASE, _TerminalPolicy() still takes no arguments.
 from vibesys.loops.multi.session import _TerminalPolicy
-
-# TODO(stack PR 06): import from vibesys.roles.implementer once it exists.  # noqa: FIX002, TD003  # LW-040072 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, ImplementerResponse
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+)
 from vibesys.search.hypothesis import (
     CarryOver,
     ClosedRound,

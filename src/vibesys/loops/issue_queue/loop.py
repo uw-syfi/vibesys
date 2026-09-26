@@ -7,19 +7,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
+from vibesys.evaluators.perf_reply import (
+    IssuePerfEvalResponse,
+    PerfMetrics,
+)
 from vibesys.events import RunConfiguredData
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.render.sink import output_sink
-from vibesys.schemas import (
-    IssueImplementerResponse,
-    IssueJudgeResponse,
-    IssuePerfEvalResponse,
-    PerfMetrics,
-    PerfTrend,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import IssueImplementerResponse
+from vibesys.roles.judge import IssueJudgeResponse
+from vibesys.schemas import PerfTrend
 from vs_agent.api import MCPServerSpec, RoundProgress
 from vs_issue_board.api import (
     Issue,

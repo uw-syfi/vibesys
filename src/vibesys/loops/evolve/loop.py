@@ -42,6 +42,7 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import FrameworkSource
 from vibesys.loops.evolve.policy_flow import (
     BootstrapAttemptResult,
@@ -62,7 +63,9 @@ from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.render.sink import output_sink
-from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.mutator import MutatorResponse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -299,7 +299,7 @@
 {"id": "LW-010200", "path": "src/entrypoints/cli/loops.py", "rules": ["TRY004"]}
 {"id": "LW-010201", "path": "src/vibesys/features.py", "rules": ["TRY004"]}
 {"id": "LW-010202", "path": "src/vibesys/search/hypothesis/state.py", "rules": ["S105"]}
-{"id": "LW-010203", "path": "src/vibesys/schemas.py", "rules": ["S105"]}
+{"id": "LW-010203", "path": "src/vibesys/roles/common.py", "rules": ["S105"]}
 {"id": "LW-010204", "path": "src/vibesys/loops/evolve/run.py", "rules": ["S311"]}
 {"id": "LW-010207", "path": "src/vibesys/evaluators/gates.py", "rules": ["S108"]}
 {"id": "LW-010208", "path": "src/vibesys/sandbox/skypilot_evaluator.py", "rules": ["S108"]}
@@ -462,7 +462,6 @@
 {"id": "LW-040035", "path": "libs/vs-project/tests/test_store.py", "rules": ["SLF001"]}
 {"id": "LW-040036", "path": "src/vibesys/loops/multi/turns.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040037", "path": "src/vibesys/loops/profile_multi/turns.py", "rules": ["FIX002", "TD003"]}
-{"id": "LW-040038", "path": "src/vibesys/schemas.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040039", "path": "src/vibesys/search/hypothesis/cadence.py", "rules": ["PLR0913"]}
 {"id": "LW-040040", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["S101"]}
 {"id": "LW-040041", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["PLR0913"]}
@@ -479,13 +478,11 @@
 {"id": "LW-040052", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["S311"]}
 {"id": "LW-040053", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["PLR0913"]}
 {"id": "LW-040054", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["S311"]}
-{"id": "LW-040055", "path": "src/vibesys/search/population/search.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040056", "path": "src/vibesys/search/population/search.py", "rules": ["S311"]}
 {"id": "LW-040057", "path": "src/vibesys/search/population/search.py", "rules": ["S311"]}
 {"id": "LW-040058", "path": "src/vibesys/search/population/search.py", "rules": ["S311"]}
 {"id": "LW-040059", "path": "src/vibesys/search/population/vibesys_selector.py", "rules": ["PLR0913"]}
 {"id": "LW-040060", "path": "src/vibesys/search/population/vibesys_selector.py", "rules": ["PLR0913"]}
-{"id": "LW-040061", "path": "tests/vibesys/search/hypothesis/test_record.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040062", "path": "tests/vibesys/search/hypothesis/test_record.py", "rules": ["S106"]}
 {"id": "LW-040063", "path": "tests/vibesys/search/hypothesis/test_record.py", "rules": ["ANN001", "ANN202"]}
 {"id": "LW-040064", "path": "tests/vibesys/search/hypothesis/test_reprojection.py", "rules": ["S106"]}
@@ -496,7 +493,6 @@
 {"id": "LW-040069", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["S106"]}
 {"id": "LW-040070", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["ANN001"]}
 {"id": "LW-040071", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FIX002", "TD003"]}
-{"id": "LW-040072", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040073", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["S106"]}
 {"id": "LW-040074", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
 {"id": "LW-040075", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
@@ -521,7 +517,6 @@
 {"id": "LW-040094", "path": "src/vibesys/orchestration/_host.py", "rules": ["ANN401"]}
 {"id": "LW-040096", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR2004"]}
 {"id": "LW-040097", "path": "src/vibesys/orchestration/agents.py", "rules": ["PLR0913"]}
-{"id": "LW-040098", "path": "src/vibesys/orchestration/artifacts.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040099", "path": "src/vibesys/orchestration/environment.py", "rules": ["SLF001"]}
 {"id": "LW-040100", "path": "src/vibesys/orchestration/fake_gates.py", "rules": ["PLR0913"]}
 {"id": "LW-040101", "path": "src/vibesys/orchestration/gates.py", "rules": ["SLF001"]}
@@ -547,3 +542,5 @@
 {"id": "LW-040121", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["ANN401"]}
 {"id": "LW-040122", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["FBT001"]}
 {"id": "LW-040123", "path": "tests/vibesys/orchestration/test_workspace_transaction.py", "rules": ["FBT001"]}
+{"id": "LW-040124", "path": "src/vibesys/prompts/contexts.py", "rules": ["PLR0913"]}
+{"id": "LW-040125", "path": "tests/vibesys/roles/test_prompt_contracts.py", "rules": ["FIX002", "TD003"]}

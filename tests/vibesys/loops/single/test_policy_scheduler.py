@@ -25,7 +25,9 @@ from vibesys.loops.single.session import (
     SingleSession,
     SingleSessionError,
 )
-from vibesys.schemas import SingleAgentRoundResponse, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:

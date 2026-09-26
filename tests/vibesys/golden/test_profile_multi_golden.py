@@ -63,16 +63,14 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import GateFinishedData
 from vibesys.loops.profile_multi.orchestration import ProfileGuidedMultiAgentOrchestrator
 from vibesys.profilers import ProfilerKind
-from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-    ProfilerSummary,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 

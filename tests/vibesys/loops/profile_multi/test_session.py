@@ -23,6 +23,7 @@ from vibesys.evaluators.gates import (
     FrameworkBenchmarkOutcome,
 )
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
 from vibesys.loops.profile_multi.controller import HypothesisEngine
 from vibesys.loops.profile_multi.decisions import AttemptRequest, RoundSelection
 from vibesys.loops.profile_multi.session import (
@@ -32,13 +33,11 @@ from vibesys.loops.profile_multi.session import (
     _ProfilePolicy,
     _TerminalPolicy,
 )
-from vibesys.schemas import (
-    HypothesisOutcome,
-    ImplementerResponse,
-    JudgeResponse,
-    ValidationRecipeArtifact,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.schemas import HypothesisOutcome
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:

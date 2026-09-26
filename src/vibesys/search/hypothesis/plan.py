@@ -13,7 +13,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from vibesys.schemas import HYPOTHESIS_TITLE_MAX_LEN, SkillResourceSelection
+from vibesys.schemas import (
+    HYPOTHESIS_TITLE_MAX_LEN,
+    SkillResourceSelection,
+)
 
 HypothesisStrategyDisposition = Literal["parked", "abandoned"]
 
