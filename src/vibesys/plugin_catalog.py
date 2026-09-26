@@ -7,6 +7,7 @@ Delete these ``RunSetup`` factories when those facts move behind ``vs_runtime``.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from vibesys.context import RunSetup, RunStartHints
@@ -65,8 +66,8 @@ def _compare_resume(
                 message="resuming a run cannot change its orchestration ID or config version",
             )
         )
-    old = options_type.model_validate(recorded.options)
-    new = options_type.model_validate(requested.options)
+    old = options_type.model_validate_json(json.dumps(recorded.options), strict=True)
+    new = options_type.model_validate_json(json.dumps(requested.options), strict=True)
     changed = tuple(
         name
         for name in options_type.model_fields
@@ -173,8 +174,8 @@ def _compare_evolve_resume(
                 message="resuming a run cannot change its orchestration ID or config version",
             )
         )
-    old = EvolveOptions.model_validate(recorded.options)
-    new = EvolveOptions.model_validate(requested.options)
+    old = EvolveOptions.model_validate_json(json.dumps(recorded.options), strict=True)
+    new = EvolveOptions.model_validate_json(json.dumps(requested.options), strict=True)
     changed = tuple(
         name
         for name in EvolveOptions.model_fields

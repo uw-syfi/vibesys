@@ -271,6 +271,82 @@ def test_builtin_plugin_setup_is_private_product_wiring() -> None:
     assert prepared_plain.setup.resume_policy is not None
 
 
+@pytest.mark.parametrize(
+    ("plugin_id", "options", "expected_tuple"),
+    [
+        (
+            "multi-agent",
+            {
+                "interface": "service",
+                "max_rounds": 2,
+                "max_retries_per_round": 2,
+                "judge_every": 1,
+                "official_eval_every": 3,
+                "memory_layout": "directories",
+                "operator_constraints": ["Preserve ordering"],
+                "metric_space": {
+                    "objectives": [{"name": "throughput", "direction": "max"}],
+                    "relative_noise": 0.01,
+                },
+            },
+            ("Preserve ordering",),
+        ),
+        (
+            "plain",
+            {
+                "max_rounds": 2,
+                "max_attempts_per_issue": 2,
+                "max_issues_per_perf_eval": 3,
+                "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
+            },
+            (4,),
+        ),
+        (
+            "evolve",
+            {
+                "max_generations": 2,
+                "children_per_generation": 2,
+                "k_top_inspirations": 1,
+                "k_random_inspirations": 1,
+                "selection_temperature": 1.0,
+                "frontier_bias": 0.7,
+                "bootstrap_max_attempts": 3,
+                "keep_deployments": False,
+                "max_parallelism": 2,
+                "metric_space": {
+                    "objectives": [{"name": "throughput", "direction": "max"}],
+                    "relative_noise": 0.01,
+                },
+            },
+            ("throughput",),
+        ),
+    ],
+)
+def test_builtin_plugin_preparation_preserves_strict_tuples_from_persisted_json(
+    plugin_id: str,
+    options: dict[str, JsonValue],
+    expected_tuple: tuple[str | int, ...],
+) -> None:
+    descriptor = OrchestrationDescriptor(
+        id=plugin_id,
+        config_version=1,
+        options=options,
+    )
+
+    prepared = built_in_orchestrations().resolve(descriptor.id).prepare_plugin(descriptor)
+
+    if plugin_id == "multi-agent":
+        observed = prepared.options.operator_constraints
+    elif plugin_id == "plain":
+        observed = tuple(level.rate for level in prepared.options.load_levels)
+    else:
+        observed = tuple(item.name for item in prepared.options.metric_space.objectives)
+    assert observed == expected_tuple
+    compare = prepared.setup.resume_policy
+    assert compare is not None
+    assert compare(descriptor, descriptor).descriptor is None
+
+
 def test_builtin_plugins_allow_only_increased_total_budget_on_resume() -> None:
     registry = built_in_orchestrations()
     recorded = OrchestrationDescriptor(

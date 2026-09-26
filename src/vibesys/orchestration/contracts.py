@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
@@ -111,7 +112,10 @@ class OrchestrationRegistration:
                 f"{plugin.config_version}, got {descriptor.config_version}"
             )
             raise ValueError(message)
-        options = plugin.options.model_validate(descriptor.options)
+        options = plugin.options.model_validate_json(
+            json.dumps(descriptor.options),
+            strict=True,
+        )
         setup = self.plugin_setup(options) if self.plugin_setup is not None else RunSetup()
         setup = replace(
             setup,
