@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestrations.evolve.models import EvolveOptions, EvolveState
@@ -57,6 +58,11 @@ def _passing_responder(
         "perf_metric": 100.0,
         "perf_unit": "tokens/s",
     }
+
+
+def test_deployment_retention_is_rejected_outside_the_runtime_boundary() -> None:
+    with pytest.raises(ValidationError, match="keep_deployments"):
+        _options(keep_deployments=True)
 
 
 def test_profiler_none_reuses_only_mutator_and_judge_sessions(tmp_path: Path) -> None:

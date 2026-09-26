@@ -30,7 +30,7 @@ class EvolveOptions(BaseModel):
     openevolve_migration_rate: Annotated[float, Field(ge=0, le=1)] | None = None
     frontier_bias: Annotated[float, Field(ge=0, le=1)]
     bootstrap_max_attempts: Annotated[int, Field(gt=0)]
-    keep_deployments: bool
+    keep_deployments: Literal[False]
     max_parallelism: Annotated[int, Field(gt=0)]
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
 
