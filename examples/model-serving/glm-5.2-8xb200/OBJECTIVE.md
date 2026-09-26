@@ -23,11 +23,15 @@ under concurrency, not just raw weight sharding.
 
 ## Workload
 
-Run the Request Factory benchmark with its configured workload unless the
-evaluator passes a different `--url`:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different `--url`:
 
 ```bash
-uv run python benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model zai-org/GLM-5.2 --tokenizer zai-org/GLM-5.2 \
+  --tokenizer-revision cf457fa734ab149ffef225f80893eb38c6ff5cdc \
+  --request-count 256 \
+  --input-tokens 8192 --output-tokens 1024 --concurrency 64 --url <SERVER_URL>
 ```
 
 Default load:

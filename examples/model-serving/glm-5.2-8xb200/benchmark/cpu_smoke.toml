@@ -1,18 +1,30 @@
-benchmark = "examples/model-serving/glm-5.2-8xb200/benchmark/benchmark.py"
+benchmark = "resources/evaluators/request-factory/fixed_text.py"
 model = "cpu-smoke-model"
 tokenizer = "examples/model-serving/glm-5.2-8xb200/benchmark/cpu_smoke_tokenizer.json"
-corpus_text = "Request Factory benchmark sample synthetic workload input output token sequence stream generated deterministic prompt context model"
 benchmark_args = [
   "--request-count", "8",
   "--input-tokens", "16",
   "--output-tokens", "4",
   "--concurrency", "2",
-  "--token-pool-limit", "16",
-  "--text-file", "{corpus}",
 ]
 response_style = "usage"
-failure_message_contains = "failed_steps"
 unique_prompt_tokens = true
+
+[[failure_cases]]
+mode = "http"
+message_contains = "failed_steps"
+
+[[failure_cases]]
+mode = "malformed-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "truncated-sse"
+message_contains = "output_mismatch_steps"
+
+[[failure_cases]]
+mode = "output-mismatch"
+message_contains = "output_mismatch_steps"
 
 [[request_shapes]]
 input_tokens = 16
