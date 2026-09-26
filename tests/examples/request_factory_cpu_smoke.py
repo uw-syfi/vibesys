@@ -55,11 +55,19 @@ class SmokeProfile(BaseModel):
     required_fields: Mapping[str, Any]
     response_style: Literal["usage", "token-chunks"]
     failure_message_contains: str
+    tokenizer: str | None = None
+    corpus_text: str | None = None
     unique_prompt_tokens: bool = False
 
     @property
     def benchmark_path(self) -> Path:
         return (_ROOT / self.benchmark).resolve()
+
+    @property
+    def tokenizer_path(self) -> Path:
+        if self.tokenizer is None:
+            return _TOKENIZER
+        return (_ROOT / self.tokenizer).resolve()
 
     @property
     def shape_counts(self) -> Counter[tuple[int, int]]:
@@ -194,6 +202,20 @@ class _FakeServer(http.server.ThreadingHTTPServer):
         self.lock = threading.Lock()
 
 
+def _benchmark_args(profile: SmokeProfile, output_path: Path) -> tuple[str, ...]:
+    corpus_path = output_path.parent / "smoke-corpus.txt"
+    if profile.corpus_text is not None:
+        corpus_path.write_text(profile.corpus_text + "\n", encoding="utf-8")
+    args = []
+    for argument in profile.benchmark_args:
+        if argument == "{corpus}":
+            assert profile.corpus_text is not None, "profile uses {corpus} without corpus_text"
+            args.append(str(corpus_path))
+        else:
+            args.append(argument)
+    return tuple(args)
+
+
 def _run_case(
     profile: SmokeProfile,
     engine: str,
@@ -212,8 +234,8 @@ def _run_case(
         "--model",
         profile.model,
         "--tokenizer",
-        str(_TOKENIZER),
-        *profile.benchmark_args,
+        str(profile.tokenizer_path),
+        *_benchmark_args(profile, output_path),
         "--vs-output",
         str(output_path),
     ]
@@ -288,6 +310,7 @@ def main() -> int:
     args = parser.parse_args()
     profile = load_profile(args.profile)
     assert profile.benchmark_path.is_file(), f"benchmark does not exist: {profile.benchmark_path}"
+    assert profile.tokenizer_path.is_file(), f"tokenizer does not exist: {profile.tokenizer_path}"
     run_cpu_smoke(profile, args.request_factory_engine)
     sys.stdout.write(
         "CPU fake-server smoke passed: request shape, metrics, and failure propagation\n"
