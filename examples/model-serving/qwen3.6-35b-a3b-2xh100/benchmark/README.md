@@ -12,6 +12,10 @@ latency. These methodology changes are intentional; old and new scores are
 not directly comparable. The bundle adapter validates the RF summary and maps
 the metrics to VibeSys result protocol 2.
 
+The adapter generates its deterministic synthetic text corpus in a temporary
+directory and sets an explicit token-pool limit from prompt length and request
+count. It fails if RF reports that the pool is too short for a prompt.
+
 The evaluator injects the trusted RF engine path. For CPU-only request-path
 validation, run `python benchmark/cpu_smoke.py --request-factory-engine
 <RF_ENGINE>`; it uses a strict local fake completions server and a tiny local
