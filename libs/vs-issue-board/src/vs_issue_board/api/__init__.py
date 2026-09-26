@@ -22,9 +22,11 @@ from vs_issue_board.policy import (
     create_issue_under_policy,
     parse_type,
 )
+from vs_issue_board.progress import FileProgressLog, ProgressLog
 
 __all__ = [
     "CreateIssuePolicy",
+    "FileProgressLog",
     "Issue",
     "IssueBoard",
     "IssueBoardLoadError",
@@ -32,6 +34,7 @@ __all__ = [
     "IssueStatus",
     "IssueTracker",
     "IssueType",
+    "ProgressLog",
     "check_create_allowed",
     "create_issue_under_policy",
     "format_issue_full",

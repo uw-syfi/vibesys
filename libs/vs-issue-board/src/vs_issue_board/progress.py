@@ -1,4 +1,4 @@
-"""Progress-log contract and filesystem implementation for issue_queue."""
+"""Progress-log contract and filesystem implementation."""
 
 from __future__ import annotations
 
@@ -38,6 +38,3 @@ class FileProgressLog:
         """Append one Markdown entry without changing prior entries."""
         with self._path.open("a", encoding="utf-8") as stream:
             stream.write(entry)
-
-
-__all__ = ["FileProgressLog", "ProgressLog"]
