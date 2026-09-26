@@ -6,9 +6,9 @@ checker's tolerance. Build an OpenAI-compatible `/v1/chat/completions` and
 `/v1/completions` server. Model weights and tokenizer are provided locally at
 `reference/model` (mounted read-only in the container).
 
-Headline metric: `aggregate_throughput` (the output-token-throughput field, in
-tok/s, of the benchmark tool's `--output-json` output). Report this exact field
-as `perf_metric` every round; do not substitute or invert it.
+Headline metric: `aggregate_throughput` (the peak Request Factory output-token
+throughput across the declared matrix). Report this exact field as `perf_metric`
+every round; do not substitute or invert it.
 
 ## Hardware
 
@@ -41,11 +41,15 @@ as `perf_metric` every round; do not substitute or invert it.
 - Text-generation, dense causal LM (Llama-3-8B: 32 layers, hidden 4096, GQA
   with 8 KV heads, vocab 128256, RoPE theta 5e5, 8192-token context, no
   rope-scaling).
-- The benchmark drives the server over HTTP with fixed in/out token lengths
-  (128/256/512). It **warms up first** (compiles the buckets, untimed) and then
-  measures **closed-loop** at several concurrency levels — so the reported
-  `aggregate_throughput` (tok/s, the primary metric) is the peak *steady-state*
-  throughput, not dragged down by cold compiles or queueing. Higher concurrency
-  drives bigger decode batches: a server that keeps the NeuronCore fed wins.
+- Request Factory drives `/v1/completions` with input/output lengths
+  (128/256/512), 64 requests per point, and concurrency levels (1/2/4/8). It
+  uses saturated arrival mode bounded by each matrix point's concurrency. This
+  fixed-volume methodology replaces the former duration-driven bundle client;
+  compare its scores accordingly. `aggregate_throughput` is the maximum RF
+  output-token throughput across the full matrix. The wrapper partitions one
+  logical RF trace across the 12 matrix points so a later point cannot replay
+  prompt token IDs cached by an earlier point. Every matrix point is retained
+  in JSON stdout and in `--output-json` output when requested; protocol v2
+  carries only the declared headline metric.
 - Correctness is judged by the accuracy checker against the HuggingFace
   Transformers reference; match its tolerance before chasing throughput.

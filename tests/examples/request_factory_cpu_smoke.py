@@ -18,7 +18,7 @@ import tomllib
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from tests.support import run_test_command
@@ -70,6 +70,8 @@ class SmokeProfile(BaseModel):
     tokenizer: str | None = None
     corpus_text: str | None = None
     unique_prompt_tokens: bool = False
+    disjoint_prompt_batches: tuple[Annotated[int, Field(gt=0)], ...] = ()
+    cache_prefix_tokens: int = Field(default=16, gt=0)
 
     @model_validator(mode="after")
     def _has_failure_contract(self) -> SmokeProfile:
@@ -179,6 +181,7 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
         for key, expected in self.server.profile.required_fields.items():
             if body.get(key) != expected:
                 return f"{key} must be {expected!r}"
+        self.server.observed_prompts.append(tuple(prompt))
         return None
 
     @staticmethod
@@ -234,6 +237,7 @@ class _FakeServer(http.server.ThreadingHTTPServer):
         self.failure_mode: FailureMode | None = None
         self.errors: list[str] = []
         self.observed_shapes: Counter[tuple[int, int]] = Counter()
+        self.observed_prompts: list[tuple[int, ...]] = []
         self.lock = threading.Lock()
 
 
@@ -318,6 +322,28 @@ def _run_case(
         )
 
 
+def _check_disjoint_prompt_batches(profile: SmokeProfile, prompts: list[tuple[int, ...]]) -> None:
+    if not profile.disjoint_prompt_batches:
+        return
+    assert sum(profile.disjoint_prompt_batches) == len(prompts), (
+        f"prompt batch sizes {profile.disjoint_prompt_batches} do not cover "
+        f"{len(prompts)} observed requests"
+    )
+    batches: list[set[tuple[int, ...]]] = []
+    start = 0
+    for size in profile.disjoint_prompt_batches:
+        batch = prompts[start : start + size]
+        batches.append({prompt[: profile.cache_prefix_tokens] for prompt in batch})
+        start += size
+    for left_index, left in enumerate(batches):
+        for right_index, right in enumerate(batches[left_index + 1 :], start=left_index + 1):
+            overlap = left & right
+            assert not overlap, (
+                f"prompt batches {left_index} and {right_index} replay cache-eligible prefixes: "
+                f"{sorted(overlap)!r}"
+            )
+
+
 def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
     """Exercise one bundle's RF request shape, result contract, and failure path."""
     server = _FakeServer(profile)
@@ -331,8 +357,10 @@ def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
                 f"unexpected request-shape counts: {server.observed_shapes}; "
                 f"expected {profile.shape_counts}"
             )
+            _check_disjoint_prompt_batches(profile, server.observed_prompts)
             for index, failure in enumerate(profile.failures):
                 server.observed_shapes.clear()
+                server.observed_prompts.clear()
                 server.failure_mode = failure.mode
                 _run_case(
                     profile,

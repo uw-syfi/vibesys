@@ -1,247 +1,248 @@
-"""
-Serving benchmark for the Trainium Llama-3-8B server (warm, closed-loop).
-
-Warm-up before timing to exclude neuronx-cc compiles. Closed-loop concurrency
-sweep over (length, concurrency) pairs. The headline `aggregate_throughput` is
-the peak steady-state output tok/s across the sweep.
-
-Usage:
-    python benchmark.py --url http://localhost:8000 \
-        --lengths 128,256,512 --concurrency 1,2,4,8 \
-        --duration 20 --output-json /tmp/bench.json
-"""
+#!/usr/bin/env python3
+"""Run the Trainium input-length/concurrency matrix through Request Factory."""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
+import csv
 import json
-import os
-import random
-import statistics
+import math
+import subprocess
+import sys
+import tempfile
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
-import httpx
-
-from vs_bench.runner import run
-from vs_bench.schedule import duration_limited
-from vs_bench.stats import pct_block
-from vs_bench.transport import stream_sse
-
-_MODEL_PATH_CANDIDATES = ("/model", "/workspace/reference/model", "reference/model")
-
-
-def _load_tokenizer(model_path):
-    candidates = [model_path] if model_path else list(_MODEL_PATH_CANDIDATES)
-    candidates = [c for c in candidates if c and os.path.exists(c)]
-    if not candidates and os.environ.get("MODEL_PATH") and os.path.exists(os.environ["MODEL_PATH"]):
-        candidates = [os.environ["MODEL_PATH"]]
-    for path in candidates:
-        try:
-            from transformers import AutoTokenizer
-
-            tok = AutoTokenizer.from_pretrained(path)
-            excluded = set(getattr(tok, "all_special_ids", []) or [])
-            pool = [
-                t
-                for t in range(len(tok))
-                if t not in excluded and tok.decode([t], skip_special_tokens=True).strip()
-            ]
-            if pool:
-                print(f"[prompt] tokenizer from {path}; pool={len(pool)}")
-                return tok, pool
-        except Exception as exc:
-            print(f"[prompt] tokenizer load from {path} failed ({exc})")
-    print("[prompt] no tokenizer — approximating input length with filler words")
-    return None, None
+_MODEL = "NousResearch/Meta-Llama-3-8B-Instruct"
+_TOKENIZER = "/model"
+_METRICS = {"aggregate_throughput": {"unit": "tok/s", "direction": "max"}}
+_UNDERSIZED_POOL_WARNING = "synthetic content will repeat within a single request"
 
 
-def make_prompt(tokenizer, pool, input_len, rng):
-    if tokenizer is not None and pool:
-        return tokenizer.decode(
-            [rng.choice(pool) for _ in range(input_len)], skip_special_tokens=True
+def _write_trace(path: Path, count: int, length: int) -> None:
+    with path.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.writer(output)
+        writer.writerow(("id", "arrival_time", "input_len", "output_len"))
+        for index in range(count):
+            writer.writerow((f"request-{index:05d}", 0, length, length))
+
+
+def _write_corpus(path: Path, token_pool_limit: int) -> None:
+    seed = "The server processes a synthetic request and returns generated text"
+    with path.open("w", encoding="utf-8") as corpus:
+        for index in range(token_pool_limit):
+            corpus.write(f"{seed} sample {index} token sequence {index}\n")
+
+
+def _token_pool_limit(max_length: int, total_requests: int) -> int:
+    minimum = max(2 * max_length, total_requests)
+    return 1 << (minimum - 1).bit_length()
+
+
+def _run_point(
+    args: argparse.Namespace,
+    length: int,
+    concurrency: int,
+    *,
+    point_index: int,
+    point_count: int,
+    max_length: int,
+) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="llama3-trn2-rf-point-") as directory:
+        temporary = Path(directory)
+        trace, summary_path, log_path = (
+            temporary / "requests.csv",
+            temporary / "summary.json",
+            temporary / "requests.jsonl",
         )
-    return " ".join(["token"] * input_len)
-
-
-async def measure(client, url, tokenizer, pool, length, concurrency, duration, temperature, rng):
-    async def send(i: int) -> dict:
-        prompt = make_prompt(tokenizer, pool, length, rng)
-        r = await stream_sse(
-            client,
-            url,
-            {
-                "prompt": prompt,
-                "max_tokens": length,
-                "min_tokens": length,
-                "ignore_eos": True,
-                "temperature": temperature,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-            },
-            timeout=600.0,
-        )
-        gen = (
-            r.usage["completion_tokens"]
-            if r.usage and "completion_tokens" in r.usage
-            else r.token_count
-        )
-        ttft = r.ttft
-        tpot = (r.latency - ttft) / (gen - 1) if (ttft is not None and gen > 1) else None
+        total_requests = args.request_count * point_count
+        _write_trace(trace, total_requests, length)
+        token_pool_limit = _token_pool_limit(max_length, total_requests)
+        corpus = temporary / "corpus.txt"
+        _write_corpus(corpus, token_pool_limit)
+        command = [
+            args.request_factory_engine,
+            "--trace",
+            str(trace),
+            "--input-file-format",
+            "text-generation-independent",
+            "--text-file",
+            str(corpus),
+            "--tokenizer",
+            args.tokenizer,
+            "--model",
+            args.model,
+            "--backend",
+            "openai",
+            "--dialect",
+            "openai",
+            "--base-url",
+            args.url.rstrip("/") + "/v1",
+            "--temperature",
+            str(args.temperature),
+            "--arrival-mode",
+            "saturated",
+            "--max-concurrency",
+            str(concurrency),
+            "--shard-count",
+            str(point_count),
+            "--shard-index",
+            str(point_index),
+            "--token-pool-limit",
+            str(token_pool_limit),
+            "--request-log",
+            "true",
+            "--log-path",
+            str(log_path),
+            "--timeline",
+            "false",
+            "--summary-path",
+            str(summary_path),
+        ]
+        completed = subprocess.run(command, check=False, text=True, capture_output=True)
+        if completed.stdout:
+            print(completed.stdout, end="", flush=True)
+        if completed.stderr:
+            print(completed.stderr, end="", file=sys.stderr, flush=True)
+        if _UNDERSIZED_POOL_WARNING in completed.stderr:
+            raise ValueError(
+                "Request Factory token pool is shorter than the longest prompt; "
+                "increase the generated corpus or token-pool limit"
+            )
+        if completed.returncode != 0:
+            raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        replay = summary.get("replay")
+        common = replay.get("common") if isinstance(replay, Mapping) else None
+        if not isinstance(common, Mapping):
+            raise ValueError("RF summary is missing replay.common")
+        expected_counts = {
+            "attempted_steps": args.request_count,
+            "success_steps": args.request_count,
+            "failed_steps": 0,
+            "output_mismatch_steps": 0,
+        }
+        for name, expected in expected_counts.items():
+            actual = common.get(name)
+            if actual != expected:
+                raise ValueError(f"RF summary {name}={actual!r}, expected {expected}")
+        throughput = common.get("output_token_throughput_per_s")
+        if isinstance(throughput, bool) or not isinstance(throughput, int | float):
+            raise ValueError(f"RF throughput is missing or not numeric: {throughput!r}")
+        throughput = float(throughput)
+        if not math.isfinite(throughput) or throughput <= 0:
+            raise ValueError(f"RF throughput is invalid: {throughput!r}")
+        rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        if len(rows) != args.request_count:
+            raise ValueError(
+                f"RF request log has {len(rows)} records, expected {args.request_count}"
+            )
+        for row in rows:
+            source, outcome = row.get("source", {}).get("data", {}), row.get("outcome", {})
+            if source.get("input_len") != length or source.get("output_len_target") != length:
+                raise ValueError(f"RF request log has wrong trace lengths: {source!r}")
+            if outcome.get("error") is not None or outcome.get("output_len_actual") != length:
+                raise ValueError(f"RF request did not complete at target length: {outcome!r}")
         return {
-            "error": r.error,
-            "gen_tokens": gen,
-            "ttft_s": ttft,
-            "tpot_s": tpot,
-            "latency_s": r.latency,
+            "input_len": length,
+            "output_len": length,
+            "concurrency": concurrency,
+            "request_count": args.request_count,
+            "output_token_throughput_per_s": throughput,
+            "request_throughput_per_s": common.get("request_throughput_per_s"),
+            "ttft_ms_p50": common.get("ttft_ms_p50"),
+            "ttft_ms_p90": common.get("ttft_ms_p90"),
+            "tpot_ms_p50": common.get("tpot_ms_p50"),
+            "tpot_ms_p90": common.get("tpot_ms_p90"),
         }
 
-    result = await run(duration_limited(duration), send, concurrency=concurrency)
 
-    ok = [r for r in result.results if r["error"] is None]
-    gen = sum(r["gen_tokens"] for r in ok)
-    wall = result.wall_clock
-    ttfts = [r["ttft_s"] for r in ok if r["ttft_s"] is not None]
-    tpots = [r["tpot_s"] for r in ok if r["tpot_s"] is not None]
-    return {
-        "input_len": length,
-        "output_len": length,
-        "concurrency": concurrency,
-        "completed": len(ok),
-        "failed": len(result.results) - len(ok),
-        "wall_s": wall,
-        "generated_tokens": gen,
-        "output_tokens_per_s": gen / wall if wall > 0 else 0.0,
-        "request_throughput_per_s": len(ok) / wall if wall > 0 else 0.0,
-        "ttft_s": {
-            "p50": pct_block(ttfts)["p50"] if ttfts else None,
-            "p90": pct_block(ttfts)["p90"] if ttfts else None,
-            "mean": statistics.fmean(ttfts) if ttfts else None,
-        },
-        "tpot_s": {
-            "p50": pct_block(tpots)["p50"] if tpots else None,
-            "p90": pct_block(tpots)["p90"] if tpots else None,
-            "mean": statistics.fmean(tpots) if tpots else None,
-        },
-    }
-
-
-async def run_benchmark(args):
-    url = args.url.rstrip("/") + args.endpoint
-    lengths = [int(v) for v in args.lengths.split(",") if v.strip()]
-    concs = [int(v) for v in args.concurrency.split(",") if v.strip()]
-    tokenizer, pool = _load_tokenizer(args.model_path)
-    rng = random.Random(args.seed)
-
-    print(
-        json.dumps(
-            {
-                "url": url,
-                "lengths": lengths,
-                "concurrency": concs,
-                "duration_s": args.duration,
-                "warmup_requests": args.warmup_requests,
-            },
-            indent=2,
-        ),
-        flush=True,
-    )
-
-    scenarios: list[dict] = []
-    async with httpx.AsyncClient() as client:
-        # Warmup: compile every length bucket
-        if args.warmup_requests > 0:
-            print("Warming up (compiling buckets; not timed) ...", flush=True)
-            warm = []
-            for length in lengths:
-                for _ in range(args.warmup_requests):
-                    warm.append(
-                        stream_sse(
-                            client,
-                            url,
-                            {
-                                "prompt": make_prompt(tokenizer, pool, length, rng),
-                                "max_tokens": length,
-                                "min_tokens": length,
-                                "ignore_eos": True,
-                                "temperature": args.temperature,
-                                "stream": True,
-                            },
-                            timeout=600.0,
-                        )
-                    )
-            await asyncio.gather(*warm)
-            print("Warm-up done.\n", flush=True)
-
-        # Timed closed-loop sweep
-        for length in lengths:
-            for c in concs:
-                print(
-                    f"MEASURE length={length} concurrency={c} for {args.duration}s ...", flush=True
-                )
-                s = await measure(
-                    client, url, tokenizer, pool, length, c, args.duration, args.temperature, rng
-                )
-                scenarios.append(s)
-                print(
-                    f"  -> {s['output_tokens_per_s']:.1f} tok/s "
-                    f"({s['completed']} reqs, tpot_p50={s['tpot_s']['p50']})",
-                    flush=True,
-                )
-
-    peak = max((s["output_tokens_per_s"] for s in scenarios), default=0.0)
-    best = max(scenarios, key=lambda s: s["output_tokens_per_s"], default=None)
-
-    result = {
-        "config": {
-            "url": url,
-            "lengths": lengths,
-            "concurrency": concs,
-            "duration_s": args.duration,
-            "warmup_requests": args.warmup_requests,
-            "temperature": args.temperature,
-            "seed": args.seed,
-        },
-        "aggregate_throughput": peak,
-        "peak_scenario": {k: best[k] for k in ("input_len", "concurrency", "output_tokens_per_s")}
-        if best
-        else None,
-        "scenarios": scenarios,
-    }
-
-    print("\n" + "=" * 56)
-    print("  Benchmark summary (warm, closed-loop)")
-    print("=" * 56)
-    for s in scenarios:
-        print(
-            f"  len={s['input_len']:>4} c={s['concurrency']:>2}  "
-            f"{s['output_tokens_per_s']:7.1f} tok/s   req/s={s['request_throughput_per_s']:.2f}"
+def run(args: argparse.Namespace) -> int:
+    result_path = Path(args.vs_output) if args.vs_output else None
+    if result_path:
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text(
+            json.dumps({"kind": "hello", "protocol": 2, "metrics": _METRICS}) + "\n",
+            encoding="utf-8",
         )
-    print(f"\nAggregate throughput (peak steady-state): {peak:.1f} tok/s  (headline)")
+    try:
+        points = [
+            (length, concurrency) for length in args.lengths for concurrency in args.concurrencies
+        ]
+        max_length = max(args.lengths)
+        scenarios = [
+            _run_point(
+                args,
+                length,
+                concurrency,
+                point_index=point_index,
+                point_count=len(points),
+                max_length=max_length,
+            )
+            for point_index, (length, concurrency) in enumerate(points)
+        ]
+        best = max(scenarios, key=lambda row: row["output_token_throughput_per_s"])
+        values = {"aggregate_throughput": best["output_token_throughput_per_s"]}
+        result = {
+            "aggregate_throughput": values["aggregate_throughput"],
+            "peak_scenario": {key: best[key] for key in ("input_len", "concurrency")},
+            "scenarios": scenarios,
+        }
+        if args.output_json:
+            Path(args.output_json).write_text(
+                json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+            )
+        if result_path:
+            with result_path.open("a", encoding="utf-8") as output:
+                output.write(
+                    json.dumps(
+                        {
+                            "kind": "result",
+                            "label": "",
+                            "values": values,
+                        },
+                        allow_nan=False,
+                    )
+                    + "\n"
+                )
+        print(json.dumps(result, allow_nan=False), flush=True)
+        return 0
+    except Exception as exc:
+        if result_path:
+            with result_path.open("a", encoding="utf-8") as output:
+                output.write(
+                    json.dumps({"kind": "error", "message": str(exc)}, allow_nan=False) + "\n"
+                )
+        print(f"benchmark failed: {exc}", file=sys.stderr)
+        return 1
 
-    if args.output_json:
-        with open(args.output_json, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"Results written to {args.output_json}")
-    return result
 
-
-def main():
-    p = argparse.ArgumentParser(
-        description="Warm, closed-loop benchmark for an OpenAI-compatible server."
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--request-factory-engine", default="session_runner")
+    parser.add_argument("--url", default="http://127.0.0.1:8000")
+    parser.add_argument("--model", default=_MODEL)
+    parser.add_argument("--tokenizer", default=_TOKENIZER)
+    parser.add_argument("--request-count", type=int, default=64)
+    parser.add_argument(
+        "--lengths",
+        type=lambda raw: tuple(int(value) for value in raw.split(",")),
+        default=(128, 256, 512),
     )
-    p.add_argument("--url", default="http://localhost:8000")
-    p.add_argument("--endpoint", default="/v1/completions")
-    p.add_argument("--lengths", default="128,256,512")
-    p.add_argument("--concurrency", default="1,2,4,8")
-    p.add_argument("--duration", type=float, default=20.0)
-    p.add_argument("--warmup-requests", type=int, default=2)
-    p.add_argument("--temperature", type=float, default=0.0)
-    p.add_argument("--model-path", default=None)
-    p.add_argument("--seed", type=int, default=1234)
-    p.add_argument("--output-json", default=None)
-    args = p.parse_args()
-    asyncio.run(run_benchmark(args))
+    parser.add_argument(
+        "--concurrencies",
+        type=lambda raw: tuple(int(value) for value in raw.split(",")),
+        default=(1, 2, 4, 8),
+    )
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--output-json")
+    parser.add_argument("--vs-output")
+    args = parser.parse_args()
+    if args.request_count < 1 or any(value < 1 for value in (*args.lengths, *args.concurrencies)):
+        parser.error("request count, lengths, and concurrency values must be positive")
+    return run(args)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
