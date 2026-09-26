@@ -1,215 +1,315 @@
-"""
-Serving performance benchmark for LLM inference servers.
-
-Generates load following a Poisson arrival process or closed-loop concurrency
-and measures TTFT, TPOT, end-to-end latency, and throughput.
-
-Usage:
-    .venv/bin/python benchmark.py --url http://localhost:8002 --rate 2 --duration 30 --max-tokens 64
-"""
+#!/usr/bin/env python3
+"""Run a closed-loop concurrency sweep through Request Factory."""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
+import csv
 import json
-import random
+import math
+import statistics
+import subprocess
+import sys
+import tempfile
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
-import httpx
-
-from vs_bench.runner import run
-from vs_bench.schedule import duration_limited, poisson
-from vs_bench.stats import pct_block
-from vs_bench.transport import stream_sse
-
-PROMPT_POOL = [
-    "The capital of France is",
-    "Once upon a time, in a land far away,",
-    'def fibonacci(n):\n    """Return the n-th Fibonacci number."""\n',
-    "1 + 1 =",
-    "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A B C D E F G",
-    (
-        "The following is a detailed explanation of how neural networks work. "
-        "Neural networks are computing systems inspired by biological neural networks. "
-        "They consist of layers of interconnected nodes or neurons. "
-        "Each connection has a weight that adjusts as learning proceeds. "
-        "The network processes information using a connectionist approach. "
-        "In summary, the key takeaway is that"
-    ),
-    "Question: What is the speed of light?\nAnswer:",
-    "The year 2024 was followed by the year",
-    "Hello",
-    '{"name": "Alice", "age":',
-    "Explain the theory of relativity in simple terms.",
-    "Write a short poem about the ocean.",
-    (
-        "In computer science, a hash table is a data structure that implements "
-        "an associative array, also called a dictionary. A hash table uses a "
-        "hash function to compute an index into an array of buckets, from which "
-        "the desired value can be found. The main advantage of hash tables is"
-    ),
-]
+_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+_DEFAULT_CONCURRENCIES = (1, 2, 4, 8, 16, 32, 64, 128)
+_METRICS = {
+    "aggregate_throughput": {"unit": "tok/s", "direction": "max"},
+    "p99_latency_ms": {"unit": "ms", "direction": "min"},
+}
 
 
-async def run_benchmark(args: argparse.Namespace) -> dict:
-    rng = random.Random(args.seed)
-    url = args.url.rstrip("/") + args.endpoint
+def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) -> None:
+    with path.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.writer(output)
+        writer.writerow(("id", "arrival_time", "input_len", "output_len"))
+        for index in range(count):
+            writer.writerow((f"request-{index:05d}", 0, input_tokens, output_tokens))
 
-    if args.prompt_len is not None:
-        prompt_list = [" ".join(["token"] * args.prompt_len) for _ in range(20)]
-    else:
-        prompt_list = list(PROMPT_POOL)
 
-    async with httpx.AsyncClient() as client:
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        raise ValueError("cannot compute a percentile without successful request timings")
+    position = (len(ordered) - 1) * fraction
+    lower, upper = math.floor(position), math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    return ordered[lower] * (upper - position) + ordered[upper] * (position - lower)
 
-        async def send(i: int) -> dict:
-            prompt = rng.choice(prompt_list)
-            r = await stream_sse(
-                client,
-                url,
-                {
-                    "model": args.model,
-                    "prompt": prompt,
-                    "max_tokens": args.max_tokens,
-                    "temperature": args.temperature,
-                    "stream": True,
-                },
-                timeout=120.0,
-            )
-            return {
-                "error": r.error,
-                "output_tokens": r.token_count,
-                "finish_reason": r.finish_reason,
-                "total_latency": r.latency,
-                "ttft": r.ttft,
-                "tpot": None
-                if r.ttft is None or r.token_count <= 1
-                else (r.latency - r.ttft) / (r.token_count - 1),
-            }
 
-        # Warmup
-        if args.warmup_requests > 0:
+def _request_p99(log_path: Path, expected: int) -> float:
+    latencies: list[float] = []
+    for line_number, line in enumerate(log_path.read_text(encoding="utf-8").splitlines(), 1):
+        try:
+            record = json.loads(line)
+            outcome = record["outcome"]
+            if outcome.get("error") is None:
+                duration = outcome["total_duration_ms"]
+                if isinstance(duration, bool) or not isinstance(duration, int | float):
+                    raise ValueError("total_duration_ms is not numeric")
+                latencies.append(float(duration))
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid RF request log at line {line_number}: {exc}") from exc
+    if len(latencies) != expected:
+        raise ValueError(
+            f"RF request log has {len(latencies)} successful timings, expected {expected}"
+        )
+    return _percentile(latencies, 0.99)
 
-            async def warmup_send(index: int) -> dict[str, object]:
-                return await send(index)
 
-            from vs_bench.schedule import closed_loop
-
-            warmup_result = await run(
-                closed_loop(args.warmup_requests),
-                warmup_send,
-                concurrency=min(args.warmup_requests, args.concurrency or 1),
-            )
-            warmup_errors = [r for r in warmup_result.results if r["error"] is not None]
-            print(
-                f"Warm-up:           {len(warmup_result.results) - len(warmup_errors)}/"
-                f"{len(warmup_result.results)} requests completed in "
-                f"{warmup_result.wall_clock:.1f}s; results discarded"
-            )
-            if warmup_errors:
-                raise RuntimeError(
-                    f"{len(warmup_errors)} warm-up request(s) failed. "
-                    f"First error: {warmup_errors[0]['error']}"
-                )
-
-        # Measured run
-        if args.concurrency:
-            schedule = duration_limited(args.duration)
-            conc = args.concurrency
-        else:
-            n = args.num_requests if args.num_requests else 10**9
-            schedule = poisson(n, args.rate, seed=args.seed)
-            conc = 10000
-
-        result = await run(schedule, send, concurrency=conc)
-
-    wall_clock = result.wall_clock
-    successes = [r for r in result.results if r["error"] is None]
-    errors = [r for r in result.results if r["error"] is not None]
-
-    ttfts = [r["ttft"] for r in successes if r["ttft"] is not None]
-    tpots = [r["tpot"] for r in successes if r["tpot"] is not None]
-    latencies = [r["total_latency"] for r in successes]
-    total_output_tokens = sum(r["output_tokens"] for r in successes)
-
-    print()
-    print("=" * 40)
-    print("  Benchmark Results")
-    print("=" * 40)
-    print(f"Backend URL:       {url}")
-    print(f"Duration:          {wall_clock:.1f}s")
-    print(
-        f"Completed:         {len(successes)}/{len(result.results)} requests ({len(errors)} errors)"
-    )
-    print()
-    print("Throughput:")
-    print(f"  Request:         {len(successes) / wall_clock:.2f} req/s")
-    print(f"  Token (output):  {total_output_tokens / wall_clock:.1f} tok/s")
-
-    if errors:
-        print("Errors:")
-        for i, r in enumerate(errors[:5]):
-            print(f"  [{i}] {r['error'][:120]}")
-
-    result_dict = {
-        "config": {
-            "url": url,
-            "model": args.model,
-            "rate": args.rate,
-            "concurrency": args.concurrency,
-            "duration": args.duration,
-            "max_tokens": args.max_tokens,
-            "temperature": args.temperature,
-            "seed": args.seed,
-            "warmup_requests": args.warmup_requests,
-        },
-        "warmup_num_requests": args.warmup_requests,
-        "num_requests": len(result.results),
-        "num_completed": len(successes),
-        "num_failed": len(errors),
-        "actual_duration": wall_clock,
-        "actual_rate": len(successes) / wall_clock if wall_clock > 0 else 0,
-        "total_tokens": total_output_tokens,
-        "aggregate_throughput": total_output_tokens / wall_clock if wall_clock > 0 else 0,
-        "request_throughput": len(successes) / wall_clock if wall_clock > 0 else 0,
-        "ttft": pct_block(ttfts, 1000.0),
-        "tpot": pct_block(tpots, 1000.0),
-        "total_latency": pct_block(latencies, 1000.0),
-        "p99_ttft_ms": pct_block(ttfts, 1000.0)["p99"] if ttfts else None,
-        "p99_tpot_ms": pct_block(tpots, 1000.0)["p99"] if tpots else None,
-        "p99_latency_ms": pct_block(latencies, 1000.0)["p99"] if latencies else None,
+def _metrics(summary: Mapping[str, Any], request_count: int, log_path: Path) -> dict[str, float]:
+    replay = summary.get("replay")
+    common = replay.get("common") if isinstance(replay, Mapping) else None
+    if not isinstance(common, Mapping):
+        raise ValueError("RF summary is missing replay.common")
+    expected = {
+        "attempted_steps": request_count,
+        "success_steps": request_count,
+        "failed_steps": 0,
+        "output_mismatch_steps": 0,
+    }
+    for name, value in expected.items():
+        actual = common.get(name)
+        if actual != value:
+            raise ValueError(f"RF summary {name}={actual!r}, expected {value}")
+    throughput = common.get("output_token_throughput_per_s")
+    if isinstance(throughput, bool) or not isinstance(throughput, int | float):
+        raise ValueError(f"RF output-token throughput is missing or not numeric: {throughput!r}")
+    throughput = float(throughput)
+    if not math.isfinite(throughput) or throughput <= 0:
+        raise ValueError(f"RF output-token throughput is invalid: {throughput!r}")
+    return {
+        "aggregate_throughput": throughput,
+        "p99_latency_ms": _request_p99(log_path, request_count),
     }
 
-    if hasattr(args, "output_json") and args.output_json:
-        with open(args.output_json, "w") as f:
-            json.dump(result_dict, f, indent=2)
-        print(f"Results written to {args.output_json}")
 
-    return result_dict
+def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="llama3-rf-point-") as directory:
+        temporary = Path(directory)
+        trace, summary_path, log_path = (
+            temporary / "requests.csv",
+            temporary / "summary.json",
+            temporary / "requests.jsonl",
+        )
+        _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
+        command = [
+            args.request_factory_engine,
+            "--trace",
+            str(trace),
+            "--input-file-format",
+            "text-generation-independent",
+            "--text-file",
+            str(Path(__file__).with_name("corpus.txt")),
+            "--tokenizer",
+            args.tokenizer,
+            "--model",
+            args.model,
+            "--backend",
+            "openai",
+            "--dialect",
+            "openai",
+            "--base-url",
+            args.url.rstrip("/") + "/v1",
+            "--temperature",
+            "0",
+            "--arrival-mode",
+            "saturated",
+            "--max-concurrency",
+            str(concurrency),
+            "--request-log",
+            "true",
+            "--log-path",
+            str(log_path),
+            "--timeline",
+            "false",
+            "--summary-path",
+            str(summary_path),
+        ]
+        completed = subprocess.run(command, check=False, text=True, capture_output=True)
+        if completed.stdout:
+            print(completed.stdout, end="", flush=True)
+        if completed.stderr:
+            print(completed.stderr, end="", file=sys.stderr, flush=True)
+        if completed.returncode != 0:
+            raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        replay = summary.get("replay")
+        common = replay.get("common") if isinstance(replay, Mapping) else None
+        if isinstance(common, Mapping) and common.get("failed_steps", 0):
+            details = [
+                json.loads(line).get("outcome", {}).get("error")
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+                if json.loads(line).get("outcome", {}).get("error")
+            ]
+            raise ValueError(f"RF reported {common['failed_steps']} failed requests: {details[:3]}")
+        values = _metrics(summary, args.request_count, log_path)
+        return {
+            "label": label,
+            "concurrency": concurrency,
+            "request_count": args.request_count,
+            "input_tokens": args.input_tokens,
+            "output_tokens": args.output_tokens,
+            "metrics": values,
+        }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Benchmark an OpenAI-compatible streaming completion server."
+def _median_metric(rows: list[dict[str, Any]], name: str) -> float:
+    return statistics.median(row["metrics"][name] for row in rows)
+
+
+def _overload(rows: list[dict[str, Any]]) -> int | None:
+    sustainable: list[dict[str, Any]] = []
+    best_throughput = 0.0
+    last_latency: float | None = None
+    for index, row in enumerate(rows):
+        metrics = row.get("metrics", row)
+        throughput, latency = metrics["aggregate_throughput"], metrics["p99_latency_ms"]
+        if sustainable and (
+            throughput < best_throughput * 0.95
+            or (
+                throughput <= best_throughput * 1.03 and last_latency and latency > last_latency * 2
+            )
+        ):
+            return index
+        sustainable.append(row)
+        best_throughput = max(best_throughput, throughput)
+        last_latency = latency
+    return None
+
+
+def run(args: argparse.Namespace) -> int:
+    output_path = Path(args.vs_output) if args.vs_output else None
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps({"kind": "hello", "protocol": 2, "metrics": _METRICS}) + "\n",
+            encoding="utf-8",
+        )
+    try:
+        rows = [
+            _run_point(args, concurrency, f"coarse-c{concurrency}")
+            for concurrency in args.concurrencies
+        ]
+        first_overload = _overload(rows)
+        if first_overload is not None:
+            if first_overload == 0:
+                raise ValueError("the lowest concurrency point was already overloaded")
+            lower = rows[first_overload - 1]["concurrency"]
+            upper = rows[first_overload]["concurrency"]
+            middle = (lower + upper) // 2
+            if middle > lower:
+                rows.append(_run_point(args, middle, "boundary-midpoint"))
+            for index in {first_overload - 1, first_overload}:
+                concurrency = rows[index]["concurrency"]
+                rows.append(_run_point(args, concurrency, f"confirm-c{concurrency}"))
+        else:
+            prior_rows = rows[:-1] or rows
+            best_prior = max(row["metrics"]["aggregate_throughput"] for row in prior_rows)
+            if len(rows) > 1 and rows[-1]["metrics"]["aggregate_throughput"] > best_prior * 1.03:
+                raise ValueError(
+                    "concurrency sweep ended while throughput was still rising by more than 3%"
+                )
+            best_row = max(rows, key=lambda row: row["metrics"]["aggregate_throughput"])
+            best_index = rows.index(best_row)
+            for index in {max(0, best_index - 1), best_index, min(len(rows) - 1, best_index + 1)}:
+                concurrency = rows[index]["concurrency"]
+                rows.append(_run_point(args, concurrency, f"confirm-c{concurrency}"))
+
+        by_concurrency: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_concurrency.setdefault(row["concurrency"], []).append(row)
+        points = []
+        for concurrency, repetitions in sorted(by_concurrency.items()):
+            points.append(
+                {
+                    "concurrency": concurrency,
+                    "repetitions": len(repetitions),
+                    "aggregate_throughput": _median_metric(repetitions, "aggregate_throughput"),
+                    "p99_latency_ms": _median_metric(repetitions, "p99_latency_ms"),
+                    "runs": repetitions,
+                }
+            )
+        suspected = _overload(points)
+        limit = points[suspected]["concurrency"] if suspected is not None else None
+        sustainable = [point for point in points if limit is None or point["concurrency"] < limit]
+        if not sustainable:
+            raise ValueError("no sustainable concurrency point was measured")
+        selected = max(sustainable, key=lambda point: point["aggregate_throughput"])
+        values = {
+            "aggregate_throughput": selected["aggregate_throughput"],
+            "p99_latency_ms": selected["p99_latency_ms"],
+        }
+        result = {
+            "metrics": values,
+            "selected_concurrency": selected["concurrency"],
+            "sweep": points,
+        }
+        if args.output_json:
+            Path(args.output_json).write_text(
+                json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+            )
+        if output_path:
+            with output_path.open("a", encoding="utf-8") as output:
+                output.write(
+                    json.dumps(
+                        {
+                            "kind": "result",
+                            "label": "",
+                            "values": values,
+                            "artifacts": {"sweep": points},
+                            "metadata": {"selected_concurrency": selected["concurrency"]},
+                            "unit": "tok/s",
+                        },
+                        allow_nan=False,
+                    )
+                    + "\n"
+                )
+        print(json.dumps(result, allow_nan=False), flush=True)
+        return 0
+    except Exception as exc:
+        if output_path:
+            with output_path.open("a", encoding="utf-8") as output:
+                output.write(
+                    json.dumps({"kind": "error", "message": str(exc)}, allow_nan=False) + "\n"
+                )
+        print(f"benchmark failed: {exc}", file=sys.stderr)
+        return 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--request-factory-engine", default="session_runner")
+    parser.add_argument("--url", default="http://127.0.0.1:8000")
+    parser.add_argument("--model", default=_MODEL)
+    parser.add_argument("--tokenizer", default="meta-llama/Llama-3.1-8B-Instruct")
+    parser.add_argument("--request-count", type=int, default=512)
+    parser.add_argument("--input-tokens", type=int, default=256)
+    parser.add_argument("--output-tokens", type=int, default=128)
+    parser.add_argument(
+        "--concurrencies",
+        type=lambda raw: tuple(int(v) for v in raw.split(",")),
+        default=_DEFAULT_CONCURRENCIES,
     )
-    parser.add_argument("--url", default="http://localhost:8000")
-    parser.add_argument("--endpoint", default="/v1/completions")
-    parser.add_argument("--model", default="meta-llama/Llama-3.1-8B-Instruct")
-    parser.add_argument("--rate", type=float, default=1.0)
-    parser.add_argument("--concurrency", type=int, default=None)
-    parser.add_argument("--duration", type=float, default=60)
-    parser.add_argument("--num-requests", type=int, default=None)
-    parser.add_argument("--max-tokens", type=int, default=128)
-    parser.add_argument("--temperature", type=float, default=0)
-    parser.add_argument("--warmup-requests", type=int, default=4)
-    parser.add_argument("--prompt-len", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-json", type=str, default=None)
+    parser.add_argument("--output-json")
+    parser.add_argument("--vs-output")
     args = parser.parse_args()
-    if args.concurrency is not None and args.concurrency <= 0:
-        parser.error("--concurrency must be greater than zero")
-    asyncio.run(run_benchmark(args))
+    if args.request_count < 1 or args.input_tokens < 1 or args.output_tokens < 1:
+        parser.error("request and token counts must be positive")
+    if (
+        not args.concurrencies
+        or any(value < 1 for value in args.concurrencies)
+        or tuple(sorted(set(args.concurrencies))) != args.concurrencies
+    ):
+        parser.error("concurrencies must be unique positive integers in ascending order")
+    args.request_factory_engine = args.request_factory_engine
+    return run(args)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
