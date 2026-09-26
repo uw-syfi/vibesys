@@ -215,11 +215,17 @@ graph TD
     vibesys.orchestration.gates --> vibesys.context
     vibesys.orchestration.gates --> vibesys.evaluators
     vibesys.orchestration.gates --> vibesys.orchestration._host
+    vibesys.orchestration.gates --> vibesys.orchestration.local_validation
     vibesys.orchestration.gates --> vibesys.orchestration.progress_log
     vibesys.orchestration.gates --> vibesys.orchestration.workspaces
     vibesys.orchestration.gates --> vibesys.run
     vibesys.orchestration.gates --> vibesys.runtime
     vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.local_validation --> vibesys
+    vibesys.orchestration.local_validation --> vibesys.evaluators
+    vibesys.orchestration.local_validation --> vibesys.orchestration._host
+    vibesys.orchestration.local_validation --> vibesys.orchestration.artifacts
+    vibesys.orchestration.local_validation --> vibesys.orchestration.workspaces
     vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.progress_log --> vibesys
     vibesys.orchestration.progress_log --> vibesys.evaluators
@@ -269,6 +275,7 @@ graph TD
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
+    vibesys.orchestrations --> vibesys.search.profile_focus
     vibesys.orchestrations.agent_options --> vibesys
     vibesys.orchestrations.agent_options --> vibesys.errors
     vibesys.orchestrations.agent_options --> vibesys.evaluators
@@ -549,6 +556,7 @@ graph TD
     vibesys.orchestration.commands --> vibesys.orchestration._host
     vibesys.orchestration.commands --> vibesys.orchestration.workspaces
     vibesys.orchestration.commands --> vs_runtime
+    vibesys.orchestration.commands --> vs_sandbox
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
@@ -569,6 +577,7 @@ graph TD
     vibesys.orchestration.gates --> vibesys.context
     vibesys.orchestration.gates --> vibesys.evaluators
     vibesys.orchestration.gates --> vibesys.orchestration._host
+    vibesys.orchestration.gates --> vibesys.orchestration.local_validation
     vibesys.orchestration.gates --> vibesys.orchestration.progress_log
     vibesys.orchestration.gates --> vibesys.orchestration.workspaces
     vibesys.orchestration.gates --> vibesys.run
@@ -576,6 +585,12 @@ graph TD
     vibesys.orchestration.gates --> vibesys.sandbox
     vibesys.orchestration.gates --> vs_runtime
     vibesys.orchestration.gates --> vs_sandbox
+    vibesys.orchestration.local_validation --> vibesys
+    vibesys.orchestration.local_validation --> vibesys.evaluators
+    vibesys.orchestration.local_validation --> vibesys.orchestration._host
+    vibesys.orchestration.local_validation --> vibesys.orchestration.artifacts
+    vibesys.orchestration.local_validation --> vibesys.orchestration.workspaces
+    vibesys.orchestration.local_validation --> vs_runtime
     vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.progress_log --> vibesys
     vibesys.orchestration.progress_log --> vibesys.evaluators
@@ -636,6 +651,7 @@ graph TD
     vibesys.orchestrations --> vibesys.prompts
     vibesys.orchestrations --> vibesys.roles
     vibesys.orchestrations --> vibesys.search.hypothesis
+    vibesys.orchestrations --> vibesys.search.profile_focus
     vibesys.orchestrations --> vs_prompts
     vibesys.orchestrations --> vs_runtime
     vibesys.orchestrations.agent_options --> vibesys
