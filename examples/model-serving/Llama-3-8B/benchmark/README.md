@@ -5,7 +5,10 @@ request timing, and per-point summaries. The bundle wrapper runs a closed-loop
 concurrency sweep and selects throughput and p99 latency from the same
 operating point. The pinned RF summary currently reports p50/p90 end-to-end
 latency only, so p99 is calculated from RF's per-request `total_duration_ms`
-records rather than approximated from a lower percentile.
+records rather than approximated from a lower percentile. Each point builds a
+deterministic temporary text corpus and sets RF's token-pool limit to the
+larger of twice the prompt length or the request count. An RF warning that the
+token pool is too short fails the point.
 
 Run the server on the same host as the benchmark and use loopback. Keep the
 server process alive for the whole sweep. The default trace has 512 independent
