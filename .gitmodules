@@ -1,7 +1,3 @@
-[submodule "3rd_party/transformers"]
-	path = 3rd_party/transformers
-	url = git@github.com:huggingface/transformers.git
-	update = none
 [submodule "skills/serving-systems/repos/vllm"]
 	path = resources/skills/serving-systems/repos/vllm
 	url = https://github.com/vllm-project/vllm.git
