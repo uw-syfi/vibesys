@@ -39,6 +39,20 @@ if TYPE_CHECKING:
     from vs_runtime.api import Skills
 
 
+class _ExecutionResultLike(Protocol):
+    """The bounded command outcome local validation consumes."""
+
+    @property
+    def output(self) -> str:
+        """Return captured command output."""
+        ...
+
+    @property
+    def exit_code(self) -> int:
+        """Return the process exit status."""
+        ...
+
+
 class _LocalAgentHandleLike(Protocol):
     """What ``workspaces.py`` needs from a live spawned agent handle."""
 
@@ -119,6 +133,17 @@ class _EnvironmentLike(Protocol):
         scope: Any = None,  # noqa: ANN401
     ) -> str | None:
         """Stage candidate-declared model weights; return a rejection reason."""
+        ...
+
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+        # lint-waiver: LW-040118 [ANN401]; the concrete workspace handle cannot be named here without a sibling-module cycle.
+        scope: Any = None,  # noqa: ANN401
+    ) -> _ExecutionResultLike:
+        """Execute one trusted validation command in the selected workspace."""
         ...
 
 

@@ -440,7 +440,7 @@ expose = ["agent_options", "hypothesis_readmodel", "single"]
 from = ["vibesys.orchestrations"]
 
 [[interfaces]]
-expose = ["OrchestrationResumeDecision", "skills"]
+expose = ["OrchestrationResumeDecision", "skills", "local_validation"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
@@ -504,7 +504,14 @@ depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.
 [[modules]]
 path = "vibesys.orchestration.gates"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log", "vibesys.orchestration.local_validation"]
+
+[[modules]]
+# Runtime-owned execution, reuse, mutation isolation, and reporting for
+# candidate-authored local validation recipes.
+path = "vibesys.orchestration.local_validation"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.orchestration.artifacts", "vibesys.orchestration._host", "vibesys.orchestration.workspaces", "vs_runtime"]
 
 [[modules]]
 # In-memory `GateExecutor` test double; see the module docstring. Split from

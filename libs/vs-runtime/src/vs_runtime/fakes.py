@@ -18,6 +18,7 @@ from vs_runtime.contracts import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     CommandResult,
+    LocalValidationEvaluation,
     OrchestrationPlugin,
     ResolvedSkillResources,
     RunFacts,
@@ -29,6 +30,7 @@ from vs_runtime.contracts import (
     StateModelError,
     UnknownAgentRoleError,
     Workspace,
+    WorkspaceAccess,
     WorkspaceRestoreError,
     validate_command,
     validate_member_id,
@@ -552,6 +554,15 @@ class FakeBenchmarkCall:
     objectives: tuple[BenchmarkObjective, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FakeLocalValidationCall:
+    """One recorded candidate-authored local validation request."""
+
+    workspace: Workspace
+    recipe_artifact: str
+    report_location: str
+
+
 @dataclass(slots=True)
 class FakeEvaluation:
     """Scriptable in-memory implementation of trusted evaluation effects."""
@@ -562,10 +573,15 @@ class FakeEvaluation:
     default_benchmark: BenchmarkEvaluation = field(
         default_factory=lambda: BenchmarkEvaluation(executed=False)
     )
+    default_local_validation: LocalValidationEvaluation = field(
+        default_factory=lambda: LocalValidationEvaluation(passed=True)
+    )
     accuracy_results: list[AccuracyEvaluation] = field(default_factory=list)
     benchmark_results: list[BenchmarkEvaluation] = field(default_factory=list)
+    local_validation_results: list[LocalValidationEvaluation] = field(default_factory=list)
     accuracy_calls: list[FakeAccuracyCall] = field(default_factory=list)
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
+    local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
 
     def script_accuracy(self, *results: AccuracyEvaluation) -> None:
@@ -575,6 +591,10 @@ class FakeEvaluation:
     def script_benchmark(self, *results: BenchmarkEvaluation) -> None:
         """Queue benchmark results in call order."""
         self.benchmark_results.extend(results)
+
+    def script_local_validation(self, *results: LocalValidationEvaluation) -> None:
+        """Queue local-validation results in call order."""
+        self.local_validation_results.extend(results)
 
     async def accuracy(
         self,
@@ -621,6 +641,25 @@ class FakeEvaluation:
         if self.benchmark_results:
             return self.benchmark_results.pop(0)
         return self.default_benchmark
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+    ) -> LocalValidationEvaluation:
+        """Record one semantic local-validation request and return its script."""
+        validate_workspace_writable_paths(
+            WorkspaceAccess.LIMITED,
+            (recipe_artifact, report_location),
+        )
+        self.local_validation_calls.append(
+            FakeLocalValidationCall(workspace, recipe_artifact, report_location)
+        )
+        if self.local_validation_results:
+            return self.local_validation_results.pop(0)
+        return self.default_local_validation
 
 
 class FakeRunHost:

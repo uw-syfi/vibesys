@@ -31,14 +31,18 @@ from vibesys.evaluators.gates import (
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import GateFinishedData, GateKind
 from vibesys.orchestration import progress_log
+from vibesys.orchestration.local_validation import validate_local
 from vibesys.orchestration.workspaces import WorkspaceHandle
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    LocalValidationEvaluation,
     RuntimeContractError,
     Workspace,
+    WorkspaceAccess,
+    validate_workspace_writable_paths,
 )
 
 if TYPE_CHECKING:
@@ -624,4 +628,24 @@ class _EvaluationAdapter:
             metric_direction=outcome.metric_direction,
             metric_unit=outcome.metric_unit,
             row=outcome.row,
+        )
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+    ) -> LocalValidationEvaluation:
+        """Run candidate-authored recipes while isolating their workspace effects."""
+        validate_workspace_writable_paths(
+            WorkspaceAccess.LIMITED,
+            (recipe_artifact, report_location),
+        )
+        live = self._live_workspace(workspace)
+        return await validate_local(
+            self._host,
+            live,
+            recipe_artifact=recipe_artifact,
+            report_location=report_location,
         )

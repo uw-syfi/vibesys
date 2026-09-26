@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +28,7 @@ from vs_runtime.api import (
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    LocalValidationEvaluation,
     MetricDirection,
     RuntimeContractError,
 )
@@ -276,3 +278,92 @@ def test_adapter_rejects_foreign_or_stale_accuracy_receipt(tmp_path: Path, field
 
     _run(tmp_path, executor, body)
     assert executor.accuracy_calls == []
+
+
+def test_local_validation_executes_then_reuses_an_exact_pass(tmp_path: Path) -> None:
+    executor = FakeGateExecutor()
+
+    async def body(
+        ctx: RunContext,
+    ) -> tuple[LocalValidationEvaluation, LocalValidationEvaluation, dict[str, object]]:
+        recipe = ctx.workspaces.root.path / "validation" / "recipes.json"
+        recipe.parent.mkdir(parents=True)
+        recipe.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "recipes": [
+                        {
+                            "name": "focused",
+                            "command": "python -c 'print(\"ok\")'",
+                            "input_paths": ["queue.py"],
+                            "timeout_seconds": 30,
+                            "purpose": "exercise the candidate queue",
+                        }
+                    ],
+                }
+            )
+        )
+        first = await ctx.evaluation.validate_local(
+            ctx.workspaces.root,
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report-1.json",
+        )
+        second = await ctx.evaluation.validate_local(
+            ctx.workspaces.root,
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report-2.json",
+        )
+        payload = json.loads(
+            (ctx.workspaces.root.path / "validation" / "report-2.json").read_text()
+        )
+        return first, second, payload
+
+    first, second, payload = _run(tmp_path, executor, body)
+
+    assert first == LocalValidationEvaluation(
+        passed=True,
+        report_location="validation/report-1.json",
+    )
+    assert second.passed
+    assert payload["results"][0]["reused"] is True
+
+
+def test_local_validation_reverts_candidate_mutation_and_reports_failure(tmp_path: Path) -> None:
+    executor = FakeGateExecutor()
+
+    async def body(ctx: RunContext) -> tuple[LocalValidationEvaluation, str]:
+        recipe = ctx.workspaces.root.path / "validation" / "recipes.json"
+        recipe.parent.mkdir(parents=True)
+        recipe.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "recipes": [
+                        {
+                            "name": "mutating",
+                            "command": (
+                                "python -c 'from pathlib import Path; "
+                                'Path("queue.py").write_text("VALUE = 99\\n")\''
+                            ),
+                            "input_paths": ["queue.py"],
+                            "timeout_seconds": 30,
+                            "purpose": "must not mutate the candidate",
+                        }
+                    ],
+                }
+            )
+        )
+        result = await ctx.evaluation.validate_local(
+            ctx.workspaces.root,
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+        return result, (ctx.workspaces.root.path / "queue.py").read_text()
+
+    result, candidate = _run(tmp_path, executor, body)
+
+    assert not result.passed
+    assert result.feedback is not None
+    assert "mutated the workspace" in result.feedback
+    assert candidate == "VALUE = 1\n"

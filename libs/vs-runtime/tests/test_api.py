@@ -18,6 +18,7 @@ from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     CommandResult,
+    LocalValidationEvaluation,
     MetricDirection,
     OrchestrationPlugin,
     ProfileExecution,
@@ -409,15 +410,30 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
             metric_direction=MetricDirection.MAXIMIZE,
             row={"tokens_per_second": 42.0},
         )
+        local_validation = LocalValidationEvaluation(
+            passed=False,
+            feedback="focused tests failed",
+            report_location="progress/validation/round-1.json",
+        )
         host.evaluation.script_accuracy(accuracy)
         host.evaluation.script_benchmark(benchmark)
+        host.evaluation.script_local_validation(local_validation)
 
         accuracy_result = await host.evaluation.accuracy(workspace)
         assert accuracy_result.executed
         assert accuracy_result.receipt is not None
         assert await host.evaluation.benchmark(workspace, objectives=(objective,)) == benchmark
+        assert (
+            await host.evaluation.validate_local(
+                workspace,
+                recipe_artifact="progress/validation/recipes.json",
+                report_location="progress/validation/round-1.json",
+            )
+            == local_validation
+        )
         assert host.evaluation.accuracy_calls[0].workspace is workspace
         assert host.evaluation.benchmark_calls[0].objectives == (objective,)
+        assert host.evaluation.local_validation_calls[0].recipe_artifact.endswith("recipes.json")
         assert accuracy_result.passed
         assert benchmark.passed
 
@@ -431,6 +447,33 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
         )
         assert reused == AccuracyEvaluation(executed=False, receipt=restored)
         assert resumed_host.evaluation.accuracy_calls[-1].reuse == restored
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "case",
+    [(True, "unexpected"), (False, None)],
+)
+def test_local_validation_result_requires_consistent_feedback(
+    case: tuple[bool, str | None],
+) -> None:
+    passed, feedback = case
+    with pytest.raises(ValidationError, match="failure requires feedback"):
+        LocalValidationEvaluation(passed=passed, feedback=feedback)
+
+
+@pytest.mark.parametrize("path", ["../recipe.json", "/recipe.json", ".", "bad\\path"])
+def test_fake_local_validation_rejects_noncanonical_paths(path: str) -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        with pytest.raises(ValueError, match="canonical workspace-relative"):
+            await host.evaluation.validate_local(
+                host.workspaces.root,
+                recipe_artifact=path,
+                report_location="progress/validation/round-1.json",
+            )
+        assert host.evaluation.local_validation_calls == []
 
     asyncio.run(scenario())
 

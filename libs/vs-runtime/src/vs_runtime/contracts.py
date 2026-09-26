@@ -14,7 +14,7 @@ from pathlib import (
 )  # Pydantic resolves WorkspaceRef at runtime.
 from typing import TYPE_CHECKING, Protocol, TypeVar, overload
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -511,6 +511,24 @@ class BenchmarkEvaluation(BaseModel):
         return self.feedback is None
 
 
+class LocalValidationEvaluation(BaseModel):
+    """Semantic outcome of candidate-authored local validation recipes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    passed: bool
+    feedback: str | None = None
+    report_location: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _consistent_outcome(self) -> LocalValidationEvaluation:
+        """Keep pass/fail state and policy-facing feedback unambiguous."""
+        if self.passed == (self.feedback is not None):
+            message = "passing local validation cannot have feedback; failure requires feedback"
+            raise ValueError(message)
+        return self
+
+
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects available to policy."""
 
@@ -530,6 +548,16 @@ class Evaluation(Protocol):
         objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> BenchmarkEvaluation:
         """Measure one live workspace against policy-selected objectives."""
+        ...
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+    ) -> LocalValidationEvaluation:
+        """Run audited candidate-authored recipes without permitting workspace mutation."""
         ...
 
 
