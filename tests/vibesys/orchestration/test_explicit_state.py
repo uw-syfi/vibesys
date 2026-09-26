@@ -137,7 +137,7 @@ def test_public_session_composes_a_registered_plugin_with_typed_state(tmp_path: 
     project_root = tmp_path / "project"
     _write_project(project_root)
     registry = OrchestrationRegistry()
-    registry.register_plugin(PLUGIN, portable_namespaces=(PLUGIN.id,))
+    registry.register_plugin(PLUGIN)
     session = create_session(_request(project_root), sink=_discard_event, registry=registry)
     session.start()
 

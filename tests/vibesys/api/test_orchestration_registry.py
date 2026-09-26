@@ -35,7 +35,13 @@ from vibesys.loops.single.orchestration import (
 )
 from vibesys.orchestration import OrchestrationResumeDecision
 from vs_project.api import OrchestrationDescriptor, Project
-from vs_runtime.api import AgentRole, OrchestrationPlugin, RunHost
+from vs_runtime.api import (
+    AgentRole,
+    OrchestrationPlugin,
+    PluginProjection,
+    ProjectedRound,
+    RunHost,
+)
 from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
@@ -85,12 +91,29 @@ async def _run_plugin(host: RunHost, options: BaseModel) -> PluginRunStatus:
     return PluginRunStatus.SUCCEEDED
 
 
+def _project_plugin(state: BaseModel) -> PluginProjection:
+    parsed = _PluginState.model_validate(state)
+    return PluginProjection(
+        payload={"completed_rounds": parsed.completed_rounds},
+        rounds=(
+            ProjectedRound(
+                number=parsed.completed_rounds,
+                status="completed",
+                attempts=1,
+                judge_verdict="pass",
+            ),
+        ),
+        experiment_revision=parsed.completed_rounds,
+    )
+
+
 _SETUP_PLUGIN = OrchestrationPlugin(
     id="setup-plugin",
     agents=(AgentRole(id="worker", system_prompt="Complete the assigned work."),),
     options=_PluginOptions,
     orchestrate=_run_plugin,
     state=_PluginState,
+    project=_project_plugin,
 )
 
 
@@ -103,8 +126,6 @@ def _accept_resume(
 def _plugin_setup(options: BaseModel) -> RunSetup:
     parsed = _PluginOptions.model_validate(options)
     return RunSetup(
-        state_namespace="setup-state",
-        state_slots={"state.json": _PluginState},
         resume_policy=_accept_resume,
         start_hints=RunStartHints(max_rounds=parsed.max_rounds),
         memory_paths=(".vibesys-memory/progress.md",),
@@ -296,17 +317,15 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
         }
     )
     registry = OrchestrationRegistry()
-    registry.register_plugin(
-        _SETUP_PLUGIN,
-        setup=_plugin_setup,
-        portable_namespaces=("setup-state",),
-    )
+    registry.register_plugin(_SETUP_PLUGIN, setup=_plugin_setup)
     events: list[CoreEvent] = []
+    committed: list[RunView] = []
 
     def record(event: CoreEvent) -> None:
         events.append(event)
 
     session = create_session(request, sink=record, registry=registry)
+    session.on_committed_view(lambda view, _keys: committed.append(view))
     session.start()
 
     result = asyncio.run(session.await_result())
@@ -318,11 +337,32 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
     assert started.data.expected_roles == ("worker",)
     stored = (
         Project.open(request.project_root)
-        .state.portable_namespace(result.run_id, "setup-state")
+        .state.portable_namespace(result.run_id, _SETUP_PLUGIN.id)
         .slot("state.json", _PluginState)
         .load_optional()
     )
     assert stored == _PluginState(completed_rounds=3)
+    assert committed == [
+        RunView(
+            run_id=result.run_id,
+            loop=_SETUP_PLUGIN.id,
+            status=RunStatus.ACTIVE,
+            projection={"completed_rounds": 3},
+            rounds=(
+                {
+                    "number": 3,
+                    "status": "completed",
+                    "attempts": 1,
+                    "judge_verdict": "pass",
+                },
+            ),
+            experiment_revision=3,
+        )
+    ]
+    historical = open_run_store(Project.open(request.project_root), registry=registry).get_run(
+        result.run_id
+    )
+    assert historical.model_copy(update={"status": RunStatus.ACTIVE}) == committed[0]
     prepared = registry.resolve(_SETUP_PLUGIN.id).prepare_plugin(request.orchestration)
     assert prepared.setup is not None
     assert prepared.setup.resume_policy is _accept_resume
@@ -368,3 +408,30 @@ def test_registered_plugin_without_setup_derives_roles_from_declaration(tmp_path
     assert prepared.setup.start_hints is not None
     assert prepared.setup.start_hints.max_rounds is None
     assert prepared.setup.start_hints.expected_roles == ("worker",)
+
+
+def test_plugin_registration_derives_projection_and_portable_state_only_when_declared() -> None:
+    state_only = OrchestrationPlugin(
+        id="state-only",
+        agents=(),
+        options=_PluginOptions,
+        orchestrate=_run_plugin,
+        state=_PluginState,
+    )
+    stateless = OrchestrationPlugin(
+        id="stateless",
+        agents=(),
+        options=_PluginOptions,
+        orchestrate=_run_plugin,
+    )
+    registry = OrchestrationRegistry()
+
+    registry.register_plugin(state_only)
+    registry.register_plugin(stateless)
+
+    state_registration = registry.resolve(state_only.id)
+    assert state_registration.projector is None
+    assert state_registration.portable_namespaces == (state_only.id,)
+    stateless_registration = registry.resolve(stateless.id)
+    assert stateless_registration.projector is None
+    assert stateless_registration.portable_namespaces == ()

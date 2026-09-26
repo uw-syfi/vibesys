@@ -5,21 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from vibesys.context import RunSetup, RunStartHints
-from vibesys.orchestration.view import RunView
+from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pydantic import BaseModel
-
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.orchestration.view import RunStatus
     from vs_project.api import Project
-    from vs_runtime.api import OrchestrationPlugin
+    from vs_runtime.api import OrchestrationPlugin, PluginProjection
 
 
 type PluginSetupFactory = Callable[[BaseModel], RunSetup]
@@ -49,6 +46,60 @@ class OrchestrationProjector(Protocol):
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         """Project a state just committed by the host."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class _PluginProjector:
+    """Adapt one runtime-neutral plugin projection to VibeSys read views."""
+
+    plugin: OrchestrationPlugin
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Load the plugin's typed state and project its historical view."""
+        del loop
+        state_model = self.plugin.state
+        callback = self.plugin.project
+        if state_model is None or callback is None:
+            return empty_run_view(run_id=run_id, status=status, loop=self.plugin.id)
+        state = (
+            project.state.portable_namespace(run_id, self.plugin.id)
+            .slot("state.json", state_model)
+            .load_optional()
+        )
+        projection = callback(state) if state is not None else None
+        return _plugin_run_view(self.plugin.id, run_id, status, projection)
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project the exact state model committed under this plugin's namespace."""
+        state_model = self.plugin.state
+        callback = self.plugin.project
+        if (
+            namespace != self.plugin.id
+            or state_model is None
+            or callback is None
+            or type(state) is not state_model
+        ):
+            return None
+        return _plugin_run_view(self.plugin.id, run_id, RunStatus.ACTIVE, callback(state))
+
+
+def _plugin_run_view(
+    plugin_id: str,
+    run_id: str,
+    status: RunStatus,
+    projection: PluginProjection | None,
+) -> RunView:
+    """Wrap the portable plugin projection in VibeSys-owned run identity."""
+    if projection is None:
+        return empty_run_view(run_id=run_id, status=status, loop=plugin_id)
+    return RunView(
+        run_id=run_id,
+        loop=plugin_id,
+        status=status,
+        projection=projection.payload,
+        rounds=tuple(RoundSummary.model_validate(item.model_dump()) for item in projection.rounds),
+        experiment_revision=projection.experiment_revision,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,9 +141,10 @@ class OrchestrationRegistration:
             raise ValueError(message)
         options = plugin.options.model_validate(descriptor.options)
         setup = self.plugin_setup(options) if self.plugin_setup is not None else RunSetup()
-        _validate_plugin_setup(plugin, setup)
         setup = replace(
             setup,
+            state_namespace=plugin.id if plugin.state is not None else None,
+            state_slots={"state.json": plugin.state} if plugin.state is not None else None,
             start_hints=replace(
                 setup.start_hints or RunStartHints(),
                 expected_roles=tuple(role.id for role in plugin.agents),
@@ -108,16 +160,6 @@ class PreparedPlugin:
     plugin: OrchestrationPlugin
     options: BaseModel
     setup: RunSetup
-
-
-def _validate_plugin_setup(plugin: OrchestrationPlugin, setup: RunSetup) -> None:
-    """Keep the plugin state declaration authoritative over host storage setup."""
-    if setup.state_namespace is None:
-        return
-    expected = {"state.json": plugin.state} if plugin.state is not None else None
-    if setup.state_slots != expected:
-        message = "plugin setup state slots must match the plugin's declared state model"
-        raise ValueError(message)
 
 
 def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
@@ -177,8 +219,6 @@ class OrchestrationRegistry:
         plugin: OrchestrationPlugin,
         *,
         setup: PluginSetupFactory | None = None,
-        projector: OrchestrationProjector | None = None,
-        portable_namespaces: tuple[str, ...] = (),
         state_family: str | None = None,
     ) -> None:
         """Register an in-repository plugin in the same product catalog."""
@@ -188,8 +228,8 @@ class OrchestrationRegistry:
         self._registrations[plugin.id] = OrchestrationRegistration(
             plugin=plugin,
             plugin_setup=setup,
-            projector=projector,
-            portable_namespaces=portable_namespaces,
+            projector=_PluginProjector(plugin) if plugin.project is not None else None,
+            portable_namespaces=(plugin.id,) if plugin.state is not None else (),
             state_family=state_family,
         )
 
