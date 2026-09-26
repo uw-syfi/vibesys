@@ -24,6 +24,7 @@ _DEFAULT_REQUESTS = 64
 _DEFAULT_INPUT_TOKENS = 256
 _DEFAULT_OUTPUT_TOKENS = 128
 _DEFAULT_CONCURRENCY = 8
+_TOKEN_POOL_WARNING = "token pool ("
 _METRICS = {
     "output_token_throughput_per_s": {"unit": "tok/s", "direction": "max"},
     "p90_latency_ms": {"unit": "ms", "direction": "min"},
@@ -44,6 +45,15 @@ def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) 
         writer.writerow(("id", "arrival_time", "input_len", "output_len"))
         for index in range(count):
             writer.writerow((f"request-{index:04d}", 0, input_tokens, output_tokens))
+
+
+def _write_corpus(path: Path, token_pool_limit: int) -> None:
+    """Write deterministic synthetic text; RF tokenizes it into the bounded pool."""
+    with path.open("w", encoding="utf-8") as corpus:
+        for start in range(0, token_pool_limit, 128):
+            end = min(start + 128, token_pool_limit)
+            segments = " ".join(f"segment{index:08d}" for index in range(start, end))
+            corpus.write(f"Synthetic benchmark corpus: {segments}.\n")
 
 
 def _summary_metrics(summary: Mapping[str, Any], expected_requests: int) -> dict[str, float]:
@@ -91,8 +101,11 @@ def run(args: argparse.Namespace) -> int:
         with tempfile.TemporaryDirectory(prefix="vibesys-rf-llama70b-") as directory:
             temporary = Path(directory)
             trace_path = temporary / "requests.csv"
+            corpus_path = temporary / "corpus.txt"
             summary_path = temporary / "summary.json"
             _write_trace(trace_path, args.request_count, args.input_tokens, args.output_tokens)
+            token_pool_limit = max(2 * args.input_tokens, args.request_count)
+            _write_corpus(corpus_path, token_pool_limit)
             command = [
                 args.request_factory_engine,
                 "--trace",
@@ -100,7 +113,9 @@ def run(args: argparse.Namespace) -> int:
                 "--input-file-format",
                 "text-generation-independent",
                 "--text-file",
-                str(Path(__file__).resolve().parent / "corpus.txt"),
+                str(corpus_path),
+                "--token-pool-limit",
+                str(token_pool_limit),
                 "--tokenizer",
                 args.tokenizer,
                 "--model",
@@ -129,6 +144,8 @@ def run(args: argparse.Namespace) -> int:
                 print(completed.stdout, end="")
             if completed.stderr:
                 print(completed.stderr, end="", file=sys.stderr)
+            if _TOKEN_POOL_WARNING in completed.stderr:
+                raise RuntimeError("Request Factory token pool is shorter than the longest prompt")
             if completed.returncode != 0:
                 raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
             summary = json.loads(summary_path.read_text(encoding="utf-8"))

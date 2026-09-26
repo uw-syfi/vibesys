@@ -15,7 +15,10 @@ The VibeSys protocol-v2 metrics are:
 
 RF sends token-ID prompts using the served model tokenizer, sets
 `ignore_eos=true`, and measures completion token IDs rather than inferring token
-count from SSE chunk count. There is no warmup phase in this workload. These
+count from SSE chunk count. The adapter generates a deterministic temporary text
+corpus and bounds RF's token pool to at least twice the longest prompt (and the
+request count), so the prompt data is sufficient for the configured workload
+without a committed corpus fixture. There is no warmup phase in this workload. These
 methodology changes are intentional; do not compare the new score numerically
 with legacy benchmark results as if they were the same metric.
 
