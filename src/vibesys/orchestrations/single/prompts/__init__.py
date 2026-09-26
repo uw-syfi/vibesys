@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from vibesys.orchestrations.single.models import SingleAgentResult, SingleOptions, SinglePlan
+from vibesys.prompts import PROMPTS_DIR
+from vs_prompts.api import TemplateRenderer
+
+if TYPE_CHECKING:
+    from vibesys.roles.designer import PlanContext
+    from vibesys.roles.single_agent import SingleAgentRoundContext
+
+_PROMPT_DIR = Path(__file__).resolve().parent
+# The execution boundary is shared by the legacy policies until they migrate.
+_RENDERER = TemplateRenderer(_PROMPT_DIR, fallback_roots=(PROMPTS_DIR / "shared",))
+
+
+def render_plan_prompt(context: PlanContext) -> str:
+    """Render the complete legacy designer brief as changing turn content."""
+    return _RENDERER.render_template("orchestrator_plan_prompt.j2", **context.model_dump())
+
+
+def render_single_agent_prompt(context: SingleAgentRoundContext) -> str:
+    """Render the complete legacy implementer brief, including shared execution rules."""
+    return _RENDERER.render_template("single_agent_round_prompt.j2", **context.model_dump())
 
 
 def plan_message(options: SingleOptions) -> str:
@@ -51,5 +74,7 @@ __all__ = [
     "implementation_message",
     "plan_correction_message",
     "plan_message",
+    "render_plan_prompt",
+    "render_single_agent_prompt",
     "revision_message",
 ]
