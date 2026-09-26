@@ -22,11 +22,15 @@ from-scratch target in this suite.
 
 ## Workload
 
-Run the Request Factory benchmark with its configured workload unless the
-evaluator passes a different `--url`:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different `--url`:
 
 ```bash
-uv run python benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model deepseek-ai/DeepSeek-V3.2 --tokenizer deepseek-ai/DeepSeek-V3.2 \
+  --tokenizer-revision a7e62ac04ecb2c0a54d736dc46601c5606cf10a6 \
+  --request-count 256 \
+  --input-tokens 8192 --output-tokens 1024 --concurrency 64 --url <SERVER_URL>
 ```
 
 Default load:
