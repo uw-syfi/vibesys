@@ -1,0 +1,3 @@
+The server processes a synthetic token workload whose request lengths are declared in the trace.
+This corpus supplies ordinary text tokens to Request Factory without asserting semantic responses.
+The benchmark measures the serving transport and generation path, not answer quality.
