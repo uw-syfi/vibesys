@@ -21,6 +21,7 @@ _METRICS = {
     "aggregate_throughput": {"unit": "tok/s", "direction": "max"},
     "p99_latency_ms": {"unit": "ms", "direction": "min"},
 }
+_UNDERSIZED_POOL_WARNING = "synthetic content will repeat within a single request"
 
 
 def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) -> None:
@@ -29,6 +30,13 @@ def _write_trace(path: Path, count: int, input_tokens: int, output_tokens: int) 
         writer.writerow(("id", "arrival_time", "input_len", "output_len"))
         for index in range(count):
             writer.writerow((f"request-{index:05d}", 0, input_tokens, output_tokens))
+
+
+def _write_corpus(path: Path, token_pool_limit: int) -> None:
+    seed = "The server processes a synthetic request and returns generated text"
+    with path.open("w", encoding="utf-8") as corpus:
+        for index in range(token_pool_limit):
+            corpus.write(f"{seed} sample {index} token sequence {index}\n")
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -98,6 +106,9 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
             temporary / "requests.jsonl",
         )
         _write_trace(trace, args.request_count, args.input_tokens, args.output_tokens)
+        token_pool_limit = max(2 * args.input_tokens, args.request_count)
+        corpus = temporary / "corpus.txt"
+        _write_corpus(corpus, token_pool_limit)
         command = [
             args.request_factory_engine,
             "--trace",
@@ -105,7 +116,7 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
             "--input-file-format",
             "text-generation-independent",
             "--text-file",
-            str(Path(__file__).with_name("corpus.txt")),
+            str(corpus),
             "--tokenizer",
             args.tokenizer,
             "--model",
@@ -122,6 +133,8 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
             "saturated",
             "--max-concurrency",
             str(concurrency),
+            "--token-pool-limit",
+            str(token_pool_limit),
             "--request-log",
             "true",
             "--log-path",
@@ -136,6 +149,11 @@ def _run_point(args: argparse.Namespace, concurrency: int, label: str) -> dict[s
             print(completed.stdout, end="", flush=True)
         if completed.stderr:
             print(completed.stderr, end="", file=sys.stderr, flush=True)
+        if _UNDERSIZED_POOL_WARNING in completed.stderr:
+            raise ValueError(
+                "Request Factory token pool is shorter than the longest prompt; "
+                "increase the generated corpus or token-pool limit"
+            )
         if completed.returncode != 0:
             raise RuntimeError(f"Request Factory exited with status {completed.returncode}")
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
