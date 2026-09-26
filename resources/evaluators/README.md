@@ -91,7 +91,11 @@ The bundled Request Factory evaluator exposes three entrypoints. The low-level
 Experiments that need task-owned orchestration use `request-factory-adapter`
 and pass a Python script as the first argument; the evaluator invokes that
 script with `--request-factory-engine <trusted-path>` before the task's
-remaining arguments. Fixed independent `/v1/completions` workloads use
+remaining arguments. It also exports
+`VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER` with the installed path of the
+versioned fixed-text driver, so model-specific preparation wrappers can
+delegate the generic workload and result behavior instead of copying it.
+Fixed independent `/v1/completions` workloads use
 `request-factory-fixed-text-v1`; its typed CLI owns deterministic trace and
 corpus generation, strict RF summary validation, and protocol-v2 metric output.
 The version suffix keeps this workload and result contract explicit while the
