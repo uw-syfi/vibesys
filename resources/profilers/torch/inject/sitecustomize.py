@@ -210,6 +210,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
 
 _ENV_ENABLE = "VIBESYS_TORCH_PROFILE"
 _ENV_OUT_DIR = "VIBESYS_TORCH_PROFILE_OUT_DIR"
@@ -329,7 +330,9 @@ class _Capture:
         record_shapes: bool,
         sync_timeout_s: float = _DEFAULT_SYNCHRONIZE_TIMEOUT_S,
         control_dir: Path | None = None,
+        import_module: Callable[[str], ModuleType] = importlib.import_module,
     ) -> None:
+        self._import_module = import_module
         self._out_dir = out_dir
         self._record_shapes = record_shapes
         self._sync_timeout_s = sync_timeout_s
@@ -396,15 +399,13 @@ class _Capture:
                 return
             out_dir, ack_dir = self._resolve_window_out_dir()
             try:
-                import torch  # noqa: PLC0415  # LW-920184; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
-                from torch.profiler import (  # noqa: PLC0415  # LW-920185; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
-                    ProfilerActivity,
-                    profile,
-                )
+                self._import_module("torch")
+                profiler = self._import_module("torch.profiler")
+                activity = profiler.ProfilerActivity
 
                 out_dir.mkdir(parents=True, exist_ok=True)
-                prof = profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                prof = profiler.profile(
+                    activities=[activity.CPU, activity.CUDA],
                     record_shapes=self._record_shapes,
                     with_stack=False,
                 )
@@ -428,7 +429,6 @@ class _Capture:
             )
             _write_marker(out_dir, _window_marker(self._window_index, _WINDOW_STARTED_STATE), "")
             _write_marker(ack_dir, _ACK_STARTED_NAME, str(self._window_index))
-            _ = torch  # keep the import alive via closure; no further use here
 
     def stop_and_export(self) -> None:
         _log("SIGUSR2/SIGINT/atexit handler entered (stop requested)")
@@ -500,7 +500,7 @@ class _Capture:
         this step affects nothing but this call's own return latency.
         """
         try:
-            import torch  # noqa: PLC0415  # LW-920186; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
+            torch = self._import_module("torch")
         except Exception:  # noqa: BLE001  # LW-910125; this boundary code deliberately catches any exception from an external tool or subprocess call
             return
 

@@ -25,7 +25,6 @@ import socket
 import sys
 import tempfile
 import textwrap
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1179,8 +1178,18 @@ def _isolate_torch_sibling_imports() -> Iterator[None]:
         sys.modules.pop(name, None)
 
 
+@pytest.fixture
+def staged_capture(tmp_path: Path) -> Iterator[ModuleType]:
+    """``capture.py`` copied to ``tmp_path/rocprof``: its torch sibling dir is ``tmp_path/torch``."""
+    rocprof_dir = tmp_path / "rocprof"
+    rocprof_dir.mkdir()
+    shutil.copy(_ROCPROF_DIR / "capture.py", rocprof_dir / "capture.py")
+    yield _load_module("capture_staged", rocprof_dir / "capture.py")
+    sys.modules.pop("capture_staged", None)
+
+
 def test_profile_ops_delegates_to_stub_and_returns_marker_unchanged(
-    profiles_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    profiles_dir: Path, tmp_path: Path, staged_capture: ModuleType
 ) -> None:
     del profiles_dir
     torch_dir = tmp_path / "torch"
@@ -1188,15 +1197,14 @@ def test_profile_ops_delegates_to_stub_and_returns_marker_unchanged(
     (torch_dir / "capture_ops.py").write_text(
         "def profile_ops(**kwargs):\n    return 'STUB-MARKER'\n"
     )
-    monkeypatch.setattr(capture, "_HERE", tmp_path / "rocprof")
 
-    out = capture.profile_ops(command="true")
+    out = staged_capture.profile_ops(command="true")
 
     assert out == "STUB-MARKER"
 
 
 def test_profile_ops_stub_signature_mismatch_becomes_error_string(
-    profiles_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    profiles_dir: Path, tmp_path: Path, staged_capture: ModuleType
 ) -> None:
     del profiles_dir
     torch_dir = tmp_path / "torch"
@@ -1204,21 +1212,18 @@ def test_profile_ops_stub_signature_mismatch_becomes_error_string(
     (torch_dir / "capture_ops.py").write_text(
         "def profile_ops(only_this_kwarg=None):\n    raise TypeError('boom')\n"
     )
-    monkeypatch.setattr(capture, "_HERE", tmp_path / "rocprof")
 
-    out = capture.profile_ops(command="true")
+    out = staged_capture.profile_ops(command="true")
 
     assert out.startswith("error:")
     assert "signature mismatch" in out
 
 
 def test_profile_ops_not_staged_returns_error_string(
-    profiles_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    profiles_dir: Path, staged_capture: ModuleType
 ) -> None:
     del profiles_dir
-    monkeypatch.setattr(capture, "_HERE", tmp_path / "rocprof")
-
-    out = capture.profile_ops(command="true")
+    out = staged_capture.profile_ops(command="true")
 
     assert "not staged alongside rocprof" in out
 
@@ -1239,9 +1244,10 @@ def test_captures_lists_recent_and_respects_limit(profiles_dir: Path) -> None:
     del profiles_dir
     id1, dir1 = cr.new_capture("timeline")
     cr.write_manifest(dir1, {"kind": "timeline", "status": "ok"})
-    time.sleep(0.01)
     id2, dir2 = cr.new_capture("counters")
     cr.write_manifest(dir2, {"kind": "counters", "status": "target_failed"})
+    os.utime(dir1, (1_000_000, 1_000_000))
+    os.utime(dir2, (2_000_000, 2_000_000))
 
     out_all = capture.captures(limit=10)
     assert id1 in out_all

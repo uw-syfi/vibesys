@@ -786,7 +786,7 @@ class TestCliCommands:
         assert "Trace Certification" in out
         assert out.index("Trace Certification") < out.index("Top GPU Kernels")
 
-    def test_cmd_summary_reads_the_trace_file_exactly_once(self, analyzer, tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # LW-910352; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+    def test_cmd_summary_reads_the_trace_file_exactly_once(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # LW-910352; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Regression: ``cmd_summary`` used to call ``cmd_cpu_overhead``/
         ``cmd_kernels``/``cmd_operators``/``cmd_memory`` as subroutines,
         each of which independently re-read and re-parsed the whole trace
@@ -806,10 +806,8 @@ class TestCliCommands:
             calls += 1
             return real_read(path)
 
-        monkeypatch.setattr(analyzer, "_read_json_maybe_gz", _counting_read)
-
         args = argparse.Namespace(report=str(trace_path))
-        _run_capturing_stdout(analyzer.cmd_summary, args)
+        _run_capturing_stdout(lambda ns: analyzer.cmd_summary(ns, read_json=_counting_read), args)
 
         assert calls == 1
 

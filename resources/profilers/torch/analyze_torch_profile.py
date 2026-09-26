@@ -542,7 +542,9 @@ def cmd_memory(args: argparse.Namespace) -> None:
     _print_memory(_load(args.report))
 
 
-def cmd_summary(args: argparse.Namespace) -> None:
+def cmd_summary(
+    args: argparse.Namespace, *, read_json: Callable[[str], dict] = _read_json_maybe_gz
+) -> None:
     """All-in-one: certify (raw traces only) + overhead + kernels + operators + memory.
 
     Reads and indexes the trace exactly once, however large it is. The
@@ -561,7 +563,7 @@ def cmd_summary(args: argparse.Namespace) -> None:
     _print("  TORCH PROFILER SUMMARY")
     _print("=" * 80)
 
-    raw = _read_json_maybe_gz(args.report)
+    raw = read_json(args.report)
     if _is_chrome_trace(raw):
         _print("\n## Trace Certification\n")
         index = _index_trace(raw)

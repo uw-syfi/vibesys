@@ -23,6 +23,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -326,6 +327,9 @@ def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> N
 # it waits for appears (see sitecustomize.py's "Handshake" section).
 _HANDSHAKE_TIMEOUT_S = 30.0
 
+# Never set: ``wait(interval)`` is only the pause between polls of another process's files.
+_POLL_PAUSE = threading.Event()
+
 
 def _wait_for_file(path: Path, *, proc: subprocess.Popen[str]) -> str:
     """Return *path*'s content once it exists; fail if *proc* exits first."""
@@ -335,7 +339,7 @@ def _wait_for_file(path: Path, *, proc: subprocess.Popen[str]) -> str:
             pytest.fail(f"process exited (rc={proc.returncode}) before {path.name}")
         if time.monotonic() >= deadline:
             pytest.fail(f"{path} never appeared")
-        time.sleep(0.01)
+        _POLL_PAUSE.wait(0.01)
     return path.read_text()
 
 
@@ -557,7 +561,7 @@ def _wait_for_event(call_log: Path, event: str, *, timeout: float) -> None:
     while time.monotonic() < deadline:
         if any(name == event for _ts, name in parse_call_log(call_log)):
             return
-        time.sleep(0.02)
+        _POLL_PAUSE.wait(0.02)
     raise AssertionError(  # noqa: TRY003  # LW-910311; this is a boundary error that deliberately embeds the offending value for the operator to act on
         f"{event!r} never appeared in {call_log} within {timeout}s"
     )

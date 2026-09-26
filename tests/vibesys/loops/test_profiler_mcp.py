@@ -10,11 +10,13 @@ import contextlib
 import importlib.util
 import json
 import os
+import select
 import sqlite3
 import sys
 import textwrap
+import threading
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Protocol
@@ -1266,12 +1268,15 @@ def _install_fake_rocprofv3_timeline_only(bin_dir: Path) -> Path:
 _SLOW_TARGET_SOURCE = textwrap.dedent(
     """
     import os
+    import signal
     import sys
-    import time
 
-    with open(sys.argv[1], "w") as handle:
-        handle.write(str(os.getpid()))
-    time.sleep(60)
+    # Keep the fifo's write end open for the process's whole life: the test
+    # observes the target's death as EOF on the read end.
+    handle = open(sys.argv[1], "w")
+    handle.write(str(os.getpid()))
+    handle.flush()
+    signal.pause()
     """
 )
 
@@ -1282,44 +1287,124 @@ def _install_slow_target(tmp_path: Path) -> Path:
     return path
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+class _PidChannel:
+    """A FIFO the slow target reports its pid on, awaited without polling.
 
-
-def _wait_until(predicate, *, timeout: float = 10.0, interval: float = 0.05) -> bool:  # noqa: ANN001  # LW-910193; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(interval)
-    return predicate()
-
-
-async def _wait_until_async(
-    predicate,  # noqa: ANN001  # LW-910194; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    *,
-    timeout_s: float = 10.0,
-    interval: float = 0.02,
-) -> bool:
-    """Like ``_wait_until``, but yields to the event loop instead of blocking it.
-
-    Used from inside a coroutine that must let another concurrently
-    scheduled task (e.g. a capture started via ``asyncio.ensure_future``)
-    actually get CPU time to run: a blocking ``time.sleep`` poll from
-    inside a coroutine starves the loop and the other task never starts.
+    The read end is opened (non-blocking) before the target starts, so the
+    target's ``open(fifo, "w")`` succeeds immediately, and the event loop is
+    woken by the fd becoming readable rather than by a timer.
     """
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        await asyncio.sleep(interval)
-    return predicate()
+
+    def __init__(self, path: Path) -> None:
+        os.mkfifo(path)
+        self.path = path
+        self._fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+
+    async def wait_for_start(self, capture_task: asyncio.Future[str]) -> None:
+        """Return once the target has reported in, or fail if the capture ends first."""
+        loop = asyncio.get_running_loop()
+        readable = asyncio.Event()
+        loop.add_reader(self._fd, readable.set)
+        waiter = asyncio.ensure_future(readable.wait())
+        try:
+            await asyncio.wait({waiter, capture_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            loop.remove_reader(self._fd)
+            waiter.cancel()
+        if not readable.is_set():
+            diag = f"capture_task.done()={capture_task.done()}"
+            if capture_task.done():
+                exc = capture_task.exception()
+                diag += f" exception={exc!r}"
+                if exc is None:
+                    diag += f" result={capture_task.result()!r}"
+            raise AssertionError(f"target never started: {diag}")  # noqa: TRY003  # LW-910203; this is a boundary error that deliberately embeds the offending value for the operator to act on
+        os.read(self._fd, 64)
+
+    def wait_for_target_exit(self, *, timeout_s: float = 30.0) -> bool:
+        """True once the target has exited: its held-open write end closes, giving EOF.
+
+        ``timeout_s`` only bounds the failure case where the process leaked.
+        """
+        readable, _, _ = select.select([self._fd], [], [], timeout_s)
+        return bool(readable) and os.read(self._fd, 64) == b""
+
+    def close(self) -> None:
+        os.close(self._fd)
+
+
+class _WorkerTracker:
+    """``run_worker`` seam Fake: runs the real ``run_cancellable``, tracking in-flight workers.
+
+    A cancelled call's worker thread is "abandoned" (anyio's
+    ``abandon_on_cancel=True``): it keeps escalating the target and releasing
+    the exclusive-capture slot in its own ``finally`` after the coroutine that
+    awaited cancellation has already returned. ``wait_idle`` blocks on a
+    condition until every such worker has returned, so it cannot race a
+    subsequent capture.
+    """
+
+    def __init__(self, run_cancellable: Callable[..., Awaitable[str]]) -> None:
+        self._run_cancellable = run_cancellable
+        self._in_flight = 0
+        self._idle = threading.Condition()
+
+    async def __call__(
+        self,
+        fn: Callable[..., str],
+        /,
+        *args: object,
+        cancel_event: threading.Event,
+        **kwargs: object,
+    ) -> str:
+        with self._idle:
+            self._in_flight += 1
+
+        def tracked(*call_args: object, **call_kwargs: object) -> str:
+            try:
+                return fn(*call_args, **call_kwargs)
+            finally:
+                with self._idle:
+                    self._in_flight -= 1
+                    self._idle.notify_all()
+
+        return await self._run_cancellable(tracked, *args, cancel_event=cancel_event, **kwargs)
+
+    def wait_idle(self, *, timeout_s: float = 30.0) -> bool:
+        """``timeout_s`` only bounds the failure case where a worker never returns."""
+        with self._idle:
+            return self._idle.wait_for(lambda: self._in_flight == 0, timeout=timeout_s)
+
+
+_FAKE_PANDAS_PYTHON_SOURCE = textwrap.dedent(
+    """\
+    #!/bin/sh
+    if [ "$1" = "-c" ]; then
+        echo 2.2.2
+    else
+        echo "rocprofiler-compute version: 3.1.0"
+    fi
+    """
+)
+
+
+def _install_fake_rocm(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A minimal ROCm tree plus a stand-in deps interpreter, selected via env vars."""
+    bin_dir = root / "bin"
+    lib_dir = root / "lib"
+    bin_dir.mkdir(parents=True)
+    lib_dir.mkdir()
+    for name in ("rocprof-compute", "rocprof"):
+        tool = bin_dir / name
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+    (lib_dir / "libaqlprofile64.so").write_bytes(b"")
+    fake_python = root / "fake-python"
+    fake_python.write_text(_FAKE_PANDAS_PYTHON_SOURCE)
+    fake_python.chmod(0o755)
+    monkeypatch.setenv("ROCM_PATH", str(root))
+    monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_BIN", str(bin_dir / "rocprof-compute"))
+    monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_PYTHON", str(fake_python))
 
 
 class TestRocprofMcpServer:
@@ -1394,11 +1479,9 @@ class TestRocprofMcpServer:
         }
 
     def test_registers_fewer_tools_when_torch_analyzer_is_unavailable(
-        self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+        self, rocprof_server_mod: ModuleType
     ) -> None:
-        monkeypatch.setattr(rocprof_server_mod.capture, "import_torch_sibling", lambda _name: None)
-
-        server = rocprof_server_mod.build_server()
+        server = rocprof_server_mod.build_server(import_sibling=lambda _name: None)
         names = asyncio.run(_list_tool_names(server))
 
         assert "certify" not in names
@@ -1443,36 +1526,12 @@ class TestRocprofMcpServer:
         assert "Stall category totals" in out
 
     def test_profiling_capabilities_tool_reports_all_compute_checks_passed(
-        self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # compute_doctor is gone as a standalone tool; its diagnosis is now
         # reached via profiling_capabilities() -> capture._capability_compute_block()
-        # -> compute.cmd_doctor. rocprof_server_mod.compute and
-        # rocprof_server_mod.capture.compute are the same cached module
-        # object (both server.py and capture.py `import compute` after
-        # inserting the same rocprof dir onto sys.path), so patching either
-        # attribute path reaches the same functions capture.py calls.
-        monkeypatch.setattr(
-            rocprof_server_mod.compute,
-            "find_rocprof_compute_bin",
-            lambda: "/opt/rocm/bin/rocprof-compute",
-        )
-        monkeypatch.setattr(
-            rocprof_server_mod.compute, "find_deps_python", lambda _bin: "/usr/bin/python3"
-        )
-        monkeypatch.setattr(
-            rocprof_server_mod.compute,
-            "check_pandas_version",
-            lambda _py: (True, "pandas 2.2.2 under /usr/bin/python3"),
-        )
-        monkeypatch.setattr(
-            rocprof_server_mod.compute, "find_rocprof_legacy_bin", lambda: "/opt/rocm/bin/rocprof"
-        )
-        monkeypatch.setattr(
-            rocprof_server_mod.compute,
-            "find_aqlprofile_lib",
-            lambda: "/opt/rocm/lib/libaqlprofile64.so",
-        )
+        # -> compute.cmd_doctor, which locates everything through env vars.
+        _install_fake_rocm(tmp_path / "rocm", monkeypatch)
 
         server = rocprof_server_mod.build_server()
         out = asyncio.run(_call_tool(server, "profiling_capabilities"))
@@ -1480,11 +1539,9 @@ class TestRocprofMcpServer:
         assert "All checks passed." in out
 
     def test_profiling_capabilities_tool_reports_missing_compute_binary_as_a_fix(
-        self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprof_compute_bin", lambda: None)
-        monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprofv3_bin", lambda: None)
-        monkeypatch.setattr(rocprof_server_mod.compute, "find_aqlprofile_lib", lambda: None)
+        monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_BIN", str(tmp_path / "no-such-rocprof-compute"))
 
         server = rocprof_server_mod.build_server()
         out = asyncio.run(_call_tool(server, "profiling_capabilities"))
@@ -1494,7 +1551,7 @@ class TestRocprofMcpServer:
     def test_compute_analyze_tool_falls_back_to_raw_csvs(
         self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprof_compute_bin", lambda: None)
+        monkeypatch.setenv("VIBESYS_ROCPROF_COMPUTE_BIN", str(tmp_path / "no-such-rocprof-compute"))
         workload = tmp_path / "workload"
         workload.mkdir()
         (workload / "pmc_perf.csv").write_text("a,b\n1,2\n")
@@ -1605,25 +1662,46 @@ class TestRocprofMcpServer:
 
         assert out.startswith("error:")
 
-    def test_profile_timeline_tool_stays_responsive_to_other_calls_while_a_capture_runs(
+    def _slow_capture_server(
         self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    ) -> tuple[_McpServer, _WorkerTracker, _PidChannel, str]:
         bin_dir = tmp_path / "fakebin"
         bin_dir.mkdir()
         _install_fake_rocprofv3_timeline_only(bin_dir)
         monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
         monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
-        pid_file = tmp_path / "target.pid"
+        pid_channel = _PidChannel(tmp_path / "target.pid")
         slow_script = _install_slow_target(tmp_path)
-        server = rocprof_server_mod.build_server()
+        tracker = _WorkerTracker(rocprof_server_mod.mcp_async.run_cancellable)
+        server = rocprof_server_mod.build_server(run_worker=tracker)
+        return server, tracker, pid_channel, f"{sys.executable} {slow_script} {pid_channel.path}"
+
+    def _assert_target_and_slot_released(
+        self, rocprof_server_mod: ModuleType, tracker: _WorkerTracker, pid_channel: _PidChannel
+    ) -> None:
+        assert pid_channel.wait_for_target_exit(), "target process leaked past cancellation"
+        # The cancelled call's worker thread keeps running (escalating, then
+        # releasing the exclusive-capture slot in its own `finally`) after the
+        # coroutine that awaited cancellation has already returned. Wait for
+        # that teardown to finish so it can't race a subsequent test's own
+        # capture.
+        assert tracker.wait_idle(), "capture worker never returned after cancellation"
+        assert rocprof_server_mod.capture_runtime.active_capture() is None, (
+            "capture slot still held after cancellation settled"
+        )
+
+    def test_profile_timeline_tool_stays_responsive_to_other_calls_while_a_capture_runs(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server, tracker, pid_channel, command = self._slow_capture_server(
+            rocprof_server_mod, tmp_path, monkeypatch
+        )
 
         async def run() -> None:
             capture_task = asyncio.ensure_future(
-                _call_tool(
-                    server, "profile_timeline", command=f"{sys.executable} {slow_script} {pid_file}"
-                )
+                _call_tool(server, "profile_timeline", command=command)
             )
-            assert await _wait_until_async(pid_file.is_file, timeout_s=20.0), "target never started"
+            await pid_channel.wait_for_start(capture_task)
 
             # A cheap call, made while the capture is still in flight, must
             # return promptly instead of waiting behind it on the event
@@ -1637,51 +1715,24 @@ class TestRocprofMcpServer:
             with contextlib.suppress(asyncio.CancelledError):
                 await capture_task
 
-        asyncio.run(run())
-
-        pid = int(pid_file.read_text())
-        assert _wait_until(lambda: not _pid_alive(pid)), "target process leaked past cancellation"
-        # The cancelled call's worker thread is "abandoned" (anyio's
-        # abandon_on_cancel=True): it keeps running (escalating, then
-        # releasing the exclusive-capture slot in its own `finally`) after
-        # the coroutine that awaited cancellation has already returned.
-        # Wait for that teardown to actually finish so it can't race a
-        # subsequent test's own capture -- not just force-clear the slot
-        # (the autouse fixture already does that at the *next* test's
-        # start, which is too late to stop this stray thread's own
-        # in-flight work from overlapping with it).
-        assert _wait_until(lambda: rocprof_server_mod.capture_runtime.active_capture() is None), (
-            "capture slot still held after cancellation settled"
-        )
+        try:
+            asyncio.run(run())
+            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+        finally:
+            pid_channel.close()
 
     def test_profile_timeline_tool_returns_busy_for_a_second_concurrent_capture(
         self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        bin_dir = tmp_path / "fakebin"
-        bin_dir.mkdir()
-        _install_fake_rocprofv3_timeline_only(bin_dir)
-        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
-        pid_file = tmp_path / "target.pid"
-        slow_script = _install_slow_target(tmp_path)
-        server = rocprof_server_mod.build_server()
+        server, tracker, pid_channel, command = self._slow_capture_server(
+            rocprof_server_mod, tmp_path, monkeypatch
+        )
 
         async def run() -> str:
             capture_task = asyncio.ensure_future(
-                _call_tool(
-                    server, "profile_timeline", command=f"{sys.executable} {slow_script} {pid_file}"
-                )
+                _call_tool(server, "profile_timeline", command=command)
             )
-            started = await _wait_until_async(pid_file.is_file, timeout_s=20.0)
-            if not started:
-                diag = f"capture_task.done()={capture_task.done()}"
-                if capture_task.done():
-                    exc = capture_task.exception()
-                    diag += f" exception={exc!r}"
-                    if exc is None:
-                        diag += f" result={capture_task.result()!r}"
-                diag += f" active_capture={rocprof_server_mod.capture_runtime.active_capture()!r}"
-                raise AssertionError(f"target never started: {diag}")  # noqa: TRY003  # LW-910203; this is a boundary error that deliberately embeds the offending value for the operator to act on
+            await pid_channel.wait_for_start(capture_task)
 
             busy_out = await asyncio.wait_for(
                 _call_tool(server, "profile_timeline", command="true"), timeout=3.0
@@ -1692,44 +1743,24 @@ class TestRocprofMcpServer:
                 await capture_task
             return busy_out
 
-        busy_out = asyncio.run(run())
-
-        assert busy_out.startswith("busy: capture ")
-        assert "timeline" in busy_out
-        pid = int(pid_file.read_text())
-        assert _wait_until(lambda: not _pid_alive(pid)), "target process leaked past cancellation"
-        # The cancelled call's worker thread is "abandoned" (anyio's
-        # abandon_on_cancel=True): it keeps running (escalating, then
-        # releasing the exclusive-capture slot in its own `finally`) after
-        # the coroutine that awaited cancellation has already returned.
-        # Wait for that teardown to actually finish so it can't race a
-        # subsequent test's own capture -- not just force-clear the slot
-        # (the autouse fixture already does that at the *next* test's
-        # start, which is too late to stop this stray thread's own
-        # in-flight work from overlapping with it).
-        assert _wait_until(lambda: rocprof_server_mod.capture_runtime.active_capture() is None), (
-            "capture slot still held after cancellation settled"
-        )
+        try:
+            busy_out = asyncio.run(run())
+            assert busy_out.startswith("busy: capture ")
+            assert "timeline" in busy_out
+            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+        finally:
+            pid_channel.close()
 
     def test_profile_timeline_tool_cancellation_stops_the_target_process(
         self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        bin_dir = tmp_path / "fakebin"
-        bin_dir.mkdir()
-        _install_fake_rocprofv3_timeline_only(bin_dir)
-        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
-        pid_file = tmp_path / "target.pid"
-        slow_script = _install_slow_target(tmp_path)
-        server = rocprof_server_mod.build_server()
+        server, tracker, pid_channel, command = self._slow_capture_server(
+            rocprof_server_mod, tmp_path, monkeypatch
+        )
 
         async def run() -> None:
-            task = asyncio.ensure_future(
-                _call_tool(
-                    server, "profile_timeline", command=f"{sys.executable} {slow_script} {pid_file}"
-                )
-            )
-            assert await _wait_until_async(pid_file.is_file, timeout_s=20.0), "target never started"
+            task = asyncio.ensure_future(_call_tool(server, "profile_timeline", command=command))
+            await pid_channel.wait_for_start(task)
 
             # Simulates a client-initiated cancellation (e.g. an MCP client
             # tearing down after its own timeout): cancelling the awaiting
@@ -1738,23 +1769,13 @@ class TestRocprofMcpServer:
                 await asyncio.wait_for(task, timeout=0.5)
 
         start = time.monotonic()
-        asyncio.run(run())
-        elapsed = time.monotonic() - start
+        try:
+            asyncio.run(run())
+            elapsed = time.monotonic() - start
 
-        # Bounded by capture_runtime's poll chunk + escalation, not by the
-        # target's own (never reached) 60s sleep.
-        assert elapsed < 10.0
-        pid = int(pid_file.read_text())
-        assert _wait_until(lambda: not _pid_alive(pid)), "target process leaked past cancellation"
-        # The cancelled call's worker thread is "abandoned" (anyio's
-        # abandon_on_cancel=True): it keeps running (escalating, then
-        # releasing the exclusive-capture slot in its own `finally`) after
-        # the coroutine that awaited cancellation has already returned.
-        # Wait for that teardown to actually finish so it can't race a
-        # subsequent test's own capture -- not just force-clear the slot
-        # (the autouse fixture already does that at the *next* test's
-        # start, which is too late to stop this stray thread's own
-        # in-flight work from overlapping with it).
-        assert _wait_until(lambda: rocprof_server_mod.capture_runtime.active_capture() is None), (
-            "capture slot still held after cancellation settled"
-        )
+            # Bounded by capture_runtime's poll chunk + escalation, not by the
+            # target's own (never reached) indefinite wait.
+            assert elapsed < 10.0
+            self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
+        finally:
+            pid_channel.close()

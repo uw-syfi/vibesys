@@ -759,8 +759,6 @@
 {"id": "LW-910190", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-910191", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-910192", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-910193", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001"]}
-{"id": "LW-910194", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001"]}
 {"id": "LW-910195", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-910196", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-910197", "path": "tests/vibesys/loops/test_profiler_mcp.py", "rules": ["ANN001", "ANN201"]}
@@ -1081,10 +1079,7 @@
 {"id": "LW-920126", "path": "resources/profilers/rocprof/capture.py", "rules": ["E402"]}
 {"id": "LW-920127", "path": "resources/profilers/rocprof/capture.py", "rules": ["E402"]}
 {"id": "LW-920128", "path": "resources/profilers/rocprof/capture.py", "rules": ["E402"]}
-{"id": "LW-920129", "path": "resources/profilers/rocprof/compute.py", "rules": ["S603"]}
-{"id": "LW-920130", "path": "resources/profilers/rocprof/compute.py", "rules": ["S603"]}
 {"id": "LW-920131", "path": "resources/profilers/rocprof/compute.py", "rules": ["PLR2004"]}
-{"id": "LW-920132", "path": "resources/profilers/rocprof/compute.py", "rules": ["S603"]}
 {"id": "LW-920133", "path": "resources/profilers/rocprof/compute.py", "rules": ["T201"]}
 {"id": "LW-920134", "path": "resources/profilers/rocprof/compute.py", "rules": ["T201"]}
 {"id": "LW-920135", "path": "resources/profilers/rocprof/compute.py", "rules": ["T201"]}
@@ -1136,9 +1131,6 @@
 {"id": "LW-920181", "path": "resources/profilers/torch/capture_ops.py", "rules": ["SLF001"]}
 {"id": "LW-920182", "path": "resources/profilers/torch/capture_ops.py", "rules": ["SLF001"]}
 {"id": "LW-920183", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["BLE001"]}
-{"id": "LW-920184", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["PLC0415"]}
-{"id": "LW-920185", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["PLC0415"]}
-{"id": "LW-920186", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["PLC0415"]}
 {"id": "LW-920187", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["PLC0415"]}
 {"id": "LW-920188", "path": "resources/profilers/torch/server.py", "rules": ["E402"]}
 {"id": "LW-920189", "path": "resources/profilers/torch/server.py", "rules": ["E402"]}
@@ -1170,43 +1162,15 @@
 {"id": "LW-920216", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920217", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920218", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920219", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920220", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920221", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920222", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
-{"id": "LW-920223", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920224", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920225", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ARG005"]}
-{"id": "LW-920226", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920227", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ARG005"]}
-{"id": "LW-920228", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920229", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN002", "ANN003", "ANN202"]}
-{"id": "LW-920230", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920231", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920232", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920233", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ARG005"]}
-{"id": "LW-920234", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920235", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ARG005"]}
-{"id": "LW-920236", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920237", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ARG005"]}
-{"id": "LW-920238", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920239", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920240", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
-{"id": "LW-920241", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920242", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920243", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
 {"id": "LW-920244", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920245", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920246", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920247", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920248", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920249", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920250", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
-{"id": "LW-920251", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920252", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920253", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920254", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
-{"id": "LW-920255", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920256", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920257", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920258", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
@@ -1217,14 +1181,6 @@
 {"id": "LW-920263", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920264", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920265", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920266", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920267", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN202", "ARG001"]}
-{"id": "LW-920268", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
-{"id": "LW-920269", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920270", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920271", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920272", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920273", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN202", "ARG001"]}
 {"id": "LW-920274", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920275", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920276", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
@@ -1254,9 +1210,6 @@
 {"id": "LW-920300", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920301", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920302", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920303", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920304", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
-{"id": "LW-920305", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920306", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920307", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN201"]}
 {"id": "LW-920308", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
@@ -1268,7 +1221,6 @@
 {"id": "LW-920314", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
 {"id": "LW-920315", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
 {"id": "LW-920316", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001"]}
-{"id": "LW-920317", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920318", "path": "tests/vibesys/loops/test_rocprof_compute.py", "rules": ["ANN001", "ANN201"]}
 {"id": "LW-920319", "path": "tests/vibesys/loops/test_rocprof_counters.py", "rules": ["ANN201"]}
 {"id": "LW-920320", "path": "tests/vibesys/loops/test_rocprof_counters.py", "rules": ["ANN201"]}

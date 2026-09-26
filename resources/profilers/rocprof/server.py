@@ -25,8 +25,13 @@ import atexit
 import sys
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+    from types import ModuleType
 
 _HERE = Path(__file__).resolve().parent
 
@@ -57,11 +62,17 @@ import kernel_bench  # noqa: E402  # LW-920177; the sys.path setup directly abov
 _capture_cli = capture.run_cli
 
 
-def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this function implements one cohesive parsing/validation routine that resists a clean split
+def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements one cohesive parsing/validation routine that resists a clean split
+    *,
+    run_worker: Callable[..., Awaitable[str]] = mcp_async.run_cancellable,
+    import_sibling: Callable[[str], ModuleType | None] = capture.import_torch_sibling,
+) -> FastMCP:
     """Construct the FastMCP instance with the curated rocprof tool set.
 
     Exposed separately so unit tests can introspect registered tools
-    without spawning a stdio loop.
+    without spawning a stdio loop. ``run_worker`` runs each blocking
+    ``profile_*`` capture off the event loop; ``import_sibling`` locates the
+    torch plugin's analyzer module.
     """
     mcp = FastMCP("vibesys-rocprof-profiler")
 
@@ -160,7 +171,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this functio
         )
         cancel_event = threading.Event()
         try:
-            return await mcp_async.run_cancellable(
+            return await run_worker(
                 capture.profile_timeline,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -229,7 +240,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this functio
         )
         cancel_event = threading.Event()
         try:
-            return await mcp_async.run_cancellable(
+            return await run_worker(
                 capture.profile_counters,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -292,7 +303,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this functio
         )
         cancel_event = threading.Event()
         try:
-            return await mcp_async.run_cancellable(
+            return await run_worker(
                 capture.profile_kernel_deep,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -356,7 +367,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this functio
         )
         cancel_event = threading.Event()
         try:
-            return await mcp_async.run_cancellable(
+            return await run_worker(
                 capture.profile_instructions,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -427,7 +438,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this functio
         """
         cancel_event = threading.Event()
         try:
-            return await mcp_async.run_cancellable(
+            return await run_worker(
                 capture.profile_ops,
                 cancel_event=cancel_event,
                 command=command,
@@ -785,7 +796,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this functio
 
     # -- analyze_torch_profile.py: cross-check torch-side analysis --------
 
-    torch_analyzer = capture.import_torch_sibling("analyze_torch_profile")
+    torch_analyzer = import_sibling("analyze_torch_profile")
 
     if torch_analyzer is not None:
 

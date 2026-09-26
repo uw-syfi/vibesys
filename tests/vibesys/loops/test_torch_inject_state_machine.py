@@ -12,16 +12,19 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 import tempfile
 import types
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import INJECT_DIR
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _OPS = ("ready", "start", "stop")
 
@@ -81,11 +84,19 @@ class _Model:
 class _Harness:
     """Applies one op to the real ``_Capture`` and to the reference model."""
 
-    def __init__(self, inject_module: types.ModuleType, root: Path) -> None:
+    def __init__(
+        self,
+        inject_module: types.ModuleType,
+        root: Path,
+        import_module: Callable[[str], types.ModuleType],
+    ) -> None:
         self.root = root
         self.control = root / "control"
         self.capture = inject_module._Capture(  # noqa: SLF001  # LW-920405; the standalone injected script's state machine class is private by design
-            out_dir=root / "default", record_shapes=False, control_dir=self.control
+            out_dir=root / "default",
+            record_shapes=False,
+            control_dir=self.control,
+            import_module=import_module,
         )
         self.model = _Model()
         self.named = 0  # window dirs named via next_window so far
@@ -134,10 +145,9 @@ def test_capture_matches_reference_model(inject_module: types.ModuleType, ops: l
     is ever acknowledged ``window.failed``.
     """
     torch, profiler, active = _fake_torch()
-    with pytest.MonkeyPatch.context() as mp, tempfile.TemporaryDirectory() as tmp:
-        mp.setitem(sys.modules, "torch", torch)
-        mp.setitem(sys.modules, "torch.profiler", profiler)
-        harness = _Harness(inject_module, Path(tmp))
+    fake_modules = {"torch": torch, "torch.profiler": profiler}
+    with tempfile.TemporaryDirectory() as tmp:
+        harness = _Harness(inject_module, Path(tmp), fake_modules.__getitem__)
         for op in ops:
             getattr(harness, op)()
             running = harness.model.running

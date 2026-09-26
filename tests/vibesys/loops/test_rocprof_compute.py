@@ -6,9 +6,10 @@ vibesys imports, staged verbatim into the agent workspace as
 way ``tests/vibesys/loops/test_profiler_mcp.py`` loads the sibling nsys/torch
 profiler modules, so these tests stay decoupled from sys.path/package state.
 
-Every external-tool interaction here is exercised through a mocked
-``subprocess.run``/``subprocess.Popen``, or (for ``run_with_timeout``'s
-process-group kill behavior) a real, sub-second child process -- never a real
+Every external-tool interaction here goes through the module's injectable
+``run``/``run_tool`` seams with an in-memory fake (``FakeRunner``,
+``FakeToolRunner``), or (for ``run_with_timeout``'s process-group kill
+behavior) a real, sub-second child process -- never a real
 ``rocprof-compute``/``rocprofv3`` install.
 """
 
@@ -28,6 +29,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import ModuleType
 
 _MODULE_NAME = "rocprof_compute_under_test"
@@ -104,6 +106,86 @@ def _make_executable(path: Path, shebang: str = "") -> Path:
     return path
 
 
+@pytest.fixture
+def rocm_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """An empty ROCm install root with PATH pointing nowhere, so only the files a test adds are found."""
+    monkeypatch.setenv("PATH", "/nonexistent-bin-dir")
+    root = tmp_path / "rocm"
+    monkeypatch.setenv("ROCM_PATH", str(root))
+    return root
+
+
+_Reply = tuple[int, str, str] | Exception
+
+
+class FakeRunner:
+    """In-memory ``subprocess.run``: records each argv and answers from ``respond``."""
+
+    def __init__(self, respond: Callable[[list[str]], _Reply]) -> None:
+        self._respond = respond
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        reply = self._respond(argv)
+        if isinstance(reply, Exception):
+            raise reply
+        returncode, stdout, stderr = reply
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+
+def _fixed_runner(returncode: int = 0, stdout: str = "", stderr: str = "") -> FakeRunner:
+    return FakeRunner(lambda _argv: (returncode, stdout, stderr))
+
+
+def _healthy_probe_runner() -> FakeRunner:
+    """Answers the deps gate, pandas, and version probes the way a working install does."""
+
+    def respond(argv: list[str]) -> _Reply:
+        if argv[-1] == "--version":
+            return 0, "rocprofiler-compute version: 3.1.0\n", ""
+        if "-c" in argv:
+            return 0, "2.2.2\n", ""
+        return 0, "help text", ""
+
+    return FakeRunner(respond)
+
+
+class FakeToolRunner:
+    """In-memory ``run_with_timeout``: records each command and answers from ``respond``."""
+
+    def __init__(self, respond: Callable[[list[str]], tuple[int, str]]) -> None:
+        self._respond = respond
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd: list[str], **_options: object) -> tuple[int, str]:
+        self.calls.append(list(cmd))
+        return self._respond(cmd)
+
+
+def _no_signal_handlers() -> None:
+    """Stand-in for ``install_signal_handlers`` so tests never rebind the runner's SIGINT/SIGTERM."""
+
+
+def _profile_ns(out_dir: Path, *, kernel: str = "") -> argparse.Namespace:
+    return argparse.Namespace(
+        cmd=["--", "python", "driver.py"],
+        name="run",
+        out=str(out_dir),
+        kernel=kernel,
+        dispatch=None,
+        block=None,
+        timeout=60.0,
+        check_torch_import=False,
+    )
+
+
+def _analyze_ns(workload_dir: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        workload_dir=str(workload_dir), blocks="0,2,4", max_stat=10, kernel="", timeout=60.0
+    )
+
+
 # ---------------------------------------------------------------------------
 # Locating the tool
 # ---------------------------------------------------------------------------
@@ -159,10 +241,12 @@ def test_find_aqlprofile_lib_searches_rocm_lib_dirs(monkeypatch, tmp_path, compu
     assert compute.find_aqlprofile_lib() == str(lib_dir / "libaqlprofile64.so")
 
 
-def test_find_aqlprofile_lib_falls_back_to_loader_search(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920219; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute.ctypes.util, "find_library", lambda _name: None)
+@pytest.mark.usefixtures("rocm_root")
+def test_find_aqlprofile_lib_falls_back_to_loader_search(compute: ModuleType) -> None:
+    assert compute.find_aqlprofile_lib(find_library=lambda _name: None) is None
 
-    assert compute.find_aqlprofile_lib() is None
+    found = {"aqlprofile": "libaqlprofile.so.1"}
+    assert compute.find_aqlprofile_lib(find_library=found.get) == "libaqlprofile.so.1"
 
 
 # ---------------------------------------------------------------------------
@@ -187,99 +271,83 @@ def test_shebang_python_returns_none_for_missing_file():  # noqa: ANN201  # LW-9
     assert _shebang_python("/nonexistent/rocprof-compute") is None
 
 
-def test_candidate_interpreters_orders_and_dedupes(monkeypatch, tmp_path, compute):  # noqa: ANN001, ANN201  # LW-920223; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
+def test_candidate_interpreters_orders_and_dedupes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, compute: ModuleType
+) -> None:
     rocprof_bin = _make_executable(tmp_path / "rocprof-compute", shebang="#!/usr/bin/env python3")
     monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/opt/venv/bin/python")
-    monkeypatch.setattr(compute.shutil, "which", lambda _name: "/usr/bin/env python3")
 
-    ordered = compute.candidate_interpreters(str(rocprof_bin))
+    ordered = compute.candidate_interpreters(str(rocprof_bin), which=lambda _name: sys.executable)
 
     assert ordered[0] == "/opt/venv/bin/python"
     # The venv override and sys.executable never repeat later in the list.
     assert ordered.count(sys.executable) == 1
 
 
-def test_python_satisfies_deps_true_on_zero_exit(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920224; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute.subprocess,
-        "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "help text", ""),  # noqa: ARG005  # LW-920225; tracked migration debt from the pre-manifest ratchet scheme
+def test_python_satisfies_deps_true_on_zero_exit() -> None:
+    runner = _fixed_runner(0, "help text")
+
+    assert _python_satisfies_deps("/usr/bin/python3", "/opt/rocm/bin/rocprof-compute", run=runner)
+    assert runner.calls == [["/usr/bin/python3", "/opt/rocm/bin/rocprof-compute", "--help"]]
+
+
+def test_python_satisfies_deps_false_on_nonzero_exit() -> None:
+    runner = _fixed_runner(1, "", "ModuleNotFoundError")
+
+    assert not _python_satisfies_deps(
+        "/usr/bin/python3", "/opt/rocm/bin/rocprof-compute", run=runner
     )
 
-    assert _python_satisfies_deps("/usr/bin/python3", "/opt/rocm/bin/rocprof-compute") is True
 
+def test_python_satisfies_deps_false_when_interpreter_missing() -> None:
+    runner = FakeRunner(lambda _argv: FileNotFoundError())
 
-def test_python_satisfies_deps_false_on_nonzero_exit(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920226; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute.subprocess,
-        "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, "", "ModuleNotFoundError"),  # noqa: ARG005  # LW-920227; tracked migration debt from the pre-manifest ratchet scheme
+    assert not _python_satisfies_deps(
+        "/missing/python", "/opt/rocm/bin/rocprof-compute", run=runner
     )
 
-    assert _python_satisfies_deps("/usr/bin/python3", "/opt/rocm/bin/rocprof-compute") is False
+
+def test_find_deps_python_returns_first_satisfying_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, compute: ModuleType
+) -> None:
+    rocprof_bin = _make_executable(tmp_path / "rocprof-compute", shebang="#!/good/python")
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/bad/python")
+    runner = FakeRunner(lambda argv: (0 if argv[0] == "/good/python" else 1, "", ""))
+
+    assert compute.find_deps_python(str(rocprof_bin), run=runner) == "/good/python"
+    assert [argv[0] for argv in runner.calls] == ["/bad/python", "/good/python"]
 
 
-def test_python_satisfies_deps_false_when_interpreter_missing(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920228; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    def _raise(*_a, **_kw):  # noqa: ANN002, ANN003, ANN202  # LW-920229; tracked migration debt from the pre-manifest ratchet scheme
-        raise FileNotFoundError
+def test_find_deps_python_returns_none_when_no_candidate_satisfies(
+    monkeypatch: pytest.MonkeyPatch, compute: ModuleType
+) -> None:
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/bad/python")
 
-    monkeypatch.setattr(compute.subprocess, "run", _raise)
-
-    assert _python_satisfies_deps("/missing/python", "/opt/rocm/bin/rocprof-compute") is False
+    assert compute.find_deps_python("/opt/rocm/bin/rocprof-compute", run=_fixed_runner(1)) is None
 
 
-def test_find_deps_python_returns_first_satisfying_candidate(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920230; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute, "candidate_interpreters", lambda _rocprof_bin: ["/bad/python", "/good/python"]
+def test_check_pandas_version_accepts_pandas_below_3(compute: ModuleType) -> None:
+    ok, message = compute.check_pandas_version(
+        "/usr/bin/python3", run=_fixed_runner(0, "2.2.2\n", "")
     )
-    monkeypatch.setattr(
-        compute, "_python_satisfies_deps", lambda python, _rocprof_bin: python == "/good/python"
-    )
-
-    assert compute.find_deps_python("/opt/rocm/bin/rocprof-compute") == "/good/python"
-
-
-def test_find_deps_python_returns_none_when_no_candidate_satisfies(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920231; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute, "candidate_interpreters", lambda _rocprof_bin: ["/bad/python"])
-    monkeypatch.setattr(compute, "_python_satisfies_deps", lambda *_a: False)
-
-    assert compute.find_deps_python("/opt/rocm/bin/rocprof-compute") is None
-
-
-def test_check_pandas_version_accepts_pandas_below_3(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920232; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute.subprocess,
-        "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "2.2.2\n", ""),  # noqa: ARG005  # LW-920233; tracked migration debt from the pre-manifest ratchet scheme
-    )
-
-    ok, message = compute.check_pandas_version("/usr/bin/python3")
 
     assert ok
     assert "2.2.2" in message
 
 
-def test_check_pandas_version_rejects_pandas_3(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920234; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute.subprocess,
-        "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "3.0.1\n", ""),  # noqa: ARG005  # LW-920235; tracked migration debt from the pre-manifest ratchet scheme
+def test_check_pandas_version_rejects_pandas_3(compute: ModuleType) -> None:
+    ok, message = compute.check_pandas_version(
+        "/usr/bin/python3", run=_fixed_runner(0, "3.0.1\n", "")
     )
-
-    ok, message = compute.check_pandas_version("/usr/bin/python3")
 
     assert not ok
     assert ">=3" in message
 
 
-def test_check_pandas_version_reports_import_failure(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920236; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute.subprocess,
-        "run",
-        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, "", "ModuleNotFoundError: pandas"),  # noqa: ARG005  # LW-920237; tracked migration debt from the pre-manifest ratchet scheme
-    )
+def test_check_pandas_version_reports_import_failure(compute: ModuleType) -> None:
+    runner = _fixed_runner(1, "", "ModuleNotFoundError: pandas")
 
-    ok, message = compute.check_pandas_version("/usr/bin/python3")
+    ok, message = compute.check_pandas_version("/usr/bin/python3", run=runner)
 
     assert not ok
     assert "not importable" in message
@@ -290,31 +358,31 @@ def test_check_pandas_version_reports_import_failure(monkeypatch, compute):  # n
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_doctor_reports_all_checks_passed(monkeypatch, capsys, compute):  # noqa: ANN001, ANN201  # LW-920238; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-    monkeypatch.setattr(
-        compute, "check_pandas_version", lambda _py: (True, "pandas 2.2.2 under /usr/bin/python3")
-    )
-    monkeypatch.setattr(compute, "find_rocprof_legacy_bin", lambda: "/opt/rocm/bin/rocprof")
-    monkeypatch.setattr(compute, "find_aqlprofile_lib", lambda: "/opt/rocm/lib/libaqlprofile64.so")
+def test_cmd_doctor_reports_all_checks_passed(
+    rocm_root: Path, capsys: pytest.CaptureFixture[str], compute: ModuleType
+) -> None:
+    _make_executable(rocm_root / "bin" / "rocprof-compute")
+    _make_executable(rocm_root / "bin" / "rocprof")
+    (rocm_root / "lib").mkdir(parents=True)
+    (rocm_root / "lib" / "libaqlprofile64.so").write_bytes(b"")
 
-    compute.cmd_doctor(argparse.Namespace())
+    compute.cmd_doctor(argparse.Namespace(), run=_healthy_probe_runner())
 
     out = capsys.readouterr().out
     assert "[OK]" in out
     assert "FAIL" not in out
+    assert "version: 3.1.0" in out
     assert "All checks passed." in out
 
 
-def test_cmd_doctor_reports_fixes_and_skips_downstream_checks(monkeypatch, capsys, compute):  # noqa: ANN001, ANN201  # LW-920239; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute, "find_rocprof_compute_bin", lambda: None)
-    monkeypatch.setattr(compute, "find_rocprof_legacy_bin", lambda: None)
-    monkeypatch.setattr(compute, "find_aqlprofile_lib", lambda: None)
+def test_cmd_doctor_reports_fixes_and_skips_downstream_checks(
+    rocm_root: Path, capsys: pytest.CaptureFixture[str], compute: ModuleType
+) -> None:
+    (rocm_root / "lib").mkdir(parents=True)
+    (rocm_root / "lib" / "libaqlprofile64.so").write_bytes(b"")
+    runner = _healthy_probe_runner()
 
-    compute.cmd_doctor(argparse.Namespace())
+    compute.cmd_doctor(argparse.Namespace(), run=runner)
 
     out = capsys.readouterr().out
     assert "[FAIL] rocprof-compute binary: not found" in out
@@ -322,13 +390,12 @@ def test_cmd_doctor_reports_fixes_and_skips_downstream_checks(monkeypatch, capsy
     assert "[SKIP] pandas" in out
     assert "Fixes:" in out
     assert f"${compute.ROCPROF_COMPUTE_BIN_ENV}" in out
+    assert runner.calls == []
 
 
-def test_cmd_doctor_fails_when_legacy_rocprof_missing_even_with_rocprofv3_present(  # noqa: ANN201  # LW-920240; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch,  # noqa: ANN001  # LW-920241; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    capsys,  # noqa: ANN001  # LW-920242; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    compute,  # noqa: ANN001  # LW-920243; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-):
+def test_cmd_doctor_fails_when_legacy_rocprof_missing_even_with_rocprofv3_present(
+    rocm_root: Path, capsys: pytest.CaptureFixture[str], compute: ModuleType
+) -> None:
     """Regression: doctor used to gate on ``rocprofv3``, but a real MI210 run
     confirmed rocprof-compute 3.1.0 shells out to the deprecated *legacy*
     ``rocprof`` internally, not ``rocprofv3`` (every pass logs ROCm's own
@@ -336,20 +403,14 @@ def test_cmd_doctor_fails_when_legacy_rocprof_missing_even_with_rocprofv3_presen
     passed" on a host with rocprofv3 but no legacy rocprof -- exactly the host
     ``profile`` would then fail on -- and would FAIL a host that has legacy
     rocprof but happens to lack rocprofv3, which ``profile`` doesn't need."""
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-    monkeypatch.setattr(
-        compute, "check_pandas_version", lambda _py: (True, "pandas 2.2.2 under /usr/bin/python3")
-    )
-    monkeypatch.setattr(compute, "find_aqlprofile_lib", lambda: "/opt/rocm/lib/libaqlprofile64.so")
+    _make_executable(rocm_root / "bin" / "rocprof-compute")
+    (rocm_root / "lib").mkdir(parents=True)
+    (rocm_root / "lib" / "libaqlprofile64.so").write_bytes(b"")
     # rocprofv3 present, legacy rocprof missing -- the real dependency profile
     # is unmet even though the old check would have called this host healthy.
-    monkeypatch.setattr(compute, "find_rocprofv3_bin", lambda: "/opt/rocm/bin/rocprofv3")
-    monkeypatch.setattr(compute, "find_rocprof_legacy_bin", lambda: None)
+    _make_executable(rocm_root / "bin" / "rocprofv3")
 
-    compute.cmd_doctor(argparse.Namespace())
+    compute.cmd_doctor(argparse.Namespace(), run=_healthy_probe_runner())
 
     out = capsys.readouterr().out
     assert "[FAIL]" in out
@@ -390,25 +451,32 @@ def test_run_with_timeout_kills_a_stuck_child_and_its_subtree(compute):  # noqa:
     assert elapsed < 10
 
 
-def test_check_torch_import_under_rocprofv3_skips_when_rocprofv3_missing(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920247; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute, "find_rocprofv3_bin", lambda: None)
+@pytest.mark.usefixtures("rocm_root")
+def test_check_torch_import_under_rocprofv3_skips_when_rocprofv3_missing(
+    compute: ModuleType,
+) -> None:
+    run_tool = FakeToolRunner(lambda _cmd: (0, ""))
 
-    ok, detail = compute.check_torch_import_under_rocprofv3(sys.executable)
+    ok, detail = compute.check_torch_import_under_rocprofv3(sys.executable, run_tool=run_tool)
 
     assert ok
     assert "skipping preflight" in detail
+    assert run_tool.calls == []
 
 
-def test_check_torch_import_under_rocprofv3_reports_failure(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920248; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute, "find_rocprofv3_bin", lambda: "/opt/rocm/bin/rocprofv3")
-    monkeypatch.setattr(
-        compute, "run_with_timeout", lambda *_a, **_kw: (1, "spirv-expand-step collision")
-    )
+def test_check_torch_import_under_rocprofv3_reports_failure(
+    rocm_root: Path, compute: ModuleType
+) -> None:
+    rocprofv3 = _make_executable(rocm_root / "bin" / "rocprofv3")
+    run_tool = FakeToolRunner(lambda _cmd: (1, "spirv-expand-step collision"))
 
-    ok, detail = compute.check_torch_import_under_rocprofv3(sys.executable)
+    ok, detail = compute.check_torch_import_under_rocprofv3(sys.executable, run_tool=run_tool)
 
     assert not ok
     assert "collision" in detail
+    assert run_tool.calls == [
+        [str(rocprofv3), "--hip-trace", "--", sys.executable, "-c", "import torch"]
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -428,30 +496,26 @@ def test_resolve_profiled_cmd_exits_when_empty():  # noqa: ANN201  # LW-920250; 
         _resolve_profiled_cmd([])
 
 
-def test_require_rocprof_compute_exits_without_binary(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920251; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute, "find_rocprof_compute_bin", lambda: None)
+@pytest.mark.usefixtures("rocm_root")
+def test_require_rocprof_compute_exits_without_binary() -> None:
+    with pytest.raises(SystemExit):
+        _require_rocprof_compute(run=_fixed_runner(0))
+
+
+def test_require_rocprof_compute_exits_without_deps_python(rocm_root: Path) -> None:
+    _make_executable(rocm_root / "bin" / "rocprof-compute")
 
     with pytest.raises(SystemExit):
-        _require_rocprof_compute()
+        _require_rocprof_compute(run=_fixed_runner(1))
 
 
-def test_require_rocprof_compute_exits_without_deps_python(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920252; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: None)
+def test_require_rocprof_compute_returns_pair_when_resolved(
+    monkeypatch: pytest.MonkeyPatch, rocm_root: Path, compute: ModuleType
+) -> None:
+    rocprof_bin = _make_executable(rocm_root / "bin" / "rocprof-compute")
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/usr/bin/python3")
 
-    with pytest.raises(SystemExit):
-        _require_rocprof_compute()
-
-
-def test_require_rocprof_compute_returns_pair_when_resolved(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920253; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-
-    assert _require_rocprof_compute() == ("/opt/rocm/bin/rocprof-compute", "/usr/bin/python3")
+    assert _require_rocprof_compute(run=_fixed_runner(0)) == (str(rocprof_bin), "/usr/bin/python3")
 
 
 def test_maybe_preflight_torch_import_skipped_when_not_requested():  # noqa: ANN201  # LW-920254; tracked migration debt from the pre-manifest ratchet scheme
@@ -459,14 +523,15 @@ def test_maybe_preflight_torch_import_skipped_when_not_requested():  # noqa: ANN
     _maybe_preflight_torch_import(ns, ["python", "driver.py"])  # must not raise
 
 
-def test_maybe_preflight_torch_import_exits_on_failure(monkeypatch, capsys, compute):  # noqa: ANN001, ANN201  # LW-920255; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute, "check_torch_import_under_rocprofv3", lambda _py, **_kw: (False, "boom")
-    )
+def test_maybe_preflight_torch_import_exits_on_failure(
+    rocm_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _make_executable(rocm_root / "bin" / "rocprofv3")
+    run_tool = FakeToolRunner(lambda _cmd: (1, "boom"))
     ns = argparse.Namespace(check_torch_import=True)
 
     with pytest.raises(SystemExit) as exc_info:
-        _maybe_preflight_torch_import(ns, ["python", "driver.py"])
+        _maybe_preflight_torch_import(ns, ["python", "driver.py"], run_tool=run_tool)
 
     assert exc_info.value.code == 3
     assert "boom" in capsys.readouterr().out
@@ -647,14 +712,19 @@ def test_report_profile_result_succeeds_against_real_workload(capsys):  # noqa: 
     assert f"Workload written to: {_REAL_WORKLOAD_DIR}" in out
 
 
-def test_cmd_profile_end_to_end_with_mocked_tool(monkeypatch, tmp_path, capsys, compute):  # noqa: ANN001, ANN201  # LW-920266; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
+def test_cmd_profile_end_to_end_with_fake_tool(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rocm_root: Path,
+    capsys: pytest.CaptureFixture[str],
+    compute: ModuleType,
+) -> None:
     """The command construction, out-dir creation, and workload resolution --
     everything except actually shelling out to rocprof-compute."""
-    out_dir = tmp_path / "out"
-    recorded: dict[str, list[str]] = {}
+    rocprof_bin = _make_executable(rocm_root / "bin" / "rocprof-compute")
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/fake/python3")
 
-    def fake_run_with_timeout(cmd: list[str], *, timeout=None, **_kw: object):  # noqa: ANN001, ANN202, ARG001  # LW-920267; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-        recorded["cmd"] = cmd
+    def profile_writes_workload(cmd: list[str]) -> tuple[int, str]:
         workload_dir = Path(cmd[cmd.index("-p") + 1])
         workload_dir.mkdir(parents=True)
         (workload_dir / "pmc_kernel_top.csv").write_text(
@@ -662,43 +732,36 @@ def test_cmd_profile_end_to_end_with_mocked_tool(monkeypatch, tmp_path, capsys, 
         )
         return 0, "profiled ok"
 
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
+    run_tool = FakeToolRunner(profile_writes_workload)
+    compute.cmd_profile(
+        _profile_ns(tmp_path / "out"),
+        run=_fixed_runner(0),
+        run_tool=run_tool,
+        install_handlers=_no_signal_handlers,
     )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-    monkeypatch.setattr(compute, "run_with_timeout", fake_run_with_timeout)
-    monkeypatch.setattr(compute, "install_signal_handlers", lambda: None)
 
-    ns = argparse.Namespace(
-        cmd=["--", "python", "driver.py"],
-        name="run",
-        out=str(out_dir),
-        kernel="",
-        dispatch=None,
-        block=None,
-        timeout=60.0,
-        check_torch_import=False,
-    )
-    compute.cmd_profile(ns)
-
-    assert "-p" in recorded["cmd"]
-    assert recorded["cmd"][-2:] == ["python", "driver.py"]
+    [cmd] = run_tool.calls
+    assert cmd[:3] == ["/fake/python3", str(rocprof_bin), "profile"]
+    assert "-p" in cmd
+    assert cmd[-2:] == ["python", "driver.py"]
     assert "Workload written to" in capsys.readouterr().out
 
 
-def test_cmd_profile_end_to_end_fails_loudly_on_empty_kernel_match(  # noqa: ANN201  # LW-920268; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch,  # noqa: ANN001  # LW-920269; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    tmp_path,  # noqa: ANN001  # LW-920270; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    capsys,  # noqa: ANN001  # LW-920271; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    compute,  # noqa: ANN001  # LW-920272; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-):
+def test_cmd_profile_end_to_end_fails_loudly_on_empty_kernel_match(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rocm_root: Path,
+    capsys: pytest.CaptureFixture[str],
+    compute: ModuleType,
+) -> None:
     """End-to-end regression for the ``-k gemm`` pitfall through the real
     ``cmd_profile`` entry point, using the real failing-run log excerpt as the
-    mocked subprocess output."""
+    fake tool's output."""
     log = (_REAL_FIXTURE_DIR / "profile_run_empty_match_excerpt.txt").read_text(encoding="utf-8")
-    out_dir = tmp_path / "out"
+    _make_executable(rocm_root / "bin" / "rocprof-compute")
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/fake/python3")
 
-    def fake_run_with_timeout(cmd, *, timeout=None, **_kw: object):  # noqa: ANN001, ANN202, ARG001  # LW-920273; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
+    def profile_fails_with_empty_match(cmd: list[str]) -> tuple[int, str]:
         workload_dir = Path(cmd[cmd.index("-p") + 1])
         workload_dir.mkdir(parents=True)
         (workload_dir / "pmc_kernel_top.csv").write_text(
@@ -706,26 +769,13 @@ def test_cmd_profile_end_to_end_fails_loudly_on_empty_kernel_match(  # noqa: ANN
         )
         return 1, log
 
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-    monkeypatch.setattr(compute, "run_with_timeout", fake_run_with_timeout)
-    monkeypatch.setattr(compute, "install_signal_handlers", lambda: None)
-
-    ns = argparse.Namespace(
-        cmd=["--", "python", "driver.py"],
-        name="run",
-        out=str(out_dir),
-        kernel="gemm",
-        dispatch=None,
-        block=None,
-        timeout=60.0,
-        check_torch_import=False,
-    )
-
     with pytest.raises(SystemExit):
-        compute.cmd_profile(ns)
+        compute.cmd_profile(
+            _profile_ns(tmp_path / "out", kernel="gemm"),
+            run=_fixed_runner(0),
+            run_tool=FakeToolRunner(profile_fails_with_empty_match),
+            install_handlers=_no_signal_handlers,
+        )
 
     out = capsys.readouterr().out
     assert "matched no dispatches" in out
@@ -1027,39 +1077,39 @@ def test_print_pmc_perf_ratios_returns_false_without_known_columns(tmp_path):  #
     assert _print_pmc_perf_ratios(path) is False
 
 
-def test_cmd_analyze_prints_cleaned_output_on_success(monkeypatch, tmp_path, capsys, compute):  # noqa: ANN001, ANN201  # LW-920303; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-    monkeypatch.setattr(
-        compute, "run_with_timeout", lambda *_a, **_kw: (0, "==\nTop Stats\nkernel_a 10%\n")
-    )
+def test_cmd_analyze_prints_cleaned_output_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rocm_root: Path,
+    capsys: pytest.CaptureFixture[str],
+    compute: ModuleType,
+) -> None:
+    _make_executable(rocm_root / "bin" / "rocprof-compute")
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/fake/python3")
+    run_tool = FakeToolRunner(lambda _cmd: (0, "==\nTop Stats\nkernel_a 10%\n"))
 
-    ns = argparse.Namespace(
-        workload_dir=str(tmp_path), blocks="0,2,4", max_stat=10, kernel="", timeout=60.0
-    )
-    compute.cmd_analyze(ns)
+    compute.cmd_analyze(_analyze_ns(tmp_path), run=_fixed_runner(0), run_tool=run_tool)
 
     out = capsys.readouterr().out
     assert "Top Stats" in out
     assert "NOTE:" not in out
+    [cmd] = run_tool.calls
+    assert cmd[2:4] == ["analyze", "-p"]
 
 
-def test_cmd_analyze_falls_back_to_csv_on_nonzero_exit(monkeypatch, tmp_path, capsys, compute):  # noqa: ANN001, ANN201  # LW-920304; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
+def test_cmd_analyze_falls_back_to_csv_on_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rocm_root: Path,
+    capsys: pytest.CaptureFixture[str],
+    compute: ModuleType,
+) -> None:
     (tmp_path / "pmc_perf.csv").write_text("Kernel_Name,Duration\nkernel_a,10\n", encoding="utf-8")
-    monkeypatch.setattr(
-        compute, "find_rocprof_compute_bin", lambda: "/opt/rocm/bin/rocprof-compute"
-    )
-    monkeypatch.setattr(compute, "find_deps_python", lambda _bin: "/usr/bin/python3")
-    monkeypatch.setattr(
-        compute, "run_with_timeout", lambda *_a, **_kw: (1, "dependency gate error")
-    )
+    _make_executable(rocm_root / "bin" / "rocprof-compute")
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_PYTHON_ENV, "/fake/python3")
+    run_tool = FakeToolRunner(lambda _cmd: (1, "dependency gate error"))
 
-    ns = argparse.Namespace(
-        workload_dir=str(tmp_path), blocks="0,2,4", max_stat=10, kernel="", timeout=60.0
-    )
-    compute.cmd_analyze(ns)
+    compute.cmd_analyze(_analyze_ns(tmp_path), run=_fixed_runner(0), run_tool=run_tool)
 
     out = capsys.readouterr().out
     assert "NOTE: analyze failed" in out
@@ -1068,17 +1118,18 @@ def test_cmd_analyze_falls_back_to_csv_on_nonzero_exit(monkeypatch, tmp_path, ca
     assert "kernel_a" in out
 
 
-def test_cmd_analyze_falls_back_when_tool_missing(monkeypatch, tmp_path, capsys, compute):  # noqa: ANN001, ANN201  # LW-920305; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    monkeypatch.setattr(compute, "find_rocprof_compute_bin", lambda: None)
+@pytest.mark.usefixtures("rocm_root")
+def test_cmd_analyze_falls_back_when_tool_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], compute: ModuleType
+) -> None:
+    run_tool = FakeToolRunner(lambda _cmd: (0, "unreachable"))
 
-    ns = argparse.Namespace(
-        workload_dir=str(tmp_path), blocks="0,2,4", max_stat=10, kernel="", timeout=60.0
-    )
-    compute.cmd_analyze(ns)
+    compute.cmd_analyze(_analyze_ns(tmp_path), run=_fixed_runner(0), run_tool=run_tool)
 
     out = capsys.readouterr().out
     assert "not available" in out
     assert "No CSVs found" in out
+    assert run_tool.calls == []
 
 
 def test_cmd_analyze_exits_for_non_directory(compute):  # noqa: ANN001, ANN201  # LW-920306; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
@@ -1203,13 +1254,16 @@ def test_empty_match_guard_fires_iff_filter_matches_no_real_kernel(  # noqa: ANN
 # ---------------------------------------------------------------------------
 
 
-def test_main_dispatches_doctor(monkeypatch, compute):  # noqa: ANN001, ANN201  # LW-920317; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    calls: list[str] = []
-    monkeypatch.setattr(compute, "cmd_doctor", lambda _ns: calls.append("doctor"))
+def test_main_dispatches_doctor(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], compute: ModuleType
+) -> None:
+    # An override that is not executable makes the doctor report the binary missing
+    # without probing anything.
+    monkeypatch.setenv(compute.ROCPROF_COMPUTE_BIN_ENV, "/nonexistent/rocprof-compute")
 
     compute.main(["doctor"])
 
-    assert calls == ["doctor"]
+    assert "[FAIL] rocprof-compute binary: not found" in capsys.readouterr().out
 
 
 def test_main_requires_a_subcommand(compute):  # noqa: ANN001, ANN201  # LW-920318; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme

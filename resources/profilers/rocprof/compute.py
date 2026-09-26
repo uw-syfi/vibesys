@@ -74,6 +74,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,6 +105,10 @@ _BANNER_ART_RE = re.compile(r"^[\s_/\\|().,'`]+$")
 _CONTEXTS_COLLECTED_RE = re.compile(r"(\d+) contexts collected")
 _EMPTY_JOIN_KEYERROR = "KeyError: 'Grid_Size'"
 _WORKLOAD_KERNEL_CSVS = ("pmc_kernel_top.csv", "pmc_perf.csv")
+
+# Injection seams: the ``subprocess.run`` / ``run_with_timeout`` shapes the helpers below call.
+_ProbeRun = Callable[..., subprocess.CompletedProcess[str]]
+_ToolRun = Callable[..., tuple[int, str]]
 
 # ---------------------------------------------------------------------------
 # Locating the tool
@@ -168,14 +173,16 @@ def find_rocprof_legacy_bin() -> str | None:
     return None
 
 
-def find_aqlprofile_lib() -> str | None:
+def find_aqlprofile_lib(
+    *, find_library: Callable[[str], str | None] = ctypes.util.find_library
+) -> str | None:
     """Locate the aqlprofile shared library the profiler loads as its HSA tool."""
     for root in _rocm_path_roots():
         for name in _AQLPROFILE_LIB_NAMES:
             candidate = Path(root) / "lib" / name
             if candidate.is_file():
                 return str(candidate)
-    return ctypes.util.find_library("aqlprofile64") or ctypes.util.find_library("aqlprofile")
+    return find_library("aqlprofile64") or find_library("aqlprofile")
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +202,9 @@ def _shebang_python(path: str) -> str | None:
     return first_line[2:].strip().split(" ", 1)[0] or None
 
 
-def candidate_interpreters(rocprof_bin: str) -> list[str]:
+def candidate_interpreters(
+    rocprof_bin: str, *, which: Callable[[str], str | None] = shutil.which
+) -> list[str]:
     """Interpreters to try, in preference order.
 
     ``VIBESYS_ROCPROF_COMPUTE_PYTHON`` override, the tool's own shebang
@@ -213,19 +222,21 @@ def candidate_interpreters(rocprof_bin: str) -> list[str]:
     add(os.environ.get(ROCPROF_COMPUTE_PYTHON_ENV))
     add(_shebang_python(rocprof_bin))
     add(sys.executable)
-    add(shutil.which("python3"))
+    add(which("python3"))
     add("/usr/bin/python3")
     return ordered
 
 
-def _python_satisfies_deps(python: str, rocprof_bin: str) -> bool:
+def _python_satisfies_deps(
+    python: str, rocprof_bin: str, *, run: _ProbeRun = subprocess.run
+) -> bool:
     """True iff ``python`` can run the rocprof-compute CLI at all.
 
     ``--help`` is enough to trip ``verify_deps()`` without doing any real
     profiling work.
     """
     try:
-        result = subprocess.run(  # noqa: S603  # LW-920129; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+        result = run(
             [python, rocprof_bin, "--help"],
             capture_output=True,
             timeout=DEFAULT_DEPS_CHECK_TIMEOUT,
@@ -237,21 +248,21 @@ def _python_satisfies_deps(python: str, rocprof_bin: str) -> bool:
     return result.returncode == 0
 
 
-def find_deps_python(rocprof_bin: str) -> str | None:
+def find_deps_python(rocprof_bin: str, *, run: _ProbeRun = subprocess.run) -> str | None:
     """First candidate interpreter whose deps satisfy the dependency gate."""
     for python in candidate_interpreters(rocprof_bin):
-        if _python_satisfies_deps(python, rocprof_bin):
+        if _python_satisfies_deps(python, rocprof_bin, run=run):
             return python
     return None
 
 
-def check_pandas_version(python: str) -> tuple[bool, str]:
+def check_pandas_version(python: str, *, run: _ProbeRun = subprocess.run) -> tuple[bool, str]:
     """Check pandas is importable under ``python`` and its major version < 3.
 
     rocprof-compute's CSV-to-report conversion silently breaks on pandas>=3.
     """
     try:
-        result = subprocess.run(  # noqa: S603  # LW-920130; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+        result = run(
             [python, "-c", "import pandas; print(pandas.__version__)"],
             capture_output=True,
             text=True,
@@ -310,22 +321,24 @@ def _check_rocprof_bin() -> tuple[_DoctorCheck, str | None]:
     return _DoctorCheck("FAIL", "rocprof-compute binary: not found", fix), None
 
 
-def _check_deps_python(rocprof_bin: str | None) -> tuple[_DoctorCheck, str | None]:
+def _check_deps_python(
+    rocprof_bin: str | None, *, run: _ProbeRun
+) -> tuple[_DoctorCheck, str | None]:
     if not rocprof_bin:
         return _DoctorCheck(
             "SKIP", "deps interpreter: no rocprof-compute binary to check against"
         ), None
-    deps_python = find_deps_python(rocprof_bin)
+    deps_python = find_deps_python(rocprof_bin, run=run)
     if deps_python:
         return _DoctorCheck("OK", f"deps interpreter: {deps_python}"), deps_python
     fix = "deps interpreter: no candidate interpreter satisfies the dependency gate"
     return _DoctorCheck("FAIL", fix, _private_venv_recipe()), None
 
 
-def _check_pandas(deps_python: str | None) -> _DoctorCheck:
+def _check_pandas(deps_python: str | None, *, run: _ProbeRun) -> _DoctorCheck:
     if not deps_python:
         return _DoctorCheck("SKIP", "pandas: no deps interpreter to check under")
-    pandas_ok, pandas_msg = check_pandas_version(deps_python)
+    pandas_ok, pandas_msg = check_pandas_version(deps_python, run=run)
     if pandas_ok:
         return _DoctorCheck("OK", f"pandas: {pandas_msg}")
     fix = f"Install pandas<3 into {deps_python}: `{deps_python} -m pip install 'pandas<3'`."
@@ -362,12 +375,14 @@ def _check_aqlprofile() -> _DoctorCheck:
 _VERSION_RE = re.compile(r"rocprofiler-compute version:\s*(\S+)")
 
 
-def _check_version(rocprof_bin: str | None, deps_python: str | None) -> _DoctorCheck:
+def _check_version(
+    rocprof_bin: str | None, deps_python: str | None, *, run: _ProbeRun
+) -> _DoctorCheck:
     """Informational: report the installed version (confirmed working: 3.1.0)."""
     if not rocprof_bin or not deps_python:
         return _DoctorCheck("SKIP", "version: no runnable rocprof-compute to check")
     try:
-        result = subprocess.run(  # noqa: S603  # LW-920132; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+        result = run(
             [deps_python, rocprof_bin, "--version"],
             capture_output=True,
             text=True,
@@ -384,16 +399,16 @@ def _check_version(rocprof_bin: str | None, deps_python: str | None) -> _DoctorC
     return _DoctorCheck("OK", f"version: {version}{note}")
 
 
-def cmd_doctor(ns: argparse.Namespace) -> None:
+def cmd_doctor(ns: argparse.Namespace, *, run: _ProbeRun = subprocess.run) -> None:
     """Diagnose the rocprof-compute install and print actionable fixes."""
     del ns
     bin_check, rocprof_bin = _check_rocprof_bin()
-    deps_check, deps_python = _check_deps_python(rocprof_bin)
+    deps_check, deps_python = _check_deps_python(rocprof_bin, run=run)
     checks = [
         bin_check,
         deps_check,
-        _check_pandas(deps_python),
-        _check_version(rocprof_bin, deps_python),
+        _check_pandas(deps_python, run=run),
+        _check_version(rocprof_bin, deps_python, run=run),
         _check_rocprof_legacy(),
         _check_aqlprofile(),
     ]
@@ -504,7 +519,10 @@ def run_with_timeout(
 
 
 def check_torch_import_under_rocprofv3(
-    python: str, *, timeout: float = DEFAULT_PREFLIGHT_TIMEOUT
+    python: str,
+    *,
+    timeout: float = DEFAULT_PREFLIGHT_TIMEOUT,
+    run_tool: _ToolRun = run_with_timeout,
 ) -> tuple[bool, str]:
     """Fast preflight: does ``python -c 'import torch'`` survive under rocprofv3?
 
@@ -520,7 +538,7 @@ def check_torch_import_under_rocprofv3(
     if not rocprofv3:
         return True, "rocprofv3 not found; skipping preflight"
     cmd = [rocprofv3, "--hip-trace", "--", python, "-c", "import torch"]
-    rc, out = run_with_timeout(cmd, timeout=timeout)
+    rc, out = run_tool(cmd, timeout=timeout)
     if rc == 0:
         return True, ""
     return False, out[-1000:]
@@ -539,7 +557,7 @@ def _resolve_profiled_cmd(raw_cmd: list[str]) -> list[str]:
     return cmd
 
 
-def _require_rocprof_compute() -> tuple[str, str]:
+def _require_rocprof_compute(*, run: _ProbeRun = subprocess.run) -> tuple[str, str]:
     """Resolve ``(rocprof_bin, deps_python)``, or exit with an actionable message."""
     rocprof_bin = find_rocprof_compute_bin()
     if not rocprof_bin:
@@ -547,7 +565,7 @@ def _require_rocprof_compute() -> tuple[str, str]:
             "rocprof-compute not found. Run `python compute.py doctor` for how to install or "
             f"point at it (or set ${ROCPROF_COMPUTE_BIN_ENV})."
         )
-    python = find_deps_python(rocprof_bin)
+    python = find_deps_python(rocprof_bin, run=run)
     if not python:
         sys.exit(
             "rocprof-compute is installed, but no interpreter satisfies its dependency gate. "
@@ -556,10 +574,12 @@ def _require_rocprof_compute() -> tuple[str, str]:
     return rocprof_bin, python
 
 
-def _maybe_preflight_torch_import(ns: argparse.Namespace, cmd: list[str]) -> None:
+def _maybe_preflight_torch_import(
+    ns: argparse.Namespace, cmd: list[str], *, run_tool: _ToolRun = run_with_timeout
+) -> None:
     if not ns.check_torch_import:
         return
-    ok, detail = check_torch_import_under_rocprofv3(cmd[0])
+    ok, detail = check_torch_import_under_rocprofv3(cmd[0], run_tool=run_tool)
     if ok:
         return
     print(f"[FAIL] rocprofv3 cannot import torch under {cmd[0]!r}; not profiling.")  # noqa: T201  # LW-920139; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
@@ -669,19 +689,25 @@ def _report_profile_result(
     )
 
 
-def cmd_profile(ns: argparse.Namespace) -> None:
+def cmd_profile(
+    ns: argparse.Namespace,
+    *,
+    run: _ProbeRun = subprocess.run,
+    run_tool: _ToolRun = run_with_timeout,
+    install_handlers: Callable[[], None] = install_signal_handlers,
+) -> None:
     """Run ``rocprof-compute profile`` with a hard timeout, own process group."""
     cmd = _resolve_profiled_cmd(ns.cmd)
-    rocprof_bin, python = _require_rocprof_compute()
-    _maybe_preflight_torch_import(ns, cmd)
+    rocprof_bin, python = _require_rocprof_compute(run=run)
+    _maybe_preflight_torch_import(ns, cmd, run_tool=run_tool)
 
     out_dir = Path(ns.out)
     workload_dir = out_dir / "workloads" / ns.name
     out_dir.mkdir(parents=True, exist_ok=True)
-    install_signal_handlers()
+    install_handlers()
 
     profile_cmd = _build_profile_cmd(python, rocprof_bin, ns, cmd, workload_dir)
-    rc, log = run_with_timeout(profile_cmd, timeout=ns.timeout)
+    rc, log = run_tool(profile_cmd, timeout=ns.timeout)
     _report_profile_result(rc, log, workload_dir, kernel=ns.kernel, dispatch=ns.dispatch)
 
 
@@ -857,14 +883,19 @@ def _print_csv_fallback(workload: str, *, max_rows: int) -> None:
             print("  " + ", ".join(row))  # noqa: T201  # LW-920161; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
-def cmd_analyze(ns: argparse.Namespace) -> None:
+def cmd_analyze(
+    ns: argparse.Namespace,
+    *,
+    run: _ProbeRun = subprocess.run,
+    run_tool: _ToolRun = run_with_timeout,
+) -> None:
     """Run ``rocprof-compute analyze``; fall back to raw CSVs if it fails."""
     workload = ns.workload_dir
     if not Path(workload).is_dir():
         sys.exit(f"analyze: not a directory: {workload}")
 
     rocprof_bin = find_rocprof_compute_bin()
-    python = find_deps_python(rocprof_bin) if rocprof_bin else None
+    python = find_deps_python(rocprof_bin, run=run) if rocprof_bin else None
     blocks = [b.strip() for b in ns.blocks.split(",") if b.strip()]
 
     reason = ""
@@ -883,7 +914,7 @@ def cmd_analyze(ns: argparse.Namespace) -> None:
         ]
         if ns.kernel:
             cmd += ["-k", ns.kernel]
-        rc, output = run_with_timeout(cmd, timeout=ns.timeout)
+        rc, output = run_tool(cmd, timeout=ns.timeout)
         if rc == 0:
             print(_clean_analyze_output(output))  # noqa: T201  # LW-920162; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             return

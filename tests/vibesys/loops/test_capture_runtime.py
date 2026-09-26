@@ -84,12 +84,15 @@ def _is_alive(pid: int) -> bool:
     return True
 
 
+_POLL_PAUSE = threading.Event()  # never set: ``wait(interval)`` is a pause between polls
+
+
 def _wait_until(predicate, *, timeout: float = 3.0, interval: float = 0.05) -> bool:  # noqa: ANN001  # LW-910179; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return True
-        time.sleep(interval)
+        _POLL_PAUSE.wait(interval)
     return predicate()
 
 
@@ -1109,7 +1112,7 @@ def test_list_captures_orders_newest_first_and_respects_limit() -> None:
         capture_id, directory = cr.new_capture("kernel_deep")
         cr.write_manifest(directory, {"kind": "kernel_deep", "status": "ok"})
         ids.append(capture_id)
-        time.sleep(0.01)  # distinct mtimes
+        os.utime(directory, (1_000_000 + len(ids), 1_000_000 + len(ids)))  # distinct mtimes
 
     summaries = cr.list_captures(limit=2)
     assert len(summaries) == 2
