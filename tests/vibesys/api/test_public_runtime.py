@@ -440,7 +440,9 @@ def test_root_workspace_and_typed_state_capabilities(tmp_path: Path) -> None:
             assert (root.path / "queue.py").read_text() == "VALUE = 1\n"
             await root.restore(changed)
             assert (root.path / "queue.py").read_text() == "VALUE = 2\n"
-            assert (await root.retain("public-probe", changed)).endswith("/candidates/public-probe")
+            retained_reference = await root.retain("public-probe", changed)
+            assert retained_reference is not None
+            assert retained_reference.endswith("/candidates/public-probe")
             with pytest.raises(ValueError, match="run root cannot be discarded"):
                 await root.discard()
             with pytest.raises(RuntimeError, match="cannot open isolated candidate sandboxes"):
