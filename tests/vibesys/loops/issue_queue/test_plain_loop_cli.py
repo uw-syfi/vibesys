@@ -43,6 +43,11 @@ class TestBuildParser:
         args = parser.parse_args([])
         assert args.max_issues_per_perf_eval == 3
 
+    def test_tracker_defaults_to_local(self) -> None:
+        args = build_parser().parse_args([])
+        assert args.tracker_backend == "local"
+        assert args.tracker_repository is None
+
     def test_default_resume_is_none(self) -> None:
         parser = build_parser()
         args = parser.parse_args([])
@@ -133,7 +138,20 @@ class TestMain:
             main()
         assert exc_info.value.code == 1
 
-    def test_main_passes_round_args_to_run_loop(self) -> None:
+    @pytest.mark.parametrize(
+        ("tracker_args", "tracker_backend", "tracker_repository"),
+        [
+            ([], "local", None),
+            (
+                ["--tracker-backend", "github", "--tracker-repository", "owner/repo"],
+                "github",
+                "owner/repo",
+            ),
+        ],
+    )
+    def test_main_passes_run_options_to_loop(
+        self, tracker_args: list[str], tracker_backend: str, tracker_repository: str | None
+    ) -> None:
         with (
             patch(
                 "sys.argv",
@@ -145,6 +163,7 @@ class TestMain:
                     "4",
                     "--max-issues-per-perf-eval",
                     "2",
+                    *tracker_args,
                 ],
             ),
             self._patch_config(),
@@ -158,6 +177,10 @@ class TestMain:
             assert request.orchestration.options["max_rounds"] == 7
             assert request.orchestration.options["max_attempts_per_issue"] == 4
             assert request.orchestration.options["max_issues_per_perf_eval"] == 2
+            assert request.orchestration.options["tracker"] == {
+                "backend": tracker_backend,
+                "repository": tracker_repository,
+            }
             assert request.runs_dir == Path("runs").resolve()
 
     def test_main_forwards_agent_backend_and_cli_provider(self) -> None:

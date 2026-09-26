@@ -1,6 +1,6 @@
 """Generic FastMCP stdio runner for :class:`~vs_agent.tools.ToolSpec` lists.
 
-Generalizes ``vs_issue_board.mcp``'s hand-written server: that module builds
+Generalizes ``vs_issue_tracker.mcp``'s hand-written server: that module builds
 one ``FastMCP`` instance and registers a fixed set of issue-tracker tools by
 hand. This module does the same registration generically, driven by data
 instead of a hardcoded tool list, and knows nothing about what any tool does.

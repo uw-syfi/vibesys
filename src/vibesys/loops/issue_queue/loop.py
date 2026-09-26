@@ -17,19 +17,34 @@ from vibesys.roles.implementer import ISSUE_IMPLEMENTER, IssueImplementerContext
 from vibesys.roles.judge import ISSUE_JUDGE, IssueJudgeContext
 from vibesys.roles.perf_eval import ISSUE_PERF_EVAL, IssuePerfEvalContext
 from vs_agent.api import RoundProgress
-from vs_issue_board.api import (
+from vs_issue_tracker.api import (
     CreateIssuePolicy,
     Issue,
     IssueTracker,
     IssueTrackerSession,
     IssueType,
     ProgressLog,
-    open_local_issue_tracker_session,
+    open_issue_tracker_session,
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "issue_queue"
 IssueQueuePhase = Literal["implementer", "judge", "perf_eval"]
+
+
+def _bootstrap_issue_title(objective: str) -> str:
+    """Summarize the task's first objective line for the initial issue title."""
+    summary = next(
+        (line.strip().lstrip("# ").strip() for line in objective.splitlines() if line.strip()),
+        "",
+    )
+    for prefix in ("Objective -", "Objective:"):
+        if summary.lower().startswith(prefix.lower()):
+            summary = summary[len(prefix) :].strip()
+            break
+    if not summary:
+        summary = "implement the task objective"
+    return f"Initial task: {summary[:100]}"
 
 
 class ImplementerUserContext(BaseModel):
@@ -56,6 +71,7 @@ class BootstrapContext(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    objective: str
     reference_path: str
     accuracy_command: str | None
     benchmark_command: str | None
@@ -207,17 +223,12 @@ class IssueQueueRun:
         state_store = IssueQueueStateStore(portable)
         local_dir = host.state.local_namespace.external_directory()
         issues_dir = local_dir / "issues"
-        board: IssueTracker | None = None
-
-        def render_changed_issues() -> None:
-            if board is not None:
-                render_all(issues_dir, board.list())
-
-        tracker_session = open_local_issue_tracker_session(
-            store_path=host.workspaces.root.path / "issues.json",
-            progress_path=local_dir / "progress.md",
+        tracker_session = open_issue_tracker_session(
+            options.tracker,
+            local_store_path=host.workspaces.root.path / "issues.json",
+            local_progress_path=local_dir / "progress.md",
             tool_store_path="issues.json",
-            on_change=render_changed_issues,
+            run_id=host.run_id,
             view_sink=lambda issues: render_all(issues_dir, issues),
         )
         board = tracker_session.tracker
@@ -254,7 +265,9 @@ class IssueQueueRun:
         """Create the first candidate-facing issue and commit the cursor."""
         if self.state.bootstrap_done:
             return
+        objective = self.host.request.objective or self.host.request.input_bundle.objective
         context = BootstrapContext(
+            objective=objective,
             reference_path=self.host.environment.reference_path,
             accuracy_command=self.host.environment.view.paths.accuracy_command,
             benchmark_command=self.host.environment.view.paths.benchmark_command,
@@ -263,7 +276,7 @@ class IssueQueueRun:
         description = self.prompt.render("bootstrap_issue.j2", **context.model_dump())
         issue = self.board.create(
             type=IssueType.FEATURE,
-            title="Build FastAPI inference server for the reference model",
+            title=_bootstrap_issue_title(objective),
             description=description,
             created_by="loop:bootstrap",
             iteration=max(self.state.round_idx + 1, 1),

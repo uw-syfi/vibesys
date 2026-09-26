@@ -12,7 +12,7 @@ from vibesys.loops.issue_queue.render import (
     render_issue_markdown,
     slugify,
 )
-from vs_issue_board.api import (
+from vs_issue_tracker.api import (
     Issue,
     IssueBoard,
     IssueEvent,

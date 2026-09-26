@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from vs_issue_board.api import IssueBoard, IssueType
-from vs_issue_board.format import format_issue_full, format_issue_short
-from vs_issue_board.policy import (
+from vs_issue_tracker.api import IssueBoard, IssueType
+from vs_issue_tracker.format import format_issue_full, format_issue_short
+from vs_issue_tracker.policy import (
     CreateIssuePolicy,
     check_create_allowed,
     create_issue_under_policy,

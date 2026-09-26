@@ -23,6 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import agentshim
@@ -56,7 +57,6 @@ from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from vs_agent.contracts import AgentSession
 
@@ -468,15 +468,26 @@ def test_the_host_sandbox_wraps_the_provider_launch(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_a, **_k: _FakeHostSandbox())
+    monkeypatch.setattr(
+        subject,
+        "build_host_sandbox",
+        lambda *_a, **_k: _FakeHostSandbox(path=str(tmp_path)),
+    )
+    binary = tmp_path / agentshim.get_provider(provider).profile.binary
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
     driver, fake = _driver(provider, scripted_turn(provider, text="ok"))
-    session = driver.create_session(_spec(tmp_path, provider=provider))
+    session = driver.create_session(
+        _spec(tmp_path, provider=provider, environment=(("PATH", str(tmp_path)),))
+    )
 
     session.run_turn(AgentTurnRequest(message="Do it"))
 
     argv = list(fake.requests[-1].argv)
     assert argv[0] == "/usr/bin/stub-sandbox"
-    assert argv[argv.index("--") + 1].endswith(agentshim.get_provider(provider).profile.binary)
+    binary = Path(argv[argv.index("--") + 1])
+    assert binary.is_absolute()
+    assert not binary.is_symlink()
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -551,6 +562,42 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
         assert argv[argv.index("-w") + 1] == "/workspace"
     else:
         assert argv[0] == "/usr/bin/stub-sandbox"
+
+
+def test_host_binary_lookup_resolves_symlinks_before_sandbox_launch(tmp_path: Path) -> None:
+    """A host sandbox must launch the granted executable path, not its alias.
+
+    test-isolation: This regression targets the binary lookup passed to
+    agentshim's transforming executor, which is the boundary where symlinks
+    otherwise become inaccessible inside bubblewrap.
+    """
+    install = tmp_path / "codex-install"
+    install.mkdir()
+    target = install / "codex-real"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o755)
+    alias_dir = tmp_path / "bin"
+    alias_dir.mkdir()
+    alias = alias_dir / "codex"
+    alias.symlink_to(target)
+
+    env = {"PATH": str(alias_dir)}
+    # lint-waiver: LW-010420 [SLF001]; exercise the driver-owned lookup used by the sandbox boundary.
+    # > Testing only the sandbox transform cannot catch the original mismatch between
+    # > the declared executable and the path passed to bubblewrap. A public lookup
+    # > API would expose an implementation detail solely for this regression.
+    resolver = subject._find_host_binary  # noqa: SLF001
+    assert resolver("codex", env) == str(target)
+
+    fake = FakeExecutor(scripted_turn("codex", text="ok"))
+    executor = subject.confine_to_sandbox(
+        fake,
+        _FakeHostSandbox(),
+        find_binary=resolver,
+    )
+    executor.check_binary(resolver("codex", env), env, timeout=1)
+
+    assert fake.requests[0].argv[-2:] == [str(target), "--help"]
 
 
 # ---------------------------------------------------------------------------

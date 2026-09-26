@@ -32,7 +32,7 @@ from vibesys.loops.issue_queue.orchestration import descriptor_from_options
 from vibesys.roles.common import Verdict
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_issue_board.api import IssueBoard, IssueStatus
+from vs_issue_tracker.api import IssueBoard, IssueStatus
 from vs_project.api import OrchestrationRunManifest, Project
 
 if TYPE_CHECKING:
@@ -71,6 +71,29 @@ def test_bootstrap_is_not_repeated_on_resume(tmp_path: Path) -> None:
     assert len(issues) == 1
     assert issues[0].created_by == "loop:bootstrap"
     assert [call.kind for call in second.calls] == ["perf_eval"]
+
+
+def test_bootstrap_issue_uses_the_run_objective(tmp_path: Path) -> None:
+    """The initial issue describes this task instead of assuming model serving."""
+    fake = _client()
+    fake.enqueue("implementer", implementer_response(1))
+    fake.enqueue("judge", judge_response(1, Verdict.PASS))
+    fake.enqueue("perf_eval", perf_eval_response())
+    run = run_plain(
+        tmp_path,
+        fake,
+        exp_name="objective-bootstrap",
+    )
+
+    issue = _board(run.project_dir).get(1)
+    assert issue is not None
+    assert issue.title == "Initial task: Maximize tok/s throughput."
+    assert "FastAPI" not in issue.description
+    assert "Maximize tok/s throughput." in issue.description
+    for kind in ("implementer", "judge", "perf_eval"):
+        prompt = fake.calls_for(kind)[0].system_prompt
+        assert "FastAPI inference server" not in prompt
+        assert "VibeServeModel" not in prompt
 
 
 def test_issue_blocks_after_max_attempts_exhausted(tmp_path: Path) -> None:
@@ -157,7 +180,7 @@ def test_budget_increase_on_resume_requires_clean_workspace(tmp_path: Path) -> N
 def test_phase_ordering_and_issue_board_tool_scoping(tmp_path: Path) -> None:
     """impl -> judge -> perf_eval, with per-phase issue-board tool access.
 
-    Only judge and perf_eval get the issue-board MCP tool (scoped by
+    Only judge and perf_eval get the issue tracker tools (scoped by
     creator/cap/allowed-types); the implementer works from the issue
     inlined in its prompt and gets no tool access.
     """
@@ -190,6 +213,7 @@ def test_phase_ordering_and_issue_board_tool_scoping(tmp_path: Path) -> None:
     }
 
     perf_call = fake.calls_for("perf_eval")[0]
+    assert "Use only the issue tracker tools provided for this turn" in perf_call.system_prompt
     assert perf_call.mcp_servers
     perf_spec = perf_call.mcp_servers[0]
     perf_args = _flags(perf_spec.args)

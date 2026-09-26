@@ -6,11 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration import OrchestrationResumeDecision
+from vs_issue_tracker.api import IssueTrackerConfig
 from vs_project.api import OrchestrationDescriptor
 
 
 class IssueQueueOptions(BaseModel):
-    """Resolved, strict plain-loop settings persisted in a v4 descriptor."""
+    """Resolved plain-loop settings, including its selected issue backend."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -18,6 +19,7 @@ class IssueQueueOptions(BaseModel):
     max_rounds: int = Field(gt=0)
     max_attempts_per_issue: int = Field(gt=0)
     max_issues_per_perf_eval: int = Field(gt=0)
+    tracker: IssueTrackerConfig = Field(default_factory=IssueTrackerConfig.local)
 
 
 def descriptor_from_options(options: IssueQueueOptions) -> OrchestrationDescriptor:

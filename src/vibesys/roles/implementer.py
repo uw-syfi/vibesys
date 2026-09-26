@@ -12,7 +12,7 @@ from vibesys.roles.common import SkillResourceSelection
 from vibesys.runtime import Keyed, Reuse, Role, Writes
 from vibesys.skills import ResolvedSkillSelection
 from vs_agent.api import SessionScope
-from vs_issue_board.api import Issue
+from vs_issue_tracker.api import Issue
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 
 

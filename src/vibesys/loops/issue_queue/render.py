@@ -26,7 +26,7 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
 
-from vs_issue_board.api import Issue, IssueEvent, IssueStatus
+from vs_issue_tracker.api import Issue, IssueEvent, IssueStatus
 
 if TYPE_CHECKING:
     from pathlib import Path

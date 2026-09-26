@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vs_issue_board.core import Issue, IssueTracker, IssueType
+from vs_issue_tracker.core import Issue, IssueTracker, IssueType
 
 
 @dataclass(frozen=True)

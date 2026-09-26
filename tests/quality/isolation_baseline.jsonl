@@ -1,9 +1,9 @@
 {"path": "libs/vs-agent/tests/test_fake_client.py", "rule": "private_import", "count": 5}
-{"path": "libs/vs-issue-board/tests/test_issue_board_core.py", "rule": "mock", "count": 4}
-{"path": "libs/vs-issue-board/tests/test_issue_board_core.py", "rule": "patch", "count": 1}
-{"path": "libs/vs-issue-board/tests/test_issue_board_core.py", "rule": "sleep", "count": 2}
-{"path": "libs/vs-issue-board/tests/test_mcp.py", "rule": "private_import", "count": 1}
-{"path": "libs/vs-issue-board/tests/test_policy_and_format.py", "rule": "private_import", "count": 2}
+{"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "mock", "count": 4}
+{"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "patch", "count": 1}
+{"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "sleep", "count": 2}
+{"path": "libs/vs-issue-tracker/tests/test_mcp.py", "rule": "private_import", "count": 1}
+{"path": "libs/vs-issue-tracker/tests/test_policy_and_format.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-project/tests/test_errors.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-project/tests/test_git_tracker_guards.py", "rule": "patch", "count": 4}
 {"path": "libs/vs-project/tests/test_state_guards.py", "rule": "patch", "count": 3}

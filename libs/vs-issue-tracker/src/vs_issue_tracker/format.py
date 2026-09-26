@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vs_issue_board.core import Issue
+    from vs_issue_tracker.core import Issue
 
 
 def format_issue_short(issue: Issue) -> str:

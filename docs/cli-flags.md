@@ -51,7 +51,7 @@ come from the domain and input bundle, not the interface mode.
 | --- | --- | --- |
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
 | `profile-guided` | Agent lifecycle with framework-owned component attribution and focus selection. | Requires `[profile_guided]` in the input manifest. Supports the agent flags. |
-| `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibesys/prompts/backend/`. |
+| `plain` | Issue-tracker loop with deterministic issue draining and perf evaluation. | `--tracker-backend local|github` selects storage; GitHub requires `--tracker-repository OWNER/REPOSITORY` and `gh` authentication. Backend and repository are fixed when resuming. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses domain-aware mutator, judge, and profiler roles. |
 
 Run the commands below with `vibesys`.

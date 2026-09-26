@@ -1,7 +1,7 @@
 """Direct unit tests for `vibesys.api.chat_tools_server`'s read-only MCP tools.
 
-Mirrors `vs_issue_board.mcp`'s own test pattern (see
-`libs/vs-issue-board/tests/test_mcp.py`): build the tool list, register it on
+Mirrors `vs_issue_tracker.mcp`'s own test pattern (see
+`libs/vs-issue-tracker/tests/test_mcp.py`): build the tool list, register it on
 a bare `FastMCP` via `vs_agent.mcp_server.register_tool`, and call tools
 through `FastMCP.call_tool`. We do not test the stdio JSON-RPC framing or
 `main`/`serve_stdio`; those are `mcp`/`vs_agent`'s responsibility.
@@ -125,7 +125,7 @@ def _server(tools: tuple[ToolSpec, ...]) -> FastMCP:
 
 
 async def _call(server: FastMCP, name: str, **kwargs: object) -> str:
-    """Invoke an MCP tool and return its string result (see vs_issue_board's helper).
+    """Invoke an MCP tool and return its string result (see vs_issue_tracker's helper).
 
     ``FastMCP.call_tool`` is declared as returning
     ``Sequence[ContentBlock] | dict[str, Any]``, but for a tool with an

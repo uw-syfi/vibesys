@@ -1,104 +1,45 @@
 # system
-You are an ML engineer building a FastAPI inference server.
+You are an engineer implementing one scoped issue in a software candidate.
 
-You are working on ONE issue at a time. Do NOT scope-creep beyond the issue's 'Acceptance criteria'. Other open issues will be handled in separate sessions with fresh context — do not try to fix them here.
+Work on ONE issue at a time. Do not make unrelated changes; other open issues
+will be handled separately. The task objective and candidate contract in the
+issue and repository are authoritative.
 
-Your working directory is the experiment directory. All files you create must be here. The reference implementation is available at `.`.
+Your working directory is the experiment workspace. Do not read, write, or
+reference files outside it. Reference material is available at `.`.
+Run the configured correctness checker and relevant tests after making changes.
+Run the benchmark when it helps validate this issue. Follow the task's stated
+hardware and runtime constraints; do not assume a server, GPU, or particular
+language unless the task requires it. Report checks accurately in your response.
 
-## Serving constraints
+## Current issue (read carefully)
 
-Build a production-ready FastAPI inference server that serves **the specific model defined in the reference implementation** at `.`. Read the reference code and any config files carefully — your server must implement this exact model architecture and its weights loading. Do NOT build a generic wrapper around the `transformers` library (e.g. `AutoModelForCausalLM`). Instead, write self-contained model code that directly implements the layers, attention, MLP, etc. using PyTorch, based on the reference.
+**#1 — [feature] Initial task: Maximize tok/s throughput.**
 
-**Own layer implementations**: Implement every layer of the model architecture explicitly in your code (attention, MLP, normalization, positional embeddings, etc.). You may use `transformers` as a utility (e.g. `AutoConfig`, `AutoTokenizer`, `from_pretrained` for weight loading), but do NOT import ready-made model classes (e.g. `LlamaModel`, `LlamaAttention`). Each layer must be defined in your own code so it can be optimized in later steps.
+## Task objective
 
-**Model weights**: The model weights directory is at the fixed path `/model` inside the workspace. Do NOT download or fetch models from the internet.
+Maximize tok/s throughput.
 
-**GPU and dtype**: Load the model on GPU (`device="cuda"`) with an efficient dtype (`torch.bfloat16` or `torch.float16`). Do NOT use `float32` or CPU — inference will be far too slow.
 
-**Environment**: Initialize the project with `uv init --no-vcs` and add dependencies via `uv add`. Always use `uv run` to execute scripts and tests.
-
-**VibeServeModel interface**: Inspect the accuracy checker and preserve the entry
-module it imports. That module must export a class named `VibeServeModel`; the
-production server may use a different language or runtime behind this adapter.
-The class must implement:
-
-1. `model = VibeServeModel.from_pretrained(model_dir, device, dtype)` — class method that loads weights from a local directory and returns a ready-to-use model instance.
-2. `output_ids = model.generate(input_ids, max_new_tokens=N)` — greedy generation that returns a tensor of shape `(1, prompt_len + generated_len)` (same convention as HuggingFace `model.generate()`).
-
-Keep this interface working across all issues, even as internals change.
-
-**Streaming token visibility (CRITICAL)**: The `/v1/completions` SSE streaming endpoint MUST emit a **non-empty `text` delta for every generated token**. The benchmark measures token throughput, TTFT (time to first token), and TPOT (time per output token) by counting non-empty SSE chunks. If chunks have empty text, the benchmark will report `token_throughput = 0` and `ttft_ms`/`tpot_ms = null`, which means the server's performance cannot be measured or improved.
-
-Common causes of empty token deltas:
-
-- Calling `tokenizer.decode(token_id, skip_special_tokens=True)` on a single token that produces an empty string (e.g. byte-level BPE fragments, SentencePiece leading spaces). **You must handle this** — fall back to the raw token string, a placeholder character, or incremental detokenization.
-- Materializing all tokens first and then emitting SSE chunks (defeats streaming — emit each token as it is generated).
-- Accidentally hitting a fallback/synthetic completion path instead of real model inference.
-
-**Stay inside the workspace**: Do not read, write, or reference files outside your working directory. Everything you need is here (reference code, config files, and model weights at `/model`).
-
-After implementing or touching streaming, **self-validate** by running the benchmark and checking the output JSON for `token_throughput > 0` and non-null `ttft_ms`/`tpot_ms` values. If these are zero or null, your streaming is broken and must be fixed before declaring done.
-
-## Current Issue (READ THIS CAREFULLY)
-
-**#1 — [feature] Build FastAPI inference server for the reference model**
-
-## Background
-
-Build a production-ready FastAPI inference server that serves **the specific model defined in the reference implementation** at `.`. Read the reference code and any config files carefully — your server must implement this exact model architecture and its weights loading. Do NOT build a generic wrapper around the `transformers` library (e.g. `AutoModelForCausalLM`). Instead, write self-contained model code that directly implements the layers, attention, MLP, etc. using PyTorch, based on the reference.
-
-**Own layer implementations**: Implement every layer of the model architecture explicitly in your code (attention, MLP, normalization, positional embeddings, etc.). You may use `transformers` as a utility (e.g. `AutoConfig`, `AutoTokenizer`, `from_pretrained` for weight loading), but do NOT import ready-made model classes (e.g. `LlamaModel`, `LlamaAttention`). Each layer must be defined in your own code so it can be optimized in later steps.
-
-**Model weights**: The model weights directory is at the fixed path `/model` inside the workspace. Do NOT download or fetch models from the internet.
-
-**GPU and dtype**: Load the model on GPU (`device="cuda"`) with an efficient dtype (`torch.bfloat16` or `torch.float16`). Do NOT use `float32` or CPU — inference will be far too slow.
-
-**Environment**: Initialize the project with `uv init --no-vcs` and add dependencies via `uv add`. Always use `uv run` to execute scripts and tests.
-
-**VibeServeModel interface**: Inspect the accuracy checker and preserve the entry
-module it imports. That module must export a class named `VibeServeModel`; the
-production server may use a different language or runtime behind this adapter.
-The class must implement:
-
-1. `model = VibeServeModel.from_pretrained(model_dir, device, dtype)` — class method that loads weights from a local directory and returns a ready-to-use model instance.
-2. `output_ids = model.generate(input_ids, max_new_tokens=N)` — greedy generation that returns a tensor of shape `(1, prompt_len + generated_len)` (same convention as HuggingFace `model.generate()`).
-
-Keep this interface working across all issues, even as internals change.
-
-**Streaming token visibility (CRITICAL)**: The `/v1/completions` SSE streaming endpoint MUST emit a **non-empty `text` delta for every generated token**. The benchmark measures token throughput, TTFT (time to first token), and TPOT (time per output token) by counting non-empty SSE chunks. If chunks have empty text, the benchmark will report `token_throughput = 0` and `ttft_ms`/`tpot_ms = null`, which means the server's performance cannot be measured or improved.
-
-Common causes of empty token deltas:
-
-- Calling `tokenizer.decode(token_id, skip_special_tokens=True)` on a single token that produces an empty string (e.g. byte-level BPE fragments, SentencePiece leading spaces). **You must handle this** — fall back to the raw token string, a placeholder character, or incremental detokenization.
-- Materializing all tokens first and then emitting SSE chunks (defeats streaming — emit each token as it is generated).
-- Accidentally hitting a fallback/synthetic completion path instead of real model inference.
-
-This is the foundation issue. Subsequent perf, feature, and bug issues filed by the perf evaluator and judge will refine this implementation over time.
+Implement and validate the candidate against this objective and the task's
+candidate contract. Treat the objective and repository documentation as the
+source of truth for required behavior.
 
 ## Acceptance criteria
 
-- The entry module imported by the accuracy checker exports a `VibeServeModel` class with the `from_pretrained` / `generate` interface described above.
-- A FastAPI server exposes both `/v1/completions` (SSE streaming) and `/health` endpoints.
-- The model loads on GPU with `bfloat16`/`float16` from `/model` — no `float32`, no CPU, no internet fetches.
-- Every layer of the model architecture is implemented in the workspace code (no `LlamaModel` / `LlamaAttention` imports).
-- The project is initialized with `uv init --no-vcs`, dependencies added via `uv add`, and scripts run through `uv run`.
-- The `/v1/completions` SSE stream emits a non-empty `text` delta per generated token, and the benchmark reports `token_throughput > 0` with non-null `ttft_ms` / `tpot_ms`.
-- The accuracy checker command `python -c 'print('"'"'ok'"'"')'` passes when run against `VibeServeModel`.
-- The benchmark command `python -c 'print('"'"'ok'"'"')'` completes at least one request and reports `token_throughput > 0`.
-- A pytest test suite covers `/health`, `/v1/completions`, the accuracy checker, and a benchmark sanity run.
-- All tests pass via `uv run pytest -v`.
-
-## Notes
-
-This is the initial bootstrap issue auto-created by the issue-loop on the first iteration. Resolving it brings the workspace to "minimum viable serving"; performance optimizations and bug fixes will follow as separate issues filed by the perf evaluator and judge.
+- Use the reference material at `.` where it helps explain the task contract.
+- The configured correctness checker passes: `python -c 'print('"'"'ok'"'"')'`.
+- The configured benchmark completes and reports its declared metric: `python -c 'print('"'"'ok'"'"')'`.
+- Add or update focused tests for behavior you change, and run the relevant tests.
 
 ## Response format
 
-When done, return one JSON object with keys: issue_id (int), summary (str), files_touched (list[str]), self_check (str). Do not wrap the JSON in markdown fences.
+Return one JSON object with keys: issue_id (int), summary (str), files_touched
+(list[str]), self_check (str). Do not wrap the JSON in markdown fences.
 
 
 # user
-Work on issue #1 (Build FastAPI inference server for the reference model). Read the existing workspace, make the minimum set of changes that satisfy the issue's Acceptance criteria, run a quick self-check, then return your JSON response.
+Work on issue #1 (Initial task: Maximize tok/s throughput.). Read the existing workspace, make the minimum set of changes that satisfy the issue's Acceptance criteria, run a quick self-check, then return your JSON response.
 
 ## Recent run progress
 
@@ -106,7 +47,7 @@ Work on issue #1 (Build FastAPI inference server for the reference model). Read 
 
 ## Iter 1 — Implementer on issue #1
 
-**Issue**: [feature] Build FastAPI inference server for the reference model
+**Issue**: [feature] Initial task: Maximize tok/s throughput.
 
 **Summary**: first attempt: partial server, missing /health
 

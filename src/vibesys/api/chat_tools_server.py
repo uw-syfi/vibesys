@@ -8,8 +8,7 @@ run's portable state and raw logs into the chat agent's sandbox for `rg`/
 tools. A chat agent driver launches `python -m vibesys.api.chat_tools_server
 --run-id <id> --project-root <path>` per `vibesys.api.session
 ._OpenedAgentEnvironment.investigation_tools`; this module rebuilds its own
-tool list from those two primitives, mirroring
-`vs_issue_board.mcp`'s standalone-server shape.
+tool list from those two primitives as a standalone agent tool server.
 
 Tool set:
 

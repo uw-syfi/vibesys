@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from vs_issue_board.api import FileProgressLog, ProgressLog
+from vs_issue_tracker.api import FileProgressLog, ProgressLog
 
 
 def test_file_progress_log_creates_and_appends_to_markdown(tmp_path: Path) -> None:

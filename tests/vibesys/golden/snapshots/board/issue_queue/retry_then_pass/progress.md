@@ -2,7 +2,7 @@
 
 ## Iter 1 — Implementer on issue #1
 
-**Issue**: [feature] Build FastAPI inference server for the reference model
+**Issue**: [feature] Initial task: Maximize tok/s throughput.
 
 **Summary**: first attempt: partial server, missing /health
 
@@ -21,7 +21,7 @@
 
 ## Iter 1 — Implementer on issue #1
 
-**Issue**: [feature] Build FastAPI inference server for the reference model
+**Issue**: [feature] Initial task: Maximize tok/s throughput.
 
 **Summary**: second attempt: added /health after judge feedback
 

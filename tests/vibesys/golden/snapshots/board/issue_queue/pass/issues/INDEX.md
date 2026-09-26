@@ -4,4 +4,4 @@
 
 | ID | Type | Title | Attempts | Created iter | Updated |
 |---:|------|-------|---------:|-------------:|---------|
-| 1 | feature | [Build FastAPI inference server for the reference model](0001-build-fastapi-inference-server-for-the-r.md) | 1 | 1 | <TIMESTAMP> |
+| 1 | feature | [Initial task: Maximize tok/s throughput.](0001-initial-task-maximize-tok-s-throughput.md) | 1 | 1 | <TIMESTAMP> |
