@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -13,8 +14,10 @@ import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
 from entrypoints.server import (
     _control_socket_from_argv,
+    _DetachedLaunchEffects,
     _headless_argv,
     _read_only_log_from_argv,
+    _spawn_detached,
     _web_assets_from_argv,
     _web_instance_from_argv,
     _web_origins_from_argv,
@@ -26,6 +29,58 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import BinaryIO
+
+
+class RecordingDetachedProcess:
+    def __init__(self, status: int | None) -> None:
+        self.status = status
+        self.terminated = False
+        self.killed = False
+
+    def poll(self) -> int | None:
+        return self.status
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.status = -15
+
+    def wait(self, timeout: float | None = None) -> int:
+        assert timeout == 2.0
+        return self.status or 0
+
+    def kill(self) -> None:
+        self.killed = True
+        self.status = -9
+
+
+class RecordingDetachedEffects(_DetachedLaunchEffects):
+    def __init__(self, process: RecordingDetachedProcess, times: list[float]) -> None:
+        self.process = process
+        self.times = iter(times)
+        self.command: list[str] = []
+        self.environment: dict[str, str] = {}
+
+    def spawn(
+        self,
+        command: list[str],
+        environment: dict[str, str],
+        output: BinaryIO,
+    ) -> RecordingDetachedProcess:
+        self.command = command
+        self.environment = environment
+        output.write(b"Address already in use\n")
+        output.flush()
+        return self.process
+
+    def discover(self, instance_path: Path) -> None:
+        assert instance_path.name == "web-gateway.json"
+
+    def monotonic(self) -> float:
+        return next(self.times)
+
+    def sleep(self, seconds: float) -> None:
+        pytest.fail(f"unexpected sleep for {seconds}s")
 
 
 def test_control_socket_argument_forms() -> None:
@@ -142,6 +197,33 @@ def test_second_web_launch_reuses_live_instance(
 
     assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
     assert opened == [record.url]
+
+
+def test_detached_startup_surfaces_early_child_failure(tmp_path: Path) -> None:
+    process = RecordingDetachedProcess(status=7)
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0])
+    instance_path = tmp_path / "web-gateway.json"
+
+    with pytest.raises(RuntimeError, match=r"(?s)exited with status 7.*Address already in use"):
+        _spawn_detached(["--web", "--detach"], instance_path, effects)
+
+    assert effects.command[-2:] == ["--web", "--detach"]
+    assert effects.environment["VIBESYS_DETACHED_CHILD"] == "1"
+    log_path = tmp_path / "web-gateway.json.log"
+    assert log_path.read_text() == "Address already in use\n"
+    assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
+    assert process.terminated is False
+
+
+def test_detached_startup_terminates_a_child_that_never_becomes_ready(tmp_path: Path) -> None:
+    process = RecordingDetachedProcess(status=None)
+    effects = RecordingDetachedEffects(process, times=[0.0, 11.0])
+
+    with pytest.raises(RuntimeError, match=r"(?s)did not become ready.*Address already in use"):
+        _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
+
+    assert process.terminated is True
+    assert process.killed is False
 
 
 def test_discover_web_instance_waits_for_a_claimed_gateway(

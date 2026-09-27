@@ -10,7 +10,7 @@ import time
 import webbrowser
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, Protocol
 from urllib.parse import urlsplit
 
 from entrypoints import cli
@@ -22,10 +22,14 @@ from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
 
 _WEB_PORT_MAX = 65_535
+_DETACHED_START_TIMEOUT_SECONDS = 10.0
+_DETACHED_STOP_TIMEOUT_SECONDS = 2.0
+_DETACHED_LOG_TAIL_BYTES = 4_096
 
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
+    from typing import BinaryIO
 
     from vibesys.api import Config
 
@@ -250,27 +254,115 @@ def _missing_control_socket() -> NoReturn:
     )
 
 
-def _spawn_detached(arguments: list[str], instance_path: Path) -> None:
+class _DetachedProcess(Protocol):
+    def poll(self) -> int | None: ...
+
+    def terminate(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+    def kill(self) -> None: ...
+
+
+class _DetachedLaunchEffects:
+    """Process, discovery, and clock effects for detached gateway startup."""
+
+    def spawn(
+        self,
+        command: list[str],
+        environment: dict[str, str],
+        output: BinaryIO,
+    ) -> _DetachedProcess:
+        return subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101035 [S603]; launch the detached child with a fixed interpreter/module command
+            command,
+            cwd=Path.cwd(),
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    def discover(self, instance_path: Path) -> WebInstanceRecord | None:
+        return WebInstanceRecord.discover(instance_path, cleanup_stale=False)
+
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+
+_DETACHED_EFFECTS = _DetachedLaunchEffects()
+
+
+def _spawn_detached(
+    arguments: list[str],
+    instance_path: Path,
+    effects: _DetachedLaunchEffects = _DETACHED_EFFECTS,
+) -> None:
     """Start the long-lived child and wait for its capability record."""
     environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
-    subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101035 [S603]; launch the detached child with a fixed interpreter/module command
-        [sys.executable, "-m", "entrypoints.server", *arguments],
-        cwd=Path.cwd(),
-        env=environment,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        record = WebInstanceRecord.discover(instance_path, cleanup_stale=False)
-        if record is not None:
-            print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
-            webbrowser.open(record.url, new=2)
+    instance_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path = instance_path.with_name(f"{instance_path.name}.log")
+    descriptor = os.open(log_path, os.O_CREAT | os.O_TRUNC | os.O_RDWR, 0o600)
+    os.fchmod(descriptor, 0o600)
+    with os.fdopen(descriptor, "w+b") as output:
+        process = effects.spawn(
+            [sys.executable, "-m", "entrypoints.server", *arguments],
+            environment,
+            output,
+        )
+        deadline = effects.monotonic() + _DETACHED_START_TIMEOUT_SECONDS
+        while effects.monotonic() < deadline:
+            record = effects.discover(instance_path)
+            if record is not None:
+                print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
+                webbrowser.open(record.url, new=2)
+                return
+            status = process.poll()
+            if status is not None:
+                raise RuntimeError(
+                    _detached_failure(
+                        f"Detached VibeSys web gateway exited with status {status}",
+                        log_path,
+                        output,
+                    )
+                )
+            effects.sleep(0.05)
+        _stop_detached(process)
+        raise RuntimeError(
+            _detached_failure(
+                "Detached VibeSys web gateway did not become ready within 10 seconds",
+                log_path,
+                output,
+            )
+        )
+
+
+def _stop_detached(process: _DetachedProcess) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=_DETACHED_STOP_TIMEOUT_SECONDS)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=_DETACHED_STOP_TIMEOUT_SECONDS)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
             return
-        time.sleep(0.05)
-    raise RuntimeError("Detached VibeSys web gateway did not become ready")  # noqa: TRY003  # lint-waiver: LW-101037 [TRY003]; report a bounded child-startup failure to the launcher
+
+
+def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
+    output.flush()
+    length = output.seek(0, os.SEEK_END)
+    output.seek(max(0, length - _DETACHED_LOG_TAIL_BYTES))
+    tail = output.read().decode("utf-8", errors="replace").strip()
+    message = f"{summary}. Startup log: {log_path}"
+    return f"{message}\n{tail}" if tail else message
 
 
 def _discover_web_instance(path: Path) -> WebInstanceRecord | None:
