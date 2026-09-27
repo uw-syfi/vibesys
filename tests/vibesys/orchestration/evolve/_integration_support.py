@@ -11,8 +11,8 @@ from vibesys.api.testing import create_session
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.evolve import PLUGIN
 from vibesys.orchestration.evolve.models import EvolveState
+from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.profilers import ProfilerKind
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend

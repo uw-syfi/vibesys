@@ -45,7 +45,7 @@ from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.models import EvolveOptions
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
-from vibesys.profilers import ProfilerKind
+from vibesys.orchestration.profilers import ProfilerKind
 from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,

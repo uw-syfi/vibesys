@@ -8,11 +8,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.constants import DomainName
-from vibesys.profilers import (
+from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
     ProfilerDefinition,
     ProfilerKind,
+    ProfilerPreflightResult,
     allowed_profiler_kinds,
     coerce_profiler_kind,
     preflight_profiler_kind,
@@ -20,7 +21,6 @@ from vibesys.profilers import (
     require_domain_name,
     resolve_profiler_kind,
 )
-from vs_runtime.api.infrastructure import NativeCpuProfilerPreflight
 
 _DOMAINS = tuple(DomainName)
 _REQUESTED = tuple(ProfilerKind)
@@ -244,8 +244,8 @@ def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_ki
 def test_linux_cpu_preflight_fails_when_perf_is_unavailable() -> None:
     result = preflight_profiler_kind(
         ProfilerKind.LINUX_CPU,
-        native_preflight=lambda _kind: NativeCpuProfilerPreflight(
-            selected_tool="none",
+        native_preflight=lambda kind: ProfilerPreflightResult(
+            kind,
             usable=False,
             diagnostics=("perf_event_paranoid_restrictive", "perf_unavailable"),
             details=("perf_path=missing", "perf_event_paranoid=3", "kptr_restrict=0"),
@@ -258,11 +258,17 @@ def test_linux_cpu_preflight_fails_when_perf_is_unavailable() -> None:
     assert "perf_unavailable" in result.error_message()
 
 
+@pytest.mark.parametrize("kind", [ProfilerKind.LINUX_CPU, ProfilerKind.MACOS_CPU])
+def test_native_cpu_preflight_requires_product_adapter(kind: ProfilerKind) -> None:
+    with pytest.raises(ValueError, match="native_preflight is required"):
+        preflight_profiler_kind(kind)
+
+
 def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions() -> None:
     result = preflight_profiler_kind(
         ProfilerKind.LINUX_CPU,
-        native_preflight=lambda _kind: NativeCpuProfilerPreflight(
-            selected_tool="perf",
+        native_preflight=lambda kind: ProfilerPreflightResult(
+            kind,
             usable=True,
             diagnostics=("kernel_symbols_restricted",),
             details=("perf_path=/usr/bin/perf", "perf_event_paranoid=1", "kptr_restrict=1"),
@@ -390,8 +396,8 @@ def test_macos_cpu_preflight_reports_tool_availability(
     usable = selected_tool == "sample"
     result = preflight_profiler_kind(
         ProfilerKind.MACOS_CPU,
-        native_preflight=lambda _kind: NativeCpuProfilerPreflight(
-            selected_tool=selected_tool,
+        native_preflight=lambda kind: ProfilerPreflightResult(
+            kind,
             usable=usable,
             diagnostics=(),
             details=(

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.inputs import InputBundle
-from vibesys.profilers import ProfilerKind
+from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec

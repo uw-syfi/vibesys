@@ -28,7 +28,7 @@ from vibesys.inputs import (
     load_project_task,
 )
 from vibesys.orchestration.environment import open_run_environment
-from vibesys.profilers import ProfilerKind
+from vibesys.orchestration.profilers import ProfilerKind
 from vs_agent.api.images import ImagePushError
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (

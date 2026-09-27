@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from vibesys.profilers import tool_server as profiler_tool_server
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
     Driver,
+    StdioServerDescriptor,
     ToolServerDescriptor,
     expose_as_tools,
 )
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.config import Config
-    from vibesys.profilers import ProfilerKind
     from vs_runtime.api import Workspace
 
 
@@ -29,7 +28,7 @@ if TYPE_CHECKING:
 class AgentToolContext:
     """Product facts available while binding one declared agent tool."""
 
-    profiler_kind: ProfilerKind
+    profiler_id: str
 
 
 def _vibesys_runtime_host_resource() -> HostResource:
@@ -93,8 +92,16 @@ def agent_spec_from_config(
 def _profiler_tool(context: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
     """Bind the selected profiler's analysis server to one agent session."""
     resolved = cast("AgentToolContext", context)
-    spec = profiler_tool_server(resolved.profiler_kind)
-    return () if spec is None else (spec,)
+    if resolved.profiler_id == "none":
+        return ()
+    support_name = f"{resolved.profiler_id}_profiler"
+    return (
+        StdioServerDescriptor(
+            name=f"vibesys-{resolved.profiler_id.replace('_', '-')}-profiler",
+            command="python",
+            args=(f"{support_name}/server.py",),
+        ),
+    )
 
 
 def _issue_board_tool(_host: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:

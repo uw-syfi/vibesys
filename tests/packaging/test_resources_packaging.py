@@ -18,7 +18,7 @@ from resources_packaging import (
 from vibesys.api.request import default_skill_roots
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import PROJECT_ROOT
-from vibesys.profilers import PROFILERS_COMMON_STAGED_NAME
+from vibesys.orchestration.profilers import PROFILERS_COMMON_STAGED_NAME
 
 if TYPE_CHECKING:
     from pathlib import Path

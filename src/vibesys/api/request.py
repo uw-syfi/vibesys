@@ -32,8 +32,12 @@ from vibesys.inputs import (
     load_project_task,
     synthesize_input_bundle,
 )
+from vibesys.orchestration.profilers import (
+    CLI_PROFILER_CHOICES,
+    ProfilerKind,
+    coerce_profiler_kind,
+)
 from vibesys.orchestration.skills import resolve_skill_source_dirs
-from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibesys.repository import (
     REPOSITORY_SLUG,
     generate_experiment_name,

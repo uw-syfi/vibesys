@@ -17,7 +17,7 @@ from vibesys.api import (
 from vibesys.api.testing import create_session
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueState
-from vibesys.profilers import ProfilerKind
+from vibesys.orchestration.profilers import ProfilerKind
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend

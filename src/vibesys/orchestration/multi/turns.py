@@ -35,9 +35,8 @@ from vibesys.orchestration.multi.prompts import (
     render_pre_round_prompt,
     render_profiler_prompt,
 )
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
 from vibesys.orchestration.review import Verdict
-from vibesys.profilers import ProfilerKind, profiler_definition
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     ResolvedSkillResources,

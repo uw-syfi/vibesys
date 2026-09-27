@@ -7,7 +7,7 @@ starts its MCP server, renders its prompt, and records the returned `ProfilerSum
 ## Declare a profiler
 
 Add a uniform identifier to `ProfilerKind` and a `ProfilerDefinition` to the typed registry
-in `vibesys.profilers`. Definitions contain behavioral policy that cannot be inferred,
+in `vibesys.orchestration.profilers`. Definitions contain behavioral policy that cannot be inferred,
 such as supported domains or interface constraints. Keep backend, environment, and
 platform `auto` selection in `resolve_profiler_kind` rather than the packaging definition.
 

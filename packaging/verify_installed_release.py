@@ -23,7 +23,7 @@ from entrypoints.launcher import bundled_tui
 from vibesys.api.request import default_skill_roots
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
-from vibesys.profilers import ACTIVE_PROFILER_KINDS
+from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
 from vs_runtime.api.infrastructure import (
     SDKRoots,
     materialize_input_project,

@@ -17,8 +17,8 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration import memory
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import render_template
 
 if TYPE_CHECKING:

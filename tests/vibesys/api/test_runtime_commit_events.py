@@ -21,10 +21,10 @@ from pydantic import BaseModel
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_session
 from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
+from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.state import _emit_commit_events
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
-from vibesys.profilers import ProfilerKind
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor

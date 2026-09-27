@@ -41,14 +41,14 @@ from vibesys.inputs import (
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
-from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.plugin_catalog import built_in_orchestrations
-from vibesys.profilers import (
+from vibesys.orchestration.profilers import (
     PROFILERS_COMMON_STAGED_NAME,
     ProfilerKind,
     ProfilerPreflightResult,
     profiler_definition,
 )
+from vibesys.orchestration.request import ResumeRef, RunRequest
+from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
@@ -103,7 +103,7 @@ class _CreateContextOptions(TypedDict, total=False):
 def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
-        lambda kind: ProfilerPreflightResult(kind, usable=True),
+        lambda kind, **_kwargs: ProfilerPreflightResult(kind, usable=True),
     )
 
 

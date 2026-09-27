@@ -41,21 +41,22 @@ from vibesys.events import (
 )
 from vibesys.inputs import InputBundle, WorkspaceSource
 from vibesys.orchestration.environment import open_run_environment
+from vibesys.orchestration.profilers import (
+    ACTIVE_PROFILER_KINDS,
+    PROFILERS_COMMON_STAGED_NAME,
+    ProfilerDefinition,
+    ProfilerKind,
+    ProfilerPreflightResult,
+    default_profiler_for_backend,
+    preflight_profiler_kind,
+    profiler_definition,
+    resolve_profiler_kind,
+)
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.skills import (
     SkillSelection,
     platform_skill_excluded_paths,
     platform_skill_selection,
-)
-from vibesys.profilers import (
-    ACTIVE_PROFILER_KINDS,
-    PROFILERS_COMMON_STAGED_NAME,
-    ProfilerDefinition,
-    ProfilerKind,
-    default_profiler_for_backend,
-    preflight_profiler_kind,
-    profiler_definition,
-    resolve_profiler_kind,
 )
 from vibesys.run import (
     DeviceLease,
@@ -91,6 +92,7 @@ from vs_project.api import (
 from vs_runtime.api import OrchestrationResumeDecision, boot_trace
 from vs_runtime.api.infrastructure import (
     MultiSlotRoundTransactionCoordinator,
+    NativeCpuProfilerKind,
     ProjectMaterializer,
     ProtocolBenchmarkContract,
     RoundRecoveryOutcome,
@@ -108,6 +110,7 @@ from vs_runtime.api.infrastructure import (
     create_trusted_evaluation_executor,
     load_evaluator_package,
     make_run_environment_spec,
+    preflight_native_cpu_profiler,
     run_environment_record,
 )
 from vs_sandbox.api import (
@@ -184,6 +187,21 @@ def _profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, 
         if extra_dir is not None:
             extra.append((str(extra_dir), extra_definition.support_name))
     return tuple(extra)
+
+
+def _native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
+    """Adapt runtime-native host checks into profiler policy results."""
+    native_kind = {
+        ProfilerKind.LINUX_CPU: NativeCpuProfilerKind.LINUX,
+        ProfilerKind.MACOS_CPU: NativeCpuProfilerKind.MACOS,
+    }[kind]
+    capability = preflight_native_cpu_profiler(native_kind)
+    return ProfilerPreflightResult(
+        kind,
+        capability.usable,
+        capability.diagnostics,
+        capability.details,
+    )
 
 
 def _execution_status(error: BaseException | None) -> EventStatus:
@@ -531,7 +549,10 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                             ),
                         )
                     )
-            profiler_preflight = preflight_profiler_kind(resolved_profiler_kind)
+            profiler_preflight = preflight_profiler_kind(
+                resolved_profiler_kind,
+                native_preflight=_native_profiler_preflight,
+            )
             if not profiler_preflight.usable:
                 raise ConfigurationError(
                     ConfigurationDiagnostic(

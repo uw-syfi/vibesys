@@ -30,9 +30,8 @@ from vibesys.orchestration.evolve.population import (
     Proposal,
 )
 from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
 from vibesys.orchestration.review import Verdict
-from vibesys.profilers import ProfilerKind, profiler_definition
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,

@@ -102,7 +102,7 @@ class _ProductHostFactory:
             session_store,
             self.integration.events,
             resources.lprint,
-            AgentToolContext(resources.profiler_kind),
+            AgentToolContext(resources.profiler_kind.value),
             self.plugin.agents,
             self.agent_tool_bindings,
             root_resource=root_workspace_resource(

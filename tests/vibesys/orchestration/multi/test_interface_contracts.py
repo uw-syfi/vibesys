@@ -20,13 +20,13 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError, UnsupportedProfilerError
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.profilers import (
+from vibesys.orchestration.profilers import (
     ProfilerDefinition,
     ProfilerKind,
     profiler_definition,
     require_profiler_kind,
 )
+from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
@@ -40,7 +40,7 @@ def _effective_profiler_definition(
 ) -> ProfilerDefinition | None:
     """Exercise the same resolved-profiler guard ``MultiAgentTurns._profiler``
     applies (``require_profiler_kind`` + domain torch-support check), through
-    the public ``vibesys.profilers`` functions it composes, rather than
+    the public ``vibesys.orchestration.profilers`` functions it composes, rather than
     reaching into the strategy's private method.
     """
     resolved = require_profiler_kind(kind)

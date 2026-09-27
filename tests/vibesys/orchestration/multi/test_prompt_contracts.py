@@ -25,9 +25,9 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import render_template
 from vs_agent.cli_common import build_schema_hint
 
