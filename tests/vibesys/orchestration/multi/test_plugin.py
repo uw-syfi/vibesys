@@ -21,6 +21,7 @@ from vibesys.orchestration.multi.models import MultiState, PaidAttempt
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
+    AgentCapability,
     BenchmarkEvaluation,
     LocalValidationEvaluation,
     RunFacts,
@@ -38,6 +39,9 @@ if TYPE_CHECKING:
 
 
 DESIGNER, PROFILER, IMPLEMENTER, JUDGE = PLUGIN.agents
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+)
 
 
 def _options(**changes: object) -> BaseModel:
@@ -134,6 +138,7 @@ def _run(
             project_root=path,
             facts=facts,
             responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         if configure is not None:
             configure(run)
@@ -262,7 +267,12 @@ def test_invalid_plan_correction_exhaustion_fails_without_more_agent_work(
             _plan("H-01"),
             _plan("H-01"),
         )
-        run = FakeRun(PLUGIN, project_root=tmp_path, responder=script.respond)
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
         try:
             with pytest.raises(InvalidPlanError):
                 await PLUGIN.orchestrate(run, _options(max_rounds=2))
@@ -417,7 +427,12 @@ def test_paid_attempt_is_not_replayed_after_interrupted_turn(tmp_path: Path) -> 
             _implementation(),
             _judge(),
         )
-        run = FakeRun(PLUGIN, project_root=tmp_path, responder=script.respond)
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
         try:
             with pytest.raises(RuntimeError, match="agent disconnected"):
                 await PLUGIN.orchestrate(run, _options())

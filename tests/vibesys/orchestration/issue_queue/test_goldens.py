@@ -15,7 +15,7 @@ from tests.vibesys.golden.helpers import (
 )
 
 from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueOptions, IssueQueueState
-from vs_runtime.api import RunFacts, RunStatus
+from vs_runtime.api import AgentCapability, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -33,6 +33,14 @@ _ARTIFACT_PATHS = {
     "issues.json",
     "progress.md",
 }
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {
+        AgentCapability.MCP_SERVERS,
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.SESSION_REUSE,
+    }
+)
+_FAKE_AGENT_TOOLS = frozenset({"issue-board", "profiler"})
 
 
 def _options() -> IssueQueueOptions:
@@ -233,6 +241,8 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
                 benchmark_configured=True,
             ),
             responder=script.respond,
+            supported_agent_tools=_FAKE_AGENT_TOOLS,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         try:
             status = await PLUGIN.orchestrate(run, _options())

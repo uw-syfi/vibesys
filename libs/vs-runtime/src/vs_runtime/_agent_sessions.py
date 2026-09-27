@@ -15,6 +15,10 @@ from pydantic import BaseModel
 
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
+from vs_runtime._agent_declarations import (
+    validate_agent_capabilities,
+    validate_agent_tools,
+)
 from vs_runtime._agent_execution import RuntimeAgentExecution
 from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
@@ -287,11 +291,7 @@ class RuntimeAgentSessions:
                 role.workspace_access,
                 writable_paths,
             )
-            bound_tool_ids = tuple(tool.id for tool in role.tools if tool.id != "shell")
-            unknown_tools = sorted(set(bound_tool_ids) - self._tool_bindings.keys())
-            if unknown_tools:
-                message = f"unsupported agent tools: {', '.join(unknown_tools)}"
-                raise RuntimeContractError(message)
+            bound_tool_ids = validate_agent_tools(role, self._tool_bindings.keys())
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.
@@ -346,18 +346,17 @@ class RuntimeAgentSessions:
     ) -> RuntimeAgentSession:
         if self._closed:
             raise SessionClosedError
-        missing = {
-            capability.value
-            for capability in role.required_capabilities
-            if not _supports_required_capability(execution.capabilities, capability)
-        }
-        if member_id is not None and not execution.capabilities.provider_session_resume:
-            missing.add("provider_session_resume")
-        if bound_tool_ids and not execution.capabilities.tool_servers:
-            missing.add("tool_servers")
-        if missing:
-            message = f"agent driver lacks required capabilities: {', '.join(sorted(missing))}"
-            raise RuntimeContractError(message)
+        supported_capabilities = frozenset(
+            capability
+            for capability in AgentCapability
+            if _supports_required_capability(execution.capabilities, capability)
+        )
+        validate_agent_capabilities(
+            role,
+            supported_capabilities,
+            member_id=member_id,
+            has_bound_tools=bool(bound_tool_ids),
+        )
         return RuntimeAgentSession(
             execution,
             role,

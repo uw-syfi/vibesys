@@ -17,7 +17,13 @@ from vibesys.orchestration.profile_focus import ProfileAttributionError, Profile
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
-from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus
+from vs_runtime.api import (
+    AgentCapability,
+    BenchmarkEvaluation,
+    CommandResult,
+    RunFacts,
+    RunStatus,
+)
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -29,6 +35,9 @@ if TYPE_CHECKING:
 
 DESIGNER, IMPLEMENTER = PROFILE_GUIDED_PLUGIN.agents
 _COMPONENT = "prefill_launch_overhead"
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+)
 
 
 class _Script:
@@ -149,6 +158,7 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
                 benchmark_configured=True,
             ),
             responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         _script_attribution(run, 40.0, 35.0)
         run.evaluation.script_benchmark(
@@ -211,7 +221,11 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
 
 def test_profile_command_failure_is_typed(tmp_path: Path) -> None:
     async def scenario() -> FakeRun:
-        run = FakeRun(PROFILE_GUIDED_PLUGIN, project_root=tmp_path)
+        run = FakeRun(
+            PROFILE_GUIDED_PLUGIN,
+            project_root=tmp_path,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
         run.commands.script(CommandResult(output="profiler failed", exit_code=2))
         try:
             with pytest.raises(ProfileAttributionError, match="exit code 2"):

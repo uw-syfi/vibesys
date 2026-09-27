@@ -242,7 +242,14 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
 
     async def scenario() -> None:
         role = _role()
-        run = FakeRun(_plugin(role), responder=respond)
+        run = FakeRun(
+            _plugin(role),
+            responder=respond,
+            supported_agent_capabilities={
+                AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.SESSION_REUSE,
+            },
+        )
         workspace = _workspace()
         first = await run.agents.create_session(role, workspace=workspace, member_id="candidate-1")
         assert await first.turn("one") == "one"
@@ -315,6 +322,56 @@ def test_factory_rejects_role_not_declared_by_plugin() -> None:
         run = FakeRun(_plugin(_role()))
         with pytest.raises(UnknownAgentRoleError, match="reviewer"):
             await run.agents.create_session(_role("reviewer"), workspace=_workspace())
+
+    asyncio.run(scenario())
+
+
+def test_fake_session_factory_enforces_configured_tools_and_capabilities() -> None:
+    async def scenario() -> None:
+        role = AgentRole(
+            id="worker",
+            system_prompt="Use the board.",
+            tools=(AgentTool(id="shell"), AgentTool(id="board")),
+            required_capabilities=frozenset({AgentCapability.PROVIDER_SESSION_RESUME}),
+        )
+        plugin = _plugin(role)
+        unsupported_tool = FakeRun(plugin)
+        with pytest.raises(RuntimeContractError, match="unsupported agent tools: board"):
+            await unsupported_tool.agents.create_session(
+                role,
+                workspace=unsupported_tool.workspaces.root,
+            )
+
+        unsupported_capability = FakeRun(
+            plugin,
+            supported_agent_tools=frozenset({"board"}),
+            supported_agent_capabilities=frozenset({AgentCapability.MCP_SERVERS}),
+        )
+        with pytest.raises(RuntimeContractError, match="provider_session_resume"):
+            await unsupported_capability.agents.create_session(
+                role,
+                workspace=unsupported_capability.workspaces.root,
+            )
+
+        supported = FakeRun(
+            plugin,
+            supported_agent_tools=frozenset({"board"}),
+            supported_agent_capabilities=frozenset(
+                {
+                    AgentCapability.MCP_SERVERS,
+                    AgentCapability.PROVIDER_SESSION_RESUME,
+                }
+            ),
+        )
+        session = await supported.agents.create_session(
+            role,
+            workspace=supported.workspaces.root,
+            member_id="durable-worker",
+        )
+        assert session.role is role
+        await unsupported_tool.close()
+        await unsupported_capability.close()
+        await supported.close()
 
     asyncio.run(scenario())
 

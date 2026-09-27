@@ -27,12 +27,17 @@ from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AccuracyEvaluation,
+    AgentCapability,
     BenchmarkEvaluation,
     CommandResult,
     RunFacts,
     RunStatus,
 )
 from vs_runtime.api.testing import FakeRun
+
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -289,7 +294,13 @@ def test_public_policy_trajectory_matches_golden(
             accuracy_configured=scenario == "gate",
             benchmark_configured=scenario == "gate",
         )
-        run = FakeRun(plugin, project_root=tmp_path, facts=facts, responder=script.respond)
+        run = FakeRun(
+            plugin,
+            project_root=tmp_path,
+            facts=facts,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
         if profile_guided:
             for _round in range(rounds):
                 run.commands.script(CommandResult(output=_attribution(), exit_code=0))

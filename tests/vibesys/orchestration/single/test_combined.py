@@ -26,13 +26,17 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
 )
 from vs_loop_state.api import CandidateDisposition, RoundRecord
-from vs_runtime.api import AgentTurnTimeoutError, StructuredResponseError
+from vs_runtime.api import AgentCapability, AgentTurnTimeoutError, StructuredResponseError
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_runtime.api import AgentRole, Workspace
+
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+)
 
 
 def _plan(
@@ -124,7 +128,12 @@ class _Script:
 
 
 def _host(script: _Script) -> FakeRun:
-    return FakeRun(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
+    return FakeRun(
+        PLUGIN,
+        project_root=Path("/candidate"),
+        responder=script.respond,
+        supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+    )
 
 
 def _search() -> HypothesisSearch:

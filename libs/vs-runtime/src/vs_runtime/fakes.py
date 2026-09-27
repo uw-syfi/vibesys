@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, overload
@@ -11,12 +11,17 @@ from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, overload
 from pydantic import BaseModel
 
 from vs_agent.api import NULL_SKILL_SELECTION
+from vs_runtime._agent_declarations import (
+    validate_agent_capabilities,
+    validate_agent_tools,
+)
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
     AgentBinding,
+    AgentCapability,
     AgentRole,
     AgentSession,
     BenchmarkEvaluation,
@@ -464,13 +469,24 @@ class FakeAgentSessions:
         *,
         responder: TurnResponder = _echo_responder,
         bindings: dict[str, AgentBinding] | None = None,
+        supported_agent_tools: Collection[str] | None = None,
+        supported_agent_capabilities: Collection[AgentCapability] | None = None,
     ) -> None:
-        """Build the private role lookup from the plugin's authoritative tuple."""
+        """Build role lookup, optionally restricting simulated driver support."""
         self._roles = {role.id: role for role in agents}
         self._responder = responder
         self._bindings = bindings or {
             role.id: AgentBinding(backend="fake", driver="fake", provider="fake") for role in agents
         }
+        self._supported_agent_tools = frozenset(supported_agent_tools or ())
+        default_capabilities = {AgentCapability.SESSION_REUSE}
+        if self._supported_agent_tools:
+            default_capabilities.add(AgentCapability.MCP_SERVERS)
+        self._supported_agent_capabilities = frozenset(
+            default_capabilities
+            if supported_agent_capabilities is None
+            else supported_agent_capabilities
+        )
         # Keep observations separate from live ownership. Candidate teardown
         # removes sessions from the live set, but tests still need to inspect
         # what the public fake created and whether runtime ownership closed it.
@@ -500,13 +516,16 @@ class FakeAgentSessions:
         """Validate the declared role and create an independent conversation."""
         if self._closing:
             raise SessionClosedError
-        if self._creation_results:
-            failure = self._creation_results.pop(0)
-            if failure is not None:
-                raise failure
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
         validate_member_id(member_id)
+        bound_tool_ids = validate_agent_tools(role, self._supported_agent_tools)
+        validate_agent_capabilities(
+            role,
+            self._supported_agent_capabilities,
+            member_id=member_id,
+            has_bound_tools=bool(bound_tool_ids),
+        )
         validated_paths = validate_workspace_writable_paths(
             role.workspace_access,
             writable_paths,
@@ -514,6 +533,10 @@ class FakeAgentSessions:
         if not isinstance(workspace, FakeWorkspace):
             message = "workspace is not owned by this fake runtime"
             raise TypeError(message)
+        if self._creation_results:
+            failure = self._creation_results.pop(0)
+            if failure is not None:
+                raise failure
         session = FakeAgentSession(
             role,
             workspace,
@@ -1334,6 +1357,8 @@ class FakeRun(Run):
         facts: RunFacts | None = None,
         responder: TurnResponder = _echo_responder,
         agent_bindings: dict[str, AgentBinding] | None = None,
+        supported_agent_tools: Collection[str] | None = None,
+        supported_agent_capabilities: Collection[AgentCapability] | None = None,
         supports_parallel_candidates: bool = False,
     ) -> None:
         """Create a run whose private role map derives from ``plugin.agents``."""
@@ -1344,6 +1369,8 @@ class FakeRun(Run):
             plugin.agents,
             responder=responder,
             bindings=agent_bindings,
+            supported_agent_tools=supported_agent_tools,
+            supported_agent_capabilities=supported_agent_capabilities,
         )
         workspaces = FakeWorkspaces(
             FakeWorkspace(path=project_root),

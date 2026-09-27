@@ -18,7 +18,7 @@ from vibesys.orchestration.multi.contracts import (
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import RunStatus, StructuredResponseError
+from vs_runtime.api import AgentCapability, RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 
 if TYPE_CHECKING:
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 
 DESIGNER, _PROFILER, IMPLEMENTER, JUDGE = PLUGIN.agents
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+)
 
 
 def _options(**changes: object) -> BaseModel:
@@ -105,7 +108,12 @@ class _Script:
 
 def _run(path: Path, script: _Script, *, options: BaseModel | None = None) -> FakeRun:
     async def scenario() -> FakeRun:
-        run = FakeRun(PLUGIN, project_root=path, responder=script.respond)
+        run = FakeRun(
+            PLUGIN,
+            project_root=path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
         try:
             assert await PLUGIN.orchestrate(run, options or _options()) is RunStatus.SUCCEEDED
             return run

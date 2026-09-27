@@ -23,7 +23,7 @@ from vibesys.orchestration.issue_queue.prompts import (
     performance_message,
 )
 from vs_issue_tracker.api import IssueBoard, IssueStatus, IssueTrackerConfig, IssueType
-from vs_runtime.api import RunFacts, RunStatus
+from vs_runtime.api import AgentCapability, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -32,6 +32,14 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentRole
 
 IMPLEMENTER, JUDGE, PERF_EVALUATOR = PLUGIN.agents
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {
+        AgentCapability.MCP_SERVERS,
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.SESSION_REUSE,
+    }
+)
+_FAKE_AGENT_TOOLS = frozenset({"issue-board", "profiler"})
 
 
 def _options(**changes: object) -> IssueQueueOptions:
@@ -139,6 +147,8 @@ def _fake_host(path: Path, script: _Script) -> FakeRun:
             benchmark_configured=True,
         ),
         responder=script.respond,
+        supported_agent_tools=_FAKE_AGENT_TOOLS,
+        supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
     )
 
 
@@ -608,6 +618,8 @@ def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path:
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Build the candidate."),
             responder=script.respond,
+            supported_agent_tools=_FAKE_AGENT_TOOLS,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         try:
             with pytest.raises(RuntimeError, match="provider unavailable"):
@@ -705,6 +717,8 @@ def test_session_construction_failure_leaves_no_policy_artifacts(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Build the candidate."),
+            supported_agent_tools=_FAKE_AGENT_TOOLS,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         run.agents.script_creation(*creation_script)
         try:

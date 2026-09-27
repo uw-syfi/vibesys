@@ -18,7 +18,13 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
     SingleState,
 )
-from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, RunFacts, RunStatus
+from vs_runtime.api import (
+    AccuracyEvaluation,
+    AgentCapability,
+    BenchmarkEvaluation,
+    RunFacts,
+    RunStatus,
+)
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 
 if TYPE_CHECKING:
@@ -31,6 +37,9 @@ if TYPE_CHECKING:
 
 
 DESIGNER, IMPLEMENTER = PLUGIN.agents
+_FAKE_AGENT_CAPABILITIES = frozenset(
+    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+)
 
 
 def _options(**changes: object) -> BaseModel:
@@ -109,6 +118,7 @@ def _run(
             project_root=path,
             facts=facts,
             responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         if configure is not None:
             configure(run)
@@ -296,7 +306,12 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
 def test_paid_attempt_is_not_repeated_after_interrupted_turn(tmp_path: Path) -> None:
     async def scenario() -> tuple[FakeRun, _Script]:
         script = _Script(_plan("H-01"), RuntimeError("agent disconnected"), _response())
-        run = FakeRun(PLUGIN, project_root=tmp_path, responder=script.respond)
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
         try:
             with pytest.raises(RuntimeError, match="agent disconnected"):
                 await PLUGIN.orchestrate(run, _options(max_rounds=1))
