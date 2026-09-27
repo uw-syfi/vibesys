@@ -60,7 +60,6 @@ from vibesys.run import (
     DeviceLease,
     ExperimentRepository,
     ProjectProvisioningSpec,
-    RunPaths,
     RunResourceHandoff,
     RunStateNamespace,
     Workspace,
@@ -531,9 +530,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                     if config.perf_eval.load_levels is not None
                     else None
                 ),
-                feature_flags={
-                    flag.value: enabled for flag, enabled in config.feature_flags.items()
-                },
                 skills_dirs=[str(path) for path in skill_source_paths],
             )
 
@@ -638,11 +634,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             for message in buffered_logs:
                 logger.lprint(message)
 
-        paths = RunPaths(
-            project_root=project_root,
-            log_dir=log_dir,
-            run_log_path=logger.path,
-        )
         if existing:
             with boot_trace.span("workspace_repair"):
                 workspace_files.repair()
@@ -950,7 +941,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             run_environment=environment,
             integration=integration,
             logger=logger,
-            paths=paths,
+            project_root=project_root,
+            log_dir=log_dir,
             debug=debug,
             backend_impl=backend_impl,
             model_name=model_name,
@@ -1236,18 +1228,13 @@ def _assemble_workspace_resources(
     session = teardown_stack.enter_context(
         parent.run_environment.open(workspace_environment_request)
     )
-    paths = RunPaths(
-        project_root=workspace,
-        log_dir=log_dir,
-        run_log_path=logger.path,
-    )
-
     return _RunResources(
         backend=parent.backend,
         run_environment=parent.run_environment,
         integration=parent.integration,
         logger=logger,
-        paths=paths,
+        project_root=workspace,
+        log_dir=log_dir,
         debug=parent.debug,
         backend_impl=parent.backend_impl,
         model_name=parent.model_name,
@@ -1300,7 +1287,8 @@ class _RunResources:
         run_environment: RunEnvironment,
         integration: LocalRunIntegration,
         logger: RunLogger,
-        paths: RunPaths,
+        project_root: Path,
+        log_dir: Path,
         debug: bool,
         backend_impl: ComputeBackendImpl,
         model_name: str,
@@ -1344,7 +1332,8 @@ class _RunResources:
         self.integration = integration
         self.events = integration.events
         self.logger = logger
-        self._paths = paths
+        self.project_root = project_root
+        self.log_dir = log_dir
         self.debug = debug
         self.backend_impl = backend_impl
         self.model_name = model_name
@@ -1382,20 +1371,10 @@ class _RunResources:
         self.device = device
         self._closed = False
 
-    # -- path passthroughs ----------------------------------------------------
-    # Canonical values live in the frozen ``RunPaths`` record.
-
-    @property
-    def project_root(self) -> Path:
-        return self._paths.project_root
-
-    @property
-    def log_dir(self) -> Path:
-        return self._paths.log_dir
-
     @property
     def workspace(self) -> Path:
-        return self._paths.workspace
+        """Return the project root, which is also the only agent workspace."""
+        return self.project_root
 
     def publish_committed_state(
         self,
@@ -1413,7 +1392,8 @@ class _RunResources:
 
     @property
     def run_log_path(self) -> Path:
-        return self._paths.run_log_path
+        """Return the logger's current output path."""
+        return self.logger.path
 
     @property
     def run_log_file(self) -> TextIO:
@@ -1429,9 +1409,8 @@ class _RunResources:
         self.logger.lprint(text)
 
     def switch_log_file(self, label: int | str) -> None:
-        """Switch to a per-phase log file — see :meth:`RunLogger.switch`."""
+        """Switch to a per-phase log file, see :meth:`RunLogger.switch`."""
         self.logger.switch(label)
-        self._paths = replace(self._paths, run_log_path=self.logger.path)
 
     def reselect_gpu(self) -> None:
         """Delegate mid-run device rebalance — see :meth:`DeviceLease.reselect`."""

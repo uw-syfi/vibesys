@@ -12,7 +12,6 @@ from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.integration import LocalRunIntegration, RunResourceHandoff
 from vibesys.run.legacy_namespaces import RunStateNamespace
-from vibesys.run.paths import RunPaths
 from vibesys.run.project import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,
@@ -50,7 +49,6 @@ __all__ = [
     "RoundRecoveryOutcome",
     "RoundTransactionError",
     "RunControlChannel",
-    "RunPaths",
     "RunResourceHandoff",
     "RunState",
     "RunStateNamespace",

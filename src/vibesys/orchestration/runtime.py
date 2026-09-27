@@ -66,8 +66,12 @@ from vibesys.orchestration.workspaces import (
     _Workspaces,
 )
 from vibesys.render.sink import output_sink
-from vibesys.run.agent_sessions import SynchronizedSessionStore
-from vs_agent.api import AgentExecutionPolicy, AgentSessionState, build_agent_client
+from vs_agent.api import (
+    AgentExecutionPolicy,
+    AgentSessionState,
+    DurableSessionStore,
+    build_agent_client,
+)
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 
 if TYPE_CHECKING:
@@ -215,7 +219,7 @@ class RunContext:
         self._gate_executor = gate_executor
         self._resource_owner: _RunResources | None = None
         self._facts: RunFacts | None = None
-        self._session_store: SynchronizedSessionStore | None = None
+        self._session_store: DurableSessionStore | None = None
         self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
         self._spawn_lock = asyncio.Lock()
         self._parent_mutation_lock = asyncio.Lock()
@@ -544,7 +548,7 @@ class RunContext:
             self._integration,
             backend_factory=self._backend_factory,
         )
-        self._session_store = SynchronizedSessionStore(
+        self._session_store = DurableSessionStore(
             self._resource_owner.state.local("agent").slot("sessions.json", AgentSessionState),
             log=self._resource_owner.logger.lprint,
         )
