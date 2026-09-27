@@ -144,9 +144,7 @@ def _runtime(provider: _Provider) -> WorkspaceRuntime:
 
     return create_workspace_runtime(
         (),
-        root_resource=provider.root,
-        supports_parallel_candidates=provider.supports_parallel_candidates,
-        create_candidate_resource=provider.create_candidate,
+        workspace_resources=provider,
         resolve_configuration=unexpected_execution,
         session_store=lambda: None,
         control=create_run_control_channel(FakeRunControlEventSink()),

@@ -13,6 +13,8 @@ from vibesys.events import (
     CoreEventType,
     EventStatus,
     ExperimentsChangedData,
+    FrameworkSource,
+    FrameworkWarningData,
     InvocationFinishedData,
     InvocationStartedData,
     PhaseData,
@@ -26,6 +28,8 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStarted,
     AgentExecutionStatus,
     RunControlTransition,
+    WorkspaceResourceEvent,
+    WorkspaceRestoreFailed,
     create_run_control_channel,
 )
 
@@ -314,6 +318,22 @@ class LocalRunIntegration:
             data=PhaseData(phase=event.agent_id, attempt=None),
             **fields,
         )
+
+    def workspace_resource_event(self, event: WorkspaceResourceEvent) -> CoreEvent:
+        """Translate a runtime workspace observation into the core event format."""
+        if isinstance(event, WorkspaceRestoreFailed):
+            return self.events.emit(
+                CoreEventType.FRAMEWORK_WARNING,
+                data=FrameworkWarningData(
+                    summary=(
+                        f"could not restore workspace to revision {event.revision[:8]}; "
+                        "will retry on a later round"
+                    ),
+                    source=FrameworkSource.GIT_TRACKING,
+                    source_label="rollback",
+                ),
+            )
+        raise AssertionError(event)
 
     def add_committed_state_listener(
         self, listener: Callable[[str, BaseModel, tuple[str, ...] | None], None]

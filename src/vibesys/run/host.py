@@ -10,11 +10,8 @@ from typing import TYPE_CHECKING
 from vibesys.composition import AgentToolContext, agent_spec_from_config
 from vibesys.context import _StateBinding, open_run_resources
 from vibesys.orchestration.gates import _EvaluationAdapter
+from vibesys.orchestration.skills import platform_skill_selection
 from vibesys.orchestration.steering import splice_steering
-from vibesys.orchestration.workspace_resources import (
-    CandidateWorkspaceResourceFactory,
-    root_workspace_resource,
-)
 from vibesys.run.agent_events import CoreAgentEventSink
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
@@ -22,6 +19,8 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
     RunHostComponents,
+    WorkspaceResourceFactory,
+    create_model_request_reconciler,
     create_runtime_control,
     create_state,
     create_workspace_runtime,
@@ -42,7 +41,6 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentRole, OrchestrationPlugin, RunHost, Workspace
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
-        WorkspaceResource,
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl
@@ -106,23 +104,24 @@ class _ProductHostFactory:
             resources.state.local("agent").slot("sessions.json", AgentSessionState),
             log=resources.logger.lprint,
         )
+        workspace_resources = WorkspaceResourceFactory(
+            resources.project_resources,
+            resources.environment_resources,
+            evaluation_plan=resources.trusted_evaluation_plan,
+            memory_paths=self.plugin.memory_paths,
+            skill_source_dirs=tuple(resources.skill_source_paths),
+            skill_selection=platform_skill_selection(resources.backend),
+            host_resources=resources.agent_host_resources,
+            events=self.integration.workspace_resource_event,
+            model_requests=(
+                create_model_request_reconciler()
+                if resources.run_environment_view.env_kind == "modal"
+                else None
+            ),
+            root_agent_environment_opener=self._root_agent_environment_opener(),
+        )
         agent_runtime = self._agent_runtime(
-            resources,
-            session_store,
-            root_resource=root_workspace_resource(
-                resources,
-                self.plugin.memory_paths,
-                self.integration.events,
-                self.open_agent_environment,
-            ),
-            create_candidate_resource=CandidateWorkspaceResourceFactory(
-                resources,
-                self.request,
-                self.plugin.memory_paths,
-                self.integration.events,
-                self.open_agent_environment,
-            ),
-            blocking=blocking,
+            resources, session_store, workspace_resources=workspace_resources, blocking=blocking
         )
         agents = agent_runtime.agents
         workspaces = agent_runtime.workspaces
@@ -165,13 +164,30 @@ class _ProductHostFactory:
             resources=resources,
         )
 
+    def _root_agent_environment_opener(
+        self,
+    ) -> Callable[[AgentExecutionConfiguration], AgentExecutionEnvironment] | None:
+        opener = self.open_agent_environment
+        if opener is None:
+            return None
+
+        def open_environment(
+            configuration: AgentExecutionConfiguration,
+        ) -> AgentExecutionEnvironment:
+            return opener(
+                mounts=configuration.resources,
+                agent_backend=configuration.spec.backend.value,
+                cli_provider=configuration.spec.provider,
+            )
+
+        return open_environment
+
     def _agent_runtime(
         self,
         resources: _RunResources,
         session_store: DurableSessionStore,
         *,
-        root_resource: WorkspaceResource,
-        create_candidate_resource: CandidateWorkspaceResourceFactory,
+        workspace_resources: WorkspaceResourceFactory,
         blocking: BlockingOperations,
     ) -> WorkspaceRuntime:
         """Bind product configuration to the runtime's resource owner."""
@@ -191,11 +207,7 @@ class _ProductHostFactory:
         tool_context = AgentToolContext(resources.profiler_kind.value)
         return create_workspace_runtime(
             self.plugin.agents,
-            root_resource=root_resource,
-            supports_parallel_candidates=(
-                resources.run_environment_view.supports_parallel_candidate_evaluation
-            ),
-            create_candidate_resource=create_candidate_resource,
+            workspace_resources=workspace_resources,
             resolve_configuration=resolve_configuration,
             session_store=lambda: session_store,
             control=self.integration.control,

@@ -12,7 +12,6 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     RunEnvironmentView,
     open_run_environment_resources,
-    open_workspace_environment_resources,
 )
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
@@ -118,16 +117,14 @@ def test_workspace_resources_borrow_device_without_closing_it(tmp_path: Path) ->
         _request(tmp_path, backend),
         lambda _request: _session(events),
     )
-    workspace_session = _session(events)
-    workspace = open_workspace_environment_resources(
-        _request(tmp_path, backend),
-        lambda _request: workspace_session,
-        device=root.device,
-    )
+    workspace_request = _request(tmp_path, backend)
+    workspace = root.open_workspace(workspace_request)
 
     workspace.close()
     workspace.close()
     assert events == ["session:enter", "monitor:start", "session:enter", "session:close"]
+    assert workspace.request is workspace_request
+    assert workspace.device is root.device
 
     root.close()
     assert events[-2:] == ["monitor:stop", "session:close"]

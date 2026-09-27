@@ -294,11 +294,13 @@ class RunEnvironmentResources:
         session: RunEnvironmentSession,
         device: DeviceLease,
         ownership: ExitStack,
+        open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
     ) -> None:
         self.request = request
         self.session = session
         self.device = device
         self._ownership = ownership
+        self._open_session = open_session
         self._closed = False
 
     @property
@@ -309,6 +311,18 @@ class RunEnvironmentResources:
     def reselect_device(self) -> None:
         """Re-pick the active compute device when the environment permits it."""
         self.device.reselect()
+
+    def open_workspace(self, request: RunEnvironmentRequest) -> RunEnvironmentResources:
+        """Open a child workspace session that borrows this run's device lease."""
+        return open_workspace_environment_resources(
+            request,
+            self._open_session,
+            device=self.device,
+        )
+
+    def open_session(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
+        """Open an independently owned session using this environment's factory."""
+        return self._open_session(request)
 
     def close(self) -> None:
         """Release owned resources in reverse construction order exactly once."""
@@ -347,7 +361,7 @@ def open_run_environment_resources(
             )
             ownership.callback(device.close)
             device.start_monitor()
-        return RunEnvironmentResources(request, session, device, ownership)
+        return RunEnvironmentResources(request, session, device, ownership, open_session)
     except BaseException as construction_error:
         _close_failed_environment_resources(ownership, construction_error)
         raise
@@ -363,7 +377,7 @@ def open_workspace_environment_resources(
     ownership = ExitStack()
     try:
         session = ownership.enter_context(open_session(request))
-        return RunEnvironmentResources(request, session, device, ownership)
+        return RunEnvironmentResources(request, session, device, ownership, open_session)
     except BaseException as construction_error:
         _close_failed_environment_resources(ownership, construction_error)
         raise

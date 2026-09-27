@@ -205,6 +205,12 @@ from vs_runtime._trusted_evaluation_preparation import (
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
+from vs_runtime._workspace_resources import (
+    WorkspaceResourceEvent,
+    WorkspaceResourceEventSink,
+    WorkspaceResourceFactory,
+    WorkspaceRestoreFailed,
+)
 from vs_runtime._workspace_runtime import (
     CommandExecutionResult,
     RuntimeCommands,
@@ -216,6 +222,7 @@ from vs_runtime._workspaces import (
     OwnedWorkspaces,
     RuntimeWorkspaces,
     WorkspaceResource,
+    WorkspaceResourceProvider,
 )
 from vs_runtime.contracts import Workspace
 
@@ -233,15 +240,12 @@ def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel
 
 type AgentConfigurationResolver = Callable[[AgentRole], AgentExecutionConfiguration]
 type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
-type CandidateWorkspaceResourceFactory = Callable[[str, str], WorkspaceResource]
 
 
 def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution and workspace effects behind focused plugin-facing capabilities.
     roles: tuple[AgentRole, ...],
     *,
-    root_resource: WorkspaceResource,
-    supports_parallel_candidates: bool,
-    create_candidate_resource: CandidateWorkspaceResourceFactory,
+    workspace_resources: WorkspaceResourceProvider,
     resolve_configuration: AgentConfigurationResolver,
     session_store: Callable[[], SessionStore | None],
     control: RunControlChannel,
@@ -254,11 +258,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     log: Callable[[str], None] = print,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
-    workspaces = RuntimeWorkspaces(
-        root_resource,
-        supports_parallel_candidates=supports_parallel_candidates,
-        create_candidate_resource=create_candidate_resource,
-    )
+    workspaces = RuntimeWorkspaces(workspace_resources)
     agents = RuntimeAgentSessions(
         roles,
         workspaces=workspaces,
@@ -273,11 +273,12 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         log=log,
     )
     workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
+    commands = RuntimeCommands(workspaces, blocking)
     return WorkspaceRuntime(
         agents=agents,
         workspaces=workspaces,
-        commands=RuntimeCommands(workspaces, blocking),
-        evaluation=RuntimeWorkspaceEvaluation(workspaces),
+        commands=commands,
+        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands),
     )
 
 
@@ -503,6 +504,11 @@ __all__ = [
     "ValidationRecipe",
     "WorkspaceEvaluationSpec",
     "WorkspaceResource",
+    "WorkspaceResourceEvent",
+    "WorkspaceResourceEventSink",
+    "WorkspaceResourceFactory",
+    "WorkspaceResourceProvider",
+    "WorkspaceRestoreFailed",
     "WorkspaceRuntime",
     "WorkspaceSourceValue",
     "build_run_environment",

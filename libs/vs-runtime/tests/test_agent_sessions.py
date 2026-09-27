@@ -280,6 +280,13 @@ class _RuntimeEffects:
     tool_bindings: dict[str, Callable[[Workspace], tuple[ToolServerDescriptor, ...]]] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _WorkspaceResources:
+    root: _WorkspaceResource
+    create_candidate: Callable[[str, str], _WorkspaceResource]
+    supports_parallel_candidates: bool = True
+
+
 def _runtime(
     role: AgentRole,
     effects: _RuntimeEffects,
@@ -303,9 +310,7 @@ def _runtime(
 
     return create_workspace_runtime(
         (role,),
-        root_resource=selected_root,
-        supports_parallel_candidates=True,
-        create_candidate_resource=create_candidate,
+        workspace_resources=_WorkspaceResources(selected_root, create_candidate),
         resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
             agent_id=selected_role.id,
             spec=AgentSpec(backend=AgentBackend.STUB),
@@ -540,9 +545,7 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
         root_resource.scope_factory = lambda: _scope(cast("Workspace", root_resource), environments)
         runtime = create_workspace_runtime(
             (role,),
-            root_resource=root_resource,
-            supports_parallel_candidates=True,
-            create_candidate_resource=_candidate_resource,
+            workspace_resources=_WorkspaceResources(root_resource, _candidate_resource),
             resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
                 agent_id=selected_role.id,
                 spec=AgentSpec(backend=AgentBackend.STUB),
@@ -1091,9 +1094,7 @@ def test_environment_client_turn_and_cleanup_share_one_worker_thread() -> None:
         )
         runtime = create_workspace_runtime(
             (role,),
-            root_resource=root_resource,
-            supports_parallel_candidates=True,
-            create_candidate_resource=_candidate_resource,
+            workspace_resources=_WorkspaceResources(root_resource, _candidate_resource),
             resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
                 agent_id=selected_role.id,
                 spec=AgentSpec(backend=AgentBackend.STUB),

@@ -11,10 +11,8 @@ from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.context import (
-    WorkspaceResourceSpec,
     _profiler_support_extra,
     _RunResources,
-    create_workspace_resources,
     open_run_resources,
 )
 from vibesys.errors import ConfigurationError
@@ -291,7 +289,6 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
                 if event.type is CoreEventType.EXPERIMENTS_CHANGED
             ]
 
-            assert ctx.integration is integration
             assert len(changed) == 1
             assert changed[0].run_id == ctx.run_id
             assert changed[0].data is not None
@@ -721,39 +718,6 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> N
     portable = ctx.project.state.portable_namespace(ctx.run_id, "evolve")
     assert portable.agent_visible_path("new.json") in tree
     assert portable.agent_visible_path("old.json") not in tree
-
-
-def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> None:
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-
-    with _create_context(project, evaluator=evaluator) as parent:
-        parent_commit = parent.git.current_sha()
-        assert parent_commit is not None
-        candidate = create_workspace_resources(
-            parent,
-            WorkspaceResourceSpec(
-                scope_id="g2c3",
-                revision=parent_commit,
-                config=Config.model_validate({"model": {"name": "gpt-test"}}),
-                log_namespace="evolve",
-                log_directory="candidates",
-                agent_backend="stub",
-            ),
-        )
-        candidate_root = candidate.workspace
-        assert candidate_root == parent.project.state.candidate_worktree_directory(
-            parent.run_id,
-            "g2c3",
-        )
-        assert candidate.log_dir == (
-            parent.state.local("evolve").external_directory("candidates/g2c3/logs")
-        )
-        assert Path(candidate.run_environment_view.paths.objective).read_text() == (
-            parent.environment_request.objective
-        )
-        candidate.close()
-        assert not candidate_root.exists()
 
 
 def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:

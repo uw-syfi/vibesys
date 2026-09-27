@@ -130,7 +130,6 @@ graph TD
     vibesys.orchestration.gates --> vibesys
     vibesys.orchestration.gates --> vibesys.context
     vibesys.orchestration.gates --> vibesys.orchestration.request
-    vibesys.orchestration.gates --> vibesys.orchestration.workspace_resources
     vibesys.orchestration.hypothesis --> vibesys.orchestration.metrics
     vibesys.orchestration.hypothesis --> vibesys.orchestration.profile_focus
     vibesys.orchestration.hypothesis.readmodel --> vibesys.orchestration.hypothesis
@@ -172,9 +171,6 @@ graph TD
     vibesys.orchestration.single --> vibesys.orchestration.resume
     vibesys.orchestration.single --> vibesys.orchestration.review
     vibesys.orchestration.skills --> vibesys
-    vibesys.orchestration.workspace_resources --> vibesys
-    vibesys.orchestration.workspace_resources --> vibesys.context
-    vibesys.orchestration.workspace_resources --> vibesys.orchestration.request
     vibesys.plugin_catalog --> vibesys.orchestration.contracts
     vibesys.plugin_catalog --> vibesys.orchestration.evolve
     vibesys.plugin_catalog --> vibesys.orchestration.issue_queue
@@ -189,7 +185,6 @@ graph TD
     vibesys.run.host --> vibesys.orchestration.request
     vibesys.run.host --> vibesys.orchestration.skills
     vibesys.run.host --> vibesys.orchestration.steering
-    vibesys.run.host --> vibesys.orchestration.workspace_resources
     vibesys.run.host --> vibesys.run
 ```
 
@@ -346,7 +341,6 @@ graph TD
     vibesys.orchestration.gates --> vibesys
     vibesys.orchestration.gates --> vibesys.context
     vibesys.orchestration.gates --> vibesys.orchestration.request
-    vibesys.orchestration.gates --> vibesys.orchestration.workspace_resources
     vibesys.orchestration.gates --> vs_runtime
     vibesys.orchestration.hypothesis --> vibesys.orchestration.metrics
     vibesys.orchestration.hypothesis --> vibesys.orchestration.profile_focus
@@ -408,10 +402,6 @@ graph TD
     vibesys.orchestration.skills --> vibesys
     vibesys.orchestration.skills --> vs_agent
     vibesys.orchestration.skills --> vs_runtime
-    vibesys.orchestration.workspace_resources --> vibesys
-    vibesys.orchestration.workspace_resources --> vibesys.context
-    vibesys.orchestration.workspace_resources --> vibesys.orchestration.request
-    vibesys.orchestration.workspace_resources --> vs_runtime
     vibesys.plugin_catalog --> vibesys.orchestration.contracts
     vibesys.plugin_catalog --> vibesys.orchestration.evolve
     vibesys.plugin_catalog --> vibesys.orchestration.issue_queue
@@ -431,7 +421,6 @@ graph TD
     vibesys.run.host --> vibesys.orchestration.request
     vibesys.run.host --> vibesys.orchestration.skills
     vibesys.run.host --> vibesys.orchestration.steering
-    vibesys.run.host --> vibesys.orchestration.workspace_resources
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vs_agent
     vibesys.run.host --> vs_runtime

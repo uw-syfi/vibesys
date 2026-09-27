@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterator, Mapping
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.vibesys.orchestration.plugin import capability_plugin
@@ -13,25 +12,19 @@ from tests.vibesys.orchestration.plugin import capability_plugin
 from vibesys.api import (
     ComputeBackend,
     Config,
-    ConfigurationError,
     OrchestrationDescriptor,
     ProfilerKind,
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.context import borrow_run_agent_environment
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import ToolServerDescriptor
 from vs_runtime.api import Workspace
-from vs_runtime.api.infrastructure import SkyPilotEnvironment
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from vibesys.context import _RunResources
-
 
 _PLUGIN = capability_plugin("three-agent-rounds")
 
@@ -105,34 +98,6 @@ def _request(project_root: Path) -> RunRequest:
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-
-
-def test_skypilot_agents_borrow_the_workspace_session() -> None:
-    environment = SkyPilotEnvironment.from_options({"profile": "test-cluster"})
-    assert environment.config.profile == "test-cluster"
-    closed: list[bool] = []
-    session = SimpleNamespace(
-        view=SimpleNamespace(cli_sandboxed=False),
-        close=lambda: closed.append(True),
-    )
-    context = cast(
-        "_RunResources",
-        SimpleNamespace(
-            environment_request=SimpleNamespace(
-                agent_backend="stub", cli_provider="claude", project_path_policy=None
-            ),
-            run_environment_session=session,
-            skill_source_paths=(),
-            backend=ComputeBackend.CPU,
-            agent_host_resources=(),
-        ),
-    )
-    borrowed = borrow_run_agent_environment(context, agent_backend="stub", cli_provider="claude")
-    assert borrowed.session is session
-    borrowed.close()
-    assert not closed
-    with pytest.raises(ConfigurationError, match="must use its configured backend"):
-        borrow_run_agent_environment(context, cli_provider="codex")
 
 
 def test_root_workspace_capabilities(tmp_path: Path) -> None:

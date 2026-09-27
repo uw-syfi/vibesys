@@ -4,11 +4,10 @@ import shutil
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Protocol, TextIO, overload
+from typing import TextIO, overload
 
 from vibesys.composition import (
     _vibesys_runtime_host_resource,
@@ -16,7 +15,7 @@ from vibesys.composition import (
     prepare_domain_model_artifacts,
     resolve_agent_driver,
 )
-from vibesys.config import BUNDLED_RESOURCES, Config, as_config
+from vibesys.config import BUNDLED_RESOURCES, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
     ComputeBackend,
@@ -41,7 +40,7 @@ from vibesys.orchestration.profilers import (
     resolve_profiler_kind,
 )
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.skills import platform_skill_excluded_paths, platform_skill_selection
+from vibesys.orchestration.skills import platform_skill_excluded_paths
 from vibesys.run import (
     ExperimentRepository,
     ProjectProvisioningSpec,
@@ -83,9 +82,9 @@ from vs_runtime.api.infrastructure import (
     ProjectRunMismatchError,
     ProjectRunMismatchKind,
     ProjectRunRequest,
+    ProjectRunResources,
     ProjectStateDeclaration,
     ProtocolBenchmarkContract,
-    RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentResources,
     RunEnvironmentSession,
@@ -93,20 +92,13 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentView,
     RunState,
     ScalarBenchmarkContract,
-    ScopedAgentEnvironment,
-    SharedAgentEnvironmentConflictError,
-    TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
     build_run_environment,
-    create_model_request_reconciler,
-    create_trusted_evaluation_executor,
     load_evaluator_package,
     make_run_environment_spec,
-    open_agent_execution_environment,
     open_project_run_resources,
     open_run_environment_resources,
-    open_workspace_environment_resources,
     preflight_native_cpu_profiler,
     run_environment_record,
 )
@@ -888,12 +880,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
         result = _RunResources(
             backend=backend,
-            run_environment=environment,
-            integration=integration,
             profiler_kind=resolved_profiler_kind,
             skill_source_paths=skill_source_paths,
             ref_name=ref_name,
-            excluded_workspace_dirs=workspace_files.excluded_dirs,
             trusted_evaluation_plan=_trusted_evaluation_plan(bundle, session),
             teardown_stack=teardown_stack,
             environment_resources=environment_resources,
@@ -932,265 +921,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     return result
 
 
-@dataclass(frozen=True, slots=True)
-class WorkspaceResourceSpec:
-    """One isolated workspace's identity and environment settings."""
-
-    scope_id: str
-    revision: str
-    config: Config
-    log_namespace: str = _RUNTIME_STATE_NAMESPACE
-    log_directory: str = "workspaces"
-    agent_backend: str | None = None
-    cli_provider: str | None = None
-
-
-class _ProjectResources(Protocol):
-    """Project mechanics consumed by the remaining product composition."""
-
-    @property
-    def project(self) -> Project: ...
-
-    @property
-    def git(self) -> GitTracker: ...
-
-    @property
-    def logger(self) -> RunLogger: ...
-
-    @property
-    def state(self) -> RunState: ...
-
-    @property
-    def round_transaction_coordinator(
-        self,
-    ) -> MultiSlotRoundTransactionCoordinator | None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class _WorkspaceProjectResources:
-    """Candidate project facts assembled around a parent-owned project."""
-
-    project: Project
-    git: GitTracker
-    logger: RunLogger
-    state: RunState
-    round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None = None
-
-
-def borrow_run_agent_environment(
-    context: "_RunResources",
-    *,
-    mounts: tuple[HostResource, ...] = (),
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-) -> ScopedAgentEnvironment:
-    """Share an already-opened workspace session with an agent client.
-
-    SkyPilot's evaluator bridge and editor sandbox have one owner per workspace.
-    Opening another environment for each role would bind the same bridge socket
-    and let an agent close a bridge still used by the run.
-    """
-    try:
-        return _open_agent_environment(
-            context,
-            share_session=True,
-            mounts=mounts,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-        )
-    except SharedAgentEnvironmentConflictError as error:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="skypilot_agent_environment_conflict",
-                stage="agent_capability_validation",
-                message=(
-                    "SkyPilot agents sharing a workspace must use its configured backend, "
-                    "provider, and mounts"
-                ),
-            )
-        ) from error
-
-
-def open_scoped_agent_environment(
-    context: "_RunResources",
-    *,
-    mounts: tuple[HostResource, ...] = (),
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-) -> ScopedAgentEnvironment:
-    """Open an independently configured agent in this context's workspace."""
-    if context.run_environment_view.share_agent_session:
-        return borrow_run_agent_environment(
-            context,
-            mounts=mounts,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-        )
-    return _open_agent_environment(
-        context,
-        share_session=False,
-        mounts=mounts,
-        agent_backend=agent_backend,
-        cli_provider=cli_provider,
-    )
-
-
-def _open_agent_environment(
-    context: "_RunResources",
-    *,
-    share_session: bool,
-    mounts: tuple[HostResource, ...],
-    agent_backend: str | None,
-    cli_provider: str | None,
-) -> ScopedAgentEnvironment:
-    """Bind product-resolved policy to the runtime's scoped session owner."""
-    return open_agent_execution_environment(
-        context.environment_request,
-        context.run_environment_session,
-        share_session=share_session,
-        skill_source_dirs=tuple(context.skill_source_paths),
-        skill_selection=platform_skill_selection(context.backend),
-        host_resources=context.agent_host_resources,
-        mounts=mounts,
-        agent_backend=agent_backend,
-        cli_provider=cli_provider,
-        open_session=lambda request: open_run_environment(context.run_environment, request),
-    )
-
-
-def create_workspace_resources(
-    parent: "_RunResources", spec: WorkspaceResourceSpec
-) -> "_RunResources":
-    """Open an isolated Git tree and run environment."""
-    teardown_stack = ExitStack()
-    try:
-        return _assemble_workspace_resources(
-            teardown_stack=teardown_stack, parent=parent, spec=spec
-        )
-    except BaseException as construction_error:
-        _close_after_construction_failure(teardown_stack, construction_error)
-        raise
-
-
-def _assemble_workspace_resources(
-    *,
-    teardown_stack: ExitStack,
-    parent: "_RunResources",
-    spec: WorkspaceResourceSpec,
-) -> "_RunResources":
-    config = as_config(spec.config)
-    workspace = parent.project.state.candidate_worktree_directory(parent.run_id, spec.scope_id)
-    log_dir = parent.state.local(spec.log_namespace).external_directory(
-        f"{spec.log_directory}/{spec.scope_id}/logs"
-    )
-
-    # Materialize the parent's tree in an isolated worktree (shared object
-    # store). `git worktree add` touches the main repo's admin area, so the
-    # caller serializes this; the container/agent work afterward is isolated.
-    # Remove the worktree only after it has been materialized, including when
-    # git itself reports failure after partially materializing its admin state.
-    teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
-    parent.git.add_worktree(workspace, spec.revision)
-
-    logger = RunLogger(
-        log_dir,
-        tee_stderr=False,
-        emit=_run_log_emitter(parent.integration.agent_events),
-    )
-    teardown_stack.callback(logger.close)
-
-    resolved_backend = str(spec.agent_backend or config.agent.backend or AgentBackend.CLI)
-    resolved_cli_provider = spec.cli_provider or config.agent.cli_provider or "codex"
-    effective_objective = parent.environment_request.objective
-
-    git = GitTracker(
-        workspace,
-        run_id=parent.run_id,
-        events=CoreGitTrackerEvents(parent.integration.events),
-        excluded_dirs=parent.excluded_workspace_dirs,
-        trusted_input_paths=trusted_project_input_paths(
-            workspace,
-            evaluator_source=None,
-        ),
-    )
-    if parent.git.trusted_input_baseline is not None:
-        git.configure_trusted_input_baseline(parent.git.trusted_input_baseline)
-    workspace_files = create_project_materializer(
-        workspace,
-        environment=parent.run_environment,
-        backend=parent.environment_request.backend,
-        log=logger.lprint,
-    )
-    project_path_policy = build_project_path_policy(workspace, evaluator_source=None)
-    objective_document = None
-    if effective_objective is not None:
-        objective_document = parent.state.portable(
-            _RUNTIME_STATE_NAMESPACE
-        ).equivalent_external_file(workspace, "effective-objective.md")
-
-    # Reuse adapter-owned resources provisioned when the parent environment was
-    # opened. Candidate sessions do not need to rematerialize reference inputs.
-    workspace_environment_request = RunEnvironmentRequest(
-        log_dir=log_dir,
-        workspace=workspace,
-        seeded_workspace_paths=parent.environment_request.seeded_workspace_paths,
-        ref_dir=None,
-        backend=parent.environment_request.backend,
-        agent_backend=resolved_backend,
-        cli_provider=resolved_cli_provider,
-        run_id=parent.run_id,
-        objective=effective_objective,
-        objective_document=objective_document,
-        accuracy_command=parent.environment_request.accuracy_command,
-        benchmark_command=parent.environment_request.benchmark_command,
-        benchmark_output_argument=parent.environment_request.benchmark_output_argument,
-        evaluator_requirements=parent.environment_request.evaluator_requirements,
-        profiler_support_path=parent.environment_request.profiler_support_path,
-        profiler_support_name=parent.environment_request.profiler_support_name,
-        profiler_support_extra=parent.environment_request.profiler_support_extra,
-        git_history_root=parent.git.history_root,
-        environment_bind_mounts=parent.environment_request.environment_bind_mounts,
-        log=logger.lprint,
-        framework_root=PROJECT_ROOT,
-        project_path_policy=project_path_policy,
-        state_namespace=parent.state.local(_SKYPILOT_STATE_NAMESPACE),
-    )
-    environment_resources = open_workspace_environment_resources(
-        workspace_environment_request,
-        lambda request: open_run_environment(parent.run_environment, request),
-        device=parent.device,
-    )
-    teardown_stack.callback(environment_resources.close)
-    session = environment_resources.session
-    return _RunResources(
-        backend=parent.backend,
-        run_environment=parent.run_environment,
-        integration=parent.integration,
-        profiler_kind=parent.profiler_kind,
-        skill_source_paths=parent.skill_source_paths,
-        ref_name=parent.ref_name,
-        excluded_workspace_dirs=workspace_files.excluded_dirs,
-        trusted_evaluation_plan=parent.trusted_evaluation_plan.model_copy(
-            update={
-                "accuracy_command": session.view.paths.accuracy_command,
-                "benchmark_command": session.view.paths.benchmark_command,
-                "framework_setup_timeout_seconds": (session.view.framework_setup_timeout_seconds),
-            }
-        ),
-        # Candidate worktrees share the parent repository and may run in
-        # parallel. Only the parent context owns remote synchronization.
-        teardown_stack=teardown_stack,
-        environment_resources=environment_resources,
-        project_resources=_WorkspaceProjectResources(
-            project=parent.project,
-            git=git,
-            logger=logger,
-            state=parent.state,
-        ),
-        agent_host_resources=parent.agent_host_resources,
-    )
-
-
 class _RunResources:
     """Private owner of one workspace's assembled resources and teardown stack.
 
@@ -1204,43 +934,23 @@ class _RunResources:
         self,
         *,
         backend: ComputeBackend,
-        run_environment: RunEnvironment,
-        integration: LocalRunIntegration,
         profiler_kind: ProfilerKind,
         skill_source_paths: list[Path],
         ref_name: str,
-        excluded_workspace_dirs: set[str],
         trusted_evaluation_plan: TrustedEvaluationPlan,
         teardown_stack: ExitStack,
         environment_resources: RunEnvironmentResources,
-        project_resources: _ProjectResources,
+        project_resources: ProjectRunResources,
         agent_host_resources: tuple[HostResource, ...] = (),
     ) -> None:
         self.backend = backend
-        # Retained so a candidate sub-context can hand its own agent runner the
-        # same declarations the parent computed, rather than recomputing them
-        # from state a candidate context does not carry.
         self.agent_host_resources = agent_host_resources
-        self.run_environment = run_environment
-        self.integration = integration
         self.profiler_kind = profiler_kind
         self._skill_source_paths = skill_source_paths
         self.ref_name = ref_name
-        self.excluded_workspace_dirs = excluded_workspace_dirs
         self._project_resources = project_resources
         self.environment_resources = environment_resources
         self.trusted_evaluation_plan = trusted_evaluation_plan
-        self.trusted_evaluation: TrustedEvaluationExecutor = create_trusted_evaluation_executor(
-            trusted_evaluation_plan,
-            workspace=environment_resources.request.workspace,
-            sandbox=environment_resources.session.sandbox,
-            git=project_resources.git,
-            model_requests=(
-                create_model_request_reconciler()
-                if environment_resources.view.env_kind == "modal"
-                else None
-            ),
-        )
         self._teardown_stack = teardown_stack
         self._closed = False
 
@@ -1248,6 +958,11 @@ class _RunResources:
     def workspace(self) -> Path:
         """Return the project root, which is also the only agent workspace."""
         return self.environment_resources.request.workspace
+
+    @property
+    def project_resources(self) -> ProjectRunResources:
+        """Return the lower-owned project resource aggregate for host composition."""
+        return self._project_resources
 
     @property
     def project(self) -> Project:

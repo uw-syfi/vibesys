@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from subprocess import CalledProcessError
 from typing import TYPE_CHECKING
 
 import pytest
@@ -126,6 +127,46 @@ def test_fresh_run_owns_manifest_git_logger_and_state(tmp_path: Path) -> None:
     resources.close()
     assert resources.logger.writer.closed
     assert sys.stderr is original_stderr
+
+
+def test_candidate_resources_own_linked_worktree_git_and_logger(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    resources = open_project_run_resources(
+        _request(root), effects=_effects([]), resolve_resume=_unexpected_resume
+    )
+    revision = resources.git.current_sha()
+    assert revision is not None
+
+    candidate = resources.open_candidate("candidate-1", revision)
+    candidate_path = candidate.project_root
+    assert candidate_path.is_dir()
+    assert candidate.git.current_sha() == revision
+    assert candidate.git.trusted_input_baseline == resources.git.trusted_input_baseline
+    candidate.logger.lprint("candidate message")
+    assert "candidate message" in candidate.logger.path.read_text(encoding="utf-8")
+
+    candidate.close()
+    candidate.close()
+    assert not candidate_path.exists()
+    assert candidate.logger.writer.closed
+    resources.close()
+
+
+def test_candidate_construction_failure_removes_partial_worktree(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    with open_project_run_resources(
+        _request(root), effects=_effects([]), resolve_resume=_unexpected_resume
+    ) as resources:
+        candidate_path = resources.project.state.candidate_worktree_directory(
+            _RUN_ID, "candidate-1"
+        )
+
+        with pytest.raises(CalledProcessError):
+            resources.open_candidate("candidate-1", "not-a-revision")
+
+        assert not candidate_path.exists()
 
 
 def test_resume_applies_policy_decision_and_restores_current_run(tmp_path: Path) -> None:

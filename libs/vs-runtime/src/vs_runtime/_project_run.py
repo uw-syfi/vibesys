@@ -141,7 +141,43 @@ class ProjectRunResources:
     state: RunState
     round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None
     _teardown_stack: ExitStack
+    _request: ProjectRunRequest
+    _effects: ProjectRunEffects
     _closed: bool = field(init=False, default=False)
+
+    def open_candidate(self, workspace_id: str, revision: str) -> _ProjectWorkspaceResources:
+        """Open an isolated candidate worktree owned by the returned resource."""
+        workspace = self.project.state.candidate_worktree_directory(
+            self._request.run_id, workspace_id
+        )
+        log_dir = self.state.local("runtime").external_directory(f"workspaces/{workspace_id}/logs")
+        teardown_stack = ExitStack()
+        try:
+            teardown_stack.callback(self.git.remove_worktree, workspace)
+            self.git.add_worktree(workspace, revision)
+            logger = RunLogger(log_dir, tee_stderr=False, emit=self._effects.log_emit)
+            teardown_stack.callback(logger.close)
+            git = GitTracker(
+                workspace,
+                run_id=self._request.run_id,
+                events=self._effects.git_events,
+                excluded_dirs=self._request.excluded_dirs,
+                trusted_input_paths=self._request.trusted_input_paths,
+            )
+            if self.git.trusted_input_baseline is not None:
+                git.configure_trusted_input_baseline(self.git.trusted_input_baseline)
+            return _ProjectWorkspaceResources(
+                workspace_id=workspace_id,
+                project_root=workspace,
+                git=git,
+                logger=logger,
+                parent_git=self.git,
+                state=self.state,
+                teardown_stack=teardown_stack,
+            )
+        except BaseException as construction_error:
+            _close_after_construction_failure(teardown_stack, construction_error)
+            raise
 
     def close(self) -> None:
         """Release owned resources once, in reverse construction order."""
@@ -151,6 +187,44 @@ class ProjectRunResources:
         self._teardown_stack.close()
 
     def __enter__(self) -> ProjectRunResources:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.close()
+
+
+@dataclass(slots=True)
+class _ProjectWorkspaceResources:
+    """Own one candidate's linked worktree, Git tracker, and logger."""
+
+    workspace_id: str
+    project_root: Path
+    git: GitTracker
+    logger: RunLogger
+    parent_git: GitTracker
+    state: RunState
+    teardown_stack: ExitStack
+    _closed: bool = field(init=False, default=False)
+
+    @property
+    def objective_document(self) -> Path:
+        """Return the candidate equivalent of the run's effective objective."""
+        return self.state.portable("runtime").equivalent_external_file(
+            self.project_root, "effective-objective.md"
+        )
+
+    def retain(self, revision: str, reference: str | None = None) -> None:
+        """Keep a candidate revision reachable after its worktree closes."""
+        self.parent_git.retain_candidate(reference or self.workspace_id, revision)
+
+    def close(self) -> None:
+        """Release the logger and linked worktree exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        self.teardown_stack.close()
+
+    def __enter__(self) -> _ProjectWorkspaceResources:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -185,7 +259,7 @@ def open_project_run_resources(
         raise
 
 
-def _assemble_project_run_resources(  # lint-waiver: LW-836001 [PLR0913]; this private assembly receives independent effect ports and one lifecycle stack, while public callers use the typed request.
+def _assemble_project_run_resources(
     request: ProjectRunRequest,
     *,
     effects: ProjectRunEffects,
@@ -263,6 +337,8 @@ def _assemble_project_run_resources(  # lint-waiver: LW-836001 [PLR0913]; this p
         RunState(project, git, request.run_id),
         round_transaction_coordinator,
         teardown_stack,
+        request,
+        effects,
     )
 
 

@@ -77,6 +77,18 @@ class WorkspaceResource(Protocol):
     def close(self) -> None: ...
 
 
+class WorkspaceResourceProvider(Protocol):
+    """One coherent source of root and candidate workspace resources."""
+
+    @property
+    def root(self) -> WorkspaceResource: ...
+
+    @property
+    def supports_parallel_candidates(self) -> bool: ...
+
+    def create_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource: ...
+
+
 class OwnedWorkspaces(Workspaces, Protocol):
     """Composition lifetime for a runtime-owned workspace collection."""
 
@@ -229,13 +241,9 @@ class RuntimeWorkspaces:
 
     def __init__(
         self,
-        root_resource: WorkspaceResource,
-        *,
-        supports_parallel_candidates: bool,
-        create_candidate_resource: Callable[[str, str], WorkspaceResource],
+        resources: WorkspaceResourceProvider,
     ) -> None:
-        self._supports_parallel_candidates = supports_parallel_candidates
-        self._create_candidate_resource = create_candidate_resource
+        self._resources = resources
         self._root_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}
@@ -243,7 +251,7 @@ class RuntimeWorkspaces:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: RuntimeAgentSessions | None = None
-        self.root = RuntimeWorkspace(self, root_resource)
+        self.root = RuntimeWorkspace(self, resources.root)
 
     def _attach_sessions(self, sessions: RuntimeAgentSessions) -> None:
         """Complete the private ownership cycle during runtime construction."""
@@ -261,7 +269,7 @@ class RuntimeWorkspaces:
 
     @property
     def supports_parallel_candidates(self) -> bool:
-        return self._supports_parallel_candidates
+        return self._resources.supports_parallel_candidates
 
     async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
         async with self._lifecycle_lock:
@@ -278,7 +286,7 @@ class RuntimeWorkspaces:
                     raise RuntimeError(message)
                 workspace_id = f"s{uuid.uuid4().hex}"
                 task = asyncio.create_task(
-                    asyncio.to_thread(self._create_candidate_resource, workspace_id, revision)
+                    asyncio.to_thread(self._resources.create_candidate, workspace_id, revision)
                 )
                 try:
                     resource = await asyncio.shield(task)
