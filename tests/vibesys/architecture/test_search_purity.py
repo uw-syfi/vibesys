@@ -1,7 +1,7 @@
 """``vibesys.search`` stays pure: deterministic state transitions, no effects.
 
 Rules (see the orchestration-simplify design brief):
-  - No imports of vibesys.orchestration, vibesys.loops, vibesys.orchestrations,
+  - No imports of vibesys.orchestration or vibesys.loops,
     vibesys.prompts (search answers questions and returns new state; it never
     drives agents, renders prompts, or touches RunContext).
   - No os / subprocess / pathlib / time / datetime imports (search must do no
@@ -27,9 +27,8 @@ _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _SEARCH = _SRC / "search"
 
 _FORBIDDEN_PACKAGES = (
-    "vibesys.orchestration",
     "vibesys.loops",
-    "vibesys.orchestrations",
+    "vibesys.orchestration",
     "vibesys.prompts",
 )
 

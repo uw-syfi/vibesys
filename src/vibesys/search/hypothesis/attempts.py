@@ -20,7 +20,7 @@ class CandidateReply(Protocol):
     Structural, not nominal: search must never import an orchestration policy
     (policies depend on search, not the reverse), so this describes the shared
     shape of a policy-owned implementer response and
-    ``orchestrations.single.models.SingleAgentRoundResponse`` without importing it.
+    ``orchestration.single.models.SingleAgentRoundResponse`` without importing it.
     """
 
     candidate_disposition: CandidateDisposition

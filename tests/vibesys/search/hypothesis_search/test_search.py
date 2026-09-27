@@ -21,7 +21,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestrations.multi.contracts import ImplementerResponse
+from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vibesys.search.hypothesis import (
     CarryOver,

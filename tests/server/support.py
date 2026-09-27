@@ -15,7 +15,7 @@ from server.journal import WireJournal
 from server.read_model import RunInspector
 from vibesys.api import CoreEventType
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.orchestrations.agent_options import (
+from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal

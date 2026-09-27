@@ -22,7 +22,7 @@ from vibesys.domains.registry import (
     resolve_domain,
 )
 from vibesys.domains.rendering import render_domain_section
-from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.prompts import render_template
 
 if TYPE_CHECKING:

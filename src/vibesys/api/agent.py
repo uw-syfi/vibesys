@@ -8,15 +8,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.memory import framework_memory_paths
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
-from vibesys.orchestrations.hypothesis_readmodel import (
+from vibesys.orchestration.agent_options import AgentOrchestrationOptions
+from vibesys.orchestration.hypothesis_readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,
     RoundView,
     agent_projection,
 )
+from vibesys.orchestration.memory import framework_memory_paths
 
 if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest

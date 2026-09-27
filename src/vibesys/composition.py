@@ -40,7 +40,7 @@ def _issue_board_tool(_host: object, _workspace: Workspace) -> tuple[ToolServerD
     return (
         expose_as_tools(
             name="vibesys-issue-board",
-            entrypoint_module="vibesys.orchestrations.issue_queue.tool_server",
+            entrypoint_module="vibesys.orchestration.issue_queue.tool_server",
             entrypoint_args=(
                 "issues.json",
                 ".vibesys/issue-tool-policy.json",

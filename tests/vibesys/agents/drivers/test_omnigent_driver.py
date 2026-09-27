@@ -28,7 +28,7 @@ from omnigent.tools.builtins import os_env as omnigent_os_tools
 from tests.support import run_test_command
 
 from vibesys.events import CommandResultPayload, JsonResultPayload
-from vibesys.orchestrations.multi.contracts import JudgeResponse
+from vibesys.orchestration.multi.contracts import JudgeResponse
 from vs_agent.api import (
     AgentEvent,
     AgentTurnTimeoutError,

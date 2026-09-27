@@ -1,6 +1,6 @@
 """Every registered plugin owns its prompt code and resources.
 
-Plugin declarations live in ``vibesys.orchestrations.<folder>``. A plugin may
+Plugin declarations live in ``vibesys.orchestration.<folder>``. A plugin may
 use a ``prompts.py`` module or a ``prompts/`` package; neither requires a
 duplicate central ``prompts/loops/<strategy>/`` directory.
 """
@@ -17,7 +17,7 @@ def _registered_strategy_folders() -> set[str]:
     folders = set()
     for registration in registry._registrations.values():  # noqa: SLF001  # LW-040196 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
         module = registration.plugin.orchestrate.__module__
-        prefix = "vibesys.orchestrations."
+        prefix = "vibesys.orchestration."
         assert module.startswith(prefix), f"registered policy {module!r} is not under {prefix}"
         folders.add(module.split(".")[2])
     return folders
@@ -25,11 +25,11 @@ def _registered_strategy_folders() -> set[str]:
 
 def test_every_registered_strategy_has_a_local_prompt_owner() -> None:
     folders = _registered_strategy_folders()
-    orchestrations = Path(__file__).parents[3] / "src" / "vibesys" / "orchestrations"
+    orchestration = Path(__file__).parents[3] / "src" / "vibesys" / "orchestration"
     missing = sorted(
         folder
         for folder in folders
-        if not (orchestrations / folder / "prompts.py").is_file()
-        and not (orchestrations / folder / "prompts").is_dir()
+        if not (orchestration / folder / "prompts.py").is_file()
+        and not (orchestration / folder / "prompts").is_dir()
     )
     assert not missing, f"registered strategies with no plugin-local prompt owner: {missing}"

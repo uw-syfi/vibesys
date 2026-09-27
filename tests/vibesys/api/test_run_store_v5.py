@@ -10,8 +10,8 @@ from tests.support.run_execution import run_execution_record
 from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
-from vibesys.orchestrations.evolve.models import EvolveState
-from vibesys.orchestrations.issue_queue import IssueQueueState
+from vibesys.orchestration.evolve.models import EvolveState
+from vibesys.orchestration.issue_queue import IssueQueueState
 from vibesys.search.population.models import PopulationConfig
 from vibesys.search.population.search import PopulationSearch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord

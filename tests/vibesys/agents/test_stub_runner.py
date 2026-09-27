@@ -3,7 +3,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.orchestrations.multi.contracts import (
+from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
     PreRoundDecision,

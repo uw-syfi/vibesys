@@ -12,10 +12,10 @@ from tests.support import make_orchestrator_plan
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration import artifacts, memory
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
-from vibesys.orchestrations.multi.contracts import ImplementerResponse, PreRoundDecision
-from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.orchestration.agent_options import AgentOrchestrationOptions
+from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
+from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts.contexts import display_path
 from vibesys.schemas import (
     CandidateDisposition,

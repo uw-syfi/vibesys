@@ -18,10 +18,10 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runtime import RunContext
-from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestrations.single import PLUGIN
+from vibesys.orchestration.single import PLUGIN
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import (
@@ -579,7 +579,7 @@ def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) 
             command="python",
             args=(
                 "-m",
-                "vibesys.orchestrations.issue_queue.tool_server",
+                "vibesys.orchestration.issue_queue.tool_server",
                 "issues.json",
                 ".vibesys/issue-tool-policy.json",
                 ".vibesys/issue-tracker.json",

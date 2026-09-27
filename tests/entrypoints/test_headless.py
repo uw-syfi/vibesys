@@ -38,13 +38,13 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEventType
-from vibesys.orchestrations.agent_options import (
+from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
-from vibesys.orchestrations.evolve import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestrations.evolve.models import EvolveOptions
-from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestrations.issue_queue import IssueQueueOptions
+from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
+from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
+from vibesys.orchestration.issue_queue import IssueQueueOptions
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project.api import (

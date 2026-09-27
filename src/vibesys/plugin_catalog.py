@@ -13,27 +13,27 @@ from typing import TYPE_CHECKING
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.contracts import OrchestrationRegistry
-from vibesys.orchestration.memory import declared_memory_paths
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
-from vibesys.orchestrations.evolve.models import EvolveOptions
-from vibesys.orchestrations.evolve.plugin import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestrations.issue_queue.models import IssueQueueOptions
-from vibesys.orchestrations.issue_queue.plugin import (
+from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.evolve.plugin import PLUGIN as EVOLVE_PLUGIN
+from vibesys.orchestration.issue_queue.models import IssueQueueOptions
+from vibesys.orchestration.issue_queue.plugin import (
     PLUGIN as ISSUE_QUEUE_PLUGIN,
 )
-from vibesys.orchestrations.multi.models import MultiOptions, ProfileGuidedMultiOptions
-from vibesys.orchestrations.multi.plugin import (
+from vibesys.orchestration.memory import declared_memory_paths
+from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
+from vibesys.orchestration.multi.plugin import (
     PLUGIN as MULTI_PLUGIN,
 )
-from vibesys.orchestrations.multi.plugin import (
+from vibesys.orchestration.multi.plugin import (
     PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
 )
-from vibesys.orchestrations.single.models import ProfileGuidedSingleOptions, SingleOptions
-from vibesys.orchestrations.single.plugin import (
+from vibesys.orchestration.single.models import ProfileGuidedSingleOptions, SingleOptions
+from vibesys.orchestration.single.plugin import (
     PLUGIN as SINGLE_PLUGIN,
 )
-from vibesys.orchestrations.single.plugin import (
+from vibesys.orchestration.single.plugin import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
 

@@ -1,4 +1,4 @@
-"""Internal orchestration contracts and execution framework."""
+"""Orchestration framework and built-in policy plugins."""
 
 from vibesys.orchestration.resume import OrchestrationResumeDecision
 

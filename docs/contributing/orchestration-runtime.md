@@ -12,7 +12,7 @@ layer imports only the ones below it.
 
 | Layer | Holds | Must not hold |
 |---|---|---|
-| `orchestrations/<strategy>/` | orchestration policy: which roles run, in what order, with which workspace and search tools | effects outside `RunHost`; imports of another strategy |
+| `orchestration/<strategy>/` | orchestration policy: which roles run, in what order, with which workspace and search tools | effects outside `RunHost`; imports of another strategy |
 | `roles/` | `Role` declarations, typed prompt context models, reply schemas (data only) | turn execution, sequencing, state transitions |
 | `search/` | pure, deterministic guidance: `hypothesis/`, `profile_focus/`, `population/` | `RunContext`, agents, prompts, filesystem, clocks, global RNG |
 | `prompts/` | every Jinja template, under `roles/<role>/`, `loops/<strategy>/`, and a `shared/` fallback root | Python policy |
@@ -25,10 +25,10 @@ mechanics libraries below it). A module in a layer may depend only on
 modules in the same or a strictly lower layer; `uv run tach check` fails a
 PR that adds an upward edge.
 
-## orchestrations/: policy replaceability
+## orchestration/: policy replaceability
 
 A policy package declares an `OrchestrationPlugin` and its prompt folder.
-Built-in policies live in `orchestrations/{multi,single,issue_queue,evolve}`;
+Built-in policies live in `orchestration/{multi,single,issue_queue,evolve}`;
 the product `vibesys.plugin_catalog` composes them. Policy packages never
 import each other.
 
@@ -219,7 +219,7 @@ common.
 
 For a genuinely new strategy:
 
-1. Create `orchestrations/<strategy>/` with the options, state, and
+1. Create `orchestration/<strategy>/` with the options, state, and
    `OrchestrationPlugin` declaration.
 2. Create `prompts/loops/<strategy>/` for any templates not already covered
    by `prompts/shared/`.
@@ -249,7 +249,7 @@ scans (no import of the scanned packages required):
 
 | Test | Checks |
 |---|---|
-| `test_orchestrations_replaceability.py` | no policy package imports another; only the plugin catalog imports policy packages |
+| `test_orchestration_replaceability.py` | no policy package imports another; only the plugin catalog imports policy packages |
 | `test_prompt_folder_registry_parity.py` | every registered strategy has a `prompts/loops/<strategy>/` folder, and vice versa |
 | `test_roles_boundaries.py` | `roles/` never imports orchestration policy; the role catalog has no dead entries |
 | `test_search_purity.py` | `search/` never imports `orchestration`/`loops`/`roles`/`prompts`, does no I/O, and never reads or mutates global RNG state |

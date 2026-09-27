@@ -41,7 +41,7 @@ from vibesys.evaluators.input_manifest import (
 from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestrations.agent_options import (
+from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.plugin_catalog import built_in_orchestrations

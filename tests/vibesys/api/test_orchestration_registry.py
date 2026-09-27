@@ -25,22 +25,22 @@ from vibesys.context import RunSetup, RunStartHints
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.memory import declared_memory_paths
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
-from vibesys.orchestrations.evolve import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestrations.evolve.models import EvolveOptions
-from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestrations.issue_queue import IssueQueueOptions
-from vibesys.orchestrations.multi import (
+from vibesys.orchestration.agent_options import AgentOrchestrationOptions
+from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
+from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
+from vibesys.orchestration.issue_queue import IssueQueueOptions
+from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
-from vibesys.orchestrations.multi import (
+from vibesys.orchestration.multi import (
     PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
 )
-from vibesys.orchestrations.multi.models import MultiOptions
-from vibesys.orchestrations.single import (
+from vibesys.orchestration.multi.models import MultiOptions
+from vibesys.orchestration.single import (
     PLUGIN as SINGLE_PLUGIN,
 )
-from vibesys.orchestrations.single import (
+from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
 from vibesys.plugin_catalog import built_in_orchestrations

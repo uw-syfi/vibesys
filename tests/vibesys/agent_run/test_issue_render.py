@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Required, TypedDict, Unpack
 
-from vibesys.orchestrations.issue_queue.artifacts import render_all, render_issue
+from vibesys.orchestration.issue_queue.artifacts import render_all, render_issue
 from vs_issue_tracker.api import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
 
 

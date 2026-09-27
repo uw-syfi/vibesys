@@ -13,8 +13,8 @@ from vibesys.evaluators.perf_reply import (
     ProfilerSummary,
     ThroughputStats,
 )
-from vibesys.orchestrations.multi.contracts import ImplementerResponse, JudgeResponse
-from vibesys.orchestrations.single.models import SingleAgentRoundResponse
+from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
+from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.schemas import (
     HYPOTHESIS_TITLE_MAX_LEN,
     SkillResourceSelection,

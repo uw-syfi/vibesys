@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
-from vibesys.orchestrations.multi.contracts import JudgeResponse
+from vibesys.orchestration.multi.contracts import JudgeResponse
 from vibesys.schemas import Verdict
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger

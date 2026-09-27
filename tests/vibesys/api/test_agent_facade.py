@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 import vibesys.api as generic_api
 from vibesys.api import agent as agent_api
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.orchestrations.single.models import SingleOptions
+from vibesys.orchestration.single.models import SingleOptions
 from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,
@@ -45,8 +45,8 @@ def test_generic_api_import_does_not_load_builtin_policies() -> None:
     script = (
         "import sys, vibesys.api; "
         "assert 'vibesys.plugin_catalog' not in sys.modules; "
-        "assert not any(name.startswith(('vibesys.orchestrations.multi', "
-        "'vibesys.orchestrations.single')) for name in sys.modules)"
+        "assert not any(name.startswith(('vibesys.orchestration.multi', "
+        "'vibesys.orchestration.single')) for name in sys.modules)"
     )
     subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; The subprocess runs the current interpreter on a fixed script literal.
 

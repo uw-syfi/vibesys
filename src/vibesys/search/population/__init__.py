@@ -2,7 +2,7 @@
 
 Public surface: :class:`PopulationConfig`, :class:`PopulationState`, and
 :class:`PopulationSearch`. Everything here is pure (see ``vibesys.search``);
-orchestration in ``vibesys.orchestrations.evolve`` owns persisting
+orchestration in ``vibesys.orchestration.evolve`` owns persisting
 :class:`PopulationState` and supplying agent/gate results as
 :class:`CandidateOutcome`.
 """
