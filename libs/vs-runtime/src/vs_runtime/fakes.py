@@ -470,7 +470,11 @@ class FakeAgentSessions:
         self._bindings = bindings or {
             role.id: AgentBinding(backend="fake", driver="fake", provider="fake") for role in agents
         }
+        # Keep observations separate from live ownership. Candidate teardown
+        # removes sessions from the live set, but tests still need to inspect
+        # what the public fake created and whether runtime ownership closed it.
         self._sessions: list[FakeAgentSession] = []
+        self._active_sessions: list[FakeAgentSession] = []
         self._creation_results: list[BaseException | None] = []
         self._closing = False
         self._closed = False
@@ -521,6 +525,7 @@ class FakeAgentSessions:
             ),
         )
         self._sessions.append(session)
+        self._active_sessions.append(session)
         return session
 
     async def close(self) -> None:
@@ -529,26 +534,29 @@ class FakeAgentSessions:
             return
         self._closing = True
         self._closed = True
-        for session in self._sessions:
+        for session in self._active_sessions:
             session.mark_closed()
-        for session in reversed(self._sessions):
+        for session in reversed(self._active_sessions):
             await session.close()
+        self._active_sessions.clear()
 
     def begin_close(self) -> None:
         """Reject new sessions before asynchronous teardown starts."""
         self._closing = True
-        for session in self._sessions:
+        for session in self._active_sessions:
             session.mark_closed()
 
     async def close_workspace_sessions(self, workspace: Workspace) -> None:
         """Invalidate every public session bound to a discarded workspace."""
-        sessions = [session for session in self._sessions if session.workspace is workspace]
+        sessions = [session for session in self._active_sessions if session.workspace is workspace]
         for session in sessions:
             session.mark_closed()
         for session in reversed(sessions):
             await session.close()
         selected = set(sessions)
-        self._sessions = [session for session in self._sessions if session not in selected]
+        self._active_sessions = [
+            session for session in self._active_sessions if session not in selected
+        ]
 
 
 class FakeWorkspaces:

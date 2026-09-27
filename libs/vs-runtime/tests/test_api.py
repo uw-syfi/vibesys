@@ -312,6 +312,24 @@ def test_run_owner_closes_sessions_and_closed_turn_fails() -> None:
     asyncio.run(scenario())
 
 
+def test_fake_retains_discarded_workspace_sessions_for_observation() -> None:
+    async def scenario() -> None:
+        role = _role()
+        host = FakeRunHost(_plugin(role), supports_parallel_candidates=True)
+        candidate = await host.workspaces.create_candidate()
+        session = await host.agents.create_session(role, workspace=candidate)
+
+        await candidate.discard()
+
+        assert session.closed
+        assert host.agents.sessions == (session,)
+        with pytest.raises(SessionClosedError):
+            await session.turn("late")
+        await host.close()
+
+    asyncio.run(scenario())
+
+
 def test_session_can_close_early_idempotently() -> None:
     async def scenario() -> None:
         role = _role()
