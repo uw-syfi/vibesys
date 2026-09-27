@@ -57,15 +57,12 @@ forbid_circular_dependencies = true
 
 # Orchestration-simplification target direction (loops > search >
 # orchestration host > prompts + lower libs), enforced only where a module
-# already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`/
-# `vibesys.orchestration.progress_log` stays unlayered; its order is still pinned
-# by the explicit edges above -- progress_log renders typed role replies
-# (OrchestratorPlan, ImplementerResponse, ...) into Markdown, so unlike
-# `artifacts.py` it genuinely needs policy-layer types, not just a generic
-# `BaseModel`). `vibesys.prompts` (templates + renderer) sits in the
-# bottom layer with the other mechanics libraries: the host and lower layers
-# render prompts, they don't hand policy to the template layer, so `prompts`
-# is a leaf every layer above it may reach downward into.
+# already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`
+# stay unlayered; their order is still pinned by the explicit edges above).
+# `vibesys.prompts` (templates + renderer) sits in the bottom layer with the
+# other mechanics libraries: the host and lower layers render prompts, they
+# don't hand policy to the template layer, so `prompts` is a leaf every layer
+# above it may reach downward into.
 # `layers_explicit_depends_on = true` keeps this ratchet's rule that every
 # edge, same-layer or cross-layer, must still be listed in `depends_on`;
 # layers add one more check on top: no module may list a dependency on a
@@ -443,15 +440,6 @@ depends_on = []
 path = "vibesys.orchestration.state"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.orchestration.view"]
-
-[[modules]]
-# Pure framework-log renderers (job 2 of the progress board) plus the one
-# function that writes them to disk. Lives here (not agent_run) so the
-# host itself -- state.commit and gates.run -- can call it without agent_run
-# depending on orchestration, which would cycle (agent_run already depends
-# on orchestration.view/orchestration).
-path = "vibesys.orchestration.progress_log"
-depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.gates"
