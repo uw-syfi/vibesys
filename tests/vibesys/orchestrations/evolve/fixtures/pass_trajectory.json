@@ -1,0 +1,27 @@
+{
+  "status": "succeeded",
+  "generation": 1,
+  "individuals": [
+    {
+      "id": 1,
+      "generation": 0,
+      "parent_id": null,
+      "passed": true,
+      "summary": "candidate 2"
+    },
+    {
+      "id": 2,
+      "generation": 1,
+      "parent_id": 1,
+      "passed": true,
+      "summary": "candidate 3"
+    }
+  ],
+  "cursor": {
+    "generation_start": null,
+    "admitted_slots": 0
+  },
+  "workspace": {
+    "queue.py": "VALUE = 3\n"
+  }
+}

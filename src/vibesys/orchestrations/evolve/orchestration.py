@@ -319,7 +319,7 @@ class _EvolveRun:
         parent = proposal.parent
         if parent.commit is None or not await self.root.try_restore(parent.commit):
             return None
-        outcome = await self._evaluate(
+        return await self._evaluate(
             workspace=self.root,
             sessions=self.root_sessions,
             task=_CandidateTask(
@@ -332,9 +332,6 @@ class _EvolveRun:
                 target_island=proposal.target_island,
             ),
         )
-        if not outcome.passed:
-            await self.root.try_restore(parent.commit)
-        return outcome
 
     async def _parallel(
         self,

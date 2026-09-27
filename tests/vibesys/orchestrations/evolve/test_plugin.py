@@ -207,6 +207,112 @@ def test_judge_failure_skips_trusted_evaluation(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_bootstrap_repairs_the_retained_wip_seed(tmp_path: Path) -> None:
+    implementer_messages: list[str] = []
+    judge_turn = 0
+
+    def responder(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal judge_turn
+        if role.id == "implementer":
+            implementer_messages.append(message)
+            return _passing_responder(role, history, message, response)
+        if role.id == "judge":
+            judge_turn += 1
+            if judge_turn == 1:
+                return {
+                    "analysis": "the endpoint is missing",
+                    "feedback": "add the missing endpoint",
+                    "verdict": "fail",
+                }
+        return _passing_responder(role, history, message, response)
+
+    async def scenario() -> None:
+        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=responder)
+        status = await PLUGIN.orchestrate(host, _options(bootstrap_max_attempts=2))
+
+        state = await host.state.load(EvolveState)
+        assert status is RunStatus.SUCCEEDED
+        assert state is not None
+        failed, seed, child = state.population.individuals
+        assert failed.passed is False
+        assert failed.commit is not None
+        assert seed.passed is True
+        assert seed.commit is not None
+        assert seed.commit != failed.commit
+        assert child.parent_id == seed.id
+        assert (
+            "A previous bootstrap attempt's files are already in the workspace"
+            in (implementer_messages[1])
+        )
+        assert "add the missing endpoint" in implementer_messages[1]
+        await host.close()
+
+    asyncio.run(scenario())
+
+
+def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> None:
+    space = MetricSpace(
+        objectives=(
+            Objective(name="throughput", direction="max"),
+            Objective(name="latency_ms", direction="min"),
+        )
+    )
+    profiler_results = iter(
+        (
+            {"throughput": 100.0, "latency_ms": 80.0},
+            {"throughput": 80.0, "latency_ms": 50.0},
+        )
+    )
+
+    def responder(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        if role.id != "profiler":
+            return _passing_responder(role, history, message, response)
+        metrics = next(profiler_results)
+        return {
+            "analysis": "measured both objectives",
+            "bottlenecks": "tradeoff",
+            "suggestions": "explore the frontier",
+            "perf_metric": metrics["throughput"],
+            "perf_unit": "requests/s",
+            "metrics": metrics,
+        }
+
+    async def scenario() -> None:
+        host = FakeRunHost(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=responder,
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Increase throughput without increasing latency.",
+                profiler_id="linux_cpu",
+            ),
+        )
+        status = await PLUGIN.orchestrate(host, _options(metric_space=space))
+
+        state = await host.state.load(EvolveState)
+        assert status is RunStatus.SUCCEEDED
+        assert state is not None
+        seed, child = state.population.individuals
+        assert seed.metrics == {"throughput": 100.0, "latency_ms": 80.0}
+        assert child.metrics == {"throughput": 80.0, "latency_ms": 50.0}
+        search = PopulationSearch(PopulationConfig(space=space, seed=0))
+        assert {item.id for item in search.frontier(state.population)} == {seed.id, child.id}
+        await host.close()
+
+    asyncio.run(scenario())
+
+
 def test_projection_exposes_committed_population_and_metric_space() -> None:
     space = MetricSpace(objectives=(Objective(name="throughput", direction="max"),))
     population = PopulationSearch(PopulationConfig(space=space, seed=3)).initial()
