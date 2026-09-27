@@ -1435,8 +1435,11 @@ describe('the carried-forward profile flag', () => {
     expect(state.rounds[0]?.profileSkipped).toBe(true);
   });
 
-  it('stays unset when the event lacks the field, as legacy streams do', () => {
-    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {}));
+  it('stays unset when the event records that profiling ran', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      roundFinishedEvent(1, {profile_skipped: false}),
+    );
 
     expect(state.rounds[0]?.status).toBe('completed');
     expect(state.rounds[0]?.profileSkipped).toBeUndefined();
@@ -1788,6 +1791,7 @@ function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean}
       judge_verdict: 'pass',
       perf_metric: 900,
       perf_unit: 'ops/s',
+      profile_skipped: false,
       ...extra,
     },
   };
