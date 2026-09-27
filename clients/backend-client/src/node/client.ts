@@ -27,6 +27,8 @@ export type ControlChannelState =
   | {readonly status: 'disconnected'; readonly error: Error};
 
 export interface ServerClientOptions {
+  /** Stable frontend identity reflected by server acknowledgements. */
+  clientId?: string;
   connectTimeoutMs?: number;
   requestTimeoutMs?: number;
   /** Delay between connection attempts while the socket does not exist yet. */
@@ -89,6 +91,7 @@ interface ControlRequest {
 export class ServerClient {
   #socket: Socket;
   readonly #path: string;
+  readonly #clientId: string;
   readonly #pending = new Map<string, ControlRequest>();
   /**
    * Idempotent requests waiting for the channel to recover, to resend once it
@@ -129,6 +132,7 @@ export class ServerClient {
   private constructor(socket: Socket, path: string, options: ServerClientOptions) {
     this.#socket = socket;
     this.#path = path;
+    this.#clientId = options.clientId ?? globalThis.crypto.randomUUID();
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
@@ -200,6 +204,7 @@ export class ServerClient {
     const request = {
       protocol_version: 1,
       request_id: requestId,
+      client_id: this.#clientId,
       timestamp: new Date().toISOString(),
       ...input,
     } as ProtocolRequest;
@@ -336,6 +341,7 @@ export class ServerClient {
       `${JSON.stringify({
         protocol_version: 1,
         request_id: globalThis.crypto.randomUUID(),
+        client_id: this.#clientId,
         timestamp: new Date().toISOString(),
         type: 'subscribe',
         after_sequence: afterSequence,

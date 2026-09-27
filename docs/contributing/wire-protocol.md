@@ -169,15 +169,15 @@ decision is server logic, not framing.
 
 Two clients on one run is the configuration the browser port creates, and the server must be able to
 say which connection issued a request (for #840's acknowledgment attribution, and for the two-client
-conformance scenario). This is a protocol field, `client_id`, carried on requests and reflected on
-acknowledgments. It is additive and optional: a client that omits it keeps working, matching the
-`extra="forbid"` probe pattern.
+conformance scenario). This is the optional protocol field `client_id`. A frontend transport
+generates one stable id for its client instance and carries it on control requests, subscriptions,
+and dedicated chat requests, including requests sent after a reconnect. `Response`,
+`SubscribedMessage`, and `ProtocolErrorMessage` reflect it. An empty id is the backward-compatible
+default for a peer that predates attribution.
 
-The field itself lands in `src/server/api/protocol.py` with regenerated bindings, which is outside
-the client team's delegated-merge capability, so it is filed as the maintainer half of #888 (888c in
-the port plan). This document specifies it; the corpus reserves a two-client scenario that asserts
-independent attribution once the field and a second transport both exist (that scenario lands with
-the gateway, #811, because it needs one Unix and one WebSocket subscriber live in one process).
+The field is defined in `src/server/api/protocol.py` and generated into the TypeScript bindings. The
+corpus reserves a two-client scenario that asserts independent attribution with one Unix and one
+WebSocket subscriber live in one process.
 
 ## The conformance corpus
 

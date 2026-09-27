@@ -25,6 +25,8 @@ export interface WebSocketLike {
 }
 
 export interface WebSocketTransportOptions {
+  /** Stable frontend identity reflected by server acknowledgements. */
+  clientId?: string;
   connectTimeoutMs?: number;
   requestTimeoutMs?: number;
   closeGraceMs?: number;
@@ -45,6 +47,7 @@ type IssuedRequest = ProtocolRequest & {readonly request_id: string};
  */
 export class WebSocketTransport implements ServerTransport {
   readonly #url: string;
+  readonly #clientId: string;
   readonly #connectTimeoutMs: number;
   readonly #requestTimeoutMs: number;
   readonly #closeGraceMs: number;
@@ -67,6 +70,7 @@ export class WebSocketTransport implements ServerTransport {
 
   constructor(url: string, options: WebSocketTransportOptions = {}) {
     this.#url = url;
+    this.#clientId = options.clientId ?? globalThis.crypto.randomUUID();
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
@@ -76,7 +80,7 @@ export class WebSocketTransport implements ServerTransport {
 
   async request(input: RequestInput): Promise<ProtocolResponse> {
     if (this.#closed) throw disconnectedError('Client is closed');
-    const request = makeRequest(input);
+    const request = makeRequest(input, this.#clientId);
     if (input.type === 'query.chat') return this.#requestChat(request);
     const socket = await this.#ensureControl();
     return new Promise((resolve, reject) => {
@@ -110,12 +114,15 @@ export class WebSocketTransport implements ServerTransport {
       await closeSocket(socket, this.#closeGraceMs, this.#scheduleTimeout);
       throw disconnectedError('Client is closed');
     }
-    const request = makeRequest({
-      type: 'subscribe',
-      after_sequence: afterSequence,
-      ...(options.tail === undefined ? {} : {tail: options.tail}),
-      ...(options.storeId === undefined ? {} : {store_id: options.storeId}),
-    } as RequestInput);
+    const request = makeRequest(
+      {
+        type: 'subscribe',
+        after_sequence: afterSequence,
+        ...(options.tail === undefined ? {} : {tail: options.tail}),
+        ...(options.storeId === undefined ? {} : {store_id: options.storeId}),
+      } as RequestInput,
+      this.#clientId,
+    );
     return new Promise((resolve, reject) => {
       let subscribed = false;
       let closing = false;
@@ -377,10 +384,11 @@ export class WebSocketTransport implements ServerTransport {
   }
 }
 
-function makeRequest(input: RequestInput): IssuedRequest {
+function makeRequest(input: RequestInput, clientId: string): IssuedRequest {
   return {
     protocol_version: 1,
     request_id: globalThis.crypto.randomUUID(),
+    client_id: clientId,
     timestamp: new Date().toISOString(),
     ...input,
   } as IssuedRequest;

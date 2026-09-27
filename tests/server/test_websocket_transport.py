@@ -220,7 +220,7 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
         origin = f"http://127.0.0.1:{gateway.bound_port}"
         messages: list[dict[str, Any]] = []
         async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(SubscribeRequest().model_dump_json())
+            await websocket.send(SubscribeRequest(client_id="browser-client").model_dump_json())
             messages.append(json.loads(await websocket.recv()))
             messages.append(json.loads(await websocket.recv()))
         return messages
@@ -228,6 +228,7 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
     with gateway:
         messages = asyncio.run(subscribe())
     assert messages[0]["type"] == "subscribed"
+    assert messages[0]["client_id"] == "browser-client"
     assert messages[1]["type"] == "event_batch"
 
 
@@ -250,12 +251,15 @@ def test_gateway_reports_subscription_bootstrap_failure(
     async def request() -> dict[str, Any]:
         origin = f"http://127.0.0.1:{gateway.bound_port}"
         async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(SubscribeRequest().model_dump_json())
+            await websocket.send(
+                SubscribeRequest(client_id="failing-browser-client").model_dump_json()
+            )
             return json.loads(await websocket.recv())
 
     with WebSocketGateway(parts.api) as gateway:
         response = asyncio.run(request())
     assert response["type"] == "protocol_error"
+    assert response["client_id"] == "failing-browser-client"
     assert response["code"] == "stream_failed"
 
 

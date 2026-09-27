@@ -13,6 +13,7 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
   if (typeof value['ok'] !== 'boolean') {
     throw new BackendClientError('parse', 'Invalid server response: ok must be a boolean');
   }
+  validateClientId(value, 'response');
   return value as unknown as ProtocolResponse;
 }
 
@@ -28,6 +29,7 @@ export function parseServerMessage(line: string): ServerMessage {
     ) {
       throw new BackendClientError('parse', 'Invalid subscribed message');
     }
+    validateClientId(value, 'subscribed message');
   } else if (type === 'event') {
     if (!isRecord(value['event'])) throw new BackendClientError('parse', 'Invalid event message');
   } else if (type === 'event_batch') {
@@ -38,6 +40,7 @@ export function parseServerMessage(line: string): ServerMessage {
     if (typeof value['code'] !== 'string' || typeof value['message'] !== 'string') {
       throw new BackendClientError('parse', 'Invalid protocol error message');
     }
+    validateClientId(value, 'protocol error message');
   } else {
     throw unknownStreamLineError(value);
   }
@@ -94,6 +97,12 @@ function parseRecord(line: string, description: string): Record<string, unknown>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateClientId(value: Record<string, unknown>, description: string): void {
+  if (value['client_id'] !== undefined && typeof value['client_id'] !== 'string') {
+    throw new BackendClientError('parse', `Invalid ${description}: client_id must be a string`);
+  }
 }
 
 function toError(error: unknown): Error {

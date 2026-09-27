@@ -37,6 +37,10 @@ class Request(ProtocolModel):
 
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    # Stable for one frontend client across its control, subscription, and
+    # dedicated chat connections. Empty preserves compatibility with clients
+    # and servers that predate connection attribution.
+    client_id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -469,6 +473,7 @@ class Response(ProtocolModel):
 
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str
+    client_id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ok: bool = True
     error: str | None = None
@@ -519,7 +524,12 @@ class Response(ProtocolModel):
             operation=operation,
             code=code or getattr(error, "diagnostic_code", None),
         )
-        return cls(request_id=request_id, ok=False, error=diagnostic.summary, diagnostic=diagnostic)
+        return cls(
+            request_id=request_id,
+            ok=False,
+            error=diagnostic.summary,
+            diagnostic=diagnostic,
+        )
 
 
 class SubscribedMessage(ProtocolModel):
@@ -527,6 +537,7 @@ class SubscribedMessage(ProtocolModel):
 
     type: Literal["subscribed"] = "subscribed"
     request_id: str
+    client_id: str = ""
     run_id: str
     latest_sequence: int
 
@@ -563,6 +574,7 @@ class ProtocolErrorMessage(ProtocolModel):
 
     type: Literal["protocol_error"] = "protocol_error"
     request_id: str | None = None
+    client_id: str = ""
     code: str
     message: str
     diagnostic: Diagnostic | None = None

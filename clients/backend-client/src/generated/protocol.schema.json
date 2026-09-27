@@ -487,6 +487,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -536,6 +541,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -622,6 +632,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -1004,6 +1019,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -1048,6 +1068,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -1389,6 +1414,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -1468,6 +1498,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -1827,6 +1862,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -2466,6 +2506,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -2607,6 +2652,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -2711,6 +2761,11 @@
           "default": null,
           "title": "Request Id"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "code": {
           "title": "Code",
           "type": "string"
@@ -2760,6 +2815,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -2965,6 +3025,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -3597,6 +3662,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -3624,6 +3694,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -3661,6 +3736,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {
@@ -3737,6 +3817,11 @@
           "title": "Request Id",
           "type": "string"
         },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -3788,6 +3873,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "run_id": {
@@ -3974,6 +4064,11 @@
         },
         "request_id": {
           "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
           "type": "string"
         },
         "timestamp": {

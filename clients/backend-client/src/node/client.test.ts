@@ -262,12 +262,14 @@ describe('ServerClient', () => {
         const full = await client.subscribe(0, () => undefined, noopDisconnect);
 
         expect(frames[0]).toMatchObject({after_sequence: 0, tail: 1000});
+        expect(frames.map(frame => frame['client_id'])).toEqual(['node-client', 'node-client']);
         // An old server forbids unknown fields, so the plain call must not
         // carry the key at all, not even as null.
         expect(frames[1]).not.toHaveProperty('tail');
         await tailed.close();
         await full.close();
       },
+      {clientId: 'node-client'},
     );
   });
 

@@ -292,7 +292,7 @@ class WebSocketGateway:
             del error
 
     async def _handle_request(self, websocket: ServerConnection, raw: str) -> bool:
-        request_id = _request_id(raw)
+        request_id, client_id = _request_metadata(raw)
         try:
             request = _REQUEST_ADAPTER.validate_json(raw)
             if isinstance(request, SubscribeRequest):
@@ -301,7 +301,11 @@ class WebSocketGateway:
                 return True
             response = self.api.execute(request)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101017 [BLE001]; convert malformed browser frames into protocol responses
-            response = Response.from_exception(request_id, error, operation="Request")
+            response = Response.from_exception(
+                request_id,
+                error,
+                operation="Request",
+            ).model_copy(update={"client_id": client_id})
         await websocket.send(response.model_dump_json())
         return False
 
@@ -317,12 +321,15 @@ class WebSocketGateway:
                     operation="Event stream",
                     code="stream_failed",
                     request_id=request.request_id,
-                ).model_dump_json()
+                )
+                .model_copy(update={"client_id": request.client_id})
+                .model_dump_json()
             )
             return
         await websocket.send(
             SubscribedMessage(
                 request_id=request.request_id,
+                client_id=request.client_id,
                 run_id=bootstrap.run_id,
                 latest_sequence=bootstrap.through_sequence,
             ).model_dump_json()
@@ -394,11 +401,18 @@ class WebSocketGateway:
 
 
 def _request_id(raw: str) -> str:
+    return _request_metadata(raw)[0]
+
+
+def _request_metadata(raw: str) -> tuple[str, str]:
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
-        return "unknown"
-    return str(value.get("request_id", "unknown")) if isinstance(value, dict) else "unknown"
+        return "unknown", ""
+    if not isinstance(value, dict):
+        return "unknown", ""
+    client_id = value.get("client_id")
+    return str(value.get("request_id", "unknown")), client_id if isinstance(client_id, str) else ""
 
 
 def _request_header(request: Request, name: str) -> str | None:

@@ -28,6 +28,6 @@ export type TuiDefaults = NonNullable<ProtocolResponse['tui_defaults']>;
 
 export type RequestInput = ProtocolRequest extends infer Request
   ? Request extends ProtocolRequest
-    ? Omit<Request, 'protocol_version' | 'request_id' | 'timestamp'>
+    ? Omit<Request, 'protocol_version' | 'request_id' | 'client_id' | 'timestamp'>
     : never
   : never;

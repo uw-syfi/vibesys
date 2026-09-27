@@ -63,6 +63,7 @@ describe('WebSocketTransport', () => {
   it('keeps control messages one text frame and correlates the response', async () => {
     const sockets: FakeSocket[] = [];
     const transport = new WebSocketTransport('ws://127.0.0.1:43123', {
+      clientId: 'browser-client',
       webSocket: () => {
         const socket = new FakeSocket();
         sockets.push(socket);
@@ -73,8 +74,12 @@ describe('WebSocketTransport', () => {
 
     const pending = transport.request({type: 'query.tui_defaults'});
     await tick();
-    const frame = JSON.parse(sockets[0]?.sent[0] ?? '{}') as {request_id?: string};
+    const frame = JSON.parse(sockets[0]?.sent[0] ?? '{}') as {
+      request_id?: string;
+      client_id?: string;
+    };
     expect(sockets[0]?.sent[0]?.endsWith('\n')).toBe(false);
+    expect(frame.client_id).toBe('browser-client');
     sockets[0]?.respond(response(frame.request_id ?? '', {tui_defaults: {theme: 'default'}}));
     await expect(pending).resolves.toMatchObject({ok: true});
     await transport.close();
@@ -83,6 +88,7 @@ describe('WebSocketTransport', () => {
   it('delivers the subscribe acknowledgement and batch before resolving the handle', async () => {
     const sockets: FakeSocket[] = [];
     const transport = new WebSocketTransport('ws://127.0.0.1:43123', {
+      clientId: 'browser-subscriber',
       webSocket: () => {
         const socket = new FakeSocket();
         sockets.push(socket);
@@ -99,6 +105,10 @@ describe('WebSocketTransport', () => {
       },
     );
     await tick();
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toMatchObject({
+      type: 'subscribe',
+      client_id: 'browser-subscriber',
+    });
     sockets[0]?.respond({
       type: 'subscribed',
       request_id: 'subscribe-1',
