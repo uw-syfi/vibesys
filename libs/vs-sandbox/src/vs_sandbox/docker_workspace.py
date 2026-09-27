@@ -1,4 +1,4 @@
-"""Privileged Docker maintenance for host-mounted workspaces."""
+"""Docker mechanics for host-mounted workspaces."""
 
 from __future__ import annotations
 
@@ -8,8 +8,12 @@ import subprocess
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from vs_sandbox.host_resources import HostResource, HostResourceAccess
+
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sandbox.project_paths import ProjectPathPolicy
 
 _MAINTENANCE_TIMEOUT_SECONDS = 120
 
@@ -28,6 +32,49 @@ class DockerWorkspaceRepairError(RuntimeError):
     ) -> DockerWorkspaceRepairError:
         """Describe a completed maintenance command that returned nonzero."""
         return cls(f"chown failed for {workspace} (rc={returncode}): {detail}")
+
+
+def docker_project_path_resources(
+    policy: ProjectPathPolicy,
+    workspace: Path,
+    *,
+    mask_root: Path,
+) -> tuple[HostResource, ...]:
+    """Lower project visibility policy to Docker overlay resources.
+
+    Read-only project paths are mounted over Docker's writable workspace.
+    Hidden paths are overlaid with empty operator-owned files or directories
+    below *mask_root*, preserving whether each hidden target is a file or a
+    directory.
+    """
+    resolved = policy.resolve(workspace)
+    resolved_workspace = workspace.resolve()
+    resources = [
+        HostResource(
+            protected.path,
+            HostResourceAccess.READ_ONLY,
+            "container mount",
+            f"/workspace/{protected.path.relative_to(resolved_workspace).as_posix()}",
+        )
+        for protected in resolved.read_only_paths
+    ]
+
+    for index, hidden in enumerate(resolved.hidden_paths):
+        mask = mask_root / str(index)
+        if hidden.is_directory:
+            mask.mkdir(parents=True, exist_ok=True)
+        else:
+            mask.parent.mkdir(parents=True, exist_ok=True)
+            mask.touch(exist_ok=True)
+        resources.append(
+            HostResource(
+                mask,
+                HostResourceAccess.READ_ONLY,
+                "container mount",
+                f"/workspace/{hidden.path.relative_to(resolved_workspace).as_posix()}",
+            )
+        )
+    return tuple(resources)
 
 
 def repair_docker_workspace(workspace: Path, *, image: str) -> None:

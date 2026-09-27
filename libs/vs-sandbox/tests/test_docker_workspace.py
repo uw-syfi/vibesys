@@ -1,4 +1,4 @@
-"""Public contract tests for privileged Docker workspace maintenance."""
+"""Public contract tests for Docker workspace mechanics."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
+    docker_project_path_resources,
     remove_docker_workspace_child,
     repair_docker_workspace,
 )
@@ -38,6 +40,79 @@ raise SystemExit({exit_code})
     executable.chmod(0o755)
     monkeypatch.setenv("PATH", f"{executable_dir}{os.pathsep}{os.environ['PATH']}")
     return call_log
+
+
+def test_project_path_resources_lower_read_only_and_hidden_overlays(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    read_only_directory = workspace / ".state"
+    hidden_directory = read_only_directory / "local"
+    read_only_directory.mkdir(parents=True)
+    hidden_directory.mkdir()
+    read_only_file = workspace / "vibesys.input.toml"
+    read_only_file.write_text("version = 1\n")
+    hidden_file = workspace / "agent.toml"
+    hidden_file.write_text("secret\n")
+    mask_root = tmp_path / "operator-state" / "hidden"
+
+    resources = docker_project_path_resources(
+        ProjectPathPolicy(
+            read_only_paths=(".state", "vibesys.input.toml"),
+            hidden_paths=(".state/local", "agent.toml"),
+        ),
+        workspace,
+        mask_root=mask_root,
+    )
+
+    assert resources[:2] == (
+        HostResource(
+            read_only_directory,
+            HostResourceAccess.READ_ONLY,
+            "container mount",
+            "/workspace/.state",
+        ),
+        HostResource(
+            read_only_file,
+            HostResourceAccess.READ_ONLY,
+            "container mount",
+            "/workspace/vibesys.input.toml",
+        ),
+    )
+    assert resources[2].agent_path == "/workspace/.state/local"
+    assert resources[2].path == mask_root / "0"
+    assert resources[2].path.is_dir()
+    assert resources[3].agent_path == "/workspace/agent.toml"
+    assert resources[3].path == mask_root / "1"
+    assert resources[3].path.is_file()
+    assert resources[2].access is HostResourceAccess.READ_ONLY
+    assert resources[3].access is HostResourceAccess.READ_ONLY
+
+
+def test_project_path_resources_are_idempotent(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "hidden-directory").mkdir(parents=True)
+    (workspace / "hidden-file").write_text("secret\n")
+    mask_root = tmp_path / "operator-state" / "hidden"
+    policy = ProjectPathPolicy(hidden_paths=("hidden-directory", "hidden-file"))
+
+    first = docker_project_path_resources(policy, workspace, mask_root=mask_root)
+    second = docker_project_path_resources(policy, workspace, mask_root=mask_root)
+
+    assert second == first
+
+
+def test_empty_project_path_policy_does_not_require_or_mutate_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "missing-workspace"
+    mask_root = tmp_path / "operator-state" / "hidden"
+
+    assert (
+        docker_project_path_resources(
+            ProjectPathPolicy(),
+            workspace,
+            mask_root=mask_root,
+        )
+        == ()
+    )
+    assert not mask_root.exists()
 
 
 def test_repair_uses_selected_image_and_host_identity(

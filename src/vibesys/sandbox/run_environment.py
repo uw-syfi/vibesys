@@ -78,6 +78,7 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
+    docker_project_path_resources,
     remove_docker_workspace_child,
     repair_docker_workspace,
 )
@@ -1363,17 +1364,26 @@ def _container_mount_plan(
             )
         )
 
-    bind_mounts.extend(_container_project_policy_mounts(request))
+    resources = _resources_for_mounts(bind_mounts)
+    resources.extend(
+        docker_project_path_resources(
+            request.project_path_policy,
+            request.workspace,
+            mask_root=request.log_dir / "sandbox-hidden",
+        )
+    )
 
     if (
         include_cli_provider_mounts
         and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
         and request.cli_provider
     ):
-        bind_mounts.extend(auth_bind_mounts(request.cli_provider))
-        bind_mounts.append((str(request.framework_root), "/opt/vibesys", True))
+        resources.extend(_resources_for_mounts(auth_bind_mounts(request.cli_provider)))
+        resources.append(
+            _resource_for_mount(str(request.framework_root), "/opt/vibesys", read_only=True)
+        )
 
-    return _resources_for_mounts(bind_mounts), symlinks
+    return resources, symlinks
 
 
 def _reference_container_path(request: RunEnvironmentRequest) -> str:
@@ -1390,34 +1400,6 @@ def _reference_container_path(request: RunEnvironmentRequest) -> str:
     except ValueError:
         return "/workspace/reference"
     return f"/workspace/{relative.as_posix()}"
-
-
-def _container_project_policy_mounts(
-    request: RunEnvironmentRequest,
-) -> list[tuple[str, str, bool]]:
-    """Translate project visibility rules into Docker overlay mounts."""
-    resolved = request.project_path_policy.resolve(request.workspace)
-    workspace = request.workspace.resolve()
-    mounts = [
-        (
-            str(protected.path),
-            f"/workspace/{protected.path.relative_to(workspace).as_posix()}",
-            True,
-        )
-        for protected in resolved.read_only_paths
-    ]
-
-    mask_root = request.log_dir / "sandbox-hidden"
-    for index, hidden in enumerate(resolved.hidden_paths):
-        mask = mask_root / str(index)
-        if hidden.is_directory:
-            mask.mkdir(parents=True, exist_ok=True)
-        else:
-            mask.parent.mkdir(parents=True, exist_ok=True)
-            mask.touch(exist_ok=True)
-        relative = hidden.path.relative_to(workspace).as_posix()
-        mounts.append((str(mask), f"/workspace/{relative}", True))
-    return mounts
 
 
 def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
