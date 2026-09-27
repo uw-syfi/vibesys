@@ -10,6 +10,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from vs_runtime._evaluator_packages import load_evaluator_package
 from vs_sandbox.api.command_translation import (
     PROJECT_ROOT_TOKEN,
     PYTHON_TOKEN,
@@ -18,6 +19,7 @@ from vs_sandbox.api.command_translation import (
 from vs_sandbox.api.evaluator_tools import (
     CargoGitToolSpec,
     evaluator_tools_install_command,
+    tool_install_root,
     tool_path_replacements,
 )
 
@@ -66,6 +68,37 @@ class TrustedEvaluatorRequirements:
         if self.package_root is None and (self.toolchains or self.tools):
             message = "evaluator toolchains and tools require an evaluator package root"
             raise ValueError(message)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTrustedEvaluator:
+    """Validated evaluator requirements and declared local tool roots."""
+
+    requirements: TrustedEvaluatorRequirements
+    tool_roots: tuple[Path, ...] = ()
+
+
+def prepare_trusted_evaluator(
+    package_root: Path | None,
+    evaluator_tools_root: Path,
+) -> PreparedTrustedEvaluator:
+    """Load one evaluator package and derive its complete host preparation."""
+    if package_root is None:
+        return PreparedTrustedEvaluator(TrustedEvaluatorRequirements())
+
+    package = load_evaluator_package(package_root)
+    tools = package.metadata.tools
+    tools_root = evaluator_tools_root if tools else None
+    requirements = TrustedEvaluatorRequirements(
+        package_root=package.root,
+        toolchains=frozenset(package.metadata.toolchains),
+        tools=tools,
+        tools_root=tools_root,
+    )
+    return PreparedTrustedEvaluator(
+        requirements,
+        tuple(tool_install_root(evaluator_tools_root, name, spec) for name, spec in tools.items()),
+    )
 
 
 @dataclass(frozen=True, slots=True)

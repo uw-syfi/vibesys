@@ -12,6 +12,8 @@ import pytest
 
 from vs_runtime.api.infrastructure import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
+    EvaluatorPackageError,
+    PreparedTrustedEvaluator,
     ProtocolBenchmarkContract,
     TrustedEvaluationCommandPaths,
     TrustedEvaluationPlan,
@@ -20,11 +22,16 @@ from vs_runtime.api.infrastructure import (
     evaluator_agent_toolchains,
     evaluator_container_setup,
     prepare_trusted_evaluation_plan,
+    prepare_trusted_evaluator,
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
 from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN, PYTHON_TOKEN
-from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, tool_path_replacements
+from vs_sandbox.api.evaluator_tools import (
+    CargoGitToolSpec,
+    tool_install_root,
+    tool_path_replacements,
+)
 
 if TYPE_CHECKING:
     from subprocess import CompletedProcess
@@ -47,6 +54,88 @@ def _requirements(tmp_path: Path, *, tools: bool = False) -> TrustedEvaluatorReq
         tools={"check-tool": _tool()} if tools else {},
         tools_root=tmp_path / "operator-tools",
     )
+
+
+def _write_evaluator_package(root: Path, *, with_tool: bool) -> Path:
+    root.mkdir()
+    tool_metadata = (
+        """
+[tools.check-tool]
+kind = "cargo-git"
+git = "https://example.com/tools/check.git"
+rev = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+package = "check-tool"
+bins = ["check"]
+"""
+        if with_tool
+        else ""
+    )
+    command = '"${TOOL:check-tool/check}"' if with_tool else '"python"'
+    (root / "vibesys.evaluator.toml").write_text(
+        f"""schema_version = 1
+name = "vibesys-evaluator-test"
+version = "1.0.0"
+protocol_version = 1
+toolchains = ["go"]
+[entrypoints]
+check = [{command}]
+{tool_metadata}""",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_trusted_evaluator_preparation_is_empty_without_a_package(tmp_path: Path) -> None:
+    prepared = prepare_trusted_evaluator(None, tmp_path / "unused-cache")
+
+    assert prepared == PreparedTrustedEvaluator(TrustedEvaluatorRequirements())
+
+
+def test_trusted_evaluator_preparation_derives_requirements_and_tool_roots(
+    tmp_path: Path,
+) -> None:
+    package_root = _write_evaluator_package(tmp_path / "package", with_tool=True)
+    tools_root = tmp_path / "model-cache" / "evaluator-tools"
+
+    prepared = prepare_trusted_evaluator(package_root, tools_root)
+
+    assert prepared.requirements.package_root == package_root.resolve()
+    assert prepared.requirements.toolchains == frozenset({"go"})
+    assert tuple(prepared.requirements.tools) == ("check-tool",)
+    assert prepared.requirements.tools_root == tools_root
+    assert prepared.tool_roots == (
+        tool_install_root(
+            tools_root,
+            "check-tool",
+            prepared.requirements.tools["check-tool"],
+        ),
+    )
+
+
+def test_trusted_evaluator_preparation_omits_cache_for_package_without_tools(
+    tmp_path: Path,
+) -> None:
+    package_root = _write_evaluator_package(tmp_path / "package", with_tool=False)
+
+    prepared = prepare_trusted_evaluator(package_root, tmp_path / "unused-cache")
+
+    assert prepared.requirements.package_root == package_root.resolve()
+    assert prepared.requirements.toolchains == frozenset({"go"})
+    assert prepared.requirements.tools == {}
+    assert prepared.requirements.tools_root is None
+    assert prepared.tool_roots == ()
+
+
+def test_trusted_evaluator_preparation_preserves_package_validation_errors(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "missing"
+
+    with pytest.raises(
+        EvaluatorPackageError,
+        match=f"evaluator package is not a directory: {missing}",
+    ):
+        prepare_trusted_evaluator(missing, tmp_path / "model-cache")
 
 
 def test_authored_command_tokens_remain_stable() -> None:

@@ -93,13 +93,12 @@ from vs_runtime.api.infrastructure import (
     RunState,
     ScalarBenchmarkContract,
     TrustedEvaluationPlan,
-    TrustedEvaluatorRequirements,
     build_run_environment,
-    load_evaluator_package,
     make_run_environment_spec,
     open_project_run_resources,
     open_run_environment_resources,
     preflight_native_cpu_profiler,
+    prepare_trusted_evaluator,
     run_environment_record,
 )
 from vs_sandbox.api import (
@@ -108,7 +107,6 @@ from vs_sandbox.api import (
     HostResource,
     create_compute_backend,
 )
-from vs_sandbox.api.evaluator_tools import tool_install_root
 
 _RUNTIME_STATE_NAMESPACE = "runtime"
 _SKYPILOT_STATE_NAMESPACE = "skypilot"
@@ -679,31 +677,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         logger = project_resources.logger
         git = project_resources.git
 
-        evaluator_package = (
-            load_evaluator_package(evaluator_package_root)
-            if evaluator_package_root is not None
-            else None
+        prepared_evaluator = prepare_trusted_evaluator(
+            evaluator_package_root,
+            project_state.model_cache_directory("evaluator-tools"),
         )
-        evaluator_tools_root = None
-        evaluator_tool_roots: tuple[Path, ...] = ()
-        if evaluator_package is not None:
-            evaluator_tools = evaluator_package.metadata.tools
-            if evaluator_tools:
-                evaluator_tools_root = project_state.model_cache_directory("evaluator-tools")
-                evaluator_tool_roots = tuple(
-                    tool_install_root(evaluator_tools_root, name, spec)
-                    for name, spec in evaluator_tools.items()
-                )
-        evaluator_requirements = TrustedEvaluatorRequirements(
-            package_root=evaluator_package.root if evaluator_package is not None else None,
-            toolchains=(
-                frozenset(evaluator_package.metadata.toolchains)
-                if evaluator_package is not None
-                else frozenset()
-            ),
-            tools=evaluator_package.metadata.tools if evaluator_package is not None else {},
-            tools_root=evaluator_tools_root,
-        )
+        evaluator_requirements = prepared_evaluator.requirements
+        evaluator_tool_roots = prepared_evaluator.tool_roots
 
         with boot_trace.span("workspace_setup"):
             integration.attach(log_dir, project=project, run_id=run_id)
