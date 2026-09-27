@@ -10,13 +10,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import import_module
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
+from pydantic import BaseModel
+
+from vs_agent.api import AgentCapabilities, AgentSessionKey, ToolServerDescriptor
 from vs_runtime._accelerators import (
     AcceleratorDiscovery,
     AcceleratorInventory,
     SystemAcceleratorDiscovery,
 )
+from vs_runtime._agent_sessions import RuntimeAgentSessions
 from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
@@ -68,10 +72,141 @@ from vs_runtime._skills import (
     load_skill_frontmatter,
     resolve_skill_resources,
 )
+from vs_runtime.contracts import AgentSessions, Workspace
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Awaitable, Callable, Mapping
     from pathlib import Path
+
+    from vs_runtime.api import AgentRole
+
+
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+
+class ManagedAgentWorkspace(Workspace, Protocol):
+    """Composition view of workspace mechanics needed for access enforcement.
+
+    This is not an orchestration-plugin contract. It is removed once workspace
+    ownership also resides in ``vs_runtime``.
+    """
+
+    @property
+    def path(self) -> Path:
+        """Return the live host path used by the agent execution adapter."""
+        ...
+
+    async def snapshot(self, label: str) -> str:
+        """Record the tree before or after one turn."""
+        ...
+
+    async def pending_changes(self) -> list[str]:
+        """List workspace-relative paths changed since the latest snapshot."""
+        ...
+
+    async def restore_for_agent(
+        self,
+        revision: str,
+        *,
+        preserve_paths: tuple[str, ...],
+    ) -> None:
+        """Restore a turn snapshot while preserving only declared grants."""
+        ...
+
+    def is_directory(self, path: str) -> bool:
+        """Return whether one validated workspace-relative path is a directory."""
+        ...
+
+
+class AgentExecution(Protocol):
+    """Temporary composition port for one already-open agent execution.
+
+    The runtime owns sessions through this port while the concrete client and
+    sandbox opener still lives in VibeSys. The port is removed when those
+    resources move into ``vs_runtime``.
+    """
+
+    @property
+    def capabilities(self) -> AgentCapabilities:
+        """Return execution-system capabilities."""
+        ...
+
+    @property
+    def backend_name(self) -> str:
+        """Return the selected backend name."""
+        ...
+
+    @property
+    def driver_name(self) -> str | None:
+        """Return the selected driver name."""
+        ...
+
+    @property
+    def provider(self) -> str | None:
+        """Return the selected provider."""
+        ...
+
+    @property
+    def model(self) -> str | None:
+        """Return the selected model."""
+        ...
+
+    @property
+    def reasoning_effort(self) -> str | None:
+        """Return the selected reasoning effort."""
+        ...
+
+    async def execute(  # noqa: PLR0913  # lint-waiver: LW-837205 [PLR0913]; temporary port mirrors the independently fixed inputs of the existing execution handle and is deleted when that handle moves into vs_runtime.
+        self,
+        message: str,
+        *,
+        system_prompt: str,
+        response: type[ResponseT] | None,
+        label: str,
+        session_key: AgentSessionKey,
+        tool_servers: tuple[ToolServerDescriptor, ...] | None,
+    ) -> str | ResponseT:
+        """Execute one turn with fixed session configuration."""
+        ...
+
+    async def close(self) -> None:
+        """Release the execution resource idempotently."""
+        ...
+
+
+class AgentSessionRuntime(AgentSessions, Protocol):
+    """Composition controls for the run-owned production session manager."""
+
+    def invalidate_workspace(self, workspace: Workspace) -> None:
+        """Reject new turns before a workspace begins teardown."""
+        ...
+
+    def begin_close(self) -> None:
+        """Reject new turns before run teardown begins."""
+        ...
+
+
+type AgentExecutionFactory = Callable[[AgentRole, Workspace, str], Awaitable[AgentExecution]]
+type ManagedAgentWorkspaceResolver = Callable[[Workspace], ManagedAgentWorkspace]
+type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
+
+
+def create_agent_session_runtime(
+    roles: tuple[AgentRole, ...],
+    *,
+    open_execution: AgentExecutionFactory,
+    resolve_workspace: ManagedAgentWorkspaceResolver,
+    tool_bindings: Mapping[str, AgentToolResolver] | None = None,
+    log: Callable[[str], None] = print,
+) -> AgentSessionRuntime:
+    """Create the production owner for explicit orchestration sessions."""
+    return RuntimeAgentSessions(
+        roles,
+        open_execution=open_execution,
+        resolve_workspace=resolve_workspace,
+        tool_bindings=tool_bindings,
+        log=log,
+    )
 
 
 class ModelVolumeProvisioner(Protocol):
@@ -183,6 +318,11 @@ def create_model_request_reconciler(
 __all__ = [
     "AcceleratorDiscovery",
     "AcceleratorInventory",
+    "AgentExecution",
+    "AgentExecutionFactory",
+    "AgentSessionRuntime",
+    "AgentToolResolver",
+    "FrameworkValidationResult",
     "InputDependency",
     "InputProjectError",
     "LinuxProfileResult",
@@ -198,6 +338,8 @@ __all__ = [
     "MacOSProfilerDiagnostic",
     "MacOSProfilerEffects",
     "MacOSProfilerTool",
+    "ManagedAgentWorkspace",
+    "ManagedAgentWorkspaceResolver",
     "ModelRequestError",
     "ModelRequestReconciler",
     "ModelVolumeProvisioner",
@@ -211,6 +353,7 @@ __all__ = [
     "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",
+    "create_agent_session_runtime",
     "create_model_request_reconciler",
     "detect_linux_profiler",
     "detect_macos_profiler",
@@ -224,7 +367,6 @@ __all__ = [
     "resolve_packaged_tree",
     "resolve_sdk_source",
     "resolve_skill_resources",
-    "FrameworkValidationResult",
     "run_local_validation",
     "summarize_linux_profile",
 ]

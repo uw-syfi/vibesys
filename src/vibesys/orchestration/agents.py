@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, cast, overload
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -57,20 +57,16 @@ from vs_agent.api import (
     AgentTurnTimeoutError as DriverAgentTurnTimeoutError,
 )
 from vs_runtime.api import (
-    AgentBinding,
     AgentRole,
-    AgentTurnTimeoutError,
-    RuntimeContractError,
-    SessionClosedError,
     SkillResourceRequest,
     StructuredResponseError,
-    UnknownAgentRoleError,
     Workspace,
-    WorkspaceAccess,
-    validate_member_id,
-    validate_workspace_writable_paths,
 )
-from vs_runtime.api.infrastructure import build_skill_catalog, resolve_skill_resources
+from vs_runtime.api.infrastructure import (
+    build_skill_catalog,
+    create_agent_session_runtime,
+    resolve_skill_resources,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator, Mapping
@@ -87,6 +83,7 @@ if TYPE_CHECKING:
         AgentProgress,
         ToolServerDescriptor,
     )
+    from vs_runtime.api import AgentSession
 
 T = TypeVar("T", bound=BaseModel)
 type _AgentToolResolver = Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
@@ -270,6 +267,42 @@ class _LocalAgentHandle:
         """Return the reasoning effort resolved for this handle's role."""
         spec = self._definition.spec
         return spec.role_reasoning_efforts.get(self._definition.id, spec.reasoning_effort)
+
+    async def execute(  # noqa: PLR0913  # lint-waiver: LW-040125 [PLR0913]; temporary composition port mirrors the fixed execution inputs and is deleted when this handle moves into vs_runtime.
+        self,
+        message: str,
+        *,
+        system_prompt: str,
+        response: type[T] | None,
+        label: str,
+        session_key: AgentSessionKey,
+        tool_servers: tuple[ToolServerDescriptor, ...] | None,
+    ) -> str | T:
+        """Execute one explicit-session turn through the legacy client adapter."""
+        resolved_tools = list(tool_servers) if tool_servers is not None else None
+        if response is None:
+            return await self.turn(
+                message,
+                system_prompt=system_prompt,
+                label=label,
+                session_key=session_key,
+                reuse_session=True,
+                tool_servers=resolved_tools,
+            )
+
+        def parse_failure() -> T:
+            raise StructuredResponseError(self._definition.id, response)
+
+        return await self.turn_structured(
+            message,
+            response_cls=response,
+            fallback_factory=parse_failure,
+            system_prompt=system_prompt,
+            label=label,
+            session_key=session_key,
+            reuse_session=True,
+            tool_servers=resolved_tools,
+        )
 
     async def turn(  # noqa: PLR0913  # lint-waiver: LW-020039 [PLR0913]; this adapter mirrors the agent client's independently configurable session and tool-server turn settings.
         self,
@@ -464,196 +497,6 @@ class _LocalAgentHandle:
             await asyncio.to_thread(self._executor.shutdown, wait=True)
 
 
-class _ExplicitAgentSession:
-    """One policy-facing conversation over a host-owned agent handle."""
-
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-040111 [PLR0913]; these are the immutable session binding and its independently owned host resources.
-        self,
-        host: HostResources,
-        agent: _LocalAgentHandle,
-        role: AgentRole,
-        workspace: WorkspaceHandle,
-        member_id: str | None,
-        writable_paths: tuple[str, ...],
-        writable_directory_paths: tuple[str, ...],
-        tool_servers: list[ToolServerDescriptor] | None,
-        *,
-        session_id: str,
-    ) -> None:
-        self._host = host
-        self._agent = agent
-        self._role = role
-        self._workspace = workspace
-        self._member_id = member_id
-        self._writable_paths = writable_paths
-        self._writable_directory_paths = writable_directory_paths
-        self._tool_servers = tool_servers
-        self._binding = AgentBinding(
-            backend=agent.backend_name,
-            driver=agent.driver_name,
-            provider=agent.provider,
-            model=agent.model,
-            reasoning_effort=agent.reasoning_effort,
-        )
-        # Candidate workspace IDs are runtime-generated and change when a
-        # retained revision is reopened. The policy-owned member ID is the
-        # durable identity; callers must choose distinct IDs for distinct
-        # conversations, regardless of their current physical workspace.
-        self._session_key = (
-            AgentSessionKey(
-                SessionScope.MEMBER,
-                f"{role.id}:{member_id}",
-            )
-            if member_id is not None
-            else AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")
-        )
-        self._turn_number = 0
-        self._turn_lock = asyncio.Lock()
-        self._closed = False
-        self._close_task: asyncio.Task[None] | None = None
-
-    @property
-    def role(self) -> AgentRole:
-        """Return the role fixed when the session was created."""
-        return self._role
-
-    @property
-    def workspace(self) -> WorkspaceHandle:
-        """Return the workspace fixed when the session was created."""
-        return self._workspace
-
-    @property
-    def member_id(self) -> str | None:
-        """Return the durable policy identity fixed at creation."""
-        return self._member_id
-
-    @property
-    def writable_paths(self) -> tuple[str, ...]:
-        """Return the fixed workspace-relative write grants for this session."""
-        return self._writable_paths
-
-    @property
-    def binding(self) -> AgentBinding:
-        """Return immutable runtime attribution for the resolved agent."""
-        return self._binding
-
-    @property
-    def closed(self) -> bool:
-        """Return whether this session accepts further turns."""
-        return self._closed
-
-    @overload
-    async def turn(self, message: str, *, response: None = None) -> str: ...
-
-    @overload
-    async def turn(self, message: str, *, response: type[T]) -> T: ...
-
-    async def turn(self, message: str, *, response: type[T] | None = None) -> str | T:
-        """Run one context-preserving turn and enforce workspace access."""
-        if self._closed:
-            raise SessionClosedError
-        async with self._turn_lock:
-            if self._closed:
-                raise SessionClosedError
-            return await self._turn_once(message, response=response)
-
-    async def _turn_once(self, message: str, *, response: type[T] | None) -> str | T:
-        """Run the serialized workspace transaction for one turn."""
-        self._turn_number += 1
-        label = f"{self._role.id}-session-turn-{self._turn_number}"
-        revision = await self._workspace.snapshot(f"{label}-input")
-        try:
-            try:
-                if response is None:
-                    result: str | T = await self._agent.turn(
-                        message,
-                        system_prompt=self._role.system_prompt,
-                        label=label,
-                        session_key=self._session_key,
-                        reuse_session=True,
-                        tool_servers=self._tool_servers,
-                    )
-                else:
-
-                    def parse_failure() -> T:
-                        raise StructuredResponseError(self._role.id, response)
-
-                    result = await self._agent.turn_structured(
-                        message,
-                        response_cls=response,
-                        fallback_factory=parse_failure,
-                        system_prompt=self._role.system_prompt,
-                        label=label,
-                        session_key=self._session_key,
-                        reuse_session=True,
-                        tool_servers=self._tool_servers,
-                    )
-            except DriverAgentTurnTimeoutError as error:
-                raise AgentTurnTimeoutError(error.timeout_seconds) from error
-        finally:
-            if self._role.workspace_access in {
-                WorkspaceAccess.READ_ONLY,
-                WorkspaceAccess.LIMITED,
-            }:
-                allowed_paths = (
-                    self._writable_paths
-                    if self._role.workspace_access is WorkspaceAccess.LIMITED
-                    else ()
-                )
-                allowed_directories = (
-                    self._writable_directory_paths
-                    if self._role.workspace_access is WorkspaceAccess.LIMITED
-                    else ()
-                )
-                changes = await self._workspace.pending_changes()
-                unauthorized = _unauthorized_paths(
-                    changes,
-                    allowed_paths,
-                    directories=allowed_directories,
-                )
-                if unauthorized:
-                    await self._workspace.restore(
-                        revision,
-                        clean=True,
-                        preserve_paths=allowed_paths,
-                        preserve_memory=False,
-                    )
-                    remaining = _unauthorized_paths(
-                        await self._workspace.pending_changes(),
-                        allowed_paths,
-                        directories=allowed_directories,
-                    )
-                    if remaining:
-                        raise RoleIsolationError(remaining, role=self._role.id)
-                    self._host.log(
-                        f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
-                        f"attempted by {self._role.id}: {', '.join(unauthorized[:8])}"
-                    )
-
-        if (
-            self._role.workspace_access is WorkspaceAccess.READ_WRITE
-            or await self._workspace.pending_changes()
-        ):
-            await self._workspace.snapshot(label)
-        return result
-
-    async def close(self) -> None:
-        """Release this session once; repeated calls await the same cleanup."""
-        if self._close_task is None:
-            self._closed = True
-            self._close_task = asyncio.create_task(self._close_once())
-        await asyncio.shield(self._close_task)
-
-    async def _close_once(self) -> None:
-        """Wait for the complete turn transaction before closing its agent."""
-        async with self._turn_lock:
-            await self._agent.close()
-
-    def _mark_closed(self) -> None:
-        """Reflect host-owned shutdown before handles close in spawn order."""
-        self._closed = True
-
-
 class _Agents:
     """Agent creation and per-turn progress for one run."""
 
@@ -666,7 +509,16 @@ class _Agents:
         self._host = host
         self._roles = {role.id: role for role in roles}
         self._tool_bindings = dict(tool_bindings or {})
-        self._sessions: list[_ExplicitAgentSession] = []
+        self._explicit = create_agent_session_runtime(
+            roles,
+            open_execution=self._open_explicit_execution,
+            resolve_workspace=self._resolve_explicit_workspace,
+            tool_bindings={
+                tool_id: partial(resolver, host)
+                for tool_id, resolver in self._tool_bindings.items()
+            },
+            log=host.log,
+        )
 
     async def create_session(
         self,
@@ -675,86 +527,49 @@ class _Agents:
         workspace: Workspace,
         member_id: str | None = None,
         writable_paths: tuple[str, ...] = (),
-    ) -> _ExplicitAgentSession:
+    ) -> AgentSession:
         """Create a role session, durable only when policy supplies a member ID."""
-        validate_member_id(member_id)
-        if self._roles.get(role.id) != role:
-            raise UnknownAgentRoleError(role.id)
-        validated_paths = validate_workspace_writable_paths(
-            role.workspace_access,
-            writable_paths,
+        return await self._explicit.create_session(
+            role,
+            workspace=workspace,
+            member_id=member_id,
+            writable_paths=writable_paths,
         )
-        bound_tool_ids = tuple(tool.id for tool in role.tools if tool.id != "shell")
-        unknown_tools = sorted(set(bound_tool_ids) - self._tool_bindings.keys())
-        if unknown_tools:
-            message = f"unsupported agent tools: {', '.join(unknown_tools)}"
-            raise RuntimeContractError(message)
-        if role.skills:
-            message = "role-scoped agent skills are not supported by this host adapter"
-            raise RuntimeContractError(message)
+
+    def _resolve_explicit_workspace(self, workspace: Workspace) -> WorkspaceHandle:
         if not isinstance(workspace, WorkspaceHandle):
             message = "workspace must be a live handle from this run"
             raise TypeError(message)
-        tool_servers = [
-            spec
-            for tool_id in bound_tool_ids
-            for spec in self._tool_bindings[tool_id](self._host, workspace)
-        ]
-        scope = self._host.workspaces._scope_of(workspace)
-        session_id = uuid.uuid4().hex
-        agent = cast(
+        self._host.workspaces._scope_of(workspace)
+        return workspace
+
+    async def _open_explicit_execution(
+        self,
+        role: AgentRole,
+        workspace: Workspace,
+        registration_id: str,
+    ) -> _LocalAgentHandle:
+        managed = self._resolve_explicit_workspace(workspace)
+        return cast(
             "_LocalAgentHandle",
             await self._host._spawn(
                 self.default_definition(role.id),
-                scope=scope,
-                registration_id=f"session:{session_id}",
+                scope=self._host.workspaces._scope_of(managed),
+                registration_id=registration_id,
             ),
         )
-        missing_capabilities = {
-            capability.value
-            for capability in role.required_capabilities
-            if not getattr(agent.capabilities, capability.value)
-        }
-        if member_id is not None and not agent.capabilities.provider_session_resume:
-            missing_capabilities.add("provider_session_resume")
-        if bound_tool_ids and not agent.capabilities.tool_servers:
-            missing_capabilities.add("tool_servers")
-        if missing_capabilities:
-            await agent.close()
-            message = (
-                "agent driver lacks required capabilities: "
-                f"{', '.join(sorted(missing_capabilities))}"
-            )
-            raise RuntimeContractError(message)
-        session = _ExplicitAgentSession(
-            self._host,
-            agent,
-            role,
-            workspace,
-            member_id,
-            validated_paths,
-            tuple(path for path in validated_paths if (workspace.path / path).is_dir()),
-            tool_servers or None,
-            session_id=session_id,
-        )
-        self._sessions.append(session)
-        return session
 
     async def close(self) -> None:
         """Close explicit sessions in reverse creation order."""
-        for session in reversed(self._sessions):
-            await session.close()
+        await self._explicit.close()
 
     def _mark_workspace_closed(self, workspace: Workspace) -> None:
         """Invalidate public sessions before their workspace resources close."""
-        for session in self._sessions:
-            if session.workspace is workspace:
-                session._mark_closed()
+        self._explicit.invalidate_workspace(workspace)
 
     def _mark_closed(self) -> None:
         """Mark every public session closed before host-owned teardown."""
-        for session in self._sessions:
-            session._mark_closed()
+        self._explicit.begin_close()
 
     def default_definition(self, role_id: str, *, model: str | None = None) -> AgentDefinition:
         """Build a named role from this run's resolved agent configuration."""

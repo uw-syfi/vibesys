@@ -222,7 +222,7 @@ depends_on = []
 # in loops/ supplies the typed value and owns that shaping.
 path = "vibesys.orchestration.artifacts"
 layer = "orchestration_host"
-depends_on = ["vibesys.evaluators", "vibesys.orchestration.memory"]
+depends_on = ["vibesys.evaluators", "vibesys.orchestration.memory", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.runtime"
@@ -278,12 +278,7 @@ depends_on = ["vibesys", "vs_runtime", "vs_sandbox"]
 [[modules]]
 path = "vibesys.sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.skypilot", "vs_project", "vs_sandbox"]
-
-[[modules]]
-path = "vibesys.skypilot"
-layer = "prompts_and_lower_libs"
-depends_on = [ "vs_project"]
+depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.render"
@@ -313,12 +308,12 @@ depends_on = ["vibesys", "vibesys.domains", "vibesys.errors", "vibesys.evaluator
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_project"]
 
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sandbox"]
+depends_on = ["vs_agent", "vs_sandbox"]
 
 [[modules]]
 path = "vs_agent"
@@ -454,7 +449,7 @@ depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vs_runtime
 # depending on orchestration, which would cycle (agent_run already depends
 # on orchestration.view/orchestration).
 path = "vibesys.orchestration.progress_log"
-depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.hypothesis"]
+depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.hypothesis", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"
@@ -466,7 +461,7 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runti
 # candidate-authored local validation recipes.
 path = "vibesys.orchestration.local_validation"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.evaluators", "vibesys.orchestration.artifacts", "vibesys.orchestration._host", "vibesys.orchestration.workspaces", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.orchestration._host", "vibesys.orchestration.workspaces", "vs_runtime"]
 
 [[modules]]
 # In-memory `GateExecutor` test double; see the module docstring. Split from

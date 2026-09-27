@@ -64,7 +64,9 @@ graph TD
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
     vs_issue_tracker --> vs_github
+    vs_runtime --> vs_agent
     vs_runtime --> vs_sandbox
+    vs_sandbox --> vs_project
 ```
 
 ## Core layers
@@ -159,7 +161,6 @@ graph TD
     vibesys.orchestration.local_validation --> vibesys
     vibesys.orchestration.local_validation --> vibesys.evaluators
     vibesys.orchestration.local_validation --> vibesys.orchestration._host
-    vibesys.orchestration.local_validation --> vibesys.orchestration.artifacts
     vibesys.orchestration.local_validation --> vibesys.orchestration.workspaces
     vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.progress_log --> vibesys
@@ -245,7 +246,6 @@ graph TD
     vibesys.sandbox --> vibesys.domains
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
-    vibesys.sandbox --> vibesys.skypilot
     vibesys.search.hypothesis --> vibesys
     vibesys.search.hypothesis --> vibesys.evaluators
     vibesys.search.hypothesis --> vibesys.search.profile_focus
@@ -421,6 +421,7 @@ graph TD
     vibesys.orchestration.agents --> vs_runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
+    vibesys.orchestration.artifacts --> vs_runtime
     vibesys.orchestration.commands --> vibesys.orchestration._host
     vibesys.orchestration.commands --> vibesys.orchestration.workspaces
     vibesys.orchestration.commands --> vs_runtime
@@ -457,7 +458,6 @@ graph TD
     vibesys.orchestration.local_validation --> vibesys
     vibesys.orchestration.local_validation --> vibesys.evaluators
     vibesys.orchestration.local_validation --> vibesys.orchestration._host
-    vibesys.orchestration.local_validation --> vibesys.orchestration.artifacts
     vibesys.orchestration.local_validation --> vibesys.orchestration.workspaces
     vibesys.orchestration.local_validation --> vs_runtime
     vibesys.orchestration.progress --> vibesys.orchestration._host
@@ -465,6 +465,7 @@ graph TD
     vibesys.orchestration.progress_log --> vibesys.evaluators
     vibesys.orchestration.progress_log --> vibesys.roles
     vibesys.orchestration.progress_log --> vibesys.search.hypothesis
+    vibesys.orchestration.progress_log --> vs_runtime
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
@@ -572,7 +573,6 @@ graph TD
     vibesys.sandbox --> vibesys.domains
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
-    vibesys.sandbox --> vibesys.skypilot
     vibesys.sandbox --> vs_agent
     vibesys.sandbox --> vs_project
     vibesys.sandbox --> vs_sandbox
@@ -582,11 +582,12 @@ graph TD
     vibesys.search.hypothesis --> vs_loop_state
     vibesys.search.hypothesis --> vs_project
     vibesys.search.population --> vibesys.evaluators
-    vibesys.skypilot --> vs_project
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
     vs_issue_tracker --> vs_github
+    vs_runtime --> vs_agent
     vs_runtime --> vs_sandbox
+    vs_sandbox --> vs_project
 ```
 [//]: # (tach-graph:end)

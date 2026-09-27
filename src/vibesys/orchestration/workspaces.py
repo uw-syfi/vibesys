@@ -187,6 +187,24 @@ class WorkspaceHandle:
         """List uncommitted candidate changes in this workspace."""
         return await self._owner._pending_changes(scope=self._scope)
 
+    async def restore_for_agent(
+        self,
+        revision: str,
+        *,
+        preserve_paths: tuple[str, ...],
+    ) -> None:
+        """Restore a turn snapshot without preserving undeclared memory paths."""
+        await self.restore(
+            revision,
+            clean=True,
+            preserve_paths=preserve_paths,
+            preserve_memory=False,
+        )
+
+    def is_directory(self, path: str) -> bool:
+        """Return whether one validated workspace-relative path is a directory."""
+        return (self.path / path).is_dir()
+
     async def candidate_patch(self, revision: str) -> str:
         """Return a candidate diff against the trusted baseline."""
         return await self._owner._candidate_patch(revision, scope=self._scope)

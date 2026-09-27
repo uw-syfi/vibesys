@@ -17,6 +17,17 @@ schema, an authoritative tuple of immutable agent roles, state and projection
 contracts, and its orchestration function. Sessions bind one declared role,
 workspace, and optional member ID for their full lifetime.
 
+The production session manager also lives here. It fixes role configuration
+and tools at creation, serializes turns in one conversation, enforces workspace
+write grants, owns reverse-order cleanup, and delegates provider continuity to
+`vs_agent`. Product composition temporarily supplies the concrete agent opener
+until sandbox and client construction move into this library as well.
+
+The runtime also owns strict local-validation recipe contracts and parsing,
+exact-input pass reuse, trusted shell execution, mutation rollback, and atomic
+reports. VibeSys retains validation cadence, gate events, and policy-facing
+feedback interpretation.
+
 `RunHost.workspaces.root` supplies the live root workspace. Policies may read
 its recorded revision and trusted-input baseline, snapshot and restore its
 tree, try a non-fatal restore, and retain a revision under a semantic label.
