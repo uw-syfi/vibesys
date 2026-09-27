@@ -10,7 +10,7 @@ test('renders the replay-driven run viewer', async ({page}) => {
 
 test('surfaces a replay load failure and retries it', async ({page}) => {
   let failRequest = true;
-  await page.route('**/__vibesys/fixtures/framework-events.jsonl', async route => {
+  await page.route(/\/__vibesys\/fixtures\/framework-events\.jsonl(?:\?.*)?$/, async route => {
     if (failRequest) await route.fulfill({status: 503, body: 'temporarily unavailable'});
     else await route.continue();
   });
