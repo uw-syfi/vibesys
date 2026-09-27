@@ -127,9 +127,12 @@ def test_discover_web_instance_waits_for_a_claimed_gateway(
     # test-isolation: keep the race test on the first polling iteration
     monkeypatch.setattr(server_entrypoint.time, "monotonic", lambda: 0.0)
 
-    assert server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101066 [SLF001]; exercise the launch race helper directly
-        instance_path
-    ) == record
+    assert (
+        server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101066 [SLF001]; exercise the launch race helper directly
+            instance_path
+        )
+        == record
+    )
 
 
 def test_discover_web_instance_falls_back_after_claim_timeout(
@@ -157,9 +160,12 @@ def test_discover_web_instance_falls_back_after_claim_timeout(
     # test-isolation: advance directly from the deadline setup to the timeout check
     monkeypatch.setattr(server_entrypoint.time, "monotonic", lambda: next(monotonic_values))
 
-    assert server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101067 [SLF001]; exercise the launch timeout fallback directly
-        instance_path
-    ) == record
+    assert (
+        server_entrypoint._discover_web_instance(  # noqa: SLF001  # lint-waiver: LW-101067 [SLF001]; exercise the launch timeout fallback directly
+            instance_path
+        )
+        == record
+    )
 
 
 def test_web_instance_claim_reports_ownership(tmp_path: Path) -> None:
