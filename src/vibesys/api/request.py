@@ -30,7 +30,6 @@ from vibesys.evaluators.input_synthesis import (
     SynthesizedInputSpec,
     synthesize_input_bundle,
 )
-from vibesys.evaluators.objective import load_objective, with_operator_constraints
 from vibesys.orchestration.skills import resolve_skill_source_dirs
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibesys.repository import (
@@ -40,7 +39,7 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.sandbox.run_environment import (
+from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
@@ -58,6 +57,20 @@ def default_skill_roots() -> tuple[Path, ...]:
     """Return the bundled skill collection, when one is installed."""
     skills = BUNDLED_RESOURCES.directory("skills")
     return () if skills is None else (skills,)
+
+
+def load_objective(bundle: InputBundle) -> str:
+    """Return one input bundle's objective text."""
+    return bundle.objective
+
+
+def with_operator_constraints(objective: str, constraints: list[str]) -> str:
+    """Add run-specific invariants without mutating the input bundle."""
+    normalized = [constraint.strip() for constraint in constraints if constraint.strip()]
+    if not normalized:
+        return objective
+    lines = "\n".join(f"- {constraint}" for constraint in normalized)
+    return f"{objective.rstrip()}\n\n## Operator constraints\n\n{lines}\n"
 
 
 __all__ = [
