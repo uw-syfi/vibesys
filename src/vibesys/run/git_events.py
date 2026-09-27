@@ -1,10 +1,4 @@
-"""Typed emission interface for Git tracker observations.
-
-``GitTrackerEvents`` and ``NullGitTrackerEvents`` now live in ``vs_project``
-and are re-exported here so core-internal importers keep working.
-``CoreGitTrackerEvents`` stays in core: it projects tracker callbacks onto the
-owning run's semantic event stream, which ``vs_project`` cannot depend on.
-"""
+"""Project Git tracker observations onto the core event stream."""
 
 from __future__ import annotations
 
@@ -15,13 +9,8 @@ from vibesys.events import (
     FrameworkWarningData,
     WorkspaceSnapshotData,
 )
-from vs_project.api import GitTrackerEvents, NullGitTrackerEvents
 
-__all__ = [
-    "CoreGitTrackerEvents",
-    "GitTrackerEvents",
-    "NullGitTrackerEvents",
-]
+__all__ = ["CoreGitTrackerEvents"]
 
 
 class CoreGitTrackerEvents:

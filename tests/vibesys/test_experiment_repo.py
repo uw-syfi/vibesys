@@ -11,9 +11,8 @@ from tests.support import run_test_command
 
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.run.git_events import NullGitTrackerEvents
 from vs_github.api import GitHubCLI
-from vs_project.api import GitTracker
+from vs_project.api import GitTracker, NullGitTrackerEvents
 
 if TYPE_CHECKING:
     from pathlib import Path
