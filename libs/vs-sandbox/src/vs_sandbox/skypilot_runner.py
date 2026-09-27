@@ -22,7 +22,7 @@ import yaml
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from vibesys.skypilot.config import ResolvedSkyPilotResources
+    from vs_sandbox.skypilot_config import ResolvedSkyPilotResources
 
 _CLUSTER_COMPONENT = re.compile(r"[^a-z0-9-]+")
 _MAX_CLUSTER_NAME = 28

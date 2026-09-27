@@ -262,7 +262,7 @@ FRAMEWORK_BENCHMARK_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 # ``OutputFlag`` in the evaluator SDK (``sdk/vs-evaluator/vseval/schema.go``).
 
 # The SkyPilot bridge allowlists framework result artifacts by this path
-# shape (``_FRAMEWORK_ARTIFACT`` in ``vibesys.skypilot.bridge``); the nonce
+# shape (``_FRAMEWORK_ARTIFACT`` in ``vs_sandbox``'s SkyPilot bridge); the nonce
 # appended per invocation must stay within its ``[a-zA-Z0-9._-]`` alphabet.
 _BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010207 [S108]; evaluator and remote bridge share this fixed artifact path protocol.
 

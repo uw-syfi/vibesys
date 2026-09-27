@@ -12,39 +12,35 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from tests.support import run_test_command
 
-import vibesys.skypilot.bridge as bridge_module
-from vibesys.skypilot.bridge import SkyPilotBridge
-from vibesys.skypilot.config import ResolvedSkyPilotResources
-from vibesys.skypilot.protocol import (
+import vs_sandbox.skypilot_bridge as bridge_module  # test-isolation: durable restart-offset behavior belongs to the bridge's private spool state machine.
+from vs_project.api import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
+from vs_sandbox.api.skypilot import (
     AckRequest,
     ArtifactFrame,
+    AttemptResourcesRecord,
+    ClusterInfo,
+    ClusterStatus,
     ErrorFrame,
     EvaluationRequest,
-    ResponseFrame,
-    decode_response,
-    encode_message,
-)
-from vibesys.skypilot.recovery import (
-    AttemptResourcesRecord,
     InvocationJournal,
     InvocationPhase,
     InvocationProvenance,
     InvocationRecord,
     InvocationResultRecord,
-)
-from vibesys.skypilot.runner import (
-    ClusterInfo,
-    ClusterStatus,
     JobResult,
     JobStatus,
+    ResolvedSkyPilotResources,
+    ResponseFrame,
+    SkyPilotBridge,
     SkyPilotJobRunner,
+    decode_response,
+    encode_message,
 )
-from vs_project.api import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vibesys.skypilot.runner import RemoteJobInfo
+    from vs_sandbox.api.skypilot import RemoteJobInfo
 
 
 def _resources() -> ResolvedSkyPilotResources:

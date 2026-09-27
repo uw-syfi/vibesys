@@ -33,3 +33,7 @@ Applications select a backend and declare the resources their agents need.
   a raised exception aborts startup and triggers backend-owned cleanup.
 - `ensure_model_volume` provisions a per-model Modal Volume populated with
   HuggingFace model weights, reusing already-populated volumes.
+- `vs_sandbox.api.skypilot` owns the optional SkyPilot cluster profile, CLI,
+  evaluator bridge, wire protocol, and durable invocation-recovery mechanics.
+  Applications select and compose that backend without carrying its
+  implementation in product policy code.

@@ -17,7 +17,7 @@ import pytest
 
 import vibesys.sandbox.skypilot_evaluator as helper_module
 from vibesys.sandbox.skypilot_evaluator import run_evaluator
-from vibesys.skypilot.protocol import (
+from vs_sandbox.api.skypilot import (
     AckedFrame,
     ArtifactFrame,
     ErrorFrame,

@@ -17,7 +17,8 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.skypilot.protocol import (
+from vs_project.api import validate_socket_path
+from vs_sandbox.skypilot_protocol import (
     AckedFrame,
     ArtifactFrame,
     ErrorFrame,
@@ -28,7 +29,7 @@ from vibesys.skypilot.protocol import (
     decode_request,
     encode_message,
 )
-from vibesys.skypilot.recovery import (
+from vs_sandbox.skypilot_recovery import (
     ArtifactRecord,
     AttemptResourcesRecord,
     InvocationJournal,
@@ -37,22 +38,21 @@ from vibesys.skypilot.recovery import (
     InvocationRecord,
     InvocationResultRecord,
 )
-from vibesys.skypilot.runner import (
+from vs_sandbox.skypilot_runner import (
     ClusterStatus,
     RemoteJobInfo,
     RemoteJobStatus,
     SkyPilotControlPlaneError,
     SkyPilotJobStateError,
 )
-from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from io import BufferedIOBase
 
-    from vibesys.skypilot.config import ResolvedSkyPilotResources
-    from vibesys.skypilot.runner import SkyPilotJobRunner
     from vs_project.api import StateNamespace
+    from vs_sandbox.skypilot_config import ResolvedSkyPilotResources
+    from vs_sandbox.skypilot_runner import SkyPilotJobRunner
 
 _MAX_REQUEST_BYTES = 4096
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024

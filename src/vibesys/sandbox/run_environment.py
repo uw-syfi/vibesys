@@ -62,9 +62,6 @@ from vibesys.sandbox._command_translation import (
     _translate_command_argument,
 )
 from vibesys.sandbox.modal_evaluator import encode_setup_command
-from vibesys.skypilot.bridge import SkyPilotBridge
-from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
-from vibesys.skypilot.runner import SkyPilotJobRunner, stable_cluster_name
 from vs_agent.api import (
     DOCKER_PROVIDER_ENV,
     AgentBackend,
@@ -81,6 +78,13 @@ from vs_sandbox.api import (
     HostResourceAccess,
     ProjectPathPolicy,
     SandboxLifecycleHooks,
+)
+from vs_sandbox.api.skypilot import (
+    SkyPilotBridge,
+    SkyPilotJobRunner,
+    load_cluster_profiles,
+    resolve_profile,
+    stable_cluster_name,
 )
 
 _RunEnvironmentName = Literal["local", "docker", "modal", "skypilot"]

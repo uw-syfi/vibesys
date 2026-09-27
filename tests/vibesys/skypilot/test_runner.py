@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
-from vibesys.skypilot.config import ResolvedSkyPilotResources
-from vibesys.skypilot.runner import (
+from vs_sandbox.api.skypilot import (
     ClusterStatus,
     JobStatus,
     ProcessResult,
+    ResolvedSkyPilotResources,
     SkyPilotCLIError,
     SkyPilotClusterNotReadyError,
     SkyPilotControlPlaneError,

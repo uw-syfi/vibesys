@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from vibesys.skypilot.recovery import (
+from vs_sandbox.api.skypilot import (
     ArtifactRecord,
     AttemptResourcesRecord,
     InvocationJournal,
