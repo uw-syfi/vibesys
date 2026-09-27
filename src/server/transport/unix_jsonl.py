@@ -203,9 +203,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         """Report a replay or stream failure without hiding a live connection."""
         protocol_error = ProtocolErrorMessage.from_exception(
             error, operation="Event stream", code="stream_failed", request_id=request_id
-        ).model_copy(
-            update={"client_id": client_id}
-        )
+        ).model_copy(update={"client_id": client_id})
         with suppress(BrokenPipeError, ConnectionResetError):
             self._write_message(protocol_error)
 
