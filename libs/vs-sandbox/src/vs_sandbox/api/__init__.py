@@ -59,6 +59,9 @@ if TYPE_CHECKING:
         SandboxLifecycle,
         SandboxLifecycleError,
         SandboxLifecycleHooks,
+        SandboxSession,
+        start_sandbox,
+        stop_sandbox,
     )
     from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellSandbox
@@ -98,6 +101,7 @@ __all__ = [
     "SandboxLifecycle",
     "SandboxLifecycleError",
     "SandboxLifecycleHooks",
+    "SandboxSession",
     "SandboxUnavailableError",
     "SeatbeltSandbox",
     "SystemAcceleratorDiscovery",
@@ -111,6 +115,8 @@ __all__ = [
     "pick_gpu",
     "query_gpu_info",
     "register_compute_backend",
+    "start_sandbox",
+    "stop_sandbox",
 ]
 
 _LAZY_EXPORTS = {
@@ -154,9 +160,12 @@ _LAZY_EXPORTS = {
     "WorkspaceSandbox": ("host_sandbox", "WorkspaceSandbox"),
     "build_host_sandbox": ("host_sandbox", "build"),
     "BeforeReadyContext": ("lifecycle", "BeforeReadyContext"),
+    "SandboxSession": ("lifecycle", "SandboxSession"),
     "SandboxLifecycle": ("lifecycle", "SandboxLifecycle"),
     "SandboxLifecycleError": ("lifecycle", "SandboxLifecycleError"),
     "SandboxLifecycleHooks": ("lifecycle", "SandboxLifecycleHooks"),
+    "start_sandbox": ("lifecycle", "start_sandbox"),
+    "stop_sandbox": ("lifecycle", "stop_sandbox"),
     "LocalShellSandbox": ("local_shell", "LocalShellSandbox"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
 }

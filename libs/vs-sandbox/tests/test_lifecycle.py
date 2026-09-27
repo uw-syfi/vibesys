@@ -12,7 +12,11 @@ from vs_sandbox.api import (
     SandboxLifecycle,
     SandboxLifecycleError,
     SandboxLifecycleHooks,
+    SandboxSession,
+    start_sandbox,
+    stop_sandbox,
 )
+from vs_sandbox.api.testing import FakeSandbox
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import Sandbox
@@ -36,6 +40,21 @@ class _FailingHooks(SandboxLifecycleHooks):
 
 def _sandbox() -> Sandbox:
     return cast("Sandbox", object())
+
+
+class _FakeLifecycleSandbox(FakeSandbox):
+    """In-memory lifecycle capability for the public session contract."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_count = 0
+        self.stop_count = 0
+
+    def start(self) -> None:
+        self.start_count += 1
+
+    def stop(self) -> None:
+        self.stop_count += 1
 
 
 def test_base_hooks_are_a_noop() -> None:
@@ -86,3 +105,55 @@ def test_failure_names_hooks_provider_preserves_cause_and_stops_dispatch() -> No
 
     assert isinstance(error.value.__cause__, ValueError)
     assert events == []
+
+
+def test_owned_session_starts_and_stops_sandbox_once() -> None:
+    sandbox = _FakeLifecycleSandbox()
+
+    session = SandboxSession.start(sandbox, {"location": "container"})
+
+    assert session.sandbox is sandbox
+    assert session.view == {"location": "container"}
+    assert sandbox.start_count == 1
+    assert sandbox.stop_count == 0
+
+    session.close()
+    session.close()
+
+    assert sandbox.stop_count == 1
+
+
+def test_owned_session_context_exit_stops_after_an_error() -> None:
+    sandbox = _FakeLifecycleSandbox()
+    failure_message = "failed inside session"
+
+    with (
+        pytest.raises(ValueError, match=failure_message),
+        SandboxSession.start(sandbox, "container"),
+    ):
+        raise ValueError(failure_message)
+
+    assert sandbox.start_count == 1
+    assert sandbox.stop_count == 1
+
+
+def test_borrowed_session_never_stops_sandbox() -> None:
+    sandbox = _FakeLifecycleSandbox()
+
+    with SandboxSession.borrowed(sandbox, "host") as session:
+        assert session.view == "host"
+
+    session.close()
+    assert sandbox.start_count == 0
+    assert sandbox.stop_count == 0
+
+
+def test_start_sandbox_rejects_sandbox_without_lifecycle() -> None:
+    sandbox = FakeSandbox()
+
+    with pytest.raises(TypeError, match="FakeSandbox has no execution environment to start"):
+        start_sandbox(sandbox)
+
+
+def test_stop_sandbox_ignores_sandbox_without_lifecycle() -> None:
+    stop_sandbox(FakeSandbox())

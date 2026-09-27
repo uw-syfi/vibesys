@@ -64,7 +64,10 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
+    SandboxSession,
     evaluator_helpers,
+    start_sandbox,
+    stop_sandbox,
 )
 from vs_sandbox.api.command_translation import translate_command_arguments
 from vs_sandbox.api.docker_workspace import (
@@ -356,49 +359,6 @@ class _NoopWorkspaceRecovery:
         return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
-def _start_sandbox(sandbox: Sandbox) -> None:
-    """Start the container of a sandbox kind that owns one.
-
-    ``Sandbox`` is the command-execution contract and says
-    nothing about container lifetime, so the lookup stays dynamic. Every
-    Docker- and Modal-kind sandbox this module builds implements ``start``.
-    """
-    start = getattr(sandbox, "start", None)
-    if not callable(start):
-        message = f"{type(sandbox).__name__} has no container to start"
-        raise TypeError(message)
-    start()
-
-
-def _stop_sandbox(sandbox: Sandbox) -> None:
-    """Stop the sandbox's container, if it owns one."""
-    stop = getattr(sandbox, "stop", None)
-    if callable(stop):
-        stop()
-
-
-@dataclass
-class _DefaultRunEnvironmentSession:
-    sandbox: Sandbox
-    view: RunEnvironmentView
-    stop_on_close: bool = False
-    _closed: bool = False
-
-    def __enter__(self) -> _DefaultRunEnvironmentSession:
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Stop the sandbox when this session owns its lifecycle."""
-        if self._closed:
-            return
-        self._closed = True
-        if self.stop_on_close:
-            _stop_sandbox(self.sandbox)
-
-
 class LocalEnvironment(_NoopWorkspaceRecovery):
     """Run agents directly on the host filesystem."""
 
@@ -429,7 +389,7 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
             extra_init_commands=[],
             lifecycle_hooks=lifecycle_hooks,
         )
-        return _DefaultRunEnvironmentSession(
+        return SandboxSession.borrowed(
             sandbox=sandbox,
             view=RunEnvironmentView(
                 paths=AgentPaths(
@@ -443,7 +403,6 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
                     profiler_support=request.profiler_support_path,
                 ),
             ),
-            stop_on_close=False,
         )
 
 
@@ -523,10 +482,7 @@ class DockerEnvironment:
         )
         log: Callable[[str], None] = request.log or (lambda _: None)
         log(f"[docker] starting container with image {container_image}")
-        # DOCKER-kind sandboxes always manage a container lifetime.
-        _start_sandbox(sandbox)
-
-        return _DefaultRunEnvironmentSession(
+        return SandboxSession.start(
             sandbox=sandbox,
             view=RunEnvironmentView(
                 paths=_isolated_paths(
@@ -543,7 +499,6 @@ class DockerEnvironment:
                 cli_sandboxed=True,
                 env_kind="docker",
             ),
-            stop_on_close=True,
         )
 
     def repair_workspace(
@@ -626,7 +581,7 @@ class _SkyPilotRunEnvironmentSession:
             return
         self._closed = True
         try:
-            _stop_sandbox(self.sandbox)
+            stop_sandbox(self.sandbox)
         finally:
             self.bridge.close()
 
@@ -779,7 +734,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 container_image=container_image,
                 attach_accelerator=False,
             )
-            _start_sandbox(sandbox)
+            start_sandbox(sandbox)
         except Exception:
             bridge.close()
             raise
@@ -967,9 +922,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             "[modal] starting local Docker editor; GPU work will dispatch "
             "to Modal via the candidate's declared `modal run` entrypoint"
         )
-        # DOCKER-kind sandboxes always manage a container lifetime.
-        _start_sandbox(sandbox)
-
         setup_timeout_seconds = 1200
         evaluator_arguments = ["python", evaluator_container_path]
         if self.config.entrypoint is not None:
@@ -987,7 +939,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         evaluator_prefix = f"{shlex.join(evaluator_arguments)} --"
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
         objective_document = _materialize_effective_objective(request)
-        return _DefaultRunEnvironmentSession(
+        return SandboxSession.start(
             sandbox=sandbox,
             view=RunEnvironmentView(
                 paths=AgentPaths(
@@ -1039,7 +991,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                 framework_setup_timeout_seconds=setup_timeout_seconds,
             ),
-            stop_on_close=True,
         )
 
     def _ensure_model_volume(self, request: RunEnvironmentRequest) -> None:
@@ -1869,7 +1820,7 @@ def _docker_evaluator_tool_mounts(
                 container_image=resolved_image,
             )
             try:
-                _start_sandbox(builder)
+                start_sandbox(builder)
                 container_roots = [
                     str(tool_install_root(_SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec))
                     for name, spec in tools.items()
@@ -1894,7 +1845,7 @@ def _docker_evaluator_tool_mounts(
                     detail = (ownership.output or "chown failed").strip()
                     raise EvaluatorToolError.cache_ownership_failed(detail[:500])
             finally:
-                _stop_sandbox(builder)
+                stop_sandbox(builder)
         try:
             prepare_evaluator_tools(tools, host_parent, command_runner=require_builder)
         except _EvaluatorToolBuildRequiredError as exc:
