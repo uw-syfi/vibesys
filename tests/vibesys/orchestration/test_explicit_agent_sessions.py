@@ -7,12 +7,13 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.vibesys.orchestration.plugin import capability_plugin
 
+import vibesys
 from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
 from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.config import Config
@@ -52,6 +53,7 @@ from vs_runtime.api import (
     Workspace,
     WorkspaceAccess,
 )
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -207,6 +209,32 @@ def test_sessions_fix_configuration_and_preserve_distinct_conversations(tmp_path
     assert first.calls[0].session_key != second.calls[0].session_key
     assert all(call.reuse_session is True for call in [*first.calls, *second.calls])
     assert all(call.system_prompt == "Work carefully." for call in first.calls)
+
+
+def test_product_composition_declares_its_runtime_to_confined_agents(tmp_path: Path) -> None:
+    client = FakeAgentClient(session_reuse=True)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    observed: list[HostResource] = []
+
+    def create_client(**kwargs: object) -> FakeAgentClient:
+        observed.extend(cast("tuple[HostResource, ...]", kwargs["host_resources"]))
+        return client
+
+    async def body(ctx: RunHost) -> None:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        await session.close()
+
+    _run_with_clients(
+        tmp_path,
+        [client],
+        body,
+        declaration=(role,),
+        configuration=_RunConfiguration(client_factory=create_client),
+    )
+
+    package_root = Path(vibesys.__file__).resolve().parents[1]
+    matching = [resource for resource in observed if resource.path == package_root]
+    assert matching == [HostResource(package_root, HostResourceAccess.READ_ONLY, "VibeSys runtime")]
 
 
 def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path) -> None:

@@ -7,7 +7,6 @@ import agentshim
 import pytest
 from tests.support import provider_profiles as fake_profiles
 
-import vibesys
 from vs_agent import host_resource_declarations
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -60,7 +59,7 @@ class TestInstallRoot:
             for resource in host_resource_declarations.declare_agent_host_resources(
                 {}, binary_path=str(launcher), provider="codex"
             )
-            if resource.purpose == "agent and VibeSys runtime"
+            if resource.purpose == "agent runtime"
         }
 
         assert root in runtime_paths
@@ -74,7 +73,7 @@ class TestInstallRoot:
         resources = host_resource_declarations.declare_agent_host_resources(
             {}, binary_path="/opt/tool/bin/agent", provider="codex"
         )
-        assert HostResource(Path("/opt/tool/bin"), purpose="agent and VibeSys runtime") in resources
+        assert HostResource(Path("/opt/tool/bin"), purpose="agent runtime") in resources
 
 
 class TestInterpreterAliasRoots:
@@ -123,27 +122,6 @@ class TestInterpreterAliasRoots:
             if resource.purpose == "Python runtime"
         }
         assert real.parent not in runtime_roots
-
-
-class TestAgentRuntime:
-    """The running VibeSys install must be importable inside confinement.
-
-    ``import vibesys`` cannot fail here: this test module is itself reached
-    through ``vs_agent.host_resource_declarations``, so the package is
-    already loaded and ``vibesys/__init__.py`` is a docstring-only module with
-    no re-exports that could raise. The declaration is unconditional.
-    """
-
-    def test_declares_the_running_vibesys_package_root(self) -> None:
-        declarations = host_resource_declarations.declare_agent_host_resources(
-            {}, binary_path=None, provider="codex"
-        )
-
-        vibesys_root = Path(vibesys.__file__).resolve().parents[1]
-        matching = [resource for resource in declarations if resource.path == vibesys_root]
-        assert len(matching) == 1
-        assert matching[0].access is HostResourceAccess.READ_ONLY
-        assert matching[0].purpose == "agent and VibeSys runtime"
 
 
 def test_defaults_declare_path_rust_and_shell_resources(tmp_path: Path) -> None:

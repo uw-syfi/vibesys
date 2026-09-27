@@ -8,7 +8,6 @@ resource-import mechanism.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -177,7 +176,7 @@ def _shell_setup(ctx: HostResourceContext) -> Iterable[HostResource]:
     )
 
 
-def _agent_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
+def _agent_executable_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
     paths: list[Path] = []
     if ctx.binary_path:
         real_binary = Path(ctx.binary_path).resolve()
@@ -188,14 +187,7 @@ def _agent_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
         real_node = Path(node).resolve()
         paths.extend((real_node.parent, real_node.parent.parent))
 
-    # Locate the installed vibesys package by name without importing it: this
-    # leaf library must not depend on core. The grant is best-effort — present
-    # when vibesys is importable, which it is in every real run.
-    vibesys_spec = importlib.util.find_spec("vibesys")
-    if vibesys_spec is not None and vibesys_spec.origin:
-        paths.append(Path(vibesys_spec.origin).resolve().parents[1])
-
-    return _resources(paths, purpose="agent and VibeSys runtime")
+    return _resources(paths, purpose="agent runtime")
 
 
 #: State directories granted as named leaves rather than whole.
@@ -377,7 +369,7 @@ DEFAULT_AGENT_HOST_RESOURCE_DECLARERS: tuple[HostResourceDeclarer, ...] = (
     _path_toolchain,
     declare_rust_toolchain_resources,
     _shell_setup,
-    _agent_runtime,
+    _agent_executable_runtime,
     _provider_state,
     _operator_allowlist,
 )

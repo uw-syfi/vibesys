@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from vibesys.profilers import tool_server as profiler_tool_server
@@ -14,6 +15,7 @@ from vs_agent.api import (
     ToolServerDescriptor,
     expose_as_tools,
 )
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -28,6 +30,15 @@ class AgentToolContext:
     """Product facts available while binding one declared agent tool."""
 
     profiler_kind: ProfilerKind
+
+
+def _vibesys_runtime_host_resource() -> HostResource:
+    """Declare the installed product package needed by host-confined agents."""
+    return HostResource(
+        Path(__file__).resolve().parents[1],
+        HostResourceAccess.READ_ONLY,
+        "VibeSys runtime",
+    )
 
 
 def resolve_agent_driver(config: Config) -> Driver:

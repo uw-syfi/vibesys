@@ -13,7 +13,11 @@ from typing import TextIO, cast, overload
 
 from pydantic import BaseModel
 
-from vibesys.composition import agent_spec_from_config, resolve_agent_driver
+from vibesys.composition import (
+    _vibesys_runtime_host_resource,
+    agent_spec_from_config,
+    resolve_agent_driver,
+)
 from vibesys.config import BUNDLED_RESOURCES, Config, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
@@ -975,6 +979,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             evaluator_package_root=evaluator_package_root,
             evaluator_tool_roots=evaluator_tool_roots,
         )
+        if not session.view.cli_sandboxed:
+            agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
 
         run_state = RunState(project, git, run_id)
 

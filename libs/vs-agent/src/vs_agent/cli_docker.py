@@ -29,7 +29,7 @@ from vs_agent.provider_policy import DOCKER_PROVIDER_ENV
 from vs_sandbox.api import AGENT_HOME
 
 # Re-exported for existing importers (``vs_agent.factory``,
-# ``vibesys.sandbox.run_environment``, and this module's own tests reach it as
+# ``vs_runtime._run_environment``, and this module's own tests reach it as
 # ``cli_docker.DOCKER_PROVIDER_ENV``); the value itself lives in
 # ``provider_policy`` now.
 __all__ = ["DOCKER_PROVIDER_ENV"]
