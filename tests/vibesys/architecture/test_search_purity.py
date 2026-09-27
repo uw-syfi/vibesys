@@ -42,6 +42,13 @@ _FORBIDDEN_PACKAGES = (
     "vibesys.prompts",
 )
 
+# Gate cadence and execution stay outside deterministic search policy. The
+# attempt record imports only the closed FrameworkBenchmarkOutcome value that
+# now shares their policy-owned module; do not widen this to the package.
+_ALLOWED_EXECUTION_POLICY_IMPORTS = {
+    ("orchestration/hypothesis/attempts.py", "vibesys.orchestration.gates"),
+}
+
 # vibesys.agent_run has fully dissolved into search/hypothesis, policy packages,
 # and vibesys.orchestration.{memory,artifacts}. No search/ module
 # re-exports from it any more.
@@ -94,12 +101,15 @@ def _policy_paths() -> list[Path]:
 def test_search_imports_nothing_from_execution_policy_or_prompts() -> None:
     violations: list[str] = []
     for path in _policy_paths():
+        relative_path = str(path.relative_to(_SRC))
         for node, module_name in _module_level_import_nodes(path):
+            if (relative_path, module_name) in _ALLOWED_EXECUTION_POLICY_IMPORTS:
+                continue
             if any(
                 module_name == pkg or module_name.startswith(pkg + ".")
                 for pkg in _FORBIDDEN_PACKAGES
             ):
-                violations.append(f"{path.relative_to(_SRC)}:{node.lineno} imports {module_name}")
+                violations.append(f"{relative_path}:{node.lineno} imports {module_name}")
     assert not violations, "search/ imports a forbidden layer: " + "; ".join(violations)
 
 
