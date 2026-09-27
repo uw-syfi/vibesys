@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from vs_project.api import Project
 from vs_runtime.api.infrastructure import (
     ModelRequestReconciler,
     ProtocolBenchmarkContract,
@@ -287,8 +288,11 @@ def test_benchmark_execution_error_is_typed_and_cleanup_failure_is_suppressed(
 
 
 def test_model_request_failure_prevents_trusted_command(tmp_path: Path) -> None:
-    (tmp_path / ".vibesys").mkdir()
-    (tmp_path / ".vibesys" / "models.json").write_text('[{"id":"blocked/model"}]')
+    project = Project.open(tmp_path)
+    project.state.create_project("trusted evaluation")
+    project.configuration_root().resolve("models.json", must_exist=False).write_text(
+        '[{"id":"blocked/model"}]'
+    )
     provisioner = FakeModelVolumeProvisioner()
     reconciler = create_model_request_reconciler(
         provisioner=provisioner,

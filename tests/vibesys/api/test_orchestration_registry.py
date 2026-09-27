@@ -24,12 +24,12 @@ from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration import OrchestrationResumeDecision
-from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.models import EvolveOptions
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
+from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
