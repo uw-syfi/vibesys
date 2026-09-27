@@ -6,9 +6,11 @@ internal modules directly.
 
 from __future__ import annotations
 
+from vs_agent.drivers.fake import FakeDriver
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 
 __all__ = [
     "FakeAgentClient",
+    "FakeDriver",
     "FakeInvocation",
 ]

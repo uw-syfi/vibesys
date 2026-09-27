@@ -115,11 +115,13 @@ class FakeSession:
         spec: AgentSessionSpec,
         turns: tuple[tuple[AgentEvent, ...], ...],
         answer: BaseModel | Mapping[str, object] | str | None,
+        resumed_session_ids: list[str],
     ) -> None:
         """Create a session bound to ``turns``/``answer`` for ``spec``'s role."""
         self._spec = spec
         self._turns = turns
         self._answer = answer
+        self._resumed_session_ids = resumed_session_ids
         self._invocations = 0
         self._closed = False
         self._resumed_session_id: str | None = None
@@ -162,6 +164,7 @@ class FakeSession:
     def resume_provider_session(self, session_id: str) -> bool:
         """Adopt ``session_id`` so a resumed run's continuity is observable."""
         self._resumed_session_id = session_id
+        self._resumed_session_ids.append(session_id)
         return True
 
 
@@ -199,6 +202,7 @@ class FakeDriver:
         self._turns = resolved_turns
         self._answer = answer
         self._sessions: list[FakeSession] = []
+        self._resumed_session_ids: list[str] = []
         self._closed = False
 
     @property
@@ -206,11 +210,21 @@ class FakeDriver:
         """Describe what the fake honors; see :data:`FAKE_CAPABILITIES`."""
         return FAKE_CAPABILITIES
 
+    @property
+    def resumed_session_ids(self) -> tuple[str, ...]:
+        """Return provider session IDs adopted by created sessions, in order."""
+        return tuple(self._resumed_session_ids)
+
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one fake conversation for ``spec``."""
         if self._closed:
             raise FakeDriverError.driver_closed()
-        session = FakeSession(spec=spec, turns=self._turns, answer=self._answer)
+        session = FakeSession(
+            spec=spec,
+            turns=self._turns,
+            answer=self._answer,
+            resumed_session_ids=self._resumed_session_ids,
+        )
         self._sessions.append(session)
         return session
 

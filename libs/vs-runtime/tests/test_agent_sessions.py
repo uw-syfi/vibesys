@@ -13,17 +13,22 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
+from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentBackend,
     AgentCapabilities,
+    AgentClient,
     AgentSessionKey,
+    AgentSessionState,
     AgentSpec,
+    DurableSessionStore,
     SessionScope,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api.testing import FakeAgentClient, FakeDriver
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
@@ -57,7 +62,7 @@ from vs_sandbox.api import ProjectPathPolicy
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
+    from vs_agent.api import AgentClientProtocol, SessionStore, ToolServerDescriptor
 
 
 class _Reply(BaseModel):
@@ -192,7 +197,7 @@ def _scope(
 
 def _runtime(
     role: AgentRole,
-    clients: _ClientFactory,
+    clients: Callable[..., AgentClientProtocol],
     environments: _EnvironmentOpener,
     lifecycle: FakeAgentExecutionLifecycleSink,
     *,
@@ -346,6 +351,87 @@ def test_session_fixes_role_binding_and_continues_provider_context() -> None:
         for event in lifecycle.events
         if isinstance(event, AgentExecutionFinished)
     )
+
+
+def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: Path) -> None:
+    project = Project.open(tmp_path)
+    project.state.create_project("runtime session continuity")
+    manifest = project.state.new_run_manifest(
+        "runtime session continuity",
+        run_id="run-1",
+        trusted_input_baseline="a" * 40,
+        branch="vibesys/run-1",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+    )
+    project.state.create_run(manifest)
+    slot = project.state.local_namespace(manifest.run_id, "agent").slot(
+        "sessions.json",
+        AgentSessionState,
+    )
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    session_key = AgentSessionKey(SessionScope.MEMBER, "worker:candidate-1")
+    drivers: list[FakeDriver] = []
+
+    def open_client(**kwargs: object) -> AgentClient:
+        store = cast("SessionStore | None", kwargs["session_store"])
+        driver = FakeDriver(answer="done")
+        drivers.append(driver)
+        return AgentClient(
+            driver,
+            provider="fake",
+            model_name="fake-model",
+            driver_name="fake",
+            session_store=store,
+        )
+
+    async def run_once() -> str:
+        clients: list[AgentClient] = []
+
+        def record_client(**kwargs: object) -> AgentClient:
+            client = open_client(**kwargs)
+            clients.append(client)
+            return client
+
+        environments = _EnvironmentOpener(_environment())
+        runtime = create_agent_session_runtime(
+            (role,),
+            resolve_execution=lambda selected_role, workspace: (
+                AgentExecutionConfiguration(
+                    agent_id=selected_role.id,
+                    spec=AgentSpec(backend=AgentBackend.STUB),
+                    reasoning_effort="high",
+                ),
+                _scope(workspace, environments),
+            ),
+            resolve_workspace=_workspace,
+            session_store=lambda: DurableSessionStore(slot),
+            control=create_run_control_channel(FakeRunControlEventSink()),
+            lifecycle_events=FakeAgentExecutionLifecycleSink(),
+            agent_events=NULL_AGENT_EVENT_SINK,
+            route_message=lambda message, steering: message + "".join(steering),
+            client_factory=record_client,
+            log=lambda _message: None,
+        )
+        session = await runtime.create_session(
+            role,
+            workspace=_Workspace(),
+            member_id="candidate-1",
+        )
+        assert await session.turn("continue") == "done"
+        provider_session_id = clients[0].last_turn_provider_session_id(session_key)
+        assert provider_session_id is not None
+        await runtime.close()
+        return provider_session_id
+
+    first_provider_session = asyncio.run(run_once())
+    resumed_provider_session = asyncio.run(run_once())
+
+    assert resumed_provider_session == first_provider_session
+    assert drivers[0].resumed_session_ids == ()
+    assert drivers[1].resumed_session_ids == (first_provider_session,)
 
 
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
