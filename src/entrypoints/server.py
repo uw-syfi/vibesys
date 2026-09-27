@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import sys
-from importlib import import_module
 import tempfile
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
