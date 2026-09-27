@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.errors import InvalidPlanError
 from vibesys.orchestration.hypothesis import (
     Hypothesis,
     HypothesisConfig,
     HypothesisSearch,
     HypothesisState,
     HypothesisStrategyUpdate,
+    InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
 )

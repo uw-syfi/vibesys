@@ -148,8 +148,8 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
-# Typed user-facing failures shared by CLI, application transports, and the
-# four hypothesis-driven loop strategies. No internal imports.
+# Typed product configuration failures shared by public transports. No
+# internal imports.
 path = "vibesys.errors"
 layer = "prompts_and_lower_libs"
 depends_on = []
@@ -208,12 +208,12 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime",
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.errors", "vibesys.orchestration.profile_focus", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
+depends_on = ["vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.errors", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
+depends_on = ["vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"

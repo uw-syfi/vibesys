@@ -151,7 +151,6 @@ graph TD
     vibesys.orchestration.hypothesis.readmodel --> vibesys.run.contracts
     vibesys.orchestration.issue_queue --> vibesys.orchestration.resume
     vibesys.orchestration.multi --> vibesys
-    vibesys.orchestration.multi --> vibesys.errors
     vibesys.orchestration.multi --> vibesys.inputs
     vibesys.orchestration.multi --> vibesys.orchestration.agent_options
     vibesys.orchestration.multi --> vibesys.orchestration.domains
@@ -168,7 +167,6 @@ graph TD
     vibesys.orchestration.prompts --> vibesys
     vibesys.orchestration.resume --> vibesys.errors
     vibesys.orchestration.single --> vibesys
-    vibesys.orchestration.single --> vibesys.errors
     vibesys.orchestration.single --> vibesys.inputs
     vibesys.orchestration.single --> vibesys.orchestration.agent_options
     vibesys.orchestration.single --> vibesys.orchestration.domains
@@ -388,7 +386,6 @@ graph TD
     vibesys.orchestration.issue_queue --> vs_runtime
     vibesys.orchestration.metrics --> vs_loop_state
     vibesys.orchestration.multi --> vibesys
-    vibesys.orchestration.multi --> vibesys.errors
     vibesys.orchestration.multi --> vibesys.inputs
     vibesys.orchestration.multi --> vibesys.orchestration.agent_options
     vibesys.orchestration.multi --> vibesys.orchestration.domains
@@ -411,7 +408,6 @@ graph TD
     vibesys.orchestration.resume --> vs_project
     vibesys.orchestration.resume --> vs_runtime
     vibesys.orchestration.single --> vibesys
-    vibesys.orchestration.single --> vibesys.errors
     vibesys.orchestration.single --> vibesys.inputs
     vibesys.orchestration.single --> vibesys.orchestration.agent_options
     vibesys.orchestration.single --> vibesys.orchestration.domains

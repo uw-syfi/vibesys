@@ -30,6 +30,14 @@ class ProfilerKind(StrEnum):
     HEADROOM = "headroom"
 
 
+class UnsupportedProfilerError(ValueError):
+    """The selected domain cannot use the configured profiler."""
+
+    def __init__(self) -> None:
+        """Report missing Torch profiler support."""
+        super().__init__("selected domain does not provide Torch profiler support")
+
+
 _BACKEND_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
     ComputeBackend.CUDA: ProfilerKind.NSYS,
     ComputeBackend.METAL: ProfilerKind.TORCH,
@@ -377,6 +385,7 @@ __all__ = [
     "ProfilerKind",
     "ProfilerPreflightResult",
     "ProfilerSummary",
+    "UnsupportedProfilerError",
     "allowed_profiler_kinds",
     "coerce_profiler_kind",
     "default_profiler_for_backend",

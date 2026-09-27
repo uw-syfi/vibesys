@@ -15,7 +15,7 @@ import pytest
 import vibesys.orchestration.domains.base as domain
 from entrypoints.cli import parse_cli_invocation
 from vibesys.constants import DomainName
-from vibesys.errors import ConfigurationError, UnsupportedProfilerError
+from vibesys.errors import ConfigurationError
 from vibesys.orchestration.domains.base import DomainRole
 from vibesys.orchestration.domains.registry import resolve_domain
 from vibesys.orchestration.domains.rendering import render_domain_section
@@ -23,6 +23,7 @@ from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import (
     ProfilerDefinition,
     ProfilerKind,
+    UnsupportedProfilerError,
     profiler_definition,
     require_profiler_kind,
 )

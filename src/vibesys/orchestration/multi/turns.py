@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.errors import InvalidPlanError, UnsupportedProfilerError
 from vibesys.orchestration.domains.base import DomainRole
 from vibesys.orchestration.domains.registry import resolve_domain
 from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.hypothesis import (
+    InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
     normalize_hypothesis_title,
@@ -35,7 +35,12 @@ from vibesys.orchestration.multi.prompts import (
     render_pre_round_prompt,
     render_profiler_prompt,
 )
-from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
+from vibesys.orchestration.profilers import (
+    ProfilerKind,
+    ProfilerSummary,
+    UnsupportedProfilerError,
+    profiler_definition,
+)
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AgentTurnTimeoutError,

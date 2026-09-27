@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.errors import UnsupportedProfilerError
 from vibesys.orchestration.domains.base import DomainRole
 from vibesys.orchestration.domains.registry import resolve_domain
 from vibesys.orchestration.domains.rendering import render_domain_section
@@ -29,7 +28,12 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusConfig,
     ProfileFocusState,
 )
-from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
+from vibesys.orchestration.profilers import (
+    ProfilerKind,
+    ProfilerSummary,
+    UnsupportedProfilerError,
+    profiler_definition,
+)
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.single.attribution import run_attribution

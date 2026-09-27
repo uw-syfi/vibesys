@@ -130,8 +130,8 @@ turn end to end and returns a typed reply. It owns:
   before the pre-turn snapshot, so a crash after it still resumes from a
   committed tree;
 - workspace isolation: a pre-turn snapshot, and for a `ReadOnly` role,
-  reverting unauthorized changes after the turn (raising `RoleIsolationError`
-  if they cannot be reverted); `access.allow` names paths the role may still
+  reverting unauthorized changes after the turn (raising the runtime's
+  `RuntimeContractError` if they cannot be reverted); `access.allow` names paths the role may still
   write;
 - timeout fallback: `vs_agent.api.AgentTurnTimeoutError` resolves to
   `role.timeout_fallback(seconds)` if declared, else `role.fallback()`, for

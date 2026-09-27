@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.errors import InvalidPlanError
 from vibesys.orchestration.hypothesis import (
+    InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
     normalize_hypothesis_title,

@@ -18,6 +18,29 @@ HypothesisStrategyDisposition = Literal["parked", "abandoned"]
 HYPOTHESIS_TITLE_MAX_LEN = 60
 
 
+class InvalidPlanError(ValueError):
+    """The designer returned an invalid hypothesis state transition."""
+
+    def __init__(self, detail: str) -> None:
+        """Name the violated plan invariant."""
+        super().__init__(detail)
+
+    @classmethod
+    def duplicate_updates(cls) -> InvalidPlanError:
+        """Report repeated prior hypothesis IDs."""
+        return cls("hypothesis_updates names one hypothesis more than once")
+
+    @classmethod
+    def self_reference(cls) -> InvalidPlanError:
+        """Report a plan that updates its own new hypothesis."""
+        return cls("hypothesis_updates includes the new hypothesis")
+
+    @classmethod
+    def reused_id(cls, hypothesis_id: str) -> InvalidPlanError:
+        """Report a new hypothesis ID already used in this run."""
+        return cls(f"hypothesis ID {hypothesis_id!r} was already used")
+
+
 class SkillResourceSelection(BaseModel):
     """Advisory selection of resources from one installed agent skill.
 

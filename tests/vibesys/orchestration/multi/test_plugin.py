@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.errors import InvalidPlanError
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import InvalidPlanError, OrchestratorPlan
 from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (

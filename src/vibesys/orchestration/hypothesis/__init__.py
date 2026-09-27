@@ -27,6 +27,7 @@ from vibesys.orchestration.hypothesis.config import HypothesisConfig
 from vibesys.orchestration.hypothesis.plan import (
     HYPOTHESIS_TITLE_MAX_LEN,
     HypothesisStrategyUpdate,
+    InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
     derive_hypothesis_title,
@@ -82,6 +83,7 @@ __all__ = [
     "HypothesisStrategy",
     "HypothesisStrategyUpdate",
     "ImplementerReply",
+    "InvalidPlanError",
     "JudgeOutcome",
     "JudgeReviewed",
     "JudgeSkipReason",
