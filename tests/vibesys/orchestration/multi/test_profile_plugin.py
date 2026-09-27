@@ -63,7 +63,6 @@ def _options(**changes: object) -> BaseModel:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": 100,
-            "memory_layout": "directories",
             "metric_space": MetricSpace(
                 objectives=(Objective(name="throughput", direction="max"),)
             ),

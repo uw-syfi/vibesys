@@ -17,9 +17,7 @@ import json
 import logging
 import os
 import re
-import shutil
 import stat
-import tempfile
 import unicodedata
 import uuid
 from dataclasses import dataclass
@@ -70,7 +68,6 @@ _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
 _RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
 _STATE_HOME_ENV = "VIBESYS_STATE_HOME"
-_LEGACY_WORKTREE_MIN_PARTS = 3
 _EXCLUDED_NAMES = frozenset(
     {
         ".cache",
@@ -807,13 +804,12 @@ class ProjectState:
         self._metadata_dir = root / _STATE_DIRECTORY_PATH
         self._project_manifest_path = self._metadata_dir / "project.json"
         self._metadata_gitignore_path = self._metadata_dir / ".gitignore"
-        self._legacy_local_dir = self._metadata_dir / "local"
+        self._workspace_local_dir = self._metadata_dir / "local"
         self._state_home = _state_home()
         _prepare_state_home(self._state_home)
         self._local_dir = _external_project_state_directory(self._state_home, root)
         self._current_run_path = self._local_dir / "current-run"
         self._validate_storage_roots()
-        self._migrate_legacy_local_state()
 
     @classmethod
     def is_project_root(cls, path: Path | str) -> bool:
@@ -865,9 +861,7 @@ class ProjectState:
         state_home = _state_home()
         _prepare_state_home(state_home)
         local_dir = _external_project_state_directory(state_home, root)
-        legacy_local_dir = root / _STATE_DIRECTORY_PATH / "local"
         _validate_storage_root(local_dir, state_home, name="local metadata")
-        _migrate_legacy_local_directory(legacy_local_dir, local_dir)
         return _contained_without_symlinks(
             local_dir,
             local_dir / "runs" / normalized / "logs",
@@ -880,7 +874,7 @@ class ProjectState:
         return ProjectSandboxPaths(
             read_only_path=(Path(_CONFIG_DIRECTORY_NAME) if self._config_dir.exists() else None),
             hidden_path=(
-                _STATE_DIRECTORY_PATH / "local" if self._legacy_local_dir.exists() else None
+                _STATE_DIRECTORY_PATH / "local" if self._workspace_local_dir.exists() else None
             ),
         )
 
@@ -1205,13 +1199,13 @@ class ProjectState:
     def _worktrees_dir(self, run_id: str) -> Path:
         """Return the machine-local directory reserved for candidate worktrees."""
         normalized = _validate_run_id(run_id)
-        legacy_run_dir = _contained_without_symlinks(
-            self._legacy_local_dir,
-            self._legacy_local_dir / "runs" / normalized,
+        workspace_run_dir = _contained_without_symlinks(
+            self._workspace_local_dir,
+            self._workspace_local_dir / "runs" / normalized,
             kind="candidate worktree run",
         )
         return _contained_state_dir(
-            legacy_run_dir,
+            workspace_run_dir,
             "worktrees",
             kind="worktrees",
         )
@@ -1238,15 +1232,11 @@ class ProjectState:
         _validate_storage_root(self._config_dir, self.project_root, name="configuration")
         _validate_storage_root(self._metadata_dir, self._config_dir, name="metadata")
         _validate_storage_root(
-            self._legacy_local_dir,
+            self._workspace_local_dir,
             self._metadata_dir,
-            name="legacy local metadata",
+            name="workspace-local metadata",
         )
         _validate_storage_root(self._local_dir, self._state_home, name="local metadata")
-
-    def _migrate_legacy_local_state(self) -> None:
-        """Move legacy repository-local operational state to the user state home."""
-        _migrate_legacy_local_directory(self._legacy_local_dir, self._local_dir)
 
     def _ensure_local_gitignore(self) -> None:
         self._validate_storage_roots()
@@ -1316,81 +1306,6 @@ def _prepare_state_home(state_home: Path) -> None:
     except OSError as exc:
         message = f"Could not create VibeSys state home {state_home}: {exc}"
         raise ProjectStateError(message) from exc
-
-
-def _migrate_legacy_local_directory(source: Path, destination: Path) -> None:
-    """Atomically relocate legacy local metadata while leaving worktrees in place."""
-    if destination.exists() or not source.is_dir():
-        return
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(
-        tempfile.mkdtemp(prefix=f".{destination.name}.migrating-", dir=destination.parent)
-    )
-    try:
-        _validate_legacy_migration_tree(source)
-        shutil.copytree(source, temporary, dirs_exist_ok=True)
-        for run_worktrees in temporary.glob("runs/*/worktrees"):
-            shutil.rmtree(run_worktrees)
-        try:
-            temporary.replace(destination)
-        except OSError:
-            if not destination.is_dir():
-                raise
-        _remove_migrated_legacy_entries(source)
-    except OSError as exc:
-        message = f"Could not migrate VibeSys local state from {source} to {destination}: {exc}"
-        raise ProjectStateError(message) from exc
-    finally:
-        shutil.rmtree(temporary, ignore_errors=True)
-
-
-def _remove_migrated_legacy_entries(source: Path) -> None:
-    """Remove copied metadata from the legacy tree without touching worktrees."""
-    for entry in tuple(source.iterdir()):
-        if entry.name != "runs":
-            _remove_path(entry)
-            continue
-        if entry.is_symlink() or not entry.is_dir():
-            _remove_path(entry)
-            continue
-        _remove_migrated_run_entries(entry)
-        if not any(entry.iterdir()):
-            entry.rmdir()
-    if not any(source.iterdir()):
-        source.rmdir()
-
-
-def _remove_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
-
-
-def _remove_migrated_run_entries(runs_directory: Path) -> None:
-    for run_dir in tuple(runs_directory.iterdir()):
-        if not run_dir.is_dir() or run_dir.is_symlink():
-            _remove_path(run_dir)
-            continue
-        for run_entry in tuple(run_dir.iterdir()):
-            if run_entry.name != "worktrees":
-                _remove_path(run_entry)
-        if not any(run_dir.iterdir()):
-            run_dir.rmdir()
-
-
-def _validate_legacy_migration_tree(source: Path) -> None:
-    """Reject legacy metadata aliases while allowing untouched worktree contents."""
-    for path in source.rglob("*"):
-        relative = path.relative_to(source)
-        if (
-            len(relative.parts) >= _LEGACY_WORKTREE_MIN_PARTS
-            and relative.parts[0] == "runs"
-            and relative.parts[2] == "worktrees"
-        ):
-            continue
-        if path.is_symlink():
-            raise ProjectStateError.local_state_symlink(path)
 
 
 def _validate_run_id(run_id: str, *, source: Path | None = None) -> str:

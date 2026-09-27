@@ -137,9 +137,6 @@ class SingleOptions(AgentOrchestrationOptions):
         if self.interface not in {"inprocess", "service"}:
             message = f"unsupported single-agent interface {self.interface!r}"
             raise ValueError(message)
-        if self.memory_layout not in {"files", "directories"}:
-            message = f"unsupported single-agent memory_layout {self.memory_layout!r}"
-            raise ValueError(message)
         return self
 
 
@@ -152,11 +149,6 @@ class ProfileGuidedSingleOptions(AgentOrchestrationOptions):
     def _registered_values(self) -> ProfileGuidedSingleOptions:
         if self.interface not in {"inprocess", "service"}:
             message = f"unsupported profile-guided single-agent interface {self.interface!r}"
-            raise ValueError(message)
-        if self.memory_layout not in {"files", "directories"}:
-            message = (
-                f"unsupported profile-guided single-agent memory_layout {self.memory_layout!r}"
-            )
             raise ValueError(message)
         return self
 

@@ -5,9 +5,9 @@ tests, or launch benchmarks.
 ## Authoritative inputs
 
 - Objective: `{{ objective_location|default('OBJECTIVE.md') }}`
-- Progress ledger: `{{ progress_location|default('progress.md') }}`
-- Roadmap: `{{ roadmap_location|default('roadmap.md') }}`
-- Pareto archive: `{{ pareto_archive_location|default('pareto-frontier.md') }}`
+- Progress ledger: `{{ progress_location|default('progress/') }}`
+- Roadmap: `{{ roadmap_location|default('roadmap/index.md') }}`
+- Pareto archive: `{{ pareto_archive_location|default('progress/pareto-frontier.md') }}`
 {% if runtime_notes %}- Runtime contract: {{ runtime_notes }}
 {% endif %}
 Read the objective first; every operator constraint is hard feasibility.

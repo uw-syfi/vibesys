@@ -101,7 +101,6 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         max_retries_per_round=4,
         judge_every=2,
         official_eval_every=5,
-        memory_layout="directories",
         operator_constraints=("Preserve ordering",),
         metric_space=MetricSpace(),
     )
@@ -118,7 +117,6 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         "max_retries_per_round": 4,
         "judge_every": 2,
         "official_eval_every": 5,
-        "memory_layout": "directories",
         "modality": "messages",
         "operator_constraints": ["Preserve ordering"],
         "metric_space": MetricSpace().model_dump(mode="json"),
@@ -856,14 +854,8 @@ def test_profiler_summary_perf_metric_optional() -> None:
     assert p2.perf_unit == "tok/s"
 
 
-@pytest.mark.parametrize(
-    ("progress_name", "artifact_root"),
-    [("progress", "progress"), ("progress.md", "progress-artifacts")],
-)
-def test_progress_writes_typed_role_handoffs_atomically(
-    tmp_path: Path, progress_name: str, artifact_root: str
-) -> None:
-    progress = tmp_path / progress_name
+def test_progress_writes_typed_role_handoffs_atomically(tmp_path: Path) -> None:
+    progress = tmp_path / "progress"
     plan = make_orchestrator_plan(
         hypothesis_id="transport-boundary",
         task="Replace the request-local queue.",
@@ -881,13 +873,13 @@ def test_progress_writes_typed_role_handoffs_atomically(
         artifacts.implementer_artifact_path(progress, 12, 2), implementation
     )
 
-    assert plan_path == tmp_path / artifact_root / "plans" / "round-0012.json"
+    assert plan_path == tmp_path / "progress" / "plans" / "round-0012.json"
     assert evidence_path == (
-        tmp_path / artifact_root / "evidence" / "round-0012-attempt-02-implementer.json"
+        tmp_path / "progress" / "evidence" / "round-0012-attempt-02-implementer.json"
     )
     assert OrchestratorPlan.model_validate_json(plan_path.read_text()) == plan
     assert ImplementerResponse.model_validate_json(evidence_path.read_text()) == implementation
-    assert not list((tmp_path / artifact_root).rglob(".*.tmp*"))
+    assert not list(progress.rglob(".*.tmp*"))
 
 
 def test_persisted_implementer_attempts_define_resume_boundary(tmp_path: Path) -> None:
@@ -939,12 +931,12 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path: Path) -
 
 
 def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
-
-    p = tmp_path / "roadmap.md"
-    assert not p.exists()
-    memory.ensure_roadmap_file(p)
-    assert p.exists()
-    text = p.read_text()
+    roadmap = tmp_path / "roadmap"
+    document = roadmap / "index.md"
+    assert not document.exists()
+    memory.ensure_roadmap_file(roadmap)
+    assert document.exists()
+    text = document.read_text()
     # The seed must scaffold the four sections so the orchestrator's first
     # round starts with a clear structure.
     assert "## Major" in text
@@ -954,24 +946,23 @@ def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
 
 
 def test_ensure_roadmap_does_not_overwrite_existing(tmp_path: Path) -> None:
-
-    p = tmp_path / "roadmap.md"
-    p.write_text("# my custom plan\n")
-    memory.ensure_roadmap_file(p)
-    assert p.read_text() == "# my custom plan\n"
+    roadmap = tmp_path / "roadmap"
+    roadmap.mkdir()
+    document = roadmap / "index.md"
+    document.write_text("# my custom plan\n")
+    memory.ensure_roadmap_file(roadmap)
+    assert document.read_text() == "# my custom plan\n"
 
 
 def test_read_roadmap_returns_text(tmp_path: Path) -> None:
-
-    p = tmp_path / "roadmap.md"
-    p.write_text("hello\n")
-    assert memory.read_roadmap(p) == "hello\n"
+    roadmap = tmp_path / "roadmap"
+    roadmap.mkdir()
+    (roadmap / "index.md").write_text("hello\n")
+    assert memory.read_roadmap(roadmap) == "hello\n"
 
 
 def test_read_roadmap_missing_returns_empty(tmp_path: Path) -> None:
-
-    p = tmp_path / "nope.md"
-    assert memory.read_roadmap(p) == ""
+    assert memory.read_roadmap(tmp_path / "roadmap") == ""
 
 
 def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
@@ -999,18 +990,12 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> No
         assert "pareto_archive_summary" not in role_prompt
 
 
-@pytest.mark.parametrize(
-    ("progress_name", "expected"),
-    [("progress.md", "pareto-frontier.md"), ("progress", "progress/pareto-frontier.md")],
-)
-def test_pareto_archive_is_materialized_beside_progress(
-    tmp_path: Path, progress_name: str, expected: str
-) -> None:
-    progress_path = tmp_path / progress_name
+def test_pareto_archive_is_materialized_under_progress(tmp_path: Path) -> None:
+    progress_path = tmp_path / "progress"
 
     document = memory.write_pareto_archive(progress_path, "Trusted frontier: round 4")
 
-    assert document == tmp_path / expected
+    assert document == tmp_path / "progress" / "pareto-frontier.md"
     assert document.read_text() == "# Pareto frontier\n\nTrusted frontier: round 4\n"
 
 

@@ -5,8 +5,8 @@ self-review it, and collect only the profile/evidence needed to classify it.
 
 - Objective: `{{ objective_location|default('OBJECTIVE.md') }}`
 - Typed plan: `{{ plan_artifact_location|default('progress/plans/current.json') }}`
-- Progress ledger: `{{ progress_location|default('progress.md') }}`
-- Pareto archive: `{{ pareto_archive_location|default('pareto-frontier.md') }}`
+- Progress ledger: `{{ progress_location|default('progress/') }}`
+- Pareto archive: `{{ pareto_archive_location|default('progress/pareto-frontier.md') }}`
 - Framework validation ledger: `{{ validation_location|default('progress/validation/') }}`
 {% if runtime_notes %}- Runtime contract: {{ runtime_notes }}
 {% endif %}

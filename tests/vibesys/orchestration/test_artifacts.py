@@ -2,9 +2,8 @@
 
 Every writer here is a pure function of a ``progress_path`` and a payload: no
 ``RunContext`` is needed to exercise the public API. These tests cover the
-atomic-write primitive (``write_json``/``write_model``), path derivation for
-each artifact kind under both memory layouts (legacy ``progress.md`` and the
-directory layout), and the durable-attempt-numbering contract
+atomic-write primitive (``write_json``/``write_model``), path derivation under
+the canonical ``progress`` directory, and the durable-attempt-numbering contract
 (``next_implementer_attempt``) that survives a process killed mid-invoke.
 
 Validation recipe contracts are imported from their public runtime API.
@@ -15,7 +14,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import pytest
 from pydantic import BaseModel
 
 from vibesys.orchestration.artifacts import (
@@ -90,18 +88,12 @@ def test_write_model_dumps_json_mode(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Path derivation, for both memory layouts
+# Path derivation
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "progress_path_name",
-    ["progress.md", "progress"],
-)
-def test_plan_artifact_path_is_under_structured_root(
-    tmp_path: Path, progress_path_name: str
-) -> None:
-    progress_path = tmp_path / progress_path_name
+def test_plan_artifact_path_is_under_structured_root(tmp_path: Path) -> None:
+    progress_path = tmp_path / "progress"
 
     path = plan_artifact_path(progress_path, round_number=12)
 
@@ -109,7 +101,7 @@ def test_plan_artifact_path_is_under_structured_root(
 
 
 def test_implementer_artifact_path_is_under_evidence_dir(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     path = implementer_artifact_path(progress_path, round_number=3, retry=2)
 
@@ -121,7 +113,7 @@ def test_implementer_artifact_path_is_under_evidence_dir(tmp_path: Path) -> None
 
 
 def test_validation_artifact_root_and_recipe_schema_path(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     root = validation_artifact_root(progress_path)
     schema_path = validation_recipe_schema_path(progress_path)
@@ -131,7 +123,7 @@ def test_validation_artifact_root_and_recipe_schema_path(tmp_path: Path) -> None
 
 
 def test_profiler_artifact_root(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     root = profiler_artifact_root(progress_path, round_number=7)
 
@@ -139,7 +131,7 @@ def test_profiler_artifact_root(tmp_path: Path) -> None:
 
 
 def test_write_validation_recipe_schema_publishes_json_schema(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     path = write_validation_recipe_schema(progress_path)
 
@@ -154,7 +146,7 @@ def test_write_validation_recipe_schema_publishes_json_schema(tmp_path: Path) ->
 
 
 def test_write_and_list_validation_result_artifacts_in_creation_order(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
     results = [
         FrameworkValidationResult(
             recipe=_recipe(), input_digest="deadbeef", passed=True, exit_code=0
@@ -177,7 +169,7 @@ def test_write_and_list_validation_result_artifacts_in_creation_order(tmp_path: 
 
 
 def test_validation_result_artifact_paths_empty_when_none_written(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     assert validation_result_artifact_paths(progress_path) == []
 
@@ -188,13 +180,13 @@ def test_validation_result_artifact_paths_empty_when_none_written(tmp_path: Path
 
 
 def test_next_implementer_attempt_starts_at_one(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     assert next_implementer_attempt(progress_path, round_number=1) == 1
 
 
 def test_next_implementer_attempt_increments_past_completed_artifacts(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
     write_model(
         implementer_artifact_path(progress_path, round_number=1, retry=1),
         _Payload(label="attempt-1", count=1),
@@ -210,7 +202,7 @@ def test_next_implementer_attempt_counts_start_markers_too(tmp_path: Path) -> No
     killed attempt's label, so a marker with no matching completed artifact
     still counts.
     """
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     write_implementer_start_marker(progress_path, round_number=1, retry=1)
 
@@ -218,7 +210,7 @@ def test_next_implementer_attempt_counts_start_markers_too(tmp_path: Path) -> No
 
 
 def test_write_implementer_start_marker_records_round_and_attempt(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
 
     path = write_implementer_start_marker(progress_path, round_number=4, retry=2)
 
@@ -228,7 +220,7 @@ def test_write_implementer_start_marker_records_round_and_attempt(tmp_path: Path
 
 def test_implementer_artifact_paths_only_matches_completed_suffix(tmp_path: Path) -> None:
     """A start marker for an in-flight attempt is not a completed artifact."""
-    progress_path = tmp_path / "progress.md"
+    progress_path = tmp_path / "progress"
     write_implementer_start_marker(progress_path, round_number=1, retry=1)
     completed = write_model(
         implementer_artifact_path(progress_path, round_number=1, retry=2),

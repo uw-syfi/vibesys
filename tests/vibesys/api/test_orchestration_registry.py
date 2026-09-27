@@ -216,7 +216,6 @@ def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Pa
                     "max_retries_per_round": 1,
                     "judge_every": 1,
                     "official_eval_every": 1,
-                    "memory_layout": "files",
                 },
             )
         }
@@ -236,7 +235,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         "max_retries_per_round": 2,
         "judge_every": 1,
         "official_eval_every": 3,
-        "memory_layout": "directories",
     }
     descriptors = (
         OrchestrationDescriptor(id="single-agent", config_version=1, options=agent_options),
@@ -286,7 +284,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
                 "max_retries_per_round": 2,
                 "judge_every": 1,
                 "official_eval_every": 3,
-                "memory_layout": "directories",
                 "operator_constraints": ["Preserve ordering"],
                 "metric_space": {
                     "objectives": [{"name": "throughput", "direction": "max"}],
@@ -443,7 +440,6 @@ def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": 3,
-            "memory_layout": "directories",
         },
     )
     compare = registry.resolve(recorded.id).plugin.resume_policy

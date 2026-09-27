@@ -367,7 +367,7 @@ def test_same_named_projects_have_distinct_external_state_directories(tmp_path: 
     assert second_log.parent.parent.parent.name.startswith("project-")
 
 
-def test_legacy_local_state_moves_without_rewriting_and_leaves_worktrees(
+def test_repository_local_state_is_not_migrated_or_deleted(
     tmp_path: Path,
 ) -> None:
     project = tmp_path / "project"
@@ -386,29 +386,28 @@ def test_legacy_local_state_moves_without_rewriting_and_leaves_worktrees(
     state = Project.open(project).state
 
     local_state_dir = Project.log_directory_for(project, "run-1").parents[2]
-    assert (local_state_dir / "current-run").read_bytes() == b"run-1\n"
-    assert (local_state_dir / "runs/run-1/logs/run-events.jsonl").read_bytes() == (
-        b'{"type":"server_started"}\n'
-    )
-    assert (local_state_dir / "runs/run-1/agent/active.json").read_bytes() == (
-        b'{"schema_version":1}\n'
-    )
-    assert not (legacy / "current-run").exists()
-    assert not (legacy / "runs/run-1/logs").exists()
-    assert not (legacy / "runs/run-1/agent").exists()
+    assert not (local_state_dir / "current-run").exists()
+    assert not (local_state_dir / "runs/run-1/logs/run-events.jsonl").exists()
+    assert not (local_state_dir / "runs/run-1/agent/active.json").exists()
+    assert (legacy / "current-run").read_bytes() == b"run-1\n"
+    assert (logs / "run-events.jsonl").read_bytes() == b'{"type":"server_started"}\n'
+    assert (agent / "active.json").read_bytes() == b'{"schema_version":1}\n'
     assert (worktree / "candidate.py").read_bytes() == b"candidate = True\n"
     assert state.sandbox_paths().hidden_path == Path(".vibesys/state/local")
 
 
-def test_log_directory_rejects_symlinked_parent(tmp_path: Path) -> None:
+def test_log_directory_does_not_probe_repository_local_symlinked_parent(tmp_path: Path) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
     (project / ".vibesys/state" / "local").mkdir(parents=True)
     outside.mkdir()
-    (project / ".vibesys/state" / "local" / "runs").symlink_to(outside, target_is_directory=True)
+    legacy_runs = project / ".vibesys/state" / "local" / "runs"
+    legacy_runs.symlink_to(outside, target_is_directory=True)
 
-    with pytest.raises(ProjectStateError, match=r"(?:escapes|must not be a symlink)"):
-        Project.log_directory_for(project, "run-1")
+    log_directory = Project.log_directory_for(project, "run-1")
+
+    assert not log_directory.is_relative_to(project)
+    assert legacy_runs.is_symlink()
 
 
 def test_model_cache_directory_rejects_symlinked_parent(tmp_path: Path) -> None:

@@ -259,7 +259,6 @@ def _agent_policy_descriptor(
         "max_retries_per_round": args.max_retries_per_round,
         "judge_every": args.judge_every,
         "official_eval_every": args.official_eval_every,
-        "memory_layout": args.memory_layout,
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
         "metric_space": metrics.model_dump(mode="json"),
         "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")

@@ -7,9 +7,8 @@ this package is the shared surface between them.
 
 The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 
-  "agent" / "profile-guided": orchestrated hypothesis loops.
-             Its issue board lives in the workspace as roadmap.md +
-             progress.md, owned by the orchestrator.
+  "agent" / "profile-guided": orchestrated hypothesis loops. Their policy
+             memory lives below ``roadmap/`` and ``progress/``.
   "plain": deterministic outer loop. Its issue board is a structured
              :class:`IssueBoard` (issues.json) that perf_eval files into
              and the implementer drains one issue at a time.

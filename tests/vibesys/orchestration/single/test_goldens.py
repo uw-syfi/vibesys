@@ -96,6 +96,24 @@ def _assert_golden(
     run_id: str,
     workspace: Path,
 ) -> None:
+    policy_files = {
+        path.relative_to(workspace).as_posix()
+        for root in (workspace / "roadmap", workspace / "progress")
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    assert policy_files == {
+        "roadmap/index.md",
+        "progress/README.md",
+        "progress/pareto-frontier.md",
+        "progress/plans/round-0001.json",
+        "progress/round-0001.md",
+    }
+    assert not any(
+        (workspace / legacy).exists()
+        for legacy in ("roadmap.md", "progress.md", "pareto-frontier.md", "progress-artifacts")
+    )
+
     implementer_turn = 0
     for client in calls:
         for call in client.calls:
@@ -112,7 +130,7 @@ def _assert_golden(
                 workspace=workspace,
             )
 
-    for relative in ("progress.md", "roadmap.md", "pareto-frontier.md"):
+    for relative in ("roadmap/index.md", "progress/pareto-frontier.md"):
         path = workspace / relative
         if path.is_file():
             assert_board_snapshot(
@@ -122,7 +140,16 @@ def _assert_golden(
                 path.read_text(encoding="utf-8"),
                 workspace=workspace,
             )
-    plans_dir = workspace / "progress-artifacts" / "plans"
+    for path in sorted((workspace / "progress").glob("round-*.md")):
+        relative = path.relative_to(workspace).as_posix()
+        assert_board_snapshot(
+            strategy,
+            scenario,
+            relative,
+            path.read_text(encoding="utf-8"),
+            workspace=workspace,
+        )
+    plans_dir = workspace / "progress" / "plans"
     if plans_dir.is_dir():
         for path in sorted(plans_dir.glob("*.json")):
             relative = path.relative_to(workspace).as_posix()

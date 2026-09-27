@@ -8,10 +8,10 @@ self-review it, and collect only the profile/evidence needed to classify it.
 ## Authoritative inputs
 
 - Objective: `<WORKSPACE>/.vibesys/state/runs/<RUN_ID>/runtime/effective-objective.md`
-- Typed plan: `progress-artifacts/plans/round-0001.json`
-- Progress ledger: `progress.md`
-- Pareto archive: `pareto-frontier.md`
-- Framework validation ledger: `progress-artifacts/validation/`
+- Typed plan: `progress/plans/round-0001.json`
+- Progress ledger: `progress/`
+- Pareto archive: `progress/pareto-frontier.md`
+- Framework validation ledger: `progress/validation/`
 Read these files with tools. Do not rely on embedded copies or stale history.
 Read older rounds and installed references only for a named dependency.
 Reuse a matching framework validation PASS when its declared inputs are unchanged.

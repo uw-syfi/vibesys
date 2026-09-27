@@ -3,11 +3,9 @@
 Every agent strategy needs a durable place to write its own planning notes
 (the *roadmap*) and per-round audit trail (*progress*), plus a
 framework-materialized Pareto archive derived from committed state. These
-memory locations support two backward-compatible layouts:
-
-  - ``roadmap.md`` + ``progress.md`` -- the original compact layout.
-  - ``roadmap/index.md`` + ``progress/round-NNNN.md`` -- a layout that stays
-    scannable when a run grows to hundreds of rounds.
+The roadmap lives at ``roadmap/index.md``. Progress uses one file per round at
+``progress/round-NNNN.md``, which stays scannable when a run grows to hundreds
+of rounds.
 
 A strategy declares these paths once, through ``OrchestrationPlugin.memory_paths``
 (:func:`declared_memory_paths`); the host then preserves them across
@@ -21,68 +19,36 @@ from __future__ import annotations
 
 from pathlib import Path
 
-MEMORY_LAYOUTS = ("files", "directories")
-#: Workspace-relative roots of the loop's durable memory, layout aside.
-MEMORY_LAYOUTS_ROOTS = ("roadmap", "progress")
+MEMORY_ROOTS = ("roadmap", "progress")
 
 
-def resolve_paths(workspace: Path, layout: str) -> tuple[Path, Path]:
-    """Resolve both memory locations, preserving the layout of resumed runs."""
-    if layout not in MEMORY_LAYOUTS:
-        message = f"Unknown memory layout {layout!r}; choose from {', '.join(MEMORY_LAYOUTS)}"
-        raise ValueError(message)
-
-    def resolve(name: str) -> Path:
-        legacy = workspace / f"{name}.md"
-        directory = workspace / name
-        if legacy.exists() and directory.exists():
-            message = f"Both {legacy.name} and {directory.name}/ exist; keep only one {name} layout"
-            raise ValueError(message)
-        if legacy.exists():
-            return legacy
-        if directory.exists():
-            return directory
-        return directory if layout == "directories" else legacy
-
-    roadmap, progress = MEMORY_LAYOUTS_ROOTS
-    return resolve(roadmap), resolve(progress)
+def resolve_paths(workspace: Path) -> tuple[Path, Path]:
+    """Resolve the canonical roadmap and progress directories."""
+    roadmap, progress = MEMORY_ROOTS
+    return workspace / roadmap, workspace / progress
 
 
 def structured_artifact_root(progress_path: Path) -> Path:
     """Return the framework-owned directory for typed role handoffs.
 
-    Directory memory layouts keep the artifacts below ``progress/``. Legacy
-    ``progress.md`` runs use a sibling directory so the existing Markdown file
-    remains untouched. Shared with :mod:`vibesys.orchestration.artifacts`,
-    which writes into this same root.
+    Shared with :mod:`vibesys.orchestration.artifacts`, which writes into this
+    same root.
     """
-    if progress_path.suffix == ".md":
-        return progress_path.with_name(f"{progress_path.stem}-artifacts")
     return progress_path
 
 
 def pareto_archive_path(progress_path: Path) -> Path:
     """Return the framework-owned Pareto archive beside progress history."""
-    if progress_path.suffix == ".md":
-        return progress_path.with_name("pareto-frontier.md")
     return progress_path / "pareto-frontier.md"
 
 
 def framework_memory_paths(workspace: Path) -> tuple[Path, ...]:
     """Return every memory location the framework writes into *workspace*.
 
-    Both layouts are returned because a projection over historical commits
-    cannot know which layout a past round used, and a resumed run may switch.
-    The artifact and Pareto roots are derived from the progress path rather
-    than restated, so a new framework-owned location under ``progress`` is
-    covered by construction. The paths need not exist.
+    The paths need not exist. Derived framework artifacts live below the
+    declared progress root, so declaring that root covers them by construction.
     """
-    paths: list[Path] = []
-    for name in MEMORY_LAYOUTS_ROOTS:
-        paths.extend((workspace / f"{name}.md", workspace / name))
-    for progress in (workspace / "progress.md", workspace / "progress"):
-        paths.extend((structured_artifact_root(progress), pareto_archive_path(progress)))
-    return tuple(dict.fromkeys(paths))
+    return tuple(workspace / name for name in MEMORY_ROOTS)
 
 
 def declared_memory_paths() -> tuple[str, ...]:
@@ -107,11 +73,11 @@ def write_pareto_archive(progress_path: Path, summary: str) -> Path:
 
 
 def _roadmap_document(roadmap_path: Path) -> Path:
-    return roadmap_path if roadmap_path.suffix == ".md" else roadmap_path / "index.md"
+    return roadmap_path / "index.md"
 
 
 # ---------------------------------------------------------------------------
-# roadmap.md -- orchestrator's strategic memory
+# Roadmap: orchestrator's strategic memory
 # ---------------------------------------------------------------------------
 
 
@@ -212,11 +178,10 @@ def read_roadmap(roadmap_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# progress.md -- per-round audit log
+# Progress: per-round audit log
 # ---------------------------------------------------------------------------
 
 
-_PROGRESS_HEADER = "# Progress\n\n"
 _PROGRESS_README = """# Progress
 
 Each round has its own `round-NNNN.md` audit log. Agent prompts name this
@@ -230,23 +195,17 @@ _RECENT_PROGRESS_ROUNDS = 4
 
 
 def ensure_progress_file(progress_path: Path) -> None:
-    """Create the progress file with a header if it doesn't exist."""
-    if progress_path.suffix == ".md" and not progress_path.exists():
-        progress_path.parent.mkdir(parents=True, exist_ok=True)
-        progress_path.write_text(_PROGRESS_HEADER)
-    elif progress_path.suffix != ".md":
-        progress_path.mkdir(parents=True, exist_ok=True)
-        readme = progress_path / "README.md"
-        if not readme.exists():
-            readme.write_text(_PROGRESS_README)
+    """Create the progress directory and its explanatory README."""
+    progress_path.mkdir(parents=True, exist_ok=True)
+    readme = progress_path / "README.md"
+    if not readme.exists():
+        readme.write_text(_PROGRESS_README)
 
 
 def read_progress(progress_path: Path, *, recent_rounds: int = _RECENT_PROGRESS_ROUNDS) -> str:
-    """Return progress, bounded to recent per-round files in directory mode."""
+    """Return progress, bounded to recent per-round files."""
     if not progress_path.exists():
         return ""
-    if progress_path.is_file():
-        return progress_path.read_text()
     round_files = sorted(progress_path.glob("round-[0-9][0-9][0-9][0-9].md"))
     selected = round_files[-recent_rounds:] if recent_rounds > 0 else round_files
     return "\n\n".join(path.read_text().rstrip() for path in selected)

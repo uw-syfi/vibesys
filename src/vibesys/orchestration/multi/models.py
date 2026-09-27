@@ -24,9 +24,6 @@ class MultiOptions(AgentOrchestrationOptions):
         if self.interface not in {"inprocess", "service"}:
             message = f"unsupported multi-agent interface {self.interface!r}"
             raise ValueError(message)
-        if self.memory_layout not in {"files", "directories"}:
-            message = f"unsupported multi-agent memory_layout {self.memory_layout!r}"
-            raise ValueError(message)
         return self
 
 
@@ -39,9 +36,6 @@ class ProfileGuidedMultiOptions(AgentOrchestrationOptions):
     def _registered_values(self) -> ProfileGuidedMultiOptions:
         if self.interface not in {"inprocess", "service"}:
             message = f"unsupported profile-guided multi-agent interface {self.interface!r}"
-            raise ValueError(message)
-        if self.memory_layout not in {"files", "directories"}:
-            message = f"unsupported profile-guided multi-agent memory_layout {self.memory_layout!r}"
             raise ValueError(message)
         return self
 

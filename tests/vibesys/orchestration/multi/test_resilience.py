@@ -38,7 +38,6 @@ def _options(**changes: object) -> BaseModel:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": 10,
-            "memory_layout": "directories",
             **changes,
         }
     )

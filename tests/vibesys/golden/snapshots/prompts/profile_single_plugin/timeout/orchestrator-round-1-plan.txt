@@ -9,9 +9,9 @@ tests, or launch benchmarks.
 ## Authoritative inputs
 
 - Objective: `<WORKSPACE>/.vibesys/state/runs/<RUN_ID>/runtime/effective-objective.md`
-- Progress ledger: `progress.md`
-- Roadmap: `roadmap.md`
-- Pareto archive: `pareto-frontier.md`
+- Progress ledger: `progress/`
+- Roadmap: `roadmap/index.md`
+- Pareto archive: `progress/pareto-frontier.md`
 Read the objective first; every operator constraint is hard feasibility.
 Accuracy, Pareto gain, or diagnostic value cannot excuse a violation. Cite
 paths, not stable text. Then inspect the latest relevant ledger/roadmap entries;

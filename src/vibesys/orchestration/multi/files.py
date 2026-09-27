@@ -24,19 +24,6 @@ if TYPE_CHECKING:
     from vibesys.orchestration.profilers import ProfilerSummary
 
 
-def _resolve(workspace: Path, name: str, layout: str) -> Path:
-    file_path = workspace / f"{name}.md"
-    directory = workspace / name
-    if file_path.exists() and directory.exists():
-        message = f"both {file_path.name} and {directory.name}/ exist"
-        raise ValueError(message)
-    if file_path.exists():
-        return file_path
-    if directory.exists():
-        return directory
-    return directory if layout == "directories" else file_path
-
-
 def _location(path: Path, workspace: Path, *, directory: bool = False) -> str:
     value = path.relative_to(workspace).as_posix()
     return f"{value}/" if directory else value
@@ -69,15 +56,12 @@ class MultiFiles:
     progress: Path
 
     @classmethod
-    def open(cls, workspace: Path, layout: str) -> MultiFiles:
-        """Resolve and initialize the selected memory layout."""
-        if layout not in {"files", "directories"}:
-            message = f"unknown memory layout {layout!r}"
-            raise ValueError(message)
+    def open(cls, workspace: Path) -> MultiFiles:
+        """Resolve and initialize the policy's canonical memory directories."""
         result = cls(
             workspace=workspace,
-            roadmap=_resolve(workspace, "roadmap", layout),
-            progress=_resolve(workspace, "progress", layout),
+            roadmap=workspace / "roadmap",
+            progress=workspace / "progress",
         )
         result._initialize()
         return result
@@ -85,23 +69,16 @@ class MultiFiles:
     @property
     def roadmap_location(self) -> str:
         """Return the roadmap index path shown to agents."""
-        path = self.roadmap / "index.md" if self.roadmap.suffix != ".md" else self.roadmap
-        return _location(path, self.workspace)
+        return _location(self.roadmap / "index.md", self.workspace)
 
     @property
     def progress_location(self) -> str:
         """Return the progress ledger path shown to agents."""
-        return _location(
-            self.progress,
-            self.workspace,
-            directory=self.progress.suffix != ".md",
-        )
+        return _location(self.progress, self.workspace, directory=True)
 
     @property
     def pareto_path(self) -> Path:
         """Return the derived Pareto archive path."""
-        if self.progress.suffix == ".md":
-            return self.progress.with_name("pareto-frontier.md")
         return self.progress / "pareto-frontier.md"
 
     @property
@@ -112,8 +89,6 @@ class MultiFiles:
     @property
     def artifact_root(self) -> Path:
         """Return the root for structured policy handoff files."""
-        if self.progress.suffix == ".md":
-            return self.progress.with_name("progress-artifacts")
         return self.progress
 
     @property
@@ -255,29 +230,21 @@ class MultiFiles:
         self._append(round_number, f"Official evaluation attempt {retry}", detail)
 
     def _initialize(self) -> None:
-        roadmap = self.roadmap / "index.md" if self.roadmap.suffix != ".md" else self.roadmap
+        roadmap = self.roadmap / "index.md"
         roadmap.parent.mkdir(parents=True, exist_ok=True)
         if not roadmap.exists():
             roadmap.write_text("# Roadmap\n\nOwned and maintained by the orchestrator.\n")
-        if self.progress.suffix == ".md":
-            if not self.progress.exists():
-                self.progress.write_text("# Progress\n\n")
-        else:
-            self.progress.mkdir(parents=True, exist_ok=True)
-            readme = self.progress / "README.md"
-            if not readme.exists():
-                readme.write_text("# Progress\n\nOne audit file is written per round.\n")
+        self.progress.mkdir(parents=True, exist_ok=True)
+        readme = self.progress / "README.md"
+        if not readme.exists():
+            readme.write_text("# Progress\n\nOne audit file is written per round.\n")
         self.validation_root.mkdir(parents=True, exist_ok=True)
         schema_path = self.validation_root / "recipe-schema.json"
         if not schema_path.exists():
             _write_json(schema_path, ValidationRecipeArtifact.model_json_schema())
 
     def _append(self, round_number: int, title: str, body: str) -> None:
-        path = (
-            self.progress
-            if self.progress.suffix == ".md"
-            else self.progress / f"round-{round_number:04d}.md"
-        )
+        path = self.progress / f"round-{round_number:04d}.md"
         with path.open("a", encoding="utf-8") as stream:
             stream.write(f"## Round {round_number}: {title}\n{body.rstrip()}\n\n")
 

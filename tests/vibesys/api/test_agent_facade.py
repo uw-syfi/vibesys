@@ -75,7 +75,6 @@ def test_agent_objectives_are_parsed_by_the_registered_plugin() -> None:
         max_retries_per_round=1,
         judge_every=1,
         official_eval_every=1,
-        memory_layout="files",
         metric_space=MetricSpace(
             objectives=(
                 Objective("throughput", "max"),

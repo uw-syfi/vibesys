@@ -100,7 +100,6 @@ def options(*, max_rounds: int = 1, interface: str = "service") -> BaseModel:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": 10,
-            "memory_layout": "files",
         }
     )
 
@@ -116,7 +115,6 @@ def profile_options(*, interface: str = "inprocess") -> PluginRunOptions:
                 "max_retries_per_round": 2,
                 "judge_every": 1,
                 "official_eval_every": 1,
-                "memory_layout": "files",
                 "metric_space": MetricSpace(),
                 "profile_guided": ProfileGuidedInput(command=("profile-tool",), timeout_seconds=73),
             }

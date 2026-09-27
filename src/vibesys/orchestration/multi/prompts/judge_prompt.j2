@@ -8,8 +8,8 @@ new implementation plan.
 - Typed plan: `{{ plan_artifact_location|default('progress/plans/current.json') }}`
 - Framework-recorded implementer response:
   `{{ implementer_artifact_location|default('progress/evidence/current-implementer.json') }}`
-- Progress ledger: `{{ progress_location|default('progress.md') }}`
-- Pareto archive: `{{ pareto_archive_location|default('pareto-frontier.md') }}`
+- Progress ledger: `{{ progress_location|default('progress/') }}`
+- Pareto archive: `{{ pareto_archive_location|default('progress/pareto-frontier.md') }}`
 - Framework validation ledger: `{{ validation_location|default('progress/validation/') }}`
 - Validation recipe contract: `{{ validation_recipe_contract_location|default('progress/validation/recipe-schema.json') }}`
 {% if runtime_notes %}- Runtime contract: {{ runtime_notes }}

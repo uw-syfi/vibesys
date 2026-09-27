@@ -49,7 +49,6 @@ def _options(**changes: object) -> BaseModel:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": 10,
-            "memory_layout": "directories",
             **changes,
         }
     )
@@ -155,8 +154,9 @@ def test_plugin_declares_four_roles_and_plain_production_options() -> None:
 
     with pytest.raises(ValidationError, match="interface"):
         _options(interface="socket")
-    with pytest.raises(ValidationError, match="memory_layout"):
-        _options(memory_layout="unknown")
+    for removed_layout in ("files", "directories"):
+        with pytest.raises(ValidationError, match="memory_layout"):
+            _options(memory_layout=removed_layout)
     with pytest.raises(ValidationError, match="profile_guided"):
         _options(profile_guided={"min_measured_rounds": 2})
     with pytest.raises(ValidationError, match="unexpected_option"):

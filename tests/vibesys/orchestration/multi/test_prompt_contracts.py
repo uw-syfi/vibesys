@@ -110,6 +110,16 @@ _CONTEXTS = {
 }
 
 
+def test_templates_have_only_canonical_memory_defaults() -> None:
+    templates = tuple(_TEMPLATE_DIR.glob("*.j2")) + tuple(SINGLE_PROMPT_DIR.glob("*.j2"))
+
+    for template in templates:
+        source = template.read_text()
+        assert "default('progress.md')" not in source
+        assert "default('roadmap.md')" not in source
+        assert "default('pareto-frontier.md')" not in source
+
+
 def _text(context: dict[str, object], key: str) -> str:
     """Return a context entry that the templates interpolate as text."""
     value = context[key]

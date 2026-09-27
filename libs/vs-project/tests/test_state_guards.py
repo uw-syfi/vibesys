@@ -358,28 +358,6 @@ def test_state_home_creation_failure_is_reported(
         _ = Project.open(project).state
 
 
-def test_legacy_local_state_migration_failure_is_reported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = _project_dir(tmp_path)
-    legacy = project / ".vibesys/state/local"
-    legacy.mkdir(parents=True)
-    (legacy / "current-run").write_text("old-run\n", encoding="utf-8")
-
-    def broken_copytree(*_args: object, **_kwargs: object) -> None:
-        message = "disk full"
-        raise OSError(message)
-
-    monkeypatch.setattr("shutil.copytree", broken_copytree)
-
-    with pytest.raises(
-        ProjectStateError, match=r"Could not migrate VibeSys local state .*disk full"
-    ):
-        _ = Project.open(project).state
-
-    assert (legacy / "current-run").read_text(encoding="utf-8") == "old-run\n"
-
-
 def test_storage_root_must_be_a_directory(tmp_path: Path) -> None:
     project = _project_dir(tmp_path)
     (project / ".vibesys").mkdir()

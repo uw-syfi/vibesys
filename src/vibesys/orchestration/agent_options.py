@@ -26,7 +26,6 @@ class AgentOrchestrationOptions(BaseModel):
     max_retries_per_round: Annotated[int, Field(gt=0)]
     judge_every: Annotated[int, Field(gt=0)]
     official_eval_every: Annotated[int, Field(gt=0)]
-    memory_layout: PortableText
     operator_constraints: tuple[str, ...] = ()
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     profile_guided: ProfileGuidedInput | None = None

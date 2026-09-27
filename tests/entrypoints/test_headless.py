@@ -261,7 +261,6 @@ def _agent_configuration(
         max_retries_per_round=4,
         judge_every=2,
         official_eval_every=5,
-        memory_layout="directories",
         operator_constraints=("Preserve the ABI.",),
         profile_guided=profile_guided,
     )
@@ -1389,7 +1388,6 @@ def test_agent_resume_restores_its_configuration(
     assert args.official_eval_every == 5
     assert args.inner_loop == "single-agent"
     assert args.interface == "service"
-    assert args.memory_layout == "directories"
     assert args.constraint == ["Preserve the ABI."]
     assert args.profiler is ProfilerKind.NONE
     assert args.cli_provider == "claude"

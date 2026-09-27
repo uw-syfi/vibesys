@@ -48,7 +48,6 @@ def _configuration() -> AgentOrchestrationOptions:
         max_retries_per_round=3,
         judge_every=3,
         official_eval_every=3,
-        memory_layout="files",
         modality="text_generation",
         operator_constraints=("Do not change the ABI",),
     )

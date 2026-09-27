@@ -41,7 +41,6 @@ def _options(**changes: object) -> BaseModel:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": 10,
-            "memory_layout": "directories",
             **changes,
         }
     )
@@ -129,8 +128,9 @@ def test_plugin_declares_production_options_and_rejects_wrong_preset_polarity() 
 
     with pytest.raises(ValidationError, match="interface"):
         _options(interface="socket")
-    with pytest.raises(ValidationError, match="memory_layout"):
-        _options(memory_layout="unknown")
+    for removed_layout in ("files", "directories"):
+        with pytest.raises(ValidationError, match="memory_layout"):
+            _options(memory_layout=removed_layout)
     with pytest.raises(ValidationError, match="profile_guided"):
         _options(profile_guided={"min_measured_rounds": 2})
     with pytest.raises(ValidationError, match="unexpected_option"):
@@ -394,12 +394,18 @@ def test_selected_profiler_support_name_and_agent_metric_provenance(tmp_path: Pa
     assert state.search.rounds[0].perf_provenance == "implementer"
 
 
-def test_file_memory_layout_owns_plain_policy_artifacts(tmp_path: Path) -> None:
+def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: Path) -> None:
+    legacy_roadmap = tmp_path / "roadmap.md"
+    legacy_progress = tmp_path / "progress.md"
+    legacy_roadmap.write_text("legacy roadmap\n")
+    legacy_progress.write_text("legacy progress\n")
     script = _Script(_plan("H-01"), _response())
 
-    status, _host = _run(tmp_path, script, options=_options(max_rounds=1, memory_layout="files"))
+    status, _host = _run(tmp_path, script, options=_options(max_rounds=1))
 
     assert status is RunStatus.SUCCEEDED
-    assert (tmp_path / "roadmap.md").is_file()
-    assert (tmp_path / "progress.md").is_file()
-    assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").is_file()
+    assert (tmp_path / "roadmap" / "index.md").is_file()
+    assert (tmp_path / "progress" / "round-0001.md").is_file()
+    assert (tmp_path / "progress" / "plans" / "round-0001.json").is_file()
+    assert legacy_roadmap.read_text() == "legacy roadmap\n"
+    assert legacy_progress.read_text() == "legacy progress\n"

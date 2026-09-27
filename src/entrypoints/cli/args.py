@@ -538,15 +538,6 @@ def _build_agent_parser() -> argparse.ArgumentParser:
             "round run them immediately (default: 3)."
         ),
     )
-    parser.add_argument(
-        "--memory-layout",
-        choices=["files", "directories"],
-        default="files",
-        help=(
-            "Store roadmap/progress as roadmap.md + progress.md (files), or as "
-            "roadmap/index.md + progress/round-NNNN.md (directories)."
-        ),
-    )
     parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
         "--interface",

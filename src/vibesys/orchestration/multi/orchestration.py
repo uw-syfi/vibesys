@@ -177,7 +177,7 @@ class _MultiRun:
                 max_retries_per_round=options.max_retries_per_round,
             )
         )
-        self.files = MultiFiles.open(self.workspace.path, options.memory_layout)
+        self.files = MultiFiles.open(self.workspace.path)
         self.turns = MultiAgentTurns(host, options, self.search, self.files)
         self.terminal = _TerminalPolicy(self.search.config)
         self.state = MultiState()

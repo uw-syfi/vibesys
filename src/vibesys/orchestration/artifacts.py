@@ -6,8 +6,7 @@ results) through files rather than prompt text, so a later turn can inspect
 only what it needs with tools instead of receiving everything inline. This
 module is where that JSON gets written: every artifact lives under the
 run's structured artifact root (:func:`vibesys.orchestration.memory.structured_artifact_root`,
-a directory beside -- or, for legacy ``progress.md`` runs, a sibling of --
-the progress log), one category subdirectory per artifact kind (``plans``,
+the ``progress`` directory), one category subdirectory per artifact kind (``plans``,
 ``evidence``, ``validation``, ``profiles/round-NNNN``).
 
 ``write_json`` is the one atomic-write primitive every writer in this module

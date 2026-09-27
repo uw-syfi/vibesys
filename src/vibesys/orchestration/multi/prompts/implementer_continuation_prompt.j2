@@ -5,9 +5,9 @@ Execute the required delta; do not rediscover completed work.
 
 - Objective: `{{ objective_location|default('OBJECTIVE.md') }}`
 - Hypothesis contract: `{{ plan_artifact_location|default('progress/plans/current.json') }}`
-- Round state: `{{ current_round_location|default(progress_location|default('progress.md')) }}`
-- Ledger: `{{ progress_location|default('progress.md') }}`
-- Pareto archive: `{{ pareto_archive_location|default('pareto-frontier.md') }}`
+- Round state: `{{ current_round_location|default(progress_location|default('progress/')) }}`
+- Ledger: `{{ progress_location|default('progress/') }}`
+- Pareto archive: `{{ pareto_archive_location|default('progress/pareto-frontier.md') }}`
 - Validation ledger: `{{ validation_location|default('progress/validation/') }}`
 - Validation recipe contract: `{{ validation_recipe_contract_location|default('progress/validation/recipe-schema.json') }}`
 {% if runtime_notes %}- Runtime contract: {{ runtime_notes }}

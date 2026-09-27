@@ -117,7 +117,7 @@
       "provider": "fake",
       "stage": "orchestrator",
       "system_prompt": "You design one evidence-driven optimization hypothesis at a time. Keep hypothesis identifiers stable, do not update the hypothesis you are creating, and return only the requested structured response.",
-      "user_prompt": "<text len=8405 sha256=a7c3ab40e7a30c1b>"
+      "user_prompt": "<text len=8418 sha256=bf58a0ee91914877>"
     },
     "round_label": "orchestrator-session-turn-1",
     "status": "active",
@@ -141,7 +141,7 @@
     "data": {
       "kind": "invocation_started",
       "system_prompt": "You design one evidence-driven optimization hypothesis at a time. Keep hypothesis identifiers stable, do not update the hypothesis you are creating, and return only the requested structured response.",
-      "user_prompt": "<text len=8405 sha256=a7c3ab40e7a30c1b>"
+      "user_prompt": "<text len=8418 sha256=bf58a0ee91914877>"
     },
     "round_label": "orchestrator-session-turn-1",
     "status": "active",
@@ -277,7 +277,7 @@
       "provider": "fake",
       "stage": "implementer",
       "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
-      "user_prompt": "<text len=6535 sha256=1cccfda6226bb861>"
+      "user_prompt": "<text len=6522 sha256=10c2809f3757a95c>"
     },
     "round_label": "implementer-session-turn-1",
     "status": "active",
@@ -301,7 +301,7 @@
     "data": {
       "kind": "invocation_started",
       "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
-      "user_prompt": "<text len=6535 sha256=1cccfda6226bb861>"
+      "user_prompt": "<text len=6522 sha256=10c2809f3757a95c>"
     },
     "round_label": "implementer-session-turn-1",
     "status": "active",
@@ -454,7 +454,7 @@
       "provider": "fake",
       "stage": "implementer",
       "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
-      "user_prompt": "<text len=6699 sha256=7801d8de9add3794>"
+      "user_prompt": "<text len=6686 sha256=f37e6c66df5b3955>"
     },
     "round_label": "implementer-session-turn-2",
     "status": "active",
@@ -478,7 +478,7 @@
     "data": {
       "kind": "invocation_started",
       "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
-      "user_prompt": "<text len=6699 sha256=7801d8de9add3794>"
+      "user_prompt": "<text len=6686 sha256=f37e6c66df5b3955>"
     },
     "round_label": "implementer-session-turn-2",
     "status": "active",

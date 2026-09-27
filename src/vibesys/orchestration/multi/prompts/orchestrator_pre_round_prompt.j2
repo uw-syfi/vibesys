@@ -4,13 +4,13 @@ tests, or launch other evaluations.
 
 {% if has_history|default(true) %}
 Read the objective at `{{ objective_location|default('OBJECTIVE.md') }}` and the
-latest relevant entry under `{{ progress_location|default('progress.md') }}`.
+latest relevant entry under `{{ progress_location|default('progress/') }}`.
 Keep this routing decision bounded: normally inspect no more than one older
 named entry or one narrow skill reference, and only when it can change the
 yes/no answer. Do not inventory the campaign or roadmap.
 {% else %}
 Read the objective at `{{ objective_location|default('OBJECTIVE.md') }}`. This is
-round 1: `{{ progress_location|default('progress.md') }}` holds no result to
+round 1: `{{ progress_location|default('progress/') }}` holds no result to
 read and no earlier profile to reuse. Decide from the objective and the
 candidate source, reading only enough to judge whether measurement would change
 the first plan.

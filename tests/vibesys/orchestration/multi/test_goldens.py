@@ -141,7 +141,6 @@ def _plain_options(*, rounds: int = 1, official_every: int = 10) -> BaseModel:
             "max_retries_per_round": 2,
             "judge_every": 1,
             "official_eval_every": official_every,
-            "memory_layout": "directories",
             "metric_space": MetricSpace(
                 objectives=(Objective(name="throughput", direction="max"),)
             ),
