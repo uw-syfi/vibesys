@@ -11,16 +11,16 @@ from server.api.performance import build_performance_context, summarize_objectiv
 from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.orchestration.hypothesis.readmodel import project_run_view
-from vibesys.orchestration.single.models import SingleState
 from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.readmodel import project_run_view
 from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisState,
 )
 from vibesys.orchestration.hypothesis.transitions import reproject_run_evidence
-from vs_loop_state.api import RoundRecord
+from vibesys.orchestration.single.models import SingleState
+from vs_loop_state.api import MetricComparison, RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
@@ -128,6 +128,9 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
                             official_evaluation=True,
                             perf_metric=2000.0,
                             perf_unit="total_ops_per_sec",
+                            perf_provenance="framework",
+                            perf_comparison=MetricComparison.BETTER,
+                            judge_verdict="pass",
                             perf_baseline_round=1,
                             perf_baseline_commit="e17fce8123abc",
                             perf_baseline_metric=1000.0,

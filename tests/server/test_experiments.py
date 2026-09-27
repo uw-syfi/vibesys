@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
+import pytest
+from pydantic import ValidationError
 from tests.server.support import agent_descriptor, build_server_parts
 from tests.support.run_execution import run_execution_record
 
@@ -19,17 +21,11 @@ from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEnt
 from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.readmodel import (
     project_committed_run_view,
     project_run_view,
 )
-from vibesys.orchestration.single.models import SingleState
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    PerfDeltaReason,
-)
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
@@ -39,13 +35,17 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.orchestration.hypothesis.transitions import reproject_run_evidence
+from vibesys.orchestration.single.models import SingleState
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfDeltaReason,
+)
 from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StateSlot
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
     from vibesys.api import RunView
 
@@ -130,8 +130,11 @@ def _round(number: int, **overrides: Unpack[_RoundFields]) -> RoundRecord:
         "perf_metric": None,
         "perf_unit": None,
         "passed": False,
+        "judge_verdict": "deferred",
     }
     fields.update(overrides)
+    if fields["perf_metric"] is not None and "perf_provenance" not in fields:
+        fields["perf_provenance"] = "implementer"
     return RoundRecord(**fields)
 
 
@@ -216,28 +219,19 @@ def test_round_reads_an_implementer_outcome_from_its_own_vocabulary() -> None:
     assert entry.rounds[0].hypothesis_outcome == HypothesisOutcome.NOMINATED
 
 
-def test_round_drops_a_retired_outcome_rather_than_failing_the_log() -> None:
-    state = HypothesisState(
-        hypotheses=[
-            _hypothesis(
-                "H-01",
-                1,
-                rounds=[
-                    _round(
-                        1,
-                        hypothesis_id="H-01",
-                        hypothesis_outcome="retired_value",
-                        candidate_disposition="retained",
-                    )
-                ],
-            )
-        ]
-    )
-
-    (entry,) = build_experiment_log(_view(state))
-
-    assert entry.rounds[0].hypothesis_outcome is None
-    assert entry.rounds[0].candidate_disposition is None
+def test_state_rejects_a_retired_outcome_before_server_projection() -> None:
+    with pytest.raises(ValidationError):
+        _hypothesis(
+            "H-01",
+            1,
+            rounds=[
+                _round(
+                    1,
+                    hypothesis_id="H-01",
+                    hypothesis_outcome="retired_value",
+                )
+            ],
+        )
 
 
 def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> None:
@@ -900,6 +894,8 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
                             perf_metric=100.0,
                             perf_unit="ops_s",
                             perf_direction="max",
+                            perf_provenance="framework",
+                            perf_comparison=MetricComparison.INCOMPARABLE,
                         )
                     ],
                 ),
@@ -923,6 +919,8 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
                             perf_metric=101.0,
                             perf_unit="ops_s",
                             perf_direction="max",
+                            perf_provenance="framework",
+                            perf_comparison=MetricComparison.WITHIN_NOISE,
                         )
                     ],
                 ),

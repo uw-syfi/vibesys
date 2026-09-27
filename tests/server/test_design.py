@@ -15,11 +15,11 @@ from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
 from vibesys.api.contracts import RunStatus
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.readmodel import project_run_view
+from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.single.models import SingleState
 from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
 from vs_project.api import GitTracker, Project, RunEnvironmentRecord
 
@@ -66,6 +66,7 @@ def _round(number: int, **overrides: Unpack[_RoundFields]) -> RoundRecord:
         "perf_metric": None,
         "perf_unit": None,
         "passed": False,
+        "judge_verdict": "deferred",
     }
     fields.update(overrides)
     return RoundRecord(**fields)

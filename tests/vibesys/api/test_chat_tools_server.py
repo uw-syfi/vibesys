@@ -20,9 +20,9 @@ from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
+from vibesys.orchestration.multi.models import MultiState
 from vs_agent.api import register_tool
 from vs_loop_state.api import RoundRecord
 from vs_project.api import (
@@ -109,6 +109,7 @@ def _hypothesis() -> Hypothesis:
                 commit="c1",
                 perf_metric=100.0,
                 perf_unit="ops_s",
+                perf_provenance="implementer",
                 passed=True,
                 hypothesis_id="H-01",
                 judge_verdict="pass",

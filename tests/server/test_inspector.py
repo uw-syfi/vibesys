@@ -8,9 +8,9 @@ from tests.support.run_execution import run_execution_record
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
-from vibesys.orchestration.single.models import SingleState
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.single.models import SingleState
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
@@ -57,7 +57,9 @@ def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
                                 commit="1" * 40,
                                 perf_metric=1100.0,
                                 perf_unit="total_ops_per_sec",
+                                perf_provenance="implementer",
                                 passed=False,
+                                judge_verdict="fail",
                                 profile_skipped=False,
                                 official_evaluation_reason="Judge FAIL: latency regressed",
                             )
