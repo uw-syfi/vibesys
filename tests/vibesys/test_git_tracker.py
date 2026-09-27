@@ -10,9 +10,8 @@ from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
 from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.git_tracker import GitTracker
 from vibesys.run.project_policy import trusted_project_input_paths
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import GitTracker, OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -365,7 +365,7 @@ class _LocalRunSession:
         """Return this session's project root as a read-only host resource.
 
         The run's workspace *is* the project's Git worktree (see
-        `vibesys.run.git_tracker.GitTracker`); there is no separate per-run
+        `vs_project.api.GitTracker`); there is no separate per-run
         checkout directory to point at instead.
         """
         return HostResource(

@@ -10,10 +10,8 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run.device import DeviceLease
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.run.git_tracker import GitTracker
 from vibesys.run.integration import LocalRunIntegration, RunResourceHandoff
 from vibesys.run.legacy_namespaces import RunStateNamespace
-from vibesys.run.logger import RunLogger
 from vibesys.run.paths import RunPaths
 from vibesys.run.project import (
     ProjectProvisioningError,
@@ -44,7 +42,6 @@ __all__ = [
     "DeviceLease",
     "EventJournal",
     "ExperimentRepository",
-    "GitTracker",
     "InputProjectSpec",
     "LocalRunIntegration",
     "ProjectProvisioningError",
@@ -53,7 +50,6 @@ __all__ = [
     "RoundRecoveryOutcome",
     "RoundTransactionError",
     "RunControlChannel",
-    "RunLogger",
     "RunPaths",
     "RunResourceHandoff",
     "RunState",

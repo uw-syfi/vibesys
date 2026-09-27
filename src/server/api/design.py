@@ -69,7 +69,7 @@ class DesignLog:
 
     The projection is pure apart from ``diff`` and ``patch``, the two
     read-only git callables it is wired with (the run's own
-    :class:`~vibesys.run.git_tracker.GitTracker` name-status read and the
+    :class:`~vs_project.api.GitTracker` name-status read and the
     server's :class:`~server.api.workspace_git.WorkspacePatchReader`).
     Results are cached by ``(base, head)`` and ``(base, head, path)``: all
     are immutable checkpoints, so a cached entry stays correct and nothing

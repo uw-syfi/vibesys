@@ -17,11 +17,10 @@ from server.api.workspace_git import WorkspacePatchReader
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestrations.hypothesis_readmodel import project_run_view
 from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.git_tracker import GitTracker
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
-from vs_project.api import Project, RunEnvironmentRecord
+from vs_project.api import GitTracker, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

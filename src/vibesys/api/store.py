@@ -94,7 +94,7 @@ class _LocalRunStore:
         self._project.state.load_run(run_id)
         # A run's workspace is the project's own Git worktree, checked out to
         # the run's own `vibesys-runs/<run_id>` branch tip (see
-        # `vibesys.run.git_tracker.GitTracker`); there is no separate
+        # `vs_project.api.GitTracker`); there is no separate
         # per-run directory to point at.
         return HostResource(
             path=self._project.root,

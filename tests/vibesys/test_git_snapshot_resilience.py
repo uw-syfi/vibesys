@@ -9,9 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
-from vibesys.run import GitTracker
 from vibesys.run.git_events import NullGitTrackerEvents
-from vs_project.api import Project
+from vs_project.api import GitTracker, Project
 
 if TYPE_CHECKING:
     from pathlib import Path

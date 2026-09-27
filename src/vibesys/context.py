@@ -59,9 +59,7 @@ from vibesys.resource_paths import (
 from vibesys.run import (
     DeviceLease,
     ExperimentRepository,
-    GitTracker,
     ProjectProvisioningSpec,
-    RunLogger,
     RunPaths,
     RunResourceHandoff,
     RunStateNamespace,
@@ -95,10 +93,12 @@ from vs_agent.api import (
     task_agent_host_resources,
 )
 from vs_project.api import (
+    GitTracker,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
     RunExecutionRecord,
+    RunLogger,
     generate_run_id,
 )
 from vs_runtime.api import boot_trace

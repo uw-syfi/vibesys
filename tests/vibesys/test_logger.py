@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from vibesys.run import RunLogger
+from vs_project.api import RunLogger
 
 if TYPE_CHECKING:
     from pathlib import Path

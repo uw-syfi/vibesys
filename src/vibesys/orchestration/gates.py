@@ -52,9 +52,9 @@ if TYPE_CHECKING:
     from vibesys.context import _RunResources
     from vibesys.orchestration._host import HostResources
     from vibesys.run.event_journal import EventJournal
-    from vibesys.run.git_tracker import GitTracker
     from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
+    from vs_project.api import GitTracker
     from vs_sandbox.api import Sandbox
 
 

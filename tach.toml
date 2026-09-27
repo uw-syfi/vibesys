@@ -484,7 +484,7 @@ depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.
 [[modules]]
 path = "vibesys.orchestration.gates"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log", "vibesys.orchestration.local_validation"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log", "vibesys.orchestration.local_validation"]
 
 [[modules]]
 # Runtime-owned execution, reuse, mutation isolation, and reporting for

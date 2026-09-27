@@ -10,10 +10,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.run_execution import run_execution_record
 
-from vibesys.run import GitTracker, RoundRecoveryOutcome, RoundTransactionError
+from vibesys.run import RoundRecoveryOutcome, RoundTransactionError
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.round_transaction import MultiSlotRoundTransactionCoordinator
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import GitTracker, OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

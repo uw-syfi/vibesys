@@ -488,6 +488,7 @@ graph TD
     vibesys.orchestration.gates --> vibesys.run
     vibesys.orchestration.gates --> vibesys.runtime
     vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.gates --> vs_project
     vibesys.orchestration.gates --> vs_runtime
     vibesys.orchestration.gates --> vs_sandbox
     vibesys.orchestration.local_validation --> vibesys
