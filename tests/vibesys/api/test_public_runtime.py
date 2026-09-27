@@ -26,7 +26,7 @@ from vibesys.events import (
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import ToolServerDescriptor
-from vs_runtime.api import Workspace
+from vs_runtime.api import AgentToolBindingContext
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -63,7 +63,10 @@ class _ToolBindingAssemblyError(RuntimeError):
 
 
 class _FailingToolBindings(
-    Mapping[str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]]
+    Mapping[
+        str,
+        Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]],
+    ]
 ):
     def __len__(self) -> int:
         return 1
@@ -74,7 +77,7 @@ class _FailingToolBindings(
     def __getitem__(
         self,
         key: str,
-    ) -> Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]:
+    ) -> Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]:
         raise KeyError(key)
 
 

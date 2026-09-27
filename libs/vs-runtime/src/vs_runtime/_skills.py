@@ -133,7 +133,8 @@ def _skill_resource_parts(resource: str) -> PurePosixPath | str:
 def _resolve_skill_resource(
     entry: SkillCatalogEntry, raw_resource: str
 ) -> tuple[str | None, str | None]:
-    parsed = _skill_resource_parts(raw_resource.strip())
+    resource = raw_resource.strip().removeprefix(f"{entry.name}/")
+    parsed = _skill_resource_parts(resource)
     if isinstance(parsed, str):
         return None, parsed
     source_root = entry.source_dir.resolve()

@@ -22,16 +22,43 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import dataclasses
+import importlib
+import os
 import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from mcp.server.fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from types import ModuleType
+
+
+class RemoteCapture(Protocol):
+    """Remote capture adapter consumed by the ROCprof MCP boundary."""
+
+    def capture(
+        self,
+        kind: str,
+        lifecycle: capture_runtime.Lifecycle,
+        options: dict[str, object],
+        *,
+        cancel_event: threading.Event,
+    ) -> str:
+        """Run one capture through the remote allocation."""
+        ...
+
+    def capabilities(self) -> str:
+        """Describe the remote capture route without allocating a job."""
+        ...
+
+    def configured_lifecycle(self) -> dict[str, object] | None:
+        """Return the adapter-owned default lifecycle, when one is available."""
+        ...
+
 
 _HERE = Path(__file__).resolve().parent
 
@@ -55,6 +82,7 @@ sys.path.insert(0, str(_HERE))
 import analyze_rocprof  # noqa: E402  # LW-920172; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 import att  # noqa: E402  # LW-920173; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 import capture  # noqa: E402  # LW-920174; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import capture_jobs  # noqa: E402  # LW-930103; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 import compute  # noqa: E402  # LW-920175; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 import counters  # noqa: E402  # LW-920176; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 import kernel_bench  # noqa: E402  # LW-920177; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
@@ -66,6 +94,7 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     *,
     run_worker: Callable[..., Awaitable[str]] = mcp_async.run_cancellable,
     import_sibling: Callable[[str], ModuleType | None] = capture.import_torch_sibling,
+    remote_capture: RemoteCapture | None = None,
 ) -> FastMCP:
     """Construct the FastMCP instance with the curated rocprof tool set.
 
@@ -75,6 +104,21 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     torch plugin's analyzer module.
     """
     mcp = FastMCP("vibesys-rocprof-profiler")
+    jobs = capture_jobs.CaptureJobs()
+
+    def _run_profile(
+        kind: str,
+        function: Callable[..., str],
+        lifecycle: capture_runtime.Lifecycle,
+        *,
+        cancel_event: threading.Event,
+        **options: object,
+    ) -> str:
+        if remote_capture is not None:
+            return remote_capture.capture(kind, lifecycle, options, cancel_event=cancel_event)
+        if kind == "ops":
+            return function(**dataclasses.asdict(lifecycle), cancel_event=cancel_event, **options)
+        return function(lifecycle, cancel_event=cancel_event, **options)
 
     # -- capabilities ---------------------------------------------------
 
@@ -84,9 +128,122 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
 
         Call this first, every round.
         """
-        return capture.profiling_capabilities()
+        return (
+            remote_capture.capabilities()
+            if remote_capture is not None
+            else capture.profiling_capabilities()
+        )
 
     # -- profile_*: capture tools, one per altitude ----------------------
+
+    async def _configured_timeline_capture(
+        *,
+        cancel_event: threading.Event,
+        hip_api: bool,
+        kernel_include: str | None,
+        collection_delay_s: float | None,
+        collection_duration_s: float | None,
+    ) -> str:
+        if remote_capture is None:
+            return "error: this run environment does not provide a configured capture lifecycle"
+        configured = remote_capture.configured_lifecycle()
+        if configured is None:
+            return "error: this run environment has no configured service capture lifecycle"
+        try:
+            lifecycle = capture_runtime.Lifecycle(**cast("dict[str, Any]", configured))
+        except (TypeError, ValueError) as exc:
+            return f"error: invalid configured capture lifecycle: {exc}"
+        try:
+            return await run_worker(
+                _run_profile,
+                "timeline",
+                capture.profile_timeline,
+                lifecycle,
+                cancel_event=cancel_event,
+                hip_api=hip_api,
+                kernel_include=kernel_include,
+                collection_delay_s=collection_delay_s,
+                collection_duration_s=collection_duration_s,
+                target=None,
+            )
+        except ValueError as exc:
+            return f"error: {exc}"
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
+
+    @mcp.tool()
+    async def profile_configured_timeline(
+        hip_api: bool = False,  # noqa: FBT001, FBT002  # LW-930104; MCP boolean mirrors the profiler flag
+        kernel_include: str | None = None,
+        collection_delay_s: float | None = None,
+        collection_duration_s: float | None = None,
+    ) -> str:
+        """Capture the configured service under its configured representative load.
+
+        The run-environment adapter supplies the launch, readiness, load,
+        dynamic-port, graceful-stop, and timeout policy. Use this for the
+        first system timeline instead of rediscovering or reconstructing
+        those lifecycle arguments. Optional arguments only tune trace scope.
+        """
+        try:
+            capture.validate_collection_period(collection_delay_s, collection_duration_s)
+        except ValueError as exc:
+            return f"error: {exc}"
+        return await _configured_timeline_capture(
+            cancel_event=threading.Event(),
+            hip_api=hip_api,
+            kernel_include=kernel_include,
+            collection_delay_s=collection_delay_s,
+            collection_duration_s=collection_duration_s,
+        )
+
+    @mcp.tool()
+    async def submit_configured_timeline(
+        hip_api: bool = False,  # noqa: FBT001, FBT002  # LW-930105; MCP boolean mirrors the profiler flag
+        kernel_include: str | None = None,
+        collection_delay_s: float | None = None,
+        collection_duration_s: float | None = None,
+    ) -> str:
+        """Submit the configured system timeline and return an opaque handle immediately."""
+        try:
+            capture.validate_collection_period(collection_delay_s, collection_duration_s)
+        except ValueError as exc:
+            return f"error: {exc}"
+
+        async def run(cancel_event: threading.Event) -> str:
+            return await _configured_timeline_capture(
+                cancel_event=cancel_event,
+                hip_api=hip_api,
+                kernel_include=kernel_include,
+                collection_delay_s=collection_delay_s,
+                collection_duration_s=collection_duration_s,
+            )
+
+        return jobs.submit(run)
+
+    @mcp.tool()
+    def capture_status(handle: str) -> str:
+        """Read retained state for an asynchronous capture handle without waiting."""
+        try:
+            return jobs.status(handle)
+        except ValueError as exc:
+            return f"error: {exc}"
+
+    @mcp.tool()
+    async def await_capture(handle: str, timeout_s: float) -> str:
+        """Wait at most timeout_s for a capture; timeout leaves it running."""
+        try:
+            return await jobs.await_result(handle, timeout_s)
+        except ValueError as exc:
+            return f"error: {exc}"
+
+    @mcp.tool()
+    def cancel_capture(handle: str) -> str:
+        """Request cancellation; later status/await calls retain the outcome."""
+        try:
+            return jobs.cancel(handle)
+        except ValueError as exc:
+            return f"error: {exc}"
 
     @mcp.tool()
     async def profile_timeline(  # noqa: PLR0913  # LW-910098; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -157,6 +314,10 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 unavailable); passing it returns a clear error naming the
                 fix instead of an obscure rocprofv3 failure.
         """
+        try:
+            capture.validate_collection_period(collection_delay_s, collection_duration_s)
+        except ValueError as exc:
+            return f"error: {exc}"
         lifecycle = capture_runtime.Lifecycle(
             command=command,
             cwd=cwd,
@@ -172,6 +333,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         cancel_event = threading.Event()
         try:
             return await run_worker(
+                _run_profile,
+                "timeline",
                 capture.profile_timeline,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -241,6 +404,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         cancel_event = threading.Event()
         try:
             return await run_worker(
+                _run_profile,
+                "counters",
                 capture.profile_counters,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -304,6 +469,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         cancel_event = threading.Event()
         try:
             return await run_worker(
+                _run_profile,
+                "kernel_deep",
                 capture.profile_kernel_deep,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -368,6 +535,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         cancel_event = threading.Event()
         try:
             return await run_worker(
+                _run_profile,
+                "instructions",
                 capture.profile_instructions,
                 lifecycle,
                 cancel_event=cancel_event,
@@ -439,18 +608,22 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         cancel_event = threading.Event()
         try:
             return await run_worker(
+                _run_profile,
+                "ops",
                 capture.profile_ops,
+                capture_runtime.Lifecycle(
+                    command=command or "",
+                    cwd=cwd,
+                    env=dict(env or {}),
+                    ready_command=ready_command,
+                    ready_timeout_s=ready_timeout_s,
+                    load_command=load_command,
+                    setup_command=setup_command,
+                    stop_signal=stop_signal,
+                    grace_s=grace_s,
+                    timeout_s=timeout_s,
+                ),
                 cancel_event=cancel_event,
-                command=command,
-                cwd=cwd,
-                env=env,
-                ready_command=ready_command,
-                ready_timeout_s=ready_timeout_s,
-                load_command=load_command,
-                setup_command=setup_command,
-                stop_signal=stop_signal,
-                grace_s=grace_s,
-                timeout_s=timeout_s,
                 delay_s=delay_s,
                 duration_s=duration_s,
                 record_shapes=record_shapes,
@@ -910,7 +1083,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; thi
     # process exits (normal exit, or an uncaught error unwinding to here)
     # must not be left running -- see capture_runtime.stop_all_targets.
     atexit.register(capture_runtime.stop_all_targets)
-    mcp = build_server()
+    remote_capture = None
+    config_path = os.environ.get("VIBESYS_SLURM_CONFIG")
+    if config_path:
+        remote_bridge = importlib.import_module("remote_bridge")
+        plan_path = os.environ.get("VIBESYS_SLURM_EVALUATOR_PLAN")
+        remote_capture = remote_bridge.RemoteCaptureBridge(
+            Path(config_path),
+            _HERE.parent,
+            profile_root=capture_runtime.profiles_root(),
+            evaluator_plan=Path(plan_path) if plan_path else None,
+        )
+    mcp = build_server(remote_capture=remote_capture)
     mcp.run(transport="stdio")
 
 

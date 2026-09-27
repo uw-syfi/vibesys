@@ -8,6 +8,7 @@ import pytest
 from tests.support import provider_profiles as fake_profiles
 
 from vs_agent import host_resource_declarations
+from vs_agent.api import declare_provider_state_resources
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
@@ -37,6 +38,7 @@ _FAKE_PROFILES = {
             "Library/Caches/codex",
         ),
         state_root_env="CODEX_HOME",
+        auth_files=(".codex/auth.json",),
     ),
     "gemini": fake_profiles.profile("gemini", state_dirs=(".gemini", ".config/gemini")),
     "opencode": fake_profiles.profile(
@@ -198,6 +200,16 @@ def _writable_state(
     }
 
 
+def _fake_codex_state(
+    tmp_path: Path, env: dict[str, str] | None = None
+) -> tuple[HostResource, ...]:
+    """Declare Codex state through the public API using an inert profile value."""
+    return declare_provider_state_resources(
+        {"HOME": str(tmp_path), **(env or {})},
+        profile=_FAKE_PROFILES["codex"],
+    )
+
+
 @pytest.fixture
 def _fake_profiles_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Answer every profile lookup from the fakes above, not from agentshim."""
@@ -207,7 +219,7 @@ def _fake_profiles_installed(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     ("provider", "expected", "forbidden"),
     [
-        ("codex", ".codex/auth.json", ".claude"),
+        ("codex", ".codex/sessions", ".claude"),
         ("claude", ".claude", ".gemini"),
         ("gemini", ".gemini", ".config/opencode"),
         ("opencode", ".config/opencode", ".codex/auth.json"),
@@ -226,35 +238,39 @@ def test_provider_state_is_scoped_to_selected_agent(
     assert forbidden not in writable
 
 
-@pytest.mark.usefixtures("_fake_profiles_installed")
 def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(
     tmp_path: Path,
 ) -> None:
-    writable = _writable_state(tmp_path, "codex")
-
-    # A Codex checkout may live under $CODEX_HOME/worktrees, so the directory
-    # itself must never be granted (#185). ``sessions`` is granted because a
-    # rollout that does not outlive its turn makes every resume fail.
-    assert writable == {
-        ".codex/auth.json",
-        ".codex/config.toml",
-        ".codex/sessions",
-        ".config/codex",
+    declarations = _fake_codex_state(tmp_path)
+    by_path = {
+        resource.path.relative_to(tmp_path).as_posix(): resource.access for resource in declarations
     }
 
+    # A Codex checkout may live under $CODEX_HOME/worktrees, so the directory
+    # itself must never be granted (#185). Authentication is immutable input;
+    # sessions persist so a later turn can resume the rollout.
+    assert by_path == {
+        ".codex/auth.json": HostResourceAccess.READ_ONLY,
+        ".codex/sessions": HostResourceAccess.READ_WRITE,
+        ".config/codex": HostResourceAccess.READ_WRITE,
+    }
+    assert ".codex/config.toml" not in by_path
 
-@pytest.mark.usefixtures("_fake_profiles_installed")
+
 def test_codex_home_relocates_the_state_leaves(tmp_path: Path) -> None:
     relocated = tmp_path / "relocated-codex"
 
-    writable = _writable_state(tmp_path, "codex", {"CODEX_HOME": str(relocated)})
+    declarations = _fake_codex_state(tmp_path, {"CODEX_HOME": str(relocated)})
+    by_path = {
+        resource.path.relative_to(tmp_path).as_posix(): resource.access for resource in declarations
+    }
 
-    assert "relocated-codex/auth.json" in writable
-    assert "relocated-codex/config.toml" in writable
-    assert "relocated-codex/sessions" in writable
-    assert ".codex/auth.json" not in writable
+    assert by_path["relocated-codex/auth.json"] is HostResourceAccess.READ_ONLY
+    assert by_path["relocated-codex/sessions"] is HostResourceAccess.READ_WRITE
+    assert "relocated-codex/config.toml" not in by_path
+    assert ".codex/auth.json" not in by_path
     # $CODEX_HOME does not move the XDG config directory.
-    assert ".config/codex" in writable
+    assert by_path[".config/codex"] is HostResourceAccess.READ_WRITE
 
 
 @pytest.mark.usefixtures("_fake_profiles_installed")
@@ -296,7 +312,7 @@ class TestShippedProfileState:
             for resource in host_resource_declarations.declare_agent_host_resources(
                 {"HOME": str(tmp_path)}, binary_path=None, provider=provider
             )
-            if resource.purpose == f"{provider} agent state"
+            if resource.purpose.startswith(f"{provider} agent ")
         )
 
     @pytest.mark.parametrize("provider", _SHIPPED)
@@ -304,9 +320,10 @@ class TestShippedProfileState:
         declarations = self._declarations(tmp_path, provider)
         granted = {resource.path for resource in declarations}
 
-        assert all(resource.access is HostResourceAccess.READ_WRITE for resource in declarations), (
-            declarations
-        )
+        if provider != "codex":
+            assert all(
+                resource.access is HostResourceAccess.READ_WRITE for resource in declarations
+            ), declarations
         for state_dir in agentshim.get_provider(provider).profile.state_dirs:
             root = tmp_path / state_dir
             assert any(path == root or path.is_relative_to(root) for path in granted), state_dir
@@ -320,9 +337,15 @@ class TestShippedProfileState:
         assert codex_home not in granted
         assert {path.name for path in granted if path.is_relative_to(codex_home)} == {
             "auth.json",
-            "config.toml",
             "sessions",
         }
+        by_name = {
+            resource.path.name: resource.access
+            for resource in self._declarations(tmp_path, "codex")
+        }
+        assert by_name["auth.json"] is HostResourceAccess.READ_ONLY
+        assert by_name["sessions"] is HostResourceAccess.READ_WRITE
+        assert "config.toml" not in by_name
 
 
 class TestContainerRuntimeResources:

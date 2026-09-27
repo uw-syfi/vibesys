@@ -87,6 +87,10 @@ class FakeAgentExecutionEnvironment:
         if self._close_log is not None:
             self._close_log.append(self._name)
 
+    def agent_path(self, host_path: Path | str) -> str:
+        """Return the identity mapping used by the in-memory environment."""
+        return str(Path(host_path))
+
 
 class FakeAgentExecutionLifecycleSink:
     """Record semantic execution events in emission order."""

@@ -40,7 +40,10 @@ from vs_agent.events import (
     TodoItemData,
     ToolResultPayload,
 )
-from vs_agent.host_resource_declarations import task_agent_host_resources
+from vs_agent.host_resource_declarations import (
+    declare_provider_state_resources,
+    task_agent_host_resources,
+)
 from vs_agent.mcp_server import register_tool, serve_stdio
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
@@ -130,6 +133,7 @@ __all__ = [
     "auth_paths",
     "build_agent_client",
     "cli_skill_dirs",
+    "declare_provider_state_resources",
     "expose_as_tools",
     "register_tool",
     "serve_stdio",

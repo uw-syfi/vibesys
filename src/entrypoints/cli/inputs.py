@@ -247,7 +247,7 @@ def _resolve_implicit_input(args: argparse.Namespace, standalone: list[str]) -> 
 
 
 def _validate_agent(args: argparse.Namespace) -> None:
-    """Validate a resolved ``--outer-loop agent``/``profile-guided`` invocation."""
+    """Validate a resolved hypothesis-driven orchestration invocation."""
     _validate_target_inputs(args)
     _validate_run_environment_profiler(args)
     if args.max_retries_per_round < 1:
@@ -256,6 +256,8 @@ def _validate_agent(args: argparse.Namespace) -> None:
         _configuration_error("Error: --judge-every must be >= 1.")
     if args.official_eval_every < 1:
         _configuration_error("Error: --official-eval-every must be >= 1.")
+    if getattr(args, "outer_loop", "agent") == "dynamic" and args.max_in_flight < 1:
+        _configuration_error("Error: --max-in-flight must be >= 1.")
     if (
         getattr(args, "outer_loop", "agent") == "profile-guided"
         and args.input_bundle.manifest.profile_guided is None

@@ -36,6 +36,7 @@ from vs_runtime.api import (
     AgentSession,
     AgentSessions,
     AgentTool,
+    AgentToolBindingContext,
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
@@ -277,7 +278,9 @@ class _RuntimeEffects:
     clients: Callable[..., AgentClientProtocol] | None
     environments: _EnvironmentOpener
     lifecycle: FakeAgentExecutionLifecycleSink
-    tool_bindings: dict[str, Callable[[Workspace], tuple[ToolServerDescriptor, ...]]] | None = None
+    tool_bindings: (
+        dict[str, Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]] | None
+    ) = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1036,30 +1039,47 @@ def test_role_extra_tools_are_resolved_once_and_fixed_for_the_session() -> None:
         name = "board"
         command = "board-server"
         args: tuple[str, ...] = ()
-        env: tuple[tuple[str, str], ...] = ()
 
-    def tools(_workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
+        def __init__(self, path: str) -> None:
+            self.env = (("SOCKET", path),)
+
+    class _TranslatedEnvironment(FakeAgentExecutionEnvironment):
+        def agent_path(self, host_path: Path | str) -> str:
+            return f"/agent{host_path}"
+
+    observed: list[tuple[AgentToolBindingContext, str | None]] = []
+
+    def tools(context: AgentToolBindingContext) -> tuple[ToolServerDescriptor, ...]:
         nonlocal resolutions
         resolutions += 1
-        return (cast("ToolServerDescriptor", _Tool()),)
+        observed.append((context, context.workspace.id))
+        return (cast("ToolServerDescriptor", _Tool(context.agent_path(Path("/host.sock")))),)
 
     async def scenario() -> None:
         runtime = _runtime(
             role,
             _RuntimeEffects(
                 _ClientFactory(client),
-                _EnvironmentOpener(_environment()),
+                _EnvironmentOpener(_TranslatedEnvironment(project_path_policy=ProjectPathPolicy())),
                 FakeAgentExecutionLifecycleSink(),
                 tool_bindings={"board": tools},
             ),
         )
-        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+        session = await runtime.agents.create_session(
+            role, workspace=runtime.workspaces.root, member_id="hypothesis-1"
+        )
         assert await session.turn("work") == "done"
         await runtime.workspaces.close()
 
     asyncio.run(scenario())
     assert resolutions == 1
-    assert [tool.name for tool in client.calls_for("worker")[0].tool_servers or []] == ["board"]
+    context, workspace_id = observed[0]
+    assert context.role is role
+    assert workspace_id is None
+    assert context.member_id == "hypothesis-1"
+    bound_tools = client.calls_for("worker")[0].tool_servers or []
+    assert [tool.name for tool in bound_tools] == ["board"]
+    assert dict(bound_tools[0].env)["SOCKET"] == "/agent/host.sock"
 
 
 def test_environment_client_turn_and_cleanup_share_one_worker_thread() -> None:
@@ -1185,6 +1205,27 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
             await waiter
         assert workspace.snapshots == ["worker-session-turn-1-input"]
         assert isinstance(lifecycle.events[-1], AgentExecutionFinished)
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+def test_begin_close_propagates_cancellation_to_agent_clients() -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    client = _client()
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(client),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+        runtime.workspaces.begin_close()
+        assert client.cancel_count == 1
         await runtime.workspaces.close()
 
     asyncio.run(scenario())

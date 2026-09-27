@@ -9,6 +9,8 @@ from pathlib import Path
 PACKAGE_SOURCE_ROOTS = (
     Path("src"),
     Path("libs/vs-evaluator-protocol/src"),
+    Path("libs/vs-evaluation/src"),
+    Path("libs/vs-async-ops/src"),
     Path("libs/vs-github/src"),
     Path("libs/vs-issue-tracker/src"),
     Path("libs/vs-loop-state/src"),
@@ -17,6 +19,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-runtime/src"),
     Path("libs/vs-sandbox/src"),
     Path("libs/vs-agent/src"),
+    Path("libs/vs-slurm/src"),
 )
 _BUILD_AND_CACHE_DIRECTORIES = frozenset(
     {

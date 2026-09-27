@@ -552,7 +552,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         )
         if not session.view.cli_sandboxed:
             agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
-
         result = _PreparedRun(
             backend=backend,
             agent_specs=agent_specs,
@@ -567,6 +566,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             environment_resources=environment_resources,
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
+            profiler_agent_resources=session.view.profiler_mcp_resources,
         )
         integration.publish_resources(
             RunResources(
@@ -639,3 +639,4 @@ class _PreparedRun:
     skill_source_paths: tuple[Path, ...]
     evaluation_plan: TrustedEvaluationPlan
     agent_host_resources: tuple[HostResource, ...]
+    profiler_agent_resources: tuple[HostResource, ...]

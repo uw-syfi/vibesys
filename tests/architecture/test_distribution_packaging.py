@@ -22,7 +22,9 @@ if TYPE_CHECKING:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_DISTRIBUTIONS = {
+    "vs-async-ops",
     "vs-evaluator-protocol",
+    "vs-evaluation",
     "vs-github",
     "vs-issue-tracker",
     "vs-loop-state",
@@ -30,9 +32,12 @@ INTERNAL_DISTRIBUTIONS = {
     "vs-prompts",
     "vs-runtime",
     "vs-sandbox",
+    "vs-slurm",
 }
 INTERNAL_IMPORT_PACKAGES = {
+    "vs_async_ops",
     "vs_evaluator_protocol",
+    "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",
     "vs_loop_state",
@@ -40,6 +45,7 @@ INTERNAL_IMPORT_PACKAGES = {
     "vs_prompts",
     "vs_runtime",
     "vs_sandbox",
+    "vs_slurm",
 }
 
 
@@ -176,6 +182,9 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
     assert package_dirs["vs_prompts"] == "libs/vs-prompts/src/vs_prompts"
     assert package_dirs["vs_runtime"] == "libs/vs-runtime/src/vs_runtime"
     assert package_dirs["vs_sandbox"] == "libs/vs-sandbox/src/vs_sandbox"
+    assert package_dirs["vs_async_ops"] == "libs/vs-async-ops/src/vs_async_ops"
+    assert package_dirs["vs_evaluation"] == "libs/vs-evaluation/src/vs_evaluation"
+    assert package_dirs["vs_slurm"] == "libs/vs-slurm/src/vs_slurm"
 
 
 def test_namespace_discovery_excludes_build_and_cache_artifacts(tmp_path: Path) -> None:

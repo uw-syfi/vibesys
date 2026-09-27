@@ -45,7 +45,11 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vs_agent.api import AgentClientProtocol
     from vs_project.api import OrchestrationDescriptor
-    from vs_runtime.api import OrchestrationPlugin, OrchestrationResumeDecision, Workspace
+    from vs_runtime.api import (
+        AgentToolBindingContext,
+        OrchestrationPlugin,
+        OrchestrationResumeDecision,
+    )
     from vs_runtime.api import RunStatus as PluginRunStatus
     from vs_runtime.api.infrastructure import AgentExecutionEnvironment
     from vs_sandbox.api import ComputeBackendImpl
@@ -87,7 +91,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[
-        str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
+        str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
     ]
     | None = None,
 ) -> PluginRunStatus:

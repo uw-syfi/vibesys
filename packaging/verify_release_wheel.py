@@ -39,7 +39,9 @@ FRAMEWORK_PACKAGES = (
     "server",
     "headless",
     "vs_agent",
+    "vs_async_ops",
     "vs_evaluator_protocol",
+    "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",
     "vs_loop_state",
@@ -47,11 +49,14 @@ FRAMEWORK_PACKAGES = (
     "vs_prompts",
     "vs_runtime",
     "vs_sandbox",
+    "vs_slurm",
 )
 _INTERNAL_DISTRIBUTIONS = frozenset(
     {
         "vs-agent",
+        "vs-async-ops",
         "vs-evaluator-protocol",
+        "vs-evaluation",
         "vs-github",
         "vs-issue-tracker",
         "vs-loop-state",
@@ -59,6 +64,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-prompts",
         "vs-runtime",
         "vs-sandbox",
+        "vs-slurm",
     }
 )
 _PACKAGE_SOURCE_ROOTS = {
@@ -67,9 +73,11 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("src/server"): PurePosixPath("server"),
     Path("src/headless"): PurePosixPath("headless"),
     Path("libs/vs-agent/src/vs_agent"): PurePosixPath("vs_agent"),
+    Path("libs/vs-async-ops/src/vs_async_ops"): PurePosixPath("vs_async_ops"),
     Path("libs/vs-evaluator-protocol/src/vs_evaluator_protocol"): PurePosixPath(
         "vs_evaluator_protocol"
     ),
+    Path("libs/vs-evaluation/src/vs_evaluation"): PurePosixPath("vs_evaluation"),
     Path("libs/vs-github/src/vs_github"): PurePosixPath("vs_github"),
     Path("libs/vs-issue-tracker/src/vs_issue_tracker"): PurePosixPath("vs_issue_tracker"),
     Path("libs/vs-loop-state/src/vs_loop_state"): PurePosixPath("vs_loop_state"),
@@ -77,6 +85,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-prompts/src/vs_prompts"): PurePosixPath("vs_prompts"),
     Path("libs/vs-runtime/src/vs_runtime"): PurePosixPath("vs_runtime"),
     Path("libs/vs-sandbox/src/vs_sandbox"): PurePosixPath("vs_sandbox"),
+    Path("libs/vs-slurm/src/vs_slurm"): PurePosixPath("vs_slurm"),
     Path("resources/evaluators"): PurePosixPath("vibesys/_resources/evaluators"),
     Path("resources/profilers"): PurePosixPath("vibesys/_resources/profilers"),
     Path("resources/skills"): PurePosixPath("vibesys/_resources/skills"),

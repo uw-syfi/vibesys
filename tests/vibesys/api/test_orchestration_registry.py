@@ -24,6 +24,7 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
+from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.models import EvolveOptions
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
@@ -194,6 +195,7 @@ def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> No
 def test_builtin_catalog_selects_only_plugins() -> None:
     registry = built_in_orchestrations()
     expected = {
+        "dynamic": DYNAMIC_PLUGIN,
         "multi-agent": MULTI_PLUGIN,
         "single-agent": SINGLE_PLUGIN,
         "profile-guided-multi-agent": PROFILE_MULTI_PLUGIN,

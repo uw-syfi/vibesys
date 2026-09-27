@@ -76,6 +76,41 @@ contract is env-var-based or a Python kwarg) is **not** a ROCm concern: see
 for vLLM and SGLang specifics. This section covers only the rocprofv3
 mechanics that apply once you know what to launch and how to stop it.
 
+### Prefer the configured VibeSys capture
+
+When the ROCprof MCP exposes `submit_configured_timeline`, use it for the
+first system trace. Submit once, keep its handle, do independent local source
+or artifact analysis, then call `await_capture(handle, timeout_s=...)` once
+with a bounded wait. Do not poll the same MCP server while that await is active,
+and do not submit a duplicate capture because an await timed out. Use
+`capture_status(handle)` after the wait returns when needed; terminal and failed
+results remain attached to the handle. The run-environment adapter composes the declared service,
+readiness probe, and benchmark into one lifecycle. It chooses a free loopback
+port before profiler injection, passes that same port to launch, readiness, and
+load commands, derives the readiness bound from the declared service startup
+limit, derives the total bound from the execution-job limit, and reserves a
+grace period for clean ROCprof shutdown. Do not substitute a familiar fixed
+port such as 8000 or shorten these bounds from the MCP call.
+
+The configured capture establishes attribution. It does not turn the benchmark
+result contract into trusted performance evidence or extract its headline
+metric. Reuse the framework's accepted benchmark evidence for calibration;
+do not infer the headline metric from trace timing.
+
+If the configured capture fails, read the returned setup, target, readiness,
+and load diagnostics, then call `captures()` to distinguish a completed or
+still-settling request from one that never started. Retry only after changing
+the condition named by that evidence. Repeating the same allocation and model
+load after a timeout, endpoint collision, or client disconnect wastes the
+largest wall-clock component and may overlap teardown.
+
+Use the explicit `profile_timeline` lifecycle arguments only when the
+configured recipe cannot express the production path. In that case, choose
+the port in `setup_command`, outside profiler injection, write it to a file,
+and use the shell `read` builtin in the launch, readiness, and load scripts.
+Avoid command substitution in the profiled process tree because injected
+profiler output can corrupt the substituted value.
+
 ### 1. Prewarm before capturing
 
 Warm the target process under load before capturing anything. On ROCm this

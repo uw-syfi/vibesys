@@ -1395,6 +1395,11 @@ class TestRocprofMcpServer:
         assert names == {
             # capabilities + capture tools (capture.py)
             "profiling_capabilities",
+            "profile_configured_timeline",
+            "submit_configured_timeline",
+            "capture_status",
+            "await_capture",
+            "cancel_capture",
             "profile_timeline",
             "profile_counters",
             "profile_kernel_deep",

@@ -208,6 +208,22 @@ class AgentRole(BaseModel):
     required_capabilities: frozenset[AgentCapability] = frozenset()
 
 
+@dataclass(frozen=True, slots=True)
+class AgentToolBindingContext:
+    """Session identity available while resolving one declared agent tool.
+
+    The runtime supplies the exact declared role, selected workspace, and
+    optional durable member identity. Product composition can therefore issue
+    a least-authority capability without exposing provider or backend details
+    to orchestration policy.
+    """
+
+    role: AgentRole
+    workspace: Workspace
+    member_id: str | None
+    agent_path: Callable[[Path], str]
+
+
 class AgentBinding(BaseModel):
     """Immutable runtime choices resolved for one role session."""
 

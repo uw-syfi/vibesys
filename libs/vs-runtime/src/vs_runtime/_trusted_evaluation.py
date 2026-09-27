@@ -37,6 +37,22 @@ _BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
 _BENCHMARK_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 
 
+def build_trusted_benchmark_command(
+    command: str,
+    contract: TrustedBenchmarkContract,
+    output_path: str,
+) -> str:
+    """Frame one benchmark command for the authoritative result decoder."""
+    return (
+        f"rm -f -- {shlex.quote(output_path)}"
+        f" && {command}"
+        f" {shlex.quote(contract.output_argument)} {shlex.quote(output_path)}"
+        f" && printf '\\n{_BENCHMARK_MARKER}\\n'"
+        f" && cat {shlex.quote(output_path)}"
+        f" && printf '\\n{_BENCHMARK_END_MARKER}\\n'"
+    )
+
+
 class ScalarBenchmarkContract(BaseModel):
     """One legacy scalar JSON result contract."""
 
@@ -292,13 +308,10 @@ class RuntimeTrustedEvaluation:
                 failure=failure,
             )
         output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{uuid.uuid4().hex}.json"
-        execution = (
-            f"rm -f -- {shlex.quote(output_path)}"
-            f" && {command_override or command}"
-            f" {shlex.quote(contract.output_argument)} {shlex.quote(output_path)}"
-            f" && printf '\\n{_BENCHMARK_MARKER}\\n'"
-            f" && cat {shlex.quote(output_path)}"
-            f" && printf '\\n{_BENCHMARK_END_MARKER}\\n'"
+        execution = build_trusted_benchmark_command(
+            command_override or command,
+            contract,
+            output_path,
         )
         try:
             result, execution_failure = self._execute(
@@ -312,7 +325,9 @@ class RuntimeTrustedEvaluation:
             metrics: Mapping[str, TrustedMetricDeclaration] = {}
             if passed:
                 try:
-                    row, metrics = _decode_benchmark(output, contract, required_metrics)
+                    row, metrics = decode_trusted_benchmark_output(
+                        output, contract, required_metrics
+                    )
                 except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
                     output = f"{output}\n{error}".strip()
                     passed = False
@@ -395,11 +410,12 @@ class _BenchmarkResultError(ValueError):
         )
 
 
-def _decode_benchmark(
+def decode_trusted_benchmark_output(
     output: str,
     contract: TrustedBenchmarkContract,
     required_metrics: frozenset[str],
 ) -> tuple[Mapping[str, float], Mapping[str, TrustedMetricDeclaration]]:
+    """Decode the framed benchmark contract used by every trusted executor."""
     _, marker, framed = output.rpartition(_BENCHMARK_MARKER)
     encoded, end_marker, _ = framed.partition(_BENCHMARK_END_MARKER)
     if not marker or not end_marker:

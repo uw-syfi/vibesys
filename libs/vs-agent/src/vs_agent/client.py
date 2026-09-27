@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar
@@ -230,6 +231,9 @@ class AgentClient:
         # caller can tell a retired conversation from a replaced one.
         self._last_turn_sessions: dict[AgentSessionKey, str | None] = {}
         self._closed = False
+        self._cancelled = False
+        self._active_lock = threading.Lock()
+        self._active_sessions: list[AgentSession] = []
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -537,7 +541,7 @@ class AgentClient:
             self._sessions[session_key] = cached
 
         try:
-            result = cached.session.run_turn(turn, observer)
+            result = self._run_session(cached.session, turn, observer)
         except BaseException as error:
             # The checkpoint is deliberately kept. A turn can fail for reasons
             # that say nothing about the conversation's validity (a timeout, a
@@ -653,6 +657,14 @@ class AgentClient:
         if first_error is not None:
             raise first_error
 
+    def cancel(self) -> None:
+        """Stop every in-flight turn without discarding its checkpoint."""
+        with self._active_lock:
+            self._cancelled = True
+            active = tuple(self._active_sessions)
+        for session in active:
+            session.cancel()
+
     def _run_ephemeral(
         self,
         session_spec: AgentSessionSpec,
@@ -662,7 +674,7 @@ class AgentClient:
         session = self._create_session(session_spec)
         turn_error: BaseException | None = None
         try:
-            return session.run_turn(turn, observer)
+            return self._run_session(session, turn, observer)
         except BaseException as error:
             turn_error = error
             raise
@@ -673,6 +685,24 @@ class AgentClient:
                 if turn_error is None:
                     raise
                 turn_error.add_note(f"agent session cleanup also failed: {cleanup_error}")
+
+    def _run_session(
+        self,
+        session: AgentSession,
+        turn: AgentTurnRequest,
+        observer: AgentObserver | None,
+    ) -> AgentTurnResult:
+        """Publish a turn before running it so cross-thread cancellation cannot miss it."""
+        with self._active_lock:
+            if self._cancelled:
+                msg = "agent client is cancelled"
+                raise RuntimeError(msg)
+            self._active_sessions.append(session)
+        try:
+            return session.run_turn(turn, observer)
+        finally:
+            with self._active_lock:
+                self._active_sessions.remove(session)
 
     def _evict(self, key: AgentSessionKey) -> None:
         cached = self._sessions.pop(key, None)
@@ -699,8 +729,9 @@ class AgentClient:
         return self._driver.create_session(spec)
 
     def _ensure_open(self) -> None:
-        if self._closed:
-            msg = "agent client is closed"
+        if self._closed or self._cancelled:
+            state = "closed" if self._closed else "cancelled"
+            msg = f"agent client is {state}"
             raise RuntimeError(msg)
 
     def __enter__(self) -> AgentClient:

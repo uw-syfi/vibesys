@@ -79,6 +79,12 @@ class AgentExecutionEnvironment(Protocol):
         ...
 
 
+class _AgentPathEnvironment(Protocol):
+    """Narrow capability used only when exporting an agent-visible path."""
+
+    def agent_path(self, host_path: Path | str) -> str: ...
+
+
 class SharedAgentEnvironmentConflictError(ValueError):
     """A shared run session cannot satisfy agent-specific environment inputs."""
 
@@ -417,6 +423,10 @@ class RuntimeAgentExecution:
     def provider(self) -> str | None:
         return self._client.provider
 
+    def agent_path(self, host_path: Path | str) -> str:
+        """Translate a host resource path through this execution's environment."""
+        return cast("_AgentPathEnvironment", self._environment).agent_path(host_path)
+
     @property
     def model(self) -> str | None:
         return self._client.model_for_kind(self._configuration.agent_id)
@@ -550,6 +560,10 @@ class RuntimeAgentExecution:
         if self._close_task is None:
             self._close_task = asyncio.create_task(self._close_once())
         await asyncio.shield(self._close_task)
+
+    def cancel(self) -> None:
+        """Ask the client to stop its active provider turn."""
+        self._client.cancel()
 
     async def _close_once(self) -> None:
         try:

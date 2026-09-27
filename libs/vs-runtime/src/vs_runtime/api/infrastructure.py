@@ -154,6 +154,8 @@ from vs_runtime._run_environment import (
     RunEnvironmentView,
     SkyPilotEnvironment,
     SkyPilotEnvironmentFacts,
+    SlurmEnvironment,
+    SlurmEnvironmentFacts,
     build_run_environment,
     make_run_environment_spec,
     open_run_environment_resources,
@@ -192,7 +194,9 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     TrustedMetricDeclaration,
+    build_trusted_benchmark_command,
     create_trusted_evaluation_executor,
+    decode_trusted_benchmark_output,
 )
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -229,7 +233,7 @@ from vs_runtime._workspaces import (
     WorkspaceResource,
     WorkspaceResourceProvider,
 )
-from vs_runtime.contracts import Workspace
+from vs_runtime.contracts import AgentToolBindingContext
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -244,7 +248,7 @@ def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel
 
 
 type AgentConfigurationResolver = Callable[[AgentRole], AgentExecutionConfiguration]
-type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
+type AgentToolResolver = Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
 
 
 def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution and workspace effects behind focused plugin-facing capabilities.
@@ -502,6 +506,8 @@ __all__ = [
     "SkillMetadataError",
     "SkyPilotEnvironment",
     "SkyPilotEnvironmentFacts",
+    "SlurmEnvironment",
+    "SlurmEnvironmentFacts",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
     "TrustedBenchmarkResult",
@@ -522,6 +528,7 @@ __all__ = [
     "WorkspaceSourceValue",
     "build_run_environment",
     "build_skill_catalog",
+    "build_trusted_benchmark_command",
     "collect_linux_profile",
     "collect_macos_profile",
     "create_managed_conversation",
@@ -531,6 +538,7 @@ __all__ = [
     "create_state",
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",
+    "decode_trusted_benchmark_output",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",

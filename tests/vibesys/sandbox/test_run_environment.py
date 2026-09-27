@@ -62,6 +62,7 @@ from vs_sandbox.api.evaluator_tools import (
     tool_install_root,
     tool_spec_digest,
 )
+from vs_sandbox.api.slurm import read_slurm_capture_plan, read_slurm_evaluation_plan
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -392,6 +393,66 @@ def test_run_environment_record_captures_operator_selected_options() -> None:
     assert run_environment_record(RunEnvironmentSpec(resources=resources)) == RunEnvironmentRecord(
         name="local", resources=resources
     )
+    assert run_environment_record(
+        RunEnvironmentSpec("slurm", {"config_path": "/operator/slurm.toml"})
+    ) == RunEnvironmentRecord(name="slurm", config_path="/operator/slurm.toml")
+
+
+def test_slurm_environment_keeps_editor_local_and_routes_trusted_tools(tmp_path: Path) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+job_timeout_seconds = 900
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    profiler = tmp_path / "rocprof_profiler"
+    profiler.mkdir()
+    environment = build_run_environment(
+        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
+    )
+
+    session = _open(
+        environment,
+        _request(
+            tmp_path,
+            FakeBackend(),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            profiler_support_path=str(profiler),
+            profiler_support_name="rocprof_profiler",
+        ),
+    )
+
+    assert session.view.env_kind == "slurm"
+    assert session.view.profile_execution == "remote"
+    assert "vs_sandbox.slurm_command" in (session.view.paths.accuracy_command or "")
+    assert "vs_sandbox.slurm_command" in (session.view.paths.benchmark_command or "")
+    profiler_env = dict(session.view.profiler_mcp_env)
+    assert profiler_env["VIBESYS_SLURM_CONFIG"] == str(config_path)
+    assert profiler_env["VIBESYS_SLURM_EVALUATOR_PLAN"] == str(
+        tmp_path / "logs/slurm-capture-plan.json"
+    )
+    assert Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"]).is_socket()
+    assert profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
+    evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
+    capture = read_slurm_capture_plan(tmp_path / "logs/slurm-capture-plan.json")
+    assert evaluation.accuracy_command == (
+        "/remote/venv/bin/python",
+        "accuracy_checker/checker.py",
+    )
+    assert capture.benchmark_command == evaluation.benchmark_command
+    assert capture.support_paths["rocprof_profiler"] == profiler
+    session.close()
 
 
 def test_run_environment_record_rejects_an_unknown_environment() -> None:

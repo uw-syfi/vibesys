@@ -23,7 +23,9 @@ FRAMEWORK_PACKAGES = (
     "server",
     "headless",
     "vs_agent",
+    "vs_async_ops",
     "vs_evaluator_protocol",
+    "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",
     "vs_loop_state",
@@ -31,6 +33,7 @@ FRAMEWORK_PACKAGES = (
     "vs_prompts",
     "vs_runtime",
     "vs_sandbox",
+    "vs_slurm",
 )
 PLATLIB = ""
 DIST_INFO = "vibesys-0.1.0.dist-info"
@@ -57,7 +60,9 @@ dependencies = ["example>=1"]
         "server": "src/server",
         "headless": "src/headless",
         "vs_agent": "libs/vs-agent/src/vs_agent",
+        "vs_async_ops": "libs/vs-async-ops/src/vs_async_ops",
         "vs_evaluator_protocol": "libs/vs-evaluator-protocol/src/vs_evaluator_protocol",
+        "vs_evaluation": "libs/vs-evaluation/src/vs_evaluation",
         "vs_github": "libs/vs-github/src/vs_github",
         "vs_issue_tracker": "libs/vs-issue-tracker/src/vs_issue_tracker",
         "vs_loop_state": "libs/vs-loop-state/src/vs_loop_state",
@@ -65,6 +70,7 @@ dependencies = ["example>=1"]
         "vs_prompts": "libs/vs-prompts/src/vs_prompts",
         "vs_runtime": "libs/vs-runtime/src/vs_runtime",
         "vs_sandbox": "libs/vs-sandbox/src/vs_sandbox",
+        "vs_slurm": "libs/vs-slurm/src/vs_slurm",
     }
     for package, source in roots.items():
         _source_file(root, f"{source}/__init__.py", f"PACKAGE = {package!r}\n".encode())
@@ -98,7 +104,9 @@ def _packaged_source_files(source_root: Path) -> dict[str, bytes]:
         "src/server": "server",
         "src/headless": "headless",
         "libs/vs-agent/src/vs_agent": "vs_agent",
+        "libs/vs-async-ops/src/vs_async_ops": "vs_async_ops",
         "libs/vs-evaluator-protocol/src/vs_evaluator_protocol": "vs_evaluator_protocol",
+        "libs/vs-evaluation/src/vs_evaluation": "vs_evaluation",
         "libs/vs-github/src/vs_github": "vs_github",
         "libs/vs-issue-tracker/src/vs_issue_tracker": "vs_issue_tracker",
         "libs/vs-loop-state/src/vs_loop_state": "vs_loop_state",
@@ -106,6 +114,7 @@ def _packaged_source_files(source_root: Path) -> dict[str, bytes]:
         "libs/vs-prompts/src/vs_prompts": "vs_prompts",
         "libs/vs-runtime/src/vs_runtime": "vs_runtime",
         "libs/vs-sandbox/src/vs_sandbox": "vs_sandbox",
+        "libs/vs-slurm/src/vs_slurm": "vs_slurm",
         "resources/evaluators": "vibesys/_resources/evaluators",
         "resources/profilers": "vibesys/_resources/profilers",
         "resources/skills": "vibesys/_resources/skills",

@@ -71,6 +71,8 @@ def resolve_run_profiler(request: RunRequest, environment: RunEnvironment) -> Pr
                     ),
                 )
             )
+    if not environment.requires_local_profiler_preflight:
+        return resolved
     preflight = preflight_profiler_kind(resolved, native_preflight=native_profiler_preflight)
     if not preflight.usable:
         raise ConfigurationError(

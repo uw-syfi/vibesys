@@ -40,6 +40,8 @@
 source_roots = [
     "src",
     "libs/vs-evaluator-protocol/src",
+    "libs/vs-evaluation/src",
+    "libs/vs-async-ops/src",
     "libs/vs-github/src",
     "libs/vs-issue-tracker/src",
     "libs/vs-loop-state/src",
@@ -48,6 +50,7 @@ source_roots = [
     "libs/vs-runtime/src",
     "libs/vs-sandbox/src",
     "libs/vs-agent/src",
+    "libs/vs-slurm/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -144,7 +147,7 @@ depends_on = ["vibesys.api"]
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_runtime", "vs_sandbox", "vibesys.errors"]
+depends_on = ["vs_agent", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.evaluation_agent"]
 
 [[modules]]
 # Typed product configuration failures shared by public transports. No
@@ -231,6 +234,16 @@ layer = "loops"
 depends_on = ["vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
+path = "vibesys.orchestration.dynamic"
+layer = "loops"
+depends_on = ["vibesys.orchestration.agent_options", "vibesys.orchestration.hypothesis", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.evaluation_agent"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_async_ops.api", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm"]
+
+[[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
 depends_on = [ "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
@@ -290,7 +303,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.evaluation_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.orchestration.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -342,12 +355,12 @@ depends_on = ["vibesys", "vs_prompts"]
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_project"]
+depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm"]
 
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_sandbox"]
+depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_sandbox", "vs_slurm"]
 
 [[modules]]
 path = "vs_agent"
@@ -375,6 +388,81 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
+path = "vs_async_ops"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_async_ops.api"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.coordinator", "vs_async_ops.models", "vs_async_ops.ports"]
+
+[[modules]]
+path = "vs_async_ops.api.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.testing"]
+
+[[modules]]
+path = "vs_async_ops.coordinator"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.models", "vs_async_ops.ports"]
+
+[[modules]]
+path = "vs_async_ops.models"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_async_ops.ports"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.models"]
+
+[[modules]]
+path = "vs_async_ops.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.models"]
+
+[[modules]]
+path = "vs_evaluation"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.api"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports"]
+
+[[modules]]
+path = "vs_evaluation.api.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.testing"]
+
+[[modules]]
+path = "vs_evaluation.coordinator"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.models", "vs_evaluation.ports"]
+
+[[modules]]
+path = "vs_evaluation.filesystem_store"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models"]
+
+[[modules]]
+path = "vs_evaluation.models"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.ports"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.models"]
+
+[[modules]]
+path = "vs_evaluation.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.ports"]
+
+[[modules]]
 path = "vs_prompts"
 layer = "prompts_and_lower_libs"
 depends_on = []
@@ -384,9 +472,18 @@ path = "vs_github"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
+[[modules]]
+path = "vs_slurm"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
 # Each library exposes only its `api` subpackage and its submodules. External
 # modules must import through that surface, never from the package root or
 # internal modules. Tests are outside tach scope.
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_async_ops"]
+
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_agent"]
@@ -394,6 +491,10 @@ from = ["vs_agent"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_evaluator_protocol"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_evaluation"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]
@@ -418,6 +519,10 @@ from = ["vs_prompts"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_runtime"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_slurm"]
 
 [[interfaces]]
 expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
@@ -454,6 +559,14 @@ from = ["vibesys.orchestration.single"]
 [[interfaces]]
 expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]
 from = ["vibesys.orchestration.multi"]
+
+[[interfaces]]
+expose = ["PLUGIN", "REGISTRATION"]
+from = ["vibesys.orchestration.dynamic"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vibesys.evaluation_agent"]
 
 [[interfaces]]
 expose = ["PLUGIN", "REGISTRATION", "resolve_openevolve_options"]
@@ -517,4 +630,4 @@ depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
 
 [[modules]]
 path = "vibesys.plugin_builtins"
-depends_on = ["vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi", "vibesys.plugin_catalog"]
+depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi", "vibesys.plugin_catalog"]

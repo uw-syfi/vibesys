@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+from itertools import pairwise
 from pathlib import Path
 
 from vs_sandbox.api import (
@@ -7,12 +9,34 @@ from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
     HostResourceContext,
+    HostSandbox,
     SandboxKind,
     declare_resources,
     deduplicate_host_resources,
     host_resource_for_mount,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
+
+
+def test_host_sandbox_creates_parent_directories_for_imported_sockets(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    socket_root = tmp_path / "runtime" / "ssh-agent"
+    socket_root.mkdir(parents=True)
+    socket_path = socket_root / "agent.sock"
+    with socket.socket(socket.AF_UNIX) as agent_socket:
+        agent_socket.bind(str(socket_path))
+        sandbox = HostSandbox(
+            workspace=workspace,
+            bwrap_path="/usr/bin/bwrap",
+            read_paths=(socket_path,),
+        )
+
+        command = sandbox.wrap(["true"])
+
+    pairs = list(pairwise(command))
+    assert ("--dir", str(socket_root)) in pairs
+    assert ("--ro-bind-try", str(socket_path)) in pairs
 
 
 def test_declaration_sdk_collects_resources_without_importing_them(tmp_path: Path) -> None:

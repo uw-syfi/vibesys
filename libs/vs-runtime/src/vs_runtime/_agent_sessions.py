@@ -25,6 +25,7 @@ from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
     AgentRole,
+    AgentToolBindingContext,
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
@@ -238,6 +239,11 @@ class RuntimeAgentSession:
     def mark_closed(self) -> None:
         self._closed = True
 
+    def cancel(self) -> None:
+        """Reject further turns and stop the active provider turn, if any."""
+        self._closed = True
+        self._execution.cancel()
+
 
 class RuntimeAgentSessions:
     """Production factory and reverse-order owner for explicit sessions."""
@@ -295,11 +301,6 @@ class RuntimeAgentSessions:
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.
-                tool_servers = tuple(
-                    spec
-                    for tool_id in bound_tool_ids
-                    for spec in self._tool_bindings[tool_id](managed_workspace)
-                )
                 session_id = uuid.uuid4().hex
                 configuration = self._resolve_configuration(role)
                 scope = self._workspaces.resource_for(managed_workspace).agent_scope()
@@ -314,6 +315,17 @@ class RuntimeAgentSessions:
                     client_factory=self._client_factory,
                 )
                 try:
+                    binding_context = AgentToolBindingContext(
+                        role=role,
+                        workspace=managed_workspace,
+                        member_id=member_id,
+                        agent_path=execution.agent_path,
+                    )
+                    tool_servers = tuple(
+                        spec
+                        for tool_id in bound_tool_ids
+                        for spec in self._tool_bindings[tool_id](binding_context)
+                    )
                     session = self._complete_session(
                         execution,
                         role,
@@ -411,4 +423,4 @@ class RuntimeAgentSessions:
     def begin_close(self) -> None:
         self._closed = True
         for session in self._sessions:
-            session.mark_closed()
+            session.cancel()

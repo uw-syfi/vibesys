@@ -27,13 +27,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shlex
 import sys
+import tempfile
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
 from contextlib import ExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from importlib import import_module
 from pathlib import Path
@@ -67,6 +69,7 @@ from vs_sandbox.api import (
     DeviceLease,
     EnvironmentBindMount,
     HostResource,
+    HostResourceAccess,
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
@@ -96,18 +99,29 @@ from vs_sandbox.api.skypilot import (
     resolve_profile,
     stable_cluster_name,
 )
+from vs_sandbox.api.slurm import (
+    SlurmCapturePlan,
+    SlurmEvaluationPlan,
+    SlurmExecutionPolicy,
+    SlurmProcessBroker,
+    load_slurm_policy,
+    write_slurm_capture_plan,
+    write_slurm_evaluation_plan,
+)
 from vs_sandbox.api.symlink_mounts import (
     collect_symlink_mounts,
     find_mount_root,
     symlink_lifecycle_hooks,
 )
+from vs_slurm.api import SlurmConfig, SlurmSshTransport, load_slurm_config
 
-_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot"]
+_RunEnvironmentName = Literal["local", "docker", "modal", "skypilot", "slurm"]
 _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "local",
     "docker",
     "modal",
     "skypilot",
+    "slurm",
 )
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
@@ -173,6 +187,8 @@ class RunEnvironmentView:
     # Extra wall-clock budget for environment-owned setup that wraps a trusted
     # command, such as deploying a fresh service and waiting for readiness.
     framework_setup_timeout_seconds: int = 0
+    profiler_mcp_env: tuple[tuple[str, str], ...] = ()
+    profiler_mcp_resources: tuple[HostResource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,6 +207,11 @@ class LocalEnvironmentFacts:
 @dataclass(frozen=True)
 class DockerEnvironmentFacts:
     """Presentation facts for Docker execution."""
+
+
+@dataclass(frozen=True)
+class SlurmEnvironmentFacts:
+    """Presentation facts for a local editor with remote trusted execution."""
 
 
 @dataclass(frozen=True)
@@ -214,6 +235,7 @@ class ModalEnvironmentFacts:
 RunEnvironmentPresentationFacts = (
     LocalEnvironmentFacts
     | DockerEnvironmentFacts
+    | SlurmEnvironmentFacts
     | SkyPilotEnvironmentFacts
     | ModalEnvironmentFacts
 )
@@ -283,6 +305,46 @@ class RunEnvironmentSession(Protocol):
     def close(self) -> None:
         """Stop resources owned by this run session."""
         ...
+
+
+@dataclass(slots=True)
+class _BrokeredRunEnvironmentSession:
+    """Own a local agent session and its host-side Slurm transport broker."""
+
+    delegate: RunEnvironmentSession
+    broker: SlurmProcessBroker
+    _closed: bool = False
+
+    @property
+    def sandbox(self) -> Sandbox:
+        return self.delegate.sandbox
+
+    @sandbox.setter
+    def sandbox(self, value: Sandbox) -> None:
+        self.delegate.sandbox = value
+
+    @property
+    def view(self) -> RunEnvironmentView:
+        return self.delegate.view
+
+    @view.setter
+    def view(self, value: RunEnvironmentView) -> None:
+        self.delegate.view = value
+
+    def __enter__(self) -> _BrokeredRunEnvironmentSession:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.broker.close()
+        finally:
+            self.delegate.close()
 
 
 class RunEnvironmentResources:
@@ -403,6 +465,7 @@ class RunEnvironment(Protocol):
     default_profiler_id: str
     supported_profiler_ids: frozenset[str] | None
     backend_image: str | None
+    requires_local_profiler_preflight: bool
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
@@ -450,6 +513,7 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
     default_profiler_id = "nsys"
     supported_profiler_ids: frozenset[str] | None = None
     backend_image: str | None = None
+    requires_local_profiler_preflight = True
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve the host-local presentation facts."""
@@ -511,6 +575,165 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
         )
 
 
+class SlurmEnvironment(_NoopWorkspaceRecovery):
+    """Keep editing local while trusted gates and ROCprof run through Slurm."""
+
+    isolated = False
+    materialize_local_model_weights = False
+    default_profiler_id = "rocprof"
+    supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "none", "rocprof"})
+    backend_image: str | None = None
+    requires_local_profiler_preflight = False
+
+    def __init__(self, config_path: Path) -> None:
+        self.config_path = config_path.expanduser()
+
+    @classmethod
+    def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
+        """Resolve only the external operator configuration path."""
+        value = options.get("config_path", "~/.config/vibesys/slurm.toml")
+        return cls(Path(str(value)))
+
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Validate external policy before opening the local editor sandbox."""
+        config = load_slurm_config(self.config_path)
+        policy = load_slurm_policy(self.config_path)
+        return _PreparedRunEnvironment(
+            SlurmEnvironmentFacts(), partial(self._open, request, config, policy)
+        )
+
+    def _open(
+        self,
+        request: RunEnvironmentRequest,
+        config: SlurmConfig,
+        policy: SlurmExecutionPolicy,
+        presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
+        delegate = (
+            LocalEnvironment().prepare(request).open(RunEnvironmentPresentation(prompt_notes=""))
+        )
+        requirements = request.evaluator_requirements
+        remote = _prepare_evaluation_plan(
+            request,
+            requirements,
+            TrustedEvaluationCommandPaths(
+                source_project_root=request.workspace,
+                runtime_project_root=".",
+                python_executable=policy.remote_python,
+                runtime_package_root=(
+                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
+                ),
+                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+            ),
+        )
+        support_paths = {
+            name: Path(path)
+            for name, path in (
+                (".vibesys-evaluator-package", requirements.package_root),
+                (".vibesys-evaluator-tools", requirements.tools_root),
+                (request.profiler_support_name, request.profiler_support_path),
+                *((name, path) for path, name in request.profiler_support_extra),
+            )
+            if name is not None and path is not None
+        }
+        evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
+        capture_plan_path = request.log_dir / "slurm-capture-plan.json"
+        raw_accuracy = _command_argv(remote.accuracy_command)
+        raw_benchmark = _command_argv(remote.benchmark_command)
+        accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
+        benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
+        write_slurm_evaluation_plan(
+            evaluator_plan_path,
+            SlurmEvaluationPlan(
+                config_path=self.config_path,
+                accuracy_command=accuracy,
+                benchmark_command=benchmark,
+                benchmark_output_argument=request.benchmark_output_argument,
+                support_paths=support_paths,
+            ),
+        )
+        write_slurm_capture_plan(
+            capture_plan_path,
+            SlurmCapturePlan(
+                benchmark_command=benchmark,
+                support_paths=support_paths,
+            ),
+        )
+        prefix = (
+            sys.executable,
+            "-m",
+            "vs_sandbox.slurm_command",
+            "--plan",
+            str(evaluator_plan_path),
+        )
+        broker: SlurmProcessBroker | None = None
+        broker_env: tuple[tuple[str, str], ...] = ()
+        broker_resources: tuple[HostResource, ...] = ()
+        if isinstance(config.transport, SlurmSshTransport):
+            broker = SlurmProcessBroker(
+                config,
+                Path(tempfile.gettempdir()) / f"vss-{secrets.token_hex(8)}.sock",
+                local_roots=(request.workspace, *(path for path in support_paths.values())),
+            )
+            broker.start()
+            broker_env = (
+                ("VIBESYS_SLURM_BROKER_SOCKET", str(broker.socket_path)),
+                ("VIBESYS_SLURM_BROKER_TOKEN", broker.token),
+            )
+            broker_resources = (
+                HostResource(
+                    broker.socket_path,
+                    HostResourceAccess.READ_WRITE,
+                    "host-owned Slurm transport broker",
+                ),
+            )
+        delegate.view = replace(
+            delegate.view,
+            paths=replace(
+                delegate.view.paths,
+                accuracy_command=shlex.join((*prefix, "accuracy")) if accuracy else None,
+                benchmark_command=shlex.join((*prefix, "benchmark")) if benchmark else None,
+            ),
+            prompt_notes=presentation.prompt_notes,
+            env_kind="slurm",
+            profile_execution="remote",
+            supports_parallel_candidate_evaluation=True,
+            framework_setup_timeout_seconds=config.job_timeout_seconds,
+            profiler_mcp_env=(
+                ("VIBESYS_SLURM_CONFIG", str(self.config_path)),
+                ("VIBESYS_SLURM_EVALUATOR_PLAN", str(capture_plan_path)),
+                *broker_env,
+            ),
+            profiler_mcp_resources=(
+                HostResource(
+                    self.config_path,
+                    HostResourceAccess.READ_ONLY,
+                    "Slurm profiler configuration",
+                ),
+                HostResource(
+                    capture_plan_path,
+                    HostResourceAccess.READ_ONLY,
+                    "Slurm profiler plan",
+                ),
+                HostResource(
+                    request.framework_root / "libs",
+                    HostResourceAccess.READ_ONLY,
+                    "Slurm adapter libraries",
+                ),
+                *(
+                    HostResource(
+                        path,
+                        HostResourceAccess.READ_ONLY,
+                        f"Slurm support tree {name}",
+                    )
+                    for name, path in sorted(support_paths.items())
+                ),
+                *broker_resources,
+            ),
+        )
+        return _BrokeredRunEnvironmentSession(delegate, broker) if broker is not None else delegate
+
+
 @dataclass(frozen=True)
 class DockerEnvironmentConfig:
     """Optional image override for the Docker run environment."""
@@ -522,6 +745,7 @@ class DockerEnvironment:
     """Run agents and evaluator commands in a Docker sandbox."""
 
     isolated = True
+    requires_local_profiler_preflight = True
     materialize_local_model_weights = True
     default_profiler_id = "nsys"
     supported_profiler_ids: frozenset[str] | None = None
@@ -687,6 +911,7 @@ class SkyPilotEnvironment(DockerEnvironment):
     """CPU-only Docker editor with host-mediated SkyPilot evaluation."""
 
     config: SkyPilotEnvironmentConfig
+    requires_local_profiler_preflight = True
     materialize_local_model_weights = False
     default_profiler_id = "none"
     supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "none"})
@@ -894,6 +1119,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
     """Run candidate evaluations as Modal deployments."""
 
     isolated = True
+    requires_local_profiler_preflight = True
     materialize_local_model_weights = False
     default_profiler_id = "torch"
     supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "torch", "none"})
@@ -1190,6 +1416,7 @@ def run_environment_record(spec: RunEnvironmentSpec) -> RunEnvironmentRecord:
         gpu=_recorded_option(spec, "gpu"),
         model_volume=_recorded_option(spec, "model_volume"),
         app=_recorded_option(spec, "app"),
+        config_path=_recorded_option(spec, "config_path"),
         resources=spec.resources,
     )
 
@@ -1218,6 +1445,8 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         return ModalEnvironment.from_options(spec.options)
     if spec.name == "skypilot":
         return SkyPilotEnvironment.from_options(spec.options, spec.resources)
+    if spec.name == "slurm":
+        return SlurmEnvironment.from_options(spec.options)
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
 
@@ -1364,6 +1593,11 @@ def _prefix_command(prefix: str, command: str | None) -> str | None:
     if not command:
         return None
     return f"{prefix} {command}"
+
+
+def _command_argv(command: str | None) -> tuple[str, ...] | None:
+    """Parse one framework-rendered command before persisting a trusted plan."""
+    return tuple(shlex.split(command)) if command is not None else None
 
 
 def _noop_log(message: str) -> None:

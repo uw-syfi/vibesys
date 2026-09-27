@@ -39,6 +39,7 @@ import csv
 import dataclasses
 import importlib
 import io
+import math
 import os
 import re
 import shutil
@@ -635,6 +636,28 @@ def profiling_capabilities() -> str:
 # ---------------------------------------------------------------------------
 
 
+def validate_collection_period(
+    collection_delay_s: float | None,
+    collection_duration_s: float | None,
+) -> None:
+    """Reject collection periods that rocprofv3 cannot execute."""
+    if (collection_delay_s is None) != (collection_duration_s is None):
+        raise ValueError(  # noqa: TRY003  # LW-910050; boundary error names the invalid argument combination.
+            "collection_delay_s and collection_duration_s must both be given, or neither "
+            "(rocprofv3's --collection-period needs a start_delay:collection_time:repeat triplet)"
+        )
+    if collection_delay_s is None or collection_duration_s is None:
+        return
+    if not math.isfinite(collection_delay_s) or collection_delay_s < 0:
+        raise ValueError(  # noqa: TRY003  # LW-930106; boundary error names the accepted range.
+            "collection_delay_s must be finite and greater than or equal to 0"
+        )
+    if not math.isfinite(collection_duration_s) or collection_duration_s <= 0:
+        raise ValueError(  # noqa: TRY003  # LW-930107; boundary error names the accepted range.
+            "collection_duration_s must be finite and greater than 0"
+        )
+
+
 def profile_timeline(  # noqa: PLR0913  # LW-910049; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     lifecycle: capture_runtime.Lifecycle,
     *,
@@ -674,11 +697,7 @@ def profile_timeline(  # noqa: PLR0913  # LW-910049; this function's parameters 
     """
     if target is not None:
         return target_arg_unavailable_message()
-    if (collection_delay_s is None) != (collection_duration_s is None):
-        raise ValueError(  # noqa: TRY003  # LW-910050; this is a boundary error that deliberately embeds the offending value for the operator to act on
-            "collection_delay_s and collection_duration_s must both be given, or neither "
-            "(rocprofv3's --collection-period needs a start_delay:collection_time:repeat triplet)"
-        )
+    validate_collection_period(collection_delay_s, collection_duration_s)
     capture_id, out_dir = capture_runtime.new_capture("timeline")
     prefix = ["rocprofv3", "--kernel-trace"]
     if hip_api:

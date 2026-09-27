@@ -1,0 +1,31 @@
+You are scheduling epoch {{ epoch }} of {{ max_epochs }} with at most
+{{ capacity }} concurrent workstreams.
+
+Objective: {{ objective_location }}
+Current root revision: `{{ root_revision }}`
+
+Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+Each workstream is an independently useful line of inquiry. Continue an existing
+hypothesis only when its recorded next step remains the best use of capacity.
+Do not split one implementation into parallel fragments and do not assign duplicate
+hypothesis IDs. New IDs must not occur in the history. A continued workstream must
+reuse its existing ID and set `continue_hypothesis`.
+Use `hypothesis_updates` to park or abandon completed directions when new evidence
+makes that strategic decision clear. Do not retire an unfinished direction.
+
+The framework provides isolated candidate workspaces, runs selected independent
+reviews, and owns trusted evaluation and winner adoption. Request evaluation when
+fresh trusted evidence is needed to decide the hypothesis. Near the final epoch,
+choose work that can produce a reviewable candidate within this epoch.
+
+## Compact hypothesis history
+{{ history }}
+
+Use the read-only semantic evaluation tool to inspect concise durable profiler and
+evaluation operations when their terminal state affects scheduling. Those host-owned
+records include the natural-language profiler request and exact candidate identity.
+Treat completed evidence as applicable only to that candidate. In-flight work is
+context, not a result. Follow references to inspect detail instead of asking for it
+inline.
+
+Return only the schema-valid portfolio JSON.

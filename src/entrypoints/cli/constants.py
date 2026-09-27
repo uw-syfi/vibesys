@@ -6,7 +6,7 @@ can import from here without risking an import cycle.
 
 from __future__ import annotations
 
-_OUTER_LOOPS = ("agent", "profile-guided", "plain", "evolve")
+_OUTER_LOOPS = ("agent", "profile-guided", "dynamic", "plain", "evolve")
 
 
 _MODALITIES = (
@@ -31,6 +31,7 @@ _RUN_ENVIRONMENT_OPTION_CLI_FIELDS: dict[str, str] = {
     "modal_gpu": "gpu",
     "modal_model_volume": "model_volume",
     "modal_app": "app",
+    "slurm_config": "config_path",
 }
 
 

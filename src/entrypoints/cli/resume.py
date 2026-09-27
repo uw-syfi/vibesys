@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 
 _POLICY_CLI_SELECTION = {
+    "dynamic": ("dynamic", None),
     "multi-agent": ("agent", "multi-agent"),
     "single-agent": ("agent", "single-agent"),
     "profile-guided-multi-agent": ("profile-guided", "multi-agent"),
@@ -92,9 +93,17 @@ def _restore_run_environment_selection(
         requested = "modal"
     elif args.docker:
         requested = "docker"
+    elif getattr(args, "slurm_config", None) is not None:
+        requested = "slurm"
     else:
-        requested = "local"
-    explicit_environment = {"docker", "modal", "skypilot", "run_environment"} & explicit
+        requested = record.name
+    explicit_environment = {
+        "docker",
+        "modal",
+        "skypilot",
+        "run_environment",
+        "slurm_config",
+    } & explicit
     if explicit_environment:
         return requested != record.name
     args.docker = record.name == "docker"
@@ -123,6 +132,8 @@ def _restore_resume_run_environment(
         if not hasattr(args, destination):
             continue
         expected = getattr(record, field)
+        if destination == "slurm_config" and expected is not None:
+            expected = Path(expected)
         if destination in explicit:
             if getattr(args, destination) != expected:
                 changed.append(f"run_environment.{field}")

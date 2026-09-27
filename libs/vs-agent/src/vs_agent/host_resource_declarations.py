@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_agent import provider_profiles
+from vs_agent.provider_policy import CODEX_PROVIDER
 from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
@@ -190,29 +191,29 @@ def _agent_executable_runtime(ctx: HostResourceContext) -> Iterable[HostResource
     return _resources(paths, purpose="agent runtime")
 
 
-#: State directories granted as named leaves rather than whole.
+#: Writable leaves for provider state directories that must not be granted whole.
 #:
 #: This is VibeSys sandbox policy, not a provider fact: a Codex checkout may
 #: itself live under the CLI's own state root (``$CODEX_HOME/worktrees`` by
-#: default), so granting the directory would expose sibling tasks to the
-#: agent, while dropping it makes the CLI appear logged out inside
-#: confinement (#185). Bubblewrap creates the ephemeral parent directory
-#: these leaf mounts need. Every other state directory is granted whole,
-#: because a CLI writes session history and caches there and needs them back
-#: on resume.
+#: default), so granting the directory would expose sibling tasks to the agent.
+#: Bubblewrap creates the ephemeral parent directory these leaf mounts need.
+#: Authentication leaves come from ``ProviderProfile.auth_files`` and are
+#: mounted read-only. This table names only the additional state that VibeSys
+#: deliberately persists across turns. Every other provider state directory is
+#: granted whole because those CLIs write session history and caches throughout
+#: their declared roots.
 #:
-#: Keyed on the profile's *default* directory name, ``.codex``, regardless of
-#: where ``CODEX_HOME`` relocates it at runtime: :func:`_state_root` resolves
-#: the actual root, and this table only says which leaves of Codex's state
-#: directory are narrowed once that root is known.
+#: The outer key is the provider profile name and the inner key is its default
+#: state directory, regardless of where a state-root environment variable
+#: relocates it at runtime. :func:`_state_root` resolves the actual root.
 #:
 #: ``sessions`` is that session history for Codex. Without it the rollout a
 #: turn writes lands in the sandbox's ephemeral view of ``$CODEX_HOME`` and is
 #: gone by the next turn, so ``codex exec resume`` reports no rollout for the
 #: thread, the driver restarts the conversation, and a confined run silently
 #: loses continuity it was told it had.
-_NARROWED_STATE_DIRS: dict[str, tuple[str, ...]] = {
-    ".codex": ("auth.json", "config.toml", "sessions"),
+_NARROWED_WRITABLE_STATE_DIRS: dict[str, dict[str, tuple[str, ...]]] = {
+    CODEX_PROVIDER: {".codex": ("sessions",)},
 }
 
 
@@ -238,35 +239,72 @@ def _state_root(
     return home / state_dir
 
 
-def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
-    """Declare the provider's own writable state, derived from its profile."""
-    home = ctx.env.get("HOME")
-    if not home or not ctx.provider:
+def declare_provider_state_resources(
+    env: Mapping[str, str], *, profile: ProviderProfile
+) -> tuple[HostResource, ...]:
+    """Declare isolated host state for one AgentShim provider profile.
+
+    Profiles own provider facts such as authentication files and state roots.
+    VibeSys applies access policy: authentication needed inside a narrowed root
+    is read-only, explicitly persistent session state is writable, and roots
+    without a narrowing policy retain their existing writable grant.
+    """
+    home = env.get("HOME")
+    if not home:
         return ()
-    # A name agentshim does not register raises, naming the alternatives, the
-    # same way every other profile-derived table answers it. Silently declaring
-    # no state instead would confine an agent with no access to its own
-    # credentials and let it fail as if it were logged out.
-    profile = provider_profiles.provider_profile(ctx.provider)
+    ctx = HostResourceContext(env=env, provider=profile.name)
 
     state_dirs = list(profile.state_dirs)
     if sys.platform == "darwin":
         state_dirs.extend(profile.darwin_state_dirs)
 
-    paths: list[Path] = []
+    resources: list[HostResource] = []
+    narrowed = _NARROWED_WRITABLE_STATE_DIRS.get(profile.name, {})
     for state_dir in state_dirs:
         root = _state_root(state_dir, home=Path(home), ctx=ctx, profile=profile)
-        leaves = _NARROWED_STATE_DIRS.get(state_dir)
-        if leaves is None:
-            paths.append(root)
-        else:
-            paths.extend(root / leaf for leaf in leaves)
+        writable_leaves = narrowed.get(state_dir)
+        if writable_leaves is None:
+            resources.append(
+                HostResource(
+                    root,
+                    HostResourceAccess.READ_WRITE,
+                    f"{profile.name} agent state",
+                )
+            )
+            continue
 
-    return _resources(
-        paths,
-        access=HostResourceAccess.READ_WRITE,
-        purpose=f"{ctx.provider} agent state",
-    )
+        state_path = Path(state_dir)
+        for auth_file in profile.auth_files:
+            try:
+                relative_auth = Path(auth_file).relative_to(state_path)
+            except ValueError:
+                continue
+            resources.append(
+                HostResource(
+                    root / relative_auth,
+                    HostResourceAccess.READ_ONLY,
+                    f"{profile.name} agent authentication",
+                )
+            )
+        resources.extend(
+            HostResource(
+                root / leaf,
+                HostResourceAccess.READ_WRITE,
+                f"{profile.name} agent state",
+            )
+            for leaf in writable_leaves
+        )
+    return tuple(resources)
+
+
+def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
+    """Look up and declare the selected provider's state."""
+    if not ctx.provider:
+        return ()
+    # An unregistered name raises rather than producing an apparently logged
+    # out sandbox. AgentShim's error names the registered alternatives.
+    profile = provider_profiles.provider_profile(ctx.provider)
+    return declare_provider_state_resources(ctx.env, profile=profile)
 
 
 #: Conventional host scratch root for a repository-native task. Container

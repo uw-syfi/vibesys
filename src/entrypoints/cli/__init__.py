@@ -131,6 +131,7 @@ class _LoopCommand:
 _LOOP_COMMANDS: dict[str, _LoopCommand] = {
     "agent": _LoopCommand(_build_agent_parser, _validate_agent),
     "profile-guided": _LoopCommand(_build_agent_parser, _validate_agent),
+    "dynamic": _LoopCommand(_build_agent_parser, _validate_agent),
     "plain": _LoopCommand(_build_plain_parser, _validate_plain),
     "evolve": _LoopCommand(_build_evolve_parser, _validate_evolve),
 }

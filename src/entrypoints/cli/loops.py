@@ -239,9 +239,12 @@ def _validate_plain(args: argparse.Namespace) -> None:
 def _agent_policy_descriptor(
     args: argparse.Namespace, bundle: InputBundle
 ) -> OrchestrationDescriptor:
-    orchestration_id = (
-        args.inner_loop if args.outer_loop == "agent" else f"profile-guided-{args.inner_loop}"
-    )
+    if args.outer_loop == "dynamic":
+        orchestration_id = "dynamic"
+    elif args.outer_loop == "agent":
+        orchestration_id = args.inner_loop
+    else:
+        orchestration_id = f"profile-guided-{args.inner_loop}"
     metrics = _resolve_metric_space(args)
     benchmark = bundle.benchmark_result
     if benchmark is not None and metrics.axis(benchmark.metric) is None:
@@ -258,10 +261,12 @@ def _agent_policy_descriptor(
         "max_retries_per_round": args.max_retries_per_round,
         "judge_every": args.judge_every,
         "official_eval_every": args.official_eval_every,
+        **({"max_in_flight": args.max_in_flight} if args.outer_loop == "dynamic" else {}),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
         "metric_space": metrics.model_dump(mode="json"),
         "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")
-        if args.outer_loop == "profile-guided" and bundle.manifest.profile_guided is not None
+        if args.outer_loop in {"profile-guided", "dynamic"}
+        and bundle.manifest.profile_guided is not None
         else None,
     }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
@@ -313,7 +318,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
     with boot_trace.span("run_preamble"):
         bundle: InputBundle = args.input_bundle
         config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
-        if args.outer_loop in {"agent", "profile-guided"}:
+        if args.outer_loop in {"agent", "profile-guided", "dynamic"}:
             descriptor = _agent_policy_descriptor(args, bundle)
             objective = with_operator_constraints(bundle.objective, args.constraint)
         elif args.outer_loop == "plain":

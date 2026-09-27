@@ -12,6 +12,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     RunEnvironmentSession,
     SkyPilotEnvironmentFacts,
+    SlurmEnvironmentFacts,
 )
 
 _TEMPLATE_DIR = PROMPTS_DIR / "environments"
@@ -31,6 +32,15 @@ def open_run_environment(
                 "docker/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 history_root=request.git_history_root,
+            )
+        )
+    elif isinstance(facts, SlurmEnvironmentFacts):
+        presentation = RunEnvironmentPresentation(
+            prompt_notes=(
+                "Candidate edits run in local isolated worktrees. VibeSys dispatches trusted "
+                "accuracy, benchmark, and profiling work through the configured Slurm target. "
+                "The local editor is not the task runtime; use framework evaluation and "
+                "profiler tools without adding cluster setup to candidate code."
             )
         )
     elif isinstance(facts, SkyPilotEnvironmentFacts):

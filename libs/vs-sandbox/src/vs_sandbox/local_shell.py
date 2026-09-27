@@ -48,6 +48,10 @@ class LocalShellSandbox:
         """Return this sandbox's random identifier."""
         return self._id
 
+    def agent_path(self, host_path: Path | str) -> str:
+        """Return the unchanged path seen by a host-local process."""
+        return str(Path(host_path))
+
     def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
         """Run *command* and return combined output with stderr lines tagged.
 

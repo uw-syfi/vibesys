@@ -60,6 +60,9 @@ class StubAgentClient:
     def close(self) -> None:
         """The deterministic stub owns no external resources."""
 
+    def cancel(self) -> None:
+        """The deterministic stub has no in-flight external work to stop."""
+
     def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Never name a conversation: the stub runs no provider at all."""
         del session_key

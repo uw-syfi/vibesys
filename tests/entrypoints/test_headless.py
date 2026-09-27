@@ -7,14 +7,11 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from pathlib import Path
+from typing import TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
 from tests.support import run_test_command
 
 from entrypoints import cli
@@ -55,7 +52,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
-from vs_runtime.api.infrastructure import run_environment_record
+from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
 
 _LOOP_RUN_TARGETS = {
     "agent": "vibesys.api._session.run_plugin",
@@ -171,6 +168,25 @@ accelerator_backend = "rocm"
     assert spec.resources.accelerators_per_node == 4
 
 
+def test_cli_selects_slurm_with_external_operator_config(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+    config_path = tmp_path / "operator-slurm.toml"
+
+    invocation = parse_cli_invocation(["--input", str(project), "--slurm-config", str(config_path)])
+    spec = run_environment_spec_from_args(invocation.args)
+
+    assert spec.name == "slurm"
+    assert spec.options == {"config_path": str(config_path)}
+
+
+def test_cli_rejects_slurm_config_with_another_environment(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+    with pytest.raises(ValueError, match="slurm-config cannot be combined"):
+        parse_cli_invocation(
+            ["--input", str(project), "--slurm-config", str(tmp_path / "slurm.toml"), "--modal"]
+        )
+
+
 def test_cli_rejects_mixed_generic_and_compatibility_environment_flags(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     with pytest.raises(ValueError, match="cannot be combined"):
@@ -196,6 +212,8 @@ _MODAL_ENVIRONMENT = RunEnvironmentRecord(
     model_volume="weights",
     app="run-app",
 )
+_SLURM_CONFIG = Path("/srv/vibesys/operator/slurm.toml")
+_SLURM_ENVIRONMENT = RunEnvironmentRecord(name="slurm", config_path=str(_SLURM_CONFIG))
 
 
 def _common_configuration() -> _CommonConfiguration:
@@ -377,7 +395,7 @@ def test_extract_flag_rejects_a_missing_value() -> None:
     assert exc.value.diagnostic.code == "invalid_arguments"
 
 
-@pytest.mark.parametrize("loop", ["agent", "profile-guided", "plain", "evolve"])
+@pytest.mark.parametrize("loop", ["agent", "profile-guided", "dynamic", "plain", "evolve"])
 def test_extract_loop_selection(loop: str) -> None:
     selected, rest = _extract_loop_selection(["--outer-loop", loop, "--input", "x"])
     assert selected == loop
@@ -405,7 +423,7 @@ def test_profile_guided_loop_requires_and_accepts_manifest_capability(tmp_path: 
     assert invocation.args.input_bundle.manifest.profile_guided is not None
 
 
-@pytest.mark.parametrize("loop", ["agent", "plain", "evolve"])
+@pytest.mark.parametrize("loop", ["agent", "dynamic", "plain", "evolve"])
 def test_all_loops_run_directly_in_a_canonical_project(
     loop: str,
     tmp_path: Path,
@@ -418,6 +436,28 @@ def test_all_loops_run_directly_in_a_canonical_project(
     assert invocation.args.runs_dir is None
     assert invocation.args.input == project
     assert invocation.args.input_bundle.root == project.resolve()
+
+
+def test_dynamic_builds_an_independent_descriptor_with_parallelism(
+    tmp_path: Path,
+) -> None:
+    project = _write_input_project(tmp_path)
+
+    invocation = parse_cli_invocation(
+        [
+            "--outer-loop",
+            "dynamic",
+            "--input",
+            str(project),
+            "--max-in-flight",
+            "3",
+        ]
+    )
+    request = build_run_request(invocation)
+
+    assert request.orchestration.id == "dynamic"
+    assert request.orchestration.options["max_in_flight"] == 3
+    assert request.orchestration.options["profile_guided"] is None
 
 
 def test_current_directory_is_the_default_direct_project(
@@ -1742,6 +1782,33 @@ def test_resume_without_run_environment_flags_restores_the_recorded_environment(
     assert args.modal_model_volume == "weights"
     assert args.modal_app == "run-app"
     assert run_environment_record(run_environment_spec_from_args(args)) == _MODAL_ENVIRONMENT
+
+
+def test_resume_restores_the_external_slurm_config_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _write_input_project(tmp_path)
+    run_id = "20260811-120000-11111111-agent"
+    _write_project_run(
+        project,
+        run_id,
+        configuration=_agent_configuration(run_environment=_SLURM_ENVIRONMENT),
+        created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--resume", run_id]).args
+    spec = run_environment_spec_from_args(args)
+
+    assert args.slurm_config == _SLURM_CONFIG
+    assert spec == RunEnvironmentSpec("slurm", {"config_path": str(_SLURM_CONFIG)})
+
+    matching = parse_cli_invocation(["--resume", run_id, "--slurm-config", str(_SLURM_CONFIG)]).args
+    assert run_environment_spec_from_args(matching) == spec
+
+    with pytest.raises(ConfigurationError, match=r"run_environment\.config_path"):
+        parse_cli_invocation(["--resume", run_id, "--slurm-config", "/different/operator.toml"])
 
 
 def test_resume_with_matching_run_environment_flags_is_accepted(

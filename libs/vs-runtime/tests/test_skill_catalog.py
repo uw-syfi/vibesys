@@ -72,6 +72,28 @@ def test_resource_resolution_preserves_partial_success_and_blocks_escapes(
     assert "unknown installed skill" in result.diagnostics[2]
 
 
+def test_resource_resolution_accepts_agent_visible_paths(tmp_path: Path) -> None:
+    _write_skill(tmp_path, "profiling")
+    catalog = build_skill_catalog((tmp_path,))
+
+    result = resolve_skill_resources(
+        (
+            SkillResourceRequest(
+                name="profiling",
+                resource_paths=(
+                    "profiling/references/guide.md",
+                    "references/guide.md",
+                ),
+                purpose="reuse a displayed resource path",
+            ),
+        ),
+        catalog,
+    )
+
+    assert result.diagnostics == ()
+    assert result.resolved[0].resource_paths == ("profiling/references/guide.md",)
+
+
 def test_installed_skills_resolve_through_the_runtime_capability(tmp_path: Path) -> None:
     _write_skill(tmp_path, "profiling")
     skills = create_installed_skills((tmp_path,), BlockingOperations())

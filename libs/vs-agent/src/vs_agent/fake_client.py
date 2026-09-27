@@ -171,6 +171,7 @@ class FakeAgentClient:
         self._session_counter = 0
 
         self._closed = False
+        self.cancel_count = 0
 
     # -- AgentClientProtocol: attribution ---------------------------------
 
@@ -213,6 +214,10 @@ class FakeAgentClient:
     def close(self) -> None:
         """Mark this client closed. Idempotent, like every ``close()``."""
         self._closed = True
+
+    def cancel(self) -> None:
+        """Record a cancellation request; the in-memory fake has no process."""
+        self.cancel_count += 1
 
     # -- configuration (each returns self for chaining) --------------------
 

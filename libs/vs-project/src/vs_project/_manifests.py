@@ -15,6 +15,7 @@ Identifier = Annotated[str, Field(pattern=_IDENTIFIER_PATTERN)]
 Sha256Digest = Annotated[str, Field(pattern=_DIGEST_PATTERN)]
 GitObjectId = Annotated[str, Field(pattern=_GIT_OBJECT_ID_PATTERN)]
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
+ExternalConfigPath = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
 class _InvalidOrchestrationOptionsError(ValueError):
@@ -62,17 +63,19 @@ class RunEnvironmentRecord(BaseModel):
 
     ``name`` selects the environment; the remaining fields carry that
     environment's operator-selected options and stay ``None`` when they do not
-    apply. Values a run derives from its own input (rather than from the
-    operator) are deliberately absent: they are re-derived on every launch.
+    apply. ``config_path`` records only where external operator configuration
+    lives. Its contents and credentials remain outside the project. Values a
+    run derives from its own input are absent and re-derived on every launch.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    name: Literal["local", "docker", "modal", "skypilot"]
+    name: Literal["local", "docker", "modal", "skypilot", "slurm"]
     image: PortableText | None = None
     gpu: PortableText | None = None
     model_volume: PortableText | None = None
     app: PortableText | None = None
+    config_path: ExternalConfigPath | None = None
     resources: RunResourceRequest | None = None
 
 

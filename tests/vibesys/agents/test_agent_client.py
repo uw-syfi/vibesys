@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -54,6 +56,8 @@ class _FakeSession:
     resumed: list[str] = field(default_factory=list)
     lifecycle_calls: list[str] = field(default_factory=list)
     cancel_error: BaseException | None = None
+    started: threading.Event | None = None
+    release: threading.Event | None = None
 
     def run_turn(
         self,
@@ -62,6 +66,10 @@ class _FakeSession:
     ) -> AgentTurnResult:
         self.turns.append(request)
         self.observers.append(observer)
+        if self.started is not None:
+            self.started.set()
+        if self.release is not None:
+            self.release.wait()
         if observer is not None:
             for event in self.events:
                 observer.on_event(event)
@@ -76,6 +84,8 @@ class _FakeSession:
 
     def cancel(self) -> None:
         self.lifecycle_calls.append("cancel")
+        if self.release is not None:
+            self.release.set()
         if self.cancel_error is not None:
             raise self.cancel_error
 
@@ -567,6 +577,27 @@ def test_evicting_a_session_cancels_its_turn_before_closing_it() -> None:
     # Order matters: a client closed from another thread must stop the turn
     # before releasing the resources that turn is still using.
     assert session.lifecycle_calls == ["cancel", "close"]
+
+
+def test_cancel_stops_an_active_session_without_closing_it() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    session = _FakeSession(results=[AgentTurnResult("ok")], started=started, release=release)
+    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        turn = pool.submit(
+            client.run,
+            session_spec=_spec(),
+            turn=AgentTurnRequest("one"),
+            session_key=_key("impl"),
+        )
+        started.wait()
+        client.cancel()
+        assert turn.result().text == "ok"
+
+    assert session.lifecycle_calls == ["cancel"]
+    with pytest.raises(RuntimeError, match="cancelled"):
+        client.run(session_spec=_spec(), turn=AgentTurnRequest("two"))
 
 
 def test_a_failing_cancel_still_closes_the_session() -> None:

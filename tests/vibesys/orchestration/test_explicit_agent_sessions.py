@@ -41,6 +41,7 @@ from vs_runtime.api import (
     AgentCapability,
     AgentRole,
     AgentTool,
+    AgentToolBindingContext,
     AgentTurnTimeoutError,
     CommandResult,
     OrchestrationPlugin,
@@ -53,6 +54,7 @@ from vs_runtime.api import (
     Workspace,
     WorkspaceAccess,
 )
+from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -82,8 +84,13 @@ class _RunConfiguration:
     profiler_kind: ProfilerKind = ProfilerKind.NONE
     domain: str = "generic"
     agent_backend: str = "stub"
+    run_environment: RunEnvironmentSpec | None = None
     tool_bindings: (
-        Mapping[str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]] | None
+        Mapping[
+            str,
+            Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]],
+        ]
+        | None
     ) = None
 
 
@@ -121,6 +128,7 @@ def _request(
     orchestration_id: str = "explicit-sessions",
     profiler_kind: ProfilerKind = ProfilerKind.NONE,
     agent_backend: str = "stub",
+    run_environment: RunEnvironmentSpec | None = None,
 ) -> RunRequest:
     return RunRequest(
         project_root=project_root,
@@ -133,6 +141,7 @@ def _request(
         cli_provider="claude",
         profiler_kind=profiler_kind,
         backend=ComputeBackend.CPU,
+        run_environment=run_environment,
     )
 
 
@@ -165,6 +174,7 @@ def _run_with_clients(
                 orchestration_id=plugin.id,
                 profiler_kind=configuration.profiler_kind,
                 agent_backend=configuration.agent_backend,
+                run_environment=configuration.run_environment,
             ),
             integration,
             agent_client_factory=configuration.client_factory or create_client,
@@ -235,6 +245,95 @@ def test_product_composition_declares_its_runtime_to_confined_agents(tmp_path: P
     package_root = Path(vibesys.__file__).resolve().parents[1]
     matching = [resource for resource in observed if resource.path == package_root]
     assert matching == [HostResource(package_root, HostResourceAccess.READ_ONLY, "VibeSys runtime")]
+
+
+def test_slurm_ssh_access_grants_no_private_keys_to_the_profiler_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "operator-slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    observed: list[tuple[HostResource, ...]] = []
+    raw_socket_path = tmp_path / "agent.sock"
+    raw_socket_path.touch()
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(raw_socket_path))
+    worker_client = FakeAgentClient(session_reuse=True)
+    profiler_client = FakeAgentClient(
+        capabilities=AgentCapabilities(session_reuse=True, tool_servers=True)
+    )
+    available = deque([worker_client, profiler_client])
+
+    def create_client(**kwargs: object) -> FakeAgentClient:
+        observed.append(cast("tuple[HostResource, ...]", kwargs["host_resources"]))
+        return available.popleft()
+
+    worker = AgentRole(id="worker", system_prompt="Implement.")
+    profiler = AgentRole(
+        id="profiler",
+        system_prompt="Profile.",
+        extra_tools=(AgentTool(id="profiler"),),
+    )
+
+    async def body(run: Run) -> None:
+        await run.agents.create_session(worker, workspace=run.workspaces.root)
+        session = await run.agents.create_session(profiler, workspace=run.workspaces.root)
+        await session.turn("profile")
+
+    _run_with_clients(
+        tmp_path,
+        [],
+        body,
+        declaration=(worker, profiler),
+        configuration=_RunConfiguration(
+            client_factory=create_client,
+            profiler_kind=ProfilerKind.ROCPROF,
+            domain="llm-serving",
+            agent_backend="cli",
+            tool_bindings=AGENT_TOOL_BINDINGS,
+            run_environment=RunEnvironmentSpec("slurm", {"config_path": str(config_path)}),
+        ),
+    )
+
+    assert len(observed) == 2
+    worker_paths = {resource.path for resource in observed[0]}
+    profiler_paths = {resource.path for resource in observed[1]}
+    assert config_path not in worker_paths
+    assert raw_socket_path not in worker_paths
+    assert config_path in profiler_paths
+    assert raw_socket_path not in profiler_paths
+    broker_resources = [
+        resource
+        for resource in observed[1]
+        if resource.purpose == "host-owned Slurm transport broker"
+    ]
+    assert len(broker_resources) == 1
+    ssh_root = Path.home() / ".ssh"
+    assert ssh_root not in profiler_paths
+    assert not any(
+        path.parent == ssh_root and path.name not in {"config", "known_hosts", "known_hosts2"}
+        for path in profiler_paths
+    )
+    profiler_tool = next(
+        tool
+        for tool in profiler_client.calls[0].tool_servers or []
+        if tool.name == "vibesys-rocprof-profiler"
+    )
+    profiler_env = dict(profiler_tool.env)
+    assert "SSH_AUTH_SOCK" not in profiler_env
+    assert Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"]) == broker_resources[0].path
+    assert profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
 
 
 def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path) -> None:
@@ -443,6 +542,43 @@ def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -
     assert observed == ["stub"]
 
 
+def test_public_session_supplies_role_scoped_evaluation_tool_binding(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    role = AgentRole(
+        id="dynamic-implementer",
+        system_prompt="Improve the candidate.",
+        extra_tools=(AgentTool(id="evaluation"),),
+    )
+
+    async def orchestrate(run: Run, _options: BaseModel) -> RunStatus:
+        agent_session = await run.agents.create_session(
+            role,
+            workspace=run.workspaces.root,
+            member_id="hypothesis-1",
+        )
+        await agent_session.close()
+        return RunStatus.SUCCEEDED
+
+    plugin = OrchestrationPlugin(
+        id="composed-evaluation",
+        agents=(role,),
+        options=_Options,
+        orchestrate=orchestrate,
+    )
+    registry = OrchestrationRegistry()
+    registry.register_plugin(plugin)
+    session = create_session(
+        _request(project_root, orchestration_id=plugin.id),
+        sink=_discard_event,
+        registry=registry,
+    )
+
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+
+
 def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
     tmp_path: Path,
 ) -> None:
@@ -475,10 +611,12 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
     client.enqueue_text("profiler", "analysis").enqueue("profiler", _Reply(value=4))
     resolutions = 0
 
-    def bind_profiler(run: object, workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
+    def bind_profiler(
+        run: object, binding: AgentToolBindingContext
+    ) -> tuple[ToolServerDescriptor, ...]:
         nonlocal resolutions
         resolutions += 1
-        return AGENT_TOOL_BINDINGS["profiler"](run, workspace)
+        return AGENT_TOOL_BINDINGS["profiler"](run, binding)
 
     role = AgentRole(
         id="profiler",
@@ -523,8 +661,10 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     )
     resolved_workspaces: list[Workspace] = []
 
-    def bind_tool(_host: object, workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
-        resolved_workspaces.append(workspace)
+    def bind_tool(
+        _host: object, binding: AgentToolBindingContext
+    ) -> tuple[ToolServerDescriptor, ...]:
+        resolved_workspaces.append(binding.workspace)
         return (StdioServerDescriptor(name="workspace-tool", command="tool-server"),)
 
     async def body(ctx: Run) -> None:

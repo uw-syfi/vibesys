@@ -37,7 +37,9 @@ FRAMEWORK_PACKAGES = (
     "server",
     "headless",
     "vs_agent",
+    "vs_async_ops",
     "vs_evaluator_protocol",
+    "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",
     "vs_loop_state",
@@ -45,6 +47,7 @@ FRAMEWORK_PACKAGES = (
     "vs_prompts",
     "vs_runtime",
     "vs_sandbox",
+    "vs_slurm",
 )
 REQUIRED_SYSTEM_TOOLS = ("git",)
 SYSTEM_JAVASCRIPT_TOOLS = ("bun", "node", "npm", "pnpm")

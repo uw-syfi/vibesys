@@ -219,11 +219,13 @@ class TestBuild:
 
         assert isinstance(sb, hostsandbox.HostSandbox)
         assert codex_home not in sb.write_paths
-        assert auth in sb.write_paths
-        assert config in sb.write_paths
+        assert auth in sb.read_paths
+        assert auth not in sb.write_paths
+        assert config not in sb.read_paths
+        assert config not in sb.write_paths
         argv = sb.wrap(["codex", "login", "status"])
         assert _has_pair(argv, "--dir", str(codex_home))
-        assert _has_pair(argv, "--bind-try", str(auth), str(auth))
+        assert _has_pair(argv, "--ro-bind-try", str(auth), str(auth))
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +515,7 @@ def test_sandbox_blocks_escape_but_allows_workspace(
 
 
 @requires_sandbox
-def test_sandbox_exposes_codex_auth_but_not_sibling_worktrees(tmp_path: Path) -> None:
+def test_sandbox_exposes_read_only_codex_auth_without_user_config(tmp_path: Path) -> None:
     codex_home = tmp_path / ".codex"
     workspace = codex_home / "worktrees" / "run-A" / "workspace"
     sibling = codex_home / "worktrees" / "run-B" / "secret.txt"
@@ -537,11 +539,16 @@ def test_sandbox_exposes_codex_auth_but_not_sibling_worktrees(tmp_path: Path) ->
         [
             "/bin/sh",
             "-c",
-            f'test "$(cat {auth})" = "auth token" && test ! -e {sibling}',
+            (
+                f'test "$(cat {auth})" = "auth token" '
+                f"&& test ! -e {config} && test ! -e {sibling} "
+                f'&& ! printf "changed\\n" > {auth}'
+            ),
         ]
     )
     result = run_test_command(command, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+    assert auth.read_text() == "auth token\n"
 
 
 def test_the_executor_transform_wraps_every_command(tmp_path: Path) -> None:

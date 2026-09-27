@@ -276,7 +276,7 @@ class HostSandbox(WorkspaceSandbox):
         parent_dirs = {
             parent
             for path in (*self.read_paths, *self.write_paths)
-            if path.is_file()
+            if not path.is_dir()
             for parent in path.parents
             if parent != Path("/")
         }

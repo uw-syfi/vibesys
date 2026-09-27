@@ -1,5 +1,6 @@
 """Thin product catalog for the built-in orchestration registrations."""
 
+from vibesys.orchestration.dynamic import REGISTRATION as DYNAMIC
 from vibesys.orchestration.evolve import REGISTRATION as EVOLVE
 from vibesys.orchestration.issue_queue import REGISTRATION as ISSUE_QUEUE
 from vibesys.orchestration.multi import (
@@ -18,6 +19,7 @@ def built_in_orchestrations() -> OrchestrationRegistry:
     registry = OrchestrationRegistry()
     for registration in (
         SINGLE,
+        DYNAMIC,
         PROFILE_GUIDED_SINGLE,
         MULTI,
         PROFILE_GUIDED_MULTI,

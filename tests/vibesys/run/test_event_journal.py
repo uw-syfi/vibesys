@@ -8,6 +8,9 @@ from pydantic import ValidationError
 from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
+    AsyncOperationKind,
+    AsyncOperationLifecycleData,
+    AsyncOperationState,
     CoreEventType,
     RoundFinishedData,
 )
@@ -25,6 +28,35 @@ if TYPE_CHECKING:
 def test_current_round_event_requires_explicit_profile_outcome() -> None:
     with pytest.raises(ValidationError, match="profile_skipped"):
         RoundFinishedData.model_validate({"attempts": 1, "judge_verdict": "pass"})
+
+
+def test_async_operation_lifecycle_uses_the_unified_durable_stream(tmp_path: Path) -> None:
+    integration = LocalRunIntegration()
+    try:
+        integration.attach(tmp_path, run_id="run-operations")
+        integration.events.emit(
+            CoreEventType.ASYNC_OPERATION_LIFECYCLE,
+            data=AsyncOperationLifecycleData(
+                operation_kind=AsyncOperationKind.PROFILER,
+                operation_id="profile-1",
+                state=AsyncOperationState.RUNNING,
+                revision=2,
+                scope_id="candidate-prefill",
+            ),
+        )
+
+        event = integration.events.read()[0]
+        assert event.run_id == "run-operations"
+        assert event.type is CoreEventType.ASYNC_OPERATION_LIFECYCLE
+        assert event.data == AsyncOperationLifecycleData(
+            operation_kind=AsyncOperationKind.PROFILER,
+            operation_id="profile-1",
+            state=AsyncOperationState.RUNNING,
+            revision=2,
+            scope_id="candidate-prefill",
+        )
+    finally:
+        integration.close()
 
 
 def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> None:

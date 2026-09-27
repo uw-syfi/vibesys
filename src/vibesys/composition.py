@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING, cast
 
 from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.evaluation_agent.api import (
+    EvaluationAgentRole,
+    EvaluationAgentService,
+    SemanticEvaluationBackend,
+    evaluation_mcp_descriptor,
+)
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
@@ -29,14 +35,29 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.config import Config
-    from vs_runtime.api import AgentRole, Workspace
+    from vs_runtime.api import AgentRole, AgentToolBindingContext
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class AgentToolContext:
     """Product facts available while binding one declared agent tool."""
 
     profiler_id: str
+    profiler_env: tuple[tuple[str, str], ...] = ()
+    evaluation_service: EvaluationAgentService | None = None
+    evaluation_backend: SemanticEvaluationBackend | None = None
+
+    def install_evaluation(
+        self,
+        service: EvaluationAgentService,
+        backend: SemanticEvaluationBackend,
+    ) -> None:
+        """Install the run-owned service before orchestration creates sessions."""
+        if self.evaluation_service is not None or self.evaluation_backend is not None:
+            message = "evaluation agent service is already installed"
+            raise RuntimeError(message)
+        self.evaluation_service = service
+        self.evaluation_backend = backend
 
 
 def prepare_domain_model_artifacts(
@@ -148,7 +169,9 @@ def resolve_agent_specs(
     return MappingProxyType(resolved)
 
 
-def _profiler_tool(context: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
+def _profiler_tool(
+    context: object, _binding: AgentToolBindingContext
+) -> tuple[ToolServerDescriptor, ...]:
     """Bind the selected profiler's analysis server to one agent session."""
     resolved = cast("AgentToolContext", context)
     if resolved.profiler_id == "none":
@@ -159,11 +182,14 @@ def _profiler_tool(context: object, _workspace: Workspace) -> tuple[ToolServerDe
             name=f"vibesys-{resolved.profiler_id.replace('_', '-')}-profiler",
             command="python",
             args=(f"{support_name}/server.py",),
+            env=resolved.profiler_env,
         ),
     )
 
 
-def _issue_board_tool(_host: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
+def _issue_board_tool(
+    _host: object, _binding: AgentToolBindingContext
+) -> tuple[ToolServerDescriptor, ...]:
     """Bind the fixed issue-board server to workspace-relative policy artifacts."""
     return (
         expose_as_tools(
@@ -178,10 +204,50 @@ def _issue_board_tool(_host: object, _workspace: Workspace) -> tuple[ToolServerD
     )
 
 
+def _evaluation_tool(
+    context: object, binding: AgentToolBindingContext
+) -> tuple[ToolServerDescriptor, ...]:
+    """Issue one role and logical-member scoped evaluation capability."""
+    resolved = cast("AgentToolContext", context)
+    service = resolved.evaluation_service
+    backend = resolved.evaluation_backend
+    if service is None or backend is None:
+        message = "evaluation agent service is not installed"
+        raise RuntimeError(message)
+    role = _EVALUATION_ROLES.get(binding.role.id)
+    if role is None:
+        message = f"agent role {binding.role.id!r} has no evaluation capability profile"
+        raise RuntimeError(message)
+    backend.bind(binding)
+    scope_id = binding.workspace.id
+    principal_member = binding.member_id or scope_id or "root"
+    grant = service.grant(
+        principal_id=f"{role.value}:{principal_member}",
+        role=role,
+        scope_id=scope_id,
+        run_observer=role is EvaluationAgentRole.RUN_OBSERVER,
+    )
+    return (evaluation_mcp_descriptor(grant, binding.agent_path(service.socket_path)),)
+
+
 AGENT_TOOL_BINDINGS: Mapping[
-    str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
+    str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
 ] = {
+    "evaluation": _evaluation_tool,
     "issue-board": _issue_board_tool,
     "profiler": _profiler_tool,
 }
 """Built-in agent tools bound by product composition, not orchestration policy."""
+
+
+_EVALUATION_ROLES: Mapping[str, EvaluationAgentRole] = {
+    "dynamic-implementer": EvaluationAgentRole.IMPLEMENTER,
+    "dynamic-judge": EvaluationAgentRole.JUDGE,
+    "dynamic-orchestrator": EvaluationAgentRole.RUN_OBSERVER,
+    "dynamic-profiler": EvaluationAgentRole.PROFILER,
+    "implementer": EvaluationAgentRole.IMPLEMENTER,
+    "judge": EvaluationAgentRole.JUDGE,
+    "orchestrator": EvaluationAgentRole.ORCHESTRATOR,
+    "portfolio_dispatch": EvaluationAgentRole.PORTFOLIO_DISPATCH,
+    "profiler": EvaluationAgentRole.PROFILER,
+}

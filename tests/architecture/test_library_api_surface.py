@@ -10,7 +10,9 @@ import pytest
 @pytest.mark.parametrize(
     "module_name",
     [
+        "vs_async_ops.api",
         "vs_evaluator_protocol.api",
+        "vs_evaluation.api",
         "vs_github.api",
         "vs_issue_tracker.api",
         "vs_loop_state.api",
@@ -18,6 +20,7 @@ import pytest
         "vs_prompts.api",
         "vs_runtime.api",
         "vs_sandbox.api",
+        "vs_slurm.api",
     ],
 )
 def test_library_public_exports_resolve(module_name: str) -> None:

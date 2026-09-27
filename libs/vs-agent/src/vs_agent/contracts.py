@@ -319,6 +319,10 @@ class AgentClientProtocol(Protocol):
         """Direct subsequent application logs to ``stream``."""
         ...
 
+    def cancel(self) -> None:
+        """Stop every in-flight turn without closing the client."""
+        ...
+
     def close(self) -> None:
         """Release client resources. Implementations must be idempotent."""
         ...

@@ -305,11 +305,20 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--run-environment",
-        choices=("local", "docker", "modal", "skypilot"),
+        choices=("local", "docker", "modal", "skypilot", "slurm"),
         default=None,
         help=(
             "Select where trusted work runs. SkyPilot and Modal keep the agent "
             "in a local CPU-only Docker editor."
+        ),
+    )
+    parser.add_argument(
+        "--slurm-config",
+        type=Path,
+        default=None,
+        help=(
+            "External operator TOML for Slurm execution. Selecting this option also "
+            "selects --run-environment slurm."
         ),
     )
     parser.add_argument(
@@ -502,6 +511,13 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-rounds", type=int, default=24)
     parser.add_argument("--max-retries-per-round", type=int, default=3)
+    parser.add_argument(
+        "--max-in-flight",
+        type=int,
+        default=2,
+        metavar="N",
+        help="Maximum independent dynamic workstreams dispatched concurrently (default: 2).",
+    )
     parser.add_argument(
         "--constraint",
         action="append",
