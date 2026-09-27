@@ -10,11 +10,14 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 from vibesys.api import agent_spec_from_config
+from vibesys.composition import resolve_agent_specs
 from vibesys.config import Config
+from vibesys.errors import ConfigurationError
 from vibesys.orchestration.multi.contracts import JudgeResponse
 from vibesys.orchestration.review import Verdict
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
+from vs_runtime.api import AgentRole
 from vs_sandbox.api import ProjectPathPolicy
 
 
@@ -222,32 +225,34 @@ class TestBuildAgentClient:
         )
         assert runner.model_for_kind("implementer") == "gpt-5.4"
 
-    def test_cli_backend_carries_outer_and_inner_role_configuration(self, tmp_path: Path) -> None:
+    def test_role_configuration_resolves_every_declared_plugin_role(self) -> None:
         config = _agent_config(
             backend="cli",
             cli_provider="codex",
-            outer={"model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
-            inner={"model": "gpt-5.6-luna", "reasoning_effort": "xhigh"},
+            roles={
+                "orchestrator": {"model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
+            },
         )
         config.thinking.level = "high"
-        runner = self._cli_client(config, model_name="gpt-5.6-sol")
+        roles = (
+            AgentRole(id="orchestrator", system_prompt="plan"),
+            AgentRole(id="implementer", system_prompt="implement"),
+        )
 
-        with patch.object(runner, "run", return_value=MagicMock(text="ok")) as run:
-            for kind in ("orchestrator", "implementer"):
-                runner.invoke_text(
-                    kind=kind,
-                    workspace=tmp_path,
-                    system_prompt="instructions",
-                    user_prompt="prompt",
-                    round_label="role configuration",
-                )
-        outer_spec = run.call_args_list[0].kwargs["session_spec"]
-        inner_spec = run.call_args_list[1].kwargs["session_spec"]
-        assert outer_spec.model == "gpt-5.6-sol"
-        assert outer_spec.reasoning_effort == "xhigh"
-        assert inner_spec.model == "gpt-5.6-luna"
-        assert inner_spec.reasoning_effort == "xhigh"
-        assert runner.model_for_kind("judge") == "gpt-5.6-sol"
+        specs = resolve_agent_specs(config, roles)
+
+        assert tuple(specs) == ("orchestrator", "implementer")
+        assert specs["orchestrator"].model == "gpt-5.6-sol"
+        assert specs["orchestrator"].reasoning_effort == "xhigh"
+        assert specs["implementer"].model == "m"
+        assert specs["implementer"].reasoning_effort == "high"
+
+    def test_role_configuration_rejects_roles_outside_selected_plugin(self) -> None:
+        config = _agent_config(roles={"judge": {"model": "gpt-judge"}})
+        roles = (AgentRole(id="implementer", system_prompt="implement"),)
+
+        with pytest.raises(ConfigurationError, match="judge"):
+            resolve_agent_specs(config, roles)
 
 
 class TestAgentLoggerEventHandler:

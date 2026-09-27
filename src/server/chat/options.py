@@ -77,9 +77,9 @@ _SUGGESTED_MODELS: dict[str, tuple[str, ...]] = {
 class ChatRunSettings:
     """The run's own agent selection, from which chat options are derived.
 
-    ``role_models`` are the ``[agent.outer]`` / ``[agent.inner]`` overrides: a
-    run that deliberately gives one loop role a different model is naming a
-    model its operator already trusts for this workspace.
+    ``role_models`` are the selected plugin's ``[agent.roles.<id>]`` overrides:
+    a run that deliberately gives one role a different model is naming a model
+    its operator already trusts for this workspace.
     """
 
     driver: AgentDriver

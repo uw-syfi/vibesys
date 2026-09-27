@@ -2,7 +2,7 @@
 
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
@@ -60,10 +60,12 @@ from vibesys.run.workspace_policy import (
 from vs_agent.api import (
     AgentBackend,
     AgentEventSink,
+    AgentSpec,
     agent_driver_supports_tool_servers,
     task_agent_host_resources,
 )
 from vs_project.api import (
+    AgentRoleExecutionRecord,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
@@ -225,6 +227,26 @@ def _resume_orchestration_decision(
                 message="resuming a run cannot change its recorded run_environment",
             )
         )
+    recorded_roles = recorded.execution.agent_roles.keys()
+    selected_roles = execution.agent_roles.keys()
+    missing_roles = sorted(selected_roles - recorded_roles)
+    unknown_roles = sorted(recorded_roles - selected_roles)
+    if missing_roles or unknown_roles:
+        details = []
+        if missing_roles:
+            details.append(f"missing recorded roles: {', '.join(missing_roles)}")
+        if unknown_roles:
+            details.append(f"unknown recorded roles: {', '.join(unknown_roles)}")
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_invalid",
+                stage="resume_resolution",
+                message=(
+                    "recorded agent roles do not match the selected orchestration: "
+                    + "; ".join(details)
+                ),
+            )
+        )
     if recorded.execution != execution:
         changed = ", ".join(
             name
@@ -320,10 +342,11 @@ def _project_run_configuration_error(
     return ConfigurationError(ConfigurationDiagnostic(code=code, stage=stage, message=str(error)))
 
 
-def open_run_resources(
+def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; private run composition receives independent policy bindings and effect factories explicitly instead of hiding them in a service container.
     request: RunRequest,
     integration: LocalRunIntegration,
     *,
+    agent_specs: Mapping[str, AgentSpec],
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
@@ -344,6 +367,7 @@ def open_run_resources(
             teardown_stack=teardown_stack,
             request=request,
             integration=integration,
+            agent_specs=agent_specs,
             resume_policy=resume_policy,
             state_binding=state_binding,
             backend_factory=backend_factory,
@@ -371,6 +395,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     teardown_stack: ExitStack,
     request: RunRequest,
     integration: LocalRunIntegration,
+    agent_specs: Mapping[str, AgentSpec],
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
@@ -538,15 +563,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 resolved_profiler=resolved_profiler_kind.value,
                 default_reasoning_effort=config.thinking.level,
                 thinking_budget=config.thinking.budget,
-                outer_model=config.agent.outer.model,
-                outer_reasoning_effort=config.agent.outer.reasoning_effort,
-                inner_model=config.agent.inner.model,
-                inner_reasoning_effort=config.agent.inner.reasoning_effort,
-                perf_eval_load_levels=(
-                    [level.model_dump(mode="json") for level in config.perf_eval.load_levels]
-                    if config.perf_eval.load_levels is not None
-                    else None
-                ),
+                agent_roles={
+                    role_id: AgentRoleExecutionRecord(
+                        model=spec.model or config.model.name,
+                        reasoning_effort=spec.reasoning_effort,
+                    )
+                    for role_id, spec in agent_specs.items()
+                },
                 skills_dirs=[str(path) for path in skill_source_paths],
             )
 
@@ -857,6 +880,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
         result = _PreparedRun(
             backend=backend,
+            agent_specs=agent_specs,
             facts=_run_facts(
                 request,
                 environment_resources,
@@ -879,9 +903,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 provider=resolved_cli_provider,
                 model=model_name,
                 role_models=tuple(
-                    role.model
-                    for role in (config.agent.outer, config.agent.inner)
-                    if role.model is not None
+                    spec.model
+                    for spec in agent_specs.values()
+                    if spec.model is not None and spec.model != model_name
                 ),
                 config=config,
                 backend=backend,
@@ -936,6 +960,7 @@ class _PreparedRun:
     environment_resources: RunEnvironmentResources
     facts: RunFacts
     backend: ComputeBackend
+    agent_specs: Mapping[str, AgentSpec]
     skill_source_paths: tuple[Path, ...]
     evaluation_plan: TrustedEvaluationPlan
     agent_host_resources: tuple[HostResource, ...]

@@ -36,6 +36,7 @@ def _manifest(orchestration: OrchestrationDescriptor) -> OrchestrationRunManifes
             compute_backend="cpu",
             requested_profiler="none",
             resolved_profiler="none",
+            agent_roles={},
         ),
         orchestration=orchestration,
     )

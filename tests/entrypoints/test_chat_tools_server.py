@@ -26,6 +26,7 @@ from vibesys.orchestration.multi.models import MultiState
 from vs_agent.api import register_tool
 from vs_loop_state.api import RoundRecord
 from vs_project.api import (
+    AgentRoleExecutionRecord,
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
@@ -72,10 +73,14 @@ def _project_with_run(tmp_path: Path) -> tuple[Project, str]:
             requested_profiler="linux-cpu",
             resolved_profiler="linux-cpu",
             default_reasoning_effort="high",
-            outer_model="gpt-5.6-sol",
-            outer_reasoning_effort="xhigh",
-            inner_model="gpt-5.6-luna",
-            inner_reasoning_effort="medium",
+            agent_roles={
+                "orchestrator": AgentRoleExecutionRecord(
+                    model="gpt-5.6-sol", reasoning_effort="xhigh"
+                ),
+                "implementer": AgentRoleExecutionRecord(
+                    model="gpt-5.6-luna", reasoning_effort="medium"
+                ),
+            },
         ),
         orchestration=OrchestrationDescriptor(
             id="multi-agent",

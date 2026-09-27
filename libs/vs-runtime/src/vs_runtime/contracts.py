@@ -12,7 +12,7 @@ from pathlib import (
     PurePosixPath,
     PureWindowsPath,
 )  # Pydantic resolves WorkspaceRef at runtime.
-from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, TypeVar, overload
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
 
@@ -179,12 +179,15 @@ class WorkspaceRef(BaseModel):
     path: Path
 
 
+AgentRoleId = Annotated[str, Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")]
+
+
 class AgentRole(BaseModel):
     """Complete immutable declaration of one policy-owned agent role."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    id: AgentRoleId
     system_prompt: str
     tools: tuple[AgentTool, ...] = ()
     skills: tuple[str, ...] = ()

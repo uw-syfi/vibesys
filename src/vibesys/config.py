@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
+from vs_runtime.api import AgentRoleId
 from vs_runtime.api.infrastructure import BundledResources
 
 BUNDLED_RESOURCES = BundledResources(PROJECT_ROOT / "resources", package="vibesys")
@@ -128,13 +129,12 @@ class AgentCfg(_Strict):
             "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
         ),
     )
-    outer: AgentRoleCfg = Field(
-        default_factory=AgentRoleCfg,
-        description="[agent.outer] — model controls for orchestrator invocations.",
-    )
-    inner: AgentRoleCfg = Field(
-        default_factory=AgentRoleCfg,
-        description="[agent.inner] — model controls for implementer invocations.",
+    roles: dict[AgentRoleId, AgentRoleCfg] = Field(
+        default_factory=dict,
+        description=(
+            "Sparse model overrides keyed by plugin-declared agent role ID. "
+            "Omitted roles inherit [model] and [thinking]."
+        ),
     )
 
 
@@ -165,29 +165,6 @@ class RepositoryCfg(_Strict):
         return owner
 
 
-class LoadLevelCfg(_Strict):
-    """One benchmark load level fed to the perf_eval prompt template.
-
-    The issue-queue policy owns the corresponding structured output contract.
-    """
-
-    rate: int = Field(gt=0, description="Request rate (requests/sec) for this load level.")
-    duration: int = Field(gt=0, description="Benchmark duration in seconds at this load level.")
-    max_tokens: int = Field(gt=0, description="Max output tokens per request at this load level.")
-
-
-class PerfEvalCfg(_Strict):
-    """Optional benchmark load ladder for performance evaluation."""
-
-    load_levels: list[LoadLevelCfg] | None = Field(
-        default=None,
-        description=(
-            "Benchmark load levels handed to the perf evaluator. None → the "
-            "evaluator uses its built-in default ladder."
-        ),
-    )
-
-
 class Config(_Strict):
     """Validated project configuration for one VibeSys run."""
 
@@ -207,10 +184,6 @@ class Config(_Strict):
     repository: RepositoryCfg = Field(
         default_factory=RepositoryCfg,
         description="[repository] — defaults for remote experiment repositories.",
-    )
-    perf_eval: PerfEvalCfg = Field(
-        default_factory=PerfEvalCfg,
-        description="[perf_eval] — performance-evaluation settings.",
     )
 
 

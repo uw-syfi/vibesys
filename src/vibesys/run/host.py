@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from vibesys.composition import AgentToolContext, agent_spec_from_config
+from vibesys.composition import AgentToolContext, resolve_agent_specs
 from vibesys.context import _StateBinding, open_run_resources
 from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
@@ -68,9 +68,16 @@ class _ProductHostFactory:
             )
             raise ValueError(message)
         state_namespace = plugin.id if plugin.state is not None else None
+        agent_specs = resolve_agent_specs(
+            self.request.config,
+            plugin.agents,
+            backend=self.request.agent_backend,
+            provider=self.request.cli_provider,
+        )
         resources = open_run_resources(
             self.request,
             self.integration,
+            agent_specs=agent_specs,
             resume_policy=plugin.resume_policy,
             state_binding=(
                 _StateBinding(state_namespace, plugin.state)
@@ -193,15 +200,11 @@ class _ProductHostFactory:
         """Bind product configuration to the runtime's resource owner."""
 
         def resolve_configuration(role: AgentRole) -> AgentExecutionConfiguration:
-            spec = agent_spec_from_config(
-                self.request.config,
-                backend=self.request.agent_backend,
-                provider=self.request.cli_provider,
-            )
+            spec = resources.agent_specs[role.id]
             return AgentExecutionConfiguration(
                 agent_id=role.id,
                 spec=spec,
-                reasoning_effort=spec.role_reasoning_efforts.get(role.id, spec.reasoning_effort),
+                reasoning_effort=spec.reasoning_effort,
             )
 
         tool_context = AgentToolContext(resources.facts.profiler_id)

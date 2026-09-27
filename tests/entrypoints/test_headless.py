@@ -47,6 +47,7 @@ from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
 from vibesys.orchestration.profilers import ProfilerKind
 from vs_project.api import (
+    AgentRoleExecutionRecord,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
@@ -186,10 +187,6 @@ class _CommonConfiguration(TypedDict):
     profiler: str
     modality: str
     default_reasoning_effort: str
-    outer_model: str
-    outer_reasoning_effort: str
-    inner_model: str
-    inner_reasoning_effort: str
 
 
 _LOCAL_ENVIRONMENT = RunEnvironmentRecord(name="local")
@@ -212,14 +209,12 @@ def _common_configuration() -> _CommonConfiguration:
         "profiler": "none",
         "modality": "kv_store",
         "default_reasoning_effort": "high",
-        "outer_model": "gpt-outer",
-        "outer_reasoning_effort": "medium",
-        "inner_model": "gpt-inner",
-        "inner_reasoning_effort": "low",
     }
 
 
-def _execution_record() -> RunExecutionRecord:
+def _execution_record(
+    role_ids: tuple[str, ...] = ("orchestrator", "implementer"),
+) -> RunExecutionRecord:
     common = _common_configuration()
     return RunExecutionRecord(
         model=common["model"],
@@ -231,10 +226,13 @@ def _execution_record() -> RunExecutionRecord:
         requested_profiler=common["profiler"],
         resolved_profiler=common["profiler"],
         default_reasoning_effort=common["default_reasoning_effort"],
-        outer_model=common["outer_model"],
-        outer_reasoning_effort=common["outer_reasoning_effort"],
-        inner_model=common["inner_model"],
-        inner_reasoning_effort=common["inner_reasoning_effort"],
+        agent_roles={
+            role_id: AgentRoleExecutionRecord(
+                model=f"gpt-{role_id}",
+                reasoning_effort="medium" if role_id == "orchestrator" else "low",
+            )
+            for role_id in role_ids
+        },
     )
 
 
@@ -245,7 +243,13 @@ class _RecordedRun:
 
     @property
     def execution(self) -> RunExecutionRecord:
-        return _execution_record()
+        roles = {
+            "single-agent": ("orchestrator", "implementer"),
+            "profile-guided-single-agent": ("orchestrator", "implementer"),
+            "plain": ("implementer", "judge", "perf_eval"),
+            "evolve": ("implementer", "judge", "profiler"),
+        }.get(self.orchestration.id, ("orchestrator", "implementer"))
+        return _execution_record(roles)
 
 
 def _agent_configuration(
@@ -1395,8 +1399,8 @@ def test_agent_resume_restores_its_configuration(
     assert config.model.name == "gpt-recorded"
     assert config.agent.cli_timeout == 321
     assert config.agent.driver == "omnigent"
-    assert config.agent.outer.model == "gpt-outer"
-    assert config.agent.inner.model == "gpt-inner"
+    assert config.agent.roles["orchestrator"].model == "gpt-orchestrator"
+    assert config.agent.roles["implementer"].model == "gpt-implementer"
 
 
 @pytest.mark.parametrize("loop_kind", ["agent", "profile-guided"])

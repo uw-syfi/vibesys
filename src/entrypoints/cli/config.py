@@ -73,20 +73,6 @@ def _restore_project_config(
             "default_reasoning_effort",
         ),
         (("thinking", "budget"), recorded.thinking_budget, frozenset(), "thinking_budget"),
-        (("agent", "outer", "model"), recorded.outer_model, frozenset(), "outer_model"),
-        (
-            ("agent", "outer", "reasoning_effort"),
-            recorded.outer_reasoning_effort,
-            frozenset(),
-            "outer_reasoning_effort",
-        ),
-        (("agent", "inner", "model"), recorded.inner_model, frozenset(), "inner_model"),
-        (
-            ("agent", "inner", "reasoning_effort"),
-            recorded.inner_reasoning_effort,
-            frozenset(),
-            "inner_reasoning_effort",
-        ),
     )
     changed: list[str] = []
     for path, expected, cli_overrides, field in specs:
@@ -96,26 +82,26 @@ def _restore_project_config(
     if changed:
         _project_resume_mismatch(changed)
 
-    outer = config.agent.outer.model_copy(
-        update={
-            "model": recorded.outer_model,
-            "reasoning_effort": recorded.outer_reasoning_effort,
-        }
-    )
-    inner = config.agent.inner.model_copy(
-        update={
-            "model": recorded.inner_model,
-            "reasoning_effort": recorded.inner_reasoning_effort,
-        }
-    )
-    agent = config.agent.model_copy(
-        update={
+    raw_roles = raw.get("agent", {}).get("roles", {}) if isinstance(raw, dict) else {}
+    if isinstance(raw_roles, dict):
+        unknown_roles = sorted(raw_roles.keys() - recorded.agent_roles.keys())
+        changed.extend(f"agent.roles.{role_id}" for role_id in unknown_roles)
+        for role_id, role in recorded.agent_roles.items():
+            for field in ("model", "reasoning_effort"):
+                supplied, value = _explicit_config_value(raw, ("agent", "roles", role_id, field))
+                if supplied and value != role[field]:
+                    changed.append(f"agent.roles.{role_id}.{field}")
+    if changed:
+        _project_resume_mismatch(changed)
+
+    agent = config.agent.__class__.model_validate(
+        {
+            **config.agent.model_dump(mode="python"),
             "backend": recorded.agent_backend,
             "driver": recorded.agent_driver,
             "cli_provider": recorded.cli_provider,
             "cli_timeout": recorded.cli_timeout,
-            "outer": outer,
-            "inner": inner,
+            "roles": recorded.agent_roles,
         }
     )
     return config.model_copy(

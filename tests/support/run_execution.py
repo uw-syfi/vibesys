@@ -11,4 +11,5 @@ def run_execution_record() -> RunExecutionRecord:
         compute_backend="cpu",
         requested_profiler="none",
         resolved_profiler="none",
+        agent_roles={},
     )

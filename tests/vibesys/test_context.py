@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from typing import TypedDict, Unpack
+from typing import Literal, TypedDict, Unpack
 from unittest.mock import patch
 
 import pytest
@@ -9,6 +9,7 @@ from tests.support import run_test_command
 
 from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
+from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.context import (
     _PreparedRun,
@@ -36,7 +37,7 @@ from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
-from vs_runtime.api import boot_trace
+from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
     RunEnvironmentSpec,
@@ -71,6 +72,7 @@ class _CreateContextOptions(TypedDict, total=False):
     task_root: Path | None
     remote_repo: str | None
     integration: LocalRunIntegration | None
+    agent_roles: tuple[AgentRole, ...]
 
 
 @pytest.fixture(autouse=True)
@@ -191,9 +193,16 @@ def _create_context(
         remote_repo=options.get("remote_repo"),
     )
     plugin = built_in_orchestrations().resolve(descriptor.id).plugin
+    agent_roles = options.get("agent_roles", plugin.agents)
     return open_run_resources(
         request,
         options.get("integration") or LocalRunIntegration(),
+        agent_specs=resolve_agent_specs(
+            request.config,
+            agent_roles,
+            backend=request.agent_backend,
+            provider=request.cli_provider,
+        ),
         resume_policy=plugin.resume_policy,
         backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
     )
@@ -544,6 +553,39 @@ def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     assert isinstance(resumed, OrchestrationRunManifest)
     assert resumed.orchestration.options["max_rounds"] == 2
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_detail"),
+    [
+        ("add", "missing recorded roles: auditor"),
+        ("remove", "unknown recorded roles: profiler"),
+    ],
+)
+def test_agent_v5_resume_rejects_changed_plugin_role_catalog(
+    tmp_path: Path,
+    change: Literal["add", "remove"],
+    expected_detail: str,
+) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    with _create_context(project, evaluator=evaluator) as first:
+        run_id = first.project_resources.state.run_id
+    plugin_roles = built_in_orchestrations().resolve("multi-agent").plugin.agents
+    selected_roles = (
+        (*plugin_roles, AgentRole(id="auditor", system_prompt="audit"))
+        if change == "add"
+        else tuple(role for role in plugin_roles if role.id != "profiler")
+    )
+
+    with pytest.raises(ConfigurationError, match=expected_detail):
+        _create_context(
+            project,
+            evaluator=evaluator,
+            exp_name=run_id,
+            existing=True,
+            agent_roles=selected_roles,
+        )
 
 
 def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) -> None:

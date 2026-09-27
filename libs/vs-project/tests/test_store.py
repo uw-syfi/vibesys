@@ -111,6 +111,7 @@ def test_version_5_run_manifest_round_trips_without_loop_configuration(tmp_path:
     raw = json.loads(_run_manifest_path(store, new_run.run_id).read_text())
     assert "configuration" not in raw
     assert raw["orchestration"]["id"] == "team-search"
+    assert raw["execution"]["agent_roles"] == {}
 
 
 @pytest.mark.parametrize(

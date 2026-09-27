@@ -110,6 +110,8 @@ def test_role_is_a_strict_complete_declaration() -> None:
                 "config_profile": "hidden alias",
             }
         )
+    with pytest.raises(ValidationError, match="id"):
+        _role("Bad Role")
 
 
 def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:

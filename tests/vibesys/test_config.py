@@ -34,7 +34,7 @@ level = "medium"
         assert config.repository.owner is None
         assert config.repository.visibility == "private"
 
-    def test_outer_and_inner_agent_models_are_parsed(self, tmp_path: Path) -> None:
+    def test_plugin_role_agent_models_are_parsed(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text(
             """\
@@ -48,11 +48,11 @@ level = "high"
 backend = "cli"
 cli_provider = "codex"
 
-[agent.outer]
+[agent.roles.orchestrator]
 model = "gpt-5.6-sol"
 reasoning_effort = "xhigh"
 
-[agent.inner]
+[agent.roles.implementer]
 model = "gpt-5.6-luna"
 reasoning_effort = "xhigh"
 """
@@ -60,10 +60,10 @@ reasoning_effort = "xhigh"
 
         config = load_config(cfg_file)
 
-        assert config.agent.outer.model == "gpt-5.6-sol"
-        assert config.agent.outer.reasoning_effort == "xhigh"
-        assert config.agent.inner.model == "gpt-5.6-luna"
-        assert config.agent.inner.reasoning_effort == "xhigh"
+        assert config.agent.roles["orchestrator"].model == "gpt-5.6-sol"
+        assert config.agent.roles["orchestrator"].reasoning_effort == "xhigh"
+        assert config.agent.roles["implementer"].model == "gpt-5.6-luna"
+        assert config.agent.roles["implementer"].reasoning_effort == "xhigh"
 
 
 class TestLoadConfigErrors:
@@ -337,54 +337,33 @@ class TestLoadConfigPresentationBoundary:
 
         assert config.model.name == "gpt-5.5"
 
-
-class TestLoadConfigPerfEval:
-    def test_load_levels_preserved(self, tmp_path: Path) -> None:
-        # [perf_eval].load_levels feeds the perf_eval prompt template; the
-        # allowlist loader dropped this section entirely.
+    def test_legacy_outer_role_section_is_rejected(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
 name = "claude-sonnet-4-6"
 
-[[perf_eval.load_levels]]
-rate = 1
-duration = 20
-max_tokens = 128
-
-[[perf_eval.load_levels]]
-rate = 8
-duration = 20
-max_tokens = 256
+[agent.outer]
+model = "gpt-legacy"
 """)
-        config = load_config(cfg_file)
-        levels = config.perf_eval.load_levels
-        assert levels is not None
-        assert [lvl.rate for lvl in levels] == [1, 8]
-        assert levels[1].max_tokens == 256
 
-    def test_perf_eval_defaults_to_none(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
-        config = load_config(cfg_file)
-        assert config.perf_eval.load_levels is None
+        with pytest.raises(ValueError, match="outer"):
+            load_config(cfg_file)
 
-    @pytest.mark.parametrize("field", ["rate", "duration", "max_tokens"])
-    @pytest.mark.parametrize("value", [0, -1])
-    def test_non_positive_load_level_value_is_rejected(
-        self, tmp_path: Path, field: str, value: object
-    ) -> None:
-        load_level = {"rate": 1, "duration": 20, "max_tokens": 128}
-        load_level[field] = value
+    def test_core_perf_eval_section_is_rejected(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text(
-            "[model]\n"
-            'name = "claude-sonnet-4-6"\n\n'
-            "[[perf_eval.load_levels]]\n"
-            f"rate = {load_level['rate']}\n"
-            f"duration = {load_level['duration']}\n"
-            f"max_tokens = {load_level['max_tokens']}\n"
+            '[model]\nname = "claude-sonnet-4-6"\n\n[perf_eval]\nload_levels = []\n'
         )
 
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(ValueError, match="perf_eval"):
+            load_config(cfg_file)
+
+    def test_invalid_role_id_is_rejected(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(
+            '[model]\nname = "gpt-5.6-sol"\n\n[agent.roles."Bad Role"]\nmodel = "m"\n'
+        )
+
+        with pytest.raises(ValueError, match="Bad Role"):
             load_config(cfg_file)

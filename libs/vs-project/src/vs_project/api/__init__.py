@@ -26,6 +26,7 @@ from vs_project._layout import (
 )
 from vs_project._logger import RunLogger, strip_ansi
 from vs_project._manifests import (
+    AgentRoleExecutionRecord,
     GitObjectId,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
@@ -63,6 +64,7 @@ __all__ = [
     "MAX_SOCKET_PATH_BYTES",
     "PROJECT_SCHEMA_VERSION",
     "RUN_SCHEMA_VERSION",
+    "AgentRoleExecutionRecord",
     "AmbiguousTaskError",
     "ConfigurationRoot",
     "FrameworkSnapshotStatus",

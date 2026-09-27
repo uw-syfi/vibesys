@@ -46,10 +46,6 @@ _CONFIG_ONLY_OPTIONS = frozenset(
         "agent_driver",
         "cli_timeout",
         "default_reasoning_effort",
-        "outer_model",
-        "outer_reasoning_effort",
-        "inner_model",
-        "inner_reasoning_effort",
         "metric_space",
         "profile_guided",
     }

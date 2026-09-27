@@ -21,6 +21,26 @@ VibeSys loads `agent.toml` from the process launch working directory if it
 exists, otherwise it uses built-in CLI defaults. It does not search parent
 directories.
 
+An orchestration plugin declares its agent role IDs. Global model and thinking
+settings apply to every declared role; sparse role entries override only the
+named role:
+
+```toml
+[model]
+name = "gpt-5.4"
+
+[thinking]
+level = "high"
+
+[agent.roles.orchestrator]
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+```
+
+Unknown role IDs are rejected against the selected orchestration before run
+resources open. The run manifest records the total resolved role map. Resume
+restores that map and rejects a plugin generation whose role IDs differ.
+
 ## Mental Model
 
 Several flags look independent, but they combine into one execution contract:

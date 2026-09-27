@@ -75,6 +75,7 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 
 ```mermaid
 graph TD
+    vibesys --> vibesys.errors
     vibesys.api --> vibesys
     vibesys.api --> vibesys.api.agent
     vibesys.api --> vibesys.api.auxiliary
@@ -279,6 +280,7 @@ graph TD
     server.settings --> vibesys.api
     server.tool_payloads --> vibesys.api
     server.transport --> server.api
+    vibesys --> vibesys.errors
     vibesys --> vs_agent
     vibesys --> vs_runtime
     vibesys --> vs_sandbox

@@ -92,6 +92,13 @@ class OrchestrationDescriptor(_CommittedManifest):
         return self
 
 
+class AgentRoleExecutionRecord(_CommittedManifest):
+    """Resolved model policy for one plugin-declared agent role."""
+
+    model: PortableText
+    reasoning_effort: PortableText | None = None
+
+
 class RunExecutionRecord(_CommittedManifest):
     """Resolved host settings needed to resume the same execution environment."""
 
@@ -105,11 +112,7 @@ class RunExecutionRecord(_CommittedManifest):
     resolved_profiler: PortableText
     default_reasoning_effort: PortableText | None = None
     thinking_budget: Annotated[int, Field(ge=-1)] | None = None
-    outer_model: PortableText | None = None
-    outer_reasoning_effort: PortableText | None = None
-    inner_model: PortableText | None = None
-    inner_reasoning_effort: PortableText | None = None
-    perf_eval_load_levels: list[dict[str, int]] | None = None
+    agent_roles: dict[Identifier, AgentRoleExecutionRecord]
     skills_dirs: list[str] = Field(default_factory=list)
 
 

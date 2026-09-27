@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
 from vibesys.constants import DomainName
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
@@ -27,7 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.config import Config
-    from vs_runtime.api import Workspace
+    from vs_runtime.api import AgentRole, Workspace
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,25 +93,59 @@ def agent_spec_from_config(
         driver=resolved_driver,
         provider=resolved_provider,
         model=model if model is not None else config.model.name,
-        role_models={
-            role: configured
-            for role, configured in {
-                "orchestrator": agent_cfg.outer.model,
-                "implementer": agent_cfg.inner.model,
-            }.items()
-            if configured is not None
-        },
         reasoning_effort=config.thinking.level,
         cli_timeout=agent_cfg.cli_timeout,
-        role_reasoning_efforts={
-            role: configured
-            for role, configured in {
-                "orchestrator": agent_cfg.outer.reasoning_effort,
-                "implementer": agent_cfg.inner.reasoning_effort,
-            }.items()
-            if configured is not None
-        },
     )
+
+
+def resolve_agent_specs(
+    config: Config,
+    roles: tuple[AgentRole, ...],
+    *,
+    backend: AgentBackend | str | None = None,
+    provider: str | None = None,
+) -> Mapping[str, AgentSpec]:
+    """Resolve one immutable execution spec per plugin-declared role.
+
+    Authored role entries are sparse overrides. Every authored key must name a
+    role in the selected plugin; every declared role is returned, inheriting
+    the global model and reasoning defaults when no override is present.
+    """
+    declared = {role.id for role in roles}
+    unknown = sorted(config.agent.roles.keys() - declared)
+    if unknown:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="agent_role_configuration_invalid",
+                stage="agent_configuration_validation",
+                message=(
+                    "agent configuration names roles not declared by the selected "
+                    f"orchestration: {', '.join(unknown)}"
+                ),
+            )
+        )
+    resolved: dict[str, AgentSpec] = {}
+    default_spec = agent_spec_from_config(
+        config,
+        backend=backend,
+        provider=provider,
+    )
+    for role in roles:
+        override = config.agent.roles.get(role.id)
+        resolved[role.id] = replace(
+            default_spec,
+            model=(
+                override.model
+                if override is not None and override.model is not None
+                else default_spec.model
+            ),
+            reasoning_effort=(
+                override.reasoning_effort
+                if override is not None and override.reasoning_effort is not None
+                else default_spec.reasoning_effort
+            ),
+        )
+    return MappingProxyType(resolved)
 
 
 def _profiler_tool(context: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
