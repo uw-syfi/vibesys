@@ -10,8 +10,10 @@ to adopt it. A broken store must never cost a completed turn.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from tests.support.run_execution import run_execution_record
@@ -179,6 +181,30 @@ def test_checkpoint_survives_a_new_store_instance(tmp_path: Path) -> None:
 
     assert reloaded is not None
     assert reloaded.session_id == "thr-xyz"
+
+
+def test_one_store_preserves_checkpoints_from_concurrent_clients(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    clients = 16
+    ready = Barrier(clients)
+
+    def checkpoint(client: int) -> None:
+        ready.wait()
+        _checkpoint(
+            store,
+            f"thread-{client}",
+            key=AgentSessionKey(SessionScope.MEMBER, f"worker-{client}"),
+        )
+
+    with ThreadPoolExecutor(max_workers=clients) as executor:
+        futures = [executor.submit(checkpoint, client) for client in range(clients)]
+        for future in futures:
+            future.result()
+
+    for client in range(clients):
+        record = store.get(AgentSessionKey(SessionScope.MEMBER, f"worker-{client}"))
+        assert record is not None
+        assert record.session_id == f"thread-{client}"
 
 
 def test_clear_forgets_only_the_named_key(tmp_path: Path) -> None:

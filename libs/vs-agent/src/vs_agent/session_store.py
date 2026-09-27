@@ -21,6 +21,7 @@ keys whose scope opts into durability are ever written (see
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -150,7 +151,9 @@ class DurableSessionStore:
 
     Each operation reloads the slot so the on-disk map, not an in-memory cache,
     is the source of truth across process restarts; the file is small and
-    written at most once per agent turn.
+    written at most once per agent turn. Mutations through one store instance
+    are serialized so concurrent agent clients cannot overwrite each other's
+    read-modify-write updates.
 
     Every filesystem and schema failure is reported through ``log`` and then
     swallowed: a malformed or unreadable map degrades this run to no session
@@ -168,6 +171,7 @@ class DurableSessionStore:
         """Bind the store to a local-namespace ``sessions.json`` slot."""
         self._slot = slot
         self._log = log
+        self._mutation_lock = RLock()
 
     def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:
         """Return the checkpoint for ``key``, or ``None``."""
@@ -190,23 +194,25 @@ class DurableSessionStore:
             # Not an error: unscoped calls fall back to a role key, and those
             # conversations belong to one process only.
             return
-        state = self._load()
-        state.sessions[str(key)] = ProviderSessionRecord(
-            spec_fingerprint=spec_fingerprint,
-            session_id=session_id,
-            provider=provider,
-            model=model,
-            role=role,
-        )
-        self._save(state)
+        with self._mutation_lock:
+            state = self._load()
+            state.sessions[str(key)] = ProviderSessionRecord(
+                spec_fingerprint=spec_fingerprint,
+                session_id=session_id,
+                provider=provider,
+                model=model,
+                role=role,
+            )
+            self._save(state)
 
     def clear(self, key: AgentSessionKey) -> None:
         """Forget any checkpoint for ``key``."""
         if not key.durable:
             return
-        state = self._load()
-        if state.sessions.pop(str(key), None) is not None:
-            self._save(state)
+        with self._mutation_lock:
+            state = self._load()
+            if state.sessions.pop(str(key), None) is not None:
+                self._save(state)
 
     def _load(self) -> AgentSessionState:
         try:
