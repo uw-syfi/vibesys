@@ -55,7 +55,6 @@ diff.
 ```bash
 uv run pytest path/to/test.py -k name              # narrowest first
 uv run python scripts/check_test_isolation.py      # ratchet; --write only lowers counts
-for i in $(seq 20); do uv run pytest path/to/test.py -q -p no:cacheprovider --no-cov || break; done
 uv run pytest path/to/test.py -n auto --no-cov -q  # parallel
 ```
 

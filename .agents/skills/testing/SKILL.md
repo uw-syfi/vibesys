@@ -60,5 +60,3 @@ a per-language reference; read the one for the language you are editing:
   counts.
 - Do not migrate unrelated tests to these rules. Apply them to new tests and to
   the tests you are already changing.
-- A test involving threads, processes, async work, or time must pass 20
-  consecutive runs and a parallel run before you hand it back.
