@@ -16,7 +16,6 @@ from tests.vibesys.loops.legacy_runner import run_orchestration
 from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
-from vibesys.loops.multi.orchestration import MultiProjector, ProfileMultiProjector
 from vibesys.loops.single.orchestration import SingleProjector
 from vibesys.orchestration.request import RunRequest
 from vibesys.profilers import ProfilerKind
@@ -145,8 +144,6 @@ def run_scripted(  # noqa: PLR0913  # LW-040006 [PLR0913]; the parameters are in
         "profile-guided-single-agent": SingleProjector(
             namespace="profile_single", orchestration_id="profile-guided-single-agent"
         ),
-        "multi-agent": MultiProjector(),
-        "profile-guided-multi-agent": ProfileMultiProjector(),
     }[orchestration_id]
 
     async def execute() -> bool:
