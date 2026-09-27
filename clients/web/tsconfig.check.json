@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["vite/client", "bun"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test.ts", "src/**/*.test.tsx", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test.ts", "src/**/*.test.tsx", "e2e/**/*.ts", "vite.config.ts", "playwright.config.ts"]
 }
