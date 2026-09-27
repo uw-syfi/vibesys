@@ -496,7 +496,7 @@ class ProjectMaterializer:
     @staticmethod
     def _is_git_worktree(path: Path) -> bool:
         git = shutil.which("git") or "git"
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010239 [S603]; this checks the supplied project path using a fixed non-shell Git command.
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-548123 [S603]; this checks the supplied project path using a fixed non-shell Git command.
             [git, "-C", str(path), "rev-parse", "--is-inside-work-tree"],
             check=False,
             capture_output=True,
