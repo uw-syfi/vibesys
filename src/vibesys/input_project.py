@@ -15,10 +15,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from vibesys.sdk_paths import (
+from vibesys.sdk_paths import packaged_sdk_root
+from vs_runtime.api.infrastructure import (
     InputProjectError,
     SDKRoots,
-    packaged_sdk_root,
     relative_sdk_source,
     resolve_sdk_source,
 )

@@ -49,7 +49,6 @@ from vibesys.runtime import (
     Writes,
 )
 from vibesys.schemas import SkillResourceSelection
-from vibesys.skills import build_skill_catalog, resolve_skill_selections
 from vs_agent.api import (
     AgentSessionKey,
     SessionScope,
@@ -63,6 +62,7 @@ from vs_runtime.api import (
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
+    SkillResourceRequest,
     StructuredResponseError,
     UnknownAgentRoleError,
     Workspace,
@@ -70,6 +70,7 @@ from vs_runtime.api import (
     validate_member_id,
     validate_workspace_writable_paths,
 )
+from vs_runtime.api.infrastructure import build_skill_catalog, resolve_skill_resources
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator, Mapping
@@ -169,8 +170,16 @@ def _filter_reply_skills(host: HostResources, reply: T) -> T:
             updates[name] = []
             continue
         try:
-            resolved, diagnostics = resolve_skill_selections(
-                selections, build_skill_catalog(sources)
+            resolution = resolve_skill_resources(
+                tuple(
+                    SkillResourceRequest(
+                        name=selection.skill,
+                        resource_paths=tuple(selection.resource_paths),
+                        purpose=selection.purpose,
+                    )
+                    for selection in selections
+                ),
+                build_skill_catalog(sources),
             )
         except (OSError, ValueError) as error:
             host.warning(
@@ -181,17 +190,15 @@ def _filter_reply_skills(host: HostResources, reply: T) -> T:
             )
             updates[name] = []
             continue
-        for diagnostic in diagnostics:
+        for diagnostic in resolution.diagnostics:
             host.warning(diagnostic, source=FrameworkSource.LOOP, source_label="skills")
         updates[name] = [
             SkillResourceSelection(
-                skill=item.skill,
-                resource_paths=[
-                    path.removeprefix(f"{item.skill}/") for path in item.resource_paths
-                ],
+                skill=item.name,
+                resource_paths=[path.removeprefix(f"{item.name}/") for path in item.resource_paths],
                 purpose=item.purpose,
             )
-            for item in resolved
+            for item in resolution.resolved
         ]
     return reply.model_copy(update=updates) if updates else reply
 

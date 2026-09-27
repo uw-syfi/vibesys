@@ -46,8 +46,6 @@
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "patch", "count": 11}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 20}
-{"path": "tests/packaging/test_resources_packaging.py", "rule": "patch", "count": 4}
-{"path": "tests/packaging/test_sdk_packaging.py", "rule": "patch", "count": 4}
 {"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_chat_factory.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_chat_resources.py", "rule": "patch", "count": 1}

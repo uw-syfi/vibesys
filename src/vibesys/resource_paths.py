@@ -11,26 +11,30 @@ not a stale staged copy.
 from __future__ import annotations
 
 from importlib.resources import files
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.constants import PROJECT_ROOT
+from vs_runtime.api.infrastructure import resolve_bundled_tree, resolve_packaged_tree
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def packaged_resources_dir() -> Path | None:
     """Return the wheel-staged ``vibesys/_resources`` directory, or ``None``."""
-    try:
-        base = Path(str(files("vibesys"))) / "_resources"
-    except (ModuleNotFoundError, TypeError):  # pragma: no cover - defensive
-        return None
-    return base if base.is_dir() else None
+    return resolve_packaged_tree(
+        package="vibesys", packaged_subdir="_resources", package_files=files
+    )
 
 
 def resources_root() -> Path | None:
     """Return the active resources tree: checkout first, wheel staging second."""
-    checkout = PROJECT_ROOT / "resources"
-    if checkout.is_dir():
-        return checkout
-    return packaged_resources_dir()
+    return resolve_bundled_tree(
+        PROJECT_ROOT / "resources",
+        package="vibesys",
+        packaged_subdir="_resources",
+        package_files=files,
+    )
 
 
 def profiler_support_dir(kind_value: str) -> Path | None:

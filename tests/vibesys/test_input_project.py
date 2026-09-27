@@ -7,10 +7,10 @@ import pytest
 
 from vibesys import input_project
 from vibesys.input_project import (
-    InputProjectError,
     discover_input_project,
     materialize_input_project,
 )
+from vs_runtime.api.infrastructure import InputProjectError
 
 if TYPE_CHECKING:
     from pathlib import Path

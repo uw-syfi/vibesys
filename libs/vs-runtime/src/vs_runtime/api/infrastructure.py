@@ -12,6 +12,7 @@ from enum import StrEnum
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
 )
@@ -39,6 +40,20 @@ from vs_runtime._macos_cpu_profiler import MacOSProfilerEffects, MacOSProfilerTo
 from vs_runtime._macos_cpu_profiler import collect as collect_macos_profile
 from vs_runtime._macos_cpu_profiler import detect_capability as detect_macos_profiler
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
+from vs_runtime._sdk_paths import (
+    InputProjectError,
+    SDKRoots,
+    relative_sdk_source,
+    resolve_sdk_source,
+)
+from vs_runtime._skills import (
+    SkillCatalogEntry,
+    SkillMetadataError,
+    build_skill_catalog,
+    discover_skill_dirs,
+    load_skill_frontmatter,
+    resolve_skill_resources,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -152,6 +167,7 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "InputProjectError",
     "LinuxProfileResult",
     "LinuxProfilerCapability",
     "LinuxProfilerDiagnostic",
@@ -167,12 +183,23 @@ __all__ = [
     "ModelVolumeProvisioner",
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
+    "SDKRoots",
+    "SkillCatalogEntry",
+    "SkillMetadataError",
+    "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",
     "create_model_request_reconciler",
     "detect_linux_profiler",
     "detect_macos_profiler",
+    "discover_skill_dirs",
+    "load_skill_frontmatter",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
+    "relative_sdk_source",
+    "resolve_bundled_tree",
+    "resolve_packaged_tree",
+    "resolve_sdk_source",
+    "resolve_skill_resources",
     "summarize_linux_profile",
 ]

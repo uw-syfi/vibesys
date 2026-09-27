@@ -7,14 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.schemas import SkillResourceSelection as PolicySkillResourceSelection
-from vibesys.skills import ResolvedSkillSelection, build_skill_catalog, resolve_skill_selections
 from vs_runtime.api import (
-    ResolvedSkillResources,
     SkillCatalogError,
     SkillResolution,
     SkillResourceRequest,
 )
+from vs_runtime.api.infrastructure import build_skill_catalog, resolve_skill_resources
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,38 +34,18 @@ class _Skills:
         if not sources:
             return SkillResolution(diagnostics=("no skill sources are installed",))
         try:
-            resolved, diagnostics = await self._host._run_blocking(self._resolve, requests, sources)
+            resolution = await self._host._run_blocking(self._resolve, requests, sources)
         except (OSError, ValueError) as error:
             detail = f"{type(error).__name__}: {error}"
             raise SkillCatalogError(detail) from error
-        return SkillResolution(
-            resolved=tuple(
-                ResolvedSkillResources(
-                    name=selection.skill,
-                    router_path=selection.router_path,
-                    resource_paths=selection.resource_paths,
-                    purpose=selection.purpose,
-                )
-                for selection in resolved
-            ),
-            diagnostics=tuple(diagnostics),
-        )
+        return resolution
 
     @staticmethod
     def _resolve(
         requests: tuple[SkillResourceRequest, ...], sources: tuple[Path, ...]
-    ) -> tuple[list[ResolvedSkillSelection], list[str]]:
-        """Adapt neutral requests to VibeSys's catalog and validation policy."""
-        catalog = build_skill_catalog(sources)
-        policy_requests = [
-            PolicySkillResourceSelection(
-                skill=request.name,
-                resource_paths=list(request.resource_paths),
-                purpose=request.purpose,
-            )
-            for request in requests
-        ]
-        return resolve_skill_selections(policy_requests, catalog)
+    ) -> SkillResolution:
+        """Resolve neutral requests against the installed runtime catalog."""
+        return resolve_skill_resources(requests, build_skill_catalog(sources))
 
 
 __all__ = ["_Skills"]
