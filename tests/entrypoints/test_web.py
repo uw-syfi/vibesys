@@ -98,6 +98,9 @@ def test_parser_builds_each_browser_workflow() -> None:
         True,
         ["http://127.0.0.1:5173"],
     )
+    assert _parser().parse_args(["live", "--demo", "--open"]).open is True
+    assert _parser().parse_args(["live", "--demo", "--no-open"]).open is False
+    assert _parser().parse_args(["live", "--demo", "--no-open", "--open"]).open is True
 
     tunnel = _parser().parse_args(["tunnel", "--host", "user@host", "--url", "URL"])
     assert (tunnel.command, tunnel.host, tunnel.browser_origin) == (

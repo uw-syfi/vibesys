@@ -68,8 +68,26 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 
 ## Remote host and local laptop
 
-The gateway intentionally binds only to loopback. Start it on the remote host
-with a fixed port and the SSH target that you will use from your laptop:
+The gateway intentionally binds only to loopback. For the one-command demo,
+create the tunnel when connecting from the laptop:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 USER@chelan3
+```
+
+In that remote shell, run:
+
+```bash
+cd /path/to/VibeSys
+./scripts/run-web-ui.sh --port 8765
+```
+
+The script detects the SSH session and does not try to open a browser on the
+remote host. Open its printed `VibeSys web UI ready` URL in the laptop browser;
+the existing SSH connection forwards both HTTP and WebSocket traffic.
+
+For the separate Vite browser harness workflow, start the gateway on the remote
+host with a fixed port and the SSH target that you will use from your laptop:
 
 ```bash
 uv run python -m entrypoints.web live --demo --port 8765 --ssh-target USER@chelan3

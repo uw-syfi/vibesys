@@ -62,7 +62,12 @@ def _parser() -> argparse.ArgumentParser:
     live.add_argument("--ssh-target", default=None, metavar="USER@HOST")
     live.add_argument("--browser-origin", action="append", default=[])
     live.add_argument("--no-build", action="store_true")
-    live.add_argument("--open", action="store_true", help="ask the host to open a browser")
+    live.add_argument(
+        "--open",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="ask the host to open a browser",
+    )
     live.add_argument(
         "run_args",
         nargs=argparse.REMAINDER,

@@ -6,13 +6,21 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _recording_executable(path: Path, marker_name: str) -> None:
     path.write_text(f'#!/usr/bin/env bash\nprintf \'%s\\n\' "$PWD" "$@" > "${{{marker_name}}}"\n')
     path.chmod(0o755)
 
 
-def test_web_ui_script_bypasses_tui_launcher_and_bootstraps_clients(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("ssh_connection", "browser_flag"),
+    [(None, "--open"), ("192.0.2.10 50000 192.0.2.20 22", "--no-open")],
+)
+def test_web_ui_script_bypasses_tui_launcher_and_bootstraps_clients(
+    tmp_path: Path, ssh_connection: str | None, browser_flag: str
+) -> None:
     root = tmp_path / "checkout"
     fake_bin = tmp_path / "bin"
     root.mkdir()
@@ -28,6 +36,10 @@ def test_web_ui_script_bypasses_tui_launcher_and_bootstraps_clients(tmp_path: Pa
         "PNPM_MARKER": str(pnpm_marker),
         "UV_MARKER": str(uv_marker),
     }
+    if ssh_connection is not None:
+        environment["SSH_CONNECTION"] = ssh_connection
+    else:
+        environment.pop("SSH_CONNECTION", None)
 
     # test-isolation: execute only the repository script with fake uv and pnpm binaries.
     subprocess.run(  # noqa: S603  # lint-waiver: LW-101102 [S603]; execute the fixed repository launcher against test-owned fake tools
@@ -56,7 +68,7 @@ def test_web_ui_script_bypasses_tui_launcher_and_bootstraps_clients(tmp_path: Pa
         "entrypoints.web",
         "live",
         "--demo",
-        "--open",
+        browser_flag,
         "--port",
         "9123",
     ]
