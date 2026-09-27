@@ -15,8 +15,8 @@ if TYPE_CHECKING:
         AgentCapabilities,
         AgentSessionKey,
         AgentSpec,
-        MCPServerSpec,
         SessionScope,
+        ToolServerDescriptor,
     )
     from vs_sandbox.api import HostResource
 
@@ -89,7 +89,7 @@ class AgentHandle(Protocol):
         label: str = "",
         session_key: AgentSessionKey | None = None,
         reuse_session: bool | None = None,
-        mcp_servers: list[MCPServerSpec] | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
     ) -> T:
         """Run a typed turn, retaining the caller's fallback and session policy."""
         ...

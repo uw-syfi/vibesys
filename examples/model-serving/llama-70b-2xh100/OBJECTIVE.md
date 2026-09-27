@@ -12,34 +12,40 @@ and the model served, not how work is split.
 
 ## Workload
 
-Run the benchmark exactly as written unless the evaluator passes a different
-`--url` or `--output-json`:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different server `--url`:
 
 ```bash
-uv run python benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model meta-llama/Llama-3.3-70B-Instruct \
+  --tokenizer meta-llama/Llama-3.3-70B-Instruct \
+  --tokenizer-revision 6f6073b423013f6a7d4d9f39144961bfbfbc386b \
+  --request-count 64 \
+  --input-tokens 256 --output-tokens 128 --concurrency 8 --url <SERVER_URL>
 ```
 
-Default load:
+Default workload:
 
-- `/v1/completions` and `/v1/chat/completions`
-- streaming responses
-- closed-loop concurrency 8
-- 30 second duration
-- synthetic prompts ~256 words
-- `max_tokens = 128`
+- 64 independent streamed `/v1/completions` requests
+- saturated replay, concurrency 8
+- 256 input tokens and 128 output tokens per request
 - `temperature = 0`
 
-Standard chat/completion workload. Candidates must not reduce prompt length,
-duration, concurrency, or max output tokens to improve the score.
+The RF request driver owns request generation and measurement. Candidates must
+not reduce request count, token lengths, concurrency, or output target to improve
+the score. Prompt and output lengths are exact token counts, replacing the
+legacy approximate word count and wall-clock duration window.
 
 ## Metrics
 
 Pareto axes:
 
-- `aggregate_throughput`: output tokens per second, maximize.
-- `p99_latency_ms`: end-to-end request latency in milliseconds, minimize.
+- `output_token_throughput_per_s`: RF-measured output tokens per second, maximize.
+- `p90_latency_ms`: RF-measured end-to-end request latency in milliseconds, minimize.
 
-The scalar fallback/headline metric is `aggregate_throughput`.
+These intentionally replace legacy `aggregate_throughput` (which counted
+nonempty SSE chunks as tokens) and `p99_latency_ms`. Scores from the old and new
+protocols are not directly comparable.
 
 ## Correctness
 

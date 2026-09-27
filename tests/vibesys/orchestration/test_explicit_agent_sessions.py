@@ -569,6 +569,7 @@ def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) 
                 "vibesys.orchestrations.issue_queue.tool_server",
                 "issues.json",
                 ".vibesys/issue-tool-policy.json",
+                ".vibesys/issue-tracker.json",
             ),
         )
     ]

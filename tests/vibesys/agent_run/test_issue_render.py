@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Required, TypedDict, Unpack
 
 from vibesys.orchestrations.issue_queue.artifacts import render_all, render_issue
-from vs_issue_board.api import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
+from vs_issue_tracker.api import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
 
 
 class _IssueOptions(TypedDict, total=False):

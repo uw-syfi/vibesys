@@ -710,4 +710,14 @@ def _build_plain_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-rounds", type=int, default=5)
     parser.add_argument("--max-attempts-per-issue", type=int, default=3)
     parser.add_argument("--max-issues-per-perf-eval", type=int, default=3)
+    parser.add_argument(
+        "--tracker-backend",
+        choices=("local", "github"),
+        default="local",
+        help="Issue and progress persistence backend (default: local).",
+    )
+    parser.add_argument(
+        "--tracker-repository",
+        help="GitHub OWNER/REPOSITORY used when --tracker-backend=github.",
+    )
     return parser

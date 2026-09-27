@@ -1,26 +1,26 @@
-## Background
+## Task objective
 
-{% include "_serving_constraints.j2" %}
+{{ objective }}
 
-This is the foundation issue. Subsequent perf, feature, and bug issues filed by the perf evaluator and judge will refine this implementation over time.
+Implement and validate the candidate against this objective and the task's
+candidate contract. Treat the objective and repository documentation as the
+source of truth for required behavior.
 
 ## Acceptance criteria
 
-- The entry module imported by the accuracy checker exports a `VibeServeModel` class with the `from_pretrained` / `generate` interface described above.
-- A FastAPI server exposes both `/v1/completions` (SSE streaming) and `/health` endpoints.
-- The model loads on GPU with `bfloat16`/`float16` from `/model` — no `float32`, no CPU, no internet fetches.
-- Every layer of the model architecture is implemented in the workspace code (no `LlamaModel` / `LlamaAttention` imports).
-- The project is initialized with `uv init --no-vcs`, dependencies added via `uv add`, and scripts run through `uv run`.
-- The `/v1/completions` SSE stream emits a non-empty `text` delta per generated token, and the benchmark reports `token_throughput > 0` with non-null `ttft_ms` / `tpot_ms`.
+{% if reference_path %}
+- Use the reference material at `{{ reference_path }}` where it helps explain the task contract.
+{% endif %}
 {% if accuracy_command %}
-- The accuracy checker command `{{ accuracy_command }}` passes when run against `VibeServeModel`.
+- The configured correctness checker passes: `{{ accuracy_command }}`.
 {% endif %}
 {% if benchmark_command %}
-- The benchmark command `{{ benchmark_command }}` completes at least one request and reports `token_throughput > 0`.
+- The configured benchmark completes and reports its declared metric: `{{ benchmark_command }}`.
 {% endif %}
-- A pytest test suite covers `/health`, `/v1/completions`, the accuracy checker, and a benchmark sanity run.
-- All tests pass via `uv run pytest -v`.
+- Add or update focused tests for behavior you change, and run the relevant tests.
+{% if runtime_notes %}
 
-## Notes
+## Runtime notes
 
-This is the initial bootstrap issue auto-created by the issue-loop on the first iteration. Resolving it brings the workspace to "minimum viable serving"; performance optimizations and bug fixes will follow as separate issues filed by the perf evaluator and judge.
+{{ runtime_notes }}
+{% endif %}

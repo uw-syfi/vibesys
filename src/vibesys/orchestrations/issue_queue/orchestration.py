@@ -24,19 +24,30 @@ from vibesys.orchestrations.issue_queue.prompts import (
     judge_message,
     performance_message,
 )
-from vs_issue_board.api import Issue, IssueBoard, IssueStatus, IssueType
+from vs_issue_tracker.api import (
+    Issue,
+    IssueStatus,
+    IssueTracker,
+    IssueTrackerSession,
+    IssueType,
+    ProgressLog,
+    open_issue_tracker_session,
+)
 from vs_runtime.api import AgentSession, RunHost, RunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pydantic import BaseModel
+
 _ISSUES_FILE = "issues.json"
 _ISSUES_DIRECTORY = ".vibesys/issues"
 _PROGRESS_FILE = "progress.md"
 _TOOL_POLICY_FILE = ".vibesys/issue-tool-policy.json"
+_TRACKER_CONFIG_FILE = ".vibesys/issue-tracker.json"
 
 
-def _write_model(path: Path, value: IssueToolPolicy) -> None:
+def _write_model(path: Path, value: BaseModel) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(value.model_dump_json(indent=2), encoding="utf-8")
@@ -64,7 +75,7 @@ class _IssueQueueRun:
         self.options = options
         self.workspace = host.workspaces.root
         self.root = self.workspace.path
-        self._board: IssueBoard | None = None
+        self._tracker_session: IssueTrackerSession | None = None
         self.state = IssueQueueState()
         self.sessions: _Sessions | None = None
         self.resuming = False
@@ -90,11 +101,16 @@ class _IssueQueueRun:
             member_id="issue-queue-perf-evaluator",
         )
         self.sessions = _Sessions(implementer, judge, performance)
-        self._board = IssueBoard(self.root / _ISSUES_FILE)
-        render_all(self.root / _ISSUES_DIRECTORY, self.board)
-        progress = self.root / _PROGRESS_FILE
-        if not progress.exists():
-            progress.write_text("# Experiment Progress\n\n", encoding="utf-8")
+        _write_model(self.root / _TRACKER_CONFIG_FILE, self.options.tracker)
+        self._tracker_session = open_issue_tracker_session(
+            self.options.tracker,
+            local_store_path=self.root / _ISSUES_FILE,
+            local_progress_path=self.root / _PROGRESS_FILE,
+            tool_store_path=_ISSUES_FILE,
+            run_id=self.host.run_id,
+            view_sink=lambda issues: render_all(self.root / _ISSUES_DIRECTORY, issues),
+        )
+        self.tracker_session.refresh()
 
         if not self.state.bootstrap_done:
             self.board.create(
@@ -131,16 +147,26 @@ class _IssueQueueRun:
         return self.sessions
 
     @property
-    def board(self) -> IssueBoard:
-        """Return the issue board after session acquisition succeeds."""
-        if self._board is None:
+    def tracker_session(self) -> IssueTrackerSession:
+        """Return the storage-neutral tracker resources for this run."""
+        if self._tracker_session is None:
             message = "issue queue is not initialized"
             raise RuntimeError(message)
-        return self._board
+        return self._tracker_session
+
+    @property
+    def board(self) -> IssueTracker:
+        """Return the issue tracker after session acquisition succeeds."""
+        return self.tracker_session.tracker
+
+    @property
+    def progress(self) -> ProgressLog:
+        """Return the run's storage-neutral progress log."""
+        return self.tracker_session.progress
 
     async def commit(self, label: str) -> None:
         """Persist the aggregate and its policy artifacts with the root workspace."""
-        render_all(self.root / _ISSUES_DIRECTORY, self.board)
+        self.tracker_session.refresh()
         await self.host.state.commit(self.state, workspace=self.workspace, label=label)
 
     async def transition(
@@ -168,10 +194,6 @@ class _IssueQueueRun:
             None,
         )
 
-    @property
-    def progress_path(self) -> Path:
-        return self.root / _PROGRESS_FILE
-
 
 def _resume_point(run: _IssueQueueRun) -> tuple[int, IssueQueuePhase, int | None]:
     state = run.state
@@ -196,9 +218,7 @@ async def _implement(run: _IssueQueueRun, issue: Issue, iteration: int) -> Issue
         note=response.summary[:200],
         payload=response.model_dump(mode="json"),
     )
-    append_progress(
-        run.progress_path, f"Iteration {iteration}: implement issue #{issue.id}", response
-    )
+    append_progress(run.progress, f"Iteration {iteration}: implement issue #{issue.id}", response)
     return updated
 
 
@@ -216,7 +236,7 @@ async def _judge(run: _IssueQueueRun, issue: Issue, iteration: int) -> IssueJudg
         response=IssueJudgeResponse,
     )
     response = response.model_copy(update={"issue_id": issue.id})
-    run.board.reload()
+    run.tracker_session.refresh()
     status = IssueStatus.CLOSED if response.verdict == "pass" else IssueStatus.OPEN
     note = (
         f"closed by judge after attempt {issue.attempts}"
@@ -231,7 +251,7 @@ async def _judge(run: _IssueQueueRun, issue: Issue, iteration: int) -> IssueJudg
         note=note,
         payload=response.model_dump(mode="json"),
     )
-    append_progress(run.progress_path, f"Iteration {iteration}: review issue #{issue.id}", response)
+    append_progress(run.progress, f"Iteration {iteration}: review issue #{issue.id}", response)
     return response
 
 
@@ -343,7 +363,7 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
             ),
             response=IssuePerfEvalResponse,
         )
-        run.board.reload()
+        run.tracker_session.refresh()
         recorded = PerformanceRecord(
             iteration=iteration,
             throughput_trend=response.throughput_trend,
@@ -352,7 +372,7 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
             new_issue_ids=response.new_issue_ids,
         )
         run.state = run.state.append_performance(recorded)
-        append_progress(run.progress_path, f"Iteration {iteration}: performance", response)
+        append_progress(run.progress, f"Iteration {iteration}: performance", response)
         await run.commit(f"issue_queue: record performance evaluation {iteration}")
 
     if not run.board.list(status=IssueStatus.OPEN) and not recorded.new_issue_ids:

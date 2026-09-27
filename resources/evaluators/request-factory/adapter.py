@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,10 +14,11 @@ if TYPE_CHECKING:
 
 _FORWARD_PREFIX_LENGTH = 3
 _USAGE = "usage: adapter.py --engine <path> -- <script> [arguments ...]"
+_FIXED_TEXT_DRIVER_ENV = "VIBESYS_REQUEST_FACTORY_FIXED_TEXT_DRIVER"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Inject the installed engine into one task-owned benchmark adapter."""
+    """Inject installed RF resources into one task-owned benchmark adapter."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if (
         len(arguments) <= _FORWARD_PREFIX_LENGTH
@@ -27,8 +29,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     engine = arguments[1]
     script = arguments[3]
     script_arguments = arguments[4:]
+    environment = {
+        **os.environ,
+        _FIXED_TEXT_DRIVER_ENV: str(Path(__file__).with_name("fixed_text.py")),
+    }
     # lint-waiver: LW-008028 [S606]; Replacing the adapter process preserves direct argv execution and signal forwarding without a shell.
-    os.execv(  # noqa: S606
+    os.execve(  # noqa: S606
         sys.executable,
         [
             sys.executable,
@@ -37,5 +43,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             engine,
             *script_arguments,
         ],
+        environment,
     )
     return 0  # pragma: no cover
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

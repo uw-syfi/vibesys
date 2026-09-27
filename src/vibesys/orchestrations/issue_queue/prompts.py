@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vibesys.orchestrations.issue_queue.models import IssueQueueOptions, IssueQueueState
-    from vs_issue_board.api import Issue
+    from vs_issue_tracker.api import Issue
     from vs_runtime.api import RunFacts
 
 

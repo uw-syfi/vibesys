@@ -21,7 +21,6 @@ class IssuePerfEvalContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     load_levels: list[LoadLevelCfg] | None
-    progress_path: str | None
     perf_metrics_path: str
     issue_create_cap: int
     benchmark_command: str | None

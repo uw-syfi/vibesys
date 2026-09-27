@@ -6,7 +6,7 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
 
-from vs_issue_board.api import Issue, IssueBoard, IssueStatus
+from vs_issue_tracker.api import Issue, IssueStatus, IssueTracker, ProgressLog
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,9 +76,9 @@ def render_issue(issue: Issue) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_all(directory: Path, board: IssueBoard) -> None:
-    """Regenerate the derived markdown view from authoritative ``issues.json``."""
-    issues = board.list()
+def render_all(directory: Path, source: IssueTracker | list[Issue]) -> None:
+    """Regenerate the derived Markdown view from an issue snapshot."""
+    issues = source if isinstance(source, list) else source.list()
     directory.mkdir(parents=True, exist_ok=True)
     expected = {_filename(issue) for issue in issues}
     for stale in directory.glob("[0-9][0-9][0-9][0-9]-*.md"):
@@ -105,17 +105,11 @@ def render_all(directory: Path, board: IssueBoard) -> None:
     _write(directory / "INDEX.md", "\n".join(index))
 
 
-def append_progress(path: Path, heading: str, response: BaseModel) -> None:
+def append_progress(progress: ProgressLog, heading: str, response: BaseModel) -> None:
     """Append a compact human-readable record of one paid turn."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text("# Experiment Progress\n\n", encoding="utf-8")
     payload = response.model_dump(mode="json")
-    with path.open("a", encoding="utf-8") as stream:
-        stream.write(f"## {heading}\n\n")
-        for line in _payload_lines(payload):
-            stream.write(f"{line}\n")
-        stream.write("\n")
+    lines = [f"## {heading}", "", *_payload_lines(payload), ""]
+    progress.append("\n".join(lines) + "\n")
 
 
 __all__ = ["append_progress", "render_all", "render_issue"]

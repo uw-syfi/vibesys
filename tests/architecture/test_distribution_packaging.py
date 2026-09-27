@@ -24,7 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_DISTRIBUTIONS = {
     "vs-evaluator-protocol",
     "vs-github",
-    "vs-issue-board",
+    "vs-issue-tracker",
     "vs-loop-state",
     "vs-project",
     "vs-prompts",
@@ -34,7 +34,7 @@ INTERNAL_DISTRIBUTIONS = {
 INTERNAL_IMPORT_PACKAGES = {
     "vs_evaluator_protocol",
     "vs_github",
-    "vs_issue_board",
+    "vs_issue_tracker",
     "vs_loop_state",
     "vs_project",
     "vs_prompts",

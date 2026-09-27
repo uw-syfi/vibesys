@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
+from vs_issue_tracker.api import IssueTrackerConfig
+
 if TYPE_CHECKING:
-    from vs_issue_board.api import Issue
+    from vs_issue_tracker.api import Issue
 
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
@@ -35,6 +37,7 @@ class IssueQueueOptions(_StrictModel):
     max_attempts_per_issue: PositiveInt
     max_issues_per_perf_eval: PositiveInt
     load_levels: tuple[LoadLevel, ...] | None = None
+    tracker: IssueTrackerConfig = Field(default_factory=IssueTrackerConfig.local)
 
     @field_validator("load_levels", mode="before")
     @classmethod

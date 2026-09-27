@@ -24,6 +24,7 @@ from vs_agent.api import (
     AgentSessionKey,
     AgentUsage,
     SessionScope,
+    StdioServerDescriptor,
 )
 from vs_agent.contracts import (
     AgentExecutionPolicy,
@@ -32,6 +33,7 @@ from vs_agent.contracts import (
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
+    MCPServerSpec,
     SessionDisposition,
 )
 
@@ -703,3 +705,36 @@ def test_invoke_uses_fallback_only_for_unparseable_output(tmp_path: Path) -> Non
 
     assert response == _Response(answer="fallback")
     assert fallback_calls == 1
+
+
+def test_invoke_translates_generic_tool_server_for_the_driver(tmp_path: Path) -> None:
+    session = _FakeSession(results=[AgentTurnResult('{"answer":"done"}')])
+    driver = _FakeDriver([session])
+    client = AgentClient(driver, event_sink=output_sink())
+    descriptor = StdioServerDescriptor(
+        name="issues",
+        command="python",
+        args=("-m", "issue_tools"),
+        env=(("VIBESYS_RUN", "run-1"),),
+    )
+
+    response = client.invoke(
+        kind="judge",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        response_cls=_Response,
+        fallback_factory=lambda: _Response(answer="fallback"),
+        round_label="judge #1",
+        tool_servers=[descriptor],
+    )
+
+    assert response == _Response(answer="done")
+    assert driver.specs[0].mcp_servers == (
+        MCPServerSpec(
+            name="issues",
+            command="python",
+            args=("-m", "issue_tools"),
+            env=(("VIBESYS_RUN", "run-1"),),
+        ),
+    )

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.profilers import mcp_spec as profiler_mcp_spec
-from vs_agent.api import MCPServerSpec, expose_as_tools
+from vibesys.profilers import tool_server as profiler_tool_server
+from vs_agent.api import ToolServerDescriptor, expose_as_tools
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -27,31 +27,29 @@ class _ProfilerToolHost(Protocol):
         ...
 
 
-def _profiler_tool(host: object, _workspace: object) -> tuple[MCPServerSpec, ...]:
+def _profiler_tool(host: object, _workspace: object) -> tuple[ToolServerDescriptor, ...]:
     """Bind the selected profiler's analysis server to one agent session."""
     resolved = cast("_ProfilerToolHost", host)
-    spec = profiler_mcp_spec(resolved.environment.profiler_kind)
+    spec = profiler_tool_server(resolved.environment.profiler_kind)
     return () if spec is None else (spec,)
 
 
-def _issue_board_tool(_host: object, _workspace: object) -> tuple[MCPServerSpec, ...]:
+def _issue_board_tool(_host: object, _workspace: object) -> tuple[ToolServerDescriptor, ...]:
     """Bind the fixed issue-board server to workspace-relative policy artifacts."""
-    descriptor = expose_as_tools(
-        name="vibesys-issue-board",
-        entrypoint_module="vibesys.orchestrations.issue_queue.tool_server",
-        entrypoint_args=("issues.json", ".vibesys/issue-tool-policy.json"),
-    )
     return (
-        MCPServerSpec(
-            name=descriptor.name,
-            command=descriptor.command,
-            args=descriptor.args,
-            env=descriptor.env,
+        expose_as_tools(
+            name="vibesys-issue-board",
+            entrypoint_module="vibesys.orchestrations.issue_queue.tool_server",
+            entrypoint_args=(
+                "issues.json",
+                ".vibesys/issue-tool-policy.json",
+                ".vibesys/issue-tracker.json",
+            ),
         ),
     )
 
 
-AGENT_TOOL_BINDINGS: Mapping[str, Callable[[object, object], tuple[MCPServerSpec, ...]]] = {
+AGENT_TOOL_BINDINGS: Mapping[str, Callable[[object, object], tuple[ToolServerDescriptor, ...]]] = {
     "issue-board": _issue_board_tool,
     "profiler": _profiler_tool,
 }

@@ -24,12 +24,14 @@ from pydantic import BaseModel
 from vs_agent.contracts import AgentCapabilities, MCPServerSpec
 from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+from vs_agent.tools import StdioServerDescriptor
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
+    from vs_agent.tools import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
 
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is
@@ -69,9 +71,19 @@ class FakeInvocation:
     env: dict[str, str] | None
     invocation_id: str | None
     progress: AgentProgress | None
-    mcp_servers: list[MCPServerSpec] | None
+    tool_servers: list[ToolServerDescriptor] | None
     reuse_session: bool | None
     session_key: AgentSessionKey | None
+
+    @property
+    def mcp_servers(self) -> list[MCPServerSpec] | None:
+        """Compatibility view of the generic tool declarations."""
+        if self.tool_servers is None:
+            return None
+        return [
+            MCPServerSpec(name=item.name, command=item.command, args=item.args, env=item.env)
+            for item in self.tool_servers
+        ]
 
 
 @dataclass(slots=True)
@@ -137,7 +149,7 @@ class FakeAgentClient:
         """Create a fake client; see the class docstring for defaults.
 
         ``capabilities`` overrides the reported feature set (e.g. to report
-        ``mcp_servers=True`` for a backend that hosts issue-board tools); when
+        ``tool_servers=True`` for a backend that hosts issue-tracker tools); when
         omitted it is ``AgentCapabilities(session_reuse=session_reuse)``.
         """
         # Instance attribute shadows the class default so a test can report a
@@ -348,6 +360,7 @@ class FakeAgentClient:
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -364,6 +377,7 @@ class FakeAgentClient:
             env=env,
             invocation_id=invocation_id,
             progress=progress,
+            tool_servers=tool_servers,
             mcp_servers=mcp_servers,
             reuse_session=reuse_session,
             session_key=session_key,
@@ -384,6 +398,7 @@ class FakeAgentClient:
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
@@ -400,6 +415,7 @@ class FakeAgentClient:
             env=env,
             invocation_id=invocation_id,
             progress=progress,
+            tool_servers=tool_servers,
             mcp_servers=mcp_servers,
             reuse_session=reuse_session,
             session_key=session_key,
@@ -424,6 +440,7 @@ class FakeAgentClient:
         env: dict[str, str] | None,
         invocation_id: str | None,
         progress: AgentProgress | None,
+        tool_servers: list[ToolServerDescriptor] | None,
         mcp_servers: list[MCPServerSpec] | None,
         reuse_session: bool | None,
         session_key: AgentSessionKey | None,
@@ -439,7 +456,20 @@ class FakeAgentClient:
             env=env,
             invocation_id=invocation_id,
             progress=progress,
-            mcp_servers=mcp_servers,
+            tool_servers=[
+                *(tool_servers or ()),
+                *(
+                    StdioServerDescriptor(
+                        name=item.name,
+                        command=item.command,
+                        args=item.args,
+                        env=item.env,
+                    )
+                    for item in mcp_servers or ()
+                ),
+            ]
+            if tool_servers is not None or mcp_servers is not None
+            else None,
             reuse_session=reuse_session,
             session_key=session_key,
         )

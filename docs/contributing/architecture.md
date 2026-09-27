@@ -43,6 +43,7 @@ graph TD
     entrypoints --> vibesys
     entrypoints --> vs_agent
     entrypoints --> vs_github
+    entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys
     server --> vibesys
@@ -53,7 +54,7 @@ graph TD
     vibesys --> vs_agent
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
-    vibesys --> vs_issue_board
+    vibesys --> vs_issue_tracker
     vibesys --> vs_loop_state
     vibesys --> vs_project
     vibesys --> vs_prompts
@@ -62,6 +63,7 @@ graph TD
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
+    vs_issue_tracker --> vs_github
     vs_runtime --> vs_sandbox
 ```
 
@@ -261,6 +263,7 @@ graph TD
     entrypoints --> vibesys.api.evolve
     entrypoints --> vs_agent
     entrypoints --> vs_github
+    entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys.api
     server --> vs_agent
@@ -502,7 +505,6 @@ graph TD
     vibesys.orchestration.state --> vibesys.orchestration.view
     vibesys.orchestration.state --> vs_project
     vibesys.orchestration.state --> vs_runtime
-    vibesys.orchestration.tools --> vs_agent
     vibesys.orchestration.workspaces --> vibesys
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
@@ -519,7 +521,7 @@ graph TD
     vibesys.orchestrations --> vibesys.search.hypothesis
     vibesys.orchestrations --> vibesys.search.population
     vibesys.orchestrations --> vibesys.search.profile_focus
-    vibesys.orchestrations --> vs_issue_board
+    vibesys.orchestrations --> vs_issue_tracker
     vibesys.orchestrations --> vs_prompts
     vibesys.orchestrations --> vs_runtime
     vibesys.orchestrations.agent_options --> vibesys
@@ -550,7 +552,7 @@ graph TD
     vibesys.roles --> vibesys.search.hypothesis
     vibesys.roles --> vibesys.search.population
     vibesys.roles --> vs_agent
-    vibesys.roles --> vs_issue_board
+    vibesys.roles --> vs_issue_tracker
     vibesys.roles --> vs_loop_state
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends
@@ -582,6 +584,7 @@ graph TD
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
+    vs_issue_tracker --> vs_github
     vs_runtime --> vs_sandbox
 ```
 [//]: # (tach-graph:end)

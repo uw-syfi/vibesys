@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
-    from vs_agent.api import AgentClientProtocol, MCPServerSpec
+    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
     from vs_runtime.api import RunStatus, Workspace
 
 
@@ -32,7 +32,9 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     gate_executor: GateExecutor | None = None,
-    agent_tool_bindings: Mapping[str, Callable[[object, Workspace], tuple[MCPServerSpec, ...]]]
+    agent_tool_bindings: Mapping[
+        str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
+    ]
     | None = None,
 ) -> RunStatus:
     """Open the runtime adapter and invoke one prepared plugin."""

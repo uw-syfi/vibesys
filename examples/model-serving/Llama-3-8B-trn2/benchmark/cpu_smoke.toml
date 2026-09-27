@@ -1,0 +1,26 @@
+benchmark = "examples/model-serving/Llama-3-8B-trn2/benchmark/benchmark.py"
+model = "NousResearch/Meta-Llama-3-8B-Instruct"
+benchmark_args = [
+  "--request-count", "4",
+  "--lengths", "16,32",
+  "--concurrencies", "1,2",
+]
+response_style = "token-chunks"
+failure_message_contains = "success_steps"
+disjoint_prompt_batches = [4, 4, 4, 4]
+cache_prefix_tokens = 16
+required_fields = { temperature = 0, stream = true, ignore_eos = true, return_token_ids = true, stream_options = { include_usage = true } }
+
+[[request_shapes]]
+input_tokens = 16
+output_tokens = 16
+count = 8
+
+[[request_shapes]]
+input_tokens = 32
+output_tokens = 32
+count = 8
+
+[metrics.aggregate_throughput]
+unit = "tok/s"
+direction = "max"

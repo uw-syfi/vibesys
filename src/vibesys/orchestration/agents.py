@@ -85,11 +85,11 @@ if TYPE_CHECKING:
         AgentCapabilities,
         AgentClientProtocol,
         AgentProgress,
-        MCPServerSpec,
+        ToolServerDescriptor,
     )
 
 T = TypeVar("T", bound=BaseModel)
-type _AgentToolResolver = Callable[[object, Workspace], tuple[MCPServerSpec, ...]]
+type _AgentToolResolver = Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
 
 
 def _unauthorized_paths(
@@ -271,7 +271,7 @@ class _LocalAgentHandle:
         spec = self._definition.spec
         return spec.role_reasoning_efforts.get(self._definition.id, spec.reasoning_effort)
 
-    async def turn(  # noqa: PLR0913  # lint-waiver: LW-020039 [PLR0913]; this adapter mirrors the agent client's independently configurable session and MCP turn settings.
+    async def turn(  # noqa: PLR0913  # lint-waiver: LW-020039 [PLR0913]; this adapter mirrors the agent client's independently configurable session and tool-server turn settings.
         self,
         message: str,
         *,
@@ -279,7 +279,7 @@ class _LocalAgentHandle:
         label: str = "",
         session_key: AgentSessionKey | None = None,
         reuse_session: bool | None = None,
-        mcp_servers: list[MCPServerSpec] | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
     ) -> str:
         """Run one text turn with run control and attributed lifecycle events."""
         if self._close_task is not None:
@@ -298,7 +298,7 @@ class _LocalAgentHandle:
                 invocation_id=execution_id,
                 session_key=session_key or AgentSessionKey(SessionScope.ROLE, kind),
                 reuse_session=reuse_session,
-                mcp_servers=mcp_servers,
+                tool_servers=tool_servers,
                 progress=progress,
             )
 
@@ -319,7 +319,7 @@ class _LocalAgentHandle:
         label: str = "",
         session_key: AgentSessionKey | None = None,
         reuse_session: bool | None = None,
-        mcp_servers: list[MCPServerSpec] | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
     ) -> T:
         """Run a typed turn through the same control and event path as text turns."""
         if self._close_task is not None:
@@ -340,7 +340,7 @@ class _LocalAgentHandle:
                 invocation_id=execution_id,
                 session_key=session_key or AgentSessionKey(SessionScope.ROLE, kind),
                 reuse_session=reuse_session,
-                mcp_servers=mcp_servers,
+                tool_servers=tool_servers,
                 progress=progress,
             )
 
@@ -476,7 +476,7 @@ class _ExplicitAgentSession:
         member_id: str | None,
         writable_paths: tuple[str, ...],
         writable_directory_paths: tuple[str, ...],
-        mcp_servers: list[MCPServerSpec] | None,
+        tool_servers: list[ToolServerDescriptor] | None,
         *,
         session_id: str,
     ) -> None:
@@ -487,7 +487,7 @@ class _ExplicitAgentSession:
         self._member_id = member_id
         self._writable_paths = writable_paths
         self._writable_directory_paths = writable_directory_paths
-        self._mcp_servers = mcp_servers
+        self._tool_servers = tool_servers
         self._binding = AgentBinding(
             backend=agent.backend_name,
             driver=agent.driver_name,
@@ -571,7 +571,7 @@ class _ExplicitAgentSession:
                         label=label,
                         session_key=self._session_key,
                         reuse_session=True,
-                        mcp_servers=self._mcp_servers,
+                        tool_servers=self._tool_servers,
                     )
                 else:
 
@@ -586,7 +586,7 @@ class _ExplicitAgentSession:
                         label=label,
                         session_key=self._session_key,
                         reuse_session=True,
-                        mcp_servers=self._mcp_servers,
+                        tool_servers=self._tool_servers,
                     )
             except DriverAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
@@ -695,7 +695,7 @@ class _Agents:
         if not isinstance(workspace, WorkspaceHandle):
             message = "workspace must be a live handle from this run"
             raise TypeError(message)
-        mcp_servers = [
+        tool_servers = [
             spec
             for tool_id in bound_tool_ids
             for spec in self._tool_bindings[tool_id](self._host, workspace)
@@ -717,8 +717,8 @@ class _Agents:
         }
         if member_id is not None and not agent.capabilities.provider_session_resume:
             missing_capabilities.add("provider_session_resume")
-        if bound_tool_ids and not agent.capabilities.mcp_servers:
-            missing_capabilities.add("mcp_servers")
+        if bound_tool_ids and not agent.capabilities.tool_servers:
+            missing_capabilities.add("tool_servers")
         if missing_capabilities:
             await agent.close()
             message = (
@@ -734,7 +734,7 @@ class _Agents:
             member_id,
             validated_paths,
             tuple(path for path in validated_paths if (workspace.path / path).is_dir()),
-            mcp_servers or None,
+            tool_servers or None,
             session_id=session_id,
         )
         self._sessions.append(session)
@@ -791,7 +791,7 @@ class _Agents:
         message: str | None = None,
         session_key: str | None = None,
         label: str,
-        mcp_servers: list[MCPServerSpec] | None = None,
+        tool_servers: list[ToolServerDescriptor] | None = None,
         correction_message: Callable[[BaseModel, str], str] | None = None,
         before_paid: Callable[[], Awaitable[None]] | None = None,
         backend: ComputeBackend | None = None,
@@ -875,7 +875,7 @@ class _Agents:
                         label=turn_label,
                         session_key=resolved_session_key,
                         reuse_session=reuse_session,
-                        mcp_servers=mcp_servers,
+                        tool_servers=tool_servers,
                     )
                 except DriverAgentTurnTimeoutError as error:
                     host.log(

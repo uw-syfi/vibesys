@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from server.controller import RunController
     from server.execution import ExecutionTracker
-    from vs_agent.api import AgentSessionKey, MCPServerSpec
+    from vs_agent.api import AgentSessionKey, ToolServerDescriptor
 
 
 class ChatAgentClient(Protocol):
@@ -64,7 +64,7 @@ class ExperimentChatDependencies:
     workspace: Path
     state_dir: Path
     agent_state_dir: str
-    mcp_servers: tuple[MCPServerSpec, ...]
+    tool_servers: tuple[ToolServerDescriptor, ...]
     log: Callable[[str], None]
     environment: Callable[[], dict[str, str]]
     progress: Callable[[], object | None]
@@ -90,7 +90,7 @@ class ExperimentChatSession:
         self._chat_thread_id = dependencies.chat_thread_id
         self._workspace = dependencies.workspace
         self._state_dir = dependencies.state_dir
-        self._mcp_servers = dependencies.mcp_servers
+        self._tool_servers = dependencies.tool_servers
         self._log = dependencies.log
         self._environment = dependencies.environment
         self._progress = dependencies.progress
@@ -182,7 +182,7 @@ class ExperimentChatSession:
                     progress=self._progress(),
                     reuse_session=True,
                     session_key=self._session_key,
-                    mcp_servers=list(self._mcp_servers),
+                    tool_servers=list(self._tool_servers),
                 )
             except Exception as exc:
                 error = exc

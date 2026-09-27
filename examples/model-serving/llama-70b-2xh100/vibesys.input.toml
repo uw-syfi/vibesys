@@ -7,10 +7,20 @@ domain = "llm-serving"
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 300
 
-[benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
-timeout_seconds = 600
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
 
-[benchmark.result]
-json_argument = "--output-json"
-metric = "aggregate_throughput"
+[benchmark]
+entrypoint = "request-factory-fixed-text-v1"
+args = [
+  "--model", "meta-llama/Llama-3.3-70B-Instruct",
+  "--tokenizer", "meta-llama/Llama-3.3-70B-Instruct",
+  "--tokenizer-revision", "6f6073b423013f6a7d4d9f39144961bfbfbc386b",
+  "--request-count", "64",
+  "--input-tokens", "256",
+  "--output-tokens", "128",
+  "--concurrency", "8",
+]
+timeout_seconds = 600
+result_protocol = 2

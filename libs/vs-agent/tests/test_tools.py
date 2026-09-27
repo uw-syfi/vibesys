@@ -2,7 +2,7 @@
 
 We test registration and the flattened argument schema directly through
 ``register_tool`` and ``FastMCP.call_tool``/``list_tools``, the same way
-``vs_issue_board``'s tests exercise its hand-written server. We do not call
+``vs_issue_tracker``'s tests exercise its hand-written server. We do not call
 ``serve_stdio`` (it blocks on the stdio JSON-RPC loop, which belongs to the
 ``mcp`` package's own test suite, not ours).
 """

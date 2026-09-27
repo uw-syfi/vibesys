@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from vs_agent.contracts import AgentObserver
 
 FAKE_CAPABILITIES = AgentCapabilities(
-    mcp_servers=True,
+    tool_servers=True,
     nested_read_only_paths=True,
     hidden_paths=True,
     host_path_grants=True,

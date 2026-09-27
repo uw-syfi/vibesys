@@ -53,7 +53,7 @@ def is_codex(provider: str | None) -> bool:
 
 _COMMON_DOCKER_ENV: dict[str, str] = {"PYTHONPATH": "/opt/vibesys"}
 """Every shipped provider's container CLI needs this so it can spawn
-``python -m vs_issue_board.mcp`` against the bind-mounted project root (added
+``python -m vs_issue_tracker.mcp`` against the bind-mounted project root (added
 in ``DockerSandbox.start`` for all four CLI providers). Without it the MCP
 server module would not be importable inside the container.
 

@@ -310,7 +310,11 @@ def test_framework_resolver_finds_bundled_queue_package() -> None:
         ),
         (
             "vibesys-evaluator-request-factory",
-            {"request-factory-adapter", "request-factory-engine"},
+            {
+                "request-factory-adapter",
+                "request-factory-engine",
+                "request-factory-fixed-text-v1",
+            },
         ),
     ],
 )

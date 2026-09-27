@@ -41,7 +41,7 @@ FRAMEWORK_PACKAGES = (
     "vs_agent",
     "vs_evaluator_protocol",
     "vs_github",
-    "vs_issue_board",
+    "vs_issue_tracker",
     "vs_loop_state",
     "vs_project",
     "vs_prompts",

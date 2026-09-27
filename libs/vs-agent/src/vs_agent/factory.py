@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 
-def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
-    """Return whether the configured external driver supports session MCP.
+def agent_driver_supports_tool_servers(spec: AgentSpec) -> bool | None:
+    """Return whether the configured external driver supports agent tool servers.
 
     This query has no runtime side effects, so wiring code can reject an
     incompatible feature before creating a project or driver resources.
@@ -35,17 +35,22 @@ def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
 
     driver_name = spec.driver
     if driver_name is Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import (  # noqa: PLC0415  # lint-waiver: LW-010170 [PLC0415]; Keep OMNIGENT_CAPABILITIES lazy in agent_driver_supports_mcp_servers so unused providers and import cycles stay unloaded.
+        from vs_agent.drivers.omnigent import (  # noqa: PLC0415  # lint-waiver: LW-010170 [PLC0415]; Keep OMNIGENT_CAPABILITIES lazy so unused providers and import cycles stay unloaded.
             OMNIGENT_CAPABILITIES,
         )
 
-        return OMNIGENT_CAPABILITIES.mcp_servers
+        return OMNIGENT_CAPABILITIES.tool_servers
 
-    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010171 [PLC0415]; Keep AGENTSHIM_CAPABILITIES lazy in agent_driver_supports_mcp_servers so unused providers and import cycles stay unloaded.
+    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010171 [PLC0415]; Keep AGENTSHIM_CAPABILITIES lazy so unused providers and import cycles stay unloaded.
         AGENTSHIM_CAPABILITIES,
     )
 
-    return AGENTSHIM_CAPABILITIES.mcp_servers
+    return AGENTSHIM_CAPABILITIES.tool_servers
+
+
+def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
+    """Compatibility alias for :func:`agent_driver_supports_tool_servers`."""
+    return agent_driver_supports_tool_servers(spec)
 
 
 def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Preserve build_agent_client's named-argument contract because callers pass these independent settings directly.

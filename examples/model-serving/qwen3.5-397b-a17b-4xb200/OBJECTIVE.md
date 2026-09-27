@@ -37,37 +37,46 @@ concurrent decode, with none of it delegated to an existing serving engine.
 
 ## Workload
 
-Run the benchmark exactly as written unless the evaluator passes a different
-`--url` or `--output-json`:
+Run the benchmark command configured by `vibesys.input.toml`. The evaluator's
+versioned fixed-text entrypoint may pass a different serving URL:
 
 ```bash
-uv run python benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
+python3 <EVALUATOR_PACKAGE>/fixed_text.py --request-factory-engine <RF_ENGINE> \
+  --model Qwen/Qwen3.5-397B-A17B \
+  --tokenizer Qwen/Qwen3.5-397B-A17B \
+  --tokenizer-revision 8472618112abcbd45acbcdc58436aff4233c23f7 \
+  --request-count 64 \
+  --input-tokens 2048 --output-tokens 512 --concurrency 48 --url <SERVER_URL>
 ```
 
 Default load:
 
 - `/v1/completions`
 - streaming responses
-- closed-loop concurrency 48
-- 90 second duration
-- long synthetic prompts (~2048 tokens)
-- `max_tokens = 512`
+- 64 independent requests, saturated replay, maximum concurrency 48
+- exact 2048-token prompts and `max_tokens = 512`
 - `temperature = 0`
 
-This benchmark stresses multi-GPU expert-parallel communication, FP8 MoE
-kernel efficiency, KV-cache and recurrent-state management across devices,
-scheduler overhead, and decode throughput under concurrency with large
-prompts. Candidates must not reduce prompt length, duration, concurrency, or
-max output tokens to improve the score.
+Exact token lengths replace the legacy approximate prompt word count, and the
+fixed trace replaces its 90-second closed-loop duration. The workload still
+stresses multi-GPU expert-parallel communication, FP8 MoE kernel efficiency,
+KV-cache and recurrent-state management, scheduling, and concurrent decode.
+Candidates must not reduce request count, prompt/output lengths, or concurrency
+to improve the score.
 
 ## Metrics
 
 Pareto axes:
 
-- `aggregate_throughput`: output tokens per second, maximize.
-- `p99_latency_ms`: end-to-end request latency in milliseconds, minimize.
+- `output_token_throughput_per_s`: RF-measured output tokens per second,
+  maximize.
+- `p90_latency_ms`: RF-measured end-to-end request latency in milliseconds,
+  minimize.
 
-The scalar fallback/headline metric is `aggregate_throughput`.
+These intentionally replace legacy `aggregate_throughput` (which counted
+nonempty SSE chunks as tokens) and p99 latency. Old and new scores are not
+directly comparable. The scalar headline metric is
+`output_token_throughput_per_s`.
 
 ## Correctness
 

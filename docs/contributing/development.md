@@ -239,8 +239,8 @@ The test job enforces two independent coverage floors:
 `uv run pytest` (with `--cov` already wired in via `pyproject.toml`) must
 reach 75 % combined statement + branch coverage across the tracked packages
 (`entrypoints`, `server`, `vibesys`, `vs_agent`, `vs_bench`,
-`vs_evaluator_protocol`, `vs_github`, `vs_issue_board`,
-`vs_loop_state`, `vs_project`, `vs_prompts`, and `vs_sandbox`; the list is
+`vs_evaluator_protocol`, `vs_github`, `vs_issue_tracker`, `vs_loop_state`,
+`vs_project`, `vs_prompts`, `vs_runtime`, and `vs_sandbox`; the list is
 `[tool.coverage.run] source` in `pyproject.toml`).
 
 **Per-module floor — 40 %**  

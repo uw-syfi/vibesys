@@ -22,7 +22,7 @@ from vibesys.orchestrations.issue_queue.prompts import (
     judge_message,
     performance_message,
 )
-from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
+from vs_issue_tracker.api import IssueBoard, IssueStatus, IssueTrackerConfig, IssueType
 from vs_runtime.api import RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost
 
@@ -160,6 +160,21 @@ def test_plugin_declares_fixed_roles_and_strict_policy_options() -> None:
         _options(unexpected=True)
 
 
+def test_tracker_selection_is_strict_plugin_configuration() -> None:
+    options = _options(
+        tracker=IssueTrackerConfig.from_backend("github", repository="owner/repository")
+    )
+
+    assert options.tracker.backend == "github"
+    assert options.tracker.repository == "owner/repository"
+    with pytest.raises(ValidationError, match="repository is required"):
+        _options(tracker={"backend": "github"})
+    with pytest.raises(ValidationError, match="OWNER/REPOSITORY"):
+        _options(tracker={"backend": "github", "repository": "repository-only"})
+    with pytest.raises(ValidationError, match="unexpected"):
+        _options(tracker={"backend": "local", "unexpected": True})
+
+
 def test_success_reuses_three_named_sessions_and_writes_policy_artifacts(tmp_path: Path) -> None:
     script = _Script(_implementation(), _review(passed=True), _performance())
 
@@ -180,6 +195,10 @@ def test_success_reuses_three_named_sessions_and_writes_policy_artifacts(tmp_pat
     assert state.phase == "implementer"
     assert len(state.performance) == 1
     assert (tmp_path / "issues.json").is_file()
+    tracker_config = json.loads(
+        (tmp_path / ".vibesys" / "issue-tracker.json").read_text(encoding="utf-8")
+    )
+    assert tracker_config == {"backend": "local", "repository": None}
     assert (tmp_path / ".vibesys" / "issues" / "INDEX.md").is_file()
     assert "performance" in (tmp_path / "progress.md").read_text(encoding="utf-8")
     policy = json.loads(
