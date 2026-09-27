@@ -25,8 +25,13 @@ from vibesys.orchestration.hypothesis.attempts import (
 )
 from vibesys.orchestration.hypothesis.config import HypothesisConfig
 from vibesys.orchestration.hypothesis.plan import (
+    HYPOTHESIS_TITLE_MAX_LEN,
     HypothesisStrategyUpdate,
     OrchestratorPlan,
+    SkillResourceSelection,
+    derive_hypothesis_title,
+    normalize_hypothesis_title,
+    truncate_hypothesis_title,
 )
 from vibesys.orchestration.hypothesis.record import (
     CandidateEvidence,
@@ -57,6 +62,7 @@ from vibesys.orchestration.hypothesis.state import (
 )
 
 __all__ = [
+    "HYPOTHESIS_TITLE_MAX_LEN",
     "AttemptBudget",
     "AttemptDecision",
     "AttemptState",
@@ -89,8 +95,12 @@ __all__ = [
     "RecordInput",
     "RollbackTarget",
     "SingleAgentReply",
+    "SkillResourceSelection",
     "StartedHypothesis",
     "attempt_was_reviewed",
     "build_round_record",
+    "derive_hypothesis_title",
+    "normalize_hypothesis_title",
     "recorded_judge_verdict",
+    "truncate_hypothesis_title",
 ]

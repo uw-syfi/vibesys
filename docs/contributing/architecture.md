@@ -15,13 +15,17 @@ uv run python scripts/check_tach_graph.py --write
 Views: a package-level overview, the `vibesys` core modules, and the full
 module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
-`vibesys.orchestration` owns the internal contract, runner, runtime, and generic
-run projections. Explicit orchestration plugins, including the issue queue,
-live under `vibesys.orchestrations`. `vibesys.plugin_catalog` registers the
-plugins. Tach records each policy dependency. Orchestration-specific logic,
-including agent configuration and resume policy, belongs in `vibesys`, not
-`vs_project`. `vs_project` owns generic project layout and persistence
-operations.
+`vibesys.orchestration` owns built-in orchestration policy and the thin
+product-side composition needed to run and project plugins. Explicit plugins,
+including the issue queue, live under the singular
+`vibesys.orchestration.<plugin>` namespace; `vibesys.plugin_catalog` registers
+them. Agent roles, plan and reply schemas, prompts, state transitions, and
+resume policy live with their owning orchestration. For example, the
+hypothesis planner's skill-selection and title rules are public through
+`vibesys.orchestration.hypothesis`, not a top-level schema catch-all. Generic
+session, workspace, persistence, and sandbox mechanisms live in the runtime
+libraries. Tach records each dependency. `vs_project` owns generic project
+layout and persistence operations.
 The v5 manifest separates policy-specific descriptor options from the generic
 `execution` record. The latter is derived from `RunRequest` and resolved host
 settings, including the concrete profiler. Resume checks it before setup.

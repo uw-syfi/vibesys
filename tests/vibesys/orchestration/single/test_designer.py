@@ -17,11 +17,11 @@ from vibesys.orchestration.hypothesis import (
     HypothesisState,
     HypothesisStrategyUpdate,
     OrchestratorPlan,
+    SkillResourceSelection,
 )
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.designer import DesignerPlanRequest, request_plan
 from vibesys.orchestration.single.models import PlanContext
-from vibesys.schemas import SkillResourceSelection
 from vs_runtime.api import StructuredResponseError, WorkspaceAccess
 from vs_runtime.api.testing import FakeRunHost
 

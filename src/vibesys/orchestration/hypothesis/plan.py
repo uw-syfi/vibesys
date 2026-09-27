@@ -3,8 +3,8 @@
 ``OrchestratorPlan`` is both the designer's structured reply schema and the
 search plan type: the framework applies it in this order: optional
 ``revert_to_round`` git checkout, then implementer with ``task``, then judge
-with ``pass_criteria``. Moved from ``vibesys.schemas`` (see that module's
-docstring for what stays there and why).
+with ``pass_criteria``. The skill recommendations and title normalization live
+here because they are parts of this plan's agent-facing contract.
 """
 
 from __future__ import annotations
@@ -13,9 +13,77 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from vibesys.schemas import HYPOTHESIS_TITLE_MAX_LEN, SkillResourceSelection
-
 HypothesisStrategyDisposition = Literal["parked", "abandoned"]
+
+HYPOTHESIS_TITLE_MAX_LEN = 60
+
+
+class SkillResourceSelection(BaseModel):
+    """Advisory selection of resources from one installed agent skill.
+
+    The planner can recommend these resources while implementation and review
+    agents remain free to select different installed skills. Paths are relative
+    to the named skill root and are resolved before another agent sees them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill: str = Field(min_length=1, description="Exact installed skill name.")
+    resource_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional files relative to the skill root. An empty list selects "
+            "the skill router without preselecting a resource."
+        ),
+    )
+    purpose: str = Field(
+        min_length=1,
+        description="Short reason these resources may help with the current work.",
+    )
+
+    @field_validator("skill", "purpose")
+    @classmethod
+    def _strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
+        return value
+
+
+def truncate_hypothesis_title(text: str) -> str:
+    """Truncate a normalized title on a word boundary, adding an ellipsis."""
+    if len(text) <= HYPOTHESIS_TITLE_MAX_LEN:
+        return text
+    truncated = text[: HYPOTHESIS_TITLE_MAX_LEN - 1]
+    boundary = truncated.rfind(" ")
+    if boundary > 0:
+        truncated = truncated[:boundary]
+    return truncated.rstrip() + "…"
+
+
+def normalize_hypothesis_title(title: str) -> str:
+    """Strip, collapse internal whitespace, and truncate a plan title.
+
+    Return an empty string when the input carries no text.
+    """
+    return truncate_hypothesis_title(" ".join(title.split()))
+
+
+def derive_hypothesis_title(claim: str) -> str | None:
+    """Derive a display title from a hypothesis claim's first sentence.
+
+    Return ``None`` when the claim carries no text.
+    """
+    stripped = claim.strip()
+    if not stripped:
+        return None
+    first_line = stripped.splitlines()[0]
+    first_sentence = first_line.split(". ", 1)[0].rstrip(". ")
+    collapsed = " ".join(first_sentence.split())
+    if not collapsed:
+        return None
+    return truncate_hypothesis_title(collapsed)
 
 
 class HypothesisStrategyUpdate(BaseModel):

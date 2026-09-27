@@ -10,7 +10,11 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import InvalidPlanError, UnsupportedProfilerError
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import (
+    OrchestratorPlan,
+    SkillResourceSelection,
+    normalize_hypothesis_title,
+)
 from vibesys.orchestration.multi.agents import DESIGNER, IMPLEMENTER, JUDGE, PROFILER
 from vibesys.orchestration.multi.contracts import (
     ImplementerContext,
@@ -33,7 +37,7 @@ from vibesys.orchestration.multi.prompts import (
 )
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.schemas import SkillResourceSelection, Verdict, normalize_hypothesis_title
+from vibesys.schemas import Verdict
 from vibesys.skills import ResolvedSkillSelection
 from vs_runtime.api import (
     AgentTurnTimeoutError,

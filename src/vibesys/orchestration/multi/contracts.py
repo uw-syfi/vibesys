@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+from vibesys.orchestration.hypothesis import SkillResourceSelection
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    SkillResourceSelection,
     Verdict,
 )
 from vibesys.skills import ResolvedSkillSelection
