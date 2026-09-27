@@ -4,6 +4,7 @@ import shutil
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
+from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
@@ -63,18 +64,21 @@ from vs_agent.api import (
     task_agent_host_resources,
 )
 from vs_project.api import (
-    GitTracker,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
     RunExecutionRecord,
-    RunLogger,
     generate_run_id,
 )
-from vs_runtime.api import OrchestrationResumeDecision, boot_trace
+from vs_runtime.api import (
+    OrchestrationResumeDecision,
+    ProfileExecution,
+    RunFacts,
+    WorkspaceSourceFact,
+    boot_trace,
+)
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
-    MultiSlotRoundTransactionCoordinator,
     NativeCpuProfilerKind,
     ProjectRunBaselineMissingError,
     ProjectRunDirtyResumeError,
@@ -89,8 +93,6 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentResources,
     RunEnvironmentSession,
     RunEnvironmentSpec,
-    RunEnvironmentView,
-    RunState,
     ScalarBenchmarkContract,
     TrustedEvaluationPlan,
     build_run_environment,
@@ -103,7 +105,6 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import (
     ComputeBackendImpl,
-    DeviceLease,
     HostResource,
     create_compute_backend,
 )
@@ -329,7 +330,7 @@ def open_run_resources(
     ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-) -> "_RunResources":
+) -> "_PreparedRun":
     """Open the one project context from a canonical request.
 
     ``backend_factory`` overrides how the compute backend is constructed
@@ -376,7 +377,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-) -> "_RunResources":
+) -> "_PreparedRun":
     bundle = request.input_bundle
     exp_name = request.resolved_run_id
     config = request.config
@@ -854,13 +855,17 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         if not session.view.cli_sandboxed:
             agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
 
-        result = _RunResources(
+        result = _PreparedRun(
             backend=backend,
-            profiler_kind=resolved_profiler_kind,
-            skill_source_paths=skill_source_paths,
-            ref_name=ref_name,
-            trusted_evaluation_plan=_trusted_evaluation_plan(bundle, session),
-            teardown_stack=teardown_stack,
+            facts=_run_facts(
+                request,
+                environment_resources,
+                ref_name=ref_name,
+                profiler_kind=resolved_profiler_kind,
+            ),
+            skill_source_paths=tuple(skill_source_paths),
+            evaluation_plan=_trusted_evaluation_plan(bundle, session),
+            _teardown_stack=teardown_stack,
             environment_resources=environment_resources,
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
@@ -897,124 +902,50 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     return result
 
 
-class _RunResources:
-    """Private owner of one workspace's assembled resources and teardown stack.
+def _run_facts(
+    request: RunRequest,
+    environment: RunEnvironmentResources,
+    *,
+    ref_name: str,
+    profiler_kind: ProfilerKind,
+) -> RunFacts:
+    """Resolve the immutable policy facts exposed by the runtime host."""
+    bundle = request.input_bundle
+    view = environment.view
+    return RunFacts(
+        domain_id=bundle.domain.value,
+        objective=request.objective or bundle.objective,
+        environment_notes=view.prompt_notes,
+        profile_execution=ProfileExecution(view.profile_execution),
+        objective_location=view.paths.objective,
+        reference_location=ref_name,
+        accuracy_command=view.paths.accuracy_command,
+        benchmark_command=view.paths.benchmark_command,
+        accuracy_configured=bool(view.paths.accuracy_command),
+        benchmark_configured=(
+            bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
+        ),
+        profiler_id=profiler_kind.value,
+        workspace_sources=tuple(
+            WorkspaceSourceFact(name=source.name, dest=source.dest)
+            for source in bundle.workspace_sources
+        ),
+    )
 
-    Product composition exposes focused policy capabilities. This object keeps
-    the Git tracker, environment session, logger, state namespace, and device
-    lease together so setup failure and run closure unwind them in construction
-    order.
-    """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-008208 [PLR0913]; `_RunResources` receives already-owned runtime resources explicitly, without a second mutable parameter container.
-        self,
-        *,
-        backend: ComputeBackend,
-        profiler_kind: ProfilerKind,
-        skill_source_paths: list[Path],
-        ref_name: str,
-        trusted_evaluation_plan: TrustedEvaluationPlan,
-        teardown_stack: ExitStack,
-        environment_resources: RunEnvironmentResources,
-        project_resources: ProjectRunResources,
-        agent_host_resources: tuple[HostResource, ...] = (),
-    ) -> None:
-        self.backend = backend
-        self.agent_host_resources = agent_host_resources
-        self.profiler_kind = profiler_kind
-        self._skill_source_paths = skill_source_paths
-        self.ref_name = ref_name
-        self._project_resources = project_resources
-        self.environment_resources = environment_resources
-        self.trusted_evaluation_plan = trusted_evaluation_plan
-        self._teardown_stack = teardown_stack
-        self._closed = False
+@dataclass(slots=True)
+class _PreparedRun:
+    """Own lower run resources and their one ordered teardown stack."""
 
-    @property
-    def workspace(self) -> Path:
-        """Return the project root, which is also the only agent workspace."""
-        return self.environment_resources.request.workspace
-
-    @property
-    def project_resources(self) -> ProjectRunResources:
-        """Return the lower-owned project resource aggregate for host composition."""
-        return self._project_resources
-
-    @property
-    def project(self) -> Project:
-        return self._project_resources.project
-
-    @property
-    def git(self) -> GitTracker:
-        return self._project_resources.git
-
-    @property
-    def logger(self) -> RunLogger:
-        return self._project_resources.logger
-
-    @property
-    def state(self) -> RunState:
-        return self._project_resources.state
-
-    @property
-    def run_id(self) -> str:
-        return self._project_resources.state.run_id
-
-    @property
-    def log_dir(self) -> Path:
-        """Return the environment's run-log directory."""
-        return self.environment_resources.request.log_dir
-
-    @property
-    def environment_request(self) -> RunEnvironmentRequest:
-        """Return the authoritative request used to open this workspace."""
-        return self.environment_resources.request
-
-    @property
-    def run_environment_session(self) -> RunEnvironmentSession:
-        """Return the lower-owned active environment session."""
-        return self.environment_resources.session
-
-    @property
-    def run_environment_view(self) -> RunEnvironmentView:
-        """Return environment facts resolved during session construction."""
-        return self.environment_resources.view
-
-    @property
-    def device(self) -> DeviceLease:
-        """Return the root-owned or candidate-borrowed device lease."""
-        return self.environment_resources.device
-
-    @property
-    def run_log_path(self) -> Path:
-        """Return the logger's current output path."""
-        return self.logger.path
-
-    @property
-    def run_log_file(self) -> TextIO:
-        """The current open log file handle (owned by ``RunLogger``)."""
-        return self.logger.writer
-
-    @property
-    def skill_source_paths(self) -> list[Path]:
-        """Skill source directories copied into the workspace for agents."""
-        return self._skill_source_paths
-
-    @property
-    def round_transaction_coordinator(self) -> MultiSlotRoundTransactionCoordinator | None:
-        """Return the checkpoint coordinator prepared for plugin state."""
-        return self._project_resources.round_transaction_coordinator
-
-    def lprint(self, text: str) -> None:
-        self.logger.lprint(text)
-
-    def switch_log_file(self, label: int | str) -> None:
-        """Switch to a per-phase log file, see :meth:`RunLogger.switch`."""
-        self.logger.switch(label)
-
-    def reselect_gpu(self) -> None:
-        """Delegate mid-run device rebalance to the lower resource owner."""
-        self.environment_resources.reselect_device()
+    project_resources: ProjectRunResources
+    environment_resources: RunEnvironmentResources
+    facts: RunFacts
+    backend: ComputeBackend
+    skill_source_paths: tuple[Path, ...]
+    evaluation_plan: TrustedEvaluationPlan
+    agent_host_resources: tuple[HostResource, ...]
+    _teardown_stack: ExitStack = field(repr=False)
+    _closed: bool = field(init=False, default=False, repr=False)
 
     def close(self) -> None:
         if self._closed:
@@ -1024,7 +955,7 @@ class _RunResources:
         # environment teardown, run-environment exit, and log closure.
         self._teardown_stack.close()
 
-    def __enter__(self) -> "_RunResources":
+    def __enter__(self) -> "_PreparedRun":
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:

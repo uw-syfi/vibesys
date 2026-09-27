@@ -14,7 +14,6 @@ from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import _EvaluationAdapter
 from vibesys.run.skills import platform_skill_selection
 from vs_agent.api import AgentSessionState, DurableSessionStore
-from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -33,7 +32,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vibesys.context import _RunResources
+    from vibesys.context import _PreparedRun
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
@@ -94,28 +93,30 @@ class _ProductHostFactory:
 
     def _components(
         self,
-        resources: _RunResources,
+        resources: _PreparedRun,
         state_namespace: str | None,
         state_model: type[BaseModel] | None,
     ) -> RunHostComponents:
         blocking = BlockingOperations()
+        project = resources.project_resources
+        environment = resources.environment_resources
+        logger = project.logger
+        run_id = project.state.run_id
         session_store = DurableSessionStore(
-            resources.state.local("agent").slot("sessions.json", AgentSessionState),
-            log=resources.logger.lprint,
+            project.state.local("agent").slot("sessions.json", AgentSessionState),
+            log=logger.lprint,
         )
         workspace_resources = WorkspaceResourceFactory(
-            resources.project_resources,
-            resources.environment_resources,
-            evaluation_plan=resources.trusted_evaluation_plan,
+            project,
+            environment,
+            evaluation_plan=resources.evaluation_plan,
             memory_paths=self.plugin.memory_paths,
             skill_source_dirs=tuple(resources.skill_source_paths),
             skill_selection=platform_skill_selection(resources.backend),
             host_resources=resources.agent_host_resources,
             events=self.integration.workspace_resource_event,
             model_requests=(
-                create_model_request_reconciler()
-                if resources.run_environment_view.env_kind == "modal"
-                else None
+                create_model_request_reconciler() if environment.view.env_kind == "modal" else None
             ),
             root_agent_environment_opener=self._root_agent_environment_opener(),
         )
@@ -129,11 +130,11 @@ class _ProductHostFactory:
         control = create_runtime_control(self.integration.control, blocking)
         state = create_state(
             state_model,
-            resources.round_transaction_coordinator,
+            project.round_transaction_coordinator,
             workspaces,
             (
                 self.integration.state_commit_observer(
-                    resources.run_id,
+                    run_id,
                     self.projector,
                     state_namespace,
                 )
@@ -142,15 +143,15 @@ class _ProductHostFactory:
             ),
         )
         evaluation = _EvaluationAdapter(
-            resources.run_id,
+            run_id,
             self.request,
             agent_runtime,
             self.integration.events,
-            resources.lprint,
+            logger.lprint,
         )
         return RunHostComponents(
-            run_id=resources.run_id,
-            facts=_run_facts(self.request, resources),
+            run_id=run_id,
+            facts=resources.facts,
             agents=agents,
             workspaces=workspaces,
             evaluation=evaluation,
@@ -158,7 +159,7 @@ class _ProductHostFactory:
             control=control,
             commands=commands,
             skills=skills,
-            log=resources.lprint,
+            log=logger.lprint,
             blocking=blocking,
             resources=resources,
         )
@@ -183,7 +184,7 @@ class _ProductHostFactory:
 
     def _agent_runtime(
         self,
-        resources: _RunResources,
+        resources: _PreparedRun,
         session_store: DurableSessionStore,
         *,
         workspace_resources: WorkspaceResourceFactory,
@@ -203,7 +204,7 @@ class _ProductHostFactory:
                 reasoning_effort=spec.role_reasoning_efforts.get(role.id, spec.reasoning_effort),
             )
 
-        tool_context = AgentToolContext(resources.profiler_kind.value)
+        tool_context = AgentToolContext(resources.facts.profiler_id)
         return create_workspace_runtime(
             self.plugin.agents,
             workspace_resources=workspace_resources,
@@ -219,32 +220,8 @@ class _ProductHostFactory:
                 tool_id: partial(resolver, tool_context)
                 for tool_id, resolver in dict(self.agent_tool_bindings or {}).items()
             },
-            log=resources.lprint,
+            log=resources.project_resources.logger.lprint,
         )
-
-
-def _run_facts(request: RunRequest, resources: _RunResources) -> RunFacts:
-    bundle = request.input_bundle
-    view = resources.run_environment_view
-    return RunFacts(
-        domain_id=bundle.domain.value,
-        objective=request.objective or bundle.objective,
-        environment_notes=view.prompt_notes,
-        profile_execution=ProfileExecution(view.profile_execution),
-        objective_location=view.paths.objective,
-        reference_location=resources.ref_name,
-        accuracy_command=view.paths.accuracy_command,
-        benchmark_command=view.paths.benchmark_command,
-        accuracy_configured=bool(view.paths.accuracy_command),
-        benchmark_configured=(
-            bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
-        ),
-        profiler_id=resources.profiler_kind.value,
-        workspace_sources=tuple(
-            WorkspaceSourceFact(name=source.name, dest=source.dest)
-            for source in bundle.workspace_sources
-        ),
-    )
 
 
 @asynccontextmanager

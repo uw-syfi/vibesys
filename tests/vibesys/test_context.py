@@ -11,8 +11,8 @@ from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.context import (
+    _PreparedRun,
     _profiler_support_extra,
-    _RunResources,
     open_run_resources,
 )
 from vibesys.errors import ConfigurationError
@@ -148,7 +148,7 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
 def _create_context(
     project: Path,
     **options: Unpack[_CreateContextOptions],
-) -> _RunResources:
+) -> _PreparedRun:
     task_root = options.get("task_root")
     evaluator = options.get("evaluator")
     evaluator_package_root = options.get("evaluator_package_root")
@@ -220,25 +220,34 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as ctx:
-        assert ctx.workspace == project
-        assert ctx.project.root == project
-        assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
-        assert not ctx.state.local("test-agent").external_directory().is_relative_to(project)
-        objective_path = Path(ctx.run_environment_view.paths.objective)
+        project_resources = ctx.project_resources
+        environment = ctx.environment_resources
+        run_id = project_resources.state.run_id
+        assert environment.request.workspace == project
+        assert project_resources.project.root == project
+        assert environment.request.log_dir == project_resources.project.state.log_directory(run_id)
+        assert (
+            not project_resources.state.local("test-agent")
+            .external_directory()
+            .is_relative_to(project)
+        )
+        objective_path = Path(environment.view.paths.objective)
         assert objective_path == (
-            ctx.project.state.portable_namespace(ctx.run_id, "runtime").external_directory()
+            project_resources.project.state.portable_namespace(
+                run_id, "runtime"
+            ).external_directory()
             / "effective-objective.md"
         )
         assert objective_path.read_text() == "Make the queue faster.\n"
-        assert objective_path.is_relative_to(ctx.workspace)
+        assert objective_path.is_relative_to(environment.request.workspace)
 
-        policy = ctx.environment_request.project_path_policy
-        state_paths = ctx.project.state.sandbox_paths()
+        policy = environment.request.project_path_policy
+        state_paths = project_resources.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
         assert state_paths.hidden_path is None
 
-    manifest = Project.open(project).state.load_run(ctx.run_id)
-    assert manifest.branch == f"vibesys-runs/{ctx.run_id}"
+    manifest = Project.open(project).state.load_run(run_id)
+    assert manifest.branch == f"vibesys-runs/{run_id}"
     assert _git(project, "branch", "--show-current") == manifest.branch
     assert _git(project, "status", "--porcelain") == ""
 
@@ -263,7 +272,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         tool_install_root(tools_root, name, spec).mkdir(parents=True)
 
     with _create_context(project, evaluator_package_root=package.root) as ctx:
-        tools_root = ctx.project.state.model_cache_directory("evaluator-tools")
+        tools_root = ctx.project_resources.project.state.model_cache_directory("evaluator-tools")
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
         expected_tool_roots = tuple(
             tool_install_root(tools_root, name, spec)
@@ -290,7 +299,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
             ]
 
             assert len(changed) == 1
-            assert changed[0].run_id == ctx.run_id
+            assert changed[0].run_id == ctx.project_resources.state.run_id
             assert changed[0].data is not None
             assert changed[0].data.kind == "experiments_changed"
             assert changed[0].data.reason == "project_attached"
@@ -309,7 +318,7 @@ def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as ctx:
-        log_text = ctx.run_log_path.read_text()
+        log_text = ctx.project_resources.logger.path.read_text()
 
     for stage in (
         "config_and_inputs",
@@ -345,7 +354,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
     with boot_trace.span("agent_preamble"), boot_trace.span("load_config_and_skills"):
         pass
     with _create_context(project, evaluator=evaluator) as ctx:
-        log_text = ctx.run_log_path.read_text()
+        log_text = ctx.project_resources.logger.path.read_text()
 
     assert "boot span agent_preamble.load_config_and_skills: " in log_text
     assert "boot span agent_preamble: " in log_text
@@ -362,7 +371,7 @@ def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_pat
     evaluator = _write_project(project)
     boot_trace.drain_log_lines()
     with _create_context(project, evaluator=evaluator) as ctx:
-        log_text = ctx.run_log_path.read_text()
+        log_text = ctx.project_resources.logger.path.read_text()
 
     assert "boot span agent_preamble" not in log_text
     assert "boot span dispatch" not in log_text
@@ -375,7 +384,7 @@ def test_context_assembly_spans_stay_off_stderr_by_default(
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as ctx:
-        log_text = ctx.run_log_path.read_text()
+        log_text = ctx.project_resources.logger.path.read_text()
         captured_err = capfd.readouterr().err
 
     assert "boot span context: " in log_text
@@ -389,7 +398,7 @@ def test_boot_trace_env_puts_assembly_spans_on_stderr(
     evaluator = _write_project(project)
     monkeypatch.setenv(boot_trace.BOOT_TRACE_ENV, "1")
     with _create_context(project, evaluator=evaluator) as ctx:
-        assert "boot span context: " in ctx.run_log_path.read_text()
+        assert "boot span context: " in ctx.project_resources.logger.path.read_text()
         captured_err = capfd.readouterr().err
 
     assert "boot span context.config_and_inputs: " in captured_err
@@ -425,7 +434,7 @@ command = ["python", "_evaluator/checker/check.py"]
         task_name="latency",
         task_root=task,
     ) as ctx:
-        assert ctx.ref_name == ".vibesys/tasks/latency/reference/baseline.py"
+        assert ctx.facts.reference_location == ".vibesys/tasks/latency/reference/baseline.py"
 
 
 def test_copied_repository_task_materializes_model_outside_authored_inputs(
@@ -446,15 +455,17 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             task_name="latency",
             task_root=task,
         ) as ctx:
-            runtime_model = runs_dir / ".cache" / "llm-serving" / ctx.run_id / "model"
-            copied_reference = ctx.workspace / ".vibesys" / "tasks" / "latency" / "reference"
+            run_id = ctx.project_resources.state.run_id
+            workspace = ctx.environment_resources.request.workspace
+            runtime_model = runs_dir / ".cache" / "llm-serving" / run_id / "model"
+            copied_reference = workspace / ".vibesys" / "tasks" / "latency" / "reference"
 
             assert not (reference / "model").exists()
             assert not (copied_reference / "model").exists()
             assert runtime_model.resolve() == downloaded
-            assert ctx.git.trusted_input_changes() == []
+            assert ctx.project_resources.git.trusted_input_changes() == []
 
-        assert _git(ctx.workspace, "status", "--porcelain") == ""
+        assert _git(workspace, "status", "--porcelain") == ""
 
 
 def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path) -> None:
@@ -472,11 +483,13 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
             task_name="latency",
             task_root=task,
         ) as ctx:
-            runtime_model = ctx.project.state.model_cache_directory("llm-serving") / "model"
+            runtime_model = (
+                ctx.project_resources.project.state.model_cache_directory("llm-serving") / "model"
+            )
 
             assert not (reference / "model").exists()
             assert runtime_model.resolve() == downloaded
-            assert ctx.git.trusted_input_changes() == []
+            assert ctx.project_resources.git.trusted_input_changes() == []
 
         assert _git(project, "status", "--porcelain") == ""
 
@@ -487,17 +500,20 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Pa
     runs_dir = tmp_path / "runs"
 
     with _create_context(source, runs_dir=runs_dir, evaluator=evaluator) as ctx:
-        project = ctx.workspace
+        project = ctx.environment_resources.request.workspace
+        run_id = ctx.project_resources.state.run_id
         assert project.parent == runs_dir
-        assert project.name == ctx.run_id
-        assert ctx.workspace == project
+        assert project.name == run_id
+        assert ctx.environment_resources.request.workspace == project
         assert (project / "queue.py").is_file()
         assert not (project / "checker").exists()
         assert (project / "_evaluator" / "checker" / "check.py").is_file()
         manifest_text = (project / "vibesys.input.toml").read_text()
         assert 'source = "_evaluator/checker"' in manifest_text
         assert "[workspace]" not in manifest_text
-        assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
+        assert ctx.environment_resources.request.log_dir == (
+            ctx.project_resources.project.state.log_directory(run_id)
+        )
 
     assert _git(project, "status", "--porcelain") == ""
 
@@ -506,7 +522,7 @@ def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
-        run_id = first.run_id
+        run_id = first.project_resources.state.run_id
 
     stored = Project.open(project).state.load_run(run_id)
     assert isinstance(stored, OrchestrationRunManifest)
@@ -535,8 +551,8 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) ->
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
     with _create_context(source, runs_dir=runs_dir, evaluator=evaluator) as first:
-        project = first.workspace
-        run_id = first.run_id
+        project = first.environment_resources.request.workspace
+        run_id = first.project_resources.state.run_id
 
     remote = tmp_path / "remote.git"
     run_test_command(
@@ -571,7 +587,7 @@ def test_direct_resume_republishes_an_already_published_run(tmp_path: Path) -> N
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
-        run_id = first.run_id
+        run_id = first.project_resources.state.run_id
 
     remote = tmp_path / "remote.git"
     run_test_command(
@@ -607,7 +623,7 @@ def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path: Pat
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
-        run_id = first.run_id
+        run_id = first.project_resources.state.run_id
 
     remote = tmp_path / "remote.git"
     run_test_command(
@@ -698,7 +714,7 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
         profiler_kind=ProfilerKind.MACOS_CPU,
         agent_backend=None,
     ) as context:
-        assert context.profiler_kind is ProfilerKind.MACOS_CPU
+        assert context.facts.profiler_id == ProfilerKind.MACOS_CPU.value
 
 
 def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> None:
@@ -706,16 +722,18 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> N
     evaluator = _write_project(project)
 
     with _create_context(project, evaluator=evaluator) as ctx:
-        state = ctx.state.portable("evolve")
+        state = ctx.project_resources.state.portable("evolve")
         state.save("old.json", _PortableStateProbe(round_idx=1))
-        ctx.state.commit("state 1", state)
+        ctx.project_resources.state.commit("state 1", state)
 
         state.delete("old.json")
         state.save("new.json", _PortableStateProbe(round_idx=2))
-        ctx.state.commit("state 2", state)
+        ctx.project_resources.state.commit("state 2", state)
 
     tree = _git(project, "ls-tree", "-r", "--name-only", "HEAD")
-    portable = ctx.project.state.portable_namespace(ctx.run_id, "evolve")
+    portable = ctx.project_resources.project.state.portable_namespace(
+        ctx.project_resources.state.run_id, "evolve"
+    )
     assert portable.agent_visible_path("new.json") in tree
     assert portable.agent_visible_path("old.json") not in tree
 
@@ -725,12 +743,12 @@ def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
     evaluator = _write_project(project)
     original_stderr = sys.stderr
     with _create_context(project, evaluator=evaluator) as ctx:
-        original_file = ctx.logger.file
-        ctx.switch_log_file("round001")
+        original_file = ctx.project_resources.logger.file
+        ctx.project_resources.logger.switch("round001")
 
         assert original_file.closed
         sys.stderr.write("\033[31mcolored diagnostic\033[0m\n")
-        run_log_path = ctx.run_log_path
+        run_log_path = ctx.project_resources.logger.path
 
     assert sys.stderr is original_stderr
     assert "colored diagnostic" in run_log_path.read_text()
