@@ -25,6 +25,7 @@ dependencies = [
     "mcp>=1.0,<2",
     "modal>=1.4.2",
     "pydantic>=2",
+    "websockets>=14.2,<15",
     "pyyaml>=6",
     "python-dotenv>=1.0.1",
     "openevolve==0.3.1",

@@ -59,6 +59,10 @@ class Project:
         """Return the validated human-authored configuration root."""
         return self._layout.configuration_root()
 
+    def configuration_path(self) -> Path:
+        """Return the canonical configuration path, whether or not it exists."""
+        return self._layout.configuration_path()
+
     def tasks_root(self) -> TasksRoot:
         """Return the validated root containing task definitions."""
         return self._layout.tasks_root()

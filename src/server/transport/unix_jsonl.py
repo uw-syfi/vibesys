@@ -238,13 +238,18 @@ class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):
 class UnixJsonlServer:
     """Own a private Unix socket serving one or more concurrent clients."""
 
-    def __init__(self, path: Path, api: RunApi) -> None:
-        """Configure a Unix JSONL server without starting its socket yet."""
+    def __init__(
+        self,
+        path: Path,
+        api: RunApi,
+        subscriptions: SubscriptionTracker | None = None,
+    ) -> None:
+        """Create a Unix server, optionally sharing subscription accounting."""
         self.path = path
         self.api = api
         self._server: _JsonlUnixServer | None = None
         self._thread: threading.Thread | None = None
-        self._subscriptions = SubscriptionTracker()
+        self._subscriptions = subscriptions or SubscriptionTracker()
 
     def start(self) -> None:
         """Create the private Unix socket and start serving clients."""

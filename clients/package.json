@@ -10,6 +10,7 @@
     "check:ts-architecture": "depcruise --config .dependency-cruiser.cjs backend-client/src core-state/src core-state/bench tui/src tui/dev tui/benchmarks web/src scripts && node scripts/check_ts_package_manifests.mjs",
     "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs",
     "check:conformance": "node scripts/check_conformance_corpus.mjs",
+    "check:web-browser-bundle": "pnpm --filter @vibesys/web build:browser && node scripts/check_web_browser_bundle.mjs",
     "test:conformance": "node --test scripts/check_conformance_corpus.test.mjs",
     "check:knip": "knip",
     "build:clients": "pnpm --filter @vibesys/tui... build && pnpm --filter @vibesys/web build",

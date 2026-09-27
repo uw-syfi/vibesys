@@ -73,6 +73,16 @@ class SubscriptionBootstrap:
     active_executions: list[ActiveAgentExecution]
 
 
+class RunReadOnlyError(RuntimeError):
+    """A mutating request sent to a finished run opened for inspection."""
+
+    diagnostic_code = "run_read_only"
+
+    def __init__(self) -> None:
+        """Use one stable message for read-only command diagnostics."""
+        super().__init__("This finished run is read-only")
+
+
 @dataclass(frozen=True)
 class SubscriptionCheckpoint:
     """One journal state captured atomically for a live subscription batch.
@@ -223,6 +233,8 @@ class RunApi:
         onto between requests. No run live is a graceful no-op: the command
         still acknowledges, there is just nothing to steer.
         """
+        if self._controller.is_read_only():
+            raise RunReadOnlyError
         control = self._session_provider()
         if isinstance(request, PauseCommand):
             if control is not None:
@@ -251,6 +263,8 @@ class RunApi:
         )
 
     def _execute_chat_thread_create(self, request: ChatThreadCreateQuery) -> Response:
+        if self._controller.is_read_only():
+            raise RunReadOnlyError
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
             driver=request.driver,

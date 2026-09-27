@@ -109,6 +109,10 @@ const RULE_CASES = [
     files: {'core-state/src/index.ts': "import '../../tui/dev/harness.js';\n"},
   },
   {
+    rule: 'backend-client-neutral-has-no-node-runtime',
+    files: {'backend-client/src/neutral.ts': "import 'node:crypto';\n"},
+  },
+  {
     rule: 'tools-are-leaves',
     files: {'tui/src/session-model.ts': "import '../benchmarks/bench.js';\n"},
   },

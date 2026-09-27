@@ -57,6 +57,13 @@ the web end-to-end tests, and `clients/scripts`). Beyond the package direction, 
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
 
+`@vibesys/backend-client` is the runtime-neutral entry. It exports protocol types, parsing,
+framing-independent stream policy, and the transport interfaces. `@vibesys/backend-client/node`
+contains the Unix-socket implementation used by the TUI, while
+`@vibesys/backend-client/websocket` contains the browser WebSocket implementation. The neutral
+entry and WebSocket entry have no Node builtin imports. The package exports and dependency-cruiser
+rule enforce this split, so a browser bundle cannot accidentally pull in `node:net`.
+
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
 presentation state, renders the combined state, and sends user intents through the backend client.
@@ -68,6 +75,38 @@ The web client is a presentation adapter over `core-state`. Its React external-s
 subscriptions and browser presentation state; it does not fold events or copy TUI state logic.
 Recorded replay fixtures are served by the development harness and folded through the same
 `core-state` reducer used by live clients.
+
+The browser launch path keeps the server composition shared. `vibesys --web` starts the existing
+Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
+`SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
+store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
+same port, and prints a capability-bearing page URL. WebSocket handshakes require that URL's token
+and the exact page Origin. This is local browser hygiene, not remote authentication. The Unix socket
+and TUI remain the default path, and the WebSocket adapter uses one connection each for control,
+subscription, and chat as specified by the shared wire contract.
+
+### Detached and read-only web lifetimes
+
+`vibesys --web --detach` is the explicit long-lived mode. The launcher creates a new session for a
+server child, returns after that child publishes its capability URL, and leaves the child serving
+with zero subscribers. A later TUI or browser client can use the same Unix or WebSocket bootstrap,
+including the existing store-id and tail semantics. `SIGTERM` or `ServerRuntime.shutdown()` is the
+deliberate stop operation. Without `--detach`, the 30-second first-subscriber timeout and
+last-subscriber teardown remain unchanged.
+
+The detached gateway publishes `.vibesys/web-gateway.json` by default. The record is written by
+temporary-file replacement, has owner-only permissions, and contains the PID, loopback port,
+capability token, and project root. Discovery requires both a live PID and a token-authenticated
+`/health` response. A failed probe removes only the matching stale record. The path can be
+overridden with `--web-instance`; it is project-local, so two working directories do not share
+gateway state. The default port remains ephemeral across restarts. Use `--web-port` when a stable
+bookmarkable port is required.
+
+`vibesys --web --web-reopen PATH` serves a completed `run-events.jsonl` through the same API and
+WebSocket transport without attaching a project writer. Event history and indexed state are read
+from the existing event store, query bookkeeping is suppressed, and control or thread-creation
+requests return the typed `run_read_only` diagnostic. A reopened server remains alive until
+explicitly stopped.
 
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript

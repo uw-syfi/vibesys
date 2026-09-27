@@ -35,6 +35,14 @@ module.exports = {
       },
     },
     {
+      // The default entry and the WebSocket transport must bundle in a browser.
+      // Only the Node Unix-socket adapter may reach a Node builtin.
+      name: 'backend-client-neutral-has-no-node-runtime',
+      severity: 'error',
+      from: {path: '^backend-client/src/', pathNot: ['^backend-client/src/node/', TEST_FILE]},
+      to: {dependencyTypes: ['core']},
+    },
+    {
       name: 'web-does-not-depend-on-tui',
       severity: 'error',
       from: {path: '^web/src/'},

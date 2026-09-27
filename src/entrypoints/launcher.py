@@ -7,6 +7,7 @@ replaces the former ``./vs`` script. From a source checkout, run it with
 It routes to the headless engine, with no JavaScript runtime required, when:
 
 * ``--headless`` is passed,
+* ``--web`` is passed,
 * the first argument is ``validate``, or
 * stdin/stdout is not a TTY (pipes, CI).
 
@@ -114,7 +115,14 @@ def _headless_requested(args: list[str]) -> bool:
     ``--help``/``-h`` and ``validate`` never need the TUI, so they always go to
     the engine (and never trigger a source-checkout build).
     """
-    if "--headless" in args or "--help" in args or "-h" in args:
+    if (
+        "--headless" in args
+        or "--web" in args
+        or "--web-reopen" in args
+        or "--detach" in args
+        or "--help" in args
+        or "-h" in args
+    ):
         return True
     if args and args[0] in {"tui-defaults", "validate"}:
         return True
@@ -122,7 +130,11 @@ def _headless_requested(args: list[str]) -> bool:
 
 
 def _run_headless(args: list[str]) -> int:
-    module = "entrypoints.server" if args and args[0] == "tui-defaults" else "entrypoints.headless"
+    module = (
+        "entrypoints.server"
+        if (args and args[0] == "tui-defaults") or "--web" in args or "--web-reopen" in args
+        else "entrypoints.headless"
+    )
     command_args = args if module == "entrypoints.server" else _without_option(args, "--theme")
     return subprocess.call([sys.executable, "-m", module, *command_args])  # noqa: S603  # lint-waiver: LW-010226 [S603]; this forwards the user's CLI arguments to VibeSys's fixed Python entry module.
 

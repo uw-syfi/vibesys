@@ -34,6 +34,7 @@ develop-eggs/
 dist/
 clients/web/artifacts/
 clients/web/test-results/
+clients/web/.browser-dist/
 downloads/
 eggs/
 .eggs/
