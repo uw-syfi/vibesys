@@ -14,7 +14,7 @@ from vs_project.api import GitRemoteRepository
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-_RUN_BRANCH_PREFIXES = ("vibesys-runs/", "vibesys/")
+_RUN_BRANCH_PREFIX = "vibesys-runs/"
 _GITHUB_ORIGIN = re.compile(
     r"^(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)"
     r"(?P<slug>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
@@ -152,11 +152,7 @@ class ExperimentRepository:
         self._repository.require_root()
         branch = self._current_run_branch()
         ref = f"refs/heads/{branch}"
-        run_id = next(
-            branch.removeprefix(prefix)
-            for prefix in _RUN_BRANCH_PREFIXES
-            if branch.startswith(prefix)
-        )
+        run_id = branch.removeprefix(_RUN_BRANCH_PREFIX)
         candidate_prefix = f"refs/vibesys/{run_id}/candidates/"
         candidate_refs = self._repository.refs(candidate_prefix)
         refspecs = [f"{ref}:{ref}", *(f"{candidate}:{candidate}" for candidate in candidate_refs)]
@@ -165,10 +161,7 @@ class ExperimentRepository:
 
     def _current_run_branch(self) -> str:
         branch = self._repository.current_branch() or ""
-        if not any(
-            branch.startswith(prefix) and branch.removeprefix(prefix)
-            for prefix in _RUN_BRANCH_PREFIXES
-        ):
+        if not branch.startswith(_RUN_BRANCH_PREFIX) or not branch.removeprefix(_RUN_BRANCH_PREFIX):
             message = "remote publication requires the current VibeSys run branch"
             raise ValueError(message)
         return branch

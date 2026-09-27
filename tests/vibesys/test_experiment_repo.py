@@ -180,10 +180,10 @@ def test_push_publishes_retained_candidates_for_current_run(tmp_path: Path) -> N
     assert _git(remote, "rev-parse", candidate_ref) == tracker.current_sha()
 
 
-def test_push_accepts_legacy_run_branch(tmp_path: Path) -> None:
+def test_push_rejects_legacy_run_branch(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    tracker = _project(project)
+    _project(project)
     legacy_branch = "vibesys/publish-test"
     _git(project, "branch", "-m", legacy_branch)
     remote = tmp_path / "remote.git"
@@ -191,9 +191,10 @@ def test_push_accepts_legacy_run_branch(tmp_path: Path) -> None:
     publisher = ExperimentRepository(project, lambda _message: None)
     publisher.attach_remote(str(remote))
 
-    publisher.push()
+    with pytest.raises(ValueError, match="current VibeSys run branch"):
+        publisher.push()
 
-    assert _git(remote, "rev-parse", f"refs/heads/{legacy_branch}") == tracker.current_sha()
+    assert _git(remote, "branch", "--list") == ""
 
 
 def test_push_without_origin_is_a_noop(tmp_path: Path) -> None:
