@@ -277,11 +277,6 @@ layer = "loops"
 depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
 
 [[modules]]
-path = "vibesys.loops.multi"
-layer = "loops"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
-
-[[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
@@ -330,11 +325,6 @@ depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 path = "vibesys.orchestrations"
 layer = "loops"
 depends_on = ["vibesys", "vibesys.domains", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.search.hypothesis", "vibesys.search.population", "vibesys.search.profile_focus", "vibesys.prompts", "vibesys.roles", "vs_issue_board", "vs_prompts", "vs_runtime"]
-
-[[modules]]
-path = "vibesys._model_config"
-layer = "prompts_and_lower_libs"
-depends_on = []
 
 [[modules]]
 path = "vs_sandbox"

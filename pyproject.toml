@@ -146,13 +146,7 @@ floor = 40
 # comment naming why; do not add bare entries. Only list a module that
 # actually falls below the floor: allowlisting a covered module wrongly
 # implies it is untested.
-allowlist = [
-    # Zero tests and zero callers anywhere in the repo (verified by
-    # grepping src/, tests/, and libs/). This is an adopt-or-delete
-    # decision, not a test gap, and is tracked separately from coverage
-    # enforcement. See #298.
-    "src/vibesys/_model_config/",
-]
+allowlist = []
 
 [tool.vibesys.file_length]
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).

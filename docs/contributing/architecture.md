@@ -115,24 +115,6 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vibesys.render
-    vibesys.loops.multi --> vibesys
-    vibesys.loops.multi --> vibesys.context
-    vibesys.loops.multi --> vibesys.domains
-    vibesys.loops.multi --> vibesys.errors
-    vibesys.loops.multi --> vibesys.evaluators
-    vibesys.loops.multi --> vibesys.orchestration.artifacts
-    vibesys.loops.multi --> vibesys.orchestration.memory
-    vibesys.loops.multi --> vibesys.orchestration.progress_log
-    vibesys.loops.multi --> vibesys.orchestration.runtime
-    vibesys.loops.multi --> vibesys.orchestration.view
-    vibesys.loops.multi --> vibesys.orchestrations.agent_options
-    vibesys.loops.multi --> vibesys.orchestrations.hypothesis_readmodel
-    vibesys.loops.multi --> vibesys.prompts
-    vibesys.loops.multi --> vibesys.render
-    vibesys.loops.multi --> vibesys.roles
-    vibesys.loops.multi --> vibesys.runtime
-    vibesys.loops.multi --> vibesys.search.hypothesis
-    vibesys.loops.multi --> vibesys.search.profile_focus
     vibesys.loops.registry --> vibesys.plugin_catalog
     vibesys.loops.single --> vibesys
     vibesys.loops.single --> vibesys.context
@@ -434,27 +416,6 @@ graph TD
     vibesys.evaluators --> vs_loop_state
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
-    vibesys.loops.multi --> vibesys
-    vibesys.loops.multi --> vibesys.context
-    vibesys.loops.multi --> vibesys.domains
-    vibesys.loops.multi --> vibesys.errors
-    vibesys.loops.multi --> vibesys.evaluators
-    vibesys.loops.multi --> vibesys.orchestration.artifacts
-    vibesys.loops.multi --> vibesys.orchestration.memory
-    vibesys.loops.multi --> vibesys.orchestration.progress_log
-    vibesys.loops.multi --> vibesys.orchestration.runtime
-    vibesys.loops.multi --> vibesys.orchestration.view
-    vibesys.loops.multi --> vibesys.orchestrations.agent_options
-    vibesys.loops.multi --> vibesys.orchestrations.hypothesis_readmodel
-    vibesys.loops.multi --> vibesys.prompts
-    vibesys.loops.multi --> vibesys.render
-    vibesys.loops.multi --> vibesys.roles
-    vibesys.loops.multi --> vibesys.runtime
-    vibesys.loops.multi --> vibesys.search.hypothesis
-    vibesys.loops.multi --> vibesys.search.profile_focus
-    vibesys.loops.multi --> vs_agent
-    vibesys.loops.multi --> vs_loop_state
-    vibesys.loops.multi --> vs_project
     vibesys.loops.registry --> vibesys.plugin_catalog
     vibesys.loops.single --> vibesys
     vibesys.loops.single --> vibesys.context
