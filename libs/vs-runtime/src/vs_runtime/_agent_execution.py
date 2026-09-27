@@ -156,7 +156,7 @@ async def _wait_until_done(task: asyncio.Future[Any]) -> None:
             await asyncio.shield(task)
         except asyncio.CancelledError:
             continue
-        except BaseException:  # noqa: BLE001  # lint-waiver: execution construction cleanup must inspect the completed worker outcome.
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-837205 [BLE001]; execution construction cleanup must inspect the completed worker outcome.
             break
 
 
@@ -173,7 +173,7 @@ def _status(error: BaseException | None) -> AgentExecutionStatus:
 class RuntimeAgentExecution:
     """One environment and client confined to a single worker thread."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: the execution owns independently configured lower-layer resources and semantic sinks.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-837206 [PLR0913]; the execution owns independently configured lower-layer resources and semantic sinks.
         self,
         configuration: AgentExecutionConfiguration,
         scope: AgentExecutionScope,
@@ -199,7 +199,7 @@ class RuntimeAgentExecution:
         self._close_task: asyncio.Task[None] | None = None
 
     @classmethod
-    async def open(  # noqa: PLR0913  # lint-waiver: composition supplies independent lower-layer effects once; callers use the resulting deep execution object.
+    async def open(  # noqa: PLR0913  # lint-waiver: LW-837207 [PLR0913]; composition supplies independent lower-layer effects once; callers use the resulting deep execution object.
         cls,
         configuration: AgentExecutionConfiguration,
         scope: AgentExecutionScope,
@@ -247,7 +247,7 @@ class RuntimeAgentExecution:
             raise
 
     @classmethod
-    def _open_sync(  # noqa: PLR0913  # lint-waiver: mirrors open's one-time composition inputs on the worker thread.
+    def _open_sync(  # noqa: PLR0913  # lint-waiver: LW-837208 [PLR0913]; mirrors open's one-time composition inputs on the worker thread.
         cls,
         configuration: AgentExecutionConfiguration,
         scope: AgentExecutionScope,
@@ -319,7 +319,7 @@ class RuntimeAgentExecution:
     def reasoning_effort(self) -> str | None:
         return self._configuration.reasoning_effort
 
-    async def execute(  # noqa: PLR0913  # lint-waiver: fixed provider-turn inputs belong to the lower client contract and bundling them would expose an extra message object.
+    async def execute(  # noqa: PLR0913  # lint-waiver: LW-837209 [PLR0913]; fixed provider-turn inputs belong to the lower client contract and bundling them would expose an extra message object.
         self,
         message: str,
         *,
@@ -351,7 +351,7 @@ class RuntimeAgentExecution:
                 cancelled.add_note(f"canceled agent turn also failed: {error}")
             raise
 
-    def _run_turn(  # noqa: PLR0913  # lint-waiver: worker-side execution receives the same fixed provider-turn inputs as execute.
+    def _run_turn(  # noqa: PLR0913  # lint-waiver: LW-837210 [PLR0913]; worker-side execution receives the same fixed provider-turn inputs as execute.
         self,
         message: str,
         *,

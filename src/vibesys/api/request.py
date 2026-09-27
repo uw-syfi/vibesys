@@ -84,7 +84,7 @@ __all__ = [
 
 def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
     """Validate a selected policy before the CLI creates run resources."""
-    # lint-waiver: LW-020003 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
+    # lint-waiver: LW-020007 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
     from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
 
     registration = built_in_orchestrations().resolve(descriptor.id)

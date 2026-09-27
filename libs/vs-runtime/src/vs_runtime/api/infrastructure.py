@@ -174,7 +174,7 @@ type ManagedAgentWorkspaceResolver = Callable[[Workspace], ManagedAgentWorkspace
 type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
 
 
-def create_agent_session_runtime(  # noqa: PLR0913  # lint-waiver: composition fixes independent execution effects once behind the narrow AgentSessions contract.
+def create_agent_session_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution effects once behind the narrow AgentSessions contract.
     roles: tuple[AgentRole, ...],
     *,
     resolve_execution: AgentExecutionResolver,

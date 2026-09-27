@@ -240,7 +240,7 @@ class RuntimeAgentSession:
 class RuntimeAgentSessions:
     """Production factory and reverse-order owner for explicit sessions."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: run composition injects independent lower-layer effects once; session callers see only create_session.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-837211 [PLR0913]; run composition injects independent lower-layer effects once; session callers see only create_session.
         self,
         roles: tuple[AgentRole, ...],
         *,
@@ -401,7 +401,7 @@ class RuntimeAgentSessions:
             for session in reversed(sessions):
                 try:
                     await session.close()
-                except BaseException as error:  # noqa: BLE001  # lint-waiver: every workspace-bound session must close before grouped failures propagate.
+                except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-837212 [BLE001]; every workspace-bound session must close before grouped failures propagate.
                     errors.append(error)
         if errors:
             message = "workspace agent session cleanup failed"

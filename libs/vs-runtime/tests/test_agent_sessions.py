@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
+    AgentBackend,
     AgentCapabilities,
     AgentSessionKey,
     AgentSpec,
@@ -162,7 +163,7 @@ def _runtime(
         resolve_execution=lambda selected_role, workspace: (
             AgentExecutionConfiguration(
                 agent_id=selected_role.id,
-                spec=AgentSpec(backend="stub"),
+                spec=AgentSpec(backend=AgentBackend.STUB),
                 reasoning_effort="high",
             ),
             _scope(workspace, environments),
@@ -190,10 +191,9 @@ def _client(*, responses: tuple[str, ...] = ()) -> FakeAgentClient:
     ).enqueue_text("worker", *responses)
 
 
-def _environment(**kwargs: object) -> FakeAgentExecutionEnvironment:
+def _environment() -> FakeAgentExecutionEnvironment:
     return FakeAgentExecutionEnvironment(
         project_path_policy=ProjectPathPolicy(),
-        **kwargs,
     )
 
 
@@ -427,7 +427,7 @@ def test_environment_client_turn_and_cleanup_share_one_worker_thread() -> None:
             resolve_execution=lambda selected_role, workspace: (
                 AgentExecutionConfiguration(
                     agent_id=selected_role.id,
-                    spec=AgentSpec(backend="stub"),
+                    spec=AgentSpec(backend=AgentBackend.STUB),
                 ),
                 AgentExecutionScope(
                     workspace_path=_workspace(workspace).path,
@@ -494,9 +494,12 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
     release_turn = threading.Event()
     workspace = _Workspace()
     lifecycle = FakeAgentExecutionLifecycleSink()
-    client = _client(responses=("done",)).on_invoke(
-        lambda _call: (turn_started.set(), release_turn.wait())
-    )
+
+    def block_turn(_call: object) -> None:
+        turn_started.set()
+        release_turn.wait()
+
+    client = _client(responses=("done",)).on_invoke(block_turn)
 
     async def scenario() -> None:
         runtime = _runtime(

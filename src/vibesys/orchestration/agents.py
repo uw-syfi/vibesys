@@ -1,6 +1,6 @@
 """VibeSys composition for runtime-owned explicit agent sessions."""
 
-# lint-waiver: session composition shares one private RunContext owner with sibling capabilities.
+# lint-waiver: LW-837214 [SLF001]; session composition shares one private RunContext owner with sibling capabilities.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ type _AgentToolResolver = Callable[[object, Workspace], tuple[ToolServerDescript
 class _Agents:
     """Narrow explicit-session capability composed for one run."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: composition fixes independent runtime effects once; plugins see only create_session.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-837215 [PLR0913]; composition fixes independent runtime effects once; plugins see only create_session.
         self,
         host: HostResources,
         roles: tuple[AgentRole, ...],
