@@ -1103,6 +1103,7 @@ describe('session event model', () => {
         judge_verdict: 'skipped',
         perf_metric: null,
         perf_unit: null,
+        profile_skipped: false,
       }),
     );
 

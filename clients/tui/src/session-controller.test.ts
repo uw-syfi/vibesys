@@ -3217,7 +3217,12 @@ function roundFinished(sequence: number, round: number): RunEvent {
     timestamp: '2026-01-01T00:00:00Z',
     type: 'round_finished',
     round_label: `round-${round}`,
-    data: {kind: 'round_finished', attempts: 1, judge_verdict: 'pass'},
+    data: {
+      kind: 'round_finished',
+      attempts: 1,
+      judge_verdict: 'pass',
+      profile_skipped: false,
+    },
   };
 }
 
