@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.orchestration import artifacts, memory
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.orchestration.hypothesis import cadence as _cadence
 from vibesys.orchestration.hypothesis.transitions import (
     detect_plateau,
@@ -35,9 +33,6 @@ from vs_runtime.api import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _THROUGHPUT_LATENCY = MetricSpace(
     objectives=(
@@ -147,19 +142,6 @@ def test_validation_recipe_artifact_rejects_invented_top_level_shape() -> None:
                 ],
             }
         )
-
-
-def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path: Path) -> None:
-    progress = tmp_path / "progress"
-
-    path = artifacts.write_validation_recipe_schema(progress)
-    schema = json.loads(path.read_text())
-
-    assert path == progress / "validation" / "recipe-schema.json"
-    assert schema["properties"]["version"]["const"] == 1
-    assert schema["properties"]["recipes"]["minItems"] == 1
-    assert schema["properties"]["recipes"]["maxItems"] == 8
-    assert schema["examples"][0]["recipes"][0]["name"] == "focused-tests"
 
 
 def test_pre_round_decision_accepts_booleans() -> None:
@@ -854,117 +836,6 @@ def test_profiler_summary_perf_metric_optional() -> None:
     assert p2.perf_unit == "tok/s"
 
 
-def test_progress_writes_typed_role_handoffs_atomically(tmp_path: Path) -> None:
-    progress = tmp_path / "progress"
-    plan = make_orchestrator_plan(
-        hypothesis_id="transport-boundary",
-        task="Replace the request-local queue.",
-        criteria="The direct path activates.",
-        reasoning="The retained profile leaves a service residual.",
-    )
-    implementation = ImplementerResponse(
-        summary="Implemented direct delivery.",
-        expected_behavior="No request-local queue wakeup.",
-        evidence="Untrusted implementer claim.",
-    )
-
-    plan_path = artifacts.write_model(artifacts.plan_artifact_path(progress, 12), plan)
-    evidence_path = artifacts.write_model(
-        artifacts.implementer_artifact_path(progress, 12, 2), implementation
-    )
-
-    assert plan_path == tmp_path / "progress" / "plans" / "round-0012.json"
-    assert evidence_path == (
-        tmp_path / "progress" / "evidence" / "round-0012-attempt-02-implementer.json"
-    )
-    assert OrchestratorPlan.model_validate_json(plan_path.read_text()) == plan
-    assert ImplementerResponse.model_validate_json(evidence_path.read_text()) == implementation
-    assert not list(progress.rglob(".*.tmp*"))
-
-
-def test_persisted_implementer_attempts_define_resume_boundary(tmp_path: Path) -> None:
-    progress = tmp_path / "progress"
-    implementation = ImplementerResponse(
-        summary="Retained the first target run.",
-        expected_behavior="A resumed round must not overwrite it.",
-    )
-    first = artifacts.write_model(
-        artifacts.implementer_artifact_path(progress, 8, 1), implementation
-    )
-    second = artifacts.write_model(
-        artifacts.implementer_artifact_path(progress, 8, 2), implementation
-    )
-
-    assert artifacts.implementer_artifact_paths(progress, 8) == [first, second]
-    assert artifacts.next_implementer_attempt(progress, 8) == 3
-    assert artifacts.next_implementer_attempt(progress, 9) == 1
-
-
-def test_implementer_start_marker_advances_the_resume_boundary(tmp_path: Path) -> None:
-    progress = tmp_path / "progress"
-    implementation = ImplementerResponse(
-        summary="Recorded after the marker.",
-        expected_behavior="A killed attempt must not be replayed under its label.",
-    )
-    marker = artifacts.write_implementer_start_marker(progress, 8, 1)
-
-    assert marker == (
-        tmp_path / "progress" / "evidence" / "round-0008-attempt-01-implementer.started.json"
-    )
-    # An attempt killed mid-invoke leaves the marker and no completed artifact,
-    # yet the round must resume on attempt 2.
-    assert artifacts.implementer_artifact_paths(progress, 8) == []
-    assert artifacts.next_implementer_attempt(progress, 8) == 2
-
-    completed = artifacts.write_model(
-        artifacts.implementer_artifact_path(progress, 8, 1), implementation
-    )
-
-    # The marker and its own completed artifact name one attempt, not two.
-    assert artifacts.implementer_artifact_paths(progress, 8) == [completed]
-    assert artifacts.next_implementer_attempt(progress, 8) == 2
-
-    artifacts.write_implementer_start_marker(progress, 9, 1)
-
-    assert artifacts.next_implementer_attempt(progress, 8) == 2
-    assert artifacts.next_implementer_attempt(progress, 9) == 2
-
-
-def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
-    roadmap = tmp_path / "roadmap"
-    document = roadmap / "index.md"
-    assert not document.exists()
-    memory.ensure_roadmap_file(roadmap)
-    assert document.exists()
-    text = document.read_text()
-    # The seed must scaffold the four sections so the orchestrator's first
-    # round starts with a clear structure.
-    assert "## Major" in text
-    assert "## Minor" in text
-    assert "## Done" in text
-    assert "## Abandoned" in text
-
-
-def test_ensure_roadmap_does_not_overwrite_existing(tmp_path: Path) -> None:
-    roadmap = tmp_path / "roadmap"
-    roadmap.mkdir()
-    document = roadmap / "index.md"
-    document.write_text("# my custom plan\n")
-    memory.ensure_roadmap_file(roadmap)
-    assert document.read_text() == "# my custom plan\n"
-
-
-def test_read_roadmap_returns_text(tmp_path: Path) -> None:
-    roadmap = tmp_path / "roadmap"
-    roadmap.mkdir()
-    (roadmap / "index.md").write_text("hello\n")
-    assert memory.read_roadmap(roadmap) == "hello\n"
-
-
-def test_read_roadmap_missing_returns_empty(tmp_path: Path) -> None:
-    assert memory.read_roadmap(tmp_path / "roadmap") == ""
-
-
 def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
     template_dir = MULTI_PROMPT_DIR
     plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
@@ -988,15 +859,6 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> No
         role_prompt = (role_dir / name).read_text()
         assert "pareto_archive_location" in role_prompt
         assert "pareto_archive_summary" not in role_prompt
-
-
-def test_pareto_archive_is_materialized_under_progress(tmp_path: Path) -> None:
-    progress_path = tmp_path / "progress"
-
-    document = memory.write_pareto_archive(progress_path, "Trusted frontier: round 4")
-
-    assert document == tmp_path / "progress" / "pareto-frontier.md"
-    assert document.read_text() == "# Pareto frontier\n\nTrusted frontier: round 4\n"
 
 
 def _record(round_number: int, perf: float | None, unit: str = "tok/s") -> RoundRecord:

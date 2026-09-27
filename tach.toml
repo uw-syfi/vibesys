@@ -234,17 +234,6 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-# Host-owned turn artifacts (generic BaseModel/JSON writers plus artifact
-# paths: plan, implementer evidence, validation ledger, profiler root), the
-# other half of the dissolved vibesys.agent_run.issue_board. Writes any
-# BaseModel generically (write_model); it never imports the roles_search-layer
-# payload types (OrchestratorPlan, ImplementerReply) themselves -- the caller
-# in loops/ supplies the typed value and owns that shaping.
-path = "vibesys.orchestration.artifacts"
-layer = "orchestration_host"
-depends_on = [ "vibesys.orchestration.memory", "vs_runtime"]
-
-[[modules]]
 path = "vibesys.context"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vs_project", "vs_sandbox", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]

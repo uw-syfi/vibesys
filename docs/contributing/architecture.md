@@ -113,7 +113,6 @@ graph TD
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.agent_options --> vibesys.inputs
     vibesys.orchestration.agent_options --> vibesys.orchestration.metrics
-    vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.domains --> vibesys
@@ -330,8 +329,6 @@ graph TD
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.agent_options --> vibesys.inputs
     vibesys.orchestration.agent_options --> vibesys.orchestration.metrics
-    vibesys.orchestration.artifacts --> vibesys.orchestration.memory
-    vibesys.orchestration.artifacts --> vs_runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vs_project
     vibesys.orchestration.contracts --> vs_runtime

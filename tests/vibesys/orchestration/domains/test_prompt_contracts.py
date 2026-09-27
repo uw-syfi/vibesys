@@ -8,12 +8,10 @@ packs against an existing keyword set.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import pytest
 
 from vibesys.constants import DomainName
-from vibesys.orchestration import memory
 from vibesys.orchestration.domains.registry import resolve_domain
 from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
@@ -21,8 +19,6 @@ from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
 from vibesys.orchestration.prompts import render_template
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 
-if TYPE_CHECKING:
-    from pathlib import Path
 _TEMPLATE_DIR = MULTI_PROMPT_DIR
 
 
@@ -78,15 +74,6 @@ _NEUTRAL_CONTEXT: dict[str, object] = {
     "profile_execution": "local",
 }
 
-_PRIOR_SOLUTION_TERMS = (
-    "EAGLE3",
-    "speculative decoding",
-    "CUDA graphs",
-    "FlashAttention",
-    "continuous batching",
-    "paged attention",
-)
-
 
 def _domain_context(context: dict[str, object]) -> dict[str, object]:
     return {
@@ -99,15 +86,6 @@ def _domain_context(context: dict[str, object]) -> dict[str, object]:
         "profile_execution": context["profile_execution"],
         "workspace_sources": (),
     }
-
-
-def test_fresh_roadmap_scaffold_does_not_seed_solution_ideas(tmp_path: Path) -> None:
-    roadmap = tmp_path / "roadmap"
-    memory.ensure_roadmap_file(roadmap)
-
-    text = (roadmap / "index.md").read_text()
-    for term in _PRIOR_SOLUTION_TERMS:
-        assert term.casefold() not in text.casefold()
 
 
 def _domain_section(domain: DomainName, role: str, context: dict[str, object]) -> str:
