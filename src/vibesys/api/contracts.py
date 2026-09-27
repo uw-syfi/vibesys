@@ -12,11 +12,11 @@ from typing import Protocol
 
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-
-# Objective/MetricSpace are shared evaluator contracts.
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEvent, EventStatus
 from vibesys.orchestration.environment import AgentEnvironment
+
+# Objective/MetricSpace are shared evaluator contracts.
+from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.view import RunResult, RunStatus, RunView
 from vibesys.schemas import CandidateDisposition, PerfDeltaReason

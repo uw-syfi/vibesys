@@ -15,8 +15,9 @@ from tests.vibesys.golden.helpers import (
 )
 
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -24,7 +25,6 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.schemas import Verdict
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_runtime.api import (
     AccuracyEvaluation,
     BenchmarkEvaluation,

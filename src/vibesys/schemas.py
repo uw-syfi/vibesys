@@ -1,18 +1,11 @@
 """Pydantic schemas shared by the agent-loop reply and search-plan layers.
 
 This module used to hold every structured agent-reply schema; those now live
-with their orchestration policy or in ``vibesys.evaluators`` (measurement
-records: perf stats, validation recipes).
+with their orchestration policy or in ``vibesys.evaluators``.
 ``OrchestratorPlan`` and ``HypothesisStrategyUpdate`` moved to
 ``vibesys.orchestration.hypothesis.plan`` (the designer reply type IS the search plan
-type). What remains here -- ``PerfTrend``, ``Verdict``, and
-``SkillResourceSelection`` --
-does not: ``PerfTrend`` is a runtime dependency of ``vibesys.evaluators``
-(perf-eval reply schemas), and ``search`` already depends on
-``vibesys.evaluators`` for ``MetricSpace``; moving ``PerfTrend`` into
-``search.hypothesis`` would make that a dependency cycle, so it stays in this
-dependency-free module instead. ``SkillResourceSelection`` and ``Verdict``
-are shared by otherwise independent orchestration policies.
+type). What remains here is shared by otherwise independent orchestration
+policies.
 
 This module has no local imports besides the dependency-free ``vs_loop_state``
 leaf lib, so templates and tests can pull schemas in without dragging in the
@@ -33,14 +26,6 @@ PerfDeltaReason = _loop_state_api.PerfDeltaReason
 # vs_loop_state so that server code can import them without deep-importing
 # vibesys internals. Re-exported here so existing call sites outside this
 # refactor's scope keep working unchanged.
-
-
-class PerfTrend(StrEnum):
-    """Direction of observed performance change across rounds."""
-
-    IMPROVED = "improved"
-    REGRESSED = "regressed"
-    MIXED = "mixed"
 
 
 class Verdict(StrEnum):

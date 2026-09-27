@@ -7,7 +7,7 @@ from typing import Literal
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace, Objective
+from vibesys.orchestration.metrics import Measurement, MetricComparison, MetricSpace, Objective
 
 _OPS = Objective(name="ops", direction="max")
 _LATENCY = Objective(name="latency", direction="min")

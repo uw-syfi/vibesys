@@ -45,7 +45,7 @@ from vibesys.orchestration.evolve.population.models import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from vibesys.evaluators.metrics import MetricSpace
+    from vibesys.orchestration.metrics import MetricSpace
 
 __all__ = ["admit", "objective_signature", "select"]
 

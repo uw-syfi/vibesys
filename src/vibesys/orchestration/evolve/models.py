@@ -6,12 +6,12 @@ from typing import Annotated, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.population import (
     Individual,
     OpenEvolveSelectorConfig,
     PopulationState,
 )
+from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.schemas import Verdict
 
 

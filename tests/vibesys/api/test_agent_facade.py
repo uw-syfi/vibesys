@@ -7,8 +7,8 @@ import sys
 from datetime import UTC, datetime
 
 import vibesys.api as generic_api
+from vibesys.api import MetricSpace, Objective
 from vibesys.api import agent as agent_api
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration.single.models import SingleOptions
 from vs_project.api import (
     OrchestrationDescriptor,

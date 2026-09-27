@@ -5,9 +5,9 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.metrics import MetricSpace
 from vs_loop_state.api import RoundRecord
 
 

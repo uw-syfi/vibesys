@@ -9,8 +9,8 @@ from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
+from vibesys.api import MetricSpace
 from vibesys.api.contracts import RunStatus
-from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.readmodel import project_run_view
 from vibesys.orchestration.hypothesis.state import (

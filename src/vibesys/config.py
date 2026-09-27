@@ -165,7 +165,7 @@ class RepositoryCfg(_Strict):
 class LoadLevelCfg(_Strict):
     """One benchmark load level fed to the perf_eval prompt template.
 
-    Distinct from the ``LoadLevelMetrics`` *output* schema in ``schemas.py``.
+    The issue-queue policy owns the corresponding structured output contract.
     """
 
     rate: int = Field(gt=0, description="Request rate (requests/sec) for this load level.")

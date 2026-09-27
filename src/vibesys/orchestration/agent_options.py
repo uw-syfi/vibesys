@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
-from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.orchestration.metrics import MetricSpace, Objective
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import BenchmarkResult

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.plugin import PLUGIN
 from vibesys.orchestration.evolve.population import (
@@ -16,6 +15,7 @@ from vibesys.orchestration.evolve.population import (
     PopulationConfig,
     PopulationSearch,
 )
+from vibesys.orchestration.metrics import MetricSpace, Objective
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentRole,

@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.evaluators.metrics import Measurement
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vibesys.orchestration.hypothesis.attempts import recorded_judge_verdict
 from vibesys.orchestration.hypothesis.transitions import (
     ResolutionEvidence,
@@ -18,6 +16,8 @@ from vibesys.orchestration.hypothesis.transitions import (
     scalar_candidate_retained,
     trusted_perf_provenance,
 )
+from vibesys.orchestration.metrics import Measurement
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:

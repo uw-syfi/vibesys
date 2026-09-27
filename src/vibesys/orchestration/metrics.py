@@ -1,4 +1,4 @@
-"""Objective axes and metric comparison shared by optimization loops.
+"""Objective axes and metric comparison owned by orchestration policy.
 
 A run measures its candidates in a **metric space**: a set of directed
 objective axes plus the relative benchmark tolerance below which two readings

@@ -12,12 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
-from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    PerfDeltaReason,
-)
 from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
@@ -25,6 +19,12 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisReview,
     HypothesisState,
     HypothesisStrategy,
+)
+from vibesys.orchestration.metrics import Measurement, MetricComparison, MetricSpace
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfDeltaReason,
 )
 
 if TYPE_CHECKING:

@@ -32,11 +32,11 @@ from entrypoints.cli import (
     run_environment_spec_from_args,
 )
 from entrypoints.headless import main
+from vibesys.api import MetricSpace, Objective
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEventType
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,

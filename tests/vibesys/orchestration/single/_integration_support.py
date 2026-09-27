@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
-from vibesys.evaluators.metrics import MetricSpace
+from vibesys.orchestration.metrics import MetricSpace
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleState

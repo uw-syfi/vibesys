@@ -9,18 +9,9 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration import artifacts, memory
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
-from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.prompts.contexts import display_path
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-)
 from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
 from vibesys.orchestration.hypothesis import cadence as _cadence
 from vibesys.orchestration.hypothesis.transitions import (
@@ -33,6 +24,15 @@ from vibesys.orchestration.hypothesis.transitions import (
     select_final_candidate,
     terminal_workspace_notice,
     trusted_candidate_records,
+)
+from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
+from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.prompts.contexts import display_path
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
 )
 from vs_loop_state.api import RoundRecord
 from vs_project.api import OrchestrationDescriptor
