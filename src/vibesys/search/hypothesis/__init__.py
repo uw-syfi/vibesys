@@ -53,9 +53,7 @@ from vibesys.search.hypothesis.state import (
     HypothesisResolution,
     HypothesisReview,
     HypothesisState,
-    HypothesisStateStore,
     HypothesisStrategy,
-    load_hypothesis_state,
 )
 
 __all__ = [
@@ -75,7 +73,6 @@ __all__ = [
     "HypothesisReview",
     "HypothesisSearch",
     "HypothesisState",
-    "HypothesisStateStore",
     "HypothesisStrategy",
     "HypothesisStrategyUpdate",
     "ImplementerReply",
@@ -95,6 +92,5 @@ __all__ = [
     "StartedHypothesis",
     "attempt_was_reviewed",
     "build_round_record",
-    "load_hypothesis_state",
     "recorded_judge_verdict",
 ]

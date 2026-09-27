@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
@@ -13,20 +13,15 @@ from vibesys.search.hypothesis.plan import OrchestratorPlan
 from vibesys.search.profile_focus.state import ProfileFocusState
 from vs_loop_state.api import HypothesisResolution, PerfProvenance, RoundRecord
 
-if TYPE_CHECKING:
-    from vs_project.api import Project, StateNamespace
-
 __all__ = [
     "Hypothesis",
     "HypothesisMeasurement",
     "HypothesisResolution",
     "HypothesisReview",
     "HypothesisState",
-    "HypothesisStateStore",
     "HypothesisStrategy",
     "PerfProvenance",
     "RoundRecord",
-    "load_hypothesis_state",
 ]
 
 
@@ -197,32 +192,3 @@ class HypothesisState(BaseModel):
     def clone(self) -> HypothesisState:
         """Return an independent copy for computing the next state."""
         return self.model_copy(deep=True)
-
-
-class HypothesisStateStore:
-    """Persist hypothesis search state in the run's portable namespace."""
-
-    def __init__(self, namespace: StateNamespace) -> None:
-        """Bind the single typed state slot in the supplied namespace."""
-        self._namespace = namespace
-        self._slot = namespace.slot("state.json", HypothesisState)
-
-    def load_optional(self) -> HypothesisState | None:
-        """Return the authoritative aggregate when present."""
-        return self._slot.load_optional()
-
-    def load(self) -> HypothesisState:
-        """Return the aggregate or a new empty state."""
-        return self.load_optional() or HypothesisState()
-
-    @property
-    def namespace(self) -> StateNamespace:
-        """Return the namespace used for Git snapshots."""
-        return self._namespace
-
-
-def load_hypothesis_state(
-    project: Project, run_id: str, *, namespace: str
-) -> HypothesisState | None:
-    """Load one agent run's hypothesis state without legacy format recovery."""
-    return HypothesisStateStore(project.state.portable_namespace(run_id, namespace)).load_optional()
