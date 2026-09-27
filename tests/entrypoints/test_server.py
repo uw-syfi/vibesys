@@ -244,7 +244,9 @@ def test_detached_startup_reports_a_published_record(
     effects = RecordingDetachedEffects(process, times=[0.0, 0.0], record=record)
     opened: list[str] = []
     # test-isolation: keep the startup test headless while verifying the published URL.
-    monkeypatch.setattr(server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url))
+    monkeypatch.setattr(
+        server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
+    )
 
     _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
 
