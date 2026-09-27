@@ -20,7 +20,7 @@ from entrypoints.server import (
     _web_requested,
     main,
 )
-from server.transport.discovery import WebInstanceRecord
+from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -99,6 +99,67 @@ def test_second_web_launch_reuses_live_instance(
 
     assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
     assert opened == [record.url]
+
+
+def test_discover_web_instance_waits_for_a_claimed_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101064 [S106]; use a fixed capability token in a launch-race fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    discoveries = iter([None, record])
+    monkeypatch.setattr(
+        server_entrypoint.WebInstanceRecord,
+        "discover",
+        lambda *_args, **_kwargs: next(discoveries),
+    )
+    monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
+    monkeypatch.setattr(server_entrypoint.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(server_entrypoint.time, "monotonic", lambda: 0.0)
+
+    assert server_entrypoint._discover_web_instance(instance_path) == record
+
+
+def test_discover_web_instance_falls_back_after_claim_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101065 [S106]; use a fixed capability token in a launch-race fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    discoveries = iter([None, record])
+    monotonic_values = iter([0.0, 3.0])
+    monkeypatch.setattr(
+        server_entrypoint.WebInstanceRecord,
+        "discover",
+        lambda *_args, **_kwargs: next(discoveries),
+    )
+    monkeypatch.setattr(server_entrypoint.WebInstanceClaim, "is_held", lambda _path: True)
+    monkeypatch.setattr(server_entrypoint.time, "monotonic", lambda: next(monotonic_values))
+
+    assert server_entrypoint._discover_web_instance(instance_path) == record
+
+
+def test_web_instance_claim_reports_ownership(tmp_path: Path) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    claim = WebInstanceClaim(instance_path)
+
+    assert WebInstanceClaim.is_held(instance_path) is False
+    assert claim.try_acquire() is True
+    assert WebInstanceClaim.is_held(instance_path) is True
+    claim.close()
+    assert WebInstanceClaim.is_held(instance_path) is False
 
 
 def test_tui_defaults_use_launch_config_and_normalize_runs_dir(
