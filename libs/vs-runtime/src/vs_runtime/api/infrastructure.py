@@ -181,9 +181,8 @@ from vs_runtime._trusted_evaluation_preparation import (
 )
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
+    RuntimeWorkspaces,
     WorkspaceResource,
-    WorkspaceResourceProvider,
-    create_workspaces,
     resolve_workspace_resource,
     run_workspace_exclusive,
 )
@@ -201,64 +200,28 @@ def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel
     return RuntimeRunControlChannel(events)
 
 
-class ManagedAgentWorkspace(Workspace, Protocol):
-    """Composition view of workspace mechanics needed for access enforcement.
-
-    This is not an orchestration-plugin contract. It is removed once workspace
-    ownership also resides in ``vs_runtime``.
-    """
-
-    @property
-    def path(self) -> Path:
-        """Return the live host path used by the agent execution adapter."""
-        ...
-
-    async def snapshot(self, label: str) -> str:
-        """Record the tree before or after one turn."""
-        ...
-
-    async def pending_changes(self) -> list[str]:
-        """List workspace-relative paths changed since the latest snapshot."""
-        ...
-
-    async def restore_for_agent(
-        self,
-        revision: str,
-        *,
-        preserve_paths: tuple[str, ...],
-    ) -> None:
-        """Restore a turn snapshot while preserving only declared grants."""
-        ...
-
-    def is_directory(self, path: str) -> bool:
-        """Return whether one validated workspace-relative path is a directory."""
-        ...
-
-
-class AgentSessionRuntime(AgentSessions, Protocol):
-    """Composition controls for the run-owned production session manager."""
-
-    async def close_workspace(self, workspace: Workspace) -> None:
-        """Close sessions bound to a workspace before its teardown."""
-        ...
-
-    def begin_close(self) -> None:
-        """Reject new turns before run teardown begins."""
-        ...
-
-
 type AgentExecutionResolver = Callable[
     [AgentRole, Workspace], tuple[AgentExecutionConfiguration, AgentExecutionScope]
 ]
-type ManagedAgentWorkspaceResolver = Callable[[Workspace], ManagedAgentWorkspace]
 type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
+type CandidateWorkspaceResourceFactory = Callable[[str, str], WorkspaceResource]
 
 
-def create_agent_session_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution effects once behind the narrow AgentSessions contract.
+@dataclass(frozen=True, slots=True)
+class AgentWorkspaceRuntime:
+    """Joint runtime ownership of agent sessions and workspace resources."""
+
+    agents: AgentSessions
+    workspaces: OwnedWorkspaces
+
+
+def create_agent_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution and workspace effects behind the two plugin-facing capabilities.
     roles: tuple[AgentRole, ...],
     *,
+    root_resource: WorkspaceResource,
+    supports_parallel_candidates: bool,
+    create_candidate_resource: CandidateWorkspaceResourceFactory,
     resolve_execution: AgentExecutionResolver,
-    resolve_workspace: ManagedAgentWorkspaceResolver,
     session_store: Callable[[], SessionStore | None],
     control: RunControlChannel,
     lifecycle_events: AgentExecutionLifecycleSink,
@@ -267,12 +230,17 @@ def create_agent_session_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PL
     client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
-) -> AgentSessionRuntime:
-    """Create the production owner for explicit orchestration sessions."""
-    return RuntimeAgentSessions(
+) -> AgentWorkspaceRuntime:
+    """Create one owner for workspace handles and their bound agent sessions."""
+    workspaces = RuntimeWorkspaces(
+        root_resource,
+        supports_parallel_candidates=supports_parallel_candidates,
+        create_candidate_resource=create_candidate_resource,
+    )
+    agents = RuntimeAgentSessions(
         roles,
+        workspaces=workspaces,
         resolve_execution=resolve_execution,
-        resolve_workspace=resolve_workspace,
         session_store=session_store,
         control=control,
         lifecycle_events=lifecycle_events,
@@ -282,6 +250,8 @@ def create_agent_session_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PL
         tool_bindings=tool_bindings,
         log=log,
     )
+    workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837216 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
+    return AgentWorkspaceRuntime(agents=agents, workspaces=workspaces)
 
 
 class ModelVolumeProvisioner(Protocol):
@@ -406,8 +376,8 @@ __all__ = [
     "AgentExecutionStatus",
     "AgentMessageRouter",
     "AgentPaths",
-    "AgentSessionRuntime",
     "AgentToolResolver",
+    "AgentWorkspaceRuntime",
     "BlockingOperations",
     "BundledResources",
     "CommittedStateObserver",
@@ -439,8 +409,6 @@ __all__ = [
     "MacOSProfilerDiagnostic",
     "MacOSProfilerEffects",
     "MacOSProfilerTool",
-    "ManagedAgentWorkspace",
-    "ManagedAgentWorkspaceResolver",
     "ManagedConversation",
     "ManagedConversationSpec",
     "ModalEnvironmentFacts",
@@ -491,19 +459,17 @@ __all__ = [
     "TrustedMetricDeclaration",
     "ValidationRecipe",
     "WorkspaceResource",
-    "WorkspaceResourceProvider",
     "WorkspaceSourceValue",
     "build_run_environment",
     "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",
-    "create_agent_session_runtime",
+    "create_agent_workspace_runtime",
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
     "create_state",
     "create_trusted_evaluation_executor",
-    "create_workspaces",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",

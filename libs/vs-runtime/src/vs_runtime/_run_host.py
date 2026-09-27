@@ -8,25 +8,19 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_runtime.contracts import AgentSessions
-
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     from vs_runtime._workspaces import OwnedWorkspaces
-    from vs_runtime.contracts import Commands, Control, Evaluation, RunFacts, Skills, State
-
-
-class OwnedAgentSessions(AgentSessions, Protocol):
-    """Run-owned agent sessions with explicit lifecycle control."""
-
-    def begin_close(self) -> None:
-        """Reject new sessions and turns."""
-        ...
-
-    async def close(self) -> None:
-        """Close all sessions in reverse creation order."""
-        ...
+    from vs_runtime.contracts import (
+        AgentSessions,
+        Commands,
+        Control,
+        Evaluation,
+        RunFacts,
+        Skills,
+        State,
+    )
 
 
 class RunHostResourceOwner(Protocol):
@@ -94,7 +88,7 @@ class RunHostComponents:
 
     run_id: str
     facts: RunFacts
-    agents: OwnedAgentSessions
+    agents: AgentSessions
     workspaces: OwnedWorkspaces
     evaluation: Evaluation
     state: State
@@ -136,12 +130,8 @@ class RuntimeRunHost:
 
     async def _close_once(self) -> None:
         self._blocking.begin_close()
-        self.agents.begin_close()
+        self.workspaces.begin_close()
         errors = await self._blocking.drain()
-        try:
-            await self.agents.close()
-        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948001 [BLE001]; cleanup must continue through independently owned resources.
-            errors.append(error)
         try:
             await self.workspaces.close()
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948002 [BLE001]; cleanup must continue through independently owned resources.

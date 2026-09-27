@@ -547,6 +547,8 @@ class FakeAgentSessions:
             session.mark_closed()
         for session in reversed(sessions):
             await session.close()
+        selected = set(sessions)
+        self._sessions = [session for session in self._sessions if session not in selected]
 
 
 class FakeWorkspaces:
@@ -557,15 +559,16 @@ class FakeWorkspaces:
         root: FakeWorkspace,
         *,
         supports_parallel_candidates: bool = False,
-        invalidate_sessions: Callable[[Workspace], Awaitable[None]] | None = None,
+        sessions: FakeAgentSessions | None = None,
     ) -> None:
         """Bind the fake capability to one root and a fixed isolation capability."""
         self._root = root
         self._supports_parallel_candidates = supports_parallel_candidates
-        self._invalidate_sessions = invalidate_sessions
+        self._sessions = sessions
         self._candidates: list[FakeCandidateWorkspace] = []
         self._patches: dict[str, str] = {}
         self.export_patch_calls: list[str] = []
+        self._closing = False
         self._closed = False
 
     @property
@@ -585,7 +588,7 @@ class FakeWorkspaces:
 
     async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
         """Create one isolated workspace from a known root revision."""
-        if self._closed:
+        if self._closing or self._closed:
             raise SessionClosedError
         if not self._supports_parallel_candidates:
             message = "this run does not support parallel candidate workspaces"
@@ -596,7 +599,9 @@ class FakeWorkspaces:
         workspace_id = f"candidate-{len(self._candidates) + 1}"
         candidate = FakeCandidateWorkspace(
             owner=self,
-            invalidate_sessions=self._invalidate_sessions,
+            invalidate_sessions=(
+                self._sessions.close_workspace_sessions if self._sessions is not None else None
+            ),
             config=_FakeCandidateConfig(
                 workspace_id=workspace_id,
                 path=self._root.path / workspace_id,
@@ -632,13 +637,24 @@ class FakeWorkspaces:
         """Keep a snapshotted candidate revision reachable from the root."""
         self._root.add_retained_revision(revision)
 
+    def begin_close(self) -> None:
+        """Reject new candidates and sessions before asynchronous teardown."""
+        if self._closing:
+            return
+        self._closing = True
+        if self._sessions is not None:
+            self._sessions.begin_close()
+
     async def close(self) -> None:
-        """Discard every live candidate in reverse creation order, once."""
+        """Discard candidates, then close remaining root sessions, once."""
         if self._closed:
             return
+        self.begin_close()
         self._closed = True
         for candidate in reversed(self._candidates):
             await candidate.discard()
+        if self._sessions is not None:
+            await self._sessions.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1285,7 +1301,7 @@ class FakeRunHost:
         self._workspaces = FakeWorkspaces(
             FakeWorkspace(path=project_root),
             supports_parallel_candidates=supports_parallel_candidates,
-            invalidate_sessions=self._agents.close_workspace_sessions,
+            sessions=self._agents,
         )
         self._evaluation = FakeEvaluation(run_id=run_id)
         self._state = FakeState(plugin.state, self._workspaces.root)
@@ -1354,5 +1370,5 @@ class FakeRunHost:
         if self._closed:
             return
         self._closed = True
-        await self._agents.close()
+        self._workspaces.begin_close()
         await self._workspaces.close()

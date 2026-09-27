@@ -8,13 +8,25 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_runtime.api.infrastructure import create_workspaces, resolve_workspace_resource
-from vs_runtime.api.testing import FakeWorkspace
+from vs_agent.api import NULL_AGENT_EVENT_SINK
+from vs_runtime.api.infrastructure import (
+    AgentWorkspaceRuntime,
+    create_agent_workspace_runtime,
+    create_run_control_channel,
+    resolve_workspace_resource,
+)
+from vs_runtime.api.testing import (
+    FakeAgentExecutionLifecycleSink,
+    FakeRunControlEventSink,
+    FakeWorkspace,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_runtime.api import Workspace
+    from vs_agent.api import AgentClientProtocol
+    from vs_runtime.api import AgentRole, Workspace
+    from vs_runtime.api.infrastructure import AgentExecutionConfiguration, AgentExecutionScope
 
 
 class _Resource:
@@ -69,28 +81,50 @@ class _Provider:
     def __init__(self, path: Path) -> None:
         self.root = _Resource(None, path)
         self.created: list[_Resource] = []
-        self.cleanup: list[str] = []
 
     def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
         resource = _Resource(workspace_id, self.root.path / workspace_id, revision)
         self.created.append(resource)
         return resource
 
-    async def close_sessions(self, workspace: Workspace) -> None:
-        self.cleanup.append(f"sessions:{workspace.id}")
+
+def _runtime(provider: _Provider) -> AgentWorkspaceRuntime:
+    def unexpected_execution(
+        _role: AgentRole,
+        _workspace: Workspace,
+    ) -> tuple[AgentExecutionConfiguration, AgentExecutionScope]:
+        pytest.fail("workspace-only test opened an agent execution")
+
+    def unexpected_client(**_kwargs: object) -> AgentClientProtocol:
+        pytest.fail("workspace-only test opened an agent client")
+
+    return create_agent_workspace_runtime(
+        (),
+        root_resource=provider.root,
+        supports_parallel_candidates=provider.supports_parallel_candidates,
+        create_candidate_resource=provider.create_candidate,
+        resolve_execution=unexpected_execution,
+        session_store=lambda: None,
+        control=create_run_control_channel(FakeRunControlEventSink()),
+        lifecycle_events=FakeAgentExecutionLifecycleSink(),
+        agent_events=NULL_AGENT_EVENT_SINK,
+        route_message=lambda message, _steering: message,
+        client_factory=unexpected_client,
+    )
 
 
 def test_collection_owns_candidate_cleanup_in_reverse_order(tmp_path: Path) -> None:
     provider = _Provider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = create_workspaces(provider)
+        workspaces = _runtime(provider).workspaces
         first = await workspaces.create_candidate()
         second = await workspaces.create_candidate()
         first_id = first.id
         second_id = second.id
         await workspaces.close()
-        assert provider.cleanup == [f"sessions:{second_id}", f"sessions:{first_id}"]
+        assert second_id is not None
+        assert first_id is not None
         assert all(resource.closed for resource in provider.created)
         assert provider.root.closed
         with pytest.raises(ValueError, match="closed"):
@@ -116,14 +150,13 @@ def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: Path) 
     provider = _FailingProvider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = create_workspaces(provider)
+        workspaces = _runtime(provider).workspaces
         await workspaces.create_candidate()
         await workspaces.create_candidate()
         with pytest.raises(BaseExceptionGroup) as captured:
             await workspaces.close()
         assert len(captured.value.exceptions) == 2
         assert all(resource.closed for resource in provider.created)
-        assert len(provider.cleanup) == 2
 
     asyncio.run(exercise())
 
@@ -156,7 +189,7 @@ def test_workspace_mutations_are_serialized(tmp_path: Path) -> None:
     provider.root = root
 
     async def exercise() -> None:
-        workspaces = create_workspaces(provider)
+        workspaces = _runtime(provider).workspaces
         first = asyncio.create_task(workspaces.root.snapshot("first"))
         await asyncio.to_thread(entered.wait)
         second_scheduled = asyncio.Event()
@@ -182,14 +215,16 @@ def test_collection_rejects_foreign_handles_and_early_discard_is_idempotent(
     provider = _Provider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = create_workspaces(provider)
+        workspaces = _runtime(provider).workspaces
         candidate = await workspaces.create_candidate()
         candidate_id = candidate.id
         with pytest.raises(TypeError, match="live handle"):
             resolve_workspace_resource(workspaces, FakeWorkspace(path=tmp_path))
         await candidate.discard()
         await candidate.discard()
-        assert provider.cleanup == [f"sessions:{candidate_id}"]
+        assert candidate_id is not None
+        with pytest.raises(ValueError, match="closed"):
+            resolve_workspace_resource(workspaces, candidate)
         await workspaces.close()
 
     asyncio.run(exercise())
@@ -210,7 +245,7 @@ def test_cancelled_candidate_construction_drains_and_closes_partial_resource(
     provider = _BlockingProvider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = create_workspaces(provider)
+        workspaces = _runtime(provider).workspaces
         construction = asyncio.create_task(workspaces.create_candidate())
         await asyncio.to_thread(started.wait)
         construction.cancel()
@@ -220,5 +255,33 @@ def test_cancelled_candidate_construction_drains_and_closes_partial_resource(
         assert len(provider.created) == 1
         assert provider.created[0].closed
         await workspaces.close()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_close_keeps_owned_root_cleanup_alive(tmp_path: Path) -> None:
+    close_started = threading.Event()
+    close_release = threading.Event()
+
+    class _BlockingRoot(_Resource):
+        def close(self) -> None:
+            close_started.set()
+            close_release.wait()
+            super().close()
+
+    provider = _Provider(tmp_path)
+    root = _BlockingRoot(None, tmp_path)
+    provider.root = root
+
+    async def exercise() -> None:
+        workspaces = _runtime(provider).workspaces
+        waiter = asyncio.create_task(workspaces.close())
+        await asyncio.to_thread(close_started.wait)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        close_release.set()
+        await workspaces.close()
+        assert root.closed
 
     asyncio.run(exercise())

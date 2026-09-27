@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _joined_cleanup_failure(errors: list[BaseException]) -> BaseExceptionGroup:
+    return BaseExceptionGroup("joined runtime cleanup failed", errors)
+
+
 class _LifecycleAgents(FakeAgentSessions):
     def __init__(
         self,
@@ -51,16 +55,32 @@ class _LifecycleAgents(FakeAgentSessions):
 
 
 class _LifecycleWorkspaces(FakeWorkspaces):
-    def __init__(self, path: Path, events: list[str], failure: BaseException | None = None) -> None:
-        super().__init__(FakeWorkspace(path=path))
+    def __init__(
+        self,
+        path: Path,
+        events: list[str],
+        agents: _LifecycleAgents,
+        failure: BaseException | None = None,
+    ) -> None:
+        super().__init__(FakeWorkspace(path=path), sessions=agents)
         self._events = events
+        self._agents = agents
         self._failure = failure
 
+    def begin_close(self) -> None:
+        self._agents.begin_close()
+
     async def close(self) -> None:
+        errors: list[BaseException] = []
+        try:
+            await self._agents.close()
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948024 [BLE001]; the lifecycle fake must model joined-owner cleanup through every failure.
+            errors.append(error)
         self._events.append("workspaces-close")
         if self._failure is not None:
-            raise self._failure
-        await super().close()
+            errors.append(self._failure)
+        if errors:
+            raise _joined_cleanup_failure(errors)
 
 
 class _Resources:
@@ -110,7 +130,7 @@ def _components(  # noqa: PLR0913  # lint-waiver: LW-948021 [PLR0913]; lifecycle
 ) -> tuple[RunHostComponents, BlockingOperations, _Resources]:
     blocking = BlockingOperations()
     agents = _LifecycleAgents(events, agent_failure, begin_close_started)
-    workspaces = _LifecycleWorkspaces(tmp_path, events, workspace_failure)
+    workspaces = _LifecycleWorkspaces(tmp_path, events, agents, workspace_failure)
     owner = resources or _Resources(events)
     return (
         RunHostComponents(
@@ -187,11 +207,13 @@ def test_cleanup_attempts_every_owner_and_aggregates_failures(tmp_path: Path) ->
     with pytest.raises(BaseExceptionGroup) as caught:
         asyncio.run(exercise())
 
-    assert [str(error) for error in caught.value.exceptions] == [
+    workspace_errors = caught.value.exceptions[0]
+    assert isinstance(workspace_errors, BaseExceptionGroup)
+    assert [str(error) for error in workspace_errors.exceptions] == [
         "agent close",
         "workspace close",
-        "resource close",
     ]
+    assert str(caught.value.exceptions[1]) == "resource close"
     assert events[-3:] == ["agents-close", "workspaces-close", "resources-close"]
 
 

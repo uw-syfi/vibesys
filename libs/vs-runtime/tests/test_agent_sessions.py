@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -33,6 +34,7 @@ from vs_runtime.api import (
     AgentCapability,
     AgentRole,
     AgentSession,
+    AgentSessions,
     AgentTool,
     AgentTurnTimeoutError,
     RuntimeContractError,
@@ -46,8 +48,8 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionScope,
     AgentExecutionStarted,
     AgentExecutionStatus,
-    AgentSessionRuntime,
-    create_agent_session_runtime,
+    AgentWorkspaceRuntime,
+    create_agent_workspace_runtime,
     create_run_control_channel,
 )
 from vs_runtime.api.testing import (
@@ -69,59 +71,100 @@ class _Reply(BaseModel):
     value: int
 
 
-class _Workspace:
-    def __init__(self, workspace_id: str = "root") -> None:
+class _WorkspaceResource:
+    def __init__(
+        self,
+        workspace_id: str | None = None,
+        *,
+        close_events: list[str] | None = None,
+    ) -> None:
         self.id = workspace_id
-        self.path = Path(f"/{workspace_id}")
-        self.revision: str | None = None
+        self.path = Path(f"/{workspace_id or 'root'}")
+        self.revision: str | None = "root-revision"
         self.trusted_input_baseline: str | None = "input"
         self.changes: list[str] = []
         self.committed_changes: list[tuple[str, ...]] = []
         self.directories: set[str] = set()
         self.snapshots: list[str] = []
         self.agent_restores: list[tuple[str, tuple[str, ...]]] = []
+        self.closed = False
+        self._close_events = close_events
 
-    async def snapshot(self, label: str) -> str:
+    def snapshot(self, label: str) -> str:
         self.snapshots.append(label)
         self.committed_changes.append(tuple(self.changes))
         self.revision = f"revision-{len(self.snapshots)}"
         self.changes.clear()
         return self.revision
 
-    async def restore(self, revision: str, *, clean: bool = True) -> None:
-        del clean
-        self.revision = revision
-        self.changes.clear()
-
-    async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
-        await self.restore(revision, clean=clean)
-        return True
-
-    async def retain(self, revision: str, *, label: str) -> None:
-        del revision, label
-
-    async def pending_changes(self) -> list[str]:
-        return list(self.changes)
-
-    async def restore_for_agent(
+    def restore(
         self,
         revision: str,
         *,
-        preserve_paths: tuple[str, ...],
-    ) -> None:
-        self.agent_restores.append((revision, preserve_paths))
+        clean: bool,
+        preserve_paths: tuple[str, ...] = (),
+        preserve_memory: bool = True,
+    ) -> bool:
+        del clean, preserve_memory
         self.revision = revision
+        self.agent_restores.append((revision, preserve_paths))
         self.changes = [
             path
             for path in self.changes
             if any(path == allowed or path.startswith(f"{allowed}/") for allowed in preserve_paths)
         ]
+        return True
+
+    def try_restore(self, revision: str, *, clean: bool) -> bool:
+        return self.restore(revision, clean=clean)
+
+    def retain(self, revision: str, reference: str) -> None:
+        del revision, reference
+
+    def pending_changes(self) -> list[str]:
+        return list(self.changes)
 
     def is_directory(self, path: str) -> bool:
         return path in self.directories
 
+    def candidate_patch(self, revision: str) -> str:
+        return revision
+
+    def trusted_input_changes(self) -> list[str]:
+        return []
+
+    def close(self) -> None:
+        self.closed = True
+        if self._close_events is not None:
+            self._close_events.append(f"resource:{self.id or 'root'}")
+
+
+def _candidate_resource(workspace_id: str, revision: str) -> _WorkspaceResource:
+    resource = _WorkspaceResource(workspace_id)
+    resource.revision = revision
+    return resource
+
 
 class _SnapshotGate:
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+
+    def enter(self) -> None:
+        self.calls += 1
+        if self.calls == 1:
+            self.entered.set()
+            self.release.wait()
+
+    async def wait_entered(self) -> None:
+        await asyncio.to_thread(self.entered.wait)
+
+    def open(self) -> None:
+        self.release.set()
+
+
+class _AsyncSnapshotGate:
     def __init__(self) -> None:
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
@@ -133,21 +176,27 @@ class _SnapshotGate:
             self.entered.set()
             await self.release.wait()
 
+    async def wait_entered(self) -> None:
+        await self.entered.wait()
 
-class _BlockedRuntimeWorkspace(_Workspace):
+    def open(self) -> None:
+        self.release.set()
+
+
+class _BlockedRuntimeWorkspace(_WorkspaceResource):
     def __init__(self, workspace_id: str) -> None:
         super().__init__(workspace_id)
         self.gate = _SnapshotGate()
 
-    async def snapshot(self, label: str) -> str:
-        await self.gate.enter()
-        return await super().snapshot(label)
+    def snapshot(self, label: str) -> str:
+        self.gate.enter()
+        return super().snapshot(label)
 
 
 class _BlockedFakeWorkspace(FakeWorkspace):
     def __init__(self, workspace_id: str) -> None:
         super().__init__(workspace_id=workspace_id, path=Path(f"/{workspace_id}"))
-        self.gate = _SnapshotGate()
+        self.gate = _AsyncSnapshotGate()
 
     async def snapshot(self, label: str) -> str:
         await self.gate.enter()
@@ -174,20 +223,12 @@ class _EnvironmentOpener:
         return self._environments.popleft()
 
 
-def _workspace(value: Workspace) -> _Workspace:
-    if not isinstance(value, _Workspace):
-        message = "workspace is not owned by this runtime"
-        raise TypeError(message)
-    return value
-
-
 def _scope(
     workspace: Workspace,
     opener: _EnvironmentOpener,
 ) -> AgentExecutionScope:
-    selected = _workspace(workspace)
     return AgentExecutionScope(
-        workspace_path=selected.path,
+        workspace_path=workspace.path,
         log_directory=Path("/logs"),
         open_environment=opener,
         current_log_file=StringIO,
@@ -195,32 +236,51 @@ def _scope(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _RuntimeEffects:
+    clients: Callable[..., AgentClientProtocol]
+    environments: _EnvironmentOpener
+    lifecycle: FakeAgentExecutionLifecycleSink
+    tool_bindings: dict[str, Callable[[Workspace], tuple[ToolServerDescriptor, ...]]] | None = None
+
+
 def _runtime(
     role: AgentRole,
-    clients: Callable[..., AgentClientProtocol],
-    environments: _EnvironmentOpener,
-    lifecycle: FakeAgentExecutionLifecycleSink,
+    effects: _RuntimeEffects,
     *,
-    tool_bindings: dict[str, Callable[[Workspace], tuple[ToolServerDescriptor, ...]]] | None = None,
-) -> AgentSessionRuntime:
-    return create_agent_session_runtime(
+    root_resource: _WorkspaceResource | None = None,
+    candidate_resources: tuple[_WorkspaceResource, ...] = (),
+) -> AgentWorkspaceRuntime:
+    candidates = deque(candidate_resources)
+    selected_root = root_resource or _WorkspaceResource()
+    selected_root.id = None
+
+    def create_candidate(workspace_id: str, revision: str) -> _WorkspaceResource:
+        resource = candidates.popleft() if candidates else _WorkspaceResource()
+        resource.id = workspace_id
+        resource.revision = revision
+        return resource
+
+    return create_agent_workspace_runtime(
         (role,),
+        root_resource=selected_root,
+        supports_parallel_candidates=True,
+        create_candidate_resource=create_candidate,
         resolve_execution=lambda selected_role, workspace: (
             AgentExecutionConfiguration(
                 agent_id=selected_role.id,
                 spec=AgentSpec(backend=AgentBackend.STUB),
                 reasoning_effort="high",
             ),
-            _scope(workspace, environments),
+            _scope(workspace, effects.environments),
         ),
-        resolve_workspace=_workspace,
         session_store=lambda: None,
         control=create_run_control_channel(FakeRunControlEventSink()),
-        lifecycle_events=lifecycle,
+        lifecycle_events=effects.lifecycle,
         agent_events=NULL_AGENT_EVENT_SINK,
         route_message=lambda message, steering: message + "".join(steering),
-        client_factory=clients,
-        tool_bindings=tool_bindings,
+        client_factory=effects.clients,
+        tool_bindings=effects.tool_bindings,
         log=lambda _message: None,
     )
 
@@ -245,20 +305,25 @@ def _environment() -> FakeAgentExecutionEnvironment:
 class _OpenedSessionContract:
     def __init__(
         self,
-        owner: AgentSessionRuntime | FakeAgentSessions,
+        owner: AgentSessions,
         sessions: tuple[AgentSession, ...],
+        runtime: AgentWorkspaceRuntime | None = None,
     ) -> None:
         self.owner = owner
         self.sessions = sessions
+        self.runtime = runtime
 
     async def close(self) -> None:
-        await self.owner.close()
+        if self.runtime is None:
+            await self.owner.close()
+        else:
+            await self.runtime.workspaces.close()
 
 
 async def _open_session_contract(
     implementation: str,
     role: AgentRole,
-    workspaces: tuple[_Workspace | FakeWorkspace, ...],
+    workspaces: tuple[_WorkspaceResource | FakeWorkspace, ...],
     *,
     effects: tuple[Callable[[], None] | None, ...] = (),
     writable_paths: tuple[str, ...] = (),
@@ -278,7 +343,14 @@ async def _open_session_contract(
                 effect()
             return message
 
-        owner = FakeAgentSessions((role,), responder=respond)
+        owner: AgentSessions = FakeAgentSessions((role,), responder=respond)
+        runtime = None
+        fake_workspaces = tuple(
+            workspace for workspace in workspaces if isinstance(workspace, FakeWorkspace)
+        )
+        if len(fake_workspaces) != len(workspaces):
+            pytest.fail("fake contract requires fake workspaces")
+        session_workspaces: tuple[Workspace, ...] = fake_workspaces
     else:
         clients = []
         for index, effect in enumerate(selected_effects):
@@ -286,12 +358,23 @@ async def _open_session_contract(
             if effect is not None:
                 client.on_invoke(lambda _call, selected=effect: selected())
             clients.append(client)
-        owner = _runtime(
-            role,
-            _ClientFactory(*clients),
-            _EnvironmentOpener(*(_environment() for _workspace_value in workspaces)),
-            FakeAgentExecutionLifecycleSink(),
+        resources = tuple(
+            resource for resource in workspaces if isinstance(resource, _WorkspaceResource)
         )
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(*clients),
+                _EnvironmentOpener(*(_environment() for _workspace_value in workspaces)),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+            root_resource=resources[0],
+            candidate_resources=resources[1:],
+        )
+        owner = runtime.agents
+        handles = [runtime.workspaces.root]
+        handles.extend([await runtime.workspaces.create_candidate() for _resource in resources[1:]])
+        session_workspaces = tuple(handles)
     sessions = tuple(
         [
             await owner.create_session(
@@ -299,10 +382,10 @@ async def _open_session_contract(
                 workspace=workspace,
                 writable_paths=writable_paths,
             )
-            for workspace in workspaces
+            for workspace in session_workspaces
         ]
     )
-    return _OpenedSessionContract(owner, sessions)
+    return _OpenedSessionContract(owner, sessions, runtime)
 
 
 def test_session_fixes_role_binding_and_continues_provider_context() -> None:
@@ -314,19 +397,17 @@ def test_session_fixes_role_binding_and_continues_provider_context() -> None:
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(client),
-            _EnvironmentOpener(environment),
-            lifecycle,
+            _RuntimeEffects(_ClientFactory(client), _EnvironmentOpener(environment), lifecycle),
         )
-        session = await runtime.create_session(
+        session = await runtime.agents.create_session(
             role,
-            workspace=_Workspace(),
+            workspace=runtime.workspaces.root,
             member_id="candidate-1",
         )
         assert await session.turn("one") == "first"
         assert await session.turn("two", response=_Reply) == _Reply(value=2)
         assert session.binding.model == "fake-model"
-        await runtime.close()
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())
 
@@ -396,8 +477,11 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
             return client
 
         environments = _EnvironmentOpener(_environment())
-        runtime = create_agent_session_runtime(
+        runtime = create_agent_workspace_runtime(
             (role,),
+            root_resource=_WorkspaceResource(),
+            supports_parallel_candidates=True,
+            create_candidate_resource=_candidate_resource,
             resolve_execution=lambda selected_role, workspace: (
                 AgentExecutionConfiguration(
                     agent_id=selected_role.id,
@@ -406,7 +490,6 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
                 ),
                 _scope(workspace, environments),
             ),
-            resolve_workspace=_workspace,
             session_store=lambda: DurableSessionStore(slot),
             control=create_run_control_channel(FakeRunControlEventSink()),
             lifecycle_events=FakeAgentExecutionLifecycleSink(),
@@ -415,15 +498,15 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
             client_factory=record_client,
             log=lambda _message: None,
         )
-        session = await runtime.create_session(
+        session = await runtime.agents.create_session(
             role,
-            workspace=_Workspace(),
+            workspace=runtime.workspaces.root,
             member_id="candidate-1",
         )
         assert await session.turn("continue") == "done"
         provider_session_id = clients[0].last_turn_provider_session_id(session_key)
         assert provider_session_id is not None
-        await runtime.close()
+        await runtime.workspaces.close()
         return provider_session_id
 
     first_provider_session = asyncio.run(run_once())
@@ -446,7 +529,7 @@ def test_same_session_turns_are_serialized(implementation: str) -> None:
         opened = await _open_session_contract(implementation, role, (workspace,))
         session = opened.sessions[0]
         first = asyncio.create_task(session.turn("first"))
-        await workspace.gate.entered.wait()
+        await workspace.gate.wait_entered()
 
         queued = asyncio.Event()
 
@@ -458,7 +541,7 @@ def test_same_session_turns_are_serialized(implementation: str) -> None:
         await queued.wait()
         assert workspace.gate.calls == 1
 
-        workspace.gate.release.set()
+        workspace.gate.open()
         assert await first
         assert await second
         await opened.close()
@@ -482,11 +565,11 @@ def test_different_sessions_can_turn_concurrently(implementation: str) -> None:
         )
         first = asyncio.create_task(opened.sessions[0].turn("first"))
         second = asyncio.create_task(opened.sessions[1].turn("second"))
-        await first_workspace.gate.entered.wait()
-        await second_workspace.gate.entered.wait()
+        await first_workspace.gate.wait_entered()
+        await second_workspace.gate.wait_entered()
 
-        first_workspace.gate.release.set()
-        second_workspace.gate.release.set()
+        first_workspace.gate.open()
+        second_workspace.gate.open()
         await asyncio.gather(first, second)
         await opened.close()
 
@@ -507,7 +590,7 @@ def test_close_waits_for_active_turn_and_rejects_queued_and_new_turns(
         opened = await _open_session_contract(implementation, role, (workspace,))
         session = opened.sessions[0]
         active = asyncio.create_task(session.turn("active"))
-        await workspace.gate.entered.wait()
+        await workspace.gate.wait_entered()
 
         queued_started = asyncio.Event()
 
@@ -530,7 +613,7 @@ def test_close_waits_for_active_turn_and_rejects_queued_and_new_turns(
         with pytest.raises(SessionClosedError):
             await session.turn("new")
 
-        workspace.gate.release.set()
+        workspace.gate.open()
         assert await active
         with pytest.raises(SessionClosedError):
             await queued
@@ -554,7 +637,7 @@ def test_cancelled_close_preserves_owned_cleanup_for_a_later_waiter(
         opened = await _open_session_contract(implementation, role, (workspace,))
         session = opened.sessions[0]
         active = asyncio.create_task(session.turn("active"))
-        await workspace.gate.entered.wait()
+        await workspace.gate.wait_entered()
 
         close_started = asyncio.Event()
 
@@ -568,7 +651,7 @@ def test_cancelled_close_preserves_owned_cleanup_for_a_later_waiter(
         with pytest.raises(asyncio.CancelledError):
             await closing
 
-        workspace.gate.release.set()
+        workspace.gate.open()
         assert await active
         await session.close()
         assert session.closed
@@ -594,11 +677,11 @@ def test_session_reverts_every_unauthorized_workspace_change(
 ) -> None:
     async def scenario() -> None:
         role = AgentRole(id="worker", system_prompt="Work carefully.", workspace_access=access)
-        workspace: _Workspace | FakeWorkspace
+        workspace: _WorkspaceResource | FakeWorkspace
         workspace = (
             FakeWorkspace(workspace_id="root", path=Path("/root"))
             if implementation == "fake"
-            else _Workspace()
+            else _WorkspaceResource()
         )
         changes: list[str] = []
         grants: list[str] = []
@@ -656,14 +739,19 @@ def test_session_reverts_every_unauthorized_workspace_change(
 
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
 def test_unrevertable_unauthorized_change_fails_the_turn(implementation: str) -> None:
-    class _UnrevertableWorkspace(_Workspace):
-        async def restore_for_agent(
+    class _UnrevertableWorkspace(_WorkspaceResource):
+        def restore(
             self,
             revision: str,
             *,
-            preserve_paths: tuple[str, ...],
-        ) -> None:
+            clean: bool,
+            preserve_paths: tuple[str, ...] = (),
+            preserve_memory: bool = True,
+        ) -> bool:
+            del clean, preserve_memory
             self.agent_restores.append((revision, preserve_paths))
+            self.revision = revision
+            return True
 
     async def scenario() -> None:
         role = AgentRole(
@@ -728,7 +816,7 @@ def test_session_enforces_declared_workspace_access(
     remaining: list[str],
 ) -> None:
     role = AgentRole(id="worker", system_prompt="Work.", workspace_access=access)
-    workspace = _Workspace()
+    workspace = _WorkspaceResource()
     lifecycle = FakeAgentExecutionLifecycleSink()
     workspace.directories.update(directories)
     client = _client(responses=("done",)).on_invoke(lambda _call: workspace.changes.extend(changes))
@@ -736,19 +824,18 @@ def test_session_enforces_declared_workspace_access(
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(client),
-            _EnvironmentOpener(_environment()),
-            lifecycle,
+            _RuntimeEffects(_ClientFactory(client), _EnvironmentOpener(_environment()), lifecycle),
+            root_resource=workspace,
         )
-        session = await runtime.create_session(
+        session = await runtime.agents.create_session(
             role,
-            workspace=workspace,
+            workspace=runtime.workspaces.root,
             writable_paths=grants,
         )
         assert await session.turn("work") == "done"
         assert workspace.changes == []
         assert workspace.committed_changes[-1] == tuple(remaining)
-        await runtime.close()
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())
 
@@ -768,52 +855,107 @@ def test_timeout_is_normalized_and_capability_failure_cleans_up() -> None:
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(timed, unsupported),
-            _EnvironmentOpener(first_environment, rejected_environment),
-            FakeAgentExecutionLifecycleSink(),
+            _RuntimeEffects(
+                _ClientFactory(timed, unsupported),
+                _EnvironmentOpener(first_environment, rejected_environment),
+                FakeAgentExecutionLifecycleSink(),
+            ),
         )
-        session = await runtime.create_session(role, workspace=_Workspace())
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         with pytest.raises(AgentTurnTimeoutError) as raised:
             await session.turn("work")
         assert raised.value.__cause__ is timeout
         with pytest.raises(RuntimeContractError, match="provider_session_resume"):
-            await runtime.create_session(role, workspace=_Workspace(), member_id="durable")
-        await runtime.close()
+            await runtime.agents.create_session(
+                role, workspace=runtime.workspaces.root, member_id="durable"
+            )
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())
     assert unsupported.closed
     assert rejected_environment.closed
 
 
-def test_workspace_and_runtime_close_owned_sessions_in_reverse_order() -> None:
+def test_session_creation_rejects_foreign_and_discarded_workspace_handles() -> None:
     role = AgentRole(id="worker", system_prompt="Work.")
-    first_client = _client()
-    second_client = _client()
-    first_environment = _environment()
-    second_environment = _environment()
-    selected = _Workspace()
-    other = _Workspace("other")
 
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(first_client, second_client),
-            _EnvironmentOpener(first_environment, second_environment),
-            FakeAgentExecutionLifecycleSink(),
+            _RuntimeEffects(
+                _ClientFactory(),
+                _EnvironmentOpener(),
+                FakeAgentExecutionLifecycleSink(),
+            ),
         )
-        selected_session = await runtime.create_session(role, workspace=selected)
-        other_session = await runtime.create_session(role, workspace=other)
-        await runtime.close_workspace(selected)
-        assert selected_session.closed
-        assert first_client.closed
-        assert first_environment.closed
-        assert not other_session.closed
-        await runtime.close()
-        await runtime.close()
+        with pytest.raises(TypeError, match="live handle from this run"):
+            await runtime.agents.create_session(
+                role,
+                workspace=FakeWorkspace(path=Path("/foreign")),
+            )
+        candidate = await runtime.workspaces.create_candidate()
+        await candidate.discard()
+        with pytest.raises(ValueError, match="workspace is closed"):
+            await runtime.agents.create_session(role, workspace=candidate)
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+def test_workspace_and_runtime_close_owned_sessions_in_reverse_order() -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    first_client = _client()
+    second_client = _client()
+    events: list[str] = []
+
+    class _OrderedEnvironment(FakeAgentExecutionEnvironment):
+        def __init__(self, label: str) -> None:
+            super().__init__(project_path_policy=ProjectPathPolicy())
+            self._label = label
+
+        def close(self) -> None:
+            events.append(f"session:{self._label}")
+            super().close()
+
+    first_environment = _OrderedEnvironment("root")
+    second_environment = _OrderedEnvironment("candidate")
+    root_resource = _WorkspaceResource(close_events=events)
+    candidate_resource = _WorkspaceResource("candidate", close_events=events)
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(first_client, second_client),
+                _EnvironmentOpener(first_environment, second_environment),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+            root_resource=root_resource,
+            candidate_resources=(candidate_resource,),
+        )
+        candidate = await runtime.workspaces.create_candidate()
+        candidate_id = candidate.id
+        root_session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+        candidate_session = await runtime.agents.create_session(role, workspace=candidate)
+        await candidate.discard()
+        assert candidate_session.closed
         assert second_client.closed
         assert second_environment.closed
+        assert candidate_resource.closed
+        assert not root_session.closed
+        await runtime.workspaces.close()
+        await runtime.workspaces.close()
+        assert first_client.closed
+        assert first_environment.closed
+        assert root_resource.closed
+        assert events == [
+            "session:candidate",
+            f"resource:{candidate_id}",
+            "session:root",
+            "resource:root",
+        ]
         with pytest.raises(SessionClosedError):
-            await runtime.create_session(role, workspace=_Workspace("late"))
+            await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
 
     asyncio.run(scenario())
 
@@ -842,14 +984,16 @@ def test_role_tools_are_resolved_once_and_fixed_for_the_session() -> None:
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(client),
-            _EnvironmentOpener(_environment()),
-            FakeAgentExecutionLifecycleSink(),
-            tool_bindings={"board": tools},
+            _RuntimeEffects(
+                _ClientFactory(client),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+                tool_bindings={"board": tools},
+            ),
         )
-        session = await runtime.create_session(role, workspace=_Workspace())
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         assert await session.turn("work") == "done"
-        await runtime.close()
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())
     assert resolutions == 1
@@ -878,22 +1022,24 @@ def test_environment_client_turn_and_cleanup_share_one_worker_thread() -> None:
     )
 
     async def scenario() -> None:
-        runtime = create_agent_session_runtime(
+        runtime = create_agent_workspace_runtime(
             (role,),
+            root_resource=_WorkspaceResource(),
+            supports_parallel_candidates=True,
+            create_candidate_resource=_candidate_resource,
             resolve_execution=lambda selected_role, workspace: (
                 AgentExecutionConfiguration(
                     agent_id=selected_role.id,
                     spec=AgentSpec(backend=AgentBackend.STUB),
                 ),
                 AgentExecutionScope(
-                    workspace_path=_workspace(workspace).path,
+                    workspace_path=workspace.path,
                     log_directory=Path("/logs"),
                     open_environment=open_environment,
                     current_log_file=StringIO,
                     environment_variables=dict,
                 ),
             ),
-            resolve_workspace=_workspace,
             session_store=lambda: None,
             control=create_run_control_channel(FakeRunControlEventSink()),
             lifecycle_events=FakeAgentExecutionLifecycleSink(),
@@ -902,9 +1048,9 @@ def test_environment_client_turn_and_cleanup_share_one_worker_thread() -> None:
             client_factory=_ClientFactory(client),
             log=lambda _message: None,
         )
-        session = await runtime.create_session(role, workspace=_Workspace())
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         assert await session.turn("work") == "done"
-        await runtime.close()
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())
     assert [name for name, _thread in threads] == ["open", "turn", "close"]
@@ -927,11 +1073,13 @@ def test_cancelled_session_close_does_not_cancel_owned_cleanup() -> None:
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(_client()),
-            _EnvironmentOpener(environment),
-            FakeAgentExecutionLifecycleSink(),
+            _RuntimeEffects(
+                _ClientFactory(_client()),
+                _EnvironmentOpener(environment),
+                FakeAgentExecutionLifecycleSink(),
+            ),
         )
-        session = await runtime.create_session(role, workspace=_Workspace())
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         waiter = asyncio.create_task(session.close())
         await asyncio.to_thread(close_started.wait)
         waiter.cancel()
@@ -948,7 +1096,7 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
     role = AgentRole(id="worker", system_prompt="Work.")
     turn_started = threading.Event()
     release_turn = threading.Event()
-    workspace = _Workspace()
+    workspace = _WorkspaceResource()
     lifecycle = FakeAgentExecutionLifecycleSink()
 
     def block_turn(_call: object) -> None:
@@ -960,11 +1108,10 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
     async def scenario() -> None:
         runtime = _runtime(
             role,
-            _ClientFactory(client),
-            _EnvironmentOpener(_environment()),
-            lifecycle,
+            _RuntimeEffects(_ClientFactory(client), _EnvironmentOpener(_environment()), lifecycle),
+            root_resource=workspace,
         )
-        session = await runtime.create_session(role, workspace=workspace)
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
         waiter = asyncio.create_task(session.turn("work"))
         await asyncio.to_thread(turn_started.wait)
         waiter.cancel()
@@ -978,6 +1125,6 @@ def test_cancelled_turn_drains_worker_before_workspace_enforcement() -> None:
             await waiter
         assert workspace.snapshots == ["worker-session-turn-1-input"]
         assert isinstance(lifecycle.events[-1], AgentExecutionFinished)
-        await runtime.close()
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())

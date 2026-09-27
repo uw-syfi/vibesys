@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
+    from vs_runtime._agent_sessions import RuntimeAgentSessions
     from vs_runtime.contracts import CandidateWorkspace, Workspace
 
 
@@ -58,25 +59,14 @@ class WorkspaceResource(Protocol):
     def close(self) -> None: ...
 
 
-class WorkspaceResourceProvider(Protocol):
-    """One product composition seam for root and candidate resources."""
-
-    @property
-    def root(self) -> WorkspaceResource: ...
-
-    @property
-    def supports_parallel_candidates(self) -> bool: ...
-
-    def create_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource: ...
-
-    async def close_sessions(self, workspace: Workspace) -> None: ...
-
-
 class OwnedWorkspaces(Workspaces, Protocol):
     """Composition lifetime for a runtime-owned workspace collection."""
 
+    def begin_close(self) -> None:
+        """Reject new work before teardown begins."""
+
     async def close(self) -> None:
-        """Release every candidate in reverse creation order."""
+        """Release sessions and workspaces in dependency order."""
         ...
 
 
@@ -217,50 +207,74 @@ class RuntimeCandidateWorkspace(RuntimeWorkspace):
 
 
 class RuntimeWorkspaces:
-    """Own root/candidate synchronization and reverse-order cleanup."""
+    """Own workspace handles, agent sessions, and their teardown order."""
 
-    def __init__(self, provider: WorkspaceResourceProvider) -> None:
-        self._provider = provider
+    def __init__(
+        self,
+        root_resource: WorkspaceResource,
+        *,
+        supports_parallel_candidates: bool,
+        create_candidate_resource: Callable[[str, str], WorkspaceResource],
+    ) -> None:
+        self._supports_parallel_candidates = supports_parallel_candidates
+        self._create_candidate_resource = create_candidate_resource
         self._root_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
         self._closed = False
-        self.root = RuntimeWorkspace(self, provider.root)
+        self._close_task: asyncio.Task[None] | None = None
+        self._sessions: RuntimeAgentSessions | None = None
+        self.root = RuntimeWorkspace(self, root_resource)
+
+    def _attach_sessions(self, sessions: RuntimeAgentSessions) -> None:
+        """Complete the private ownership cycle during runtime construction."""
+        if self._sessions is not None:
+            message = "agent sessions are already attached"
+            raise RuntimeError(message)
+        self._sessions = sessions
+
+    def _owned_sessions(self) -> RuntimeAgentSessions:
+        sessions = self._sessions
+        if sessions is None:
+            message = "runtime workspace construction is incomplete"
+            raise RuntimeError(message)
+        return sessions
 
     @property
     def supports_parallel_candidates(self) -> bool:
-        return self._provider.supports_parallel_candidates
+        return self._supports_parallel_candidates
 
     async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
-        if self._closed:
-            message = "workspace collection is closed"
-            raise RuntimeContractError(message)
-        async with self._root_lock:
-            revision = from_revision or self.root.revision
-            if revision is None:
-                message = "cannot create a candidate without a committed revision"
-                raise RuntimeError(message)
-            if not self.supports_parallel_candidates:
-                message = "run environment cannot open isolated candidate sandboxes"
-                raise RuntimeError(message)
-            workspace_id = f"s{uuid.uuid4().hex}"
-            task = asyncio.create_task(
-                asyncio.to_thread(self._provider.create_candidate, workspace_id, revision)
-            )
-            try:
-                resource = await asyncio.shield(task)
-            except asyncio.CancelledError as cancelled:
-                await _drain(task)
-                if error := task.exception():
-                    cancelled.add_note(f"candidate construction also failed: {error}")
-                else:
-                    await _run_sync(task.result().close)
-                raise
-            candidate = RuntimeCandidateWorkspace(self, resource)
-            self._candidates[workspace_id] = candidate
-            self._candidate_locks[workspace_id] = asyncio.Lock()
-            return candidate
+        async with self._lifecycle_lock:
+            if self._closed:
+                message = "workspace collection is closed"
+                raise RuntimeContractError(message)
+            async with self._root_lock:
+                revision = from_revision or self.root.revision
+                if revision is None:
+                    message = "cannot create a candidate without a committed revision"
+                    raise RuntimeError(message)
+                if not self.supports_parallel_candidates:
+                    message = "run environment cannot open isolated candidate sandboxes"
+                    raise RuntimeError(message)
+                workspace_id = f"s{uuid.uuid4().hex}"
+                task = asyncio.create_task(
+                    asyncio.to_thread(self._create_candidate_resource, workspace_id, revision)
+                )
+                try:
+                    resource = await asyncio.shield(task)
+                except asyncio.CancelledError as cancelled:
+                    await _drain(task)
+                    if error := task.exception():
+                        cancelled.add_note(f"candidate construction also failed: {error}")
+                    else:
+                        await _run_sync(task.result().close)
+                    raise
+                candidate = RuntimeCandidateWorkspace(self, resource)
+                self._candidates[workspace_id] = candidate
+                self._candidate_locks[workspace_id] = asyncio.Lock()
+                return candidate
 
     async def adopt(self, revision: str) -> None:
         await self.root.restore(revision)
@@ -279,6 +293,14 @@ class RuntimeWorkspaces:
                 return workspace._resource  # noqa: SLF001  # lint-waiver: LW-228407 [SLF001]; the collection resolves its own handle to its private resource.
         message = "workspace must be a live handle from this run"
         raise TypeError(message)
+
+    def workspace_for(self, workspace: Workspace) -> RuntimeWorkspace:
+        """Return one live handle owned by this collection."""
+        self.resource_for(workspace)
+        if not isinstance(workspace, RuntimeWorkspace):
+            message = "workspace must be a live handle from this run"
+            raise TypeError(message)
+        return workspace
 
     def is_root(self, workspace: Workspace) -> bool:
         self.resource_for(workspace)
@@ -300,7 +322,7 @@ class RuntimeWorkspaces:
             resource = self.resource_for(candidate)
             errors: list[BaseException] = []
             try:
-                await self._provider.close_sessions(candidate)
+                await self._owned_sessions().close_workspace(candidate)
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228408 [BLE001]; candidate resource cleanup must continue after session cleanup fails.
                 errors.append(error)
             lock = self._candidate_locks[resource.id or ""]
@@ -317,16 +339,33 @@ class RuntimeWorkspaces:
                 message = "candidate workspace cleanup failed"
                 raise BaseExceptionGroup(message, errors)
 
-    async def close(self) -> None:
+    def begin_close(self) -> None:
+        """Reject new candidates, sessions, and turns before teardown."""
         if self._closed:
             return
         self._closed = True
+        self._owned_sessions().begin_close()
+
+    async def close(self) -> None:
+        """Close candidate pairs, root sessions, then the root resource."""
+        if self._close_task is None:
+            self.begin_close()
+            self._close_task = asyncio.create_task(self._close_once())
+        await asyncio.shield(self._close_task)
+
+    async def _close_once(self) -> None:
         errors: list[BaseException] = []
-        for candidate in reversed(tuple(self._candidates.values())):
+        async with self._lifecycle_lock:
+            candidates = tuple(self._candidates.values())
+        for candidate in reversed(candidates):
             try:
                 await candidate.discard()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228410 [BLE001]; run cleanup attempts every candidate in reverse creation order.
                 errors.append(error)
+        try:
+            await self._owned_sessions().close()
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228422 [BLE001]; root sessions must not prevent root resource cleanup.
+            errors.append(error)
         async with self._root_lock:
             try:
                 await _run_sync(self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
@@ -336,11 +375,6 @@ class RuntimeWorkspaces:
         if errors:
             message = "workspace cleanup failed"
             raise BaseExceptionGroup(message, errors)
-
-
-def create_workspaces(provider: WorkspaceResourceProvider) -> OwnedWorkspaces:
-    """Create one run-owned workspace collection."""
-    return RuntimeWorkspaces(provider)
 
 
 def resolve_workspace_resource(

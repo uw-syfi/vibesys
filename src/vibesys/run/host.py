@@ -8,19 +8,21 @@ from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext
 from vibesys.context import _StateBinding, open_run_resources
-from vibesys.orchestration.agents import _Agents, _AgentToolResolver
+from vibesys.orchestration.agents import _AgentToolResolver, create_agents_and_workspaces
 from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.gates import _EvaluationAdapter
 from vibesys.orchestration.state import _StateCommitObserver
-from vibesys.orchestration.workspace_resources import WorkspaceResourceProvider
+from vibesys.orchestration.workspace_resources import (
+    CandidateWorkspaceResourceFactory,
+    root_workspace_resource,
+)
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 from vs_runtime.api.infrastructure import (
     BlockingOperations,
     RunHostComponents,
     create_state,
-    create_workspaces,
     open_run_host,
 )
 from vs_runtime.api.infrastructure_skills import create_installed_skills
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import OrchestrationPlugin, RunHost, Workspace
+    from vs_runtime.api import OrchestrationPlugin, RunHost
     from vs_runtime.api.infrastructure import AgentExecutionEnvironment
     from vs_sandbox.api import ComputeBackendImpl
 
@@ -95,22 +97,35 @@ class _ProductHostFactory:
             resources.state.local("agent").slot("sessions.json", AgentSessionState),
             log=resources.logger.lprint,
         )
-        agents: _Agents | None = None
-
-        async def close_sessions(workspace: Workspace) -> None:
-            if agents is None:
-                raise _AgentSessionsNotPreparedError
-            await agents.close_workspace(workspace)
-
-        workspaces = create_workspaces(
-            WorkspaceResourceProvider(
+        agent_runtime = create_agents_and_workspaces(
+            self.request,
+            session_store,
+            self.integration.events,
+            resources.lprint,
+            AgentToolContext(resources.profiler_kind),
+            self.plugin.agents,
+            self.agent_tool_bindings,
+            root_resource=root_workspace_resource(
+                resources,
+                self.plugin.memory_paths,
+                self.integration.events,
+            ),
+            supports_parallel_candidates=(
+                resources.run_environment_view.supports_parallel_candidate_evaluation
+            ),
+            create_candidate_resource=CandidateWorkspaceResourceFactory(
                 resources,
                 self.request,
                 self.plugin.memory_paths,
                 self.integration.events,
-                close_sessions,
-            )
+            ),
+            control=self.integration.control,
+            lifecycle_events=self.integration.agent_execution_event,
+            agent_environment_opener=self.open_agent_environment,
+            client_factory=self.agent_client_factory,
         )
+        agents = agent_runtime.agents
+        workspaces = agent_runtime.workspaces
         commands = _Commands(workspaces, blocking)
         skills = create_installed_skills(tuple(resources.skill_source_paths), blocking)
         control = _RunControl(self.integration, debug=self.request.debug)
@@ -136,20 +151,6 @@ class _ProductHostFactory:
             workspaces,
             self.integration.events,
             commands,
-        )
-        agents = _Agents(
-            self.request,
-            workspaces,
-            session_store,
-            self.integration.events,
-            resources.lprint,
-            AgentToolContext(resources.profiler_kind),
-            self.plugin.agents,
-            self.agent_tool_bindings,
-            control=self.integration.control,
-            lifecycle_events=self.integration.agent_execution_event,
-            open_agent_environment=self.open_agent_environment,
-            client_factory=self.agent_client_factory,
         )
         return RunHostComponents(
             run_id=resources.run_id,
@@ -189,11 +190,6 @@ def _run_facts(request: RunRequest, resources: _RunResources) -> RunFacts:
             for source in bundle.workspace_sources
         ),
     )
-
-
-class _AgentSessionsNotPreparedError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("agent sessions are not prepared")
 
 
 @asynccontextmanager

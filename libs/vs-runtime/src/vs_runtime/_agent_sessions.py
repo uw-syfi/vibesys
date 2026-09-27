@@ -46,11 +46,10 @@ if TYPE_CHECKING:
         AgentMessageRouter,
     )
     from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.api.infrastructure import (
         AgentExecutionResolver,
         AgentToolResolver,
-        ManagedAgentWorkspace,
-        ManagedAgentWorkspaceResolver,
     )
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -73,7 +72,7 @@ class RuntimeAgentSession:
         self,
         execution: RuntimeAgentExecution,
         role: AgentRole,
-        workspace: ManagedAgentWorkspace,
+        workspace: RuntimeWorkspace,
         member_id: str | None,
         writable_paths: tuple[str, ...],
         writable_directory_paths: tuple[str, ...],
@@ -243,8 +242,8 @@ class RuntimeAgentSessions:
         self,
         roles: tuple[AgentRole, ...],
         *,
+        workspaces: RuntimeWorkspaces,
         resolve_execution: AgentExecutionResolver,
-        resolve_workspace: ManagedAgentWorkspaceResolver,
         session_store: Callable[[], SessionStore | None],
         control: RunControlChannel,
         lifecycle_events: AgentExecutionLifecycleSink,
@@ -255,8 +254,8 @@ class RuntimeAgentSessions:
         log: Callable[[str], None],
     ) -> None:
         self._roles = {role.id: role for role in roles}
+        self._workspaces = workspaces
         self._resolve_execution = resolve_execution
-        self._resolve_workspace = resolve_workspace
         self._session_store = session_store
         self._control = control
         self._lifecycle_events = lifecycle_events
@@ -297,14 +296,14 @@ class RuntimeAgentSessions:
                 message = "role-scoped agent skills are not supported by this runtime"
                 raise RuntimeContractError(message)
 
-            managed_workspace = self._resolve_workspace(workspace)
+            managed_workspace = self._workspaces.workspace_for(workspace)
             tool_servers = tuple(
                 spec
                 for tool_id in bound_tool_ids
-                for spec in self._tool_bindings[tool_id](workspace)
+                for spec in self._tool_bindings[tool_id](managed_workspace)
             )
             session_id = uuid.uuid4().hex
-            configuration, scope = self._resolve_execution(role, workspace)
+            configuration, scope = self._resolve_execution(role, managed_workspace)
             execution = await RuntimeAgentExecution.open(
                 configuration,
                 scope,
@@ -339,7 +338,7 @@ class RuntimeAgentSessions:
         self,
         execution: RuntimeAgentExecution,
         role: AgentRole,
-        workspace: ManagedAgentWorkspace,
+        workspace: RuntimeWorkspace,
         member_id: str | None,
         writable_paths: tuple[str, ...],
         bound_tool_ids: tuple[str, ...],
@@ -394,7 +393,10 @@ class RuntimeAgentSessions:
         """Close matching sessions in reverse order before workspace teardown."""
         errors: list[BaseException] = []
         async with self._lifecycle_lock:
-            sessions = [session for session in self._sessions if session.workspace is workspace]
+            managed_workspace = self._workspaces.workspace_for(workspace)
+            sessions = [
+                session for session in self._sessions if session.workspace is managed_workspace
+            ]
             for session in sessions:
                 session.mark_closed()
             for session in reversed(sessions):
@@ -402,6 +404,8 @@ class RuntimeAgentSessions:
                     await session.close()
                 except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-837212 [BLE001]; every workspace-bound session must close before grouped failures propagate.
                     errors.append(error)
+            selected = set(sessions)
+            self._sessions = [session for session in self._sessions if session not in selected]
         if errors:
             message = "workspace agent session cleanup failed"
             raise BaseExceptionGroup(message, errors)

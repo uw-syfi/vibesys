@@ -14,7 +14,6 @@ from vibesys.events import (
 from vs_runtime.api.infrastructure import resolve_workspace_resource
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from vibesys.context import _RunResources
@@ -128,8 +127,17 @@ class _WorkspaceResource:
         self.context.close()
 
 
-class WorkspaceResourceProvider:
-    """Create product environments while runtime owns their collection lifetime."""
+def root_workspace_resource(
+    resources: _RunResources,
+    memory_paths: tuple[str, ...],
+    events: CoreEventWriter,
+) -> WorkspaceResource:
+    """Adapt the already-open product workspace for runtime ownership."""
+    return _WorkspaceResource(resources, resources, None, memory_paths, events)
+
+
+class CandidateWorkspaceResourceFactory:
+    """Bind product inputs needed to open isolated candidate resources."""
 
     def __init__(
         self,
@@ -137,35 +145,14 @@ class WorkspaceResourceProvider:
         request: RunRequest,
         memory_paths: tuple[str, ...],
         events: CoreEventWriter,
-        close_sessions: Callable[[Workspace], Awaitable[None]],
     ) -> None:
-        """Bind product effects without exposing them through the run host."""
+        """Fix the product resource inputs for every candidate."""
         self._resources = resources
         self._request = request
         self._memory_paths = memory_paths
         self._events = events
-        self._close_sessions = close_sessions
-        self._root: _WorkspaceResource | None = None
 
-    @property
-    def root(self) -> WorkspaceResource:
-        """Return the root resource after the product host is prepared."""
-        if self._root is None:
-            self._root = _WorkspaceResource(
-                self._resources,
-                self._resources,
-                None,
-                self._memory_paths,
-                self._events,
-            )
-        return self._root
-
-    @property
-    def supports_parallel_candidates(self) -> bool:
-        """Return the selected environment's fixed isolation capability."""
-        return self._resources.run_environment_view.supports_parallel_candidate_evaluation
-
-    def create_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
+    def __call__(self, workspace_id: str, revision: str) -> WorkspaceResource:
         """Open one isolated product environment at a retained revision."""
         context = create_workspace_resources(
             self._resources,
@@ -184,10 +171,6 @@ class WorkspaceResourceProvider:
             self._memory_paths,
             self._events,
         )
-
-    async def close_sessions(self, workspace: Workspace) -> None:
-        """Close sessions before runtime tears down the workspace resource."""
-        await self._close_sessions(workspace)
 
 
 def resources_for(workspaces: Workspaces, workspace: Workspace) -> _RunResources:
