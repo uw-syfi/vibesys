@@ -9,6 +9,7 @@ from typing import TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel
 
+from vs_runtime._accelerators import AcceleratorInventory
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -43,6 +44,28 @@ ResponseT = TypeVar("ResponseT", bound=BaseModel)
 TurnResponder: TypeAlias = Callable[
     [AgentRole, tuple[str, ...], str, type[BaseModel] | None], object
 ]
+
+
+class FakeAcceleratorDiscovery:
+    """Deterministic in-memory accelerator inventory."""
+
+    def __init__(
+        self,
+        *,
+        trainium: AcceleratorInventory | None = None,
+        rocm: AcceleratorInventory | None = None,
+    ) -> None:
+        """Configure the complete inventory returned for each platform."""
+        self._trainium = trainium or AcceleratorInventory()
+        self._rocm = rocm or AcceleratorInventory()
+
+    def discover_trainium(self) -> AcceleratorInventory:
+        """Return the configured Trainium inventory."""
+        return self._trainium
+
+    def discover_rocm(self) -> AcceleratorInventory:
+        """Return the configured ROCm inventory."""
+        return self._rocm
 
 
 @dataclass(frozen=True, slots=True)

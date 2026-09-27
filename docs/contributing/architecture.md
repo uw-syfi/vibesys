@@ -376,6 +376,7 @@ graph TD
     vibesys.api.testing --> vibesys.backends
     vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.backends --> vibesys
+    vibesys.backends --> vs_runtime
     vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
     vibesys.context --> vibesys.backends

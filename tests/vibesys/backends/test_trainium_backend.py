@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 from tests.support import capture_docker_start_argv
 
@@ -14,6 +13,8 @@ from vibesys.backends import SandboxKind
 from vibesys.backends.trainium import TrainiumBackend
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
+from vs_runtime.api.infrastructure import AcceleratorInventory
+from vs_runtime.api.testing import FakeAcceleratorDiscovery
 from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
 
 if TYPE_CHECKING:
@@ -22,10 +23,12 @@ if TYPE_CHECKING:
 
 
 def _make_backend(tmp_path: Path, devices: Iterable[str] = ("/dev/neuron0",)) -> TrainiumBackend:
-    with patch("vibesys.backends.trainium._discover_neuron_devices", return_value=list(devices)):
-        impl = backends.get(ComputeBackend.TRAINIUM, log_dir=tmp_path / "logs")
-    assert isinstance(impl, TrainiumBackend)
-    return impl
+    return TrainiumBackend(
+        tmp_path / "logs",
+        accelerator_discovery=FakeAcceleratorDiscovery(
+            trainium=AcceleratorInventory(tuple(devices))
+        ),
+    )
 
 
 class TestTrainiumRegistry:

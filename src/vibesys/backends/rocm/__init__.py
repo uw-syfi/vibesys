@@ -32,8 +32,6 @@ backend).
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,6 +43,7 @@ from vibesys.backends.base import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
+from vs_runtime.api.infrastructure import AcceleratorDiscovery, SystemAcceleratorDiscovery
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -66,51 +65,12 @@ _DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
 # correctness failure. Mirrors CudaBackend's driver-matched index.
 _TORCH_INDEX_URL = "https://download.pytorch.org/whl/rocm6.3"
 
-# The compute driver node, required for any HIP program.
-_KFD_DEVICE = "/dev/kfd"
-
 # Docker's default 64 MB /dev/shm is too small for multi-GPU collectives
 # (RCCL) and large-model loading.
 _DEFAULT_SHM_SIZE = "16g"
 
 # Container groups needed to open /dev/kfd and /dev/dri nodes.
 _DEVICE_GROUPS: tuple[str, ...] = ("video", "render")
-
-
-def _discover_rocm_devices() -> list[str]:
-    """Return the host's AMD GPU device nodes, sorted.
-
-    ``/dev/kfd`` is the compute driver and is required; ``/dev/dri/render*``
-    nodes are the per-GPU render devices. Returns an empty list when the
-    host has no AMD GPU, in which case the container starts without an
-    accelerator (parity with the Trainium backend's behaviour).
-    """
-    if not Path(_KFD_DEVICE).exists():
-        return []
-    render_nodes = sorted(str(path) for path in Path("/dev/dri").glob("render*"))
-    return [_KFD_DEVICE, *render_nodes]
-
-
-def _query_rocm_gpu_count() -> int | None:
-    """Return the number of GPUs ``rocm-smi`` reports, or None if unavailable."""
-    rocm_smi = shutil.which("rocm-smi")
-    if rocm_smi is None:
-        return None
-    try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010233 [S603]; run the resolved ROCm status utility with fixed read-only arguments.
-            [rocm_smi, "--showid", "--csv"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    # CSV: header row then one row per device.
-    rows = [line for line in result.stdout.splitlines() if line.strip()]
-    return max(len(rows) - 1, 0)
 
 
 class RocmBackend:
@@ -128,6 +88,7 @@ class RocmBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        accelerator_discovery: AcceleratorDiscovery | None = None,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
         self.log_dir = Path(log_dir)
@@ -136,10 +97,12 @@ class RocmBackend:
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
         # Kept for ComputeBackendImpl parity.
         self.selected_device = None
-        self._devices = _discover_rocm_devices()
+        discovery = accelerator_discovery or SystemAcceleratorDiscovery()
+        inventory = discovery.discover_rocm()
+        self._devices = inventory.device_nodes
 
         if self._devices:
-            count = _query_rocm_gpu_count()
+            count = inventory.reported_device_count
             detail = f"{count} GPU(s), " if count is not None else ""
             self._lprint(
                 f"[rocm] {detail}forwarding {len(self._devices)} device node(s): "
@@ -196,7 +159,7 @@ class RocmBackend:
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus
-                devices=self._devices if attach_accelerator else [],
+                devices=list(self._devices) if attach_accelerator else [],
                 group_add=list(_DEVICE_GROUPS),
                 shm_size=_DEFAULT_SHM_SIZE,
                 bind_mounts=bind_mounts,

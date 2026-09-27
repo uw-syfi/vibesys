@@ -273,7 +273,7 @@ depends_on = ["vibesys", "vibesys.prompts"]
 [[modules]]
 path = "vibesys.backends"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_sandbox"]
+depends_on = ["vibesys", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.sandbox"

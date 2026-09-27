@@ -12,6 +12,11 @@ from enum import StrEnum
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._accelerators import (
+    AcceleratorDiscovery,
+    AcceleratorInventory,
+    SystemAcceleratorDiscovery,
+)
 from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -167,6 +172,8 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "AcceleratorDiscovery",
+    "AcceleratorInventory",
     "InputProjectError",
     "LinuxProfileResult",
     "LinuxProfilerCapability",
@@ -186,6 +193,7 @@ __all__ = [
     "SDKRoots",
     "SkillCatalogEntry",
     "SkillMetadataError",
+    "SystemAcceleratorDiscovery",
     "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",

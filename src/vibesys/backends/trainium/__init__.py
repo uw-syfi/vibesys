@@ -33,6 +33,7 @@ from vibesys.backends.base import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
+from vs_runtime.api.infrastructure import AcceleratorDiscovery, SystemAcceleratorDiscovery
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -63,18 +64,6 @@ _CACHE_CONTAINER_PATH = "/opt/neuron-compile-cache"
 _TMP_CONTAINER_PATH = "/opt/neuron-tmp"
 
 
-def _discover_neuron_devices() -> list[str]:
-    """Return the host's ``/dev/neuron*`` character devices, sorted.
-
-    Matches the numbered device nodes (``/dev/neuron0`` …) and skips the
-    control node ``/dev/neuron_*`` if present.
-    """
-    prefix = "neuron"
-    return sorted(
-        str(path) for path in Path("/dev").glob("neuron*") if path.name[len(prefix) :].isdigit()
-    )
-
-
 class TrainiumBackend:
     """AWS Trainium / NeuronCore backend (local or Docker; no Modal)."""
 
@@ -87,6 +76,7 @@ class TrainiumBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        accelerator_discovery: AcceleratorDiscovery | None = None,
     ) -> None:
         """Configure Trainium execution with its log directory and image override."""
         self.log_dir = Path(log_dir)
@@ -95,7 +85,8 @@ class TrainiumBackend:
         # No per-device selection; kept for protocol parity (read by
         # run resources for logging/pinning).
         self.selected_device = None
-        self._devices = _discover_neuron_devices()
+        discovery = accelerator_discovery or SystemAcceleratorDiscovery()
+        self._devices = discovery.discover_trainium().device_nodes
         if self._devices:
             self._lprint(
                 f"[neuron] Forwarding {len(self._devices)} device(s): {', '.join(self._devices)}"
@@ -180,7 +171,7 @@ class TrainiumBackend:
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # Neuron uses --device, not --gpus
-                devices=self._devices if attach_accelerator else [],
+                devices=list(self._devices) if attach_accelerator else [],
                 # The Neuron DLC's ENTRYPOINT launches a model server; clear it
                 # so the sandbox container idles on `sleep infinity` and we can
                 # exec agent commands into it.

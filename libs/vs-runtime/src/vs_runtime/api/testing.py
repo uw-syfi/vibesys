@@ -1,6 +1,7 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
 from vs_runtime.fakes import (
+    FakeAcceleratorDiscovery,
     FakeAccuracyCall,
     FakeAgentSession,
     FakeAgentSessions,
@@ -23,6 +24,7 @@ from vs_runtime.fakes import (
 )
 
 __all__ = [
+    "FakeAcceleratorDiscovery",
     "FakeAccuracyCall",
     "FakeAgentSession",
     "FakeAgentSessions",
