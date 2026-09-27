@@ -1,9 +1,4 @@
-"""Production-host fixture for explicit multi-plugin persistence and isolation tests.
-
-This is the only multi-plugin test helper that imports ``RunHost``. The
-behavior tests stay on the public plugin/runtime contracts and use this seam
-only when process-persisted state or real workspace restoration matters.
-"""
+"""Public-session fixture for explicit multi-plugin scenario tests."""
 
 from __future__ import annotations
 
@@ -11,16 +6,21 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
-from vibesys.config import Config
-from vibesys.constants import ComputeBackend
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    OrchestrationDescriptor,
+    OrchestrationRegistry,
+    ResumeRef,
+    RunRequest,
+)
+from vibesys.api.testing import create_session
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.run.contracts import ResumeRef, RunRequest
-from vibesys.run.host import open_product_run_host
-from vibesys.run.integration import LocalRunIntegration
-from vs_project.api import OrchestrationDescriptor, Project
+from vs_project.api import Project
+from vs_runtime.api import RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vibesys.events import CoreEvent
     from vs_agent.api import AgentSpec
     from vs_agent.api.testing import FakeAgentClient
-    from vs_runtime.api import RunStatus
 
 
 class InterruptedTurnError(RuntimeError):
@@ -76,6 +76,10 @@ def agent_client_factory(clients: Sequence[FakeAgentClient]) -> Callable[..., Fa
     return create
 
 
+def _discard_event(event: CoreEvent) -> None:
+    del event
+
+
 def execute(
     project_root: Path,
     clients: Sequence[FakeAgentClient],
@@ -83,7 +87,7 @@ def execute(
     configured: BaseModel | None = None,
     resume_run_id: str | None = None,
 ) -> tuple[RunStatus, str, Path]:
-    """Run the explicit multi plugin through its production host adapter."""
+    """Run the explicit multi plugin through the public product session."""
     bundle = load_input_bundle(project_root)
     selected = configured or options()
     request = RunRequest(
@@ -106,21 +110,40 @@ def execute(
     )
 
     async def run() -> tuple[RunStatus, str, Path]:
-        integration = LocalRunIntegration()
+        registry = OrchestrationRegistry()
+        registry.register_plugin(PLUGIN)
+        session = create_session(
+            request,
+            sink=_discard_event,
+            registry=registry,
+            agent_client_factory=agent_client_factory(clients),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+        )
         try:
-            async with open_product_run_host(
-                request,
-                integration,
-                agent_client_factory=agent_client_factory(clients),
-                backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
-                plugin=PLUGIN,
-            ) as host:
-                status = await PLUGIN.orchestrate(host, selected)
-                return status, host.run_id, host.workspaces.root.path
+            session.start()
+            result = await session.await_result()
         finally:
-            integration.close()
+            session.close()
+        status = RunStatus.SUCCEEDED if result.succeeded else RunStatus.FAILED
+        workspace = _workspace_for(
+            project_root,
+            run_id=result.run_id,
+            resume_run_id=resume_run_id,
+        )
+        return status, result.run_id, workspace
 
     return asyncio.run(run())
+
+
+def _workspace_for(
+    project_root: Path,
+    *,
+    run_id: str,
+    resume_run_id: str | None,
+) -> Path:
+    if resume_run_id is not None:
+        return project_root
+    return project_root.parent / f"{project_root.name}-runs" / run_id
 
 
 def load_state(project_root: Path, run_id: str) -> MultiState | None:

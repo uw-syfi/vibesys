@@ -154,6 +154,9 @@ def normalize_event(event: dict[str, Any], *, workspace: Path | None = None) -> 
         key: event.get(key)
         for key in ("type", "status", "round_label", "agent_kind", "text", "data")
     }
+    data = kept.get("data")
+    if event.get("type") == "run_started" and isinstance(data, dict):
+        data["input"] = "<INPUT>"
     normalized = json.loads(normalize_text(json.dumps(kept, sort_keys=True), workspace=workspace))
     return _collapse_long_strings(normalized)
 

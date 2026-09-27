@@ -1,4 +1,4 @@
-"""Legacy-compatible golden trajectories through the explicit single plugins."""
+"""Golden trajectories through the public session and explicit single plugins."""
 
 from __future__ import annotations
 

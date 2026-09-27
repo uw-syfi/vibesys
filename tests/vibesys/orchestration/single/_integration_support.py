@@ -1,8 +1,4 @@
-"""Production-host fixture for explicit single-plugin persistence tests.
-
-This fixture is intentionally the only test module that imports ``RunHost``.
-Remove it once ``create_session`` exposes injectable agent/backend factories.
-"""
+"""Public-session fixture for explicit single-plugin scenario tests."""
 
 from __future__ import annotations
 
@@ -11,17 +7,22 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from vibesys.config import Config
-from vibesys.constants import ComputeBackend
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    OrchestrationDescriptor,
+    OrchestrationRegistry,
+    ResumeRef,
+    RunRequest,
+)
+from vibesys.api.testing import create_session
 from vibesys.inputs import ProfileGuidedInput, load_input_bundle
 from vibesys.orchestration.metrics import MetricSpace
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleState
-from vibesys.run.contracts import ResumeRef, RunRequest
-from vibesys.run.host import open_product_run_host
-from vibesys.run.integration import LocalRunIntegration
-from vs_project.api import OrchestrationDescriptor, Project
+from vs_project.api import Project
+from vs_runtime.api import RunStatus
 from vs_sandbox.api import SandboxExecutionResult
 from vs_sandbox.api.testing import FakeComputeBackend
 
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from vibesys.events import CoreEvent
     from vs_agent.api import AgentSpec
     from vs_agent.api.testing import FakeAgentClient
-    from vs_runtime.api import OrchestrationPlugin, RunStatus
+    from vs_runtime.api import OrchestrationPlugin
     from vs_sandbox.api import SandboxKind
     from vs_sandbox.api.testing import FakeSandbox
 
@@ -159,7 +160,7 @@ def execute(
     options_override: BaseModel | PluginRunOptions | None = None,
     observed_events: list[CoreEvent] | None = None,
 ) -> tuple[RunStatus, str, Path]:
-    """Run the explicit plugin through its production host adapter."""
+    """Run the explicit plugin through the public product session."""
     bundle = load_input_bundle(project_root)
     plugin = PLUGIN
     if isinstance(options_override, PluginRunOptions):
@@ -188,28 +189,44 @@ def execute(
     )
 
     async def run() -> tuple[RunStatus, str, Path]:
-        integration = LocalRunIntegration()
-        unsubscribe = (
-            integration.events.subscribe(observed_events.append)
-            if observed_events is not None
-            else None
+        def emit(event: CoreEvent) -> None:
+            if observed_events is not None:
+                observed_events.append(event)
+
+        registry = OrchestrationRegistry()
+        registry.register_plugin(plugin)
+        session = create_session(
+            request,
+            sink=emit,
+            registry=registry,
+            agent_client_factory=agent_client_factory(clients),
+            backend_factory=lambda *_args, **_kwargs: _ProfileAttributionBackend(),
         )
         try:
-            async with open_product_run_host(
-                request,
-                integration,
-                agent_client_factory=agent_client_factory(clients),
-                backend_factory=lambda *_args, **_kwargs: _ProfileAttributionBackend(),
-                plugin=plugin,
-            ) as host:
-                status = await plugin.orchestrate(host, configured)
-                return status, host.run_id, host.workspaces.root.path
+            session.start()
+            result = await session.await_result()
         finally:
-            if unsubscribe is not None:
-                unsubscribe()
-            integration.close()
+            session.close()
+        status = RunStatus.SUCCEEDED if result.succeeded else RunStatus.FAILED
+        workspace = _workspace_for(
+            project_root,
+            run_id=result.run_id,
+            resume_run_id=resume_run_id,
+        )
+        return status, result.run_id, workspace
 
     return asyncio.run(run())
+
+
+def _workspace_for(
+    project_root: Path,
+    *,
+    run_id: str,
+    resume_run_id: str | None,
+) -> Path:
+    if resume_run_id is not None:
+        return project_root
+    return project_root.parent / f"{project_root.name}-runs" / run_id
 
 
 def load_state(project_root: Path, run_id: str) -> SingleState | None:

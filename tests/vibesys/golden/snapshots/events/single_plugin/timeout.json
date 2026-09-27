@@ -2,6 +2,23 @@
   {
     "agent_kind": null,
     "data": {
+      "expected_roles": [
+        "orchestrator",
+        "implementer"
+      ],
+      "input": "<INPUT>",
+      "kind": "run_started",
+      "max_rounds": 1,
+      "outer_loop": "single-agent"
+    },
+    "round_label": null,
+    "status": "active",
+    "text": "",
+    "type": "run_started"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": "<SHA>",
       "commit": null,
       "excluded_paths": [],
@@ -219,6 +236,18 @@
   {
     "agent_kind": null,
     "data": {
+      "kind": "experiments_changed",
+      "reason": "active_hypothesis_changed",
+      "revision": 1
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
@@ -377,6 +406,33 @@
   {
     "agent_kind": null,
     "data": {
+      "attempts": 1,
+      "judge_verdict": "fail",
+      "kind": "round_finished",
+      "perf_metric": null,
+      "perf_unit": null,
+      "profile_skipped": true
+    },
+    "round_label": "round-1",
+    "status": "failed",
+    "text": "",
+    "type": "round_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "round_persisted",
+      "revision": 2
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
@@ -388,5 +444,13 @@
     "status": null,
     "text": "",
     "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": null,
+    "round_label": null,
+    "status": "completed",
+    "text": "",
+    "type": "run_finished"
   }
 ]
