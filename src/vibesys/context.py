@@ -55,12 +55,11 @@ from vibesys.run import (
     DeviceLease,
     ExperimentRepository,
     ProjectProvisioningSpec,
-    RunResourceHandoff,
     RunStateNamespace,
     provision_project,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
-from vibesys.run.integration import LocalRunIntegration
+from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.log_projection import RunLogRenderer
 from vibesys.run.project_policy import (
     build_project_path_policy,
@@ -1002,7 +1001,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             agent_host_resources=agent_host_resources,
         )
         integration.publish_resources(
-            RunResourceHandoff(
+            RunResources(
                 project=project,
                 run_id=run_id,
                 workspace=project_root,

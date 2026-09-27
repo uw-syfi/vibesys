@@ -14,14 +14,12 @@ from tests.server.support import ServerParts, build_server_parts
 from server.chat.factory import (
     ChatAgentBuilder,
     ChatAgentBuildRequest,
-    ChatAgentResources,
     ExperimentChatFactory,
 )
 from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from server.run_attachment import AgentSelection, RunAttachment
-from vs_agent.api import NullAgentEventSink
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -368,9 +366,6 @@ def _factory_for_test(
         attachment=RunAttachment(
             project=cast("Any", _Project(_ProjectState(tmp_path / "chat"))),
             run_id="run-1",
-            workspace=tmp_path,
-            log_dir=tmp_path,
-            agent_backend="agentshim",
             agent_defaults=AgentSelection(
                 driver=defaults.driver,
                 provider=defaults.provider,
@@ -378,7 +373,6 @@ def _factory_for_test(
             ),
         ),
         build_agent=build_agent,
-        agent_events=NullAgentEventSink(),
         fallback=lambda _question: "fallback",
     )
 
@@ -393,19 +387,20 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
         nonlocal close_calls
         close_calls += 1
 
-    def build_agent(request: ChatAgentBuildRequest) -> ChatAgentResources:
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message
+            del invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            close()
+
+    def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
         construction_started.set()
         assert release_construction.wait(timeout=2)
-        return ChatAgentResources(
-            client=object(),
-            close=close,
-            log=lambda _message: None,
-            flush_logs=lambda: None,
-            environment=dict,
-            progress=lambda: None,
-            agent_shared_state_dir=str(request.shared_state_dir),
-            tool_servers=(),
-        )
+        del request
+        return FakeManagedAgent()
 
     factory = _factory_for_test(parts, tmp_path, build_agent)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:

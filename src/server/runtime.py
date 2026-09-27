@@ -89,6 +89,7 @@ class ServerRuntime:
         )
         self.chat.enable_terminal_retention()
         self.session: RunSession | None = None
+        self._owned_session: RunSession | None = None
 
     def drive(self, request: RunRequest) -> RunResult:
         """Build and run *request*'s session, retaining it while it is live.
@@ -103,18 +104,15 @@ class ServerRuntime:
         `self.session` is stored and cleared under `self.condition`, the lock
         the transport threads synchronize on; `self.api`'s `session_provider`
         reads it to route steer/pause/resume/stop to the live run. The
-        resource-handoff listener closes over `session` itself so
-        `RunIntegrationAdapter.handle_run_resources` can thread it into
-        `ExperimentChatFactory`, which opens its own agent-construction
-        environment through `session.open_agent_environment(...)`.
+        readiness listener closes over ``session`` so integration can request
+        managed auxiliary chat agents without receiving core resources.
         """
         session = create_session(request, sink=self.integration.project_event)
         session.on_committed_view(self.api.observe_committed_state)
-        session.on_run_resources(
-            lambda handoff: self.integration.handle_run_resources(session, handoff)
-        )
+        session.on_ready(lambda ready: self.integration.handle_run_ready(session, ready))
         with self.condition:
             self.session = session
+            self._owned_session = session
         session.start()
         try:
             return asyncio.run(session.await_result())
@@ -163,6 +161,23 @@ class ServerRuntime:
                             source="experiment-chat",
                         )
             finally:
+                with self.condition:
+                    owned_session, self._owned_session = self._owned_session, None
+                if owned_session is not None:
+                    try:
+                        owned_session.close()
+                    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-948026 [BLE001]; session cleanup follows frontend cleanup and must not replace a run failure.
+                        message = (
+                            "Run-session cleanup also failed: "
+                            f"{type(cleanup_error).__name__}: {cleanup_error}"
+                        )
+                        if run_error is not None:
+                            run_error.add_note(message)
+                        else:
+                            with suppress(BaseException):
+                                self.journal.publish_output(
+                                    "stderr", f"{message}\n", source="run-session"
+                                )
                 signal.signal(signal.SIGTERM, previous_sigterm)
 
     @staticmethod

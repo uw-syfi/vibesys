@@ -1,78 +1,113 @@
-"""Experiment-chat agent construction tests."""
+"""Experiment-chat construction through the managed VibeSys API."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from server.chat.factory import ChatAgentBuildRequest, build_chat_agent
-from server.chat.prompts import experiment_chat_system_prompt
-from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.config import Config
-from vibesys.skills import NULL_SKILL_SELECTION
-from vs_agent.api import NULL_AGENT_EVENT_SINK, StdioServerDescriptor, ToolServerDescriptor
-from vs_agent.api.testing import FakeAgentClient
-from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
-
-_FAKE_TOOL_SERVERS = (
-    StdioServerDescriptor(
-        name="vibesys-run",
-        command="python",
-        args=("-m", "vibesys.api.chat_tools_server", "--run-id", "run-1"),
-    ),
+from server.chat.factory import DEFAULT_CHAT_THREAD, ChatAgentBuildRequest, build_chat_agent
+from server.chat.prompts import (
+    experiment_chat_continuation_prompt,
+    experiment_chat_system_prompt,
 )
+from server.run_attachment import AgentSelection
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
-
-    from vibesys.skills import SkillSelection
+    from vibesys.api import AuxiliaryAgentLaunch
 
 
 @dataclass
-class _FakeAgentEnvironment:
-    """Stub `vibesys.api.AgentEnvironment` returned by `_FakeRunSession`."""
+class _FakeManagedAgent:
+    """In-memory managed conversation returned by the fake run session."""
 
-    config: Config
-    skill_selection: SkillSelection = NULL_SKILL_SELECTION
-    skill_source_dirs: tuple[Path, ...] = ()
-    project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
-    host_resources: tuple[HostResource, ...] = ()
-    backends: dict[str, Any] | None = None
-    use_docker: bool = False
-    isolated: bool = False
-    agent_path_value: str | None = None
+    answer: str = "answer"
     closed: bool = False
-    tool_servers: tuple[ToolServerDescriptor, ...] = _FAKE_TOOL_SERVERS
 
-    def agent_path(self, _host: Path) -> str:
-        assert self.agent_path_value is not None, "agent_path() called with no configured value"
-        return self.agent_path_value
-
-    def investigation_tools(self) -> tuple[ToolServerDescriptor, ...]:
-        return self.tool_servers
+    def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+        del message
+        del invocation_id
+        if self.closed:
+            error = "fake managed agent is closed"
+            raise RuntimeError(error)
+        return self.answer
 
     def close(self) -> None:
         self.closed = True
 
 
 class _FakeRunSession:
-    """Stub `vibesys.api.RunSession` exposing only `open_agent_environment`."""
+    """Faithful auxiliary-agent slice of ``vibesys.api.RunSession``."""
 
-    def __init__(self, environment: _FakeAgentEnvironment) -> None:
-        self._environment = environment
-        self.mounts: tuple[HostResource, ...] | None = None
+    def __init__(self, agent: _FakeManagedAgent) -> None:
+        self.agent = agent
+        self.launches: list[AuxiliaryAgentLaunch] = []
 
-    def open_agent_environment(
-        self, *, mounts: tuple[HostResource, ...] = ()
-    ) -> _FakeAgentEnvironment:
-        self.mounts = mounts
-        return self._environment
+    def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> _FakeManagedAgent:
+        self.launches.append(launch)
+        return self.agent
 
 
-def test_thread_prompt_uses_investigation_tools_and_private_transcript() -> None:
-    prompt = experiment_chat_system_prompt("/state/server/chat/threads/thread-1")
+def _selection() -> AgentSelection:
+    return AgentSelection(driver="agentshim", provider="codex", model="gpt-test")
+
+
+def test_default_chat_declares_one_fixed_managed_conversation(tmp_path: Path) -> None:
+    shared_state_dir = tmp_path / "state" / "server" / "chat"
+    shared_state_dir.mkdir(parents=True)
+    agent = _FakeManagedAgent()
+    session = _FakeRunSession(agent)
+
+    result = build_chat_agent(
+        ChatAgentBuildRequest(
+            session=session,
+            selection=_selection(),
+            instance_id=None,
+            shared_state_dir=shared_state_dir,
+        )
+    )
+
+    assert result is agent
+    assert len(session.launches) == 1
+    launch = session.launches[0]
+    assert launch.role == "chat"
+    assert launch.member_id == DEFAULT_CHAT_THREAD
+    assert (launch.driver, launch.provider, launch.model) == (
+        "agentshim",
+        "codex",
+        "gpt-test",
+    )
+    assert launch.system_prompt == experiment_chat_system_prompt("$VIBESYS_CHAT_STATE_DIR")
+    assert launch.continuation_prompt == experiment_chat_continuation_prompt(
+        "$VIBESYS_CHAT_STATE_DIR"
+    )
+    assert len(launch.readable_inputs) == 1
+    readable = launch.readable_inputs[0]
+    assert readable.path == shared_state_dir.resolve()
+    assert readable.environment_variable == "VIBESYS_CHAT_STATE_DIR"
+    assert readable.purpose == "server chat transcript"
+
+
+def test_each_thread_declares_its_own_context_identity(tmp_path: Path) -> None:
+    shared_state_dir = tmp_path / "chat"
+    shared_state_dir.mkdir()
+    session = _FakeRunSession(_FakeManagedAgent())
+
+    build_chat_agent(
+        ChatAgentBuildRequest(
+            session=session,
+            selection=_selection(),
+            instance_id="thread-7",
+            shared_state_dir=shared_state_dir,
+        )
+    )
+
+    assert session.launches[0].member_id == "thread-7"
+
+
+def test_thread_prompt_names_investigation_tools_and_private_transcript(tmp_path: Path) -> None:
+    prompt = experiment_chat_system_prompt(str(tmp_path / "threads" / "thread-1"))
 
     assert "`vibesys-run`" in prompt
     assert "run_summary" in prompt
@@ -81,129 +116,4 @@ def test_thread_prompt_uses_investigation_tools_and_private_transcript() -> None
     assert "list_rounds" in prompt
     assert "list_state_files" in prompt
     assert "read_state_file" in prompt
-    assert "`/state/server/chat/threads/thread-1/conversation.jsonl`" in prompt
-
-
-def _config() -> Config:
-    return Config.model_validate(
-        {
-            "model": {"name": "gpt-test"},
-            "agent": {"backend": "cli", "driver": "agentshim"},
-        }
-    )
-
-
-def _attachment(tmp_path: Path) -> RunAttachment:
-    workspace = tmp_path / "workspace"
-    log_dir = tmp_path / "state" / "runs" / "run-1" / "logs"
-    workspace.mkdir(parents=True)
-    log_dir.mkdir(parents=True)
-    return RunAttachment(
-        project=cast("Any", None),
-        run_id="run-1",
-        workspace=workspace,
-        log_dir=log_dir,
-        agent_backend="cli",
-        agent_defaults=AgentSelection(
-            driver="agentshim",
-            provider="claude",
-            model="claude-haiku-4-5",
-        ),
-    )
-
-
-def test_host_chat_agent_receives_read_only_server_state(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attachment = _attachment(tmp_path)
-    shared_state_dir = attachment.log_dir.parent / "server" / "chat"
-    shared_state_dir.mkdir(parents=True)
-    captured: dict[str, Any] = {}
-    client = FakeAgentClient()
-
-    def fake_build_agent_client(*_args: object, **kwargs: object) -> FakeAgentClient:
-        captured.update(kwargs)
-        return client
-
-    monkeypatch.setattr("server.chat.factory.build_agent_client", fake_build_agent_client)
-
-    environment = _FakeAgentEnvironment(config=_config())
-    session = _FakeRunSession(environment)
-
-    resources = build_chat_agent(
-        ChatAgentBuildRequest(
-            session=cast("Any", session),
-            attachment=attachment,
-            selection=attachment.agent_defaults,
-            instance_id=None,
-            shared_state_dir=shared_state_dir,
-            agent_events=NULL_AGENT_EVENT_SINK,
-        )
-    )
-
-    assert resources.agent_shared_state_dir == str(shared_state_dir)
-    assert session.mounts is not None
-    chat_mount = session.mounts[-1]
-    assert chat_mount.path == shared_state_dir
-    assert chat_mount.access is HostResourceAccess.READ_ONLY
-    assert chat_mount.agent_path == "/opt/vibesys-chat"
-    chat_resource = captured["host_resources"][-1]
-    assert chat_resource.path == shared_state_dir
-    assert chat_resource.access is HostResourceAccess.READ_ONLY
-    assert captured["use_docker"] is False
-    assert resources.tool_servers == _FAKE_TOOL_SERVERS
-    assert environment.closed is False
-    resources.close()
-    assert client.closed
-    assert environment.closed
-
-
-def test_container_chat_agent_mounts_server_state_read_only(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attachment = _attachment(tmp_path)
-    shared_state_dir = attachment.log_dir.parent / "server" / "chat"
-    shared_state_dir.mkdir(parents=True)
-    captured: dict[str, Any] = {}
-    client = FakeAgentClient()
-
-    def fake_build_agent_client(*_args: object, **kwargs: object) -> FakeAgentClient:
-        captured.update(kwargs)
-        return client
-
-    monkeypatch.setattr("server.chat.factory.build_agent_client", fake_build_agent_client)
-
-    environment = _FakeAgentEnvironment(
-        config=_config(),
-        backends={"chat": object()},
-        use_docker=True,
-        isolated=True,
-        agent_path_value="/opt/vibesys-chat",
-    )
-    session = _FakeRunSession(environment)
-
-    resources = build_chat_agent(
-        ChatAgentBuildRequest(
-            session=cast("Any", session),
-            attachment=attachment,
-            selection=attachment.agent_defaults,
-            instance_id="thread-1",
-            shared_state_dir=shared_state_dir,
-            agent_events=NULL_AGENT_EVENT_SINK,
-        )
-    )
-
-    assert resources.agent_shared_state_dir == "/opt/vibesys-chat"
-    assert session.mounts is not None
-    chat_mount = session.mounts[-1]
-    assert chat_mount.path == shared_state_dir
-    assert chat_mount.access is HostResourceAccess.READ_ONLY
-    assert chat_mount.agent_path == "/opt/vibesys-chat"
-    assert captured["use_docker"] is True
-    assert set(captured["backends"]) == {"chat"}
-    assert resources.tool_servers == _FAKE_TOOL_SERVERS
-    resources.close()
-    assert client.closed
-    assert environment.closed
+    assert "conversation.jsonl" in prompt

@@ -21,4 +21,7 @@ def run(request: RunRequest) -> RunResult:
     """
     session = create_session(request, sink=HeadlessRenderer().handle)
     session.start()
-    return asyncio.run(session.await_result())
+    try:
+        return asyncio.run(session.await_result())
+    finally:
+        session.close()

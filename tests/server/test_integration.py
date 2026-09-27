@@ -11,7 +11,6 @@ from tests.server.support import ServerParts, agent_descriptor, build_server_par
 from tests.support.run_execution import run_execution_record
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
-from server.chat.factory import ChatAgentBuildRequest, ChatAgentResources
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
 from server.events import (
     EventStatus,
@@ -24,7 +23,7 @@ from server.integration import (
 )
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.constants import ComputeBackend
+from vibesys.api import RunReady
 from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
@@ -43,18 +42,13 @@ from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
 from vibesys.events import RunStartedData as CoreRunStartedData
-from vibesys.run.integration import RunResourceHandoff
-from vs_agent.api import AgentEventSink, AgentSessionKey, SessionScope
-from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, RunEnvironmentRecord
-from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from server.chat.factory import ChatAgentBuildRequest
     from vibesys.api import RunSession
-    from vibesys.config import Config
-    from vibesys.sandbox.run_environment import RunEnvironment, RunEnvironmentRequest
 
 
 def _project_run(root: Path) -> tuple[Project, str]:
@@ -113,28 +107,18 @@ def _emit_execution_started(
     return execution_id
 
 
-def _attach_test_run(parts: ServerParts, attachment: RunAttachment) -> None:
-    """Publish run resources through the integration's public handoff path."""
-    parts.integration.handle_run_resources(
+def _attach_test_run(parts: ServerParts, attachment: RunAttachment, log_dir: Path) -> None:
+    """Publish the narrow public run-readiness contract."""
+    parts.integration.handle_run_ready(
         cast("RunSession", object()),
-        RunResourceHandoff(
-            project=attachment.project,
+        RunReady(
             run_id=attachment.run_id,
-            workspace=attachment.workspace,
-            log_dir=attachment.log_dir,
-            agent_backend=attachment.agent_backend,
-            driver=attachment.agent_defaults.driver,
-            provider=attachment.agent_defaults.provider,
-            model=attachment.agent_defaults.model,
+            project_root=attachment.project.root,
+            log_directory=log_dir,
+            agent_driver=attachment.agent_defaults.driver,
+            agent_provider=attachment.agent_defaults.provider,
+            agent_model=attachment.agent_defaults.model,
             role_models=attachment.agent_defaults.role_models,
-            config=cast("Config", object()),
-            compute_backend=ComputeBackend.CPU,
-            skill_source_dirs=(),
-            environment=cast("RunEnvironment", object()),
-            environment_request=cast("RunEnvironmentRequest", object()),
-            run_environment_sandboxed=False,
-            project_path_policy=ProjectPathPolicy(),
-            host_resources=(),
         ),
     )
 
@@ -384,26 +368,24 @@ def test_track_started_does_not_double_track_a_repeated_start_event(
 
 def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    client = FakeAgentClient().set_text("chat", "It improved in round 2.")
+    messages: list[str] = []
     closed: list[str] = []
-    agent_events: list[AgentEventSink] = []
 
-    def build_agent(request: ChatAgentBuildRequest) -> ChatAgentResources:
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            messages.append(message)
+            assert invocation_id
+            return "It improved in round 2."
+
+        def close(self) -> None:
+            closed.append("closed")
+
+    def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
         assert request.selection == AgentSelection(
             driver="agentshim", provider="codex", model="gpt-test"
         )
         assert request.instance_id is None
-        agent_events.append(request.agent_events)
-        return ChatAgentResources(
-            client=client,
-            close=lambda: closed.append("closed"),
-            log=lambda _message: None,
-            flush_logs=lambda: None,
-            environment=dict,
-            progress=lambda: None,
-            agent_shared_state_dir=str(request.shared_state_dir),
-            tool_servers=(),
-        )
+        return FakeManagedAgent()
 
     parts = build_server_parts(chat_agent_builder=build_agent)
     _attach_test_run(
@@ -411,54 +393,40 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
         RunAttachment(
             project=project,
             run_id=run_id,
-            workspace=project.root,
-            log_dir=project.state.log_directory(run_id),
-            agent_backend="cli",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         ),
+        project.state.log_directory(run_id),
     )
     response = parts.api.execute(ChatQuery(text="what improved?"))
 
     assert response.chat is not None
     assert response.chat.answer == "It improved in round 2."
-    call = client.calls_for("chat")[0]
-    assert call.reuse_session is True
-    assert call.session_key == AgentSessionKey(SessionScope.CHAT, "default")
-    assert call.user_prompt == "what improved?"
+    assert messages == ["what improved?"]
     transcript = project.state.log_directory(run_id).parent / "server/chat/conversation.jsonl"
     assert json.loads(transcript.read_text()) == {
         "question": "what improved?",
         "answer": "It improved in round 2.",
     }
     assert not (project.root / ".vibesys/server").exists()
-    assert str(transcript.parent) in call.system_prompt
-    presentation_count = sum(
-        event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read()
-    )
     parts.integration.close()
-    agent_events[0].agent_output("after close")
     assert closed == ["closed"]
-    assert (
-        sum(event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read())
-        == presentation_count
-    )
 
 
-def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
+def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    client = FakeAgentClient()
 
-    def build_agent(request: ChatAgentBuildRequest) -> ChatAgentResources:
-        return ChatAgentResources(
-            client=client,
-            close=lambda: None,
-            log=lambda _message: None,
-            flush_logs=lambda: None,
-            environment=dict,
-            progress=lambda: None,
-            agent_shared_state_dir=str(request.shared_state_dir),
-            tool_servers=(),
-        )
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message
+            del invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            pass
+
+    def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
+        del request
+        return FakeManagedAgent()
 
     parts = build_server_parts(chat_agent_builder=build_agent)
     _attach_test_run(
@@ -466,15 +434,13 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
         RunAttachment(
             project=project,
             run_id=run_id,
-            workspace=project.root,
-            log_dir=project.state.log_directory(run_id),
-            agent_backend="stub",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         ),
+        project.state.log_directory(run_id),
     )
 
-    with pytest.raises(ValueError, match="require the CLI agent backend"):
-        parts.api.execute(ChatThreadCreateQuery(provider="codex", model="gpt-test"))
+    with pytest.raises(ValueError, match="does not support provider"):
+        parts.api.execute(ChatThreadCreateQuery(provider="not-a-provider", model="gpt-test"))
     parts.integration.close()
 
 

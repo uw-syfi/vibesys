@@ -75,6 +75,11 @@ from vs_runtime._macos_cpu_profiler import (
 from vs_runtime._macos_cpu_profiler import MacOSProfilerEffects, MacOSProfilerTool
 from vs_runtime._macos_cpu_profiler import collect as collect_macos_profile
 from vs_runtime._macos_cpu_profiler import detect_capability as detect_macos_profiler
+from vs_runtime._managed_conversation import (
+    ManagedConversation,
+    ManagedConversationSpec,
+    create_managed_conversation,
+)
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._project_materialization import (
     GitSourceMaterialization,
@@ -376,6 +381,8 @@ __all__ = [
     "MacOSProfilerTool",
     "ManagedAgentWorkspace",
     "ManagedAgentWorkspaceResolver",
+    "ManagedConversation",
+    "ManagedConversationSpec",
     "ModelRequestError",
     "ModelRequestReconciler",
     "ModelVolumeProvisioner",
@@ -418,6 +425,7 @@ __all__ = [
     "collect_linux_profile",
     "collect_macos_profile",
     "create_agent_session_runtime",
+    "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
     "create_state",

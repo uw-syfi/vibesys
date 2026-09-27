@@ -7,13 +7,19 @@ a session from a `RunRequest`, then read back its events and views);
 `vibesys.api.request` is the surface for assembling a `RunRequest`.
 
 Most symbols here are contracts and Protocols; the rest are re-exports of
-core-owned types that consumers legitimately need (events, control signals,
-the resource-handoff seam) so they never import their private home modules.
+core-owned types that consumers legitimately need, so they never import their
+private home modules.
 """
 
 from __future__ import annotations
 
 from vibesys.agent_spec_config import agent_spec_from_config
+from vibesys.api.auxiliary import (
+    AuxiliaryAgentLaunch,
+    AuxiliaryReadableInput,
+    ManagedAgent,
+    RunReady,
+)
 from vibesys.api.contracts import (
     Config,
     ConfigurationDiagnostic,
@@ -54,12 +60,10 @@ from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
-from vibesys.run.integration import RunResourceHandoff
 from vibesys.run.log_projection import format_framework_event
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
-from vs_sandbox.api import HostResource, HostResourceAccess
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
@@ -68,6 +72,8 @@ __all__ = [
     "AgentOutputChunkData",
     "AgentSpec",
     "AgentStatusData",
+    "AuxiliaryAgentLaunch",
+    "AuxiliaryReadableInput",
     "ComputeBackend",
     "Config",
     "ConfigurationDiagnostic",
@@ -77,8 +83,7 @@ __all__ = [
     "CoreEventType",
     "DomainName",
     "EventStatus",
-    "HostResource",
-    "HostResourceAccess",
+    "ManagedAgent",
     "MetricSpace",
     "Objective",
     "OrchestrationDescriptor",
@@ -88,8 +93,8 @@ __all__ = [
     "RepositoryVisibility",
     "ResumeRef",
     "RunControl",
+    "RunReady",
     "RunRequest",
-    "RunResourceHandoff",
     "RunResult",
     "RunSession",
     "RunStatus",

@@ -44,10 +44,7 @@
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 20}
 {"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
-{"path": "tests/server/test_chat_factory.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_chat_resources.py", "rule": "patch", "count": 1}
-{"path": "tests/server/test_chat_session.py", "rule": "mock", "count": 4}
-{"path": "tests/server/test_chat_session.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_design.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}

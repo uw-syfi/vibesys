@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.contracts import project_run
-from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -29,10 +28,6 @@ class RunStore(Protocol):
 
     def get_run(self, run_id: str) -> RunView:
         """Return the recorded view for one run."""
-        ...
-
-    def checkout(self, run_id: str) -> HostResource:
-        """Return a host resource for inspecting one run's recorded workspace."""
         ...
 
 
@@ -88,19 +83,6 @@ class _LocalRunStore:
     def get_run(self, run_id: str) -> RunView:
         manifest = self._project.state.load_run(run_id)
         return self._view(manifest)
-
-    def checkout(self, run_id: str) -> HostResource:
-        # Ensures *run_id* is a recorded run before handing back a resource.
-        self._project.state.load_run(run_id)
-        # A run's workspace is the project's own Git worktree, checked out to
-        # the run's own `vibesys-runs/<run_id>` branch tip (see
-        # `vs_project.api.GitTracker`); there is no separate
-        # per-run directory to point at.
-        return HostResource(
-            path=self._project.root,
-            access=HostResourceAccess.READ_ONLY,
-            purpose=f"recorded workspace for run {run_id!r}",
-        )
 
     def _view(self, manifest: OrchestrationRunManifest) -> RunView:
         loop = manifest.orchestration.id

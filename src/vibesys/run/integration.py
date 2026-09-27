@@ -41,15 +41,13 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class RunResourceHandoff:
-    """Core run resources an application may use to build another agent surface.
+class RunResources:
+    """Private resource bundle shared by core composition and ``RunSession``.
 
-    Type-erased at the core/application boundary: core builds one from the
-    facts it already resolved while assembling a run and hands it to whatever
-    listener `LocalRunIntegration.add_resource_listener` registered, with no
-    knowledge of what (if anything) the application does with it. The server
-    converts this into `server.run_attachment.RunAttachment` for its own
-    experiment-chat wiring.
+    This never crosses ``vibesys.api``.  ``RunSession`` projects it to
+    ``RunReady`` and uses it privately when constructing a managed auxiliary
+    agent, so frontends cannot observe configuration, sandboxes, path policy,
+    or host-resource grants.
     """
 
     project: Project
@@ -93,12 +91,9 @@ class LocalRunIntegration:
 
     The only implementation of the shape `vibesys.api.session` builds
     internally for every run: an `EventJournal` for the run's event stream,
-    a `RunControlChannel` for steer/pause/resume/stop, and two optional
-    one-shot listener seams (`add_committed_state_listener`,
-    `add_resource_listener`) an application can register before the run
-    starts. Neither seam is a Protocol an application implements against;
-    both are plain callables `RunSession.on_committed_view`/
-    `RunSession.on_run_resources` register on the session's own instance.
+    a `RunControlChannel` for steer/pause/resume/stop, one application-facing
+    committed-state listener, and one private resource listener owned by
+    `RunSession`.
     """
 
     def __init__(self) -> None:
@@ -110,7 +105,7 @@ class LocalRunIntegration:
         self._committed_state_listener: (
             Callable[[str, BaseModel, tuple[str, ...] | None], None] | None
         ) = None
-        self._resource_listener: Callable[[RunResourceHandoff], None] | None = None
+        self._resource_listener: Callable[[RunResources], None] | None = None
 
     def attach(
         self,
@@ -208,11 +203,11 @@ class LocalRunIntegration:
         if self._committed_state_listener is not None:
             self._committed_state_listener(namespace, state, changed_keys)
 
-    def add_resource_listener(self, listener: Callable[[RunResourceHandoff], None]) -> None:
-        """Register the sole application consumer of this run's resource handoff."""
+    def add_resource_listener(self, listener: Callable[[RunResources], None]) -> None:
+        """Register the core session that owns this run's resources."""
         self._resource_listener = listener
 
-    def publish_resources(self, handoff: RunResourceHandoff) -> None:
-        """Hand off this run's resources to the registered listener, if any."""
+    def publish_resources(self, handoff: RunResources) -> None:
+        """Give the owning core session access to this run's private resources."""
         if self._resource_listener is not None:
             self._resource_listener(handoff)

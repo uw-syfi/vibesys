@@ -26,7 +26,8 @@ from server.events import (
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import CoreAgentEventSink, CoreEventType
+from vibesys.api import CoreEventType
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,8 +37,7 @@ if TYPE_CHECKING:
     from server.controller import ProjectRunState, RunController
     from server.execution import ExecutionTracker
     from server.journal import WireJournal
-    from vibesys.api import CoreEvent, RunResourceHandoff, RunSession
-    from vs_project.api import Project
+    from vibesys.api import CoreEvent, RunReady, RunSession
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
 _TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
@@ -198,7 +198,6 @@ class RunIntegrationAdapter:
         self.journal = journal
         self.chat = chat
         self._chat_agent_builder = chat_agent_builder
-        self._chat_events = CoreAgentEventSink(self._route_output_event)
         self._chat_factory: ExperimentChatFactory | None = None
         self._detach_run: Callable[[], None] | None = None
         self._closed = False
@@ -234,29 +233,23 @@ class RunIntegrationAdapter:
         self._failure_diagnostics.clear()
         self.controller.attach(log_dir, project=project, run_id=run_id)
 
-    def handle_run_resources(self, session: RunSession, handoff: RunResourceHandoff) -> None:
-        """Convert a core resource handoff into durable attach plus experiment chat.
+    def handle_run_ready(self, session: RunSession, ready: RunReady) -> None:
+        """Attach frontend projection and chat from narrow readiness facts.
 
-        Registered as this run's sole `RunSession.on_run_resources` listener,
-        bound to *session* by `server.runtime.ServerRuntime.drive`. *session*
-        is threaded through to `ExperimentChatFactory` so it can open its own
-        agent-construction environment through
-        `vibesys.api.RunSession.open_agent_environment`. Durable attach runs
-        first so the wire journal is attached before any experiment-chat setup
-        that might read it.
+        Registered as this run's sole ``RunSession.on_ready`` listener. Durable
+        attach runs first so the wire journal is ready before experiment chat
+        can read the run history.
         """
-        self.attach(handoff.log_dir, project=handoff.project, run_id=handoff.run_id)
+        project = Project.open(ready.project_root)
+        self.attach(ready.log_directory, project=project, run_id=ready.run_id)
         attachment = RunAttachment(
-            project=handoff.project,
-            run_id=handoff.run_id,
-            workspace=handoff.workspace,
-            log_dir=handoff.log_dir,
-            agent_backend=handoff.agent_backend,
+            project=project,
+            run_id=ready.run_id,
             agent_defaults=AgentSelection(
-                driver=handoff.driver,
-                provider=handoff.provider,
-                model=handoff.model,
-                role_models=handoff.role_models,
+                driver=ready.agent_driver,
+                provider=ready.agent_provider,
+                model=ready.agent_model,
+                role_models=ready.role_models,
             ),
         )
         self._detach_run = self._attach_run(attachment, session)
@@ -275,7 +268,6 @@ class RunIntegrationAdapter:
             session=session,
             attachment=attachment,
             build_agent=self._chat_agent_builder,
-            agent_events=self._chat_events,
             fallback=RunInspector(self).answer,
         )
         self._chat_factory = factory

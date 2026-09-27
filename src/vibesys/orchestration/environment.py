@@ -14,15 +14,12 @@ if TYPE_CHECKING:
 
 
 class AgentEnvironment(Protocol):
-    """A live agent-construction environment opened for one run.
+    """Private composition view of a live run agent environment.
 
-    Returned by `vibesys.api.session.RunAgentHost.open_agent_environment`.
-    Carries exactly what `server.chat.factory.build_chat_agent` needs to build
-    a sibling agent over the run's workspace: the construction inputs (`config`,
-    `skill_selection`,
-    `skill_source_dirs`, `project_path_policy`, `host_resources`), the opened
-    sandbox's shape (`backends`, `use_docker`, `isolated`), its path
-    translation (`agent_path`), and its lifetime (`close`).
+    Core uses this protocol while wiring orchestration roles to runtime agent
+    sessions. It is not part of ``vibesys.api`` and never crosses into server
+    or headless callers. The concrete environment mechanics remain here until
+    run-environment ownership moves fully into ``vs_runtime``.
 
     Every data member is a read-only property, not a plain attribute: no
     caller writes any of them, and this protocol's sole real implementation

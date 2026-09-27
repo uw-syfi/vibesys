@@ -9,7 +9,6 @@ from pathlib import Path
 
 from vibesys.api import ResumeRef, RunRequest, RunResult, RunStatus, RunView
 from vibesys.api import contracts as api_contracts
-from vibesys.orchestration.environment import AgentEnvironment
 from vibesys.orchestration.request import ResumeRef as InternalResumeRef
 from vibesys.orchestration.request import RunRequest as InternalRequest
 from vibesys.orchestration.view import RunResult as InternalResult
@@ -23,14 +22,12 @@ def test_public_dtos_reexport_internal_classes() -> None:
     assert RunResult is api_contracts.RunResult is InternalResult
     assert RunStatus is api_contracts.RunStatus is InternalStatus
     assert RunView is api_contracts.RunView is InternalView
-    assert api_contracts.AgentEnvironment is AgentEnvironment
 
 
 def test_internal_dtos_do_not_import_public_api() -> None:
     script = (
         "import sys; "
-        "import vibesys.orchestration.request, vibesys.orchestration.view, "
-        "vibesys.orchestration.environment; "
+        "import vibesys.orchestration.request, vibesys.orchestration.view; "
         "assert 'vibesys.api' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030002; The subprocess runs the current interpreter on a fixed script literal.

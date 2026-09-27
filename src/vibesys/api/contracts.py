@@ -1,9 +1,7 @@
 """Public contracts for `vibesys.api`: DTOs, enums, and the event sink.
 
 No behavior lives here. Types that already exist in vibesys core are
-re-exported instead of duplicated. `WorkspaceHandle` is deliberately not a
-type defined here: a run's workspace is expressed as `vs_sandbox.HostResource`
-(see `vibesys.api.session.RunWorkspace`) to avoid a lib -> core cycle.
+re-exported instead of duplicated.
 """
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ from typing import Protocol
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEvent, EventStatus
-from vibesys.orchestration.environment import AgentEnvironment
 
 # Objective/MetricSpace are shared evaluator contracts.
 from vibesys.orchestration.metrics import MetricSpace, Objective
@@ -24,7 +21,6 @@ from vs_agent.api import MCPServerSpec
 from vs_project.api import OrchestrationDescriptor
 
 __all__ = [
-    "AgentEnvironment",
     "CandidateDisposition",
     "Config",
     "ConfigurationDiagnostic",

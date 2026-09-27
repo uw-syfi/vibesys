@@ -10,7 +10,7 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.run.integration import LocalRunIntegration, RunResourceHandoff
+from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.legacy_namespaces import RunStateNamespace
 from vibesys.run.project import (
     ProjectProvisioningError,
@@ -30,7 +30,6 @@ __all__ = [
     "ProjectProvisioningError",
     "ProjectProvisioningSpec",
     "RepositoryVisibility",
-    "RunResourceHandoff",
     "RunStateNamespace",
     "provision_project",
 ]
