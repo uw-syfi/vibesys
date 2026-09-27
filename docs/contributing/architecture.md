@@ -356,6 +356,7 @@ graph TD
     server.transport --> vs_project
     vibesys --> vs_agent
     vibesys --> vs_loop_state
+    vibesys --> vs_runtime
     vibesys.api --> vibesys
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains

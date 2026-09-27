@@ -151,7 +151,7 @@ depends_on = [ "vs_agent"]
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_loop_state", "vs_agent"]
+depends_on = ["vs_loop_state", "vs_agent", "vs_runtime"]
 
 [[modules]]
 # Typed user-facing failures shared by CLI, application transports, and the

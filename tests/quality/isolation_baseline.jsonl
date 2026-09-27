@@ -121,9 +121,7 @@
 {"path": "tests/vibesys/test_kubernetes_inputs.py", "rule": "mock", "count": 3}
 {"path": "tests/vibesys/test_kubernetes_inputs.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "patch", "count": 25}
-{"path": "tests/vibesys/test_linux_cpu_profiler.py", "rule": "mock", "count": 8}
-{"path": "tests/vibesys/test_macos_cpu_profiler.py", "rule": "mock", "count": 12}
-{"path": "tests/vibesys/test_profilers.py", "rule": "patch", "count": 7}
+{"path": "tests/vibesys/test_profilers.py", "rule": "patch", "count": 4}
 {"path": "tests/vibesys/test_project_provisioning.py", "rule": "mock", "count": 3}
 {"path": "tests/vibesys/test_workspace.py", "rule": "mock", "count": 6}
 {"path": "tests/vibesys/test_workspace.py", "rule": "patch", "count": 8}

@@ -101,6 +101,7 @@ def detect_capability(
     system: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     run: Runner = subprocess.run,
+    read_int: Callable[[Path], int | None] = _read_int,
 ) -> Capability:
     """Report whether Linux ``perf`` can be invoked for diagnostic profiling."""
     if (system or platform.system()) != "Linux":
@@ -114,8 +115,8 @@ def detect_capability(
         )
 
     perf_path = which("perf")
-    perf_event_paranoid = _read_int(Path("/proc/sys/kernel/perf_event_paranoid"))
-    kptr_restrict = _read_int(Path("/proc/sys/kernel/kptr_restrict"))
+    perf_event_paranoid = read_int(Path("/proc/sys/kernel/perf_event_paranoid"))
+    kptr_restrict = read_int(Path("/proc/sys/kernel/kptr_restrict"))
     diagnostics: list[DiagnosticCode] = []
 
     if perf_event_paranoid is not None and perf_event_paranoid > _PERF_EVENT_PARANOID_THRESHOLD:
@@ -180,6 +181,17 @@ def _run_text(
     )
 
 
+@dataclass(frozen=True)
+class LinuxProfilerEffects:
+    """Injected process and clock effects for Linux profile collection."""
+
+    run: Callable[..., subprocess.CompletedProcess[str]] = _run_text
+    now: Callable[[], float] = time.time
+
+
+_DEFAULT_EFFECTS = LinuxProfilerEffects()
+
+
 def _parse_perf_stat_csv(path: Path) -> tuple[dict[str, str], ...]:
     if not path.is_file():
         return ()
@@ -218,11 +230,12 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     timeout: int | None = None,
     frequency: int = 99,
     call_graph: str = "fp",
+    effects: LinuxProfilerEffects = _DEFAULT_EFFECTS,
 ) -> CollectionResult:
     """Run separate diagnostic ``perf stat`` and ``perf record`` workloads."""
     capability = capability or detect_capability()
     output_dir.mkdir(parents=True, exist_ok=True)
-    started = time.time()
+    started = effects.now()
     diagnostics = list(capability.diagnostics)
     stat_path = output_dir / "perf-stat.csv"
     record_path = output_dir / "perf.data"
@@ -303,7 +316,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     for name, profiler_command in (("stat", stat_command), ("record", record_command)):
         executed[name] = profiler_command
         try:
-            result = _run_text(profiler_command, timeout=timeout)
+            result = effects.run(profiler_command, timeout=timeout)
             returncodes[name] = result.returncode
             stderr[name] = result.stderr[-4000:]
             if result.returncode != 0:
@@ -325,7 +338,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     if record_path.is_file():
         executed["report"] = report_command
         try:
-            report = _run_text(report_command, timeout=60)
+            report = effects.run(report_command, timeout=60)
             returncodes["report"] = report.returncode
             stderr["report"] = report.stderr[-4000:]
             report_text = report.stdout

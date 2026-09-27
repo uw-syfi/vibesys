@@ -9,8 +9,15 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
+from vs_runtime.api.infrastructure import (
+    NativeCpuProfilerKind,
+    NativeCpuProfilerPreflight,
+    preflight_native_cpu_profiler,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_agent.api import MCPServerSpec
 
 
@@ -307,7 +314,13 @@ def resolve_profiler_kind(
     return candidate
 
 
-def preflight_profiler_kind(kind: ProfilerKind) -> ProfilerPreflightResult:
+def preflight_profiler_kind(
+    kind: ProfilerKind,
+    *,
+    native_preflight: Callable[
+        [NativeCpuProfilerKind], NativeCpuProfilerPreflight
+    ] = preflight_native_cpu_profiler,
+) -> ProfilerPreflightResult:
     """Run cheap local checks for a resolved profiler.
 
     Most profiler kinds are validated by their backend/runtime setup. Native CPU
@@ -318,39 +331,13 @@ def preflight_profiler_kind(kind: ProfilerKind) -> ProfilerPreflightResult:
     if resolved is ProfilerKind.NONE:
         return ProfilerPreflightResult(kind=resolved, usable=True)
     if resolved is ProfilerKind.LINUX_CPU:
-        linux_profiler = import_module("vibesys.linux_cpu_profiler")
-        diagnostic_code = linux_profiler.DiagnosticCode
-        linux_profiler_tool = linux_profiler.LinuxProfilerTool
-        detect_capability = linux_profiler.detect_capability
-
-        capability = detect_capability()
-        blocking = {
-            diagnostic_code.NOT_LINUX,
-            diagnostic_code.PERF_UNAVAILABLE,
-            diagnostic_code.PERF_STAT_UNAVAILABLE,
-        }
-        diagnostics = tuple(item.value for item in capability.diagnostics)
-        usable = capability.tool is linux_profiler_tool.PERF and not any(
-            item in blocking for item in capability.diagnostics
+        capability = native_preflight(NativeCpuProfilerKind.LINUX)
+        return ProfilerPreflightResult(
+            resolved, capability.usable, capability.diagnostics, capability.details
         )
-        details = (
-            f"perf_path={capability.perf_path or 'missing'}",
-            f"perf_event_paranoid={capability.perf_event_paranoid}",
-            f"kptr_restrict={capability.kptr_restrict}",
-        )
-        return ProfilerPreflightResult(resolved, usable, diagnostics, details)
     if resolved is ProfilerKind.MACOS_CPU:
-        macos_profiler = import_module("vibesys.macos_cpu_profiler")
-        macos_profiler_tool = macos_profiler.MacOSProfilerTool
-        detect_capability = macos_profiler.detect_capability
-
-        capability = detect_capability()
-        diagnostics = tuple(item.value for item in capability.diagnostics)
-        usable = capability.tool is not macos_profiler_tool.NONE
-        details = (
-            f"xcode_path={capability.xcode_path or 'missing'}",
-            f"xctrace_path={capability.xctrace_path or 'missing'}",
-            f"sample_path={capability.sample_path or 'missing'}",
+        capability = native_preflight(NativeCpuProfilerKind.MACOS)
+        return ProfilerPreflightResult(
+            resolved, capability.usable, capability.diagnostics, capability.details
         )
-        return ProfilerPreflightResult(resolved, usable, diagnostics, details)
     return ProfilerPreflightResult(kind=resolved, usable=True)

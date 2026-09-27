@@ -2,44 +2,66 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Never
-from unittest.mock import patch
+from typing import Never, cast
 
-from vibesys.linux_cpu_profiler import (
-    Capability,
-    DiagnosticCode,
+import pytest
+
+from vs_runtime.api.infrastructure import (
+    LinuxProfilerCapability,
+    LinuxProfilerDiagnostic,
+    LinuxProfilerEffects,
     LinuxProfilerTool,
-    _extract_hot_symbols,
-    _parse_perf_stat_csv,
-    _read_int,
-    collect,
-    detect_capability,
-    parse_command,
-    summarize,
+    NativeCpuProfilerKind,
+    collect_linux_profile,
+    detect_linux_profiler,
+    parse_profile_command,
+    preflight_native_cpu_profiler,
+    summarize_linux_profile,
 )
 
 
 def test_detect_capability_rejects_non_linux() -> None:
-    capability = detect_capability(system="Darwin")
+    capability = detect_linux_profiler(system="Darwin")
 
     assert capability.tool is LinuxProfilerTool.NONE
-    assert capability.diagnostics == (DiagnosticCode.NOT_LINUX,)
+    assert capability.diagnostics == (LinuxProfilerDiagnostic.NOT_LINUX,)
 
 
 def test_detect_capability_reports_missing_perf() -> None:
-    with patch("vibesys.linux_cpu_profiler._read_int", return_value=1):
-        capability = detect_capability(system="Linux", which=lambda _name: None)
+    capability = detect_linux_profiler(
+        system="Linux", which=lambda _name: None, read_int=lambda _path: 1
+    )
 
     assert capability.tool is LinuxProfilerTool.NONE
-    assert DiagnosticCode.PERF_UNAVAILABLE in capability.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_UNAVAILABLE in capability.diagnostics
 
 
-def test_read_int_returns_none_for_missing_or_invalid_values(tmp_path: Path) -> None:
-    invalid = tmp_path / "not-an-int"
-    invalid.write_text("restricted\n", encoding="utf-8")
+def test_preflight_marks_perf_stat_failure_unusable() -> None:
+    capability = LinuxProfilerCapability(
+        LinuxProfilerTool.PERF,
+        "/usr/bin/perf",
+        "perf version 6.8",
+        3,
+        1,
+        (LinuxProfilerDiagnostic.PERF_STAT_UNAVAILABLE,),
+    )
 
-    assert _read_int(invalid) is None
-    assert _read_int(tmp_path / "missing") is None
+    result = preflight_native_cpu_profiler(
+        NativeCpuProfilerKind.LINUX, detect_linux=lambda: capability
+    )
+
+    assert not result.usable
+    assert result.selected_tool == "perf"
+    assert result.details == (
+        "perf_path=/usr/bin/perf",
+        "perf_event_paranoid=3",
+        "kptr_restrict=1",
+    )
+
+
+def test_preflight_rejects_unparsed_profiler_kind() -> None:
+    with pytest.raises(TypeError, match="NativeCpuProfilerKind"):
+        preflight_native_cpu_profiler(cast("NativeCpuProfilerKind", "linux"))
 
 
 def test_detect_capability_reports_restrictions_and_stat_failure() -> None:
@@ -53,19 +75,20 @@ def test_detect_capability_reports_restrictions_and_stat_failure() -> None:
             return subprocess.CompletedProcess(command, 255, "", "No permission")
         raise AssertionError(command)
 
-    with patch("vibesys.linux_cpu_profiler._read_int", side_effect=[3, 1]):
-        capability = detect_capability(
-            system="Linux",
-            which=lambda _name: "/usr/bin/perf",
-            run=fake_run,
-        )
+    restrictions = iter((3, 1))
+    capability = detect_linux_profiler(
+        system="Linux",
+        which=lambda _name: "/usr/bin/perf",
+        run=fake_run,
+        read_int=lambda _path: next(restrictions),
+    )
 
     assert calls[0] == ["/usr/bin/perf", "--version"]
     assert capability.tool is LinuxProfilerTool.PERF
     assert capability.perf_version == "perf version 6.8"
-    assert DiagnosticCode.PERF_EVENT_PARANOID_RESTRICTIVE in capability.diagnostics
-    assert DiagnosticCode.KERNEL_SYMBOLS_RESTRICTED in capability.diagnostics
-    assert DiagnosticCode.PERF_STAT_UNAVAILABLE in capability.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_EVENT_PARANOID_RESTRICTIVE in capability.diagnostics
+    assert LinuxProfilerDiagnostic.KERNEL_SYMBOLS_RESTRICTED in capability.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_STAT_UNAVAILABLE in capability.diagnostics
 
 
 def test_detect_capability_handles_perf_version_exception() -> None:
@@ -73,16 +96,16 @@ def test_detect_capability_handles_perf_version_exception() -> None:
         _failure_message = "cannot execute perf"
         raise OSError(_failure_message)
 
-    with patch("vibesys.linux_cpu_profiler._read_int", return_value=None):
-        capability = detect_capability(
-            system="Linux",
-            which=lambda _name: "/usr/bin/perf",
-            run=fake_run,
-        )
+    capability = detect_linux_profiler(
+        system="Linux",
+        which=lambda _name: "/usr/bin/perf",
+        run=fake_run,
+        read_int=lambda _path: None,
+    )
 
     assert capability.tool is LinuxProfilerTool.NONE
     assert capability.perf_path == "/usr/bin/perf"
-    assert DiagnosticCode.PERF_UNAVAILABLE in capability.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_UNAVAILABLE in capability.diagnostics
 
 
 def test_detect_capability_handles_perf_stat_exception() -> None:
@@ -91,19 +114,19 @@ def test_detect_capability_handles_perf_stat_exception() -> None:
             return subprocess.CompletedProcess(command, 0, "", "perf version 6.9\n")
         raise subprocess.TimeoutExpired(command, 10)
 
-    with patch("vibesys.linux_cpu_profiler._read_int", return_value=None):
-        capability = detect_capability(
-            system="Linux",
-            which=lambda _name: "/usr/bin/perf",
-            run=fake_run,
-        )
+    capability = detect_linux_profiler(
+        system="Linux",
+        which=lambda _name: "/usr/bin/perf",
+        run=fake_run,
+        read_int=lambda _path: None,
+    )
 
     assert capability.tool is LinuxProfilerTool.PERF
     assert capability.perf_version == "perf version 6.9"
-    assert DiagnosticCode.PERF_STAT_UNAVAILABLE in capability.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_STAT_UNAVAILABLE in capability.diagnostics
 
 
-def test_perf_parsers_skip_malformed_rows_and_stop_at_limit(tmp_path: Path) -> None:
+def test_summary_skips_malformed_perf_rows_and_parses_hot_symbols(tmp_path: Path) -> None:
     stat_path = tmp_path / "perf-stat.csv"
     stat_path.write_text(
         "# ignored\ntoo-short\n# comment,,cycles\n10,,cycles\n",
@@ -116,13 +139,15 @@ def test_perf_parsers_skip_malformed_rows_and_stop_at_limit(tmp_path: Path) -> N
         "  30.00% bench libqueue.so [.] dequeue\n"
     )
 
-    assert _parse_perf_stat_csv(tmp_path / "missing.csv") == ()
-    assert _parse_perf_stat_csv(stat_path) == ({"event": "cycles", "value": "10", "unit": ""},)
-    assert _extract_hot_symbols(report_text, limit=1) == ("55.00% bench libqueue.so [.] enqueue",)
+    (tmp_path / "perf-report.txt").write_text(report_text, encoding="utf-8")
+    summary = summarize_linux_profile(tmp_path)
+
+    assert summary["counters"] == [{"event": "cycles", "value": "10", "unit": ""}]
+    assert summary["hot_symbols"][:1] == ["55.00% bench libqueue.so [.] enqueue"]
 
 
 def test_collect_persists_perf_artifacts_and_summary(tmp_path: Path) -> None:
-    capability = Capability(
+    capability = LinuxProfilerCapability(
         tool=LinuxProfilerTool.PERF,
         perf_path="/usr/bin/perf",
         perf_version="perf version 6.8",
@@ -130,7 +155,7 @@ def test_collect_persists_perf_artifacts_and_summary(tmp_path: Path) -> None:
         kptr_restrict=0,
     )
 
-    def fake_run(command: list[str], *, timeout: int | None) -> object:
+    def fake_run(command: list[str], *, timeout: int | None) -> subprocess.CompletedProcess[str]:
         del timeout
         if command[1] == "stat":
             output = Path(command[command.index("-o") + 1])
@@ -153,8 +178,12 @@ def test_collect_persists_perf_artifacts_and_summary(tmp_path: Path) -> None:
             )
         raise AssertionError(command)
 
-    with patch("vibesys.linux_cpu_profiler._run_text", side_effect=fake_run):
-        result = collect(["bench", "--scenario", "spsc"], tmp_path, capability=capability)
+    result = collect_linux_profile(
+        ["bench", "--scenario", "spsc"],
+        tmp_path,
+        capability=capability,
+        effects=LinuxProfilerEffects(run=fake_run, now=lambda: 100.0),
+    )
 
     assert result.status == "ok"
     assert result.stat_artifact == str(tmp_path / "perf-stat.csv")
@@ -165,13 +194,13 @@ def test_collect_persists_perf_artifacts_and_summary(tmp_path: Path) -> None:
     assert "enqueue" in result.hot_symbols[0]
     assert "linux perf ok" in result.summary
 
-    persisted = summarize(tmp_path)
+    persisted = summarize_linux_profile(tmp_path)
     assert persisted["counters"][1]["event"] == "instructions"
     assert "dequeue" in persisted["hot_symbols"][1]
 
 
 def test_collect_reports_failed_stat_record_and_missing_counters(tmp_path: Path) -> None:
-    capability = Capability(
+    capability = LinuxProfilerCapability(
         tool=LinuxProfilerTool.PERF,
         perf_path="/usr/bin/perf",
         perf_version="perf version 6.8",
@@ -179,7 +208,7 @@ def test_collect_reports_failed_stat_record_and_missing_counters(tmp_path: Path)
         kptr_restrict=None,
     )
 
-    def fake_run(command: list[str], *, timeout: int | None) -> object:
+    def fake_run(command: list[str], *, timeout: int | None) -> subprocess.CompletedProcess[str]:
         del timeout
         if command[1] == "stat":
             return subprocess.CompletedProcess(command, 255, "", "stat failed")
@@ -187,19 +216,24 @@ def test_collect_reports_failed_stat_record_and_missing_counters(tmp_path: Path)
             raise subprocess.TimeoutExpired(command, 3)
         raise AssertionError(command)
 
-    with patch("vibesys.linux_cpu_profiler._run_text", side_effect=fake_run):
-        result = collect(["bench"], tmp_path, capability=capability, timeout=3)
+    result = collect_linux_profile(
+        ["bench"],
+        tmp_path,
+        capability=capability,
+        timeout=3,
+        effects=LinuxProfilerEffects(run=fake_run),
+    )
 
     assert result.status == "error"
     assert result.counters == ()
     assert "no perf stat counters parsed" in result.summary
-    assert DiagnosticCode.PERF_STAT_UNAVAILABLE in result.diagnostics
-    assert DiagnosticCode.PERF_RECORD_UNAVAILABLE in result.diagnostics
-    assert DiagnosticCode.COLLECTION_FAILED in result.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_STAT_UNAVAILABLE in result.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_RECORD_UNAVAILABLE in result.diagnostics
+    assert LinuxProfilerDiagnostic.COLLECTION_FAILED in result.diagnostics
 
 
 def test_collect_reports_failed_perf_report(tmp_path: Path) -> None:
-    capability = Capability(
+    capability = LinuxProfilerCapability(
         tool=LinuxProfilerTool.PERF,
         perf_path="/usr/bin/perf",
         perf_version="perf version 6.8",
@@ -207,7 +241,7 @@ def test_collect_reports_failed_perf_report(tmp_path: Path) -> None:
         kptr_restrict=None,
     )
 
-    def fake_run(command: list[str], *, timeout: int | None) -> object:
+    def fake_run(command: list[str], *, timeout: int | None) -> subprocess.CompletedProcess[str]:
         del timeout
         if command[1] == "stat":
             Path(command[command.index("-o") + 1]).write_text("1,,cycles\n", encoding="utf-8")
@@ -219,37 +253,42 @@ def test_collect_reports_failed_perf_report(tmp_path: Path) -> None:
             return subprocess.CompletedProcess(command, 1, "", "report failed")
         raise AssertionError(command)
 
-    with patch("vibesys.linux_cpu_profiler._run_text", side_effect=fake_run):
-        result = collect(["bench"], tmp_path, capability=capability)
+    result = collect_linux_profile(
+        ["bench"], tmp_path, capability=capability, effects=LinuxProfilerEffects(run=fake_run)
+    )
 
     assert result.status == "error"
     assert result.report_artifact == str(tmp_path / "perf-report.txt")
-    assert DiagnosticCode.PERF_REPORT_UNAVAILABLE in result.diagnostics
-    assert DiagnosticCode.COLLECTION_FAILED in result.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_REPORT_UNAVAILABLE in result.diagnostics
+    assert LinuxProfilerDiagnostic.COLLECTION_FAILED in result.diagnostics
 
 
 def test_summarize_empty_directory_and_parse_command(tmp_path: Path) -> None:
-    summary = summarize(tmp_path)
+    summary = summarize_linux_profile(tmp_path)
 
     assert summary["metadata"] is None
     assert summary["summary"].startswith("linux perf ok; counters: no perf stat counters parsed")
-    assert parse_command("bench --scenario 'spsc queue'") == ["bench", "--scenario", "spsc queue"]
+    assert parse_profile_command("bench --scenario 'spsc queue'") == [
+        "bench",
+        "--scenario",
+        "spsc queue",
+    ]
 
 
 def test_collect_degrades_when_perf_unavailable(tmp_path: Path) -> None:
-    capability = Capability(
+    capability = LinuxProfilerCapability(
         tool=LinuxProfilerTool.NONE,
         perf_path=None,
         perf_version=None,
         perf_event_paranoid=None,
         kptr_restrict=None,
-        diagnostics=(DiagnosticCode.PERF_UNAVAILABLE,),
+        diagnostics=(LinuxProfilerDiagnostic.PERF_UNAVAILABLE,),
     )
 
-    result = collect(["bench"], tmp_path, capability=capability)
+    result = collect_linux_profile(["bench"], tmp_path, capability=capability)
 
     assert result.status == "error"
     assert result.stat_artifact is None
     assert result.record_artifact is None
     assert result.metadata == str(tmp_path / "metadata.json")
-    assert DiagnosticCode.PERF_UNAVAILABLE in result.diagnostics
+    assert LinuxProfilerDiagnostic.PERF_UNAVAILABLE in result.diagnostics

@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol
 
 
 class MacOSProfilerTool(StrEnum):
@@ -62,6 +63,33 @@ class CollectionResult:
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+ProcessStarter = Callable[..., "ChildProcess"]
+
+
+class ChildProcess(Protocol):
+    """Process operations needed while attaching the macOS sampler."""
+
+    pid: int
+
+    def terminate(self) -> None: ...
+
+    def wait(self, *, timeout: int) -> int: ...
+
+    def kill(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class MacOSProfilerEffects:
+    """Injected process, clock, and executable lookup effects for collection."""
+
+    run: Runner = subprocess.run
+    start: ProcessStarter = subprocess.Popen
+    sleep: Callable[[float], None] = time.sleep
+    now: Callable[[], float] = time.time
+    which: Callable[[str], str | None] = shutil.which
+
+
+_DEFAULT_EFFECTS = MacOSProfilerEffects()
 
 
 def detect_capability(
@@ -69,6 +97,7 @@ def detect_capability(
     system: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     run: Runner = subprocess.run,
+    is_file: Callable[[Path], bool] = Path.is_file,
 ) -> Capability:
     """Select a functional Time Profiler, then ``sample`` as fallback."""
     if (system or platform.system()) != "Darwin":
@@ -77,7 +106,7 @@ def detect_capability(
         )
 
     sample_path = which("sample") or (
-        "/usr/bin/sample" if Path("/usr/bin/sample").is_file() else None
+        "/usr/bin/sample" if is_file(Path("/usr/bin/sample")) else None
     )
     diagnostics: list[DiagnosticCode] = [DiagnosticCode.HARDWARE_COUNTERS_UNAVAILABLE]
     xcode_path: str | None = None
@@ -90,7 +119,7 @@ def detect_capability(
             diagnostics.append(DiagnosticCode.COMMAND_LINE_TOOLS_ONLY)
         else:
             candidate = Path(xcode_path) / "usr" / "bin" / "xctrace"
-            xctrace_path = str(candidate) if candidate.is_file() else which("xctrace")
+            xctrace_path = str(candidate) if is_file(candidate) else which("xctrace")
             if xctrace_path:
                 templates = run(
                     [xctrace_path, "list", "templates"], capture_output=True, text=True, timeout=15
@@ -147,18 +176,19 @@ def _descendants(root_pid: int, *, run: Runner = subprocess.run) -> list[int]:
     return found
 
 
-def collect(
+def collect(  # noqa: PLR0913  # lint-waiver: LW-009005 [PLR0913]; platform collection controls and the effect bundle are independent infrastructure inputs.
     command: list[str],
     output_dir: Path,
     *,
     duration: int = 10,
     warmup: float = 1.0,
     capability: Capability | None = None,
+    effects: MacOSProfilerEffects = _DEFAULT_EFFECTS,
 ) -> CollectionResult:
     """Run a separate diagnostic workload and persist raw data plus metadata."""
     capability = capability or detect_capability()
     output_dir.mkdir(parents=True, exist_ok=True)
-    started = time.time()
+    started = effects.now()
     artifact: Path | None = None
     target_pid: int | None = None
     process_topology: list[int] = []
@@ -181,15 +211,13 @@ def collect(
                 "--",
                 *command,
             ]
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009002 [S603]; Instruments must launch the caller-selected workload argv to profile it.
+            result = effects.run(
                 executed, capture_output=True, text=True, timeout=duration + 30, check=False
             )
         elif capability.tool is MacOSProfilerTool.SAMPLE:
-            process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-009003 [S603]; sample mode must launch the caller-selected workload argv before attaching.
-                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            time.sleep(warmup)
-            descendants = _descendants(process.pid)
+            process = effects.start(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            effects.sleep(warmup)
+            descendants = _descendants(process.pid, run=effects.run)
             process_topology = [process.pid, *descendants]
             target_pid = descendants[-1] if descendants else process.pid
             artifact = output_dir / "sample.txt"
@@ -200,7 +228,7 @@ def collect(
                 "-file",
                 str(artifact),
             ]
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009004 [S603]; the executable is a detected sample profiler and argv contains generated pid/output options.
+            result = effects.run(
                 executed, capture_output=True, text=True, timeout=duration + 15, check=False
             )
             process.terminate()
@@ -237,7 +265,7 @@ def collect(
         "machine": platform.machine(),
         "processor": platform.processor(),
         "symbol_tools": {
-            name: shutil.which(name) for name in ("dsymutil", "atos", "nm", "dwarfdump")
+            name: effects.which(name) for name in ("dsymutil", "atos", "nm", "dwarfdump")
         },
         "started_at_epoch": started,
         "diagnostics": diagnostics,

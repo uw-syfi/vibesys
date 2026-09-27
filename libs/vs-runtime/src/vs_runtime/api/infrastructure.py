@@ -7,9 +7,37 @@ runtime implementation.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._linux_cpu_profiler import (
+    Capability as LinuxProfilerCapability,
+)
+from vs_runtime._linux_cpu_profiler import (
+    CollectionResult as LinuxProfileResult,
+)
+from vs_runtime._linux_cpu_profiler import (
+    DiagnosticCode as LinuxProfilerDiagnostic,
+)
+from vs_runtime._linux_cpu_profiler import LinuxProfilerEffects, LinuxProfilerTool
+from vs_runtime._linux_cpu_profiler import collect as collect_linux_profile
+from vs_runtime._linux_cpu_profiler import detect_capability as detect_linux_profiler
+from vs_runtime._linux_cpu_profiler import parse_command as parse_profile_command
+from vs_runtime._linux_cpu_profiler import summarize as summarize_linux_profile
+from vs_runtime._macos_cpu_profiler import (
+    Capability as MacOSProfilerCapability,
+)
+from vs_runtime._macos_cpu_profiler import (
+    CollectionResult as MacOSProfileResult,
+)
+from vs_runtime._macos_cpu_profiler import (
+    DiagnosticCode as MacOSProfilerDiagnostic,
+)
+from vs_runtime._macos_cpu_profiler import MacOSProfilerEffects, MacOSProfilerTool
+from vs_runtime._macos_cpu_profiler import collect as collect_macos_profile
+from vs_runtime._macos_cpu_profiler import detect_capability as detect_macos_profiler
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 
 if TYPE_CHECKING:
@@ -44,6 +72,65 @@ class ModelRequestReconciler(Protocol):
         ...
 
 
+class NativeCpuProfilerKind(StrEnum):
+    """Native CPU profiler mechanism requested by product composition."""
+
+    LINUX = "linux"
+    MACOS = "macos"
+
+
+@dataclass(frozen=True)
+class NativeCpuProfilerPreflight:
+    """Host capability facts needed by product profiler policy."""
+
+    selected_tool: str
+    usable: bool
+    diagnostics: tuple[str, ...]
+    details: tuple[str, ...]
+
+
+def preflight_native_cpu_profiler(
+    kind: NativeCpuProfilerKind,
+    *,
+    detect_linux: Callable[[], LinuxProfilerCapability] = detect_linux_profiler,
+    detect_macos: Callable[[], MacOSProfilerCapability] = detect_macos_profiler,
+) -> NativeCpuProfilerPreflight:
+    """Detect one native CPU profiler and return policy-neutral host facts."""
+    if not isinstance(kind, NativeCpuProfilerKind):
+        message = f"kind must be a NativeCpuProfilerKind, got {type(kind).__name__}."
+        raise TypeError(message)
+    if kind is NativeCpuProfilerKind.LINUX:
+        capability = detect_linux()
+        blocking = {
+            LinuxProfilerDiagnostic.NOT_LINUX,
+            LinuxProfilerDiagnostic.PERF_UNAVAILABLE,
+            LinuxProfilerDiagnostic.PERF_STAT_UNAVAILABLE,
+        }
+        return NativeCpuProfilerPreflight(
+            selected_tool=capability.tool.value,
+            usable=capability.tool is LinuxProfilerTool.PERF
+            and not any(item in blocking for item in capability.diagnostics),
+            diagnostics=tuple(item.value for item in capability.diagnostics),
+            details=(
+                f"perf_path={capability.perf_path or 'missing'}",
+                f"perf_event_paranoid={capability.perf_event_paranoid}",
+                f"kptr_restrict={capability.kptr_restrict}",
+            ),
+        )
+
+    capability = detect_macos()
+    return NativeCpuProfilerPreflight(
+        selected_tool=capability.tool.value,
+        usable=capability.tool is not MacOSProfilerTool.NONE,
+        diagnostics=tuple(item.value for item in capability.diagnostics),
+        details=(
+            f"xcode_path={capability.xcode_path or 'missing'}",
+            f"xctrace_path={capability.xctrace_path or 'missing'}",
+            f"sample_path={capability.sample_path or 'missing'}",
+        ),
+    )
+
+
 def _ensure_model_volume(
     model_id: str,
     *,
@@ -65,8 +152,27 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "LinuxProfileResult",
+    "LinuxProfilerCapability",
+    "LinuxProfilerDiagnostic",
+    "LinuxProfilerEffects",
+    "LinuxProfilerTool",
+    "MacOSProfileResult",
+    "MacOSProfilerCapability",
+    "MacOSProfilerDiagnostic",
+    "MacOSProfilerEffects",
+    "MacOSProfilerTool",
     "ModelRequestError",
     "ModelRequestReconciler",
     "ModelVolumeProvisioner",
+    "NativeCpuProfilerKind",
+    "NativeCpuProfilerPreflight",
+    "collect_linux_profile",
+    "collect_macos_profile",
     "create_model_request_reconciler",
+    "detect_linux_profiler",
+    "detect_macos_profiler",
+    "parse_profile_command",
+    "preflight_native_cpu_profiler",
+    "summarize_linux_profile",
 ]

@@ -4,7 +4,12 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vibesys.linux_cpu_profiler import collect, detect_capability, parse_command, summarize
+from vs_runtime.api.infrastructure import (
+    collect_linux_profile,
+    detect_linux_profiler,
+    parse_profile_command,
+    summarize_linux_profile,
+)
 
 
 def build_server() -> FastMCP:
@@ -14,7 +19,7 @@ def build_server() -> FastMCP:
     @mcp.tool()
     def capabilities() -> dict:
         """Report Linux perf availability and host profiling restrictions."""
-        capability = detect_capability()
+        capability = detect_linux_profiler()
         return {
             "selected": capability.tool.value,
             "perf_path": capability.perf_path,
@@ -33,8 +38,8 @@ def build_server() -> FastMCP:
         call_graph: str = "fp",
     ) -> dict:
         """Profile a diagnostic run. This never supplies a scored benchmark result."""
-        result = collect(
-            parse_command(command),
+        result = collect_linux_profile(
+            parse_profile_command(command),
             Path(output_dir),
             timeout=timeout,
             frequency=frequency,
@@ -57,7 +62,7 @@ def build_server() -> FastMCP:
     @mcp.tool()
     def summary(output_dir: str = "logs/linux_cpu_profile") -> dict:
         """Summarize a previously collected Linux CPU profile directory."""
-        return summarize(Path(output_dir))
+        return summarize_linux_profile(Path(output_dir))
 
     return mcp
 

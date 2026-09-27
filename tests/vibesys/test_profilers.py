@@ -8,13 +8,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.constants import DomainName
-from vibesys.linux_cpu_profiler import (
-    Capability,
-    DiagnosticCode,
-    LinuxProfilerTool,
-)
-from vibesys.macos_cpu_profiler import Capability as MacOSCapability
-from vibesys.macos_cpu_profiler import MacOSProfilerTool
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
@@ -27,6 +20,7 @@ from vibesys.profilers import (
     require_domain_name,
     resolve_profiler_kind,
 )
+from vs_runtime.api.infrastructure import NativeCpuProfilerPreflight
 
 _DOMAINS = tuple(DomainName)
 _REQUESTED = tuple(ProfilerKind)
@@ -247,26 +241,16 @@ def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_ki
         )
 
 
-def test_linux_cpu_preflight_fails_when_perf_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
-    monkeypatch.setattr(
-        "vibesys.linux_cpu_profiler.detect_capability",
-        lambda: Capability(
-            LinuxProfilerTool.NONE,
-            None,
-            None,
-            3,
-            0,
-            (
-                DiagnosticCode.PERF_EVENT_PARANOID_RESTRICTIVE,
-                DiagnosticCode.PERF_UNAVAILABLE,
-            ),
+def test_linux_cpu_preflight_fails_when_perf_is_unavailable() -> None:
+    result = preflight_profiler_kind(
+        ProfilerKind.LINUX_CPU,
+        native_preflight=lambda _kind: NativeCpuProfilerPreflight(
+            selected_tool="none",
+            usable=False,
+            diagnostics=("perf_event_paranoid_restrictive", "perf_unavailable"),
+            details=("perf_path=missing", "perf_event_paranoid=3", "kptr_restrict=0"),
         ),
     )
-
-    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
 
     assert not result.usable
     assert result.diagnostics == ("perf_event_paranoid_restrictive", "perf_unavailable")
@@ -274,23 +258,16 @@ def test_linux_cpu_preflight_fails_when_perf_is_unavailable(
     assert "perf_unavailable" in result.error_message()
 
 
-def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
-    monkeypatch.setattr(
-        "vibesys.linux_cpu_profiler.detect_capability",
-        lambda: Capability(
-            LinuxProfilerTool.PERF,
-            "/usr/bin/perf",
-            "perf version 6.8",
-            1,
-            1,
-            (DiagnosticCode.KERNEL_SYMBOLS_RESTRICTED,),
+def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions() -> None:
+    result = preflight_profiler_kind(
+        ProfilerKind.LINUX_CPU,
+        native_preflight=lambda _kind: NativeCpuProfilerPreflight(
+            selected_tool="perf",
+            usable=True,
+            diagnostics=("kernel_symbols_restricted",),
+            details=("perf_path=/usr/bin/perf", "perf_event_paranoid=1", "kptr_restrict=1"),
         ),
     )
-
-    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
 
     assert result.usable
     assert result.diagnostics == ("kernel_symbols_restricted",)
@@ -403,22 +380,29 @@ def test_auto_rejects_environment_default_the_environment_cannot_run() -> None:
 
 
 @pytest.mark.parametrize(
-    ("tool", "sample_path"),
-    [(MacOSProfilerTool.SAMPLE, "/usr/bin/sample"), (MacOSProfilerTool.NONE, None)],
+    ("selected_tool", "sample_path"),
+    [("sample", "/usr/bin/sample"), ("none", None)],
 )
 def test_macos_cpu_preflight_reports_tool_availability(
-    monkeypatch: pytest.MonkeyPatch,
-    tool: MacOSProfilerTool,
+    selected_tool: str,
     sample_path: str | None,
 ) -> None:
-    monkeypatch.setattr(
-        "vibesys.macos_cpu_profiler.detect_capability",
-        lambda: MacOSCapability(tool, None, None, sample_path, None, ()),
+    usable = selected_tool == "sample"
+    result = preflight_profiler_kind(
+        ProfilerKind.MACOS_CPU,
+        native_preflight=lambda _kind: NativeCpuProfilerPreflight(
+            selected_tool=selected_tool,
+            usable=usable,
+            diagnostics=(),
+            details=(
+                "xcode_path=missing",
+                "xctrace_path=missing",
+                f"sample_path={sample_path or 'missing'}",
+            ),
+        ),
     )
 
-    result = preflight_profiler_kind(ProfilerKind.MACOS_CPU)
-
-    assert result.usable is (tool is MacOSProfilerTool.SAMPLE)
+    assert result.usable is usable
     assert result.diagnostics == ()
     assert result.details == (
         "xcode_path=missing",
