@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.domains.base import DomainRole
-from vibesys.domains.registry import resolve_domain
-from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import UnsupportedProfilerError
+from vibesys.orchestration.domains.base import DomainRole
+from vibesys.orchestration.domains.registry import resolve_domain
+from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.hypothesis import (
     AttemptState,
     Continue,
@@ -105,7 +105,7 @@ class _SingleRun:
             )
         )
         self.worker = SingleAgentWorker(host, self.search)
-        self.files = SingleFiles.open(self.workspace.path, options.memory_layout)
+        self.files = SingleFiles.open(self.workspace.path)
         self.state = SingleState()
         self.carry: CarryOver
         self.round_number = 1

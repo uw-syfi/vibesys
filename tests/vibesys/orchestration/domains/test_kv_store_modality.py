@@ -7,11 +7,11 @@ from pathlib import Path
 from entrypoints.cli import _MODALITIES
 from vibesys.inputs import load_project_task
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.prompts import render_template
+from vibesys.orchestration.prompts import render_template
 from vs_project.api import Project
 
 _TEMPLATE_DIR = MULTI_PROMPT_DIR
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_kv_store_is_a_registered_modality() -> None:

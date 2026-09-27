@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.prompts import render_string
+from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
+from vibesys.orchestration.prompts import render_string
 
 if TYPE_CHECKING:
     from pathlib import Path

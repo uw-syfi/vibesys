@@ -31,8 +31,8 @@ if TYPE_CHECKING:
 _ENGINE_NAME_RE = re.compile(r"vllm|sglang", re.IGNORECASE)
 
 _PROMPT_GLOBS = (
-    "src/vibesys/prompts/shared/profilers/*.j2",
-    "src/vibesys/prompts/backend/*/profiling_workflow.j2",
+    "src/vibesys/orchestration/prompts/shared/profilers/*.j2",
+    "src/vibesys/orchestration/prompts/backend/*/profiling_workflow.j2",
 )
 _PROFILER_CODE_ROOT = "resources/profilers"
 

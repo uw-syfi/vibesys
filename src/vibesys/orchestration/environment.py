@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentFacts,
     LocalEnvironmentFacts,

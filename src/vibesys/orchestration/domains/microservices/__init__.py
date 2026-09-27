@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from vibesys.constants import DomainName
-from vibesys.domains.base import DomainDefinition
-from vibesys.prompts import PROMPTS_DIR
+from vibesys.orchestration.domains.base import DomainDefinition
+from vibesys.orchestration.prompts import PROMPTS_DIR
 
 DEFINITION = DomainDefinition(
     name=DomainName.MICROSERVICES,

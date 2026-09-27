@@ -2,7 +2,7 @@
 
 Rules (see the orchestration-simplify design brief):
   - No imports of orchestration execution policy or vibesys.loops,
-    vibesys.prompts (search answers questions and returns new state; it never
+    vibesys.orchestration.prompts (search answers questions and returns new state; it never
     drives agents, renders prompts, or touches RunContext).
   - No os / subprocess / pathlib / time / datetime imports (search must do no
     I/O and touch no clock; every effect is deterministic and resume-safe).
@@ -36,7 +36,7 @@ _FORBIDDEN_PACKAGES = (
     "vibesys.orchestration.gates",
     "vibesys.orchestration.single",
     "vibesys.orchestration.multi",
-    "vibesys.prompts",
+    "vibesys.orchestration.prompts",
 )
 
 # vibesys.agent_run has fully dissolved into search/hypothesis, policy packages,

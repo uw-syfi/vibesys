@@ -18,7 +18,7 @@ Every backend directory carries the same three fragments.
 
 ## How they're used
 
-`Prompt(template_dir, backend)` (in `vibesys/prompts/renderer.py`) auto-injects every fragment under `backend/<backend>/` as a kwarg keyed by **filename stem** on every `prompt.render(...)` call.
+`Prompt(template_dir, backend)` (in `vibesys/orchestration/prompts/renderer.py`) auto-injects every fragment under `backend/<backend>/` as a kwarg keyed by **filename stem** on every `prompt.render(...)` call.
 
 So a fragment file named `device_dtype.j2` is auto-injected as the kwarg `device_dtype`, and any parent template can reference it as `{{ device_dtype }}`. The parent template doesn't know or care which backend it's rendering against.
 
@@ -43,13 +43,13 @@ Explicit kwargs passed to `prompt.render(...)` override auto-injected fragments 
 
 1. Add the variant to `ComputeBackend` in
    `vibesys/constants.py`.
-2. Create `vibesys/prompts/backend/<new>/` and mirror every
+2. Create `vibesys/orchestration/prompts/backend/<new>/` and mirror every
    name in `ComputeBackendFragment.NAMES` (currently: `device_dtype.j2`,
    `judge_device_correctness.j2`, `profiling_workflow.j2`). Use an
    empty file for a deliberate skip, or short placeholder prose for
    a soft skip — don't leave the file out, validation will fail.
 3. Add a concrete `ComputeBackendFragment` subclass in
-	   `vibesys/prompts/renderer.py`:
+	   `vibesys/orchestration/prompts/renderer.py`:
    ```python
    class RocmComputeBackendFragment(ComputeBackendFragment):
        backend = ComputeBackend.ROCM
@@ -64,7 +64,7 @@ Explicit kwargs passed to `prompt.render(...)` override auto-injected fragments 
 
 ## Python contract
 
-The canonical list of fragment names lives on `ComputeBackendFragment.NAMES` (in `vibesys/prompts/renderer.py`), not in this directory layout. Adding a fragment is a 3-step change:
+The canonical list of fragment names lives on `ComputeBackendFragment.NAMES` (in `vibesys/orchestration/prompts/renderer.py`), not in this directory layout. Adding a fragment is a 3-step change:
 
 1. Add the name to `ComputeBackendFragment.NAMES`.
 2. Create `<name>.j2` under every `backend/<backend>/` directory

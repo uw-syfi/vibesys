@@ -1,6 +1,6 @@
 """Prompt rendering API and package-owned prompt assets."""
 
-from vibesys.prompts.renderer import (
+from vibesys.orchestration.prompts.renderer import (
     PROMPTS_DIR,
     ComputeBackendFragment,
     CpuComputeBackendFragment,

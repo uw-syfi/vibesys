@@ -1,6 +1,6 @@
 """Snapshot tests for environment-specific runtime prompt templates.
 
-``src/vibesys/prompts/environments/<kind>/*.j2`` used to be Python
+``src/vibesys/orchestration/prompts/environments/<kind>/*.j2`` used to be Python
 string-builder functions embedded in ``run_environment.py`` (issue #378):
 prompt-wording changes touched an infrastructure module and had no
 diffable-fixture coverage, unlike every other prompt in the repo. These
@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.prompts.renderer import _build_env
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
+from vibesys.orchestration.prompts.renderer import _build_env
 
 _ENVIRONMENTS_DIR = PROMPTS_DIR / "environments"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "environment_prompt_snapshots"

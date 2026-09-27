@@ -6,8 +6,8 @@ import inspect
 from pathlib import Path
 
 import vibesys.orchestration.single.prompts as single_prompts
+from vibesys.orchestration.prompts import PROMPTS_DIR
 from vibesys.orchestration.single.models import PlanContext, SingleAgentRoundContext
-from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import resolve_free_variables
 
 

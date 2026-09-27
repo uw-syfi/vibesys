@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-import vibesys.domains.base as domain
+import vibesys.orchestration.domains.base as domain
 from entrypoints.cli import parse_cli_invocation
 from vibesys.constants import DomainName
-from vibesys.domains.base import DomainRole
-from vibesys.domains.registry import resolve_domain
-from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError, UnsupportedProfilerError
+from vibesys.orchestration.domains.base import DomainRole
+from vibesys.orchestration.domains.registry import resolve_domain
+from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import (
     ProfilerDefinition,
@@ -26,8 +26,8 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     require_profiler_kind,
 )
+from vibesys.orchestration.prompts import render_template
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -30,7 +30,7 @@ from vibesys.orchestration.multi.prompts import (
     render_profiler_prompt,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.prompts import PROMPTS_DIR
+from vibesys.orchestration.prompts import PROMPTS_DIR
 from vs_prompts.api import resolve_free_variables
 
 if TYPE_CHECKING:

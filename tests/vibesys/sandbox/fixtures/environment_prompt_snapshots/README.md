@@ -1,7 +1,7 @@
 # Environment Prompt Snapshots
 
 These fixtures store rendered runtime-prompt content for the environment
-templates under `src/vibesys/prompts/environments/<kind>/`. They are grouped
+templates under `src/vibesys/orchestration/prompts/environments/<kind>/`. They are grouped
 by:
 
 ```text

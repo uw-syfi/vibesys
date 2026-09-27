@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.domains import database, generic, llm_serving, microservices
+from vibesys.orchestration.domains import database, generic, llm_serving, microservices
 
 if TYPE_CHECKING:
-    from vibesys.domains.base import DomainDefinition
+    from vibesys.orchestration.domains.base import DomainDefinition
 
 DOMAINS: dict[DomainName, DomainDefinition] = {
     generic.DEFINITION.name: generic.DEFINITION,
