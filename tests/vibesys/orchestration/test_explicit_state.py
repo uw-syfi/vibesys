@@ -179,6 +179,43 @@ def test_state_only_excludes_candidate_edits_and_workspace_commit_includes_them(
         integration.close()
 
 
+def test_workspace_restore_leaves_candidate_checkpoint_index_clean(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with RunContext.open(
+            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
+        ) as run:
+            root = run.workspaces.root
+            candidate_file = root.path / "queue.py"
+            candidate_file.write_text("VALUE = 2\n")
+            await run.state.commit(_State(values=[1]), workspace=root, label="candidate one")
+            first_candidate = root.revision
+            assert first_candidate is not None
+
+            candidate_file.write_text("VALUE = 3\n")
+            await run.state.commit(_State(values=[2]), workspace=root, label="candidate two")
+            latest_head = root.revision
+            assert latest_head is not None
+
+            await root.restore(first_candidate, clean=True)
+            assert root.revision == latest_head
+            assert candidate_file.read_text() == "VALUE = 2\n"
+
+            await run.state.commit(
+                _State(values=[3]), workspace=root, label="checkpoint restored candidate"
+            )
+            assert await root.pending_changes() == []
+            assert await run.state.load(_State) == _State(values=[3])
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
 def test_real_state_adapter_rejects_wrong_models_and_non_root_workspaces(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)

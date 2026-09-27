@@ -593,10 +593,12 @@ class GitTracker:
     ) -> bool:
         """Materialize *sha*'s tree into the working directory.
 
-        Restores both the index and worktree from *sha* so paths introduced
-        after that snapshot are deleted as well as modified paths being reset.
-        HEAD stays where it is, so the next commit produces a new child commit
-        rather than rewriting history. With ``clean=True``, untracked files
+        Restores the worktree from *sha* so paths introduced after that
+        snapshot are deleted as well as modified paths being reset. The index
+        is reset to ``HEAD`` and stays clean, while HEAD itself stays where it
+        is. A later candidate checkpoint can therefore commit the restored
+        tree as a new child instead of encountering staged changes or
+        rewriting run history. With ``clean=True``, untracked files
         left over from a prior failed attempt are removed via ``git clean
         -fd``. Files below workspace-relative ``preserve_paths`` are captured
         before the restore and reapplied afterwards. This is intended for
@@ -605,11 +607,11 @@ class GitTracker:
         preserved: dict[Path, bytes] = {}
         try:
             preserved = self._capture_preserved_paths(preserve_paths)
+            self.run(["git", "reset", "--mixed", "HEAD"])
             restore_cmd = [
                 "git",
                 "restore",
                 f"--source={sha}",
-                "--staged",
                 "--worktree",
                 "--",
                 ".",

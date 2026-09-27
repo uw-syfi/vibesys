@@ -40,6 +40,10 @@ def _plan() -> OrchestratorPlan:
     )
 
 
+def _rollback_plan() -> OrchestratorPlan:
+    return _plan().model_copy(update={"hypothesis_id": "H-02", "revert_to_round": 1})
+
+
 def _response() -> SingleAgentRoundResponse:
     return SingleAgentRoundResponse(
         summary="Implemented batching.",
@@ -238,3 +242,41 @@ def test_corrupt_rollback_target_warns_and_commits_the_next_round(tmp_path: Path
     assert warning.source_label == "rollback"
     assert warning.detail is None
     assert warning.summary.startswith("could not restore workspace to revision")
+
+
+def test_successful_rollback_restores_the_selected_revision(tmp_path: Path) -> None:
+    input_root = write_input(tmp_path / "rollback-success-input")
+    first_designer = _client()
+    first_designer.enqueue("orchestrator", _plan())
+    second_designer = _client()
+    second_designer.enqueue("orchestrator", _rollback_plan())
+
+    def diverge_before_rollback(invocation: FakeInvocation) -> None:
+        assert invocation.kind == "orchestrator"
+        (invocation.workspace / "queue.py").write_text("VALUE = 3\n", encoding="utf-8")
+
+    second_designer.on_invoke(diverge_before_rollback)
+    second_implementer = _client()
+    second_implementer.enqueue("implementer", _response())
+
+    def verify_restored_tree(invocation: FakeInvocation) -> None:
+        assert invocation.kind == "implementer"
+        candidate = invocation.workspace / "queue.py"
+        assert candidate.read_text(encoding="utf-8") == "VALUE = 2\n"
+        candidate.write_text("VALUE = 2\n", encoding="utf-8")
+
+    second_implementer.on_invoke(verify_restored_tree)
+
+    status, run_id, workspace = execute(
+        input_root,
+        [first_designer, _implementer(), second_designer, second_implementer],
+        max_rounds=2,
+    )
+
+    state = load_state(workspace, run_id)
+    assert status is RunStatus.SUCCEEDED
+    assert state is not None
+    hypothesis = state.search.by_id("H-02")
+    assert hypothesis is not None
+    assert hypothesis.revert_applied is True
+    assert hypothesis.revert_commit is not None
