@@ -19,7 +19,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_session
-from vibesys.events import CoreEventType, ExperimentsChangedData
+from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.request import ResumeRef, RunRequest
@@ -326,12 +326,15 @@ def test_commit_projection_preserves_profile_skip_and_publication_order() -> Non
     integration = LocalRunIntegration()
     order: list[str] = []
     captured = []
+
+    def capture_event(event: CoreEvent) -> None:
+        order.append(event.type.value)
+        captured.append(event)
+
     integration.add_committed_state_listener(
         lambda _namespace, _state, _changed: order.append("state_published")
     )
-    integration.events.subscribe(
-        lambda event: (order.append(event.type.value), captured.append(event))
-    )
+    integration.events.subscribe(capture_event)
     observer = integration.state_commit_observer("probe", _FakeProjector(), "commit-probe")
 
     observer.committed(

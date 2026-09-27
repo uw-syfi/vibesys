@@ -147,12 +147,13 @@ def test_cancelled_runtime_checkpoint_drains_its_paused_worker() -> None:
     async def exercise() -> list[RunControlTransitionKind]:
         paused = asyncio.Event()
         loop = asyncio.get_running_loop()
-        events = FakeRunControlEventSink(
-            on_transition=lambda transition: (
+
+        def observe_transition(transition: RunControlTransition) -> None:
+            if transition.kind is RunControlTransitionKind.PAUSED:
                 loop.call_soon_threadsafe(paused.set)
-                if transition.kind is RunControlTransitionKind.PAUSED
-                else None
-            )
+
+        events = FakeRunControlEventSink(
+            on_transition=observe_transition,
         )
         channel = create_run_control_channel(events)
         blocking = BlockingOperations()
