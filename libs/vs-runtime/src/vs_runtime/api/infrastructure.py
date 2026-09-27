@@ -18,6 +18,7 @@ from vs_runtime._accelerators import (
     SystemAcceleratorDiscovery,
 )
 from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
+from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
 )
@@ -174,6 +175,7 @@ def create_model_request_reconciler(
 __all__ = [
     "AcceleratorDiscovery",
     "AcceleratorInventory",
+    "InputDependency",
     "InputProjectError",
     "LinuxProfileResult",
     "LinuxProfilerCapability",
@@ -202,6 +204,7 @@ __all__ = [
     "detect_macos_profiler",
     "discover_skill_dirs",
     "load_skill_frontmatter",
+    "materialize_input_project",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
     "relative_sdk_source",

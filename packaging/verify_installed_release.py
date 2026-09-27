@@ -21,7 +21,6 @@ from typing import Never, cast
 
 from entrypoints.launcher import bundled_tui
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
-from vibesys.input_project import materialize_input_project
 from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.view import RunStatus
 from vibesys.plugin_catalog import built_in_orchestrations
@@ -32,6 +31,11 @@ from vibesys.resource_paths import (
     resources_root,
 )
 from vs_project.api import Project, ProjectError
+from vs_runtime.api.infrastructure import (
+    SDKRoots,
+    materialize_input_project,
+    resolve_packaged_tree,
+)
 
 FRAMEWORK_PACKAGES = (
     "vibesys",
@@ -247,11 +251,15 @@ def _verify_materialized_sdk() -> None:
         )
         workspace = root / "workspace"
         workspace.mkdir()
+        sdk_roots = SDKRoots(
+            checkout=project_root / "sdk",
+            packaged=resolve_packaged_tree(package="vibesys", packaged_subdir="_sdk"),
+        )
         dependencies = materialize_input_project(
             input_project,
             workspace,
-            project_root=project_root,
-            copy_dir=_copy_tree,
+            sdk_roots=sdk_roots,
+            copy_directory=_copy_tree,
         )
         if [dependency.name for dependency in dependencies] != ["vs-bench"]:
             _fail(f"Packaged SDK did not materialize: {dependencies}")

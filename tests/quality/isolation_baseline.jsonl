@@ -109,7 +109,6 @@
 {"path": "tests/vibesys/test_environment_hooks.py", "rule": "mock", "count": 13}
 {"path": "tests/vibesys/test_evaluator_packages.py", "rule": "mock", "count": 2}
 {"path": "tests/vibesys/test_git_snapshot_resilience.py", "rule": "patch", "count": 3}
-{"path": "tests/vibesys/test_input_project.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/test_input_sources.py", "rule": "mock", "count": 4}
 {"path": "tests/vibesys/test_kubernetes_inputs.py", "rule": "mock", "count": 3}
 {"path": "tests/vibesys/test_kubernetes_inputs.py", "rule": "patch", "count": 1}

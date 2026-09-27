@@ -1,10 +1,4 @@
-"""Materialize Python-backed input project dependencies.
-
-Input bundles may be tiny Python projects whose ``pyproject.toml`` declares
-path dependencies on reusable SDK packages under ``sdk/``.  Runs copy inputs
-into an isolated experiment workspace, so repo-relative paths must be
-rewritten to copied workspace-local paths before agents execute ``uv run``.
-"""
+"""Materialize SDK path dependencies declared by an input project."""
 
 from __future__ import annotations
 
@@ -15,8 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from vibesys.sdk_paths import packaged_sdk_root
-from vs_runtime.api.infrastructure import (
+from vs_runtime._sdk_paths import (
     InputProjectError,
     SDKRoots,
     relative_sdk_source,
@@ -24,63 +17,51 @@ from vs_runtime.api.infrastructure import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InputDependency:
-    """One input-project dependency and its candidate workspace location."""
+    """One SDK project copied into the run workspace."""
 
     name: str
     source_path: Path
     workspace_path: Path
 
 
-CopyDir = Callable[[Path, Path], None]
-LogFn = Callable[[str], None]
-
-
-def discover_input_project(reference_dir: Path | None) -> Path | None:
-    """Return the input project directory for a conventional ``reference/`` path."""
-    if reference_dir is None or reference_dir.name != "reference":
-        return None
-    candidate = reference_dir.parent
-    if (candidate / "pyproject.toml").is_file():
-        return candidate
-    return None
+CopyDirectory = Callable[[Path, Path], None]
+Log = Callable[[str], None]
 
 
 def materialize_input_project(
     input_project_dir: Path,
     workspace: Path,
     *,
-    project_root: Path,
-    copy_dir: CopyDir,
-    log: LogFn | None = None,
+    sdk_roots: SDKRoots,
+    copy_directory: CopyDirectory,
+    log: Log | None = None,
 ) -> list[InputDependency]:
-    """Copy an input ``pyproject.toml`` and its ``sdk/`` path deps.
+    """Copy an input project's SDK path dependencies and rewrite local paths.
 
-    The source input project's ``pyproject.toml`` remains repo-relative. The
-    workspace copy is rewritten so every explicit ``sdk/`` path dep points at
-    ``workspace/_input_libs/<relative-lib-path>``.
+    Only path dependencies resolving inside the supplied checkout or packaged
+    SDK roots are accepted. The source project remains unchanged; its workspace
+    copy points to the materialized ``_input_libs`` tree.
     """
     pyproject = input_project_dir / "pyproject.toml"
     if not pyproject.is_file():
         return []
 
-    checkout_sdk_root = (project_root / "sdk").resolve()
-    roots = SDKRoots(checkout=checkout_sdk_root, packaged=packaged_sdk_root())
-    dependencies = _collect_sdk_dependencies(input_project_dir, roots=roots)
+    dependencies = _collect_sdk_dependencies(input_project_dir, roots=sdk_roots)
     mapping = {
         dep_path: workspace
         / "_input_libs"
         / relative_sdk_source(
             dep_path,
-            checkout_sdk_root=roots.checkout,
-            packaged_sdk_root=roots.packaged,
+            checkout_sdk_root=sdk_roots.checkout,
+            packaged_sdk_root=sdk_roots.packaged,
         )
         for dep_path in dependencies
     }
 
     for source_path, workspace_path in sorted(mapping.items(), key=lambda item: str(item[0])):
-        copy_dir(source_path, workspace_path)
+        copy_directory(source_path, workspace_path)
         copied_pyproject = workspace_path / "pyproject.toml"
         if copied_pyproject.is_file():
             _rewrite_pyproject_in_place(
@@ -88,14 +69,17 @@ def materialize_input_project(
                 source_project_dir=source_path,
                 workspace_project_dir=workspace_path,
                 copied_libs=mapping,
-                roots=roots,
+                roots=sdk_roots,
             )
         if log:
+            relative_source = relative_sdk_source(
+                source_path,
+                checkout_sdk_root=sdk_roots.checkout,
+                packaged_sdk_root=sdk_roots.packaged,
+            )
             log(
                 "[input] copied local input dependency "
-                "sdk/"
-                f"{relative_sdk_source(source_path, checkout_sdk_root=roots.checkout, packaged_sdk_root=roots.packaged)} "
-                f"-> {workspace_path.relative_to(workspace)}"
+                f"sdk/{relative_source} -> {workspace_path.relative_to(workspace)}"
             )
 
     workspace_pyproject = workspace / "pyproject.toml"
@@ -105,7 +89,7 @@ def materialize_input_project(
             source_project_dir=input_project_dir,
             workspace_project_dir=workspace,
             copied_libs=mapping,
-            roots=roots,
+            roots=sdk_roots,
         )
     )
 
@@ -119,11 +103,7 @@ def materialize_input_project(
     ]
 
 
-def _collect_sdk_dependencies(
-    project_dir: Path,
-    *,
-    roots: SDKRoots,
-) -> set[Path]:
+def _collect_sdk_dependencies(project_dir: Path, *, roots: SDKRoots) -> set[Path]:
     collected: set[Path] = set()
     visiting: set[Path] = set()
 
@@ -160,11 +140,11 @@ def _path_sources(project_dir: Path) -> dict[str, str]:
         return {}
     data = tomllib.loads(pyproject.read_text())
     sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-    result: dict[str, str] = {}
-    for name, spec in sources.items():
-        if isinstance(spec, dict) and isinstance(spec.get("path"), str):
-            result[name] = spec["path"]
-    return result
+    return {
+        name: spec["path"]
+        for name, spec in sources.items()
+        if isinstance(spec, dict) and isinstance(spec.get("path"), str)
+    }
 
 
 def _rewrite_pyproject_in_place(
@@ -249,3 +229,6 @@ def _project_name(project_dir: Path) -> str:
     data = tomllib.loads((project_dir / "pyproject.toml").read_text())
     name = data.get("project", {}).get("name")
     return str(name) if name else project_dir.name
+
+
+__all__ = ["InputDependency", "materialize_input_project"]

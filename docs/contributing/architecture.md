@@ -563,6 +563,7 @@ graph TD
     vibesys.run --> vs_agent
     vibesys.run --> vs_github
     vibesys.run --> vs_project
+    vibesys.run --> vs_runtime
     vibesys.run --> vs_sandbox
     vibesys.runtime --> vs_agent
     vibesys.runtime --> vs_sandbox

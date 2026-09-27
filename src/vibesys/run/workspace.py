@@ -15,13 +15,18 @@ import shutil
 import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.evaluators.input_manifest import WorkspaceSource
-from vibesys.input_project import materialize_input_project
 from vibesys.skills import foreign_platform_names, is_platforms_parent
 from vs_agent.api import cli_skill_dirs
+from vs_runtime.api.infrastructure import (
+    SDKRoots,
+    materialize_input_project,
+    resolve_packaged_tree,
+)
 
 if TYPE_CHECKING:
     from vibesys.backends.base import ComputeBackendImpl
@@ -251,11 +256,19 @@ class Workspace:
 
         for step in plan:
             if isinstance(step, InputProjectSpec):
+                sdk_roots = SDKRoots(
+                    checkout=self._project_root / "sdk",
+                    packaged=resolve_packaged_tree(
+                        package="vibesys",
+                        packaged_subdir="_sdk",
+                        package_files=files,
+                    ),
+                )
                 materialize_input_project(
                     step.project_dir,
                     self.root,
-                    project_root=self._project_root,
-                    copy_dir=lambda src, dst: self.copy_dir(CopySpec(src=src, dest=dst)),
+                    sdk_roots=sdk_roots,
+                    copy_directory=lambda src, dst: self.copy_dir(CopySpec(src=src, dest=dst)),
                     log=self._log,
                 )
                 continue
