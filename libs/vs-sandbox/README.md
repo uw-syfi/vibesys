@@ -37,3 +37,5 @@ Applications select a backend and declare the resources their agents need.
   evaluator bridge, wire protocol, and durable invocation-recovery mechanics.
   Applications select and compose that backend without carrying its
   implementation in product policy code.
+- `vs_sandbox.api.evaluator_helpers` locates the installed Modal and SkyPilot
+  helper programs that runtime composition mounts into remote sandboxes.

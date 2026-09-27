@@ -17,8 +17,10 @@ from unittest.mock import MagicMock, call
 import pytest
 from tests.support import run_test_command
 
-from vibesys.sandbox import modal_evaluator
-from vibesys.sandbox.modal_evaluator import (
+from vs_sandbox import (
+    modal_evaluator,  # test-isolation: this suite exercises the installed helper's private process and lease state machines directly.
+)
+from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remote helper protocol limits that this suite verifies directly.
     _MAX_DIAGNOSTIC_CHARS,
     _MAX_ENCODED_SETUP_COMMAND_CHARS,
     _RELEASE_DEPLOYMENT_ENV,

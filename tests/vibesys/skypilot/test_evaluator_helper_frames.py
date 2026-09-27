@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.sandbox.skypilot_evaluator import (
+from vs_sandbox.skypilot_evaluator import (  # test-isolation: frame state-machine internals require direct coverage.
     _MAX_FRAME_BYTES,
     _acknowledge_result,
     _BridgeSession,
