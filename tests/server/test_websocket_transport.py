@@ -248,7 +248,9 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
         record = WebInstanceRecord.discover(instance_path)
         assert record is not None
         assert record.url == gateway.url
-    with urlopen(f"http://127.0.0.1:{gateway.bound_port}/health?token={gateway.token}") as response:
-        assert response.read() == b"vibesys-ok\n"
+        health_url = f"http://127.0.0.1:{gateway.bound_port}/health?token={gateway.token}"
+        with urlopen(health_url) as response:  # noqa: S310  # lint-waiver: LW-101060 [S310]; connect only to the loopback health URL captured from the gateway under test
+            assert response.status == 200
+            assert response.read() == b"vibesys-ok\n"
 
     assert not instance_path.exists()
