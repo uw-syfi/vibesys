@@ -45,8 +45,13 @@ class _EnvironmentRequest:
 
 
 class _EnvironmentSession:
-    def __init__(self) -> None:
-        self.sandbox = SimpleNamespace(agent_path=_identity_path)
+    def __init__(self, *, path_error: BaseException | None = None) -> None:
+        def agent_path(host: object) -> str:
+            if path_error is not None:
+                raise path_error
+            return _identity_path(host)
+
+        self.sandbox = SimpleNamespace(agent_path=agent_path)
         self.view = SimpleNamespace(cli_sandboxed=False, isolated=False)
         self.close_count = 0
 
@@ -61,7 +66,8 @@ def _identity_path(host: object) -> str:
 class _Environment:
     """Deterministic fake for the private run-environment resource."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, path_error: BaseException | None = None) -> None:
+        self._path_error = path_error
         self.requests: list[_EnvironmentRequest] = []
         self.sessions: list[_EnvironmentSession] = []
 
@@ -70,7 +76,7 @@ class _Environment:
 
     def _open(self, request: _EnvironmentRequest) -> _EnvironmentSession:
         self.requests.append(request)
-        session = _EnvironmentSession()
+        session = _EnvironmentSession(path_error=self._path_error)
         self.sessions.append(session)
         return session
 
@@ -288,6 +294,19 @@ def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
     session._handle_resources(_resources(tmp_path, _Environment()))  # noqa: SLF001  # lint-waiver: LW-948030 [SLF001]; inject the private composition fact needed to test public rejection.
     with pytest.raises(FileNotFoundError, match="does not exist"):
         session.create_auxiliary_agent(_launch(missing))
+
+
+def test_auxiliary_agent_projection_failure_closes_pending_environment(tmp_path: Path) -> None:
+    environment = _Environment(path_error=RuntimeError("path projection failed"))
+    session = _session()
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948029 [SLF001]; exercise public construction cleanup over deterministic resource fakes.
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    with pytest.raises(RuntimeError, match="path projection failed"):
+        session.create_auxiliary_agent(_launch(evidence))
+
+    assert environment.sessions[-1].close_count == 1
 
 
 def test_auxiliary_launch_is_strict_and_rejects_duplicate_paths(tmp_path: Path) -> None:

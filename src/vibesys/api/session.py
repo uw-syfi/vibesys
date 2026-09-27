@@ -30,15 +30,14 @@ from vibesys.run.integration import LocalRunIntegration, RunResources
 from vs_agent.api import (
     ToolServerDescriptor,
     agent_catalog,
-    build_agent_client,
     expose_as_tools,
 )
-from vs_project.api import Project, RunLogger
+from vs_project.api import Project
 from vs_runtime.api.infrastructure import (
     ManagedConversationSpec,
     ScopedAgentEnvironment,
-    create_managed_conversation,
     open_agent_execution_environment,
+    open_managed_conversation,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -314,24 +313,21 @@ class _LocalRunSession:
             if missing:
                 message = f"auxiliary agent readable path does not exist: {missing[0]}"
                 raise FileNotFoundError(message)
-            ownership = ExitStack()
-            try:
-                logger = RunLogger(resources.log_dir, tee_stderr=False)
-                ownership.callback(logger.close)
-                logger.switch(f"auxiliary-{launch.role}")
+            readable_resources = tuple(
+                HostResource(
+                    item.path,
+                    HostResourceAccess.READ_ONLY,
+                    item.purpose,
+                )
+                for item in launch.readable_inputs
+            )
+            with ExitStack() as pending_environment:
                 opened = self._open_agent_environment(
-                    mounts=tuple(
-                        HostResource(
-                            item.path,
-                            HostResourceAccess.READ_ONLY,
-                            item.purpose,
-                        )
-                        for item in launch.readable_inputs
-                    ),
+                    mounts=readable_resources,
                     agent_backend=resources.agent_backend,
                     cli_provider=launch.provider,
                 )
-                ownership.callback(opened.close)
+                pending_environment.callback(opened.close)
                 spec = agent_spec_from_config(
                     resources.config,
                     backend=resources.agent_backend,
@@ -339,56 +335,27 @@ class _LocalRunSession:
                     provider=launch.provider,
                     model=launch.model,
                 )
-                client = build_agent_client(
-                    spec=spec,
-                    backends=opened.backends,
-                    skill_source_dirs=list(opened.skill_source_dirs),
-                    skill_selection=opened.skill_selection,
-                    run_log_file=logger.writer,
-                    use_docker=opened.use_docker,
-                    log_dir=resources.log_dir,
-                    project_path_policy=opened.project_path_policy,
-                    require_host_sandbox=not opened.use_docker,
-                    host_resources=(
-                        *opened.host_resources,
-                        *(
-                            HostResource(
-                                item.path,
-                                HostResourceAccess.READ_ONLY,
-                                item.purpose,
-                            )
-                            for item in launch.readable_inputs
-                        ),
+                conversation_spec = ManagedConversationSpec(
+                    role=launch.role,
+                    member_id=launch.member_id,
+                    workspace=resources.workspace,
+                    system_prompt=launch.system_prompt,
+                    continuation_prompt=launch.continuation_prompt,
+                    tool_servers=_investigation_tools(opened, resources),
+                    environment=tuple(
+                        (item.environment_variable, opened.agent_path(item.path))
+                        for item in launch.readable_inputs
                     ),
-                    events=self._integration.agent_events,
                 )
-                ownership.callback(client.close)
-                agent = create_managed_conversation(
-                    client,
-                    ManagedConversationSpec(
-                        role=launch.role,
-                        member_id=launch.member_id,
-                        workspace=resources.workspace,
-                        system_prompt=launch.system_prompt,
-                        continuation_prompt=launch.continuation_prompt,
-                        tool_servers=_investigation_tools(opened, resources),
-                        environment=tuple(
-                            (item.environment_variable, opened.agent_path(item.path))
-                            for item in launch.readable_inputs
-                        ),
-                    ),
-                    resources=(logger, opened, client),
+                pending_environment.pop_all()
+                agent = open_managed_conversation(
+                    conversation_spec,
+                    agent_spec=spec,
+                    environment=opened,
+                    log_directory=resources.log_dir,
+                    agent_events=self._integration.agent_events,
+                    additional_host_resources=readable_resources,
                 )
-                ownership.pop_all()
-            except BaseException as construction_error:
-                try:
-                    ownership.close()
-                except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-948033 [BLE001]; cleanup must preserve the construction failure while releasing every acquired resource.
-                    construction_error.add_note(
-                        "Additional error while cleaning up auxiliary-agent construction: "
-                        f"{type(cleanup_error).__name__}: {cleanup_error}"
-                    )
-                raise
             self._auxiliary_agents.append(agent)
             return agent
 

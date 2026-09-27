@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import threading
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import AgentSessionKey, SessionScope, build_agent_client
+from vs_project.api import RunLogger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentEventSink,
+        AgentSpec,
+        ToolServerDescriptor,
+    )
+    from vs_runtime._agent_execution import AgentExecutionEnvironment
+    from vs_sandbox.api import HostResource
 
 
 class _Closeable(Protocol):
@@ -154,8 +164,65 @@ def create_managed_conversation(
     return _RuntimeManagedConversation(client, spec, resources)
 
 
+def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR0913]; this lower composition seam binds independently resolved agent, environment, logging, event, and conversation inputs once.
+    spec: ManagedConversationSpec,
+    *,
+    agent_spec: AgentSpec,
+    environment: AgentExecutionEnvironment,
+    log_directory: Path,
+    agent_events: AgentEventSink,
+    additional_host_resources: tuple[HostResource, ...] = (),
+    client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
+) -> ManagedConversation:
+    """Build one auxiliary conversation and own all transferred resources.
+
+    Calling this function transfers ``environment`` immediately. Construction
+    failures close every acquired resource and preserve the construction error;
+    a successful conversation owns the environment, logger, and client until
+    its idempotent ``close``.
+    """
+    ownership = ExitStack()
+    ownership.callback(environment.close)
+    try:
+        logger = RunLogger(log_directory, tee_stderr=False)
+        ownership.callback(logger.close)
+        logger.switch(f"auxiliary-{spec.role}")
+        client = client_factory(
+            spec=agent_spec,
+            backends=environment.backends,
+            skill_source_dirs=list(environment.skill_source_dirs),
+            skill_selection=environment.skill_selection,
+            run_log_file=logger.writer,
+            use_docker=environment.use_docker,
+            log_dir=log_directory,
+            project_path_policy=environment.project_path_policy,
+            require_host_sandbox=not environment.use_docker,
+            host_resources=(*environment.host_resources, *additional_host_resources),
+            events=agent_events,
+        )
+        ownership.callback(client.close)
+        conversation = create_managed_conversation(
+            client,
+            spec,
+            resources=(environment, logger, client),
+        )
+    except BaseException as construction_error:
+        try:
+            ownership.close()
+        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-994219 [BLE001]; cleanup must preserve the construction failure while reporting teardown failure.
+            construction_error.add_note(
+                "Additional error while cleaning up managed-conversation construction: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        raise
+    else:
+        ownership.pop_all()
+        return conversation
+
+
 __all__ = [
     "ManagedConversation",
     "ManagedConversationSpec",
     "create_managed_conversation",
+    "open_managed_conversation",
 ]
