@@ -69,6 +69,52 @@ def test_push_publishes_exact_current_run_branch_without_authoring_history(
     ]
 
 
+def test_unarmed_publication_close_does_not_push(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _project(project)
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "--bare", "-q", str(remote))
+    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher.attach_remote(str(remote))
+    publisher.configure(
+        None,
+        RepositoryVisibility.PRIVATE,
+        existing_run=True,
+        collection_project=True,
+    )
+
+    publisher.close()
+    publisher.close()
+
+    assert _git(remote, "branch", "--list") == ""
+
+
+def test_armed_publication_close_pushes_exactly_once(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    tracker = _project(project)
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "--bare", "-q", str(remote))
+    messages: list[str] = []
+    publisher = ExperimentRepository(project, messages.append)
+    publisher.attach_remote(str(remote))
+    publisher.configure(
+        None,
+        RepositoryVisibility.PRIVATE,
+        existing_run=True,
+        collection_project=True,
+    )
+
+    publisher.arm()
+    publisher.close()
+    publisher.close()
+
+    branch = "vibesys-runs/publish-test"
+    assert _git(remote, "rev-parse", f"refs/heads/{branch}") == tracker.current_sha()
+    assert messages.count(f"[repo] pushed {branch} to origin") == 1
+
+
 @pytest.mark.parametrize(
     "url",
     [

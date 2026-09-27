@@ -149,6 +149,18 @@ def test_fresh_project_removes_partial_destination_on_failure(tmp_path: Path) ->
     assert not destination.exists()
 
 
+def test_discard_project_removes_the_owned_root_idempotently(tmp_path: Path) -> None:
+    destination = tmp_path / "workspace"
+    (destination / "nested").mkdir(parents=True)
+    (destination / "nested" / "partial.txt").write_text("partial")
+    materializer = _materializer(destination)
+
+    materializer.discard_project()
+    materializer.discard_project()
+
+    assert not destination.exists()
+
+
 @pytest.mark.parametrize(
     ("destination", "materializer_root", "expected"),
     [

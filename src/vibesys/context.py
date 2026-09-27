@@ -1,6 +1,5 @@
 """Shared lifecycle context for one canonical VibeSys project run."""
 
-import shutil
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
@@ -607,14 +606,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 backend=backend_impl,
                 log=buffered_logs.append,
             )
-            construction_complete = False
             if copied_project:
-
-                def _remove_incomplete_project() -> None:
-                    if not construction_complete and project_root.exists():
-                        shutil.rmtree(project_root)
-
-                teardown_stack.callback(_remove_incomplete_project)
                 source_reference = (task_root or input_dir) / "reference"
                 model_artifacts = prepare_domain_model_artifacts(
                     bundle.domain,
@@ -679,6 +671,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     run_environment=run_environment_record(run_environment_spec),
                     execution=execution_record,
                     orchestration=orchestration_descriptor,
+                    objective=objective,
+                    provisional_project=workspace_files if copied_project else None,
                     excluded_dirs=frozenset(project_excluded_dirs),
                     trusted_input_paths=tuple(
                         trusted_project_input_paths(
@@ -777,73 +771,19 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             workspace_files.materialize(plan, existing=True)
 
         with boot_trace.span("environment_plan"):
-            runtime_state = project_state.portable_namespace(run_id, "runtime")
-            objective_document: Path | None = None
-            if objective is not None:
-                objective_document = runtime_state.external_directory() / "effective-objective.md"
-                objective_document.parent.mkdir(parents=True, exist_ok=True)
-                objective_document.write_text(objective)
-                git.snapshot_framework_state(
-                    "vibesys: record effective objective",
-                    runtime_state.snapshot(),
-                )
-
             project_path_policy = build_project_path_policy(
                 project_root,
                 evaluator_source=evaluator_source,
             )
 
             experiment_repository = ExperimentRepository(project_root, logger.lprint)
-            origin_exists = experiment_repository.has_origin()
-            if (
-                remote_repo is not None
-                and origin_exists
-                and not experiment_repository.origin_matches(remote_repo)
-            ):
-                raise ConfigurationError(
-                    ConfigurationDiagnostic(
-                        code="repository_setup_failed",
-                        stage="repository_setup",
-                        message=(
-                            f"Project origin does not match requested repository {remote_repo!r}: "
-                            f"{project_root}"
-                        ),
-                    )
-                )
-            should_publish = remote_repo is not None or (
-                existing
-                and origin_exists
-                and (
-                    collection_root is not None
-                    or experiment_repository.current_run_branch_tracks_origin()
-                )
+            experiment_repository.configure(
+                remote_repo,
+                repo_visibility,
+                existing_run=existing,
+                collection_project=collection_root is not None,
             )
-            if should_publish:
-                try:
-                    if remote_repo is not None and not origin_exists:
-                        experiment_repository.create_remote(remote_repo, repo_visibility)
-                except Exception as exc:
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="repository_setup_failed",
-                            stage="repository_setup",
-                            message=f"Could not configure project repository {remote_repo!r}: {exc}",
-                        )
-                    ) from exc
-
-                def _push_experiment_repository() -> None:
-                    try:
-                        experiment_repository.push()
-                    except Exception as exc:
-                        raise ConfigurationError(
-                            ConfigurationDiagnostic(
-                                code="repository_sync_failed",
-                                stage="repository_sync",
-                                message=f"Could not push project repository: {exc}",
-                            )
-                        ) from exc
-
-                teardown_stack.callback(_push_experiment_repository)
+            teardown_stack.callback(experiment_repository.close)
 
             run_environment_request = RunEnvironmentRequest(
                 log_dir=log_dir,
@@ -855,7 +795,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
                 objective=objective,
-                objective_document=objective_document,
+                objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,
                 benchmark_command=benchmark_command,
                 benchmark_output_argument=benchmark_output_argument,
@@ -925,7 +865,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 host_resources=agent_host_resources,
             )
         )
-        construction_complete = True
+        project_resources.mark_ready()
+        experiment_repository.arm()
     # Assembly's spans, including the enclosing one that just closed with the
     # total. The run log gets them in completion order: children, then parent.
     for line in boot_trace.drain_log_lines():

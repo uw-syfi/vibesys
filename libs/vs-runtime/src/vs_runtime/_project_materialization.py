@@ -180,7 +180,7 @@ class ProjectMaterializer:
             yield
         except BaseException as exc:
             try:
-                self._remove_path(resolved_destination)
+                self.discard_project()
             except OSError as cleanup_error:
                 exc.add_note(
                     "Failed to remove partial provisioned project "
@@ -195,6 +195,28 @@ class ProjectMaterializer:
         that may have been created as root by Docker.
         """
         self._effects.repair(self.root)
+
+    def discard_project(self) -> None:
+        """Remove the owned project root, including privileged children.
+
+        Fresh project provisioning creates the root on the host, but later
+        setup may leave children owned by an isolated environment. Cleanup
+        therefore uses the same environment effects as workspace repair.
+        """
+        root = self.root.expanduser().absolute()
+        if root.is_symlink() or (root.exists() and not root.is_dir()):
+            root.unlink()
+            return
+        if not root.exists():
+            return
+        for child in tuple(root.iterdir()):
+            try:
+                self._remove_path(child)
+            except PermissionError:
+                if not self._effects.remove_child(root, child.name):
+                    message = f"could not remove project child during rollback: {child}"
+                    raise OSError(message) from None
+        root.rmdir()
 
     def materialize(
         self,

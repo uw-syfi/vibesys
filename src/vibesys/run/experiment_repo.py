@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
 from vs_github.api import GitHubCLI
 from vs_project.api import GitRemoteRepository
@@ -20,7 +21,7 @@ _GITHUB_ORIGIN = re.compile(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class ExperimentRepository:
     """Attach and publish the already-authored branch for one project run.
 
@@ -31,6 +32,70 @@ class ExperimentRepository:
     root: Path
     log: Callable[[str], None]
     github: GitHubCLI = field(default_factory=GitHubCLI)
+    _configured: bool = field(init=False, default=False, repr=False)
+    _armed: bool = field(init=False, default=False, repr=False)
+    _closed: bool = field(init=False, default=False, repr=False)
+
+    def configure(
+        self,
+        repository: str | None,
+        visibility: RepositoryVisibility,
+        *,
+        existing_run: bool,
+        collection_project: bool,
+    ) -> None:
+        """Resolve publication policy and configure the requested origin."""
+        origin_exists = self.has_origin()
+        if repository is not None and origin_exists and not self.origin_matches(repository):
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_setup_failed",
+                    stage="repository_setup",
+                    message=(
+                        f"Project origin does not match requested repository {repository!r}: "
+                        f"{self.root}"
+                    ),
+                )
+            )
+        self._configured = repository is not None or (
+            existing_run
+            and origin_exists
+            and (collection_project or self.current_run_branch_tracks_origin())
+        )
+        if repository is None or origin_exists:
+            return
+        try:
+            self.create_remote(repository, visibility)
+        except Exception as exc:
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_setup_failed",
+                    stage="repository_setup",
+                    message=f"Could not configure project repository {repository!r}: {exc}",
+                )
+            ) from exc
+
+    def arm(self) -> None:
+        """Allow configured publication after run construction succeeds."""
+        self._armed = self._configured
+
+    def close(self) -> None:
+        """Publish an armed repository exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        if not self._armed:
+            return
+        try:
+            self.push()
+        except Exception as exc:
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_sync_failed",
+                    stage="repository_sync",
+                    message=f"Could not push project repository: {exc}",
+                )
+            ) from exc
 
     @property
     def _repository(self) -> GitRemoteRepository:

@@ -639,6 +639,40 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) ->
     assert f"vibesys-runs/{run_id}" in branch
 
 
+def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    with _create_context(project, evaluator=evaluator) as first:
+        run_id = first.project_resources.state.run_id
+
+    remote = tmp_path / "remote.git"
+    run_test_command(["git", "init", "--bare", "-q", str(remote)], check=True)
+    _git(project, "remote", "add", "origin", str(remote))
+    _git(project, "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}")
+    published = _git(remote, "rev-parse", f"refs/heads/vibesys-runs/{run_id}")
+    integration = LocalRunIntegration()
+
+    def reject_resources(_resources: object) -> None:
+        message = "resource publication failed"
+        raise RuntimeError(message)
+
+    integration.add_resource_listener(reject_resources)
+    try:
+        with pytest.raises(RuntimeError, match="resource publication failed"):
+            _create_context(
+                project,
+                evaluator=evaluator,
+                exp_name=run_id,
+                existing=True,
+                configuration=_options(max_rounds=2),
+                integration=integration,
+            )
+    finally:
+        integration.close()
+
+    assert _git(remote, "rev-parse", f"refs/heads/vibesys-runs/{run_id}") == published
+
+
 def test_direct_resume_republishes_an_already_published_run(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)

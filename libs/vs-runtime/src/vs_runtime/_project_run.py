@@ -24,11 +24,14 @@ from vs_runtime._checkpoint import (
     MultiSlotRoundTransactionCoordinator,
     RoundRecoveryOutcome,
 )
+from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+    from vs_runtime._project_materialization import ProjectMaterializer
 
 type LogEmitter = Callable[[str, TextIO], None]
 type LogReady = Callable[[Path], None]
@@ -112,6 +115,8 @@ class ProjectRunRequest:
     run_environment: RunEnvironmentRecord
     execution: RunExecutionRecord
     orchestration: OrchestrationDescriptor
+    objective: str | None = None
+    provisional_project: ProjectMaterializer | None = None
     excluded_dirs: frozenset[str] = frozenset()
     trusted_input_paths: tuple[str | Path, ...] = ()
     state: ProjectStateDeclaration | None = None
@@ -139,11 +144,17 @@ class ProjectRunResources:
     git: GitTracker
     logger: RunLogger
     state: RunState
+    objective_document: Path | None
     round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None
     _teardown_stack: ExitStack
     _request: ProjectRunRequest
     _effects: ProjectRunEffects
+    _provisional_ownership: ExitStack
     _closed: bool = field(init=False, default=False)
+
+    def mark_ready(self) -> None:
+        """Preserve a provisioned project after all run resources are ready."""
+        self._provisional_ownership.pop_all()
 
     def open_candidate(self, workspace_id: str, revision: str) -> _ProjectWorkspaceResources:
         """Open an isolated candidate worktree owned by the returned resource."""
@@ -267,6 +278,11 @@ def _assemble_project_run_resources(
     resolve_resume: ResumeResolver,
     teardown_stack: ExitStack,
 ) -> ProjectRunResources:
+    provisional_ownership = ExitStack()
+    teardown_stack.callback(provisional_ownership.close)
+    if request.provisional_project is not None:
+        provisional_ownership.callback(request.provisional_project.discard_project)
+
     with boot_trace.span("project_open"):
         project = Project.open(request.project_root)
         project_state = project.state
@@ -330,16 +346,44 @@ def _assemble_project_run_resources(
         if not request.existing:
             round_transaction_coordinator = _round_transaction(request, project, git)
 
+    state = RunState(project, git, request.run_id)
+    objective_document = _record_effective_objective(request, state, git)
     return ProjectRunResources(
         project,
         git,
         logger,
-        RunState(project, git, request.run_id),
+        state,
+        objective_document,
         round_transaction_coordinator,
         teardown_stack,
         request,
         effects,
+        provisional_ownership,
     )
+
+
+def _record_effective_objective(
+    request: ProjectRunRequest,
+    state: RunState,
+    git: GitTracker,
+) -> Path | None:
+    objective = request.objective
+    if objective is None:
+        return None
+    runtime_state = state.portable("runtime")
+    destination = runtime_state.external_directory() / "effective-objective.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    document = materialize_objective_document(
+        objective,
+        workspace=request.project_root,
+        authored_document=None,
+        destination=destination,
+    )
+    git.snapshot_framework_state(
+        "vibesys: record effective objective",
+        runtime_state.snapshot(),
+    )
+    return document
 
 
 def _validate_resume_identity(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from subprocess import CalledProcessError
 from typing import TYPE_CHECKING
 
@@ -18,14 +19,17 @@ from vs_project.api import (
 )
 from vs_runtime.api import OrchestrationResumeDecision
 from vs_runtime.api.infrastructure import (
+    ProjectMaterializer,
     ProjectRunDirtyResumeError,
     ProjectRunEffects,
     ProjectRunMismatchError,
     ProjectRunMismatchKind,
     ProjectRunRequest,
     ProjectStateDeclaration,
+    SDKRoots,
     open_project_run_resources,
 )
+from vs_runtime.api.testing import FakeProjectMaterializationEffects
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,6 +77,16 @@ def _request(
         execution=run_execution_record(),
         orchestration=descriptor or _descriptor(),
         state=ProjectStateDeclaration("policy", _PolicyState),
+    )
+
+
+def _materializer(root: Path) -> ProjectMaterializer:
+    return ProjectMaterializer(
+        root,
+        effects=FakeProjectMaterializationEffects(),
+        log=lambda _message: None,
+        sdk_roots=SDKRoots(checkout=root.parent / "sdk", packaged=root.parent / "sdk"),
+        excluded_dirs=(),
     )
 
 
@@ -127,6 +141,51 @@ def test_fresh_run_owns_manifest_git_logger_and_state(tmp_path: Path) -> None:
     resources.close()
     assert resources.logger.writer.closed
     assert sys.stderr is original_stderr
+
+
+def test_project_run_commits_the_effective_objective(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+
+    with open_project_run_resources(
+        replace(_request(root), objective="Keep latency below 10 ms.\n"),
+        effects=_effects([]),
+        resolve_resume=_unexpected_resume,
+    ) as resources:
+        document = resources.objective_document
+        assert document is not None
+        assert document.read_text() == "Keep latency below 10 ms.\n"
+        assert resources.git.pending_changes() == []
+
+
+def test_unready_project_run_discards_its_provisional_root(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    resources = open_project_run_resources(
+        replace(_request(root), provisional_project=_materializer(root)),
+        effects=_effects([]),
+        resolve_resume=_unexpected_resume,
+    )
+
+    resources.close()
+
+    assert not root.exists()
+
+
+def test_ready_project_run_preserves_its_provisional_root(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    resources = open_project_run_resources(
+        replace(_request(root), provisional_project=_materializer(root)),
+        effects=_effects([]),
+        resolve_resume=_unexpected_resume,
+    )
+
+    resources.mark_ready()
+    resources.mark_ready()
+    resources.close()
+
+    assert root.is_dir()
 
 
 def test_candidate_resources_own_linked_worktree_git_and_logger(tmp_path: Path) -> None:
