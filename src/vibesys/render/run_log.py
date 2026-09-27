@@ -112,9 +112,9 @@ def _format_framework_warning(data: FrameworkWarningData) -> str:
 class RunLogRenderer:
     """Write formatted framework events to the current run log file.
 
-    Subscribed to the output sink beside the durable journal, holding the
-    logger's switch-following writer, so converted producers stop calling
-    ``lprint`` without the run log losing its lines.
+    Subscribed to the owning run's durable journal, holding the logger's
+    switch-following writer, so converted producers stop calling ``lprint``
+    without the run log losing its lines.
     """
 
     def __init__(self, writer: TextIO) -> None:

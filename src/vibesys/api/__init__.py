@@ -53,8 +53,8 @@ from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
-from vibesys.render.sink import output_sink
 from vibesys.repository import RepositoryVisibility
+from vibesys.run import CoreAgentEventSink
 from vibesys.run.integration import RunResourceHandoff
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_runtime.api import boot_trace
@@ -71,6 +71,7 @@ __all__ = [
     "Config",
     "ConfigurationDiagnostic",
     "ConfigurationError",
+    "CoreAgentEventSink",
     "CoreEvent",
     "CoreEventType",
     "DomainName",
@@ -105,5 +106,4 @@ __all__ = [
     "format_status_prefix",
     "load_config",
     "open_run_store",
-    "output_sink",
 ]

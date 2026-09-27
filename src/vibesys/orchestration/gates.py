@@ -257,8 +257,9 @@ class _Evaluator:
 
     def _reuse_accuracy(self, label: str | None) -> AccuracyGateResult:
         command = self._host.environment.view.paths.accuracy_command
-        emit_gate_started(GateKind.ACCURACY, command=command, round_label=label)
+        emit_gate_started(self._host.events, GateKind.ACCURACY, command=command, round_label=label)
         emit_gate_finished(
+            self._host.events,
             GateFinishedData(gate=GateKind.ACCURACY, reused=True),
             passed=True,
             round_label=label,

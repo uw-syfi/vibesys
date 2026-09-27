@@ -11,7 +11,7 @@ from tests.server.support import ServerParts, agent_descriptor, build_server_par
 from tests.support.run_execution import run_execution_record
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
-from server.chat.factory import ChatAgentResources
+from server.chat.factory import ChatAgentBuildRequest, ChatAgentResources
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
 from server.events import (
     EventStatus,
@@ -43,9 +43,8 @@ from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
 from vibesys.events import RunStartedData as CoreRunStartedData
-from vibesys.render import output_sink
 from vibesys.run.integration import RunResourceHandoff
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import AgentEventSink, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_sandbox.api import ProjectPathPolicy
@@ -148,14 +147,14 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Pa
         _execution_started_data("implementer", "work", driver="agentshim", provider="codex"),
     )
 
-    output_sink().emit(
+    parts.core_events.emit(
         CoreEventType.TOOL_CALL,
         agent_kind="implementer",
         round_label="round-1",
         execution_id=execution_id,
         data=ToolCallData(tool="Bash", args={}),
     )
-    output_sink().emit(
+    parts.core_events.emit(
         CoreEventType.AGENT_OUTPUT_CHUNK,
         agent_kind="implementer",
         round_label="round-1",
@@ -180,7 +179,7 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: 
 
     # All three events arrive without an agent_kind while an implementer
     # execution is active. Only the presentation event may inherit it.
-    output_sink().emit(
+    parts.core_events.emit(
         CoreEventType.AGENT_OUTPUT_CHUNK,
         data=AgentOutputChunkData(channel="assistant", content="working"),
     )
@@ -387,16 +386,14 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
     project, run_id = _project_run(tmp_path / "project")
     client = FakeAgentClient().set_text("chat", "It improved in round 2.")
     closed: list[str] = []
+    agent_events: list[AgentEventSink] = []
 
-    def build_agent(
-        _session: RunSession,
-        _attachment: RunAttachment,
-        selection: AgentSelection,
-        thread_id: str | None,
-        shared_state_dir: Path,
-    ) -> ChatAgentResources:
-        assert selection == AgentSelection(driver="agentshim", provider="codex", model="gpt-test")
-        assert thread_id is None
+    def build_agent(request: ChatAgentBuildRequest) -> ChatAgentResources:
+        assert request.selection == AgentSelection(
+            driver="agentshim", provider="codex", model="gpt-test"
+        )
+        assert request.instance_id is None
+        agent_events.append(request.agent_events)
         return ChatAgentResources(
             client=client,
             close=lambda: closed.append("closed"),
@@ -404,7 +401,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
             flush_logs=lambda: None,
             environment=dict,
             progress=lambda: None,
-            agent_shared_state_dir=str(shared_state_dir),
+            agent_shared_state_dir=str(request.shared_state_dir),
             tool_servers=(),
         )
 
@@ -435,21 +432,23 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
     }
     assert not (project.root / ".vibesys/server").exists()
     assert str(transcript.parent) in call.system_prompt
+    presentation_count = sum(
+        event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read()
+    )
     parts.integration.close()
+    agent_events[0].agent_output("after close")
     assert closed == ["closed"]
+    assert (
+        sum(event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read())
+        == presentation_count
+    )
 
 
 def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     client = FakeAgentClient()
 
-    def build_agent(
-        _session: RunSession,
-        _attachment: RunAttachment,
-        _selection: AgentSelection,
-        _thread_id: str | None,
-        shared_state_dir: Path,
-    ) -> ChatAgentResources:
+    def build_agent(request: ChatAgentBuildRequest) -> ChatAgentResources:
         return ChatAgentResources(
             client=client,
             close=lambda: None,
@@ -457,7 +456,7 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
             flush_logs=lambda: None,
             environment=dict,
             progress=lambda: None,
-            agent_shared_state_dir=str(shared_state_dir),
+            agent_shared_state_dir=str(request.shared_state_dir),
             tool_servers=(),
         )
 
@@ -479,17 +478,10 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
     parts.integration.close()
 
 
-def test_close_is_idempotent_and_stops_event_projection(tmp_path: Path) -> None:
+def test_close_is_idempotent(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.integration.close()
     parts.integration.close()
-
-    output_sink().emit(
-        CoreEventType.AGENT_OUTPUT_CHUNK,
-        data=AgentOutputChunkData(channel="assistant", content="after close"),
-    )
-
-    assert not any(event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read())
 
 
 def test_run_started_identity_round_trip_through_the_wire_bridge() -> None:

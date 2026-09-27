@@ -113,7 +113,6 @@ graph TD
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
-    vibesys.evaluators --> vibesys.render
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration._host --> vibesys
@@ -184,7 +183,6 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.skills
     vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
-    vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.skills --> vibesys
@@ -226,7 +224,6 @@ graph TD
     vibesys.render --> vibesys
     vibesys.run --> vibesys
     vibesys.run --> vibesys.evaluators
-    vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
     vibesys.sandbox --> vibesys
     vibesys.sandbox --> vibesys.domains
@@ -376,7 +373,6 @@ graph TD
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
-    vibesys.evaluators --> vibesys.render
     vibesys.evaluators --> vs_evaluator_protocol
     vibesys.evaluators --> vs_loop_state
     vibesys.evaluators --> vs_project
@@ -473,7 +469,6 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.skills
     vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
-    vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.runtime --> vs_agent
@@ -530,7 +525,6 @@ graph TD
     vibesys.render --> vibesys
     vibesys.run --> vibesys
     vibesys.run --> vibesys.evaluators
-    vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
     vibesys.run --> vs_agent
     vibesys.run --> vs_github

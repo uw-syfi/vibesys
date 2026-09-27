@@ -1,9 +1,8 @@
 """Contract tests for the fake agent driver.
 
 The fake is only useful if it reaches the rest of the system by the same
-route a real driver does, so these tests assert on what an ``OutputSink``
-subscriber observes while an ``AgentClient`` runs a turn, never on the
-driver's internals.
+route a real driver does, so these tests assert on explicitly collected core
+events while an ``AgentClient`` runs a turn, never on the driver's internals.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from pydantic import (
     BaseModel,
 )
 
+from vibesys.api import CoreAgentEventSink
 from vibesys.events import (
     AgentOutputChunkData,
     CoreEvent,
@@ -24,9 +24,8 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
-from vibesys.render.sink import output_sink
 from vibesys.search.hypothesis import OrchestratorPlan
-from vs_agent.api import AgentClient
+from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentClient
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.drivers.fake import (
     FakeDriver,
@@ -42,19 +41,13 @@ from vs_agent.drivers.fake import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 
 @pytest.fixture
-def sink_events() -> Iterator[list[CoreEvent]]:
-    """Collect every event the process-global output sink publishes."""
-    collected: list[CoreEvent] = []
-    unsubscribe = output_sink().subscribe(collected.append)
-    try:
-        yield collected
-    finally:
-        unsubscribe()
+def sink_events() -> list[CoreEvent]:
+    """Own the events emitted by one fake-driver test."""
+    return []
 
 
 def _invoke_plan(
@@ -62,18 +55,20 @@ def _invoke_plan(
     workspace: Path,
     *,
     round_label: str = "round 1",
+    events: list[CoreEvent] | None = None,
 ) -> OrchestratorPlan:
     """Run one orchestrator turn through the real client for ``driver``.
 
     The client is left open: the caller may run further turns on the same
     driver, and closing it would close the driver with it.
     """
+    event_sink = NULL_AGENT_EVENT_SINK if events is None else CoreAgentEventSink(events.append)
     client = AgentClient(
         driver,
         driver_name="mock",
         provider="mock",
         model_name="mock-model",
-        event_sink=output_sink(),
+        event_sink=event_sink,
     )
     return client.invoke(
         kind="orchestrator",
@@ -128,7 +123,7 @@ def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(
         + [usage_event(input_tokens=1200, output_tokens=300)] * usage_updates
     )
 
-    _invoke_plan(FakeDriver(turn=events), tmp_path)
+    _invoke_plan(FakeDriver(turn=events), tmp_path, events=sink_events)
 
     assistant = [
         event
@@ -163,6 +158,7 @@ def test_scripted_tool_results_carry_the_configured_payload_size(
     _invoke_plan(
         FakeDriver(turn=[tool_call("Bash", {"command": "x"}), tool_result("y" * 4096)]),
         tmp_path,
+        events=sink_events,
     )
 
     results = _of_type(sink_events, CoreEventType.TOOL_RESULT)
@@ -182,7 +178,7 @@ def test_scripted_tool_calls_and_results_are_correlated(
         for event in (tool_call("Bash", {"command": f"cmd-{i}"}), tool_result(f"out-{i}"))
     ]
 
-    _invoke_plan(FakeDriver(turn=events), tmp_path)
+    _invoke_plan(FakeDriver(turn=events), tmp_path, events=sink_events)
 
     call_ids = [
         event.data.call_id
@@ -215,6 +211,7 @@ def test_scripted_todos_arrive_as_a_provider_plan_snapshot(
             ]
         ),
         tmp_path,
+        events=sink_events,
     )
 
     todos = _of_type(sink_events, CoreEventType.TODO_UPDATE)
@@ -227,7 +224,11 @@ def test_scripted_todos_arrive_as_a_provider_plan_snapshot(
 def test_scripted_usage_reaches_the_sink_as_a_usage_update(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
-    _invoke_plan(FakeDriver(turn=[usage_event(input_tokens=1000, output_tokens=120)]), tmp_path)
+    _invoke_plan(
+        FakeDriver(turn=[usage_event(input_tokens=1000, output_tokens=120)]),
+        tmp_path,
+        events=sink_events,
+    )
 
     usage = _of_type(sink_events, CoreEventType.USAGE_UPDATE)
     assert usage, "a turn must report token usage"
@@ -254,6 +255,7 @@ def test_events_are_scoped_to_the_invoking_role_and_round(
         FakeDriver(turn=[tool_call("Bash", {"command": "x"}), tool_result("ok")]),
         tmp_path,
         round_label="round 7",
+        events=sink_events,
     )
 
     scoped = [event for event in sink_events if event.type is CoreEventType.TOOL_CALL]

@@ -23,12 +23,21 @@ if TYPE_CHECKING:
 class _GateEvents:
     """Translate policy-neutral recipe observations to VibeSys gate events."""
 
+    def __init__(self, host: HostResources) -> None:
+        self._events = host.events
+
     def started(self, recipe: ValidationRecipe) -> None:
-        emit_gate_started(GateKind.VALIDATION, recipe=recipe.name, command=recipe.command)
+        emit_gate_started(
+            self._events,
+            GateKind.VALIDATION,
+            recipe=recipe.name,
+            command=recipe.command,
+        )
 
     def finished(self, result: FrameworkValidationResult) -> None:
         failure = None if result.passed else (result.error or result.output or "unknown failure")
         emit_gate_finished(
+            self._events,
             GateFinishedData(
                 gate=GateKind.VALIDATION,
                 recipe=result.recipe.name,
@@ -53,7 +62,7 @@ async def validate_local(
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
-            events=_GateEvents(),
+            events=_GateEvents(host),
         )
     except LocalValidationRecipeError as error:
         if error.kind is LocalValidationRecipeErrorKind.DUPLICATE_NAMES:

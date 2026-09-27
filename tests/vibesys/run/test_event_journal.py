@@ -8,7 +8,6 @@ from vibesys.events import (
     CoreEventType,
     EventStatus,
 )
-from vibesys.render import output_sink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.infrastructure import (
@@ -137,16 +136,24 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
         integration.close()
 
 
-def test_local_integration_owns_output_subscription(tmp_path: Path) -> None:
-    integration = LocalRunIntegration()
-    integration.attach(tmp_path, run_id="run-1")
-    output_sink().agent_output("before close", agent_kind="test")
-    integration.close()
-    output_sink().agent_output("after close", agent_kind="test")
+def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> None:
+    first = LocalRunIntegration()
+    second = LocalRunIntegration()
+    try:
+        first.attach(tmp_path / "first", run_id="run-1")
+        second.attach(tmp_path / "second", run_id="run-2")
 
-    output_events = [
-        event.data
-        for event in integration.events.read()
-        if isinstance(event.data, AgentOutputChunkData)
-    ]
-    assert [event.content for event in output_events] == ["before close"]
+        first.agent_events.agent_output("first", agent_kind="judge")
+        second.agent_events.agent_output("second", agent_kind="implementer")
+
+        first_event = first.events.read()[0]
+        second_event = second.events.read()[0]
+        assert first_event.run_id == "run-1"
+        assert first_event.agent_kind == "judge"
+        assert first_event.data == AgentOutputChunkData(channel="assistant", content="first")
+        assert second_event.run_id == "run-2"
+        assert second_event.agent_kind == "implementer"
+        assert second_event.data == AgentOutputChunkData(channel="assistant", content="second")
+    finally:
+        first.close()
+        second.close()

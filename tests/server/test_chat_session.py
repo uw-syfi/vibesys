@@ -16,7 +16,7 @@ from server.chat.prompts import (
 )
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
 from server.events import EventType
-from vibesys.render import output_sink
+from vibesys.run import CoreAgentEventSink
 from vs_agent.api import AgentClient, AgentSessionKey, SessionScope, StdioServerDescriptor
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.drivers import agentshim as agentshim_driver
@@ -297,11 +297,7 @@ def test_streamed_output_is_filed_under_the_thread_that_asked(
 ) -> None:
     parts = build_server_parts(tmp_path)
 
-    # ``output_sink()`` is the same event sink `build_chat_agent` injects into
-    # a real client's construction; `parts.integration` (built by
-    # `build_server_parts`) is already subscribed to it, so a chunk emitted
-    # here reaches `parts.journal` exactly as a real streaming driver's would.
-    fake = FakeAgentClient(event_sink=output_sink())
+    fake = FakeAgentClient(event_sink=CoreAgentEventSink(parts.integration.project_event))
     fake.stream_output("chat", ["partial "])
 
     chat = _chat(

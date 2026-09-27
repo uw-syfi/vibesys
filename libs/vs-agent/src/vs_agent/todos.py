@@ -5,7 +5,7 @@ convention: Claude Code calls ``TodoWrite``, opencode calls ``todowrite``,
 Gemini calls ``write_todos``, and Codex reports either an ``update_plan``
 tool call or a ``todo_list`` stream item. This module owns the mapping from
 those provider vocabularies to the neutral :class:`TodoItemData` contract so
-everything downstream of the output sink stays agent-agnostic.
+everything downstream of the agent event sink stays agent-agnostic.
 
 Extraction is best-effort by design: payloads originate from agent tool
 calls, so a malformed entry is skipped and an unrecognized payload yields

@@ -247,7 +247,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.evaluators", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.domains"
@@ -267,7 +267,7 @@ depends_on = ["vibesys"]
 [[modules]]
 path = "vibesys.evaluators"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vibesys.render", "vs_evaluator_protocol", "vs_loop_state", "vs_project", "vs_sandbox"]
+depends_on = ["vibesys", "vs_evaluator_protocol", "vs_loop_state", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.search.population"
@@ -394,7 +394,7 @@ depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchest
 [[modules]]
 path = "vibesys.orchestration.runtime"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.commands", "vibesys.orchestration.skills", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.progress", "vibesys.orchestration.state", "vibesys.orchestration.workspaces"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.commands", "vibesys.orchestration.skills", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.progress", "vibesys.orchestration.state", "vibesys.orchestration.workspaces"]
 
 [[modules]]
 path = "vibesys.orchestration.commands"

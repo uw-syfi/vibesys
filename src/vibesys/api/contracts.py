@@ -48,8 +48,7 @@ __all__ = [
 class EventSink(Protocol):
     """Receives the semantic core event stream for one run.
 
-    Matches the duck-typed subscriber shape already used by
-    `vibesys.render.sink.EventHandler` and
+    Matches the duck-typed subscriber shape used by
     `vibesys.run.event_journal.EventSubscriber`
     (`Callable[[CoreEvent], None]`): any plain function or bound method with
     this signature satisfies it, including a headless renderer's bound

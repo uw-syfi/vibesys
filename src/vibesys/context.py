@@ -47,9 +47,7 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.render.log import log_and_print
 from vibesys.render.run_log import RunLogRenderer
-from vibesys.render.sink import output_sink
 from vibesys.resource_paths import (
     PROFILERS_COMMON_STAGED_NAME,
     profiler_support_common_dir,
@@ -85,6 +83,7 @@ from vibesys.sandbox.run_environment import (
 from vibesys.skills import SkillSelection, platform_skill_selection
 from vs_agent.api import (
     AgentBackend,
+    AgentEventSink,
     agent_driver_supports_tool_servers,
     task_agent_host_resources,
 )
@@ -112,6 +111,17 @@ from vs_sandbox.api import (
     Sandbox,
     create_compute_backend,
 )
+
+
+def _run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
+    """Write run-log text and publish the same diagnostic on its run stream."""
+
+    def emit(text: str, log_file: TextIO) -> None:
+        events.agent_output(text + "\n", channel="diagnostic")
+        log_file.write(text + "\n")
+        log_file.flush()
+
+    return emit
 
 
 @dataclass(frozen=True, slots=True)
@@ -633,11 +643,13 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                     )
         with boot_trace.span("log_bootstrap"):
             integration.attach(log_dir)
-            logger = RunLogger(log_dir, emit=log_and_print)
+            logger = RunLogger(log_dir, emit=_run_log_emitter(integration.agent_events))
             teardown_stack.callback(logger.close)
             # Registered after logger.close so LIFO teardown unsubscribes the
             # renderer before the log file closes.
-            teardown_stack.callback(output_sink().subscribe(RunLogRenderer(logger.writer).handle))
+            teardown_stack.callback(
+                integration.events.subscribe(RunLogRenderer(logger.writer).handle)
+            )
             hook_log[0] = logger.lprint
             for message in buffered_logs:
                 logger.lprint(message)
@@ -654,7 +666,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             git = GitTracker(
                 project_root,
                 run_id=run_id,
-                events=CoreGitTrackerEvents(),
+                events=CoreGitTrackerEvents(integration.events),
                 excluded_dirs=project_excluded_dirs,
                 trusted_input_paths=trusted_project_input_paths(
                     project_root,
@@ -1173,7 +1185,11 @@ def _assemble_workspace_resources(
     teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
     parent.git.add_worktree(workspace, spec.revision)
 
-    logger = RunLogger(log_dir, tee_stderr=False, emit=log_and_print)
+    logger = RunLogger(
+        log_dir,
+        tee_stderr=False,
+        emit=_run_log_emitter(parent.integration.agent_events),
+    )
     teardown_stack.callback(logger.close)
 
     resolved_backend = str(spec.agent_backend or config.agent.backend or AgentBackend.CLI)
@@ -1183,7 +1199,7 @@ def _assemble_workspace_resources(
     git = GitTracker(
         workspace,
         run_id=parent.run_id,
-        events=CoreGitTrackerEvents(),
+        events=CoreGitTrackerEvents(parent.integration.events),
         excluded_dirs=parent.EXCLUDED_WORKSPACE_DIRS,
         trusted_input_paths=trusted_project_input_paths(
             workspace,

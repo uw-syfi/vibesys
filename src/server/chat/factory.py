@@ -20,8 +20,15 @@ from server.chat.session import (
 )
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import agent_spec_from_config, output_sink
-from vs_agent.api import AgentSessionKey, Driver, SessionScope, agent_catalog, build_agent_client
+from vibesys.api import agent_spec_from_config
+from vs_agent.api import (
+    AgentEventSink,
+    AgentSessionKey,
+    Driver,
+    SessionScope,
+    agent_catalog,
+    build_agent_client,
+)
 from vs_project.api import RunLogger
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -56,16 +63,24 @@ class ChatAgentResources:
     tool_servers: tuple[ToolServerDescriptor, ...]
 
 
+@dataclass(frozen=True)
+class ChatAgentBuildRequest:
+    """Inputs needed to construct one independently owned chat agent."""
+
+    session: RunSession
+    attachment: RunAttachment
+    selection: AgentSelection
+    instance_id: str | None
+    shared_state_dir: Path
+    agent_events: AgentEventSink
+
+
 class ChatAgentBuilder(Protocol):
     """Construct an independently owned chat agent from attached run resources."""
 
     def __call__(
         self,
-        session: RunSession,
-        attachment: RunAttachment,
-        selection: AgentSelection,
-        instance_id: str | None,
-        shared_state_dir: Path,
+        request: ChatAgentBuildRequest,
         /,
     ) -> ChatAgentResources:
         """Build resources for one independently owned chat agent."""
@@ -81,13 +96,14 @@ _CHAT_CONTAINER_STATE_DIR = "/opt/vibesys-chat"
 
 
 def build_chat_agent(
-    session: RunSession,
-    attachment: RunAttachment,
-    selection: AgentSelection,
-    instance_id: str | None,
-    shared_state_dir: Path,
+    request: ChatAgentBuildRequest,
 ) -> ChatAgentResources:
     """Build one chat agent without making the core aware of chat sessions."""
+    session = request.session
+    attachment = request.attachment
+    selection = request.selection
+    instance_id = request.instance_id
+    shared_state_dir = request.shared_state_dir
     resources = ExitStack()
     try:
         logger = RunLogger(attachment.log_dir, tee_stderr=False)
@@ -141,7 +157,7 @@ def build_chat_agent(
                     "server chat transcript",
                 ),
             ),
-            events=output_sink(),
+            events=request.agent_events,
         )
         resources.callback(client.close)
         owner = resources.pop_all()
@@ -178,6 +194,7 @@ class ExperimentChatFactory:
         session: RunSession,
         attachment: RunAttachment,
         build_agent: ChatAgentBuilder,
+        agent_events: AgentEventSink,
         fallback: Callable[[str], str],
     ) -> None:
         """Configure session construction and resource ownership for one run."""
@@ -196,6 +213,7 @@ class ExperimentChatFactory:
         self._session = session
         self._attachment = attachment
         self._build_agent = build_agent
+        self._agent_events = agent_events
         self._fallback = fallback
         self._lock = threading.Lock()
         self._closed = False
@@ -313,7 +331,14 @@ class ExperimentChatFactory:
             self._run_id, "server"
         ).external_directory("chat")
         resources = self._build_agent(
-            self._session, self._attachment, selection, thread_id, shared_state_dir
+            ChatAgentBuildRequest(
+                session=self._session,
+                attachment=self._attachment,
+                selection=selection,
+                instance_id=thread_id,
+                shared_state_dir=shared_state_dir,
+                agent_events=self._agent_events,
+            )
         )
         state_dir = (
             shared_state_dir if thread_id is None else shared_state_dir / "threads" / thread_id

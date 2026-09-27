@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from io import StringIO
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from unittest.mock import MagicMock, patch
 
@@ -10,12 +9,9 @@ import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from headless.render import HeadlessRenderer
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
 from vibesys.orchestrations.multi.contracts import JudgeResponse
-from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.schemas import Verdict
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
@@ -72,32 +68,6 @@ def _judge_fallback() -> JudgeResponse:
         feedback="fallback-feedback",
         verdict=Verdict.FAIL,
     )
-
-
-def test_prompt_markdown_emitter_preserves_raw_log_and_truncates_stdout(
-    capsys: pytest.CaptureFixture[str], headless_renderer: HeadlessRenderer
-) -> None:
-    headless_renderer.max_text_len = 20
-    log = StringIO()
-    prompt = "# Title\n\nUse **markdown** and `code`."
-
-    log_prompt_markdown_and_print(prompt, log_file=log)
-
-    stdout = capsys.readouterr().out
-    assert "# Title" in stdout
-    assert "... [17 more chars, see log for full text]" in stdout
-    assert log.getvalue() == prompt + "\n"
-
-
-def test_json_emitter_preserves_raw_log(capsys: pytest.CaptureFixture[str]) -> None:
-    log = StringIO()
-    raw_json = '{"analysis":"ok","items":[1,2]}'
-
-    log_json_and_print(raw_json, log_file=log)
-
-    stdout = capsys.readouterr().out
-    assert raw_json in stdout
-    assert log.getvalue() == raw_json + "\n"
 
 
 class TestBuildAgentClient:

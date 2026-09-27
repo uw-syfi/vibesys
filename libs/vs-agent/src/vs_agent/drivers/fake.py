@@ -3,9 +3,9 @@
 The fake exists so a run can be exercised end to end without an agent CLI,
 a model, or a network. It is a driver, not a shortcut around one: every event
 it produces leaves through the ``AgentObserver`` its caller passed to
-:meth:`FakeSession.run_turn`, which means it reaches the output sink, the
-core event journal, and any composed adapters by exactly the same route a real
-driver's events take. The fake never writes an event, a state file, or a log itself.
+:meth:`FakeSession.run_turn`, which means it reaches the caller-owned agent
+event sink and any composed adapters by exactly the same route a real driver's
+events take. The fake never writes an event, a state file, or a log itself.
 Anything it wrote directly would be a path integration tests then stop
 covering.
 

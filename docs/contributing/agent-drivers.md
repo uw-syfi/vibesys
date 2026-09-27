@@ -333,9 +333,9 @@ rows.
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver
 contract while streaming an explicitly scripted turn, so tests exercise the
-real `AgentClient` -> `OutputSink` -> server integration -> transport path
-without an agent CLI, a model, or a network. It never writes events, state, or
-files itself.
+real `AgentClient` -> run-owned `CoreAgentEventSink` -> `EventJournal` ->
+server integration -> transport path without an agent CLI, a model, or a
+network. It never writes events, state, or files itself.
 
 ```toml
 [agent]

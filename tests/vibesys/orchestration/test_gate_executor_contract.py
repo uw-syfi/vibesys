@@ -34,7 +34,7 @@ from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.orchestration.fake_gates import FakeGateExecutor
 from vibesys.orchestration.gates import _GateInputs, _RealGateExecutor
-from vibesys.render.sink import output_sink
+from vibesys.run import EventJournal
 from vs_sandbox.fake_sandbox import FakeSandbox
 from vs_sandbox.local_shell import LocalShellSandbox
 
@@ -55,7 +55,7 @@ def _ctx(
     git.trusted_input_changes.return_value = []
     return _GateInputs(
         # test-isolation: the real executor needs only inert git, events, and view collaborators for this input
-        events=MagicMock(),
+        events=EventJournal(),
         judge_backend=sandbox,
         judge_accuracy_command=accuracy_command,
         judge_benchmark_command=benchmark_command,
@@ -66,10 +66,10 @@ def _ctx(
 
 
 @contextlib.contextmanager
-def _captured_gate_events():  # noqa: ANN202  # LW-040119 [ANN202]; the helper is private to this test module and its return type is the local closure type.
-    """Collect the process-sink events the real executor publishes."""
+def _captured_gate_events(ctx: _GateInputs):  # noqa: ANN202  # LW-040119 [ANN202]; the helper is private to this test module and its return type is the local closure type.
+    """Collect the events the real executor publishes on its owned journal."""
     seen: list[CoreEvent] = []
-    unsubscribe = output_sink().subscribe(seen.append)
+    unsubscribe = ctx.events.subscribe(seen.append)
     try:
         yield seen
     finally:
@@ -228,7 +228,7 @@ class TestGateExecutorContract:
                 accuracy_command="exit 1",
                 benchmark_command=None,
             )
-            with _captured_gate_events() as seen:
+            with _captured_gate_events(ctx) as seen:
                 executor.run_accuracy(ctx, process_id="accuracy-5", round_label="round-42")
             assert _gate_round_labels(seen) == ["round-42", "round-42"]
         else:
@@ -350,7 +350,7 @@ class TestGateExecutorContract:
             ctx = _ctx(
                 sandbox=LocalShellSandbox(tmp_path), accuracy_command=None, benchmark_command=writer
             )
-            with _captured_gate_events() as seen:
+            with _captured_gate_events(ctx) as seen:
                 executor.run_benchmark(
                     ctx,
                     contract=BenchmarkContract(result_spec=_SCALAR_SPEC),

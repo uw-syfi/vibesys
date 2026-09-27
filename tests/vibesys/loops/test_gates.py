@@ -12,7 +12,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,14 +34,19 @@ from vibesys.events import (
     GateFinishedData,
     GateKind,
     GateStartedData,
+    SubprocessOutputData,
 )
-from vibesys.render.sink import output_sink
+from vibesys.run import EventJournal
 from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 _SCALAR_SPEC = BenchmarkResult(json_argument="--out", metric="tok_per_sec")
+
+
+class _EventContext(Protocol):
+    events: EventJournal
 
 
 class _ShellJudgeBackend:
@@ -67,6 +72,7 @@ class _ShellJudgeBackend:
 def _gate_ctx_with(backend: object, benchmark_command: str = "benchmark") -> MagicMock:
     """A loop context that runs its benchmark through *backend*."""
     ctx = MagicMock()
+    ctx.events = EventJournal()
     ctx.judge_benchmark_command = benchmark_command
     ctx.trusted_input_changes.return_value = []
     ctx.judge_backend = backend
@@ -104,6 +110,7 @@ def _transport_artifact(command: str) -> Path:
 
 def test_accuracy_gate_publishes_sandbox_streams_with_accurate_labels() -> None:
     ctx = MagicMock()
+    ctx.events = EventJournal()
     ctx.judge_accuracy_command = "check"
     ctx.trusted_input_changes.return_value = []
     ctx.judge_backend.execute.return_value = SandboxExecutionResult(
@@ -114,10 +121,12 @@ def test_accuracy_gate_publishes_sandbox_streams_with_accurate_labels() -> None:
         stderr="fatal error\n",
     )
 
+    seen: list[CoreEvent] = []
+    ctx.events.subscribe(seen.append)
     result = run_accuracy_gate(ctx, process_id="accuracy-1")
 
     assert not result.passed
-    payloads = [call.kwargs["data"] for call in ctx.events.emit.call_args_list]
+    payloads = [event.data for event in seen if isinstance(event.data, SubprocessOutputData)]
     assert [(payload.stream, payload.content) for payload in payloads] == [
         ("stdout", "normal output\n"),
         ("stderr", "fatal error\n"),
@@ -317,10 +326,10 @@ def test_configured_objective_overrides_the_declared_direction() -> None:
 
 
 @contextlib.contextmanager
-def _captured_events() -> Iterator[list[CoreEvent]]:
-    """Collect every core event the gate publishes on the process sink."""
+def _captured_events(ctx: _EventContext) -> Iterator[list[CoreEvent]]:
+    """Collect every core event the gate publishes on its owned journal."""
     seen: list[CoreEvent] = []
-    unsubscribe = output_sink().subscribe(seen.append)
+    unsubscribe = ctx.events.subscribe(seen.append)
     try:
         yield seen
     finally:
@@ -337,6 +346,7 @@ def _gate_events(seen: list[CoreEvent]) -> list[CoreEvent]:
 
 def _accuracy_ctx(*, exit_code: int = 0, output: str = "checked") -> MagicMock:
     ctx = MagicMock()
+    ctx.events = EventJournal()
     ctx.judge_accuracy_command = "trusted-check"
     ctx.trusted_input_changes.return_value = []
     ctx.judge_backend.execute.return_value = SandboxExecutionResult(
@@ -346,8 +356,9 @@ def _accuracy_ctx(*, exit_code: int = 0, output: str = "checked") -> MagicMock:
 
 
 def test_accuracy_gate_pass_emits_a_balanced_typed_pair() -> None:
-    with _captured_events() as seen:
-        result = run_accuracy_gate(_accuracy_ctx(), process_id="acc", round_label="round-3")
+    ctx = _accuracy_ctx()
+    with _captured_events(ctx) as seen:
+        result = run_accuracy_gate(ctx, process_id="acc", round_label="round-3")
 
     assert result.passed
     started, finished = _gate_events(seen)
@@ -365,9 +376,10 @@ def test_accuracy_gate_pass_emits_a_balanced_typed_pair() -> None:
 
 
 def test_accuracy_gate_failure_carries_the_output_tail() -> None:
-    with _captured_events() as seen:
+    ctx = _accuracy_ctx(exit_code=1, output="bad history")
+    with _captured_events(ctx) as seen:
         result = run_accuracy_gate(
-            _accuracy_ctx(exit_code=1, output="bad history"),
+            ctx,
             process_id="acc",
         )
 
@@ -383,7 +395,7 @@ def test_accuracy_gate_dirty_workspace_still_emits_a_balanced_pair() -> None:
     ctx = _accuracy_ctx()
     ctx.trusted_input_changes.return_value = ["OBJECTIVE.md"]
 
-    with _captured_events() as seen:
+    with _captured_events(ctx) as seen:
         result = run_accuracy_gate(ctx, process_id="acc")
 
     assert not result.passed
@@ -400,7 +412,7 @@ def test_accuracy_gate_without_a_command_emits_nothing() -> None:
     ctx = _accuracy_ctx()
     ctx.judge_accuracy_command = None
 
-    with _captured_events() as seen:
+    with _captured_events(ctx) as seen:
         result = run_accuracy_gate(ctx, process_id="acc")
 
     assert result.passed
@@ -409,9 +421,10 @@ def test_accuracy_gate_without_a_command_emits_nothing() -> None:
 
 def test_benchmark_gate_pass_emits_the_metric_and_no_benchmark_result(tmp_path: Path) -> None:
     """The typed gate_finished replaces the retired benchmark_result event."""
-    with _captured_events() as seen:
+    ctx = _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path))
+    with _captured_events(ctx) as seen:
         result = run_benchmark_gate(
-            _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path)),
+            ctx,
             contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
             space=MetricSpace(),
             process_id="benchmark",
@@ -442,9 +455,10 @@ def test_benchmark_gate_protocol_pass_reports_the_declared_unit(tmp_path: Path) 
         '"metrics":{"p99_latency_ns":{"unit":"ns","direction":"min"}}}\n'
         '{"kind":"result","values":{"p99_latency_ns":1250.0}}'
     )
-    with _captured_events() as seen:
+    ctx = _gate_ctx(_writer_command(stream, tmp_path))
+    with _captured_events(ctx) as seen:
         result = run_benchmark_gate(
-            _gate_ctx(_writer_command(stream, tmp_path)),
+            ctx,
             contract=BenchmarkContract(result_protocol=2),
             space=MetricSpace(),
             process_id="benchmark",
@@ -459,9 +473,10 @@ def test_benchmark_gate_protocol_pass_reports_the_declared_unit(tmp_path: Path) 
 
 
 def test_benchmark_gate_failure_emits_a_failed_gate_finished(tmp_path: Path) -> None:
-    with _captured_events() as seen:
+    ctx = _gate_ctx(_writer_command("this is not json", tmp_path))
+    with _captured_events(ctx) as seen:
         result = run_benchmark_gate(
-            _gate_ctx(_writer_command("this is not json", tmp_path)),
+            ctx,
             contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
             space=MetricSpace(),
             process_id="benchmark",
@@ -478,9 +493,10 @@ def test_benchmark_gate_failure_emits_a_failed_gate_finished(tmp_path: Path) -> 
 
 
 def test_benchmark_gate_undeclared_contract_emits_nothing() -> None:
-    with _captured_events() as seen:
+    ctx = _gate_ctx("true")
+    with _captured_events(ctx) as seen:
         result = run_benchmark_gate(
-            _gate_ctx("true"),
+            ctx,
             contract=BenchmarkContract(),
             space=MetricSpace(),
             process_id="benchmark",

@@ -5,14 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from headless.render import HeadlessRenderer
 from vibesys.evaluators.input_manifest import (
     MANIFEST_NAME,
     InputBundle,
     load_input_bundle,
     load_project_task,
 )
-from vibesys.render import output_sink
 from vs_project.api import Project, ProjectNotInitializedError
 
 
@@ -23,22 +21,6 @@ def isolated_vibesys_state_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
         "VIBESYS_STATE_HOME",
         str(tmp_path.parent / f".vibesys-state-{tmp_path.name}"),
     )
-
-
-@pytest.fixture(autouse=True)
-def headless_renderer() -> Iterator[HeadlessRenderer]:
-    """Compose a headless renderer for every test, mirroring production.
-
-    In production the headless entrypoint installs this subscriber. Tests get
-    the same presentation composition so direct output-sink emissions remain
-    observable to ``capsys`` assertions.
-    """
-    renderer = HeadlessRenderer()
-    unsubscribe = output_sink().subscribe(renderer.handle)
-    try:
-        yield renderer
-    finally:
-        unsubscribe()
 
 
 @pytest.fixture

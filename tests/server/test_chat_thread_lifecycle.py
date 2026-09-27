@@ -11,17 +11,20 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from tests.server.support import ServerParts, build_server_parts
 
-from server.chat.factory import ChatAgentResources, ExperimentChatFactory
+from server.chat.factory import (
+    ChatAgentBuilder,
+    ChatAgentBuildRequest,
+    ChatAgentResources,
+    ExperimentChatFactory,
+)
 from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from server.run_attachment import AgentSelection, RunAttachment
+from vs_agent.api import NullAgentEventSink
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
-
-    from vibesys.api import RunSession
 
 
 def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThreadCreatedData:
@@ -353,9 +356,7 @@ class _Project:
 def _factory_for_test(
     parts: ServerParts,
     tmp_path: Path,
-    build_agent: Callable[
-        [RunSession, RunAttachment, AgentSelection, str | None, Path], ChatAgentResources
-    ],
+    build_agent: ChatAgentBuilder,
 ) -> ExperimentChatFactory:
     defaults = ChatRunSettings(driver="agentshim", provider="codex", model="gpt-test")
 
@@ -377,6 +378,7 @@ def _factory_for_test(
             ),
         ),
         build_agent=build_agent,
+        agent_events=NullAgentEventSink(),
         fallback=lambda _question: "fallback",
     )
 
@@ -391,13 +393,7 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
         nonlocal close_calls
         close_calls += 1
 
-    def build_agent(
-        _session: RunSession,
-        _attachment: RunAttachment,
-        _selection: AgentSelection,
-        _thread_id: str | None,
-        shared_state_dir: Path,
-    ) -> ChatAgentResources:
+    def build_agent(request: ChatAgentBuildRequest) -> ChatAgentResources:
         construction_started.set()
         assert release_construction.wait(timeout=2)
         return ChatAgentResources(
@@ -407,7 +403,7 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
             flush_logs=lambda: None,
             environment=dict,
             progress=lambda: None,
-            agent_shared_state_dir=str(shared_state_dir),
+            agent_shared_state_dir=str(request.shared_state_dir),
             tool_servers=(),
         )
 

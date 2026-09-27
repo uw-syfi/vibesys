@@ -1,18 +1,8 @@
-"""Presentation layer: event emission sink and per-surface renderers.
-
-The backend never prints to the terminal directly. It emits typed events
-through :data:`~vibesys.render.sink.OutputSink` (see :func:`output_sink`)
-and writes plain text to the durable run log. Every human-facing surface —
-the headless terminal view or an application integration, is a renderer subscribed to
-the same event stream.
-"""
+"""Presentation formatters shared by VibeSys frontends."""
 
 from vibesys.render.format import format_status_prefix, format_token_count
-from vibesys.render.sink import OutputSink, output_sink
 
 __all__ = [
-    "OutputSink",
     "format_status_prefix",
     "format_token_count",
-    "output_sink",
 ]

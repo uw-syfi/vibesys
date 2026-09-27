@@ -36,7 +36,6 @@ from vibesys.orchestration.runtime import (
     WorkspaceRestoreError,
     WorkspaceTransactionKeep,
 )
-from vibesys.render.sink import output_sink
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -369,17 +368,13 @@ def test_restore_or_warn_tolerates_a_failed_real_git_checkout(
     tmp_path = tmp_path_factory.mktemp("restore-or-warn-real")
     runner = FakeAgentClient(backend_name="stub")
 
-    async def body(ctx: RunContext) -> bool:
+    async def body(ctx: RunContext) -> tuple[bool, list[CoreEvent]]:
         (ctx.workspaces.root.path / "tracked.txt").write_text("hello")
         await ctx.workspaces.root.snapshot("seed")
-        return await ctx.workspaces.root.restore_or_warn(_UNREACHABLE_REVISION)
+        restored = await ctx.workspaces.root.restore_or_warn(_UNREACHABLE_REVISION)
+        return restored, ctx.events.read()
 
-    seen: list[CoreEvent] = []
-    unsubscribe = output_sink().subscribe(seen.append)
-    try:
-        restored = run_with_context(tmp_path, runner, body)
-    finally:
-        unsubscribe()
+    restored, seen = run_with_context(tmp_path, runner, body)
 
     assert restored is False
     rollback_warnings = [

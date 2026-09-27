@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.events import (
@@ -18,6 +17,7 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
+from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
@@ -104,10 +104,8 @@ class LocalRunIntegration:
     def __init__(self) -> None:
         """Compose a durable journal with direct invocation control."""
         self.events = EventJournal()
+        self.agent_events = CoreAgentEventSink(self.events.record)
         self.control = create_run_control_channel(_CoreRunControlEvents(self.events))
-        output_sink = import_module("vibesys.render").output_sink
-
-        self._unsubscribe_output = output_sink().subscribe(self.events.record)
         self._closed = False
         self._committed_state_listener: (
             Callable[[str, BaseModel, tuple[str, ...] | None], None] | None
@@ -130,7 +128,6 @@ class LocalRunIntegration:
         if self._closed:
             return
         self._closed = True
-        self._unsubscribe_output()
 
     def agent_execution_event(self, event: AgentExecutionLifecycleEvent) -> CoreEvent:
         """Persist one runtime lifecycle fact in the stable core-event format."""

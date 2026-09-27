@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from server.chat.factory import build_chat_agent
+from server.chat.factory import ChatAgentBuildRequest, build_chat_agent
 from server.chat.prompts import experiment_chat_system_prompt
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.config import Config
 from vibesys.skills import NULL_SKILL_SELECTION
-from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor
+from vs_agent.api import NULL_AGENT_EVENT_SINK, StdioServerDescriptor, ToolServerDescriptor
 from vs_agent.api.testing import FakeAgentClient
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
@@ -132,11 +132,14 @@ def test_host_chat_agent_receives_read_only_server_state(
     session = _FakeRunSession(environment)
 
     resources = build_chat_agent(
-        cast("Any", session),
-        attachment,
-        attachment.agent_defaults,
-        None,
-        shared_state_dir,
+        ChatAgentBuildRequest(
+            session=cast("Any", session),
+            attachment=attachment,
+            selection=attachment.agent_defaults,
+            instance_id=None,
+            shared_state_dir=shared_state_dir,
+            agent_events=NULL_AGENT_EVENT_SINK,
+        )
     )
 
     assert resources.agent_shared_state_dir == str(shared_state_dir)
@@ -182,11 +185,14 @@ def test_container_chat_agent_mounts_server_state_read_only(
     session = _FakeRunSession(environment)
 
     resources = build_chat_agent(
-        cast("Any", session),
-        attachment,
-        attachment.agent_defaults,
-        "thread-1",
-        shared_state_dir,
+        ChatAgentBuildRequest(
+            session=cast("Any", session),
+            attachment=attachment,
+            selection=attachment.agent_defaults,
+            instance_id="thread-1",
+            shared_state_dir=shared_state_dir,
+            agent_events=NULL_AGENT_EVENT_SINK,
+        )
     )
 
     assert resources.agent_shared_state_dir == "/opt/vibesys-chat"

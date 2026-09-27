@@ -26,7 +26,7 @@ from server.events import (
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import CoreEventType, output_sink
+from vibesys.api import CoreAgentEventSink, CoreEventType
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -198,7 +198,7 @@ class RunIntegrationAdapter:
         self.journal = journal
         self.chat = chat
         self._chat_agent_builder = chat_agent_builder
-        self._unsubscribe_output = output_sink().subscribe(self._route_output_event)
+        self._chat_events = CoreAgentEventSink(self._route_output_event)
         self._chat_factory: ExperimentChatFactory | None = None
         self._detach_run: Callable[[], None] | None = None
         self._closed = False
@@ -275,6 +275,7 @@ class RunIntegrationAdapter:
             session=session,
             attachment=attachment,
             build_agent=self._chat_agent_builder,
+            agent_events=self._chat_events,
             fallback=RunInspector(self).answer,
         )
         self._chat_factory = factory
@@ -303,7 +304,6 @@ class RunIntegrationAdapter:
         if detach_run is not None:
             detach_run()
         self.chat.close_terminal_resource()
-        self._unsubscribe_output()
 
     def record(
         self,
@@ -375,10 +375,7 @@ class RunIntegrationAdapter:
                 event.agent_kind, event.round_label, event.execution_id
             )
         if event_type in _PRESENTATION_EVENTS:
-            # Delivered by `_route_output_event`'s own `output_sink()`
-            # subscription instead: both subscriptions see the same events,
-            # so handling presentation events here too would double-deliver
-            # them.
+            self._route_output_event(event)
             return
         terminal_trigger = _TERMINAL_TRIGGERS.get(event_type)
         if terminal_trigger is not None:
@@ -429,15 +426,9 @@ class RunIntegrationAdapter:
             self.controller.land_stop_at_boundary()
 
     def _route_output_event(self, event: CoreEvent) -> None:
-        """Publish a presentation event straight from `output_sink()`.
-
-        This is now the sole delivery path for `_PRESENTATION_EVENTS`, for
-        both the main run and experiment chat alike: `project_event` early
-        returns for these event types (see its own docstring note), and
-        chat's presentation never needed the full core-event pipeline in the
-        first place (`ExecutionTracker.presentation_scope` is its real entry
-        point).
-        """
+        """Publish one explicitly delivered presentation event."""
+        if self._closed:
+            return
         event_type = EventType(event.type.value)
         if event_type not in _PRESENTATION_EVENTS or event.data is None:
             return

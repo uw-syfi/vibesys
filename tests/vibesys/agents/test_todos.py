@@ -5,8 +5,8 @@ tests pin the adapter that translates each CLI provider's tool convention
 into that contract, and the ``AgentLogger`` hook that publishes it.
 """
 
+from vibesys.api import CoreAgentEventSink
 from vibesys.events import CoreEvent, TodoItemData, TodoUpdateData
-from vibesys.render.sink import output_sink
 from vs_agent.api import todos_from_tool_call
 from vs_agent.callbacks import AgentLogger
 
@@ -103,34 +103,22 @@ class TestDegradation:
 class TestAgentLoggerPublishing:
     def test_cli_todo_tool_call_publishes_a_todo_update(self) -> None:
         seen: list[CoreEvent] = []
-        unsubscribe = output_sink().subscribe(seen.append)
-        try:
-            logger = AgentLogger(event_sink=output_sink())
-            logger.on_tool_call("TodoWrite", {"todos": [{"content": "A", "status": "pending"}]})
-        finally:
-            unsubscribe()
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger.on_tool_call("TodoWrite", {"todos": [{"content": "A", "status": "pending"}]})
         updates = [e.data for e in seen if isinstance(e.data, TodoUpdateData)]
         assert len(updates) == 1
         assert updates[0].todos == [TodoItemData(content="A", status="pending")]
 
     def test_non_todo_tool_call_publishes_no_todo_update(self) -> None:
         seen: list[CoreEvent] = []
-        unsubscribe = output_sink().subscribe(seen.append)
-        try:
-            logger = AgentLogger(event_sink=output_sink())
-            logger.on_tool_call("Bash", {"command": "make"})
-        finally:
-            unsubscribe()
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger.on_tool_call("Bash", {"command": "make"})
         assert not any(isinstance(e.data, TodoUpdateData) for e in seen)
 
     def test_empty_snapshot_is_extracted_but_not_published(self) -> None:
         # The sink drops empty lists, so a cleared plan is a no-op on the
         # wire rather than an event with no payload.
         seen: list[CoreEvent] = []
-        unsubscribe = output_sink().subscribe(seen.append)
-        try:
-            logger = AgentLogger(event_sink=output_sink())
-            logger.on_tool_call("TodoWrite", {"todos": []})
-        finally:
-            unsubscribe()
+        logger = AgentLogger(event_sink=CoreAgentEventSink(seen.append))
+        logger.on_tool_call("TodoWrite", {"todos": []})
         assert not any(isinstance(e.data, TodoUpdateData) for e in seen)

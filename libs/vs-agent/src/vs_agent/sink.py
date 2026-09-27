@@ -1,14 +1,9 @@
 """Injected event-emission seam for agent-package code.
 
-Agent code (callbacks, the CLI client, the stub client) must not reach the
-process-global :func:`vibesys.render.sink.output_sink` directly: that would
-tie a leaf-bound package to the application's rendering composition. Instead,
-callers construct agent services with an :class:`AgentEventSink` and agent
-code publishes through the injected instance.
-
-``vibesys.render.sink.OutputSink`` satisfies this protocol structurally (its
-producer methods are mirrored here exactly), so wiring code can pass
-``output_sink()`` without either module importing the other.
+Agent code (callbacks, the CLI client, the stub client) has no event-stream or
+rendering ownership. Callers construct agent services with an
+:class:`AgentEventSink`; product wiring adapts these callbacks to its own
+run-scoped semantic stream.
 """
 
 from __future__ import annotations
@@ -26,7 +21,7 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class AgentEventSink(Protocol):
-    """The subset of ``OutputSink`` that agent-package code may call."""
+    """Agent callbacks a product-owned semantic event adapter implements."""
 
     def agent_output(  # noqa: PLR0913  # lint-waiver: LW-010182 [PLR0913]; Preserve AgentEventSink.agent_output's named-argument contract because callers pass these independent settings directly.
         self,

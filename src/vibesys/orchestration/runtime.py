@@ -34,7 +34,12 @@ from vibesys.context import (
     RunSetup,
     open_run_resources,
 )
-from vibesys.events import FrameworkSource, RunConfiguredData
+from vibesys.events import (
+    CoreEventType,
+    FrameworkSource,
+    FrameworkWarningData,
+    RunConfiguredData,
+)
 from vibesys.orchestration.agents import (
     _Agents,
     _AgentToolResolver,
@@ -59,7 +64,6 @@ from vibesys.orchestration.workspaces import (
     WorkspaceTransactionKeep,
     _Workspaces,
 )
-from vibesys.render.sink import output_sink
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 
@@ -252,11 +256,14 @@ class RunContext:
         round_label: str | None = None,
     ) -> None:
         """Publish one non-fatal framework fault as a FRAMEWORK_WARNING event."""
-        output_sink().framework_warning(
-            summary,
-            detail=detail,
-            source=source,
-            source_label=source_label,
+        self.events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary=summary,
+                detail=detail,
+                source=source,
+                source_label=source_label,
+            ),
             round_label=round_label,
         )
 
@@ -272,16 +279,21 @@ class RunContext:
         pareto_objectives: str | None = None,
     ) -> None:
         """Publish the one-per-run resolved loop configuration event."""
-        output_sink().run_configured(
-            RunConfiguredData(
+        first_line = next(
+            (line for line in (objective or "").splitlines() if line.strip()),
+            None,
+        )
+        self.events.emit(
+            CoreEventType.RUN_CONFIGURED,
+            data=RunConfiguredData(
                 run_log_path=run_log_path,
                 project_root=project_root,
                 model=model,
-                objective=objective,
+                objective=first_line,
                 search_policy=search_policy,
                 benchmark_contract=benchmark_contract,
                 pareto_objectives=pareto_objectives,
-            )
+            ),
         )
 
     def switch_log(self, label: int | str) -> None:

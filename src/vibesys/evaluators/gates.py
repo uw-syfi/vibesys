@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from vibesys.evaluators.input_manifest import benchmark_output_argument
 from vibesys.events import (
+    CoreEventData,
     CoreEventType,
     EventStatus,
     GateFinishedData,
@@ -19,7 +20,6 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vibesys.render.sink import output_sink
 from vs_evaluator_protocol.api import (
     Hello,
     ProtocolError,
@@ -37,8 +37,15 @@ if TYPE_CHECKING:
 
 
 class _GateEvents(Protocol):
-    def emit(self, event_type: CoreEventType, *, data: SubprocessOutputData) -> object:
-        """Publish one trusted subprocess output fact."""
+    def emit(
+        self,
+        event_type: CoreEventType,
+        *,
+        data: CoreEventData,
+        status: EventStatus | None = None,
+        round_label: str | None = None,
+    ) -> object:
+        """Publish one typed gate or subprocess fact."""
         ...
 
 
@@ -85,6 +92,7 @@ GATE_RECORD_TAIL_CHARS = 8000
 
 
 def emit_gate_started(
+    events: _GateEvents,
     gate: GateKind,
     *,
     recipe: str | None = None,
@@ -96,7 +104,7 @@ def emit_gate_started(
     Every emission must be balanced by exactly one :func:`emit_gate_finished`
     for the same gate (and recipe), including reused and early-failure paths.
     """
-    output_sink().emit(
+    events.emit(
         CoreEventType.GATE_STARTED,
         data=GateStartedData(gate=gate, recipe=recipe, command=command),
         status=EventStatus.ACTIVE,
@@ -105,13 +113,14 @@ def emit_gate_started(
 
 
 def emit_gate_finished(
+    events: _GateEvents,
     data: GateFinishedData,
     *,
     passed: bool,
     round_label: str | None = None,
 ) -> None:
     """Publish one framework gate outcome; envelope status carries the verdict."""
-    output_sink().emit(
+    events.emit(
         CoreEventType.GATE_FINISHED,
         data=data,
         status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
@@ -160,8 +169,14 @@ def run_accuracy_gate(
     command = ctx.judge_accuracy_command
     if changed:
         output = "Evaluator-owned files were modified: " + ", ".join(changed)
-        emit_gate_started(GateKind.ACCURACY, command=command or None, round_label=round_label)
+        emit_gate_started(
+            ctx.events,
+            GateKind.ACCURACY,
+            command=command or None,
+            round_label=round_label,
+        )
         emit_gate_finished(
+            ctx.events,
             GateFinishedData(
                 gate=GateKind.ACCURACY,
                 output_tail=output[-GATE_LOG_TAIL_CHARS:],
@@ -185,7 +200,7 @@ def run_accuracy_gate(
             executed=False,
         )
 
-    emit_gate_started(GateKind.ACCURACY, command=command, round_label=round_label)
+    emit_gate_started(ctx.events, GateKind.ACCURACY, command=command, round_label=round_label)
     command_to_execute = execution_command or command
     try:
         if timeout_seconds is None:
@@ -209,6 +224,7 @@ def run_accuracy_gate(
 
     if passed:
         emit_gate_finished(
+            ctx.events,
             GateFinishedData(gate=GateKind.ACCURACY),
             passed=True,
             round_label=round_label,
@@ -216,6 +232,7 @@ def run_accuracy_gate(
         feedback = None
     else:
         emit_gate_finished(
+            ctx.events,
             GateFinishedData(
                 gate=GateKind.ACCURACY,
                 output_tail=output[-GATE_LOG_TAIL_CHARS:],
@@ -642,7 +659,12 @@ def run_benchmark_gate(  # noqa: PLR0913  # lint-waiver: LW-011116 [PLR0913]; Pr
         f" && cat {shlex.quote(output_path)}"
         f" && printf '\\n{FRAMEWORK_BENCHMARK_END_MARKER}\\n'"
     )
-    emit_gate_started(GateKind.BENCHMARK, command=base_command, round_label=round_label)
+    emit_gate_started(
+        ctx.events,
+        GateKind.BENCHMARK,
+        command=base_command,
+        round_label=round_label,
+    )
     output, passed, changed_before_execution = _execute_benchmark_command(
         ctx,
         command,
@@ -685,6 +707,7 @@ def run_benchmark_gate(  # noqa: PLR0913  # lint-waiver: LW-011116 [PLR0913]; Pr
     if passed:
         has_metric = metric_name is not None and metric_value is not None
         emit_gate_finished(
+            ctx.events,
             GateFinishedData(
                 gate=GateKind.BENCHMARK,
                 metric=metric_name if has_metric else None,
@@ -717,6 +740,7 @@ def run_benchmark_gate(  # noqa: PLR0913  # lint-waiver: LW-011116 [PLR0913]; Pr
         )
     else:
         emit_gate_finished(
+            ctx.events,
             GateFinishedData(
                 gate=GateKind.BENCHMARK,
                 output_tail=output[-GATE_LOG_TAIL_CHARS:],
