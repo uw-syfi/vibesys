@@ -41,11 +41,13 @@ tests/conformance/
 | Reader | Language | Lands in | Uses |
 | --- | --- | --- | --- |
 | corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, and decision anchoring |
-| client fold runner | TypeScript | 888b | replays scenarios through `core-state`, asserts identical folds |
+| event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
+| client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
 | server scenario suite | Python | #811 | replays scenarios against a live transport, both Unix and WebSocket |
 
-Only the gate exists today. It is the CI enforcement that keeps the corpus well formed and complete
-while the runners are built on top of it.
+The corpus gate and event fold runner exist today. The connection-level client and server scenario
+runners remain outstanding. Do not treat structural validation or event folding as evidence that a
+scenario has executed against either transport.
 
 ## Running the gate
 
@@ -55,6 +57,7 @@ From the TypeScript workspace root:
 cd clients
 node scripts/check_conformance_corpus.mjs      # one-shot check, prints violations and exits non-zero
 pnpm test:conformance                          # the same check under node --test, with failure-mode tests
+pnpm --filter @vibesys/core-state test         # folds the shared event fixtures through core state
 ```
 
 `pnpm test:clients` runs `test:conformance` as part of the client test suite, so CI enforces it.
