@@ -55,14 +55,14 @@ exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources",
 ignore_type_checking_imports = false
 forbid_circular_dependencies = true
 
-# Orchestration-simplification target direction (loops > roles/search >
+# Orchestration-simplification target direction (loops > search >
 # orchestration host > prompts + lower libs), enforced only where a module
 # already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`/
 # `vibesys.orchestration.progress_log` stay unlayered; their order is still pinned
 # by the explicit edges above -- progress_log renders typed role replies
 # (OrchestratorPlan, ImplementerResponse, ...) into Markdown, so unlike
-# `artifacts.py` it genuinely needs those roles_search-layer types, not just a
-# generic `BaseModel`). `vibesys.prompts` (templates + renderer) sits in the
+# `artifacts.py` it genuinely needs policy-layer types, not just a generic
+# `BaseModel`). `vibesys.prompts` (templates + renderer) sits in the
 # bottom layer with the other mechanics libraries: the host and lower layers
 # render prompts, they don't hand policy to the template layer, so `prompts`
 # is a leaf every layer above it may reach downward into.
@@ -70,9 +70,6 @@ forbid_circular_dependencies = true
 # edge, same-layer or cross-layer, must still be listed in `depends_on`;
 # layers add one more check on top: no module may list a dependency on a
 # module in a strictly higher layer.
-# `vibesys.roles` (roles_search) also imports `vibesys.search.hypothesis` and
-# `vibesys.search.population` (same layer); roles and search should not
-# import each other per the target design, but this edge is already needed.
 layers = ["loops", "roles_search", "orchestration_host", "prompts_and_lower_libs"]
 layers_explicit_depends_on = true
 
@@ -236,8 +233,8 @@ depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.e
 
 [[modules]]
 # Pure, deterministic search policy: never RunContext/agents/prompts/I/O.
-# Forbidden: vibesys.loops, vibesys.orchestration, vibesys.roles,
-# vibesys.prompts, vs_agent (agents/runtime).
+# Forbidden: vibesys.loops, vibesys.orchestration, vibesys.prompts, vs_agent
+# (agents/runtime).
 path = "vibesys.search"
 layer = "roles_search"
 depends_on = []
@@ -251,14 +248,6 @@ depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.profile_focus", "
 path = "vibesys.search.profile_focus"
 layer = "roles_search"
 depends_on = []
-
-[[modules]]
-# Role catalog: data only (Role instances, reply schemas). Never turn
-# execution, sequencing, or state transitions -- those stay in
-# vibesys.orchestration.runtime (ctx.agents.turn) and the orchestration plugins.
-path = "vibesys.roles"
-layer = "roles_search"
-depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_tracker", "vibesys.search.population", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.run"
@@ -298,7 +287,7 @@ depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 [[modules]]
 path = "vibesys.orchestrations"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.domains", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.search.hypothesis", "vibesys.search.population", "vibesys.search.profile_focus", "vibesys.prompts", "vibesys.roles", "vs_issue_tracker", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.domains", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.search.hypothesis", "vibesys.search.population", "vibesys.search.profile_focus", "vibesys.prompts", "vs_issue_tracker", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vs_sandbox"
@@ -444,7 +433,7 @@ depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vs_runtime
 # depending on orchestration, which would cycle (agent_run already depends
 # on orchestration.view/orchestration).
 path = "vibesys.orchestration.progress_log"
-depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.hypothesis", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.hypothesis", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"
