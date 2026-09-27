@@ -6,16 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.orchestration.multi.attribution import run_attribution
-from vibesys.orchestration.multi.files import MultiFiles
-from vibesys.orchestration.multi.models import (
-    MultiOptions,
-    MultiState,
-    PaidAttempt,
-    ProfileGuidedMultiOptions,
-)
-from vibesys.orchestration.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, Verdict
 from vibesys.orchestration.hypothesis import (
     AttemptDecision,
     AttemptState,
@@ -33,12 +23,22 @@ from vibesys.orchestration.hypothesis import (
     build_round_record,
 )
 from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
+from vibesys.orchestration.multi.attribution import run_attribution
+from vibesys.orchestration.multi.files import MultiFiles
+from vibesys.orchestration.multi.models import (
+    MultiOptions,
+    MultiState,
+    PaidAttempt,
+    ProfileGuidedMultiOptions,
+)
+from vibesys.orchestration.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
 from vibesys.orchestration.profile_focus import (
     FocusView,
     ProfileFocus,
     ProfileFocusConfig,
     ProfileFocusState,
 )
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome, Verdict
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,

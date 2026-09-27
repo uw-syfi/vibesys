@@ -18,10 +18,10 @@ from tests.vibesys.orchestration.single._integration_support import (
 )
 
 from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse, SingleState
 from vibesys.schemas import Verdict
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project

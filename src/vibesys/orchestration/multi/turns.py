@@ -11,6 +11,7 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import InvalidPlanError, UnsupportedProfilerError
 from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.agents import DESIGNER, IMPLEMENTER, JUDGE, PROFILER
 from vibesys.orchestration.multi.contracts import (
     ImplementerContext,
@@ -33,7 +34,6 @@ from vibesys.orchestration.multi.prompts import (
 )
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.schemas import SkillResourceSelection, Verdict, normalize_hypothesis_title
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.skills import ResolvedSkillSelection
 from vs_runtime.api import (
     AgentTurnTimeoutError,
@@ -46,8 +46,6 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.multi.files import MultiFiles
-    from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
     from vibesys.orchestration.hypothesis import (
         AttemptState,
         CarryOver,
@@ -55,6 +53,8 @@ if TYPE_CHECKING:
         HypothesisState,
     )
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.multi.files import MultiFiles
+    from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
     from vibesys.orchestration.profile_focus import FocusView
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 

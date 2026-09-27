@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.single.models import SingleAgentRoundResponse
     from vibesys.orchestration.hypothesis import OrchestratorPlan
+    from vibesys.orchestration.single.models import SingleAgentRoundResponse
 
 
 def _resolve(workspace: Path, name: str, layout: str) -> Path:

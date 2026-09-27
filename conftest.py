@@ -28,7 +28,9 @@ settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True
 settings.register_profile(
     "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
 )
-settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev"))
+settings.load_profile(
+    os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
+)
 
 #: xdist scheduling group for tests that cannot run beside one another.
 _SERIAL_GROUP = "serial"

@@ -43,4 +43,6 @@ class ProfilerSummary(BaseModel):
             "they read perf_metric instead."
         ),
     )
+
+
 __all__ = ["ProfilerSummary"]

@@ -141,7 +141,9 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(_request(project_root), integration, plugin=_PLUGIN) as ctx:
+        async with open_product_run_host(
+            _request(project_root), integration, plugin=_PLUGIN
+        ) as ctx:
             root = ctx.workspaces.root
             original = root.revision
             assert original is not None

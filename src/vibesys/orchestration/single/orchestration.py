@@ -12,21 +12,6 @@ from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import UnsupportedProfilerError
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.perf_reply import ProfilerSummary
-from vibesys.orchestration.single.agents import IMPLEMENTER
-from vibesys.orchestration.single.attribution import run_attribution
-from vibesys.orchestration.single.combined import CombinedTurnRequest, SingleAgentWorker
-from vibesys.orchestration.single.designer import DesignerPlanRequest, request_plan
-from vibesys.orchestration.single.files import SingleFiles
-from vibesys.orchestration.single.models import (
-    PaidAttempt,
-    PlanContext,
-    ProfileGuidedSingleOptions,
-    SingleAgentRoundContext,
-    SingleOptions,
-    SingleState,
-)
-from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.schemas import Verdict
 from vibesys.orchestration.hypothesis import (
     AttemptState,
     Continue,
@@ -45,6 +30,21 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusConfig,
     ProfileFocusState,
 )
+from vibesys.orchestration.single.agents import IMPLEMENTER
+from vibesys.orchestration.single.attribution import run_attribution
+from vibesys.orchestration.single.combined import CombinedTurnRequest, SingleAgentWorker
+from vibesys.orchestration.single.designer import DesignerPlanRequest, request_plan
+from vibesys.orchestration.single.files import SingleFiles
+from vibesys.orchestration.single.models import (
+    PaidAttempt,
+    PlanContext,
+    ProfileGuidedSingleOptions,
+    SingleAgentRoundContext,
+    SingleOptions,
+    SingleState,
+)
+from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.schemas import Verdict
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,

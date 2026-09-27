@@ -6,15 +6,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.errors import InvalidPlanError
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
 from vibesys.schemas import SkillResourceSelection, normalize_hypothesis_title
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_runtime.api import RunHost, SkillCatalogError, SkillResourceRequest, StructuredResponseError
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.single.models import PlanContext
     from vibesys.orchestration.hypothesis import HypothesisSearch, HypothesisState
+    from vibesys.orchestration.single.models import PlanContext
     from vs_runtime.api import Workspace
 
 

@@ -8,21 +8,21 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.api.agent import AgentRunProjection
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
 from vibesys.orchestration.multi import (
     PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
 )
+from vibesys.orchestration.profile_focus import ProfileFocusState
 from vibesys.orchestration.single import (
     PLUGIN as SINGLE_PLUGIN,
 )
 from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.profile_focus import ProfileFocusState
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:

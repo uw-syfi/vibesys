@@ -1,7 +1,7 @@
-"""``vibesys.search`` stays pure: deterministic state transitions, no effects.
+"""Search policy stays pure: deterministic state transitions, no effects.
 
 Rules (see the orchestration-simplify design brief):
-  - No imports of vibesys.orchestration or vibesys.loops,
+  - No imports of orchestration execution policy or vibesys.loops,
     vibesys.prompts (search answers questions and returns new state; it never
     drives agents, renders prompts, or touches RunContext).
   - No os / subprocess / pathlib / time / datetime imports (search must do no
@@ -14,8 +14,8 @@ Rules (see the orchestration-simplify design brief):
     its state from the persisted state value, so RNG state always lives in
     the state value, never in an unseeded instance or the global singleton.
 
-All three checks are pure ``ast`` scans, so they do not require importing
-``vibesys.search`` (which would pull in its third-party dependencies).
+All three checks are pure ``ast`` scans, so they do not require importing the
+policy packages (which would pull in their third-party dependencies).
 """
 
 from __future__ import annotations
@@ -24,11 +24,21 @@ import ast
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
-_SEARCH = _SRC / "search"
+_POLICY_ROOTS = (
+    _SRC / "orchestration" / "hypothesis",
+    _SRC / "orchestration" / "profile_focus",
+    _SRC / "orchestration" / "evolve" / "population",
+)
 
 _FORBIDDEN_PACKAGES = (
     "vibesys.loops",
-    "vibesys.orchestration",
+    "vibesys.orchestration.agents",
+    "vibesys.orchestration.commands",
+    "vibesys.orchestration.environment",
+    "vibesys.orchestration.gates",
+    "vibesys.orchestration.runner",
+    "vibesys.orchestration.single",
+    "vibesys.orchestration.multi",
     "vibesys.prompts",
 )
 
@@ -77,9 +87,13 @@ def _is_type_checking_guard(node: ast.AST) -> bool:
     return False
 
 
-def test_search_imports_nothing_from_orchestration_policy_or_prompts() -> None:
+def _policy_paths() -> list[Path]:
+    return [path for root in _POLICY_ROOTS for path in root.rglob("*.py")]
+
+
+def test_search_imports_nothing_from_execution_policy_or_prompts() -> None:
     violations: list[str] = []
-    for path in _SEARCH.rglob("*.py"):
+    for path in _policy_paths():
         for node, module_name in _module_level_import_nodes(path):
             if any(
                 module_name == pkg or module_name.startswith(pkg + ".")
@@ -91,7 +105,7 @@ def test_search_imports_nothing_from_orchestration_policy_or_prompts() -> None:
 
 def test_search_has_no_module_level_io_or_clock_imports() -> None:
     violations: list[str] = []
-    for path in _SEARCH.rglob("*.py"):
+    for path in _policy_paths():
         rel = str(path.relative_to(_SRC))
         for node, module_name in _module_level_import_nodes(path):
             if module_name.startswith("vibesys.agent_run"):
@@ -143,7 +157,7 @@ def _restores_from_state(stmt: ast.stmt, target: str) -> bool:
 
 def test_search_uses_no_global_rng_and_seeds_every_random_instance() -> None:
     violations: list[str] = []
-    for path in _SEARCH.rglob("*.py"):
+    for path in _policy_paths():
         rel = str(path.relative_to(_SRC))
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):

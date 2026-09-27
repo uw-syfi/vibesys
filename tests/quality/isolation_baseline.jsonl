@@ -79,7 +79,6 @@
 {"path": "tests/vibesys/agents/test_docker_executor.py", "rule": "sleep", "count": 1}
 {"path": "tests/vibesys/agents/test_host_resource_declarations.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/agents/test_hostsandbox.py", "rule": "patch", "count": 11}
-{"path": "tests/vibesys/api/test_public_runtime.py", "rule": "patch", "count": 2}
 {"path": "tests/vibesys/backends/test_cpu_backend.py", "rule": "mock", "count": 2}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 6}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
@@ -87,8 +86,8 @@
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "sleep", "count": 11}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
-{"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 32}
-{"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "patch", "count": 23}
+{"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 26}
+{"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "patch", "count": 21}
 {"path": "tests/vibesys/skypilot/test_bridge.py", "rule": "patch", "count": 3}
 {"path": "tests/vibesys/skypilot/test_evaluator_helper.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "rule": "mock", "count": 2}

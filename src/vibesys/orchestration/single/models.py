@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from vibesys.evaluators import input_manifest
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.schemas import CandidateDisposition, SkillResourceSelection, Verdict
 from vibesys.orchestration.hypothesis.state import HypothesisState
+from vibesys.schemas import CandidateDisposition, SkillResourceSelection, Verdict
 from vs_runtime.api import AccuracyReceipt
 
 _ProfileGuidedInput = input_manifest.ProfileGuidedInput

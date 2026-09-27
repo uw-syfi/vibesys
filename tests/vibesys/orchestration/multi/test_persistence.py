@@ -13,13 +13,13 @@ from tests.vibesys.orchestration.multi._integration_support import (
     write_input,
 )
 
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
     PreRoundDecision,
 )
 from vibesys.schemas import Verdict
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import Project

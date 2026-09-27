@@ -18,9 +18,9 @@ from tests.vibesys.orchestration.single._integration_support import (
     write_input,
 )
 
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.schemas import Verdict
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities, AgentTurnTimeoutError
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project

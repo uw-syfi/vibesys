@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.hypothesis import HypothesisSearch
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.schemas import (
     CandidateDisposition,
@@ -19,7 +20,6 @@ from vibesys.schemas import (
     PerfDeltaReason,
     derive_hypothesis_title,
 )
-from vibesys.orchestration.hypothesis import HypothesisSearch
 from vs_loop_state.api import HypothesisResolution
 from vs_runtime.api import PluginProjection, ProjectedRound
 

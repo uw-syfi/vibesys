@@ -15,13 +15,13 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.evaluators.perf_reply import ProfilerSummary
+    from vibesys.orchestration.hypothesis import OrchestratorPlan
+    from vibesys.orchestration.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.multi.contracts import (
         ImplementerResponse,
         JudgeResponse,
         PreRoundDecision,
     )
-    from vibesys.orchestration.hypothesis import OrchestratorPlan
-    from vibesys.orchestration.hypothesis.attempts import ImplementerReply
 
 
 def _resolve(workspace: Path, name: str, layout: str) -> Path:

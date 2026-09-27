@@ -8,6 +8,7 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -16,7 +17,6 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.schemas import HypothesisOutcome, Verdict
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_runtime.api import RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 

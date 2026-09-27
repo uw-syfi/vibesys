@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.schemas import Verdict
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
