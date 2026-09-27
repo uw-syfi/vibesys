@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,8 +25,6 @@ from vs_sandbox.api import (
 from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_sandbox.api import Sandbox
 
 
@@ -51,6 +50,13 @@ class _Session:
         self.close_count += 1
 
 
+class _PathSandbox(FakeSandbox):
+    """Agent sandbox fake with deterministic host-path projection."""
+
+    def agent_path(self, host_path: Path | str) -> str:
+        return f"/agent/{Path(host_path).name}"
+
+
 def _request(tmp_path: Path) -> RunEnvironmentRequest:
     return RunEnvironmentRequest(
         log_dir=tmp_path / "logs",
@@ -68,7 +74,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
 
 def _session(*, sandboxed: bool) -> _Session:
     return _Session(
-        FakeSandbox(),
+        _PathSandbox(),
         RunEnvironmentView(
             paths=AgentPaths(),
             cli_sandboxed=sandboxed,
@@ -177,4 +183,5 @@ def test_owned_environment_translates_mounts_and_closes_once(tmp_path: Path) -> 
         EnvironmentBindMount(writable.path, str(writable.path), read_only=False),
     )
     assert environment.backends == {"chat": opened.sandbox}
+    assert environment.agent_path(readonly.path) == "/agent/read"
     assert opened.close_count == 1

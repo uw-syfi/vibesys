@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -41,16 +41,17 @@ class _EnvironmentRequest:
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     agent_backend: str | None = "stub"
     cli_provider: str | None = "codex"
+    project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
 
 
 class _EnvironmentSession:
     def __init__(self) -> None:
         self.sandbox = SimpleNamespace(agent_path=_identity_path)
         self.view = SimpleNamespace(cli_sandboxed=False, isolated=False)
-        self.closed = False
+        self.close_count = 0
 
     def close(self) -> None:
-        self.closed = True
+        self.close_count += 1
 
 
 def _identity_path(host: object) -> str:
@@ -136,6 +137,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             trusted_input_baseline="0" * 40,
         )
     )
+    shared_session = _EnvironmentSession()
     return RunResources(
         project=project,
         run_id="run-1",
@@ -156,8 +158,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
         skill_source_dirs=(),
         environment=cast("Any", environment),
         environment_request=cast("Any", _EnvironmentRequest()),
-        run_environment_sandboxed=False,
-        project_path_policy=ProjectPathPolicy(),
+        environment_session=cast("Any", shared_session),
         host_resources=(),
     )
 
@@ -270,7 +271,7 @@ def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> Non
     assert not hasattr(agent, "config")
     session.close()
     session.close()
-    assert environment.sessions[-1].closed
+    assert environment.sessions[-1].close_count == 1
     with pytest.raises(RuntimeError, match="closed"):
         agent.turn("Another question")
 

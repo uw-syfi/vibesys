@@ -36,8 +36,12 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_project.api import Project
-    from vs_runtime.api.infrastructure import RunEnvironment, RunEnvironmentRequest
-    from vs_sandbox.api import HostResource, ProjectPathPolicy
+    from vs_runtime.api.infrastructure import (
+        RunEnvironment,
+        RunEnvironmentRequest,
+        RunEnvironmentSession,
+    )
+    from vs_sandbox.api import HostResource
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,8 +68,7 @@ class RunResources:
     skill_source_dirs: tuple[Path, ...]
     environment: RunEnvironment
     environment_request: RunEnvironmentRequest
-    run_environment_sandboxed: bool
-    project_path_policy: ProjectPathPolicy
+    environment_session: RunEnvironmentSession
     host_resources: tuple[HostResource, ...]
 
 

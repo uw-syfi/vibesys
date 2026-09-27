@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import threading
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.api.auxiliary import (
@@ -35,25 +34,27 @@ from vs_agent.api import (
     expose_as_tools,
 )
 from vs_project.api import Project, RunLogger
-from vs_runtime.api.infrastructure import ManagedConversationSpec, create_managed_conversation
-from vs_sandbox.api import EnvironmentBindMount, HostResource, HostResourceAccess
+from vs_runtime.api.infrastructure import (
+    ManagedConversationSpec,
+    ScopedAgentEnvironment,
+    create_managed_conversation,
+    open_agent_execution_environment,
+)
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
-    from pathlib import Path
 
     from pydantic import BaseModel
 
     from vibesys.api.contracts import EventSink, RunView
-    from vibesys.config import Config
     from vibesys.orchestration.contracts import OrchestrationProjector, OrchestrationRegistry
     from vibesys.orchestration.request import RunRequest
-    from vibesys.orchestration.skills import SkillSelection
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import OrchestrationPlugin, Workspace
     from vs_runtime.api import RunStatus as PluginRunStatus
-    from vs_runtime.api.infrastructure import AgentExecutionEnvironment, RunEnvironmentSession
-    from vs_sandbox.api import ComputeBackendImpl, ProjectPathPolicy, Sandbox
+    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
+    from vs_sandbox.api import ComputeBackendImpl
 
 
 class RunQuery(Protocol):
@@ -276,49 +277,23 @@ class _LocalRunSession:
         mounts: tuple[HostResource, ...] = (),
         agent_backend: str | None = None,
         cli_provider: str | None = None,
-    ) -> _OpenedAgentEnvironment:
-        """Open a private construction environment for core-owned agent wiring."""
+    ) -> ScopedAgentEnvironment:
+        """Bind product facts to the runtime-owned scoped environment lifecycle."""
         resources = self._resources
         if resources is None:
             message = "the run is not ready to create agents"
             raise RuntimeError(message)
-        request = replace(
+        return open_agent_execution_environment(
             resources.environment_request,
-            agent_backend=(
-                agent_backend
-                if agent_backend is not None
-                else resources.environment_request.agent_backend
-            ),
-            cli_provider=(
-                cli_provider
-                if cli_provider is not None
-                else resources.environment_request.cli_provider
-            ),
-            environment_bind_mounts=(
-                *resources.environment_request.environment_bind_mounts,
-                *(_environment_bind_mount(mount) for mount in mounts),
-            ),
-        )
-        opened = open_run_environment(resources.environment, request)
-        backends: dict[str, Sandbox] | None = None
-        use_docker = False
-        isolated = False
-        if resources.run_environment_sandboxed:
-            backends = {"chat": opened.sandbox}
-            use_docker = opened.view.cli_sandboxed
-            isolated = opened.view.isolated
-        return _OpenedAgentEnvironment(
-            opened,
-            config=resources.config,
+            resources.environment_session,
+            share_session=False,
             skill_selection=platform_skill_selection(resources.compute_backend),
             skill_source_dirs=resources.skill_source_dirs,
-            project_path_policy=resources.project_path_policy,
             host_resources=resources.host_resources,
-            backends=backends,
-            use_docker=use_docker,
-            isolated=isolated,
-            run_id=resources.run_id,
-            project=resources.project,
+            mounts=mounts,
+            agent_backend=agent_backend,
+            cli_provider=cli_provider,
+            open_session=lambda request: open_run_environment(resources.environment, request),
         )
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
@@ -396,7 +371,7 @@ class _LocalRunSession:
                         workspace=resources.workspace,
                         system_prompt=launch.system_prompt,
                         continuation_prompt=launch.continuation_prompt,
-                        tool_servers=opened.investigation_tools(),
+                        tool_servers=_investigation_tools(opened, resources),
                         environment=tuple(
                             (item.environment_variable, opened.agent_path(item.path))
                             for item in launch.readable_inputs
@@ -553,73 +528,20 @@ def _run_ready(
     )
 
 
-class _AgentPathSandbox(Protocol):
-    """The one lookup `_OpenedAgentEnvironment.agent_path` needs from a sandbox.
-
-    Mirrors the runtime environment's agent-path contract: every
-    sandbox kind `RunEnvironment.open` can return (host-only or Docker)
-    implements this, even though `vs_sandbox.execution.Sandbox` itself does
-    not declare it.
-    """
-
-    def agent_path(self, host_path: Path | str) -> str: ...
-
-
-@dataclass(frozen=True, slots=True)
-class _OpenedAgentEnvironment:
-    """`AgentEnvironment` backed by one already-opened `RunEnvironmentSession`."""
-
-    _session: RunEnvironmentSession
-    config: Config
-    skill_selection: SkillSelection
-    skill_source_dirs: tuple[Path, ...]
-    project_path_policy: ProjectPathPolicy
-    host_resources: tuple[HostResource, ...]
-    backends: dict[str, Sandbox] | None
-    use_docker: bool
-    isolated: bool
-    run_id: str
-    project: Project
-
-    def agent_path(self, host: Path) -> str:
-        """Map a host path to its path inside this environment's sandbox."""
-        return cast("_AgentPathSandbox", self._session.sandbox).agent_path(host)
-
-    def investigation_tools(self) -> tuple[ToolServerDescriptor, ...]:
-        """Build the read-only tool server for investigating this run's history.
-
-        Launches `entrypoints.chat_tools_server` with the project root
-        translated into this environment's own sandbox path
-        (`self.agent_path`), so the subprocess -- which the agent's own
-        driver spawns inside that sandbox -- can resolve it.
-        """
-        descriptor = expose_as_tools(
+def _investigation_tools(
+    environment: ScopedAgentEnvironment,
+    resources: RunResources,
+) -> tuple[ToolServerDescriptor, ...]:
+    """Project one runtime environment into the product's run-history tool."""
+    return (
+        expose_as_tools(
             name="vibesys-run",
             entrypoint_module="entrypoints.chat_tools_server",
             entrypoint_args=(
                 "--run-id",
-                self.run_id,
+                resources.run_id,
                 "--project-root",
-                self.agent_path(self.project.root),
+                environment.agent_path(resources.project.root),
             ),
-        )
-        return (descriptor,)
-
-    def close(self) -> None:
-        """Release the opened environment session."""
-        self._session.close()
-
-
-def _environment_bind_mount(mount: HostResource) -> EnvironmentBindMount:
-    """Fold one requested host mount into an `EnvironmentBindMount`.
-
-    `HostResource.agent_path` names the fixed container path a caller wants
-    a resource presented at (its own docstring: unset means "imported at its
-    own host path"), so that is exactly the container path this mount asks
-    for, falling back to the host path unchanged when unset.
-    """
-    return EnvironmentBindMount(
-        mount.path,
-        mount.agent_path if mount.agent_path is not None else str(mount.path),
-        read_only=mount.access is HostResourceAccess.READ_ONLY,
+        ),
     )

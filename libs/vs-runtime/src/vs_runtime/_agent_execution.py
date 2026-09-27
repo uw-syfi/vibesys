@@ -9,7 +9,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from functools import partial
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -107,6 +107,16 @@ class ScopedAgentEnvironment:
         self._closed = True
         if self.owns_session:
             self.session.close()
+
+    def agent_path(self, host_path: Path | str) -> str:
+        """Translate a host path through this environment's active sandbox."""
+        return cast("_AgentPathSandbox", self.session.sandbox).agent_path(host_path)
+
+
+class _AgentPathSandbox(Protocol):
+    """Path translation implemented by every supported agent sandbox."""
+
+    def agent_path(self, host_path: Path | str) -> str: ...
 
 
 def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433 [PLR0913]; these are independent resolved lower-layer resources; bundling them would create the broad environment DTO this composition seam replaces.

@@ -1007,8 +1007,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 skill_source_dirs=tuple(skill_source_paths),
                 environment=environment,
                 environment_request=run_environment_request,
-                run_environment_sandboxed=session.view.cli_sandboxed,
-                project_path_policy=project_path_policy,
+                environment_session=session,
                 host_resources=agent_host_resources,
             )
         )
