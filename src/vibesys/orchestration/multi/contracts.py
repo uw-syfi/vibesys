@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vibesys.orchestration.hypothesis import SkillResourceSelection
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
-from vibesys.skills import ResolvedSkillSelection
+from vibesys.orchestration.skills import ResolvedSkillSelection
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 
 

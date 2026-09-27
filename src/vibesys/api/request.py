@@ -31,6 +31,7 @@ from vibesys.evaluators.input_synthesis import (
     synthesize_input_bundle,
 )
 from vibesys.evaluators.objective import load_objective, with_operator_constraints
+from vibesys.orchestration.skills import resolve_skill_source_dirs
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibesys.repository import (
     REPOSITORY_SLUG,
@@ -45,7 +46,6 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
     run_environment_record,
 )
-from vibesys.skills import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
 
 if TYPE_CHECKING:

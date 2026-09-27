@@ -37,6 +37,11 @@ from vibesys.events import (
     ExperimentsChangedData,
 )
 from vibesys.orchestration.request import RunRequest
+from vibesys.orchestration.skills import (
+    SkillSelection,
+    platform_skill_excluded_paths,
+    platform_skill_selection,
+)
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILERS_COMMON_STAGED_NAME,
@@ -72,7 +77,6 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
     run_environment_record,
 )
-from vibesys.skills import SkillSelection, platform_skill_selection
 from vs_agent.api import (
     AgentBackend,
     AgentEventSink,
@@ -850,7 +854,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 input_project_dir=None,
                 profiler_support_path=profiler_support_path,
                 profiler_support_name=profiler_support_name,
-                compute_backend=backend,
+                skill_excluded_relative_paths=platform_skill_excluded_paths(backend),
                 workspace_sources=(),
                 extra_input_excludes=environment_patch.copy_excludes,
                 profiler_support_extra=profiler_support_extra,

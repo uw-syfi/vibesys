@@ -11,7 +11,7 @@ import pytest
 
 from entrypoints.cli import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
-from vibesys.skills import (
+from vibesys.orchestration.skills import (
     PLATFORM_SKELETON,
     SkillMetadataError,
     coerce_skill_root,

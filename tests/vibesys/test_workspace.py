@@ -8,6 +8,7 @@ import pytest
 
 from vibesys.constants import ComputeBackend
 from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.orchestration.skills import platform_skill_excluded_paths
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     materialization_source,
@@ -34,7 +35,11 @@ def test_skill_copy_excludes_only_foreign_platform_paths(
 ) -> None:
     source = _write_platform_skill(tmp_path / "skills")
 
-    step = skill_copy(source, tmp_path / "workspace" / source.name, selected)
+    step = skill_copy(
+        source,
+        tmp_path / "workspace" / source.name,
+        platform_skill_excluded_paths(selected),
+    )
 
     assert step.excluded_relative_paths == frozenset(
         Path("references", "platforms", backend.value)
@@ -46,7 +51,11 @@ def test_skill_copy_excludes_only_foreign_platform_paths(
 def test_skill_copy_without_backend_keeps_every_platform(tmp_path: Path) -> None:
     source = _write_platform_skill(tmp_path / "skills")
 
-    step = skill_copy(source, tmp_path / "workspace" / source.name, None)
+    step = skill_copy(
+        source,
+        tmp_path / "workspace" / source.name,
+        platform_skill_excluded_paths(None),
+    )
 
     assert step.excluded_relative_paths == frozenset()
 
@@ -72,7 +81,7 @@ def test_fresh_plan_composes_all_selected_inputs(tmp_path: Path) -> None:
         input_project_dir=input_dir,
         profiler_support_path=str(tmp_path / "profilers" / "nsys"),
         profiler_support_name="nsys_profiler",
-        compute_backend=ComputeBackend.CUDA,
+        skill_excluded_relative_paths=platform_skill_excluded_paths(ComputeBackend.CUDA),
         workspace_sources=(source,),
         extra_input_excludes=frozenset({"model"}),
     )
@@ -94,7 +103,11 @@ def test_fresh_plan_composes_all_selected_inputs(tmp_path: Path) -> None:
                 "_evaluator is reserved for the manifest-declared evaluator source"
             ),
         ),
-        skill_copy(skill, root / skill.name, ComputeBackend.CUDA),
+        skill_copy(
+            skill,
+            root / skill.name,
+            platform_skill_excluded_paths(ComputeBackend.CUDA),
+        ),
         InputProjectMaterialization(project_dir=input_dir),
         ProjectTreeCopy(
             src=tmp_path / "profilers" / "nsys",
@@ -116,7 +129,7 @@ def test_fresh_plan_stages_extra_profiler_support_dirs(tmp_path: Path) -> None:
         input_project_dir=None,
         profiler_support_path=str(tmp_path / "profilers" / "rocprof"),
         profiler_support_name="rocprof_profiler",
-        compute_backend=ComputeBackend.ROCM,
+        skill_excluded_relative_paths=platform_skill_excluded_paths(ComputeBackend.ROCM),
         profiler_support_extra=(
             (str(tmp_path / "profilers" / "_common"), "profilers_common"),
             (str(tmp_path / "profilers" / "torch"), "torch_profiler"),
@@ -155,15 +168,19 @@ def test_resume_plan_refreshes_skills_and_missing_profiler(tmp_path: Path) -> No
         input_project_dir=tmp_path / "input",
         profiler_support_path=str(tmp_path / "profilers" / "nsys"),
         profiler_support_name="nsys_profiler",
-        compute_backend=ComputeBackend.CUDA,
+        skill_excluded_relative_paths=platform_skill_excluded_paths(ComputeBackend.CUDA),
     )
 
     assert plan == (
-        skill_copy(skill, root / skill.name, ComputeBackend.CUDA),
+        skill_copy(
+            skill,
+            root / skill.name,
+            platform_skill_excluded_paths(ComputeBackend.CUDA),
+        ),
         skill_copy(
             skill,
             root / ".claude" / "skills" / skill.name,
-            ComputeBackend.CUDA,
+            platform_skill_excluded_paths(ComputeBackend.CUDA),
         ),
         ProjectTreeCopy(
             src=tmp_path / "profilers" / "nsys",
@@ -185,7 +202,7 @@ def test_resume_plan_skips_existing_profiler_support(tmp_path: Path) -> None:
         input_project_dir=None,
         profiler_support_path=str(tmp_path / "profilers" / "nsys"),
         profiler_support_name="nsys_profiler",
-        compute_backend=ComputeBackend.CUDA,
+        skill_excluded_relative_paths=platform_skill_excluded_paths(ComputeBackend.CUDA),
     )
 
     assert plan == ()

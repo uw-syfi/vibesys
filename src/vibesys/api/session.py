@@ -18,9 +18,9 @@ from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
 from vibesys.orchestration.contracts import project_run
+from vibesys.orchestration.skills import platform_skill_selection
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
-from vibesys.skills import platform_skill_selection
 from vs_agent.api import (
     ToolServerDescriptor,
     build_agent_client,
@@ -40,8 +40,8 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.orchestration.contracts import OrchestrationProjector, OrchestrationRegistry
     from vibesys.orchestration.request import RunRequest
+    from vibesys.orchestration.skills import SkillSelection
     from vibesys.sandbox.run_environment import RunEnvironmentSession
-    from vibesys.skills import SkillSelection
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import OrchestrationPlugin, Workspace
     from vs_runtime.api import RunStatus as PluginRunStatus

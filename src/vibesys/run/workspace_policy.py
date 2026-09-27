@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.constants import PROJECT_ROOT
-from vibesys.skills import PLATFORMS_PARENT, foreign_platform_names
 from vs_agent.api import cli_skill_dirs
 from vs_runtime.api.infrastructure import (
     GitSourceMaterialization,
@@ -24,7 +23,6 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vibesys.constants import ComputeBackend
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.sandbox.run_environment import RunEnvironment
     from vs_sandbox.api import ComputeBackendImpl
@@ -117,16 +115,13 @@ def materialization_source(source: WorkspaceSource) -> GitSourceMaterialization:
 def skill_copy(
     source: Path,
     destination: Path,
-    compute_backend: ComputeBackend | None,
+    excluded_relative_paths: frozenset[Path],
 ) -> ProjectTreeCopy:
     """Plan one skill copy with application-selected platform visibility."""
-    excluded = frozenset(
-        Path(*PLATFORMS_PARENT, name) for name in foreign_platform_names(compute_backend)
-    )
     return ProjectTreeCopy(
         src=source,
         dest=destination,
-        excluded_relative_paths=excluded,
+        excluded_relative_paths=excluded_relative_paths,
     )
 
 
@@ -159,7 +154,7 @@ def build_workspace_materialization_plan(  # noqa: PLR0913  # lint-waiver: LW-01
     input_project_dir: Path | None,
     profiler_support_path: str | None,
     profiler_support_name: str | None,
-    compute_backend: ComputeBackend | None,
+    skill_excluded_relative_paths: frozenset[Path],
     workspace_sources: tuple[WorkspaceSource, ...] = (),
     extra_input_excludes: frozenset[str] = frozenset(),
     profiler_support_extra: tuple[tuple[str, str], ...] = (),
@@ -168,11 +163,11 @@ def build_workspace_materialization_plan(  # noqa: PLR0913  # lint-waiver: LW-01
     steps: list[ProjectMaterializationStep] = []
     for source in skill_sources:
         if (root / source.name).exists():
-            steps.append(skill_copy(source, root / source.name, compute_backend))
+            steps.append(skill_copy(source, root / source.name, skill_excluded_relative_paths))
         for cli_relative in _CLI_SKILL_DIRS:
             destination = root / cli_relative / source.name
             if destination.exists():
-                steps.append(skill_copy(source, destination, compute_backend))
+                steps.append(skill_copy(source, destination, skill_excluded_relative_paths))
 
     if not existing:
         steps.extend(materialization_source(source) for source in workspace_sources)
@@ -198,7 +193,8 @@ def build_workspace_materialization_plan(  # noqa: PLR0913  # lint-waiver: LW-01
                 )
             )
         steps.extend(
-            skill_copy(source, root / source.name, compute_backend) for source in skill_sources
+            skill_copy(source, root / source.name, skill_excluded_relative_paths)
+            for source in skill_sources
         )
         if input_project_dir is not None:
             steps.append(InputProjectMaterialization(project_dir=input_project_dir))
