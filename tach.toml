@@ -444,8 +444,24 @@ expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
 from = ["vibesys.api.profilers"]
 
 [[interfaces]]
-expose = ["agent_options", "evolve", "evolve\\..*", "gates", "hypothesis", "hypothesis\\..*", "issue_queue", "issue_queue\\..*", "metrics", "multi", "multi\\..*", "profile_focus", "profile_focus\\..*", "profilers", "review", "single", "single\\..*"]
+expose = ["agent_options", "hypothesis", "hypothesis\\..*", "metrics", "profile_focus", "profile_focus\\..*", "profilers", "review"]
 from = ["vibesys.orchestration"]
+
+[[interfaces]]
+expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]
+from = ["vibesys.orchestration.single"]
+
+[[interfaces]]
+expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]
+from = ["vibesys.orchestration.multi"]
+
+[[interfaces]]
+expose = ["PLUGIN", "REGISTRATION", "resolve_openevolve_options"]
+from = ["vibesys.orchestration.evolve"]
+
+[[interfaces]]
+expose = ["IssueQueueOptions", "IssueQueueState", "PLUGIN", "REGISTRATION"]
+from = ["vibesys.orchestration.issue_queue"]
 
 [[interfaces]]
 expose = ["AgentInput", "BenchmarkCommand", "BenchmarkResult", "EnvironmentInput", "EVALUATOR_SRC_DIRNAME", "EvaluatorInput", "InputBundle", "InputCommand", "InputManifest", "InputSynthesisError", "MANIFEST_NAME", "ModalEnvironmentInput", "PROTOCOL_OUTPUT_FLAG", "ProfileGuidedInput", "SynthesizedInputSpec", "WorkspaceInput", "WorkspaceSource", "benchmark_output_argument", "load_input_bundle", "load_project_task", "render_input_manifest", "synthesize_input_bundle"]
