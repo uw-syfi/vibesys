@@ -41,8 +41,7 @@ The internal custom-policy execution contract and example are in
 [//]: # (tach-graph:start)
 ## Architecture overview
 
-Submodules such as `vibesys.orchestration` and `server.api` are collapsed into
-their top-level package.
+Submodules such as `vibesys.orchestration` and `server.api` are collapsed into their top-level package.
 
 ```mermaid
 graph TD

@@ -82,7 +82,7 @@ def render_block(edges: list[tuple[str, str]]) -> str:
             START,
             "## Architecture overview",
             "",
-            "Submodules such as `vibesys.agents` and `server.api` are collapsed "
+            "Submodules such as `vibesys.orchestration` and `server.api` are collapsed "
             "into their top-level package.",
             "",
             "```mermaid",

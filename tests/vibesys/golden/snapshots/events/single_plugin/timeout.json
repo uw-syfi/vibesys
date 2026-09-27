@@ -49,18 +49,6 @@
   {
     "agent_kind": null,
     "data": {
-      "kind": "experiments_changed",
-      "reason": "project_attached",
-      "revision": null
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "experiments_changed"
-  },
-  {
-    "agent_kind": null,
-    "data": {
       "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
@@ -72,6 +60,18 @@
     "status": null,
     "text": "",
     "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "project_attached",
+      "revision": null
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
   },
   {
     "agent_kind": null,
