@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from vibesys.resource_paths import evaluator_packages_dir
+from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN, PYTHON_TOKEN
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 
 if TYPE_CHECKING:
@@ -23,8 +24,6 @@ if TYPE_CHECKING:
 
 EVALUATOR_PACKAGE_METADATA_NAME = "vibesys.evaluator.toml"
 PACKAGE_ROOT_TOKEN = "${PACKAGE_ROOT}"  # noqa: S105  # lint-waiver: LW-007086 [S105]; Public argv template token, not a credential.
-PROJECT_ROOT_TOKEN = "${PROJECT_ROOT}"  # noqa: S105  # lint-waiver: LW-007087 [S105]; Public argv template token, not a credential.
-PYTHON_TOKEN = "${PYTHON}"  # noqa: S105  # lint-waiver: LW-007088 [S105]; Public argv template token, not a credential.
 TOOL_TOKEN_PREFIX = "${TOOL:"  # noqa: S105  # lint-waiver: LW-007089 [S105]; Public argv template token, not a credential.
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")

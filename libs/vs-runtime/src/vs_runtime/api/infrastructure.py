@@ -132,6 +132,18 @@ from vs_runtime._trusted_evaluation import (
     TrustedMetricDeclaration,
     create_trusted_evaluation_executor,
 )
+from vs_runtime._trusted_evaluation_preparation import (
+    REMOTE_EVALUATOR_TOOLS_ROOT,
+    SANDBOX_EVALUATOR_TOOLS_ROOT,
+    TrustedEvaluationCommandPaths,
+    TrustedEvaluatorRequirements,
+    docker_evaluator_tools_root,
+    evaluator_agent_toolchains,
+    evaluator_container_setup,
+    prepare_trusted_evaluation_plan,
+    remote_evaluator_setup_command,
+    required_evaluator_tools_root,
+)
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
     WorkspaceResource,
@@ -344,6 +356,8 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "REMOTE_EVALUATOR_TOOLS_ROOT",
+    "SANDBOX_EVALUATOR_TOOLS_ROOT",
     "AgentExecutionConfiguration",
     "AgentExecutionEnvironment",
     "AgentExecutionFinished",
@@ -414,8 +428,10 @@ __all__ = [
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
     "TrustedBenchmarkResult",
+    "TrustedEvaluationCommandPaths",
     "TrustedEvaluationExecutor",
     "TrustedEvaluationPlan",
+    "TrustedEvaluatorRequirements",
     "TrustedMetricDeclaration",
     "ValidationRecipe",
     "WorkspaceResource",
@@ -434,12 +450,18 @@ __all__ = [
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",
+    "docker_evaluator_tools_root",
+    "evaluator_agent_toolchains",
+    "evaluator_container_setup",
     "load_skill_frontmatter",
     "materialize_input_project",
     "open_run_host",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
+    "prepare_trusted_evaluation_plan",
     "relative_sdk_source",
+    "remote_evaluator_setup_command",
+    "required_evaluator_tools_root",
     "resolve_bundled_tree",
     "resolve_packaged_tree",
     "resolve_sdk_source",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import shlex
 import subprocess
 import sys
@@ -12,7 +11,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from tests.support import provider_profiles as fake_profiles
-from tests.support import run_test_command
 
 from vibesys.constants import ComputeBackend
 from vibesys.domains.environment import EnvironmentBindMount
@@ -36,12 +34,9 @@ from vibesys.sandbox.run_environment import (
     _cli_container_env,
     _cli_provider_env_and_auth_files,
     _container_mount_plan,
-    _docker_agent_toolchains,
     _docker_evaluator_tool_mounts,
     _ensure_pushed_for_remote_backend,
-    _environment_command,
-    _evaluator_container_setup,
-    _evaluator_tools,
+    _evaluator_requirements,
     _EvaluatorToolBuildRequiredError,
     _materialize_effective_objective,
     _resolve_docker_image_id,
@@ -63,7 +58,6 @@ from vs_sandbox.api.evaluator_tools import EvaluatorToolError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from subprocess import CompletedProcess
 
     from vibesys.sandbox.run_environment import RunEnvironment
     from vs_sandbox.api import ContentionMonitor, Sandbox
@@ -176,80 +170,6 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
     return RunEnvironmentRequest(**values)
-
-
-def _write_executable(path: Path, contents: str) -> None:
-    path.write_text(contents, encoding="utf-8")
-    path.chmod(0o755)
-
-
-def _run_rootless_rust_setup(
-    tmp_path: Path,
-    *,
-    downloader_exit_code: int = 0,
-) -> CompletedProcess[str]:
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    _write_executable(
-        fake_bin / "rustc",
-        "#!/bin/sh\nprintf '%s\\n' 'rustc 1.85.0 (fake)'\n",
-    )
-    _write_executable(
-        fake_bin / "cargo",
-        "#!/bin/sh\necho 'rustup has no configured default toolchain' >&2\nexit 1\n",
-    )
-
-    rustup_init = tmp_path / "fake-rustup-init"
-    working_cargo = tmp_path / "working-cargo"
-    working_rustc = tmp_path / "working-rustc"
-    _write_executable(
-        working_cargo,
-        "#!/bin/sh\nprintf '%s\\n' 'cargo 1.92.0 (fake)'\n",
-    )
-    _write_executable(
-        working_rustc,
-        "#!/bin/sh\nprintf '%s\\n' 'rustc 1.92.0 (fake)'\n",
-    )
-    _write_executable(
-        rustup_init,
-        "#!/bin/sh\n"
-        'mkdir -p "$CARGO_HOME/bin" "$RUSTUP_HOME"\n'
-        'cp "$FAKE_WORKING_CARGO" "$CARGO_HOME/bin/cargo"\n'
-        'cp "$FAKE_WORKING_RUSTC" "$CARGO_HOME/bin/rustc"\n'
-        'chmod +x "$CARGO_HOME/bin/cargo" "$CARGO_HOME/bin/rustc"\n',
-    )
-    downloader = (
-        '#!/bin/sh\ncp "$FAKE_RUSTUP_INIT" "$4"\n'
-        if downloader_exit_code == 0
-        else f"#!/bin/sh\nexit {downloader_exit_code}\n"
-    )
-    _write_executable(fake_bin / "python3", downloader)
-
-    backend = FakeBackend()
-    package = resolve_evaluator_package(
-        EvaluatorPackageRequirement(
-            name="vibesys-evaluator-request-factory",
-            version="0.1.0",
-        )
-    )
-    request = _request(tmp_path, backend, evaluator_package_root=package.root)
-    commands = _evaluator_container_setup(request, rootless=True)
-    environment = {
-        **os.environ,
-        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
-        "FAKE_RUSTUP_INIT": str(rustup_init),
-        "FAKE_WORKING_CARGO": str(working_cargo),
-        "FAKE_WORKING_RUSTC": str(working_rustc),
-    }
-    return run_test_command(
-        ["/bin/sh", "-c", "set -e\n" + "\n".join((*commands, "cargo --version"))],
-        cwd=request.workspace,
-        env=environment,
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=10,
-    )
 
 
 #: The profiles these tests drive container setup with. agentshim registers
@@ -563,22 +483,6 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
     assert fake_agent_image[-1]["toolchains"] == frozenset({"go", "rust"})
 
 
-def test_rootless_rust_setup_replaces_broken_rustup_cargo_shim(tmp_path: Path) -> None:
-    result = _run_rootless_rust_setup(tmp_path)
-
-    assert result.returncode == 0, result.stderr
-    assert "cargo 1.92.0 (fake)" in result.stdout
-    assert (tmp_path / "workspace" / ".bin" / "cargo").is_symlink()
-
-
-def test_rootless_rust_setup_does_not_mask_download_failure(tmp_path: Path) -> None:
-    result = _run_rootless_rust_setup(tmp_path, downloader_exit_code=7)
-
-    assert result.returncode != 0
-    assert "failed to download evaluator Rust toolchain" in result.stderr
-    assert "cargo 1.92.0 (fake)" not in result.stdout
-
-
 def test_local_environment_prepares_and_translates_evaluator_tool(
     tmp_path: Path,
 ) -> None:
@@ -791,7 +695,7 @@ def test_docker_evaluator_tools_use_ephemeral_builder_and_read_only_final_mounts
 
     mounts = _docker_evaluator_tool_mounts(
         request,
-        package.metadata.tools,
+        _evaluator_requirements(request),
         container_image="sha256:pinned",
     )
 
@@ -1168,20 +1072,6 @@ def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -
     request = _request(tmp_path, backend, agent_backend="stub", cli_provider="codex")
 
     assert _cli_container_env(request) is None
-
-
-def test_docker_agent_toolchains_adds_rust_only_when_tools_are_needed(tmp_path: Path) -> None:
-    backend = FakeBackend()
-    package = resolve_evaluator_package(
-        EvaluatorPackageRequirement(
-            name="vibesys-evaluator-request-factory",
-            version="0.1.0",
-        )
-    )
-    request = _request(tmp_path, backend, evaluator_package_root=package.root)
-
-    assert "rust" in _docker_agent_toolchains(request, _evaluator_tools(request))
-    assert _docker_agent_toolchains(_request(tmp_path, backend), {}) == frozenset()
 
 
 def test_docker_environment_copies_cli_auth_from_readonly_staging(
@@ -2153,13 +2043,6 @@ def test_effective_objective_must_match_a_document_inside_the_workspace(tmp_path
     assert _materialize_effective_objective(request) == inside.resolve()
 
 
-def test_environment_command_rejects_unbalanced_quotes(tmp_path: Path) -> None:
-    request = _request(tmp_path, FakeBackend())
-
-    with pytest.raises(ValueError, match="invalid evaluator command"):
-        _environment_command(request, "python 'unterminated")
-
-
 def test_remote_push_failure_names_the_backend_and_image() -> None:
     failing_push = MagicMock(side_effect=ImagePushError("registry refused"))
 
@@ -2182,7 +2065,7 @@ def _tool_request(tmp_path: Path, **overrides: object) -> tuple[RunEnvironmentRe
         evaluator_package_root=package.root,
         **{"evaluator_tools_root": tmp_path / "operator-tools", **overrides},
     )
-    return request, package.metadata.tools
+    return request, _evaluator_requirements(request)
 
 
 def test_docker_tool_mounts_need_a_backend_image_and_a_tools_root(tmp_path: Path) -> None:

@@ -50,7 +50,6 @@ from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResourceAccess
-from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 from vs_sandbox.api.testing import FakeComputeBackend
 
 
@@ -286,19 +285,11 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         )
     )
 
-    def install_command(tools: dict[str, CargoGitToolSpec], root: Path) -> str:
-        root.mkdir(parents=True, exist_ok=True)
-        for name, spec in tools.items():
-            tool_install_root(root, name, spec).mkdir(parents=True)
-        return "true"
+    tools_root = Project.open(project).state.model_cache_directory("evaluator-tools")
+    for name, spec in package.metadata.tools.items():
+        tool_install_root(tools_root, name, spec).mkdir(parents=True)
 
-    with (
-        patch(
-            "vibesys.sandbox.run_environment.evaluator_tools_install_command",
-            side_effect=install_command,
-        ),
-        _create_context(project, evaluator_package_root=package.root) as ctx,
-    ):
+    with _create_context(project, evaluator_package_root=package.root) as ctx:
         tools_root = ctx.project.state.model_cache_directory("evaluator-tools")
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
         expected_tool_roots = tuple(

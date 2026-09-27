@@ -11,6 +11,9 @@ if TYPE_CHECKING:
 
 _SHELL_COMMAND_ARG_COUNT = 3
 
+PROJECT_ROOT_TOKEN = "${PROJECT_ROOT}"  # noqa: S105  # lint-waiver: LW-007087 [S105]; evaluator argv placeholder, not a credential.
+PYTHON_TOKEN = "${PYTHON}"  # noqa: S105  # lint-waiver: LW-007088 [S105]; evaluator argv placeholder, not a credential.
+
 
 def translate_command_arguments(
     arguments: Sequence[str],

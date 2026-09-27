@@ -25,7 +25,6 @@ container or remote process lifetime at the command layer.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shlex
@@ -41,11 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vibesys.constants import PROJECT_ROOT
-from vibesys.evaluators import (
-    PROJECT_ROOT_TOKEN,
-    PYTHON_TOKEN,
-    load_evaluator_package,
-)
+from vibesys.evaluators import load_evaluator_package
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_agent.api import (
@@ -58,6 +53,19 @@ from vs_agent.api import (
     auth_paths,
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
+from vs_runtime.api.infrastructure import (
+    REMOTE_EVALUATOR_TOOLS_ROOT,
+    SANDBOX_EVALUATOR_TOOLS_ROOT,
+    TrustedEvaluationCommandPaths,
+    TrustedEvaluationPlan,
+    TrustedEvaluatorRequirements,
+    docker_evaluator_tools_root,
+    evaluator_agent_toolchains,
+    evaluator_container_setup,
+    prepare_trusted_evaluation_plan,
+    remote_evaluator_setup_command,
+    required_evaluator_tools_root,
+)
 from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
@@ -69,7 +77,6 @@ from vs_sandbox.api import (
     start_sandbox,
     stop_sandbox,
 )
-from vs_sandbox.api.command_translation import translate_command_arguments
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
     remove_docker_workspace_child,
@@ -77,13 +84,10 @@ from vs_sandbox.api.docker_workspace import (
 )
 from vs_sandbox.api.evaluator_helpers import encode_setup_command
 from vs_sandbox.api.evaluator_tools import (
-    CargoGitToolSpec,
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
-    evaluator_tools_install_command,
     prepare_evaluator_tools,
     tool_install_root,
-    tool_path_replacements,
 )
 from vs_sandbox.api.skypilot import (
     SkyPilotBridge,
@@ -115,27 +119,6 @@ declares for the materialized objective document. Every environment's
 :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` for that document's
 container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
-_SANDBOX_EVALUATOR_TOOLS_ROOT = Path("/opt/vibesys-evaluator-tools")
-_REMOTE_EVALUATOR_TOOLS_ROOT = Path(".vibesys-evaluator-tools")
-_REMOTE_EVALUATOR_TOOLCHAINS_ROOT = Path(".vibesys-evaluator-toolchains")
-_EVALUATOR_RUST_TOOLCHAIN_VERSION = "1.92.0"
-_DOCKER_EVALUATOR_CACHE_SCHEMA = 2
-_PYTHON_DOWNLOAD_SCRIPT = """\
-import sys
-import time
-import urllib.request
-
-url = sys.argv[1].format(arch=sys.argv[3])
-for attempt in range(5):
-    try:
-        urllib.request.urlretrieve(url, sys.argv[2])
-        break
-    except Exception:
-        if attempt == 4:
-            raise
-        time.sleep(5)
-"""
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -166,19 +149,6 @@ class AgentPaths:
     accuracy_command: str | None = None
     benchmark_command: str | None = None
     profiler_support: str | None = None
-
-
-@dataclass(frozen=True)
-class _CommandPathOptions:
-    """Path translation choices for one evaluator command."""
-
-    isolated: bool = False
-    evaluator_package_root: str | None = None
-    evaluator_tools_root: Path | None = None
-    agent_path: Callable[[Path | str], str] | None = None
-
-
-_DEFAULT_COMMAND_PATH_OPTIONS = _CommandPathOptions()
 
 
 @dataclass(frozen=True)
@@ -332,13 +302,14 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         """Create a host-local sandbox and its agent path view."""
         objective_document = _materialize_effective_objective(request)
-        tools = _evaluator_tools(request)
+        requirements = _evaluator_requirements(request)
+        tools = requirements.tools
         lifecycle_hooks: list[SandboxLifecycleHooks] = []
         if tools:
             lifecycle_hooks.append(
                 EvaluatorToolLifecycleHooks(
                     tools,
-                    _required_evaluator_tools_root(request),
+                    required_evaluator_tools_root(requirements, request.workspace),
                 )
             )
         sandbox = request.backend.make_sandbox(
@@ -350,6 +321,20 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
             extra_init_commands=[],
             lifecycle_hooks=lifecycle_hooks,
         )
+        evaluation = _prepare_evaluation_plan(
+            request,
+            requirements,
+            TrustedEvaluationCommandPaths(
+                source_project_root=request.workspace,
+                runtime_project_root=str(request.workspace),
+                python_executable=sys.executable,
+                runtime_package_root=(
+                    str(requirements.package_root)
+                    if requirements.package_root is not None
+                    else None
+                ),
+            ),
+        )
         return SandboxSession.borrowed(
             sandbox=sandbox,
             view=RunEnvironmentView(
@@ -359,8 +344,8 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
                         if objective_document is not None
                         else "OBJECTIVE.md"
                     ),
-                    accuracy_command=_environment_command(request, request.accuracy_command),
-                    benchmark_command=_environment_command(request, request.benchmark_command),
+                    accuracy_command=evaluation.accuracy_command,
+                    benchmark_command=evaluation.benchmark_command,
                     profiler_support=request.profiler_support_path,
                 ),
             ),
@@ -396,17 +381,21 @@ class DockerEnvironment:
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
         image_helpers = import_module("vs_agent.api.images")
-        tools = _evaluator_tools(request)
+        requirements = _evaluator_requirements(request)
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
         # agent layer is applied on top of it.
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
-            toolchains=_docker_agent_toolchains(request, tools),
+            toolchains=evaluator_agent_toolchains(requirements),
         )
         resources, docker_symlinks = _container_mount_plan(request)
         resources = resources + _resources_for_mounts(
-            _docker_evaluator_tool_mounts(request, tools, container_image=container_image),
+            _docker_evaluator_tool_mounts(
+                request,
+                requirements,
+                container_image=container_image,
+            ),
             purpose="evaluator tool",
         )
         resolved_cli = _cli_container_env(request)
@@ -449,7 +438,7 @@ class DockerEnvironment:
                 paths=_isolated_paths(
                     request,
                     cast("_AgentPathSandbox", sandbox),
-                    evaluator_tools_root=_SANDBOX_EVALUATOR_TOOLS_ROOT,
+                    evaluator_tools_root=SANDBOX_EVALUATOR_TOOLS_ROOT,
                 ),
                 prompt_notes=render_template(
                     "docker/prompt_notes.j2",
@@ -597,14 +586,28 @@ class SkyPilotEnvironment(DockerEnvironment):
         profiles = load_cluster_profiles(self.config.profiles_file)
         cluster_resources = resolve_profile(profiles, self.config.profile, self.config.resources)
         cluster_name = stable_cluster_name(request.run_id, cluster_resources)
+        requirements = _evaluator_requirements(request)
+        evaluation = _prepare_evaluation_plan(
+            request,
+            requirements,
+            TrustedEvaluationCommandPaths(
+                source_project_root=request.workspace,
+                runtime_project_root=".",
+                python_executable="python3",
+                runtime_package_root=(
+                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
+                ),
+                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+            ),
+        )
         commands: dict[str, tuple[str, ...]] = {}
-        for kind, raw_command in (
-            ("accuracy", request.accuracy_command),
-            ("benchmark", request.benchmark_command),
+        for kind, command_text in (
+            ("accuracy", evaluation.accuracy_command),
+            ("benchmark", evaluation.benchmark_command),
         ):
-            command = _remote_evaluator_command(request, raw_command)
+            command = shlex.split(command_text) if command_text is not None else None
             if command is not None:
-                commands[kind] = command
+                commands[kind] = tuple(command)
 
         log = request.log or _noop_log
         bridge = SkyPilotBridge(
@@ -615,7 +618,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             evaluator_package_root=request.evaluator_package_root,
             hidden_paths=request.project_path_policy.hidden_paths,
             commands=commands,
-            framework_setup_command=_remote_evaluator_setup_command(request),
+            framework_setup_command=remote_evaluator_setup_command(requirements),
             benchmark_output_argument=request.benchmark_output_argument,
             state_namespace=request.state_namespace,
             socket_path=request.log_dir / "skypilot-bridge.sock",
@@ -626,10 +629,9 @@ class SkyPilotEnvironment(DockerEnvironment):
 
             image_helpers = import_module("vs_agent.api.images")
 
-            tools = _evaluator_tools(request)
             container_image = image_helpers.agent_image(
                 _docker_backend_image(request),
-                toolchains=_docker_agent_toolchains(request, tools),
+                toolchains=evaluator_agent_toolchains(requirements),
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
@@ -788,10 +790,10 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
         image_helpers = import_module("vs_agent.api.images")
 
-        tools = _evaluator_tools(request)
+        requirements = _evaluator_requirements(request)
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
-            toolchains=_docker_agent_toolchains(request, tools),
+            toolchains=evaluator_agent_toolchains(requirements),
             pip_extras=_MODAL_EDITOR_PIP_EXTRAS,
         )
         container_image = _ensure_pushed_for_remote_backend(
@@ -873,7 +875,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         if self.config.entrypoint is not None:
             evaluator_arguments.extend(("--entrypoint", self.config.entrypoint))
         evaluator_arguments.extend(("--readiness-timeout-seconds", str(setup_timeout_seconds)))
-        remote_setup = _remote_evaluator_setup_command(request, preserve_bootstrap=True)
+        remote_setup = remote_evaluator_setup_command(requirements, preserve_bootstrap=True)
         if remote_setup is not None:
             evaluator_arguments.extend(
                 ("--setup-command-base64", encode_setup_command(("sh", "-c", remote_setup)))
@@ -885,6 +887,19 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         evaluator_prefix = f"{shlex.join(evaluator_arguments)} --"
         agent_path_sandbox = cast("_AgentPathSandbox", sandbox)
         objective_document = _materialize_effective_objective(request)
+        evaluation = _prepare_evaluation_plan(
+            request,
+            requirements,
+            TrustedEvaluationCommandPaths(
+                source_project_root=request.workspace,
+                runtime_project_root="/workspace",
+                python_executable="python3",
+                runtime_package_root=(
+                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
+                ),
+                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+            ),
+        )
         return SandboxSession.start(
             sandbox=sandbox,
             view=RunEnvironmentView(
@@ -896,27 +911,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                     ),
                     accuracy_command=_prefix_command(
                         evaluator_prefix,
-                        _environment_command(
-                            request,
-                            request.accuracy_command,
-                            paths=_CommandPathOptions(
-                                isolated=True,
-                                evaluator_package_root=".vibesys-evaluator-package",
-                                evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
-                            ),
-                        ),
+                        evaluation.accuracy_command,
                     ),
                     benchmark_command=_prefix_command(
                         evaluator_prefix,
-                        _environment_command(
-                            request,
-                            request.benchmark_command,
-                            paths=_CommandPathOptions(
-                                isolated=True,
-                                evaluator_package_root=".vibesys-evaluator-package",
-                                evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
-                            ),
-                        ),
+                        evaluation.benchmark_command,
                     ),
                     profiler_support=(
                         request.profiler_support_name if request.profiler_support_path else None
@@ -1166,30 +1165,30 @@ def _isolated_paths(
     built from the same resource list :func:`_container_mount_plan` declared.
     """
     objective_document = _materialize_effective_objective(request)
+    requirements = _evaluator_requirements(request)
+    evaluation = _prepare_evaluation_plan(
+        request,
+        requirements,
+        TrustedEvaluationCommandPaths(
+            source_project_root=request.workspace,
+            runtime_project_root="/workspace",
+            python_executable="python3",
+            runtime_package_root=(
+                sandbox.agent_path(requirements.package_root)
+                if requirements.package_root is not None
+                else None
+            ),
+            runtime_tools_root=evaluator_tools_root,
+        ),
+    )
     return AgentPaths(
         objective=(
             sandbox.agent_path(objective_document)
             if objective_document is not None
             else "OBJECTIVE.md"
         ),
-        accuracy_command=_environment_command(
-            request,
-            request.accuracy_command,
-            paths=_CommandPathOptions(
-                isolated=True,
-                evaluator_tools_root=evaluator_tools_root,
-                agent_path=sandbox.agent_path,
-            ),
-        ),
-        benchmark_command=_environment_command(
-            request,
-            request.benchmark_command,
-            paths=_CommandPathOptions(
-                isolated=True,
-                evaluator_tools_root=evaluator_tools_root,
-                agent_path=sandbox.agent_path,
-            ),
-        ),
+        accuracy_command=evaluation.accuracy_command,
+        benchmark_command=evaluation.benchmark_command,
         profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
     )
 
@@ -1204,67 +1203,33 @@ def _noop_log(message: str) -> None:
     del message
 
 
-def _environment_command(
-    request: RunEnvironmentRequest,
-    command: str | None,
-    *,
-    paths: _CommandPathOptions = _DEFAULT_COMMAND_PATH_OPTIONS,
-) -> str | None:
-    """Translate semantic paths in argv, then quote the translated command.
-
-    ``agent_path`` maps evaluator paths through the started sandbox when the
-    caller does not pass an explicit ``evaluator_package_root`` override.
-    Callers without a sandbox, including remote dispatch wrappers, pass an
-    explicit override instead.
-    """
-    if command is None:
-        return None
-    try:
-        arguments = shlex.split(command)
-    except ValueError as exc:
-        message = f"invalid evaluator command: {exc}"
-        raise ValueError(message) from exc
-    replacements = [
-        (PROJECT_ROOT_TOKEN, "/workspace" if paths.isolated else str(request.workspace)),
-        (PYTHON_TOKEN, "python3" if paths.isolated else sys.executable),
-    ]
-    if request.evaluator_package_root is not None:
-        if paths.evaluator_package_root is not None:
-            translated_root = paths.evaluator_package_root
-        elif paths.agent_path is not None:
-            translated_root = paths.agent_path(request.evaluator_package_root)
-        elif paths.isolated:
-            translated_root = "/opt/vibesys-evaluator-package"
-        else:
-            translated_root = str(request.evaluator_package_root)
-        replacements.append((str(request.evaluator_package_root), translated_root))
-    tools = _evaluator_tools(request)
-    if tools:
-        tools_root = paths.evaluator_tools_root or _required_evaluator_tools_root(request)
-        replacements.extend(tool_path_replacements(tools, tools_root).items())
-    return shlex.join(translate_command_arguments(arguments, replacements))
-
-
-def _remote_evaluator_command(
-    request: RunEnvironmentRequest, command: str | None
-) -> tuple[str, ...] | None:
-    """Translate a trusted command into the synchronized remote workdir."""
-    rendered = _environment_command(
-        request,
-        command,
-        paths=_CommandPathOptions(
-            isolated=True,
-            evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
-        ),
+def _evaluator_requirements(request: RunEnvironmentRequest) -> TrustedEvaluatorRequirements:
+    """Lower VibeSys package metadata into runtime-owned preparation inputs."""
+    if request.evaluator_package_root is None:
+        return TrustedEvaluatorRequirements(tools_root=request.evaluator_tools_root)
+    package = load_evaluator_package(request.evaluator_package_root)
+    return TrustedEvaluatorRequirements(
+        package_root=package.root,
+        toolchains=frozenset(package.metadata.toolchains),
+        tools=package.metadata.tools,
+        tools_root=request.evaluator_tools_root,
     )
-    if rendered is None:
-        return None
-    arguments = shlex.split(rendered)
-    replacements = [
-        ("/opt/vibesys-evaluator-package", ".vibesys-evaluator-package"),
-        ("/workspace", "."),
-    ]
-    return translate_command_arguments(arguments, replacements)
+
+
+def _prepare_evaluation_plan(
+    request: RunEnvironmentRequest,
+    requirements: TrustedEvaluatorRequirements,
+    paths: TrustedEvaluationCommandPaths,
+) -> TrustedEvaluationPlan:
+    """Bind authored commands to one environment through the runtime contract."""
+    return prepare_trusted_evaluation_plan(
+        TrustedEvaluationPlan(
+            accuracy_command=request.accuracy_command,
+            benchmark_command=request.benchmark_command,
+        ),
+        requirements,
+        paths,
+    )
 
 
 def _resource_for_mount(
@@ -1541,136 +1506,26 @@ def _ensure_pushed_for_remote_backend(
         raise image_push_error.run_environment_push_failed(image_id, backend_label, exc) from exc
 
 
-def _evaluator_container_setup(
-    request: RunEnvironmentRequest,
-    *,
-    include_declared_tools: bool = True,
-    rootless: bool = False,
-) -> list[str]:
-    """Install the toolchain required by bundled evaluator packages."""
-    if request.evaluator_package_root is None:
-        return []
-    toolchains = set(load_evaluator_package(request.evaluator_package_root).metadata.toolchains)
-    if include_declared_tools and _evaluator_tools(request):
-        toolchains.add("rust")
-    if not toolchains:
-        return []
-    commands = (
-        [
-            "command -v python3 >/dev/null && command -v tar >/dev/null || "
-            "{ echo 'evaluator setup requires Python 3 and tar in this remote environment' "
-            ">&2; exit 1; }",
-            f"mkdir -p .bin {shlex.quote(str(_REMOTE_EVALUATOR_TOOLCHAINS_ROOT))}",
-            'PATH="$PWD/.bin:$PATH"; export PATH',
-        ]
-        if rootless
-        else [
-            "command -v python3 >/dev/null && command -v tar >/dev/null || "
-            "{ apt-get update -qq && apt-get install -y -qq python3 ca-certificates tar; }",
-        ]
-    )
-    if "go" in toolchains:
-        go_destination = (
-            f"$PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/go" if rootless else "/usr/local/go"
-        )
-        go_link = "$PWD/.bin/go" if rootless else "/usr/local/bin/go"
-        go_archive = (
-            f"{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/go.tgz" if rootless else "/tmp/vibesys-go.tgz"  # noqa: S108  # lint-waiver: LW-009095 [S108]; fixed scratch file is private to the isolated setup container and immediately removed.
-        )
-        go_download = _python_download_command(
-            "https://go.dev/dl/go1.23.12.linux-{arch}.tar.gz",
-            go_archive,
-            architecture_variable="go_arch",
-        )
-        commands.append(
-            "go_version=$(go env GOVERSION 2>/dev/null || true); "
-            'case "$go_version" in go1.2[1-9]*|go1.[3-9][0-9]*) ;; *) '
-            'arch=$(uname -m); case "$arch" in x86_64) go_arch=amd64 ;; '
-            "aarch64|arm64) go_arch=arm64 ;; *) "
-            'echo "unsupported Go architecture: $arch" >&2; exit 1 ;; esac; '
-            f"{go_download} || "
-            "{ echo 'failed to download evaluator Go toolchain' >&2; exit 1; }; "
-            f"rm -rf {go_destination} && mkdir -p $(dirname {go_destination}) && "
-            f"tar -C $(dirname {go_destination}) -xzf {go_archive} && "
-            f"ln -sf {go_destination}/bin/go {go_link} && rm -f {go_archive} || "
-            "{ echo 'failed to install evaluator Go toolchain' >&2; exit 1; } ;; esac"
-        )
-        commands.append("GOWORK=off; export GOWORK")
-    if "rust" in toolchains:
-        rustup_environment = (
-            f"RUSTUP_HOME=$PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/rustup "
-            f"CARGO_HOME=$PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/cargo "
-            if rootless
-            else ""
-        )
-        cargo_link = (
-            f"ln -sf $PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/cargo/bin/* $PWD/.bin/"
-            if rootless
-            else "ln -sf /root/.cargo/bin/* /usr/local/bin/"
-        )
-        rustup_init = (
-            f"{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/rustup-init"
-            if rootless
-            else "/tmp/vibesys-rustup-init"  # noqa: S108  # lint-waiver: LW-009096 [S108]; fixed scratch file is private to the isolated setup container and immediately removed.
-        )
-        rustup_download = _python_download_command(
-            "https://static.rust-lang.org/rustup/dist/{arch}-unknown-linux-gnu/rustup-init",
-            rustup_init,
-            architecture_variable="rust_arch",
-        )
-        commands.append(
-            "rust_version=$(rustc --version 2>/dev/null | awk '{print $2}' || true); "
-            "cargo_version=$(cargo --version 2>/dev/null | awk '{print $2}' || true); "
-            'rust_ready=; case "$rust_version" in '
-            "1.7[89].*|1.[89][0-9].*|1.[1-9][0-9][0-9].*) "
-            'case "$cargo_version" in ?*) rust_ready=1 ;; esac ;; esac; '
-            'if [ "$rust_ready" != 1 ]; then '
-            'arch=$(uname -m); case "$arch" in x86_64) rust_arch=x86_64 ;; '
-            "aarch64|arm64) rust_arch=aarch64 ;; *) "
-            'echo "unsupported Rust architecture: $arch" >&2; exit 1 ;; esac; '
-            f"{rustup_download} || "
-            "{ echo 'failed to download evaluator Rust toolchain' >&2; exit 1; }; "
-            f"chmod +x {rustup_init} && {rustup_environment}{rustup_init} "
-            "-y --profile minimal --no-modify-path "
-            f"--default-toolchain {_EVALUATOR_RUST_TOOLCHAIN_VERSION} && "
-            f"{cargo_link} && rm -f {rustup_init} || "
-            "{ echo 'failed to install evaluator Rust toolchain' >&2; exit 1; }; fi"
-        )
-        if rootless:
-            commands.append(
-                f"if [ -d $PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/cargo ]; then "
-                f"RUSTUP_HOME=$PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/rustup; "
-                f"CARGO_HOME=$PWD/{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/cargo; "
-                "export RUSTUP_HOME CARGO_HOME; fi"
-            )
-    return commands
-
-
-def _python_download_command(
-    url_template: str,
-    destination: str,
-    *,
-    architecture_variable: str,
-) -> str:
-    command = shlex.join(("python3", "-c", _PYTHON_DOWNLOAD_SCRIPT, url_template, destination))
-    return f'{command} "${{{architecture_variable}}}"'
-
-
 class _EvaluatorToolBuildRequiredError(RuntimeError):
     pass
 
 
 def _docker_evaluator_tool_mounts(
     request: RunEnvironmentRequest,
-    tools: Mapping[str, CargoGitToolSpec],
+    requirements: TrustedEvaluatorRequirements,
     *,
     container_image: str | None = None,
 ) -> list[tuple[str, str, bool]]:
     """Build tools in the target image, then mount verified roots read-only."""
+    tools = requirements.tools
     if not tools:
         return []
     resolved_image = container_image or _resolve_docker_image_id(_docker_backend_image(request))
-    host_parent = _docker_evaluator_tools_root(request, image_identity=resolved_image)
+    host_parent = docker_evaluator_tools_root(
+        requirements,
+        request.workspace,
+        image_identity=resolved_image,
+    )
 
     def require_builder(_arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         raise _EvaluatorToolBuildRequiredError
@@ -1683,17 +1538,17 @@ def _docker_evaluator_tool_mounts(
         builder_workspace = request.log_dir / "evaluator-tool-builder-workspace"
         builder_workspace.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=".host-owner-", dir=host_parent) as marker:
-            container_marker = str(_SANDBOX_EVALUATOR_TOOLS_ROOT / Path(marker.name).name)
+            container_marker = str(SANDBOX_EVALUATOR_TOOLS_ROOT / Path(marker.name).name)
             builder = request.backend.make_sandbox(
                 SandboxKind.DOCKER,
                 host_workspace=str(builder_workspace),
                 log_path=request.log_dir / "evaluator-tool-builder.log",
                 bind_mounts=[
-                    (str(host_parent), str(_SANDBOX_EVALUATOR_TOOLS_ROOT), False),
+                    (str(host_parent), str(SANDBOX_EVALUATOR_TOOLS_ROOT), False),
                 ],
                 extra_env={},
-                extra_init_commands=_evaluator_container_setup(request),
-                lifecycle_hooks=[EvaluatorToolLifecycleHooks(tools, _SANDBOX_EVALUATOR_TOOLS_ROOT)],
+                extra_init_commands=evaluator_container_setup(requirements),
+                lifecycle_hooks=[EvaluatorToolLifecycleHooks(tools, SANDBOX_EVALUATOR_TOOLS_ROOT)],
                 attach_accelerator=False,
                 ephemeral=True,
                 container_image=resolved_image,
@@ -1701,7 +1556,7 @@ def _docker_evaluator_tool_mounts(
             try:
                 start_sandbox(builder)
                 container_roots = [
-                    str(tool_install_root(_SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec))
+                    str(tool_install_root(SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec))
                     for name, spec in tools.items()
                 ]
                 ownership_script = (
@@ -1733,24 +1588,11 @@ def _docker_evaluator_tool_mounts(
     return [
         (
             str(tool_install_root(host_parent, name, spec)),
-            str(tool_install_root(_SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec)),
+            str(tool_install_root(SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec)),
             True,
         )
         for name, spec in tools.items()
     ]
-
-
-def _docker_evaluator_tools_root(
-    request: RunEnvironmentRequest,
-    *,
-    image_identity: str,
-) -> Path:
-    base = _required_evaluator_tools_root(request)
-    identity = (
-        f"{_DOCKER_EVALUATOR_CACHE_SCHEMA}\0{image_identity}\0{os.uname().machine}\0"
-        f"{_EVALUATOR_RUST_TOOLCHAIN_VERSION}"
-    ).encode()
-    return base / "docker" / hashlib.sha256(identity).hexdigest()
 
 
 def _docker_backend_image(request: RunEnvironmentRequest) -> str:
@@ -1809,65 +1651,3 @@ def _resolve_docker_image_id(image: str) -> str:
     if identity := _inspect_docker_image_id(image):
         return identity
     raise EvaluatorToolError.docker_image_id_missing(image)
-
-
-def _remote_evaluator_setup_command(
-    request: RunEnvironmentRequest,
-    *,
-    preserve_bootstrap: bool = False,
-) -> str | None:
-    """Build idempotent setup for the environment that runs the evaluator."""
-    commands = _evaluator_container_setup(request, rootless=True)
-    tools = _evaluator_tools(request)
-    if tools:
-        commands.append(evaluator_tools_install_command(tools, _REMOTE_EVALUATOR_TOOLS_ROOT))
-    if not commands:
-        return None
-    reserved_paths = [
-        str(_REMOTE_EVALUATOR_TOOLS_ROOT),
-        str(_REMOTE_EVALUATOR_TOOLCHAINS_ROOT),
-    ]
-    if not preserve_bootstrap:
-        reserved_paths[:0] = [".bin", ".pip", ".uv-cache"]
-    reserved = shlex.join(("rm", "-rf", "--", *reserved_paths))
-    return "set -e\n" + "\n".join((reserved, *commands))
-
-
-def _evaluator_tools(request: RunEnvironmentRequest) -> dict[str, CargoGitToolSpec]:
-    if request.evaluator_package_root is None:
-        return {}
-    return load_evaluator_package(request.evaluator_package_root).metadata.tools
-
-
-def _docker_agent_toolchains(
-    request: RunEnvironmentRequest,
-    tools: Mapping[str, CargoGitToolSpec],
-) -> frozenset[str]:
-    """Return the toolchains the agent image should bake in for this run.
-
-    Mirrors what :func:`_evaluator_container_setup` installs per-run today:
-    the evaluator package's declared toolchains, plus ``"rust"`` when the run
-    also needs cargo-git evaluator tools. *tools* is the caller's own
-    :func:`_evaluator_tools` result, passed in rather than recomputed.
-    """
-    toolchains: set[str] = set()
-    if request.evaluator_package_root is not None:
-        toolchains |= set(
-            load_evaluator_package(request.evaluator_package_root).metadata.toolchains
-        )
-    if tools:
-        toolchains.add("rust")
-    return frozenset(toolchains)
-
-
-def _required_evaluator_tools_root(request: RunEnvironmentRequest) -> Path:
-    if request.evaluator_tools_root is None:
-        message = "evaluator tools require an operator-owned tools root"
-        raise ValueError(message)
-    root = request.evaluator_tools_root.resolve()
-    try:
-        root.relative_to(request.workspace.resolve())
-    except ValueError:
-        return root
-    message = "evaluator tools root must be outside the candidate workspace"
-    raise ValueError(message)
