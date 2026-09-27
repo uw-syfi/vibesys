@@ -11,22 +11,26 @@ import pytest
 
 from entrypoints.cli import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
-from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import (
     PLATFORM_SKELETON,
     SkillMetadataError,
-    _is_in_hidden_dir,
-    build_skill_catalog,
     coerce_skill_root,
     discover_sidecar_rules,
-    discover_skill_dirs,
     effective_skill_metadata,
     load_sidecar_rules,
-    load_skill_frontmatter,
-    resolve_skill_selections,
     resolve_skill_source_dirs,
     validate_platform_layout,
     validate_skill_tree,
+)
+from vs_runtime.api import SkillResourceRequest
+from vs_runtime.api.infrastructure import (
+    SkillMetadataError as RuntimeSkillMetadataError,
+)
+from vs_runtime.api.infrastructure import (
+    build_skill_catalog,
+    discover_skill_dirs,
+    load_skill_frontmatter,
+    resolve_skill_resources,
 )
 
 if TYPE_CHECKING:
@@ -294,10 +298,6 @@ def test_discovery_ignores_hidden_skill_directories(tmp_path: Path) -> None:
     ) == [str(visible)]
 
 
-def test_hidden_dir_check_treats_external_paths_as_visible(tmp_path: Path) -> None:
-    assert not _is_in_hidden_dir(tmp_path / "other" / ".hidden" / "SKILL.md", tmp_path / "skills")
-
-
 @pytest.mark.parametrize(
     ("content", "message"),
     [
@@ -336,7 +336,7 @@ def test_missing_skill_frontmatter_is_invalid(tmp_path: Path) -> None:
     skill_dir.mkdir()
     skill_dir.joinpath("SKILL.md").write_text("# bad\n", encoding="utf-8")
 
-    with pytest.raises(SkillMetadataError, match="missing opening YAML frontmatter"):
+    with pytest.raises(RuntimeSkillMetadataError, match="missing opening YAML frontmatter"):
         load_skill_frontmatter(skill_dir)
 
 
@@ -526,23 +526,24 @@ def test_skill_selection_resolves_zero_to_many_resources_with_stable_deduplicati
     scripts.joinpath("probe.sh").write_text("#!/bin/sh\n")
 
     catalog = build_skill_catalog([root])
-    resolved, diagnostics = resolve_skill_selections(
-        [
-            SkillResourceSelection(
-                skill="portable",
-                resource_paths=["references/design.md", "references/design.md"],
+    result = resolve_skill_resources(
+        (
+            SkillResourceRequest(
+                name="portable",
+                resource_paths=("references/design.md", "references/design.md"),
                 purpose="Design the change.",
             ),
-            SkillResourceSelection(
-                skill="portable",
-                resource_paths=["scripts/probe.sh", "SKILL.md"],
+            SkillResourceRequest(
+                name="portable",
+                resource_paths=("scripts/probe.sh", "SKILL.md"),
                 purpose="Run the probe.",
             ),
-        ],
+        ),
         catalog,
     )
 
-    assert diagnostics == []
+    assert result.diagnostics == ()
+    resolved = result.resolved
     assert len(resolved) == 1
     assert resolved[0].router_path == "portable/SKILL.md"
     assert resolved[0].resource_paths == (
@@ -550,7 +551,7 @@ def test_skill_selection_resolves_zero_to_many_resources_with_stable_deduplicati
         "portable/scripts/probe.sh",
     )
     assert resolved[0].purpose == "Design the change."
-    assert resolve_skill_selections([], catalog) == ([], [])
+    assert resolve_skill_resources((), catalog).resolved == ()
 
 
 def test_skill_selection_omits_unknown_skills_and_unsafe_resources(tmp_path: Path) -> None:
@@ -563,15 +564,15 @@ def test_skill_selection_omits_unknown_skills_and_unsafe_resources(tmp_path: Pat
     (skill / "repos" / "hidden.md").write_text("hidden\n")
 
     catalog = build_skill_catalog([root])
-    resolved, diagnostics = resolve_skill_selections(
-        [
-            SkillResourceSelection(
-                skill="missing",
+    result = resolve_skill_resources(
+        (
+            SkillResourceRequest(
+                name="missing",
                 purpose="Not installed.",
             ),
-            SkillResourceSelection(
-                skill="portable",
-                resource_paths=[
+            SkillResourceRequest(
+                name="portable",
+                resource_paths=(
                     "references/valid.md",
                     "../outside.md",
                     "/absolute.md",
@@ -579,13 +580,15 @@ def test_skill_selection_omits_unknown_skills_and_unsafe_resources(tmp_path: Pat
                     "references/missing.md",
                     "repos/hidden.md",
                     "references\\valid.md",
-                ],
+                ),
                 purpose="Keep valid siblings.",
             ),
-        ],
+        ),
         catalog,
     )
 
+    resolved = result.resolved
+    diagnostics = result.diagnostics
     assert len(resolved) == 1
     assert resolved[0].resource_paths == ("portable/references/valid.md",)
     assert len(diagnostics) == 7
@@ -606,17 +609,19 @@ def test_skill_selection_rejects_symlink_escape(tmp_path: Path) -> None:
     outside.write_text("outside\n")
     references.joinpath("escape.md").symlink_to(outside)
 
-    resolved, diagnostics = resolve_skill_selections(
-        [
-            SkillResourceSelection(
-                skill="portable",
-                resource_paths=["references/escape.md"],
+    result = resolve_skill_resources(
+        (
+            SkillResourceRequest(
+                name="portable",
+                resource_paths=("references/escape.md",),
                 purpose="Attempt escape.",
-            )
-        ],
+            ),
+        ),
         build_skill_catalog([root]),
     )
 
+    resolved = result.resolved
+    diagnostics = result.diagnostics
     assert len(resolved) == 1
     assert resolved[0].resource_paths == ()
     assert len(diagnostics) == 1
@@ -639,5 +644,5 @@ def test_skill_catalog_rejects_frontmatter_name_that_cannot_be_materialized(tmp_
         encoding="utf-8",
     )
 
-    with pytest.raises(SkillMetadataError, match="must match directory name"):
+    with pytest.raises(RuntimeSkillMetadataError, match="must match directory name"):
         build_skill_catalog([skill])
