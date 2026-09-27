@@ -8,6 +8,7 @@ from vibesys.orchestration.multi.contracts import (
     JudgeResponse,
     PreRoundDecision,
 )
+from vibesys.plugin_catalog import stub_response_factory
 from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentSessionKey, SessionScope
@@ -17,7 +18,9 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def test_stub_runner_returns_valid_agent_loop_responses(tmp_path: Path) -> None:
-    runner = StubAgentClient()
+    responses = stub_response_factory("multi-agent")
+    assert responses is not None
+    runner = StubAgentClient(response_factory=responses)
 
     pre_round = invoke(runner, tmp_path, "orchestrator", PreRoundDecision)
     plan = invoke(runner, tmp_path, "orchestrator", OrchestratorPlan)

@@ -1,7 +1,7 @@
 """Unit tests for :class:`~vs_agent.fake_client.FakeAgentClient`.
 
 Each test exercises one capability described in the fake's docstring/spec:
-zero-config scripted returns, the enqueue/constant/fallback resolution order,
+zero-config fallback, the enqueue/constant/fallback resolution order,
 callable and dict responses, failures, attribution and model overrides, call
 recording, streamed output, ``on_invoke`` side effects, session reuse, and
 ``invoke_text``'s parallel behavior.
@@ -165,7 +165,7 @@ def test_zero_config_invoke_falls_back_to_fallback_factory_for_unscripted_model(
     assert response == _Response(verdict="fallback")
 
 
-def test_zero_config_invoke_returns_scripted_payload_for_known_response_model() -> None:
+def test_zero_config_does_not_infer_policy_from_the_response_model_name() -> None:
     client = FakeAgentClient()
 
     class JudgeResponse(BaseModel):
@@ -183,7 +183,7 @@ def test_zero_config_invoke_returns_scripted_payload_for_known_response_model() 
         round_label="round 2",
     )
 
-    assert response.verdict == "pass"
+    assert response.verdict == "fail"
 
 
 def test_enqueue_pops_responses_in_order_then_falls_back_to_constant() -> None:

@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
 from vs_agent.contracts import AgentCapabilities
-from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from vs_agent.progress import AgentProgress
@@ -21,14 +21,27 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
+def _round_number_from_label(round_label: str | None) -> int:
+    match = re.search(r"(\d+)", round_label or "")
+    return int(match.group(1)) if match else 1
+
+
 class StubAgentClient:
     """Return valid canned responses without invoking an external agent."""
 
     backend_name = "stub"
 
-    def __init__(self, *, event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK) -> None:
+    def __init__(
+        self,
+        *,
+        event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        response_factory: (
+            Callable[[type[BaseModel], int], BaseModel | Mapping[str, object] | None] | None
+        ) = None,
+    ) -> None:
         """Create a stateless deterministic client."""
         self._sink = event_sink
+        self._response_factory = response_factory
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -92,15 +105,23 @@ class StubAgentClient:
             agent_kind=kind,
         )
         time.sleep(0.05)
-        response = scripted_round_payload(
-            response_cls.__name__, round_number_from_label(round_label)
+        response = (
+            self._response_factory(response_cls, _round_number_from_label(round_label))
+            if self._response_factory is not None
+            else None
         )
         self._sink.agent_output(
             f"[stub-agent] {round_label}: completed {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
         )
-        return response_cls.model_validate(response) if response is not None else fallback_factory()
+        if response is None:
+            return fallback_factory()
+        if isinstance(response, response_cls):
+            return response
+        if isinstance(response, BaseModel):
+            return response_cls.model_validate(response.model_dump())
+        return response_cls.model_validate(response)
 
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010192 [PLR0913]; Preserve StubAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,

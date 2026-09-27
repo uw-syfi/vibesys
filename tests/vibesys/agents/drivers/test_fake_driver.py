@@ -91,8 +91,22 @@ def _of_type(events: list[CoreEvent], event_type: CoreEventType) -> list[CoreEve
     return [event for event in events if event.type is event_type]
 
 
+def _plan_answer(hypothesis_id: str = "H-01") -> OrchestratorPlan:
+    criteria = "the structured answer parses"
+    return OrchestratorPlan(
+        hypothesis_id=hypothesis_id,
+        hypothesis="explicit fake hypothesis",
+        task="exercise the fake driver",
+        pass_criteria=criteria,
+        reasoning="explicit fake answer",
+    )
+
+
 def test_scripted_mode_answers_a_structured_turn(tmp_path: Path) -> None:
-    plan = _invoke_plan(FakeDriver(turn=[assistant_text("planning...")]), tmp_path)
+    plan = _invoke_plan(
+        FakeDriver(turn=[assistant_text("planning...")], answer=_plan_answer()),
+        tmp_path,
+    )
 
     assert isinstance(plan, OrchestratorPlan)
     assert plan.hypothesis_id == "H-01"
@@ -123,7 +137,7 @@ def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(
         + [usage_event(input_tokens=1200, output_tokens=300)] * usage_updates
     )
 
-    _invoke_plan(FakeDriver(turn=events), tmp_path, events=sink_events)
+    _invoke_plan(FakeDriver(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
 
     assistant = [
         event
@@ -156,7 +170,10 @@ def test_scripted_tool_results_carry_the_configured_payload_size(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(turn=[tool_call("Bash", {"command": "x"}), tool_result("y" * 4096)]),
+        FakeDriver(
+            turn=[tool_call("Bash", {"command": "x"}), tool_result("y" * 4096)],
+            answer=_plan_answer(),
+        ),
         tmp_path,
         events=sink_events,
     )
@@ -178,7 +195,7 @@ def test_scripted_tool_calls_and_results_are_correlated(
         for event in (tool_call("Bash", {"command": f"cmd-{i}"}), tool_result(f"out-{i}"))
     ]
 
-    _invoke_plan(FakeDriver(turn=events), tmp_path, events=sink_events)
+    _invoke_plan(FakeDriver(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
 
     call_ids = [
         event.data.call_id
@@ -208,7 +225,8 @@ def test_scripted_todos_arrive_as_a_provider_plan_snapshot(
                         ("round step 3", "pending"),
                     ]
                 )
-            ]
+            ],
+            answer=_plan_answer(),
         ),
         tmp_path,
         events=sink_events,
@@ -225,7 +243,10 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(turn=[usage_event(input_tokens=1000, output_tokens=120)]),
+        FakeDriver(
+            turn=[usage_event(input_tokens=1000, output_tokens=120)],
+            answer=_plan_answer(),
+        ),
         tmp_path,
         events=sink_events,
     )
@@ -238,21 +259,27 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(
     assert data.model == "mock-model"
 
 
-def test_scripted_rounds_advance_the_hypothesis_story(tmp_path: Path) -> None:
-    driver = FakeDriver(turn=[assistant_text("planning...")])
+def test_explicit_structured_answer_is_reused_across_turns(tmp_path: Path) -> None:
+    driver = FakeDriver(
+        turn=[assistant_text("planning...")],
+        answer=_plan_answer("configured"),
+    )
 
     first = _invoke_plan(driver, tmp_path, round_label="round 1")
     third = _invoke_plan(driver, tmp_path, round_label="round 3")
 
-    assert first.hypothesis_id == "H-01"
-    assert third.hypothesis_id == "H-02"
+    assert first.hypothesis_id == "configured"
+    assert third.hypothesis_id == "configured"
 
 
 def test_events_are_scoped_to_the_invoking_role_and_round(
     tmp_path: Path, sink_events: list[CoreEvent]
 ) -> None:
     _invoke_plan(
-        FakeDriver(turn=[tool_call("Bash", {"command": "x"}), tool_result("ok")]),
+        FakeDriver(
+            turn=[tool_call("Bash", {"command": "x"}), tool_result("ok")],
+            answer=_plan_answer(),
+        ),
         tmp_path,
         round_label="round 7",
         events=sink_events,

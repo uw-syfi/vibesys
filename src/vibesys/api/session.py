@@ -10,6 +10,7 @@ needs.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.api.contracts import RunResult, RunStatus
@@ -21,7 +22,7 @@ from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.runner import run_plugin
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
-from vs_agent.api import ToolServerDescriptor, expose_as_tools
+from vs_agent.api import ToolServerDescriptor, build_agent_client, expose_as_tools
 from vs_project.api import Project
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -165,17 +166,25 @@ class _LocalRunSession:
     ) -> None:
         self._request = request
         self._sink = sink
+        response_factory = None
         if registry is None:
             # lint-waiver: LW-020004 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
             from vibesys.plugin_catalog import (  # noqa: PLC0415
                 built_in_orchestrations,
+                stub_response_factory,
             )
 
             registry = built_in_orchestrations()
+            response_factory = stub_response_factory(request.orchestration.id)
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._prepared_plugin = self._registration.prepare_plugin(request.orchestration)
+        self._agent_client_factory = (
+            partial(build_agent_client, stub_response_factory=response_factory)
+            if response_factory is not None
+            else None
+        )
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -318,6 +327,7 @@ class _LocalRunSession:
                 prepared_plugin,
                 open_agent_environment=self.open_agent_environment,
                 projector=self._registration.projector,
+                agent_client_factory=self._agent_client_factory,
                 agent_tool_bindings=AGENT_TOOL_BINDINGS,
             )
             succeeded = outcome.value == "succeeded"

@@ -15,10 +15,8 @@ AgentEvent` values built with the module-level helpers below
 :func:`tool_result`, :func:`todo_write`, :func:`usage`), rather than through
 count knobs: what a test asserts on is what it wrote.
 
-Structured turns answer with :func:`~vs_agent.scripted_rounds.
-scripted_round_payload` unless the caller supplies its own ``answer``, so a
-scripted run completes loop rounds on the happy path even when a test only
-cares about the event stream.
+Structured turns require the caller to supply ``answer``. The fake has no
+knowledge of application response schemas or policy defaults.
 """
 
 from __future__ import annotations
@@ -39,7 +37,6 @@ from vs_agent.contracts import (
     AgentUsage,
 )
 from vs_agent.events import CommandResultPayload
-from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -101,11 +98,11 @@ class FakeDriverError(RuntimeError):
         return cls("fake agent driver is closed")
 
     @classmethod
-    def missing_scripted_artifact(cls, schema_name: str) -> FakeDriverError:
-        """Describe an output schema without a corresponding scripted artifact."""
+    def missing_structured_answer(cls, schema_name: str) -> FakeDriverError:
+        """Describe a structured turn without an explicit fake answer."""
         return cls(
-            f"no scripted artifact for response schema {schema_name!r}; add one to "
-            "vs_agent.scripted_rounds so scripted runs keep covering this role"
+            f"no fake answer was supplied for response schema {schema_name!r}; "
+            "pass answer= when constructing FakeDriver"
         )
 
 
@@ -136,16 +133,12 @@ class FakeSession:
         if self._closed:
             raise FakeDriverError.session_closed()
         self._invocations += 1
-        # A labelled turn keeps the loop's own round numbering, so scripted
-        # artifacts line up with the round the caller thinks it is running.
-        # An unlabelled turn falls back to this session's invocation count.
-        round_index = round_number_from_label(request.label) if request.label else self._invocations
         events = self._turns[min(self._invocations, len(self._turns)) - 1]
         for event in events:
             if observer is not None:
                 observer.on_event(event)
         return AgentTurnResult(
-            text=_turn_text(self._answer, request, round_index),
+            text=_turn_text(self._answer, request),
             usage=_turn_usage(events),
             # An adopted session ID is echoed back so a resumed run's continuity
             # is observable; otherwise each session mints its own stable ID.
@@ -190,11 +183,8 @@ class FakeDriver:
         session has run more turns than ``turns`` has entries, its last entry
         keeps repeating. ``turn=[...]`` is sugar for ``turns=[[...]]``.
         Passing neither runs a turn that emits no events. ``answer`` sets the
-        text or structured payload every turn returns; when omitted, a
-        structured turn falls back to
-        :func:`~vs_agent.scripted_rounds.scripted_round_payload` for the
-        requested response schema and round, so tests that only assert on the
-        event stream need not pass one.
+        text or structured payload every turn returns. It is required for a
+        structured turn, keeping application response policy out of this fake.
         """
         if turn is not None and turns is not None:
             raise FakeDriverError.conflicting_turn_inputs()
@@ -334,17 +324,13 @@ def _turn_usage(events: tuple[AgentEvent, ...]) -> AgentUsage:
 def _turn_text(
     answer: BaseModel | Mapping[str, object] | str | None,
     request: AgentTurnRequest,
-    round_index: int,
 ) -> str:
     if answer is not None:
         return _serialize_answer(answer)
     schema = request.output_schema
     if schema is None:
         return f"Fake agent completed {request.label or 'a turn'} with no workspace changes."
-    payload = scripted_round_payload(schema.__name__, round_index)
-    if payload is None:
-        raise FakeDriverError.missing_scripted_artifact(schema.__name__)
-    return json.dumps(payload)
+    raise FakeDriverError.missing_structured_answer(schema.__name__)
 
 
 def _serialize_answer(answer: BaseModel | Mapping[str, object] | str) -> str:
