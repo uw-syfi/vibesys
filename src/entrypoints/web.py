@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from server.runtime import WebInstanceRecord
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -177,7 +178,11 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         raise SystemExit(f"vibesys web: project does not exist: {project}")  # noqa: TRY003  # lint-waiver: LW-101079 [TRY003]; report an invalid live project before launching the server
     if not args.demo and args.project is None:
         raise SystemExit("vibesys web live: pass --project or use --demo")  # noqa: TRY003  # lint-waiver: LW-101080 [TRY003]; require an explicit project for non-demo live mode
-    instance = (args.instance or project / ".vibesys" / "web-gateway.json").expanduser().resolve()
+    instance = (
+        (args.instance or Project.open(project).configuration_path() / "web-gateway.json")
+        .expanduser()
+        .resolve()
+    )
     if not args.no_build:
         subprocess.run(  # noqa: S603  # lint-waiver: LW-101081 [S603]; run the repository's fixed web bundle build command
             [_pnpm(), "build"],
