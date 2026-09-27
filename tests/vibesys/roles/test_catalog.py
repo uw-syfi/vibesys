@@ -27,7 +27,6 @@ def _role_search_names() -> dict[int, str]:
         roles.judge,
         roles.profiler,
         roles.single_agent,
-        roles.perf_eval,
         roles.mutator,
     ):
         for name, value in vars(family).items():
@@ -72,7 +71,7 @@ def test_role_ids_are_stable_agent_config_keys() -> None:
     # `role.id` is the agent-config lookup key (backend/model), same as
     # today's `default_definition(role_id)`. It must be a short, stable
     # token -- never derived from a strategy or template name.
-    known = {"orchestrator", "implementer", "judge", "profiler", "perf_eval"}
+    known = {"orchestrator", "implementer", "judge", "profiler"}
     for role in roles.ALL_ROLES:
         assert role.id in known, f"unexpected role id {role.id!r}"
 

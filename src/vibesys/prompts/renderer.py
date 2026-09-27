@@ -3,7 +3,7 @@
 Two concepts:
 
 - **Template** — a full prompt the LLM sees as one document
-  (e.g. ``loops/issue_queue/implementer/system.j2``). Has structure:
+  (e.g. ``loops/multi/implementer_prompt.j2``). Has structure:
   headers, task description, constraints. Lives in a per-mode
   directory.
 - **Fragment** — a small reusable snippet meant to be composed *into*
@@ -224,7 +224,7 @@ class Prompt:
     ----------
     template_dir:
         Per-loop directory the renderer searches first.
-        For example, ``prompts/loops/issue_queue/`` falls back to the shared
+        For example, ``prompts/loops/multi/`` falls back to the shared
         ``vibesys/prompts/`` root, where backend fragments
         live.
     backend:

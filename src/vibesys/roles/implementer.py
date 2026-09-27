@@ -1,4 +1,4 @@
-"""Implementer role family: multi's hypothesis implementer and issue_queue's.
+"""Implementer role family for multi's hypothesis implementers.
 
 ``single`` and ``profile_single`` fold implementer + judge + profiler into
 one combined role; see :mod:`vibesys.roles.single_agent` for those.
@@ -9,10 +9,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.roles.common import SkillResourceSelection
-from vibesys.runtime import Keyed, Reuse, Role, Writes
+from vibesys.runtime import Keyed, Role, Writes
 from vibesys.skills import ResolvedSkillSelection
 from vs_agent.api import SessionScope
-from vs_issue_tracker.api import Issue
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 
 
@@ -78,16 +77,6 @@ class ImplementerContinuationContext(BaseModel):
     gate_revalidation_pending: bool
     gate_approved_evaluation_artifact: str | None
     current_round_location: str | None = None
-
-
-class IssueImplementerContext(BaseModel):
-    """Context for issue_queue's implementer role (its ``system.j2``)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    reference_path: str
-    runtime_notes: str
-    issue: Issue
 
 
 class ImplementerResponse(BaseModel):
@@ -160,22 +149,6 @@ class ImplementerResponse(BaseModel):
     )
 
 
-class IssueImplementerResponse(BaseModel):
-    """Structured response from the implementer agent in the plain loop.
-
-    The implementer works on exactly one issue per invocation.
-    """
-
-    issue_id: int = Field(description="ID of the issue this implementer worked on.")
-    summary: str = Field(description="What was implemented or changed for this specific issue.")
-    files_touched: list[str] = Field(
-        default_factory=list, description="List of files created or modified."
-    )
-    self_check: str = Field(
-        description="Brief note on how the implementer self-validated the change before declaring done."
-    )
-
-
 def _fallback_implementer() -> ImplementerResponse:
     return ImplementerResponse(
         summary="Implementer produced no structured response.",
@@ -196,20 +169,6 @@ def _timeout_fallback_implementer(timeout: float) -> ImplementerResponse:
             "without a structured response."
         ),
         next_step="Inspect retained evidence and return a schema-valid response on retry.",
-    )
-
-
-def _fallback_issue_implementer() -> IssueImplementerResponse:
-    """``issue_id=0`` is a placeholder; the caller restores the real ID.
-
-    See the module docstring in :mod:`vibesys.roles.judge` for the same
-    per-call correlation-field convention.
-    """
-    return IssueImplementerResponse(
-        issue_id=0,
-        summary="Implementer did not produce a structured response.",
-        files_touched=[],
-        self_check="No structured response received.",
     )
 
 
@@ -241,14 +200,4 @@ MULTI_IMPLEMENTER_CONTINUATION = Role(
     message="Execute the required continuation step and return only the JSON object.",
 )
 
-ISSUE_IMPLEMENTER = Role(
-    id="implementer",
-    template="loops/issue_queue/implementer/system.j2",
-    reply=IssueImplementerResponse,
-    fallback=_fallback_issue_implementer,
-    context=IssueImplementerContext,
-    access=Writes(),
-    session=Reuse(),
-)
-
-ALL_ROLES = (MULTI_IMPLEMENTER, MULTI_IMPLEMENTER_CONTINUATION, ISSUE_IMPLEMENTER)
+ALL_ROLES = (MULTI_IMPLEMENTER, MULTI_IMPLEMENTER_CONTINUATION)

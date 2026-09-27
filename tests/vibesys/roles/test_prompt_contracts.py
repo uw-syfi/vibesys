@@ -31,12 +31,6 @@ if TYPE_CHECKING:
 
     from vibesys.runtime import Role
 
-# Auto-injected by ``Prompt.render`` (backend compute fragments) for the
-# roles that render through it (today: issue_queue's system prompts); never
-# part of a Role's own context model.
-_BACKEND_FRAGMENT_NAMES = frozenset(
-    {"device_dtype", "judge_device_correctness", "profiling_workflow"}
-)
 _MODALITY_ROOT = PROMPTS_DIR / "shared" / "_modality"
 # Matches `{% include "_modality/" ~ modality ~ "/<role>.j2" %}`, the one
 # dynamic-include pattern any template here uses.
@@ -65,14 +59,14 @@ def _free_variables(template: str) -> frozenset[str]:
     """Return the free variables ``template`` needs, resolving known dynamic includes."""
     path, roots = _resolve_template_path(template)
     free, unresolved = resolve_free_variables(path, search_roots=roots)
-    result = set(free) - _BACKEND_FRAGMENT_NAMES
+    result = set(free)
     if unresolved:
         source = path.read_text()
         for match in _DYNAMIC_MODALITY_RE.finditer(source):
             suffix = match.group(1)
             for variant in sorted(_MODALITY_ROOT.glob(f"*/{suffix}.j2")):
                 variant_free, _ = resolve_free_variables(variant, search_roots=roots)
-                result |= set(variant_free) - _BACKEND_FRAGMENT_NAMES
+                result |= set(variant_free)
     return frozenset(result)
 
 

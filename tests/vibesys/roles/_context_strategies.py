@@ -30,40 +30,27 @@ from typing import TYPE_CHECKING
 
 from hypothesis import strategies as st
 
-from vibesys.evaluators.perf_reply import IssuePerfEvalResponse, PerfMetrics, ProfilerSummary
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.roles.designer import PlanContext
-from vibesys.roles.implementer import IssueImplementerContext
-from vibesys.roles.judge import IssueJudgeContext
 from vibesys.roles.mutator import MutatorContext
 from vibesys.search.population.models import Individual
-from vs_issue_tracker.api import Issue
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import BaseModel
 
-_ISSUE = st.builds(Issue, history=st.just([]))
 _INDIVIDUAL = st.builds(Individual, metrics=st.just({}))
 _PROFILER_SUMMARY = st.builds(ProfilerSummary, metrics=st.just({}))
-_PERF_METRICS = st.builds(PerfMetrics, extra=st.just({}), load_levels=st.just([]))
 
 # Context-model field overrides, keyed by the exact model class (never by
-# field name alone: the same field name means different things on different
-# models, e.g. ``IssuePerfEvalResponse.metrics: PerfMetrics`` versus
-# ``ImplementerResponse.metrics: dict[str, float]``).
+# field name alone: the same field name can mean different things on
+# different models.
 _CONTEXT_OVERRIDES: dict[type[BaseModel], dict[str, st.SearchStrategy]] = {
     PlanContext: {"profiler_summary": st.none() | _PROFILER_SUMMARY},
-    IssueImplementerContext: {"issue": _ISSUE},
-    IssueJudgeContext: {"issue": _ISSUE},
     MutatorContext: {
         "inspirations": st.lists(_INDIVIDUAL, max_size=2),
     },
-}
-
-# Reply-model field overrides (same nested-``default_factory`` wrinkle).
-_REPLY_OVERRIDES: dict[type[BaseModel], dict[str, st.SearchStrategy]] = {
-    IssuePerfEvalResponse: {"metrics": _PERF_METRICS},
 }
 
 
@@ -108,4 +95,4 @@ def context_strategy(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
 
 def reply_strategy(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
     """A hypothesis strategy of valid instances of a ``Role.reply`` model."""
-    return st.builds(model, **_REPLY_OVERRIDES.get(model, {}))
+    return st.builds(model)

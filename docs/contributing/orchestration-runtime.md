@@ -39,7 +39,7 @@ policy's state model and role definitions.
 ## roles/: declarations, not execution
 
 Each module in `roles/` is one role *family* (`designer`, `pre_round`,
-`implementer`, `judge`, `profiler`, `single_agent`, `perf_eval`, `mutator`,
+`implementer`, `judge`, `profiler`, `single_agent`, `mutator`,
 `common`). A role is a `vibesys.runtime.Role`: a template path, a pydantic
 reply type, a fallback, a typed prompt-context model, workspace-access
 policy, and session policy. Different prompts or reply types are always

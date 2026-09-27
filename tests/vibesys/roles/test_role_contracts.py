@@ -26,12 +26,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
-from jinja2 import UndefinedError
 from tests.vibesys.roles._context_strategies import context_strategy, reply_strategy
 
 from vibesys import roles
-from vibesys.constants import ComputeBackend
-from vibesys.prompts import PROMPTS_DIR, Prompt, render_template
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.runtime import ReadOnly
 
 if TYPE_CHECKING:
@@ -51,25 +49,10 @@ def _split_template(template: str) -> tuple[Path, str]:
 
 
 def _render(role: Role, context: BaseModel) -> str:
-    """Render ``role.template`` exactly as ``ctx.agents.turn`` would.
-
-    Every role renders through plain ``render_template`` except the handful
-    (today: issue_queue's system prompts) that ``ctx.agents.turn`` renders
-    through the backend-aware ``Prompt`` instead, which auto-injects compute
-    fragments (``device_dtype``, etc.) as extra kwargs. Since a ``Role``
-    doesn't itself say which path it needs, try plain rendering first and
-    fall back to a backend-aware render only on the specific failure mode
-    (a fragment name left undefined) that distinguishes the two paths.
-    """
+    """Render ``role.template`` exactly as ``ctx.agents.turn`` would."""
     template_dir, name = _split_template(role.template)
     kwargs = context.model_dump(mode="python")
-    try:
-        return render_template(name, template_dir=template_dir, **kwargs)
-    except UndefinedError as plain_error:
-        try:
-            return Prompt(template_dir, ComputeBackend.CUDA).render(name, **kwargs)
-        except UndefinedError:
-            raise plain_error from None
+    return render_template(name, template_dir=template_dir, **kwargs)
 
 
 @pytest.mark.parametrize("role", _ROLE_PARAMS)
