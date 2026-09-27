@@ -89,6 +89,9 @@
       }
     ],
     "kind": "agent",
+    "objectives": [
+      "throughput:max"
+    ],
     "rounds": [
       {
         "attempts": 1,
