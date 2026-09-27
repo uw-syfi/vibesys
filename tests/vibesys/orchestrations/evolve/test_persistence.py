@@ -16,6 +16,7 @@ from tests.vibesys.orchestrations.evolve._integration_support import (
     write_input,
 )
 
+from vibesys.api import ConfigurationError
 from vibesys.orchestrations.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.schemas import Verdict
 from vs_agent.api import AgentCapabilities
@@ -283,3 +284,21 @@ def test_final_workspace_uses_deterministic_latest_best_on_tie(tmp_path: Path) -
     assert state is not None
     assert all(item.perf_metric is None for item in state.population.individuals)
     assert (workspace / "queue.py").read_text(encoding="utf-8") == "VALUE = 4\n"
+
+
+def test_resume_rejects_budget_increase_in_dirty_workspace(tmp_path: Path) -> None:
+    input_root = write_input(tmp_path / "dirty-resume-input")
+    status, run_id, workspace = execute(input_root, _clients([2, 3]))
+    assert status is RunStatus.SUCCEEDED
+    (workspace / "queue.py").write_text("VALUE = 999\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError) as raised:
+        execute(
+            workspace,
+            _clients([3]),
+            configured=options(max_generations=2),
+            resume_run_id=run_id,
+        )
+
+    assert raised.value.diagnostic.code == "project_resume_configuration_dirty"
+    assert "queue.py" in raised.value.diagnostic.message

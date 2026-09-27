@@ -12,13 +12,23 @@ from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestrations.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestrations.evolve.plugin import PLUGIN
 from vibesys.search.population import CandidateOutcome, PopulationConfig, PopulationSearch
-from vs_runtime.api import AgentRole, RunFacts, RunStatus, RuntimeContractError
+from vs_runtime.api import (
+    AccuracyEvaluation,
+    AgentRole,
+    RunFacts,
+    RunStatus,
+    RuntimeContractError,
+)
 from vs_runtime.api.testing import FakeRunHost
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic import BaseModel
+
+
+class _ParallelBatchInterruptedError(RuntimeError):
+    """Deterministic interruption injected during one parallel batch."""
 
 
 def _options(**updates: object) -> EvolveOptions:
@@ -202,6 +212,132 @@ def test_judge_failure_skips_trusted_evaluation(tmp_path: Path) -> None:
         assert status is RunStatus.FAILED
         assert host.evaluation.accuracy_calls == []
         assert host.evaluation.benchmark_calls == []
+        await host.close()
+
+    asyncio.run(scenario())
+
+
+def test_trusted_accuracy_rejects_candidate_after_judge_passes(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=_passing_responder,
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Increase throughput.",
+                profiler_id="linux_cpu",
+                benchmark_configured=True,
+            ),
+        )
+        host.evaluation.script_accuracy(
+            AccuracyEvaluation(
+                executed=True,
+                feedback="trusted accuracy rejected the candidate",
+            )
+        )
+
+        status = await PLUGIN.orchestrate(host, _options())
+
+        assert status is RunStatus.FAILED
+        assert len(host.evaluation.accuracy_calls) == 1
+        assert host.evaluation.benchmark_calls == []
+        profiler = next(
+            session for session in host.agents.sessions if session.role.id == "profiler"
+        )
+        assert profiler.history == ()
+        state = await host.state.load(EvolveState)
+        assert state is not None
+        assert len(state.population.individuals) == 1
+        assert state.population.individuals[0].passed is False
+        assert state.population.individuals[0].feedback == "trusted accuracy rejected the candidate"
+        await host.close()
+
+    asyncio.run(scenario())
+
+
+def test_parallelism_option_falls_back_to_serial_workspace(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=_passing_responder,
+            supports_parallel_candidates=False,
+        )
+
+        status = await PLUGIN.orchestrate(
+            host,
+            _options(children_per_generation=2, max_parallelism=2),
+        )
+
+        assert status is RunStatus.SUCCEEDED
+        assert host.workspaces.candidates == ()
+        assert [session.workspace.id for session in host.agents.sessions] == [None, None]
+        assert [len(session.history) for session in host.agents.sessions] == [3, 3]
+        state = await host.state.load(EvolveState)
+        assert state is not None
+        assert len(state.population.individuals) == 3
+        await host.close()
+
+    asyncio.run(scenario())
+
+
+def test_interrupted_parallel_batch_reopens_atomically_and_cleans_up(tmp_path: Path) -> None:
+    implementer_turn = 0
+
+    def interrupt_once(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_turn
+        if role.id == "implementer":
+            implementer_turn += 1
+            if implementer_turn == 3:
+                raise _ParallelBatchInterruptedError
+        return _passing_responder(role, history, message, response)
+
+    async def scenario() -> None:
+        host = FakeRunHost(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=interrupt_once,
+            supports_parallel_candidates=True,
+        )
+        options = _options(children_per_generation=2, max_parallelism=2)
+
+        with pytest.raises(_ParallelBatchInterruptedError):
+            await PLUGIN.orchestrate(host, options)
+
+        interrupted = await host.state.load(EvolveState)
+        assert interrupted is not None
+        assert len(interrupted.population.individuals) == 1
+        assert interrupted.generation_start is not None
+        assert interrupted.admitted_slots == 0
+        assert len(host.workspaces.candidates) == 2
+        assert all(candidate.discarded for candidate in host.workspaces.candidates)
+        interrupted_candidate_sessions = [
+            session for session in host.agents.sessions if session.workspace.id is not None
+        ]
+        assert len(interrupted_candidate_sessions) == 4
+        assert all(session.closed for session in interrupted_candidate_sessions)
+
+        status = await PLUGIN.orchestrate(host, options)
+
+        assert status is RunStatus.SUCCEEDED
+        reopened = await host.state.load(EvolveState)
+        assert reopened is not None
+        assert len(reopened.population.individuals) == 3
+        assert reopened.generation_start is None
+        assert reopened.admitted_slots == 0
+        assert len(host.workspaces.candidates) == 4
+        assert all(candidate.discarded for candidate in host.workspaces.candidates)
+        all_candidate_sessions = [
+            session for session in host.agents.sessions if session.workspace.id is not None
+        ]
+        assert len(all_candidate_sessions) == 8
+        assert all(session.closed for session in all_candidate_sessions)
         await host.close()
 
     asyncio.run(scenario())
