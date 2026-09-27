@@ -70,7 +70,6 @@ def _role(role_id: str = "implementer") -> AgentRole:
         id=role_id,
         system_prompt="Improve the candidate.",
         tools=(AgentTool(id="shell"),),
-        skills=("profiling",),
         workspace_access=WorkspaceAccess.READ_WRITE,
         required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
     )
@@ -100,14 +99,15 @@ def test_role_is_a_strict_complete_declaration() -> None:
     assert role.id == "implementer"
     assert role.system_prompt == "Improve the candidate."
     assert role.tools == (AgentTool(id="shell"),)
-    with pytest.raises(ValidationError):
-        AgentRole.model_validate(
-            {
-                "id": "implementer",
-                "system_prompt": "prompt",
-                "config_profile": "hidden alias",
-            }
-        )
+    for unknown_field in ("config_profile", "skills"):
+        with pytest.raises(ValidationError, match=unknown_field):
+            AgentRole.model_validate(
+                {
+                    "id": "implementer",
+                    "system_prompt": "prompt",
+                    unknown_field: ("unsupported",),
+                }
+            )
     with pytest.raises(ValidationError, match="id"):
         _role("Bad Role")
     assert len(_role("a" * 128).id) == 128

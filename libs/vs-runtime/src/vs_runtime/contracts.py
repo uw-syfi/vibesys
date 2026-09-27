@@ -193,7 +193,6 @@ class AgentRole(BaseModel):
     id: AgentRoleId
     system_prompt: str
     tools: tuple[AgentTool, ...] = ()
-    skills: tuple[str, ...] = ()
     workspace_access: WorkspaceAccess = WorkspaceAccess.READ_WRITE
     required_capabilities: frozenset[AgentCapability] = frozenset()
 

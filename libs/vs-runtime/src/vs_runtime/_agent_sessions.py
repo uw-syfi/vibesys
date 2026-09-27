@@ -292,9 +292,6 @@ class RuntimeAgentSessions:
             if unknown_tools:
                 message = f"unsupported agent tools: {', '.join(unknown_tools)}"
                 raise RuntimeContractError(message)
-            if role.skills:
-                message = "role-scoped agent skills are not supported by this runtime"
-                raise RuntimeContractError(message)
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.

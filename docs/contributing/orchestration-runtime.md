@@ -91,7 +91,7 @@ Roles contain facts fixed for every session of that role:
 
 - `id`, which also binds the role to user-supplied model and reasoning config;
 - `system_prompt`;
-- declared tools and skills;
+- declared tools;
 - workspace access;
 - required driver capabilities.
 

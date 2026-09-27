@@ -360,11 +360,6 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
         system_prompt="Use a tool.",
         tools=(AgentTool(id="unregistered"),),
     )
-    unsupported_skill = AgentRole(
-        id="skill-user",
-        system_prompt="Use a skill.",
-        skills=("profiling",),
-    )
     client = FakeAgentClient(session_reuse=True)
 
     async def body(ctx: Run) -> None:
@@ -372,8 +367,6 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
             await ctx.agents.create_session(altered, workspace=ctx.workspaces.root)
         with pytest.raises(RuntimeContractError, match="unsupported agent tools"):
             await ctx.agents.create_session(unsupported_tool, workspace=ctx.workspaces.root)
-        with pytest.raises(RuntimeContractError, match="role-scoped agent skills"):
-            await ctx.agents.create_session(unsupported_skill, workspace=ctx.workspaces.root)
         with pytest.raises(RuntimeContractError, match="provider_session_resume"):
             await ctx.agents.create_session(requires_resume, workspace=ctx.workspaces.root)
 
@@ -381,7 +374,7 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
         tmp_path,
         [client],
         body,
-        declaration=(declared, requires_resume, unsupported_tool, unsupported_skill),
+        declaration=(declared, requires_resume, unsupported_tool),
     )
     assert client.closed
 
