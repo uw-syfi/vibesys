@@ -13,6 +13,7 @@ import sys
 from typing import TextIO
 
 from headless.format import format_status_prefix
+from headless.framework_events import format_framework_event
 from vibesys.api import (
     AgentOutputChunkData,
     CoreEvent,
@@ -20,7 +21,6 @@ from vibesys.api import (
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
-    format_framework_event,
 )
 
 # Presentation constants owned by this frontend.

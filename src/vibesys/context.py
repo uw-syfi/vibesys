@@ -60,7 +60,6 @@ from vibesys.run import (
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources
-from vibesys.run.log_projection import RunLogRenderer
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
@@ -645,11 +644,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             integration.attach(log_dir)
             logger = RunLogger(log_dir, emit=_run_log_emitter(integration.agent_events))
             teardown_stack.callback(logger.close)
-            # Registered after logger.close so LIFO teardown unsubscribes the
-            # renderer before the log file closes.
-            teardown_stack.callback(
-                integration.events.subscribe(RunLogRenderer(logger.writer).handle)
-            )
             hook_log[0] = logger.lprint
             for message in buffered_logs:
                 logger.lprint(message)

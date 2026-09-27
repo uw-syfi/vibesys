@@ -3,6 +3,14 @@
 from io import StringIO
 
 from headless.render import HeadlessRenderer, TodoDisplay
+from vibesys.api import (
+    EventStatus,
+    FrameworkWarningData,
+    GateFinishedData,
+    GateStartedData,
+    RunConfiguredData,
+    WorkspaceSnapshotData,
+)
 from vibesys.events import (
     AgentOutputChannel,
     AgentOutputChunkData,
@@ -33,6 +41,18 @@ def _render(
     )
     for event_type, data in payloads:
         renderer.handle(make_core_event(event_type, data=data))
+    return out.getvalue()
+
+
+def _render_event(
+    event_type: CoreEventType,
+    data: CoreEventData,
+    *,
+    status: EventStatus | None = None,
+) -> str:
+    out = StringIO()
+    renderer = HeadlessRenderer(out=out)
+    renderer.handle(make_core_event(event_type, data=data, status=status))
     return out.getvalue()
 
 
@@ -89,6 +109,117 @@ class TestBlockChannels:
     def test_short_prompt_not_truncated(self) -> None:
         out = _render(_chunk("short\n", channel="prompt"), max_text_len=20)
         assert out == "short\n"
+
+
+class TestFrameworkEvents:
+    def test_gate_started_with_recipe_and_command(self) -> None:
+        out = _render_event(
+            CoreEventType.GATE_STARTED,
+            GateStartedData.model_validate(
+                {
+                    "gate": "validation",
+                    "recipe": "focused-tests",
+                    "command": "uv run pytest -q",
+                }
+            ),
+        )
+        assert out == "[framework-validation] running focused-tests: uv run pytest -q\n"
+
+    def test_gate_started_with_command_only(self) -> None:
+        out = _render_event(
+            CoreEventType.GATE_STARTED,
+            GateStartedData.model_validate({"gate": "accuracy", "command": "trusted-check"}),
+        )
+        assert out == "[framework-accuracy] running: trusted-check\n"
+
+    def test_gate_finished_with_metric_or_reused_recipe(self) -> None:
+        metric = _render_event(
+            CoreEventType.GATE_FINISHED,
+            GateFinishedData.model_validate(
+                {"gate": "benchmark", "metric": "tok_per_sec", "value": 42.0}
+            ),
+            status=EventStatus.COMPLETED,
+        )
+        reused = _render_event(
+            CoreEventType.GATE_FINISHED,
+            GateFinishedData.model_validate(
+                {"gate": "validation", "recipe": "focused-tests", "reused": True}
+            ),
+            status=EventStatus.COMPLETED,
+        )
+
+        assert metric == "[framework-benchmark] PASS: tok_per_sec=42.0\n"
+        assert reused == "[framework-validation] reused PASS: focused-tests\n"
+
+    def test_failed_gate_carries_output_tail(self) -> None:
+        out = _render_event(
+            CoreEventType.GATE_FINISHED,
+            GateFinishedData.model_validate(
+                {"gate": "accuracy", "output_tail": "assertion mismatch"}
+            ),
+            status=EventStatus.FAILED,
+        )
+        assert out == "[framework-accuracy] FAIL: assertion mismatch\n"
+
+    def test_workspace_snapshot_commit_and_no_change(self) -> None:
+        committed = _render_event(
+            CoreEventType.WORKSPACE_SNAPSHOT,
+            WorkspaceSnapshotData(label="round-2", commit="a" * 40),
+        )
+        unchanged = _render_event(
+            CoreEventType.WORKSPACE_SNAPSHOT,
+            WorkspaceSnapshotData(label="round-3"),
+        )
+
+        assert committed == f"[git-tracking] snapshot 'round-2': {'a' * 12}\n"
+        assert unchanged == "[git-tracking] no changes to commit for 'round-3'\n"
+
+    def test_workspace_snapshot_baseline_and_exclusions(self) -> None:
+        baseline = _render_event(
+            CoreEventType.WORKSPACE_SNAPSHOT,
+            WorkspaceSnapshotData(baseline="b" * 40),
+        )
+        excluded = _render_event(
+            CoreEventType.WORKSPACE_SNAPSHOT,
+            WorkspaceSnapshotData(excluded_paths=tuple(f"/p{i}" for i in range(7))),
+        )
+
+        assert baseline == f"[git-tracking] trusted input baseline: {'b' * 12}\n"
+        assert excluded.startswith("[git-tracking] excluded 7 unreadable path(s)")
+        assert "/p4" in excluded
+        assert "/p5" not in excluded
+
+    def test_run_configuration_header(self) -> None:
+        out = _render_event(
+            CoreEventType.RUN_CONFIGURED,
+            RunConfiguredData(
+                run_log_path="/logs/run.log",
+                project_root="/work/project",
+                objective="Make the queue fast.",
+                search_policy="pareto-ucb",
+                benchmark_contract=True,
+            ),
+        )
+        assert out == (
+            "[log] run log: /logs/run.log\n"
+            "[log] project root: /work/project\n"
+            "[log] objective: Make the queue fast.\n"
+            "[log] search policy: pareto-ucb\n"
+            "[log] benchmark result contract declared; it owns candidate fitness\n"
+        )
+
+    def test_framework_warning_with_and_without_detail(self) -> None:
+        detailed = _render_event(
+            CoreEventType.FRAMEWORK_WARNING,
+            FrameworkWarningData(summary="profiler failed", detail="boom"),
+        )
+        bare = _render_event(
+            CoreEventType.FRAMEWORK_WARNING,
+            FrameworkWarningData(summary="odd state"),
+        )
+
+        assert detailed == "[warn] profiler failed: boom\n"
+        assert bare == "[warn] odd state\n"
 
 
 class TestToolEvents:

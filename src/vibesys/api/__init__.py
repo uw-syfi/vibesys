@@ -51,16 +51,20 @@ from vibesys.events import (
     AgentOutputChunkData,
     AgentStatusData,
     CoreEventType,
+    FrameworkWarningData,
+    GateFinishedData,
+    GateStartedData,
+    RunConfiguredData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
+    WorkspaceSnapshotData,
 )
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
-from vibesys.run.log_projection import format_framework_event
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
@@ -83,6 +87,9 @@ __all__ = [
     "CoreEventType",
     "DomainName",
     "EventStatus",
+    "FrameworkWarningData",
+    "GateFinishedData",
+    "GateStartedData",
     "ManagedAgent",
     "MetricSpace",
     "Objective",
@@ -92,6 +99,7 @@ __all__ = [
     "ProfilerKind",
     "RepositoryVisibility",
     "ResumeRef",
+    "RunConfiguredData",
     "RunControl",
     "RunReady",
     "RunRequest",
@@ -105,10 +113,10 @@ __all__ = [
     "TodoUpdateData",
     "ToolCallData",
     "ToolResultData",
+    "WorkspaceSnapshotData",
     "agent_spec_from_config",
     "boot_trace",
     "create_session",
-    "format_framework_event",
     "load_config",
     "open_run_store",
 ]

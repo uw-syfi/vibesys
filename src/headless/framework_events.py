@@ -1,15 +1,8 @@
-"""Render typed framework events into stable run-log lines.
-
-The bracket-tagged line format lives here, in one renderer, instead of in the
-producers: gates, loops, and the Git tracker publish typed events, and this
-module decides what those look like in ``run-*.log``.
-"""
+"""Render semantic framework events for the headless terminal."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from vibesys.events import (
+from vibesys.api import (
     CoreEvent,
     EventStatus,
     FrameworkWarningData,
@@ -19,19 +12,12 @@ from vibesys.events import (
     WorkspaceSnapshotData,
 )
 
-if TYPE_CHECKING:
-    from typing import TextIO
-
 _EXCLUDED_PATHS_SHOWN = 5
 _SHA_ABBREV = 12
 
 
 def format_framework_event(event: CoreEvent) -> str | None:
-    """Return the log rendering of a framework event, or None for others.
-
-    The result may span multiple lines (``run_configured``) and never ends
-    with a newline.
-    """
+    """Return the terminal rendering of a framework event, or None."""
     data = event.data
     if isinstance(data, GateStartedData):
         return _format_gate_started(data)
@@ -106,24 +92,3 @@ def _format_framework_warning(data: FrameworkWarningData) -> str:
     if data.detail:
         return f"[warn] {data.summary}: {data.detail}"
     return f"[warn] {data.summary}"
-
-
-class RunLogRenderer:
-    """Write formatted framework events to the current run log file.
-
-    Subscribed to the owning run's durable journal, holding the logger's
-    switch-following writer, so converted producers stop calling ``lprint``
-    without the run log losing its lines.
-    """
-
-    def __init__(self, writer: TextIO) -> None:
-        """Wrap the run logger's current-file writer."""
-        self._writer = writer
-
-    def handle(self, event: CoreEvent) -> None:
-        """Append the log rendering of a framework event, if it has one."""
-        line = format_framework_event(event)
-        if line is None or getattr(self._writer, "closed", False):
-            return
-        self._writer.write(line + "\n")
-        self._writer.flush()
