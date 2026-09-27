@@ -5,6 +5,7 @@ from typing import TypedDict, Unpack
 from unittest.mock import patch
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 
 from vibesys.api import open_run_store
@@ -52,7 +53,6 @@ from vibesys.run import (
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vibesys.search.hypothesis.state import HypothesisState
-from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResourceAccess
@@ -72,6 +72,14 @@ class _RecordingHooks:
     def teardown(self, ctx: EnvironmentContext) -> None:
         del ctx
         self.torn_down += 1
+
+
+class _PortableStateProbe(BaseModel):
+    """Strict value used to exercise generic portable-state replacement."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    round_idx: int
 
 
 class _CreateContextOptions(TypedDict, total=False):
@@ -754,11 +762,11 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> N
 
     with _create_context(project, evaluator=evaluator) as ctx:
         state = ctx.state.portable(RunStateNamespace.EVOLVE)
-        state.save("old.json", PlainLoopCursor(round_idx=1))
+        state.save("old.json", _PortableStateProbe(round_idx=1))
         ctx.state.commit("state 1", state)
 
         state.delete("old.json")
-        state.save("new.json", PlainLoopCursor(round_idx=2))
+        state.save("new.json", _PortableStateProbe(round_idx=2))
         ctx.state.commit("state 2", state)
 
     tree = _git(project, "ls-tree", "-r", "--name-only", "HEAD")

@@ -2,9 +2,9 @@
 
 ## Responsibility
 
-This package defines validated loop history, progress, and archive values, with
-JSON-compatible codecs and in-memory history behavior. `vs-project` owns state
-persistence; VibeSys owns Git operations and loop orchestration.
+This package defines validated hypothesis-search round history, with a
+JSON-compatible codec and in-memory rollback behavior. `vs-project` owns state
+persistence; VibeSys owns Git operations and orchestration policy.
 
 ## Concepts
 
@@ -14,15 +14,9 @@ The public API includes:
 - `serialize_round_record` and `parse_round_record` define its portable JSON
   representation.
 - `RoundHistory` collects records in memory and resolves rollback bases.
-- `PlainLoopCursor`, `PlainPerformanceRecord`, and
-  `PlainPerformanceSnapshot` define versioned plain-loop state.
-- `IndividualRecord` and `PopulationSnapshot` define a versioned evolve archive
-  with validated IDs, lineage references, and finite fitness metrics.
 
-Plain and evolve persisted models reject unknown fields and type coercion.
-Performance timestamps require timezone information. The `serialize_*`
-functions return JSON-compatible dictionaries, and matching `parse_*`
-functions validate those dictionaries without reading files.
+The codec returns a JSON-compatible dictionary and validates it without
+reading files.
 
 The library does not read or write files. VibeSys defines the application
 vocabulary stored in these values.
@@ -32,8 +26,18 @@ vocabulary stored in these values.
 Codecs keep persisted values separate from file I/O:
 
 ```python
-from vs_loop_state.api import PlainLoopCursor, parse_plain_loop_cursor, serialize_plain_loop_cursor
+from vs_loop_state.api import (
+    RoundRecord,
+    parse_round_record,
+    serialize_round_record,
+)
 
-cursor = PlainLoopCursor()
-restored = parse_plain_loop_cursor(serialize_plain_loop_cursor(cursor))
+record = RoundRecord(
+    round_number=1,
+    commit=None,
+    perf_metric=None,
+    perf_unit=None,
+    passed=True,
+)
+restored = parse_round_record(serialize_round_record(record))
 ```
