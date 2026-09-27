@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration import artifacts, memory
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
@@ -28,6 +27,7 @@ from vibesys.orchestration.hypothesis.transitions import (
 from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts.contexts import display_path
 from vibesys.schemas import (

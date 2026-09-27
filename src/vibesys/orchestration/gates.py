@@ -4,23 +4,19 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from dataclasses import dataclass
 from itertools import count
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from vibesys.evaluators.gates import (
-    GATE_FEEDBACK_TAIL_CHARS,
-    GATE_LOG_TAIL_CHARS,
-    emit_gate_finished,
-    emit_gate_started,
-)
 from vibesys.events import (
     CoreEventType,
     CoreEventWriter,
+    EventStatus,
     GateFinishedData,
     GateKind,
+    GateStartedData,
     SubprocessOutputData,
 )
-from vibesys.orchestration.local_validation import validate_local
 from vibesys.orchestration.workspace_resources import resources_for
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -35,17 +31,139 @@ from vs_runtime.api import (
     validate_workspace_writable_paths,
 )
 from vs_runtime.api.infrastructure import (
+    FrameworkValidationResult,
+    LocalValidationRecipeError,
+    LocalValidationRecipeErrorKind,
     ScalarBenchmarkContract,
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
     TrustedBenchmarkResult,
+    ValidationRecipe,
+    run_local_validation,
     run_workspace_exclusive,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vibesys.context import _RunResources
     from vibesys.orchestration.request import RunRequest
-    from vs_runtime.api import Commands, Workspaces
+    from vs_runtime.api import Commands, Workspace, Workspaces
+
+
+GATE_LOG_TAIL_CHARS = 1000
+GATE_FEEDBACK_TAIL_CHARS = 4000
+
+
+def emit_gate_started(
+    events: CoreEventWriter,
+    gate: GateKind,
+    *,
+    recipe: str | None = None,
+    command: str | None = None,
+    round_label: str | None = None,
+) -> None:
+    """Publish that one framework gate began evaluating a candidate."""
+    events.emit(
+        CoreEventType.GATE_STARTED,
+        data=GateStartedData(gate=gate, recipe=recipe, command=command),
+        status=EventStatus.ACTIVE,
+        round_label=round_label,
+    )
+
+
+def emit_gate_finished(
+    events: CoreEventWriter,
+    data: GateFinishedData,
+    *,
+    passed: bool,
+    round_label: str | None = None,
+) -> None:
+    """Publish one framework gate outcome."""
+    events.emit(
+        CoreEventType.GATE_FINISHED,
+        data=data,
+        status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
+        round_label=round_label,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FrameworkBenchmarkOutcome:
+    """Policy-interpreted benchmark headline and full measured row."""
+
+    feedback: str | None = None
+    metric_name: str | None = None
+    metric_value: float | None = None
+    metric_direction: Literal["max", "min"] | None = None
+    metric_unit: str | None = None
+    row: Mapping[str, float] | None = None
+
+
+class _LocalValidationEvents:
+    """Translate policy-neutral recipe observations to VibeSys gate events."""
+
+    def __init__(self, events: CoreEventWriter) -> None:
+        self._events = events
+
+    def started(self, recipe: ValidationRecipe) -> None:
+        emit_gate_started(
+            self._events,
+            GateKind.VALIDATION,
+            recipe=recipe.name,
+            command=recipe.command,
+        )
+
+    def finished(self, result: FrameworkValidationResult) -> None:
+        failure = None if result.passed else (result.error or result.output or "unknown failure")
+        emit_gate_finished(
+            self._events,
+            GateFinishedData(
+                gate=GateKind.VALIDATION,
+                recipe=result.recipe.name,
+                reused=result.reused,
+                output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+            ),
+            passed=result.passed,
+        )
+
+
+async def _validate_local(
+    commands: Commands,
+    events: CoreEventWriter,
+    workspace: Workspace,
+    *,
+    recipe_artifact: str,
+    report_location: str,
+) -> LocalValidationEvaluation:
+    """Run the mechanism and map its detailed outcome to product feedback."""
+    try:
+        results = await run_local_validation(
+            commands,
+            workspace,
+            recipe_artifact=recipe_artifact,
+            report_location=report_location,
+            events=_LocalValidationEvents(events),
+        )
+    except LocalValidationRecipeError as error:
+        if error.kind is LocalValidationRecipeErrorKind.DUPLICATE_NAMES:
+            feedback = "Framework local validation recipes contain duplicate names."
+        else:
+            feedback = f"Framework local validation recipe error: {error}."
+        return LocalValidationEvaluation(passed=False, feedback=feedback)
+
+    failed = next((result for result in results if not result.passed), None)
+    if failed is None:
+        return LocalValidationEvaluation(passed=True, report_location=report_location)
+    detail = failed.error or failed.output or "unknown failure"
+    return LocalValidationEvaluation(
+        passed=False,
+        feedback=(
+            f"Framework local validation failed for {failed.recipe.name!r}: {detail}. "
+            f"Inspect `{report_location}` and repair only the affected local contract."
+        ),
+        report_location=report_location,
+    )
 
 
 class _EvaluationAdapter:
@@ -210,7 +328,7 @@ class _EvaluationAdapter:
             (recipe_artifact, report_location),
         )
         live = self._live_workspace(workspace)
-        return await validate_local(
+        return await _validate_local(
             self._commands,
             self._events,
             live,

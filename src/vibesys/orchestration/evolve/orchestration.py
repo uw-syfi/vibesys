@@ -11,7 +11,6 @@ from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.evolve.agents import JUDGE, MUTATOR, PROFILER
 from vibesys.orchestration.evolve.models import (
     CandidateJudgeContext,
@@ -31,6 +30,7 @@ from vibesys.orchestration.evolve.population import (
     Proposal,
 )
 from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.schemas import Verdict
 from vs_runtime.api import (

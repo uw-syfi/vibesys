@@ -7,9 +7,9 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vibesys.evaluators import input_manifest
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis.state import HypothesisState
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.schemas import CandidateDisposition, SkillResourceSelection, Verdict
 from vs_runtime.api import AccuracyReceipt
 

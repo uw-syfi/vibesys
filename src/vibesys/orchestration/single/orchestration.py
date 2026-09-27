@@ -10,8 +10,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import UnsupportedProfilerError
-from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.orchestration.gates import FrameworkBenchmarkOutcome
 from vibesys.orchestration.hypothesis import (
     AttemptState,
     Continue,
@@ -30,6 +29,7 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusConfig,
     ProfileFocusState,
 )
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.single.attribution import run_attribution
 from vibesys.orchestration.single.combined import CombinedTurnRequest, SingleAgentWorker

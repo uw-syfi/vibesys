@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,

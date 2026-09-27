@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
+from vibesys.orchestration.gates import FrameworkBenchmarkOutcome
 from vibesys.orchestration.hypothesis import (
     AttemptDecision,
     AttemptState,

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
     PreRoundDecision,
 )
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.schemas import HypothesisOutcome, Verdict
 
 if TYPE_CHECKING:

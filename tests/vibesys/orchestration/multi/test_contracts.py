@@ -9,7 +9,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.multi.contracts import (
     ImplementerContext,
     ImplementerContinuationContext,
@@ -30,6 +29,7 @@ from vibesys.orchestration.multi.prompts import (
     render_pre_round_prompt,
     render_profiler_prompt,
 )
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import resolve_free_variables
 

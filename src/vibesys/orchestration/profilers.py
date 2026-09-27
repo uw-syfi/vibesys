@@ -1,4 +1,4 @@
-"""Structured profiler reply consumed by orchestration policies."""
+"""Structured profiler replies consumed by orchestration policies."""
 
 from __future__ import annotations
 

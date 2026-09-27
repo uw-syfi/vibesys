@@ -10,7 +10,6 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.errors import InvalidPlanError
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import PLUGIN
@@ -20,6 +19,7 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.multi.models import MultiState, PaidAttempt
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.schemas import Verdict
 from vs_runtime.api import (
     BenchmarkEvaluation,

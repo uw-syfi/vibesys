@@ -1,9 +1,9 @@
 """Typed stub replies owned by the multi policy."""
 
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vibesys.orchestration.multi.stub import scripted_response
+from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.schemas import HypothesisOutcome
 
 
