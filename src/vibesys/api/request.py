@@ -39,13 +39,13 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.run.experiment_repo import ExperimentRepository
+from vs_agent.api.images import build_task_image
 from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
     run_environment_record,
 )
-from vs_agent.api.images import build_task_image
 
 if TYPE_CHECKING:
     from pathlib import Path

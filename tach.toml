@@ -160,7 +160,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.run.host", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve", "vibesys.orchestration.skills"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.run.host", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.environment", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve", "vibesys.orchestration.skills"]
 
 [[modules]]
 path = "vibesys.api.agent"
@@ -213,7 +213,12 @@ depends_on = ["vibesys", "vs_runtime", "vibesys.context", "vibesys.orchestration
 [[modules]]
 path = "vibesys.orchestration.request"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.evaluators", "vibesys.sandbox", "vs_project"]
+depends_on = ["vibesys", "vibesys.evaluators", "vs_runtime", "vs_project"]
+
+[[modules]]
+path = "vibesys.orchestration.environment"
+layer = "orchestration_host"
+depends_on = ["vibesys.prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.view"
@@ -242,7 +247,7 @@ depends_on = [ "vibesys.orchestration.memory", "vs_runtime"]
 [[modules]]
 path = "vibesys.context"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration.request", "vibesys.errors", "vibesys.orchestration.skills"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vs_project", "vs_sandbox", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.errors", "vibesys.orchestration.skills"]
 
 [[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
@@ -273,7 +278,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.evaluators", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.evaluators", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.run.host"
@@ -284,11 +289,6 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runti
 path = "vibesys.domains"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.prompts", "vs_sandbox"]
-
-[[modules]]
-path = "vibesys.sandbox"
-layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.evaluators"

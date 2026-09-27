@@ -22,9 +22,9 @@ from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import borrow_run_agent_environment
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.sandbox.run_environment import SkyPilotEnvironment
 from vs_agent.api import ToolServerDescriptor
 from vs_runtime.api import Workspace
+from vs_runtime.api.infrastructure import SkyPilotEnvironment
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:

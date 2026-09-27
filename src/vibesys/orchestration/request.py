@@ -11,8 +11,8 @@ from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.evaluators.input_manifest import InputBundle
 from vibesys.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
-from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime.api.infrastructure import RunEnvironmentSpec
 
 
 class ResumeRef(BaseModel):

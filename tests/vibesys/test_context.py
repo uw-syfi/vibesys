@@ -50,9 +50,9 @@ from vibesys.profilers import (
     profiler_definition,
 )
 from vibesys.run import LocalRunIntegration
-from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
+from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.testing import FakeComputeBackend
 

@@ -36,6 +36,7 @@ from vibesys.events import (
     EventStatus,
     ExperimentsChangedData,
 )
+from vibesys.orchestration.environment import open_run_environment
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.skills import (
     SkillSelection,
@@ -68,15 +69,6 @@ from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     create_project_materializer,
 )
-from vibesys.sandbox.run_environment import (
-    RunEnvironment,
-    RunEnvironmentRequest,
-    RunEnvironmentSession,
-    RunEnvironmentSpec,
-    build_run_environment,
-    make_run_environment_spec,
-    run_environment_record,
-)
 from vs_agent.api import (
     AgentBackend,
     AgentEventSink,
@@ -98,14 +90,21 @@ from vs_runtime.api.infrastructure import (
     ProjectMaterializer,
     ProtocolBenchmarkContract,
     RoundRecoveryOutcome,
+    RunEnvironment,
+    RunEnvironmentRequest,
+    RunEnvironmentSession,
+    RunEnvironmentSpec,
     RunState,
     ScalarBenchmarkContract,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
+    build_run_environment,
     create_model_request_reconciler,
     create_trusted_evaluation_executor,
     load_evaluator_package,
+    make_run_environment_spec,
+    run_environment_record,
 )
 from vs_sandbox.api import (
     ComputeBackendImpl,
@@ -935,7 +934,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_environment_request = RunEnvironmentRequest(
                 log_dir=log_dir,
                 workspace=project_root,
-                workspace_sources=(),
+                seeded_workspace_paths=tuple(source.dest for source in workspace_sources),
                 ref_dir=ref_dir,
                 backend=backend_impl,
                 agent_backend=resolved_backend,
@@ -957,7 +956,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
             )
-            session = teardown_stack.enter_context(environment.open(run_environment_request))
+            session = teardown_stack.enter_context(
+                open_run_environment(environment, run_environment_request)
+            )
         with boot_trace.span("device_monitor_start"):
             # Start backend-specific background monitoring (CUDA: nvidia-smi).
             device = DeviceLease(backend_impl, log_dir=log_dir, run_environment_view=session.view)
@@ -1158,7 +1159,7 @@ def open_scoped_agent_environment(
             ),
         ),
     )
-    session = context.run_environment.open(request)
+    session = open_run_environment(context.run_environment, request)
     sandboxed = session.view.cli_sandboxed
     return ScopedAgentEnvironment(
         session=session,
@@ -1246,7 +1247,7 @@ def _assemble_workspace_resources(
     workspace_environment_request = RunEnvironmentRequest(
         log_dir=log_dir,
         workspace=workspace,
-        workspace_sources=parent.workspace_sources,
+        seeded_workspace_paths=tuple(source.dest for source in parent.workspace_sources),
         ref_dir=None,
         backend=parent.backend_impl,
         agent_backend=resolved_backend,
@@ -1269,7 +1270,7 @@ def _assemble_workspace_resources(
         state_namespace=parent.state.local(_SKYPILOT_STATE_NAMESPACE),
     )
     session = teardown_stack.enter_context(
-        parent.run_environment.open(workspace_environment_request)
+        open_run_environment(parent.run_environment, workspace_environment_request)
     )
     return _RunResources(
         backend=parent.backend,

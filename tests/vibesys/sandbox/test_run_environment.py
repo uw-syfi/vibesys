@@ -27,26 +27,29 @@ from vibesys.evaluators.input_manifest import (
     WorkspaceSource,
     load_project_task,
 )
+from vibesys.orchestration.environment import open_run_environment
 from vibesys.profilers import ProfilerKind
-from vibesys.sandbox.run_environment import (
-    RunEnvironmentRequest,
-    RunEnvironmentSpec,
-    SkyPilotEnvironment,
+from vs_agent.api.images import ImagePushError
+from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
+from vs_runtime._run_environment import (
     _cli_container_env,
     _cli_provider_env_and_auth_files,
     _container_mount_plan,
     _ensure_pushed_for_remote_backend,
     _SkyPilotRunEnvironmentSession,
-    build_run_environment,
-    make_run_environment_spec,
-    run_environment_record,
 )
-from vs_agent.api.images import ImagePushError
-from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_runtime.api.infrastructure import (
+    RunEnvironmentPresentation,
+    RunEnvironmentRequest,
+    RunEnvironmentSession,
+    RunEnvironmentSpec,
+    SkyPilotEnvironment,
     TrustedEvaluatorRequirements,
+    build_run_environment,
     docker_evaluator_tools_root,
     load_evaluator_package,
+    make_run_environment_spec,
+    run_environment_record,
 )
 from vs_sandbox.api import (
     HostResource,
@@ -60,7 +63,7 @@ from vs_sandbox.api.evaluator_tools import EvaluatorToolError
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vibesys.sandbox.run_environment import RunEnvironment
+    from vs_runtime.api.infrastructure import RunEnvironment
     from vs_sandbox.api import ContentionMonitor, Sandbox
 
 
@@ -68,6 +71,10 @@ if TYPE_CHECKING:
 # how the run environment expands and quotes nested shell argv, not any
 # particular candidate repository.
 NESTED_SHELL_PROJECT = Path(__file__).parent / "fixtures" / "nested_shell_project"
+
+
+def _open(environment: RunEnvironment, request: RunEnvironmentRequest) -> RunEnvironmentSession:
+    return open_run_environment(environment, request)
 
 
 def _as_mount_tuples(resources: Sequence[HostResource]) -> list[tuple[str, str, bool]]:
@@ -389,13 +396,14 @@ def test_local_environment_opens_local_sandbox_with_host_paths(tmp_path: Path) -
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("local"))
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
-        )
+        ),
     )
 
     assert backend.calls[0][0] is SandboxKind.LOCAL
@@ -413,7 +421,7 @@ def test_local_environment_materializes_effective_objective_outside_workspace(
     env = build_run_environment(RunEnvironmentSpec("local"))
     effective = "Optimize the service.\n\n## Operator constraints\n\n- BF16 only\n"
 
-    session = env.open(_request(tmp_path, backend, objective=effective))
+    session = _open(env, _request(tmp_path, backend, objective=effective))
 
     objective_path = Path(session.view.paths.objective)
     assert objective_path == tmp_path / "logs" / "effective-objective.md"
@@ -428,13 +436,14 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
-        )
+        ),
     )
 
     assert backend.calls[0][0] is SandboxKind.DOCKER
@@ -476,14 +485,15 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
         )
     )
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             accuracy_command=command,
             benchmark_command=command,
             evaluator_package_root=package.root,
-        )
+        ),
     )
 
     translated = session.view.paths.accuracy_command
@@ -529,7 +539,8 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
     )
     tools_root = tmp_path / "operator-tools"
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
@@ -537,7 +548,7 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
             benchmark_command=command,
             evaluator_package_root=package.root,
             evaluator_tools_root=tools_root,
-        )
+        ),
     )
 
     lifecycle_hooks = backend.calls[0][1]["lifecycle_hooks"]
@@ -578,7 +589,8 @@ def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
     workspace.mkdir()
 
     with pytest.raises(ValueError, match="must be outside the candidate workspace"):
-        env.open(
+        _open(
+            env,
             _request(
                 tmp_path,
                 backend,
@@ -587,7 +599,7 @@ def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
                 benchmark_command="true",
                 evaluator_package_root=package.root,
                 evaluator_tools_root=workspace / "cache",
-            )
+            ),
         )
 
     assert backend.calls == []
@@ -654,7 +666,7 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
             Path("/opt/vibesys-evaluator-tools"), "request-factory", tool
         )
 
-    session = env.open(request)
+    session = _open(env, request)
 
     rendered = session.view.paths.benchmark_command or ""
     assert "${TOOL:" not in rendered
@@ -705,7 +717,7 @@ def test_docker_environment_requires_a_backend_image(tmp_path: Path) -> None:
     environment = build_run_environment(RunEnvironmentSpec("docker"))
 
     with pytest.raises(EvaluatorToolError, match="requires a configured backend image"):
-        environment.open(_request(tmp_path, backend))
+        _open(environment, _request(tmp_path, backend))
 
 
 def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -> None:
@@ -721,7 +733,7 @@ def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -
         accuracy_command="python checker.py --workspace '${PROJECT_ROOT}'",
         benchmark_command="true",
     )
-    session = env.open(request)
+    session = _open(env, request)
 
     command = session.view.paths.accuracy_command
     assert command is not None
@@ -737,13 +749,14 @@ def test_local_environment_resolves_python_token_to_running_interpreter(tmp_path
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("local"))
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             accuracy_command="'${PYTHON}' checker.py",
             benchmark_command="true",
-        )
+        ),
     )
 
     assert shlex.split(session.view.paths.accuracy_command or "") == [sys.executable, "checker.py"]
@@ -756,13 +769,14 @@ def test_isolated_environment_resolves_python_token_without_host_path(
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec(environment_name))
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             accuracy_command="'${PYTHON}' checker.py",
             benchmark_command="true",
-        )
+        ),
     )
 
     command = session.view.paths.accuracy_command or ""
@@ -784,7 +798,8 @@ def test_environment_quotes_nested_shell_paths(tmp_path: Path) -> None:
     bundle = load_project_task(vibesys_project, vibesys_project.select_task("nested-shell"))
     env = build_run_environment(RunEnvironmentSpec("local"))
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
@@ -792,7 +807,7 @@ def test_environment_quotes_nested_shell_paths(tmp_path: Path) -> None:
             accuracy_command=bundle.accuracy_command_display,
             benchmark_command=bundle.benchmark_command_display,
             evaluator_package_root=bundle.evaluator_package_root,
-        )
+        ),
     )
 
     command = session.view.paths.benchmark_command
@@ -823,13 +838,14 @@ def test_environment_rejects_semantic_tokens_in_nested_shell_source(
     env = build_run_environment(RunEnvironmentSpec("local"))
 
     with pytest.raises(ValueError, match="positional arguments"):
-        env.open(
+        _open(
+            env,
             _request(
                 tmp_path,
                 backend,
                 accuracy_command=shlex.join(["checker", "--run-command-json", nested]),
                 benchmark_command="true",
-            )
+            ),
         )
 
 
@@ -849,13 +865,14 @@ def test_environment_rejects_semantic_tokens_in_top_level_executable_source(
     env = build_run_environment(RunEnvironmentSpec("local"))
 
     with pytest.raises(ValueError, match="positional arguments"):
-        env.open(
+        _open(
+            env,
             _request(
                 tmp_path,
                 backend,
                 accuracy_command=shlex.join(command),
                 benchmark_command="true",
-            )
+            ),
         )
 
 
@@ -872,14 +889,15 @@ def test_microservice_package_does_not_install_rust(
         )
     )
 
-    env.open(
+    _open(
+        env,
         _request(
             tmp_path,
             backend,
             accuracy_command="true",
             benchmark_command="true",
             evaluator_package_root=package.root,
-        )
+        ),
     )
 
     assert fake_agent_image[-1]["toolchains"] == frozenset({"go"})
@@ -890,7 +908,7 @@ def test_docker_environment_mounts_effective_objective_read_only(tmp_path: Path)
     env = build_run_environment(RunEnvironmentSpec("docker"))
     effective = "Optimize.\n\n## Operator constraints\n\n- exact BF16\n"
 
-    session = env.open(_request(tmp_path, backend, objective=effective))
+    session = _open(env, _request(tmp_path, backend, objective=effective))
 
     host_path = tmp_path / "logs" / "effective-objective.md"
     assert host_path.read_text() == effective
@@ -909,7 +927,7 @@ def test_local_environment_objective_defaults_to_the_bare_workspace_relative_nam
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("local"))
 
-    session = env.open(_request(tmp_path, backend))
+    session = _open(env, _request(tmp_path, backend))
 
     assert session.view.paths.objective == "OBJECTIVE.md"
 
@@ -971,14 +989,15 @@ def test_isolated_environment_enforces_project_path_policy(
         hidden_paths=(".state/local", "agent.toml"),
     )
 
-    env.open(
+    _open(
+        env,
         _request(
             tmp_path,
             backend,
             agent_backend="cli",
             cli_provider="codex",
             project_path_policy=policy,
-        )
+        ),
     )
 
     mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
@@ -1044,7 +1063,7 @@ def test_docker_environment_copies_cli_auth_from_readonly_staging(
     auth_file.write_text('{"synthetic": true}\n')
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     kwargs = backend.calls[0][1]
     assert (str(auth_file), "/opt/vibesys-auth/0", True) in _as_mount_tuples(kwargs["resources"])
@@ -1063,7 +1082,7 @@ def test_docker_environment_forwards_host_cli_auth_environment(
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://proxy.invalid/v1")
     monkeypatch.setenv("ANTHROPIC_MODEL", "host-selected-model")
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="claude"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="claude"))
 
     container_env = backend.calls[0][1]["extra_env"]
     assert container_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"  # noqa: S105  # lint-waiver: LW-006012; provider auth variable name is an explicit environment contract.
@@ -1089,7 +1108,7 @@ def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(ValueError, match="no 'codex' CLI authentication") as excinfo:
-        env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+        _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     message = str(excinfo.value)
     assert str(home / ".codex" / "auth.json") in message
@@ -1104,14 +1123,15 @@ def test_docker_environment_exposes_framework_git_history_read_only(tmp_path: Pa
     history = tmp_path / "experiment-history"
     history.mkdir()
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             agent_backend="cli",
             cli_provider="codex",
             git_history_root=history,
-        )
+        ),
     )
 
     kwargs = backend.calls[0][1]
@@ -1127,12 +1147,13 @@ def test_docker_environment_uses_environment_bind_mounts(tmp_path: Path) -> None
     model_dir = tmp_path / "model"
     model_dir.mkdir()
 
-    env.open(
+    _open(
+        env,
         _request(
             tmp_path,
             backend,
             environment_bind_mounts=(EnvironmentBindMount(model_dir, "/model", read_only=True),),
-        )
+        ),
     )
 
     kwargs = backend.calls[0][1]
@@ -1145,13 +1166,14 @@ def test_docker_environment_mounts_selected_profiler_support(tmp_path: Path) -> 
     support = tmp_path / "custom-profiler"
     support.mkdir()
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             profiler_support_path=str(support),
             profiler_support_name="fixture_profiler",
-        )
+        ),
     )
 
     kwargs = backend.calls[0][1]
@@ -1175,7 +1197,8 @@ def test_docker_environment_mounts_extra_profiler_support_dirs(tmp_path: Path) -
     torch = tmp_path / "torch"
     torch.mkdir()
 
-    env.open(
+    _open(
+        env,
         _request(
             tmp_path,
             backend,
@@ -1185,7 +1208,7 @@ def test_docker_environment_mounts_extra_profiler_support_dirs(tmp_path: Path) -
                 (str(common), "profilers_common"),
                 (str(torch), "torch_profiler"),
             ),
-        )
+        ),
     )
 
     mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
@@ -1201,12 +1224,13 @@ def test_docker_environment_ignores_profiler_support_extra_without_a_primary_pro
     common = tmp_path / "_common"
     common.mkdir()
 
-    env.open(
+    _open(
+        env,
         _request(
             tmp_path,
             backend,
             profiler_support_extra=((str(common), "profilers_common"),),
-        )
+        ),
     )
 
     mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
@@ -1219,7 +1243,7 @@ def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_pa
     ref_dir = tmp_path / "reference"
     (ref_dir / "model").mkdir(parents=True)
 
-    env.open(_request(tmp_path, backend, ref_dir=ref_dir))
+    _open(env, _request(tmp_path, backend, ref_dir=ref_dir))
 
     mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
     assert all(container_path != "/model" for _, container_path, _ in mounts)
@@ -1229,7 +1253,7 @@ def test_environment_session_context_manager_closes(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))
 
-    with env.open(_request(tmp_path, backend)) as session:
+    with _open(env, _request(tmp_path, backend)) as session:
         assert session.sandbox is backend.sandbox
         backend.sandbox.stop.assert_not_called()
 
@@ -1249,7 +1273,7 @@ def test_modal_environment_uses_local_docker_for_editing(
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    session = _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     # The sandbox is local Docker, not a Modal Sandbox.
     assert backend.calls[0][0] is SandboxKind.DOCKER
@@ -1266,11 +1290,21 @@ def test_modal_environment_uses_local_docker_for_editing(
     backend.sandbox.start.assert_called_once()
 
 
+def test_modal_prepared_environment_requires_runtime_presentation(tmp_path: Path) -> None:
+    """Lower infrastructure fails closed when product composition omits policy text."""
+    environment = build_run_environment(RunEnvironmentSpec("modal"))
+    prepared = environment.prepare(_request(tmp_path, FakeBackend()))
+
+    with pytest.raises(ValueError, match="explicit runtime presentation document"):
+        prepared.open(RunEnvironmentPresentation(prompt_notes=""))
+
+
 def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
@@ -1278,7 +1312,7 @@ def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_pat
             cli_provider="codex",
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py --concurrency 16",
-        )
+        ),
     )
 
     helper = "/opt/vibesys-modal-evaluator.py"
@@ -1305,7 +1339,8 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
         )
     )
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
@@ -1313,7 +1348,7 @@ def test_modal_environment_wraps_custom_deployment_entrypoint(tmp_path: Path) ->
             cli_provider="codex",
             accuracy_command="trusted-check",
             benchmark_command="trusted-benchmark",
-        )
+        ),
     )
 
     helper = "/opt/vibesys-modal-evaluator.py"
@@ -1334,7 +1369,7 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     assert "extra_init_commands" not in backend.calls[0][1]
     assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
@@ -1356,7 +1391,7 @@ def test_modal_environment_mounts_modal_auth_under_the_agent_home(
     (home / ".modal").mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
     assert (str(home / ".modal.toml"), "/home/agent/.modal.toml", True) in mounts
@@ -1369,7 +1404,7 @@ def test_modal_environment_prompt_references_runtime_document(tmp_path: Path) ->
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    session = _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     notes = session.view.prompt_notes
     runtime = _modal_runtime_document(tmp_path)
@@ -1416,14 +1451,15 @@ def test_modal_environment_mounts_effective_objective_read_only(tmp_path: Path) 
     env = build_run_environment(RunEnvironmentSpec("modal"))
     effective = "Optimize.\n\n## Operator constraints\n\n- no quantization\n"
 
-    session = env.open(
+    session = _open(
+        env,
         _request(
             tmp_path,
             backend,
             agent_backend="cli",
             cli_provider="codex",
             objective=effective,
-        )
+        ),
     )
 
     host_path = tmp_path / "logs" / "effective-objective.md"
@@ -1440,7 +1476,7 @@ def test_modal_environment_prompt_notes_require_remote_runtime_fingerprint(tmp_p
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
     assert "authoritative runtime" in notes
@@ -1453,7 +1489,7 @@ def test_modal_environment_requires_exact_default_h100_identity(tmp_path: Path) 
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
     assert "gpu='H100!'" in notes
@@ -1468,14 +1504,15 @@ def test_modal_environment_documents_history_and_exact_measurement_source(tmp_pa
     history = tmp_path / "experiment-history"
     history.mkdir()
 
-    env.open(
+    _open(
+        env,
         _request(
             tmp_path,
             backend,
             agent_backend="cli",
             cli_provider="codex",
             git_history_root=history,
-        )
+        ),
     )
     kwargs = backend.calls[0][1]
     notes = _modal_runtime_document(tmp_path)
@@ -1526,8 +1563,8 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         run_id="20260429-100100-runb",
         framework_root=tmp_path / "framework",
     )
-    env.open(req_a)
-    env.open(req_b)
+    _open(env, req_a)
+    _open(env, req_b)
     notes_a = (log_a / "runtime-environment.md").read_text()
     notes_b = (log_b / "runtime-environment.md").read_text()
 
@@ -1544,7 +1581,7 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path: Pat
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
     assert "modal_profile" in notes
@@ -1562,7 +1599,7 @@ def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path: Path)
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
     assert "UV_CACHE_DIR=/workspace/.cache/uv" in notes
@@ -1578,7 +1615,7 @@ def test_modal_environment_with_stub_agent_backend_uses_docker_too(tmp_path: Pat
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="stub"))
+    _open(env, _request(tmp_path, backend, agent_backend="stub"))
 
     assert backend.calls[0][0] is SandboxKind.DOCKER
 
@@ -1622,7 +1659,7 @@ remote_artifact_root = "/remote/vibesys"
         def close(self) -> None:
             self.closed += 1
 
-    monkeypatch.setattr("vibesys.sandbox.run_environment.SkyPilotBridge", FakeBridge)
+    monkeypatch.setattr("vs_runtime._run_environment.SkyPilotBridge", FakeBridge)
     backend = FakeBackend()
     environment = build_run_environment(
         make_run_environment_spec(
@@ -1633,7 +1670,8 @@ remote_artifact_root = "/remote/vibesys"
         )
     )
 
-    session = environment.open(
+    session = _open(
+        environment,
         _request(
             tmp_path,
             backend,
@@ -1641,7 +1679,7 @@ remote_artifact_root = "/remote/vibesys"
             benchmark_command="python benchmark.py",
             benchmark_output_argument="--output-json",
             state_namespace=MagicMock(),
-        )
+        ),
     )
 
     kind, kwargs = backend.calls[0]
@@ -1709,7 +1747,7 @@ remote_artifact_root = "/remote/vibesys"
         def close(self) -> None:
             return
 
-    monkeypatch.setattr("vibesys.sandbox.run_environment.SkyPilotBridge", FakeBridge)
+    monkeypatch.setattr("vs_runtime._run_environment.SkyPilotBridge", FakeBridge)
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -1733,7 +1771,8 @@ remote_artifact_root = "/remote/vibesys"
         )
     )
 
-    session = environment.open(
+    session = _open(
+        environment,
         _request(
             tmp_path,
             backend,
@@ -1741,7 +1780,7 @@ remote_artifact_root = "/remote/vibesys"
             benchmark_command=benchmark,
             evaluator_package_root=package.root,
             state_namespace=MagicMock(),
-        )
+        ),
     )
 
     tool = package.metadata.tools["request-factory"]
@@ -1785,14 +1824,15 @@ def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path: Path) -
         dest="vllm",
     )
 
-    seeded = env.open(
+    seeded = _open(
+        env,
         _request(
             tmp_path,
             backend,
             agent_backend="cli",
             cli_provider="codex",
-            workspace_sources=(source,),
-        )
+            seeded_workspace_paths=(source.dest,),
+        ),
     )
     assert "seeded starting-point" not in seeded.view.prompt_notes.lower()
     notes = _modal_runtime_document(tmp_path)
@@ -1802,7 +1842,7 @@ def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path: Path) -
 
     unseeded_dir = tmp_path / "unseeded"
     unseeded_dir.mkdir()
-    env.open(_request(unseeded_dir, backend, agent_backend="cli", cli_provider="codex"))
+    _open(env, _request(unseeded_dir, backend, agent_backend="cli", cli_provider="codex"))
     unseeded_notes = _modal_runtime_document(unseeded_dir)
     assert "add_local_dir('vllm'" not in unseeded_notes
     assert "seeded starting-point" not in unseeded_notes.lower()
@@ -1828,12 +1868,13 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
         EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
     )
 
-    def _open(
+    def _open_environment_case(
         env_name: str, env: RunEnvironment, backend: FakeBackend, **overrides: object
     ) -> None:
         root = tmp_path / env_name
         root.mkdir()
-        env.open(
+        _open(
+            env,
             _request(
                 root,
                 backend,
@@ -1842,14 +1883,18 @@ def test_docker_modal_and_skypilot_build_the_same_kind_of_sandbox_from_one_resou
                 agent_backend="cli",
                 cli_provider="codex",
                 **overrides,
-            )
+            ),
         )
 
     docker_backend = FakeBackend()
-    _open("docker", build_run_environment(RunEnvironmentSpec("docker")), docker_backend)
+    _open_environment_case(
+        "docker", build_run_environment(RunEnvironmentSpec("docker")), docker_backend
+    )
 
     modal_backend = FakeBackend()
-    _open("modal", build_run_environment(RunEnvironmentSpec("modal")), modal_backend)
+    _open_environment_case(
+        "modal", build_run_environment(RunEnvironmentSpec("modal")), modal_backend
+    )
 
     profiles = tmp_path / "clusters.toml"
     profiles.write_text(
@@ -1874,7 +1919,7 @@ remote_artifact_root = "/remote/vibesys"
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("vibesys.sandbox.run_environment.SkyPilotBridge", _FakeBridge)
+    monkeypatch.setattr("vs_runtime._run_environment.SkyPilotBridge", _FakeBridge)
     skypilot_backend = FakeBackend()
     skypilot_env = build_run_environment(
         make_run_environment_spec(
@@ -1886,7 +1931,7 @@ remote_artifact_root = "/remote/vibesys"
             ),
         )
     )
-    _open("skypilot", skypilot_env, skypilot_backend, state_namespace=MagicMock())
+    _open_environment_case("skypilot", skypilot_env, skypilot_backend, state_namespace=MagicMock())
 
     backends = {"docker": docker_backend, "modal": modal_backend, "skypilot": skypilot_backend}
 
@@ -1959,11 +2004,11 @@ def test_skypilot_open_requires_resources_and_a_state_namespace(tmp_path: Path) 
     request = _request(tmp_path, FakeBackend())
 
     with pytest.raises(ValueError, match="requires portable run resources"):
-        SkyPilotEnvironment.from_options({"profile": "cluster"}).open(request)
+        _open(SkyPilotEnvironment.from_options({"profile": "cluster"}), request)
 
     resources = RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda")
     with pytest.raises(ValueError, match="requires a machine-local state namespace"):
-        SkyPilotEnvironment.from_options({"profile": "cluster"}, resources).open(request)
+        _open(SkyPilotEnvironment.from_options({"profile": "cluster"}, resources), request)
 
 
 def test_modal_open_requires_a_model_id_in_reference_metadata(tmp_path: Path) -> None:
@@ -1973,7 +2018,7 @@ def test_modal_open_requires_a_model_id_in_reference_metadata(tmp_path: Path) ->
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     with pytest.raises(ValueError, match="missing required 'model_id' field"):
-        env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
+        _open(env, _request(tmp_path, FakeBackend(), ref_dir=ref_dir))
 
 
 def test_modal_open_requires_a_model_id_in_draft_metadata(tmp_path: Path) -> None:
@@ -1983,7 +2028,7 @@ def test_modal_open_requires_a_model_id_in_draft_metadata(tmp_path: Path) -> Non
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     with pytest.raises(ValueError, match=r"draft_meta\.json at .* missing required 'model_id'"):
-        env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
+        _open(env, _request(tmp_path, FakeBackend(), ref_dir=ref_dir))
 
 
 def test_remote_push_failure_names_the_backend_and_image() -> None:

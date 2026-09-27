@@ -46,7 +46,6 @@ from vibesys.orchestration.evolve.models import EvolveOptions
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
 from vibesys.profilers import ProfilerKind
-from vibesys.sandbox.run_environment import run_environment_record
 from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,
@@ -55,6 +54,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
+from vs_runtime.api.infrastructure import run_environment_record
 
 _LOOP_RUN_TARGETS = {
     "agent": "vibesys.api.session.run_plugin",

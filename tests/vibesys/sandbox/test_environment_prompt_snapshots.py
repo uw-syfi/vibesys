@@ -21,22 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.prompts.renderer import _build_env
 
 _ENVIRONMENTS_DIR = PROMPTS_DIR / "environments"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "environment_prompt_snapshots"
-
-_WORKSPACE_SOURCE_A = WorkspaceSource(
-    name="reference",
-    repo="https://example.invalid/ref.git",
-    commit="1234567abcdef0",
-    dest="reference",
-)
-_WORKSPACE_SOURCE_B = WorkspaceSource(
-    name="draft", repo="https://example.invalid/draft.git", commit="fedcba7654321", dest="draft"
-)
 
 
 def _snapshot_path(kind: str, case_name: str, template_name: str) -> Path:
@@ -67,14 +56,14 @@ _MODAL_RUNTIME_NOTES_CASES = {
     "cold_start": {
         "gpu": "H100",
         "app_name": "run-9f2a3b",
-        "workspace_sources": (),
+        "seeded_workspace_paths": (),
         "reference_path": "reference",
         "history_root": None,
     },
     "with_seeded_checkouts_and_history": {
         "gpu": "A100-80GB",
         "app_name": "run-c71de0",
-        "workspace_sources": (_WORKSPACE_SOURCE_A, _WORKSPACE_SOURCE_B),
+        "seeded_workspace_paths": ("reference", "draft"),
         "reference_path": "reference",
         "history_root": Path("/opt/vibesys-history"),
     },
@@ -119,7 +108,7 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
             {
                 "gpu": "H100",
                 "app_name": "run-9f2a3b",
-                "workspace_sources": (_WORKSPACE_SOURCE_A,),
+                "seeded_workspace_paths": ("reference",),
                 "reference_path": "reference",
                 "history_root": Path("/opt/vibesys-history"),
             },

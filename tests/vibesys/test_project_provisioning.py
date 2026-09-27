@@ -15,8 +15,8 @@ from vibesys.run.project import (
     provision_project,
 )
 from vibesys.run.workspace_policy import create_project_materializer
-from vibesys.sandbox.run_environment import LocalEnvironment
 from vs_project.api import Project
+from vs_runtime.api.infrastructure import LocalEnvironment
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:

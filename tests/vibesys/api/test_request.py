@@ -27,7 +27,7 @@ from vibesys.api.request import (
     validate_experiment_name,
     with_operator_constraints,
 )
-from vibesys.sandbox.run_environment import build_run_environment
+from vs_runtime.api.infrastructure import build_run_environment
 
 if TYPE_CHECKING:
     from pathlib import Path

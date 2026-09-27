@@ -18,6 +18,7 @@ from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
 from vibesys.orchestration.contracts import project_run
+from vibesys.orchestration.environment import open_run_environment
 from vibesys.orchestration.skills import platform_skill_selection
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
@@ -41,11 +42,10 @@ if TYPE_CHECKING:
     from vibesys.orchestration.contracts import OrchestrationProjector, OrchestrationRegistry
     from vibesys.orchestration.request import RunRequest
     from vibesys.orchestration.skills import SkillSelection
-    from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import OrchestrationPlugin, Workspace
     from vs_runtime.api import RunStatus as PluginRunStatus
-    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
+    from vs_runtime.api.infrastructure import AgentExecutionEnvironment, RunEnvironmentSession
     from vs_sandbox.api import ComputeBackendImpl, ProjectPathPolicy, Sandbox
 
 
@@ -292,7 +292,7 @@ class _LocalRunSession:
                 *(_environment_bind_mount(mount) for mount in mounts),
             ),
         )
-        opened = resources.environment.open(request)
+        opened = open_run_environment(resources.environment, request)
         backends: dict[str, Sandbox] | None = None
         use_docker = False
         isolated = False
@@ -537,7 +537,7 @@ def _run_ready(resources: RunResources) -> RunReady:
 class _AgentPathSandbox(Protocol):
     """The one lookup `_OpenedAgentEnvironment.agent_path` needs from a sandbox.
 
-    Mirrors `vibesys.sandbox.run_environment._AgentPathSandbox`: every
+    Mirrors the runtime environment's agent-path contract: every
     sandbox kind `RunEnvironment.open` can return (host-only or Docker)
     implements this, even though `vs_sandbox.execution.Sandbox` itself does
     not declare it.

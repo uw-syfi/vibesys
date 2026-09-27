@@ -33,11 +33,11 @@ import sys
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
 from dataclasses import dataclass, field
+from functools import partial
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_agent.api import (
     DOCKER_PROVIDER_ENV,
     AgentBackend,
@@ -48,15 +48,15 @@ from vs_agent.api import (
     auth_paths,
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
-from vs_runtime.api.infrastructure import (
+from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
+from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
     SANDBOX_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
-    TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
     evaluator_agent_toolchains,
-    materialize_objective_document,
-    prepare_docker_evaluator_resources,
     prepare_trusted_evaluation_plan,
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
@@ -86,6 +86,7 @@ from vs_sandbox.api.evaluator_tools import (
     EvaluatorToolLifecycleHooks,
 )
 from vs_sandbox.api.skypilot import (
+    ResolvedSkyPilotResources,
     SkyPilotBridge,
     SkyPilotJobRunner,
     load_cluster_profiles,
@@ -105,7 +106,6 @@ _RECORDED_ENVIRONMENT_NAMES: tuple[_RunEnvironmentName, ...] = (
     "modal",
     "skypilot",
 )
-_ENVIRONMENTS_TEMPLATE_DIR = PROMPTS_DIR / "environments"
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
 
@@ -118,7 +118,6 @@ source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.evaluators.input_manifest import WorkspaceSource
     from vs_project.api import StateNamespace
     from vs_sandbox.api import ComputeBackendImpl, Sandbox
 
@@ -174,6 +173,50 @@ class RunEnvironmentView:
 
 
 @dataclass(frozen=True)
+class RunEnvironmentPresentation:
+    """Product-authored text consumed by environment infrastructure."""
+
+    prompt_notes: str
+    runtime_document: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalEnvironmentFacts:
+    """Presentation facts for host-local execution."""
+
+
+@dataclass(frozen=True)
+class DockerEnvironmentFacts:
+    """Presentation facts for Docker execution."""
+
+
+@dataclass(frozen=True)
+class SkyPilotEnvironmentFacts:
+    """Resolved SkyPilot facts needed by product presentation and opening."""
+
+    resources: ResolvedSkyPilotResources
+    runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
+
+
+@dataclass(frozen=True)
+class ModalEnvironmentFacts:
+    """Resolved Modal facts needed by product presentation and opening."""
+
+    gpu: str
+    app_name: str
+    reference_path: str
+    runtime_container_path: str = "/opt/vibesys-runtime/environment.md"
+
+
+RunEnvironmentPresentationFacts = (
+    LocalEnvironmentFacts
+    | DockerEnvironmentFacts
+    | SkyPilotEnvironmentFacts
+    | ModalEnvironmentFacts
+)
+
+
+@dataclass(frozen=True)
 class RunEnvironmentRequest:
     """Resolved inputs required to open a run environment."""
 
@@ -202,7 +245,7 @@ class RunEnvironmentRequest:
     profiler_support_extra: tuple[tuple[str, str], ...] = ()
     git_history_root: Path | None = None
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
-    workspace_sources: tuple[WorkspaceSource, ...] = ()
+    seeded_workspace_paths: tuple[str, ...] = ()
     log: Callable[[str], None] | None = None
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     state_namespace: StateNamespace | None = None
@@ -239,6 +282,18 @@ class RunEnvironmentSession(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class _PreparedRunEnvironment:
+    """A resolved environment plan awaiting product-authored presentation."""
+
+    presentation_facts: RunEnvironmentPresentationFacts
+    _open: Callable[[RunEnvironmentPresentation], RunEnvironmentSession]
+
+    def open(self, presentation: RunEnvironmentPresentation) -> RunEnvironmentSession:
+        """Open the resolved environment with explicit product presentation."""
+        return self._open(presentation)
+
+
 class RunEnvironment(Protocol):
     """Environment policy for run execution and candidate evaluation."""
 
@@ -248,8 +303,8 @@ class RunEnvironment(Protocol):
     supported_profiler_ids: frozenset[str] | None
     backend_image: str | None
 
-    def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
-        """Start the environment and return its run-scoped session."""
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Resolve environment facts without starting owned resources."""
         ...
 
     def repair_workspace(
@@ -295,8 +350,15 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
     supported_profiler_ids: frozenset[str] | None = None
     backend_image: str | None = None
 
-    def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Resolve the host-local presentation facts."""
+        return _PreparedRunEnvironment(LocalEnvironmentFacts(), partial(self._open, request))
+
+    def _open(
+        self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
+    ) -> RunEnvironmentSession:
         """Create a host-local sandbox and its agent path view."""
+        del presentation
         objective_document = _materialize_effective_objective(request)
         requirements = request.evaluator_requirements
         tools = requirements.tools
@@ -374,7 +436,13 @@ class DockerEnvironment:
         image = options.get("image")
         return cls(DockerEnvironmentConfig(image=str(image) if image else None))
 
-    def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Resolve Docker presentation facts."""
+        return _PreparedRunEnvironment(DockerEnvironmentFacts(), partial(self._open, request))
+
+    def _open(
+        self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
+    ) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
         image_helpers = import_module("vs_agent.api.images")
         requirements = request.evaluator_requirements
@@ -437,11 +505,7 @@ class DockerEnvironment:
                     cast("_AgentPathSandbox", sandbox),
                     evaluator_tools_root=SANDBOX_EVALUATOR_TOOLS_ROOT,
                 ),
-                prompt_notes=render_template(
-                    "docker/prompt_notes.j2",
-                    template_dir=_ENVIRONMENTS_TEMPLATE_DIR,
-                    history_root=request.git_history_root,
-                ),
+                prompt_notes=presentation.prompt_notes,
                 isolated=True,
                 cli_sandboxed=True,
                 env_kind="docker",
@@ -558,7 +622,37 @@ class SkyPilotEnvironment(DockerEnvironment):
             )
         )
 
-    def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Resolve and validate SkyPilot resources without starting them."""
+        if self.config.resources is None:
+            message = "SkyPilot requires portable run resources"
+            raise ValueError(message)
+        if request.state_namespace is None:
+            message = "SkyPilot requires a machine-local state namespace"
+            raise ValueError(message)
+        state_namespace = request.state_namespace
+        profiles = load_cluster_profiles(self.config.profiles_file)
+        resources = resolve_profile(profiles, self.config.profile, self.config.resources)
+        facts = SkyPilotEnvironmentFacts(resources=resources)
+        return _PreparedRunEnvironment(
+            facts,
+            partial(
+                self._open_skypilot,
+                request,
+                resources,
+                stable_cluster_name(request.run_id, resources),
+                state_namespace,
+            ),
+        )
+
+    def _open_skypilot(
+        self,
+        request: RunEnvironmentRequest,
+        cluster_resources: ResolvedSkyPilotResources,
+        cluster_name: str,
+        state_namespace: StateNamespace,
+        presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
         """Open the bridge and CPU-only local editor container.
 
         The editor container starts from the same agent image the plain
@@ -572,15 +666,7 @@ class SkyPilotEnvironment(DockerEnvironment):
         accuracy/benchmark command's own runtime needs (CUDA/ROCm, etc.), not
         for running agent CLIs, and this change leaves it untouched.
         """
-        if self.config.resources is None:
-            message = "SkyPilot requires portable run resources"
-            raise ValueError(message)
-        if request.state_namespace is None:
-            message = "SkyPilot requires a machine-local state namespace"
-            raise ValueError(message)
-        profiles = load_cluster_profiles(self.config.profiles_file)
-        cluster_resources = resolve_profile(profiles, self.config.profile, self.config.resources)
-        cluster_name = stable_cluster_name(request.run_id, cluster_resources)
+        runtime_presentation = _required_runtime_document(presentation, "SkyPilot")
         requirements = request.evaluator_requirements
         evaluation = _prepare_evaluation_plan(
             request,
@@ -615,7 +701,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             commands=commands,
             framework_setup_command=remote_evaluator_setup_command(requirements),
             benchmark_output_argument=request.benchmark_output_argument,
-            state_namespace=request.state_namespace,
+            state_namespace=state_namespace,
             socket_path=request.log_dir / "skypilot-bridge.sock",
             log=log,
         )
@@ -641,7 +727,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
             socket_path = "/opt/vibesys-skypilot/bridge.sock"
             caller_state_path = "/opt/vibesys-skypilot/caller-state"
-            caller_state = request.state_namespace.external_directory("caller")
+            caller_state = state_namespace.external_directory("caller")
             cli_provider_env["VIBESYS_SKYPILOT_CALLER_STATE"] = caller_state_path
             resources.extend(
                 host_resource_for_mount(host, container, read_only=read_only)
@@ -652,16 +738,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 )
             )
             runtime_document = request.log_dir / "runtime-environment.md"
-            runtime_document.write_text(
-                render_template(
-                    "skypilot/runtime_notes.j2",
-                    template_dir=_ENVIRONMENTS_TEMPLATE_DIR,
-                    nodes=cluster_resources.nodes,
-                    accelerators_per_node=cluster_resources.accelerators_per_node,
-                    accelerator_type=cluster_resources.accelerator_type,
-                    profile_name=cluster_resources.profile_name,
-                )
-            )
+            runtime_document.write_text(runtime_presentation)
             runtime_path = "/opt/vibesys-runtime/environment.md"
             resources.append(
                 host_resource_for_mount(str(runtime_document), runtime_path, read_only=True)
@@ -700,11 +777,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                     benchmark_command=(f"{prefix} benchmark" if "benchmark" in commands else None),
                     profiler_support=None,
                 ),
-                prompt_notes=render_template(
-                    "skypilot/prompt_notes.j2",
-                    template_dir=_ENVIRONMENTS_TEMPLATE_DIR,
-                    runtime_container_path=agent_path_sandbox.agent_path(runtime_document),
-                ),
+                prompt_notes=presentation.prompt_notes,
                 isolated=True,
                 cli_sandboxed=True,
                 share_agent_session=True,
@@ -745,7 +818,25 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             )
         )
 
-    def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
+    def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
+        """Resolve Modal presentation facts without starting resources."""
+        app_name = _modal_app_name(request.run_id, fallback=self.config.app)
+        facts = ModalEnvironmentFacts(
+            gpu=self.config.gpu,
+            app_name=app_name,
+            reference_path=_reference_container_path(request).removeprefix("/workspace/"),
+        )
+        return _PreparedRunEnvironment(
+            facts,
+            partial(self._open, request, app_name),
+        )
+
+    def _open(
+        self,
+        request: RunEnvironmentRequest,
+        app_name: str,
+        presentation: RunEnvironmentPresentation,
+    ) -> RunEnvironmentSession:
         """Open the Modal-via-Docker run environment.
 
         Architecture (refactor April 2026): the agent (codex CLI) runs inside
@@ -776,6 +867,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         still needs something to install it; see the accompanying report for
         the gap this surfaces.
         """
+        runtime_presentation = _required_runtime_document(presentation, "Modal")
         # Host-side: ensure Modal Volumes exist for the model + optional
         # draft.  These run before the Docker container starts and are
         # idempotent (skip-if-ready sentinel).
@@ -801,21 +893,9 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
-        app_name = _modal_app_name(request.run_id, fallback=self.config.app)
         cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
         runtime_document = request.log_dir / "runtime-environment.md"
-        reference_path = _reference_container_path(request).removeprefix("/workspace/")
-        runtime_document.write_text(
-            render_template(
-                "modal/runtime_notes.j2",
-                template_dir=_ENVIRONMENTS_TEMPLATE_DIR,
-                gpu=self.config.gpu,
-                app_name=app_name,
-                workspace_sources=request.workspace_sources,
-                reference_path=reference_path,
-                history_root=request.git_history_root,
-            )
-        )
+        runtime_document.write_text(runtime_presentation)
         runtime_container_path = "/opt/vibesys-runtime/environment.md"
         resources.append(
             host_resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
@@ -919,11 +999,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                         request.profiler_support_name if request.profiler_support_path else None
                     ),
                 ),
-                prompt_notes=render_template(
-                    "modal/prompt_notes.j2",
-                    template_dir=_ENVIRONMENTS_TEMPLATE_DIR,
-                    runtime_container_path=agent_path_sandbox.agent_path(runtime_document),
-                ),
+                prompt_notes=presentation.prompt_notes,
                 isolated=True,
                 cli_sandboxed=True,
                 host_device_reselect=False,
@@ -1191,6 +1267,16 @@ def _prefix_command(prefix: str, command: str | None) -> str | None:
 
 def _noop_log(message: str) -> None:
     del message
+
+
+def _required_runtime_document(
+    presentation: RunEnvironmentPresentation, environment_name: str
+) -> str:
+    document = presentation.runtime_document
+    if document is None:
+        message = f"{environment_name} requires an explicit runtime presentation document"
+        raise ValueError(message)
+    return document
 
 
 def _prepare_evaluation_plan(
