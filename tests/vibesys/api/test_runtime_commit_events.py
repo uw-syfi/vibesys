@@ -19,8 +19,8 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_session
-from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, ExperimentsChangedData
+from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.state import _emit_commit_events
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView

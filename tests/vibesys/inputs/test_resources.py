@@ -1,3 +1,5 @@
+"""Resource-request input-contract tests."""
+
 from __future__ import annotations
 
 import tomllib
@@ -6,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.constants import DomainName
-from vibesys.evaluators.input_manifest import InputManifest, render_input_manifest
+from vibesys.inputs import InputManifest, render_input_manifest
 from vs_project.api import RunResourceRequest
 
 

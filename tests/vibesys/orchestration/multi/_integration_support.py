@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.request import ResumeRef, RunRequest

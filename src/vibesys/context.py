@@ -34,12 +34,12 @@ from vibesys.domains.environment import (
 from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import tool_install_root
-from vibesys.evaluators.input_manifest import InputBundle, WorkspaceSource
 from vibesys.events import (
     CoreEventType,
     EventStatus,
     ExperimentsChangedData,
 )
+from vibesys.inputs import InputBundle, WorkspaceSource
 from vibesys.orchestration.environment import open_run_environment
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.skills import (

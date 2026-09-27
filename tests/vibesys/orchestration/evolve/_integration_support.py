@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
 from vibesys.api.testing import create_session
-from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.evolve import PLUGIN
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.request import ResumeRef, RunRequest

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     load_input_bundle,
 )
 

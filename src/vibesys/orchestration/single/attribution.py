@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.profile_focus import ProfileAttributionError, parse_attribution
 
 if TYPE_CHECKING:
-    from vibesys.evaluators.input_manifest import ProfileGuidedInput
+    from vibesys.inputs import ProfileGuidedInput
     from vibesys.orchestration.profile_focus import ProfileBottleneck
     from vs_runtime.api import CommandResult, RunHost, Workspace
 

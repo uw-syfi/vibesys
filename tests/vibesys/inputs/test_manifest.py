@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     BenchmarkResult,
     EvaluatorInput,
     InputCommand,

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.inputs import load_input_bundle
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

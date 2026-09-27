@@ -24,10 +24,12 @@ from typing import TYPE_CHECKING
 
 from vibesys.composition import resolve_agent_driver
 from vibesys.config import BUNDLED_RESOURCES
-from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
-from vibesys.evaluators.input_synthesis import (
+from vibesys.inputs import (
+    InputBundle,
     InputSynthesisError,
     SynthesizedInputSpec,
+    load_input_bundle,
+    load_project_task,
     synthesize_input_bundle,
 )
 from vibesys.orchestration.skills import resolve_skill_source_dirs

@@ -23,7 +23,7 @@ from vibesys.evaluators import (
     tool_install_root,
     tool_spec_digest,
 )
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     WorkspaceSource,
     load_project_task,
 )

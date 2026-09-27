@@ -36,8 +36,8 @@ from vibesys.api import MetricSpace, Objective
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
 from vibesys.events import CoreEventType
+from vibesys.inputs import ProfileGuidedInput, load_input_bundle
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )

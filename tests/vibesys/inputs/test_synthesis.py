@@ -12,10 +12,10 @@ from entrypoints import (
 )
 from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationError
-from vibesys.evaluators.input_manifest import load_input_bundle
-from vibesys.evaluators.input_synthesis import (
+from vibesys.inputs import (
     InputSynthesisError,
     SynthesizedInputSpec,
+    load_input_bundle,
     synthesize_input_bundle,
 )
 

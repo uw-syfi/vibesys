@@ -15,7 +15,7 @@ import yaml
 from tests.support.example_registry import require_external_repo_checkout
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
-from vibesys.evaluators.input_manifest import InputBundle, load_project_task
+from vibesys.inputs import InputBundle, load_project_task
 from vibesys.run.project import ProjectProvisioningSpec, provision_project
 from vibesys.run.workspace_policy import create_project_materializer
 from vs_project.api import Project

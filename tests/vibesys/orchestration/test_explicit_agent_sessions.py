@@ -18,7 +18,7 @@ from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
 from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.single import PLUGIN

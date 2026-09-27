@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vibesys.evaluators import input_manifest
+from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis import SkillResourceSelection
 from vibesys.orchestration.hypothesis.state import HypothesisState
@@ -15,7 +15,7 @@ from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
 
-_ProfileGuidedInput = input_manifest.ProfileGuidedInput
+_ProfileGuidedInput = ProfileGuidedInput
 
 
 class PlanContext(BaseModel):

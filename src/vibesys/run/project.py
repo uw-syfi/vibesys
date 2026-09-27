@@ -11,7 +11,7 @@ from typing import Self
 
 from pydantic import ValidationError
 
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     MANIFEST_NAME,
     EvaluatorInput,
     InputManifest,
@@ -102,7 +102,7 @@ class ProjectProvisioningSpec:
 
     ``materializer`` owns copy and source-materialization mechanics and must be
     rooted at the requested destination. The other paths are resolved input
-    dependencies, normally taken from :class:`~vibesys.evaluators.input_manifest.InputBundle`.
+    dependencies, normally taken from :class:`~vibesys.inputs.InputBundle`.
     """
 
     materializer: ProjectMaterializer

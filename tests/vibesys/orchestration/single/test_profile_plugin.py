@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus

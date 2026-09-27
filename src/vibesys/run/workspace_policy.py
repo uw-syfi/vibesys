@@ -23,7 +23,7 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vibesys.evaluators.input_manifest import WorkspaceSource
+    from vibesys.inputs import WorkspaceSource
     from vs_runtime.api.infrastructure import RunEnvironment
     from vs_sandbox.api import ComputeBackendImpl
 

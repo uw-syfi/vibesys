@@ -1,3 +1,5 @@
+"""Profile-guided input-contract tests."""
+
 from __future__ import annotations
 
 import tomllib
@@ -5,7 +7,7 @@ import tomllib
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     InputManifest,
     ProfileGuidedInput,
     render_input_manifest,

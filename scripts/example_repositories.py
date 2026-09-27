@@ -167,7 +167,7 @@ def _declared_project_paths(manifest: Path) -> Iterator[str]:
     ``command`` whose executable is a repository path rather than a bare
     program name.
 
-    Parsed with ``tomllib`` rather than through ``vibesys.evaluators.input_manifest`` on
+    Parsed with ``tomllib`` rather than through ``vibesys.inputs`` on
     purpose: this runs *before* validation, so it has to tolerate a manifest
     that validation is about to reject.
     """

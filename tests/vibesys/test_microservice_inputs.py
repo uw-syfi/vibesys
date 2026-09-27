@@ -7,7 +7,7 @@ import pytest
 from tests.support.example_registry import require_external_repos
 
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
-from vibesys.evaluators.input_manifest import InputBundle, load_project_task
+from vibesys.inputs import InputBundle, load_project_task
 from vs_project.api import Project, ProjectLayoutError
 
 PROJECT_ROOT = Path(__file__).parents[2]

@@ -17,7 +17,7 @@ import pytest
 from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.inputs import WorkspaceSource
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
-from vibesys.evaluators.input_manifest import InputManifest, WorkspaceSource, load_input_bundle
+from vibesys.inputs import InputManifest, WorkspaceSource, load_input_bundle
 from vibesys.run.project import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,

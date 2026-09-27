@@ -31,13 +31,13 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
-from vibesys.evaluators.input_manifest import (
+from vibesys.events import CoreEventType
+from vibesys.inputs import (
     WorkspaceInput,
     WorkspaceSource,
     load_input_bundle,
     load_project_task,
 )
-from vibesys.events import CoreEventType
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )

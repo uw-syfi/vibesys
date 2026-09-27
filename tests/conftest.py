@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     MANIFEST_NAME,
     InputBundle,
     load_input_bundle,

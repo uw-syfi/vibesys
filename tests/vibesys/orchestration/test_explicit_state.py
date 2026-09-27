@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibesys.api import RunStopped, create_session
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind

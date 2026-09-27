@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.evaluators.input_manifest import (
+from vibesys.inputs import (
     InputBundle,
     WorkspaceSource,
     load_input_bundle,

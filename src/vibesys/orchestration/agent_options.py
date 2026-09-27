@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.metrics import MetricSpace, Objective
 
 if TYPE_CHECKING:
-    from vibesys.evaluators.input_manifest import BenchmarkResult
+    from vibesys.inputs import BenchmarkResult
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
