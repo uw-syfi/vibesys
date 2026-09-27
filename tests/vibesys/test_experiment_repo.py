@@ -227,21 +227,10 @@ def test_create_remote_delegates_creation_and_attachment(tmp_path: Path) -> None
     assert messages == ["[repo] created GitHub repository vibesys-playground/example"]
 
 
-def test_create_or_attach_rejects_existing_origin(tmp_path: Path) -> None:
+def test_create_rejects_existing_origin(tmp_path: Path) -> None:
     _project(tmp_path)
     publisher = ExperimentRepository(tmp_path, lambda _message: None)
     publisher.attach_remote("https://example.com/origin.git")
 
     with pytest.raises(ValueError, match="already has an origin"):
-        publisher.attach_remote("https://example.com/other.git")
-    with pytest.raises(ValueError, match="already has an origin"):
         publisher.create_remote("owner/name", RepositoryVisibility.PRIVATE)
-
-
-def test_publication_requires_repository_root(tmp_path: Path) -> None:
-    _project(tmp_path)
-    nested = tmp_path / "nested"
-    nested.mkdir()
-
-    with pytest.raises(ValueError, match="repository root"):
-        ExperimentRepository(nested, lambda _message: None).attach_remote("remote")

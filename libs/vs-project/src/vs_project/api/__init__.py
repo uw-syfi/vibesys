@@ -8,6 +8,7 @@ Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 """
 
 from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents
+from vs_project._git_remote import GitRemoteRepository
 from vs_project._git_tracker import FrameworkSnapshotStatus, GitTracker
 from vs_project._layout import (
     AmbiguousTaskError,
@@ -66,6 +67,7 @@ __all__ = [
     "ConfigurationRoot",
     "FrameworkSnapshotStatus",
     "GitObjectId",
+    "GitRemoteRepository",
     "GitSnapshotFile",
     "GitSnapshotPlan",
     "GitTracker",
