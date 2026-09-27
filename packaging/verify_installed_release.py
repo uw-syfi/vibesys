@@ -20,16 +20,13 @@ from pathlib import Path
 from typing import Never, cast
 
 from entrypoints.launcher import bundled_tui
+from vibesys.api.request import default_skill_roots
+from vibesys.config import BUNDLED_RESOURCES
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.view import RunStatus
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ACTIVE_PROFILER_KINDS
-from vibesys.resource_paths import (
-    default_skill_roots,
-    profiler_support_dir,
-    resources_root,
-)
 from vs_project.api import Project, ProjectError
 from vs_runtime.api.infrastructure import (
     SDKRoots,
@@ -211,14 +208,14 @@ def _parse_first_launch_defaults(output: str, *, source: str) -> dict[str, objec
 
 
 def _verify_resources() -> None:
-    root = resources_root()
+    root = BUNDLED_RESOURCES.root()
     if root is None or "site-packages" not in str(root.resolve()):
         _fail(f"Installed resources did not resolve from site-packages: {root}")
     skill_roots = default_skill_roots()
     if len(skill_roots) != 1 or not any(skill_roots[0].rglob("SKILL.md")):
         _fail(f"Installed skills did not resolve: {skill_roots}")
     for kind in ACTIVE_PROFILER_KINDS:
-        support = profiler_support_dir(kind.value)
+        support = BUNDLED_RESOURCES.directory("profilers", kind.value)
         if support is None or "site-packages" not in str(support.resolve()):
             _fail(f"Installed profiler resources did not resolve for {kind.value}: {support}")
     for name in ("vibesys-evaluator-microservice", "vibesys-evaluator-queue"):

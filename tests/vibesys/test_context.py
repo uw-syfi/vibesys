@@ -43,8 +43,12 @@ from vibesys.orchestration.agent_options import (
 )
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.plugin_catalog import built_in_orchestrations
-from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
-from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
+from vibesys.profilers import (
+    PROFILERS_COMMON_STAGED_NAME,
+    ProfilerKind,
+    ProfilerPreflightResult,
+    profiler_definition,
+)
 from vibesys.run import LocalRunIntegration
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project

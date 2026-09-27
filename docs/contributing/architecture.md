@@ -84,6 +84,7 @@ graph TD
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.orchestration._common
     vibesys.api --> vibesys.orchestration.contracts
+    vibesys.api --> vibesys.orchestration.evolve
     vibesys.api --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api --> vibesys.orchestration.request
     vibesys.api --> vibesys.orchestration.runner
@@ -99,7 +100,6 @@ graph TD
     vibesys.api.contracts --> vibesys.orchestration.metrics
     vibesys.api.contracts --> vibesys.orchestration.request
     vibesys.api.contracts --> vibesys.orchestration.view
-    vibesys.api.evolve --> vibesys.orchestration.evolve
     vibesys.context --> vibesys
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.errors
@@ -220,7 +220,6 @@ graph TD
     entrypoints --> headless
     entrypoints --> server.settings
     entrypoints --> vibesys.api
-    entrypoints --> vibesys.api.evolve
     entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
@@ -304,6 +303,7 @@ graph TD
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.orchestration._common
     vibesys.api --> vibesys.orchestration.contracts
+    vibesys.api --> vibesys.orchestration.evolve
     vibesys.api --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api --> vibesys.orchestration.request
     vibesys.api --> vibesys.orchestration.runner
@@ -327,7 +327,6 @@ graph TD
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_loop_state
     vibesys.api.contracts --> vs_project
-    vibesys.api.evolve --> vibesys.orchestration.evolve
     vibesys.context --> vibesys
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.errors

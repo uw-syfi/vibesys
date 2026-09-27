@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.agent_spec_config import resolve_agent_driver
+from vibesys.config import BUNDLED_RESOURCES
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.evaluators.input_synthesis import (
     InputSynthesisError,
@@ -37,7 +38,6 @@ from vibesys.repository import (
     repository_name_from_experiment,
     validate_experiment_name,
 )
-from vibesys.resource_paths import default_skill_roots
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
@@ -53,6 +53,13 @@ if TYPE_CHECKING:
 
     from vibesys.profilers import ProfilerKind
     from vs_project.api import OrchestrationDescriptor
+
+
+def default_skill_roots() -> tuple[Path, ...]:
+    """Return the bundled skill collection, when one is installed."""
+    skills = BUNDLED_RESOURCES.directory("skills")
+    return () if skills is None else (skills,)
+
 
 __all__ = [
     "CLI_PROFILER_CHOICES",

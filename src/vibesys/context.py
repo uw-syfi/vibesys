@@ -14,7 +14,7 @@ from typing import TextIO, cast, overload
 from pydantic import BaseModel
 
 from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
-from vibesys.config import Config, as_config
+from vibesys.config import BUNDLED_RESOURCES, Config, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
     ComputeBackend,
@@ -39,17 +39,13 @@ from vibesys.events import (
 from vibesys.orchestration.request import RunRequest
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
+    PROFILERS_COMMON_STAGED_NAME,
     ProfilerDefinition,
     ProfilerKind,
     default_profiler_for_backend,
     preflight_profiler_kind,
     profiler_definition,
     resolve_profiler_kind,
-)
-from vibesys.resource_paths import (
-    PROFILERS_COMMON_STAGED_NAME,
-    profiler_support_common_dir,
-    profiler_support_dir,
 )
 from vibesys.run import (
     DeviceLease,
@@ -170,12 +166,12 @@ def _profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, 
     ``torch_profiler`` alongside ``rocprof_profiler``).
     """
     extra: list[tuple[str, str]] = []
-    common_dir = profiler_support_common_dir()
+    common_dir = BUNDLED_RESOURCES.directory("profilers", "_common")
     if common_dir is not None:
         extra.append((str(common_dir), PROFILERS_COMMON_STAGED_NAME))
     for extra_kind in sorted(definition.extra_support_kinds):
         extra_definition = profiler_definition(extra_kind)
-        extra_dir = profiler_support_dir(extra_kind.value)
+        extra_dir = BUNDLED_RESOURCES.directory("profilers", extra_kind.value)
         if extra_dir is not None:
             extra.append((str(extra_dir), extra_definition.support_name))
     return tuple(extra)
@@ -561,7 +557,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS:
                 definition = profiler_definition(resolved_profiler_kind)
                 profiler_support_name = definition.support_name
-                default_support = profiler_support_dir(definition.kind.value)
+                default_support = BUNDLED_RESOURCES.directory("profilers", definition.kind.value)
                 if default_support is not None:
                     profiler_support_path = str(default_support)
                 profiler_support_extra = _profiler_support_extra(definition)

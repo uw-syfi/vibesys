@@ -1,6 +1,7 @@
 """Public contracts for the reusable VibeSys runtime."""
 
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime._bundled_paths import BundledResources
 from vs_runtime._local_validation import (
     ValidationRecipe,
     ValidationRecipeArtifact,
@@ -68,6 +69,7 @@ __all__ = [
     "AgentTurnTimeoutError",
     "BenchmarkEvaluation",
     "BenchmarkObjective",
+    "BundledResources",
     "CandidateWorkspace",
     "CommandResult",
     "Commands",

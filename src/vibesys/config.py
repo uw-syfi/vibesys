@@ -21,6 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
+from vs_runtime.api import BundledResources
+
+BUNDLED_RESOURCES = BundledResources(PROJECT_ROOT / "resources", package="vibesys")
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

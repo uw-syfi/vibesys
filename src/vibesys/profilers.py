@@ -159,6 +159,9 @@ ACTIVE_PROFILER_KINDS: frozenset[ProfilerKind] = frozenset(PROFILER_DEFINITIONS)
 
 CLI_PROFILER_CHOICES: tuple[ProfilerKind, ...] = tuple(ProfilerKind)
 
+# The shared profiler support package is staged with an agent-facing name.
+PROFILERS_COMMON_STAGED_NAME = "profilers_common"
+
 
 def profiler_definition(kind: ProfilerKind) -> ProfilerDefinition:
     """Return the declaration for a runnable profiler kind."""

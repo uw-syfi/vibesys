@@ -6,8 +6,8 @@ are resolved from the repository checkout at run time. An installed wheel has
 no checkout, so the wheel build copies these
 trees into the ``vibesys._resources`` package directory; ``setup.py`` calls
 :func:`stage_resources` from the same custom ``build_py`` step that stages the
-TUI. ``vibesys.resource_paths`` resolves the checkout first and falls back to
-the staged copy.
+TUI. VibeSys configures ``vs_runtime.api.BundledResources`` to prefer the
+checkout and fall back to the staged copy.
 
 Vendored skill repository checkouts (``repos/`` inside a skill) are excluded:
 they are git submodules, are already excluded from workspace materialization,

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from vibesys.resource_paths import evaluator_packages_dir
+from vibesys.config import BUNDLED_RESOURCES
 from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN, PYTHON_TOKEN
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 
@@ -33,6 +33,11 @@ _TOOL_TOKEN_PATTERN = re.compile(
 )
 _VERSION_PATTERN = re.compile(r"^[A-Za-z0-9]+(?:[._+-][A-Za-z0-9]+)*$")
 _DIGEST_EXCLUDED_NAMES = frozenset({".git", "__pycache__", "target"})
+
+
+def evaluator_packages_dir() -> Path | None:
+    """Return the bundled evaluator package collection, when installed."""
+    return BUNDLED_RESOURCES.directory("evaluators")
 
 
 class EvaluatorPackageError(ValueError):

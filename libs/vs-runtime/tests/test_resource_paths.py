@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vs_runtime.api import BundledResources
 from vs_runtime.api.infrastructure import (
     InputProjectError,
     relative_sdk_source,
@@ -53,6 +54,41 @@ def test_bundled_tree_prefers_checkout_then_packaged_tree(tmp_path: Path) -> Non
         )
         == packaged
     )
+
+
+def test_bundled_resources_exposes_existing_named_directories(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout" / "resources"
+    profiler = checkout / "profilers" / "nsys"
+    profiler.mkdir(parents=True)
+    resources = BundledResources(checkout, package="product")
+
+    assert resources.root() == checkout
+    assert resources.directory("profilers", "nsys") == profiler
+    assert resources.directory("profilers", "missing") is None
+
+
+def test_bundled_resources_falls_back_to_installed_package(tmp_path: Path) -> None:
+    packaged = tmp_path / "site-packages" / "product" / "_resources"
+    skills = packaged / "skills"
+    skills.mkdir(parents=True)
+    resources = BundledResources(
+        tmp_path / "missing-checkout",
+        package="product",
+        package_files=lambda _package: packaged.parent,
+    )
+
+    assert resources.root() == packaged
+    assert resources.directory("skills") == skills
+
+
+@pytest.mark.parametrize("children", [(), ("",), ("..",), ("nested/path",)])
+def test_bundled_resources_rejects_non_child_names(
+    tmp_path: Path, children: tuple[str, ...]
+) -> None:
+    resources = BundledResources(tmp_path / "resources", package="product")
+
+    with pytest.raises(ValueError, match="non-empty direct names"):
+        resources.directory(*children)
 
 
 def test_packaged_tree_rejects_path_escape(tmp_path: Path) -> None:
