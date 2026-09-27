@@ -43,21 +43,22 @@ tests/conformance/
 | corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, and decision anchoring |
 | event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
 | client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
-| server scenario suite | Python | #811 | replays scenarios against a live transport, both Unix and WebSocket |
+| server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays shared bootstrap scenarios on both transports and the simultaneous two-client scenario |
 
-The corpus gate and event fold runner exist today. The connection-level client and server scenario
-runners remain outstanding. Do not treat structural validation or event folding as evidence that a
-scenario has executed against either transport.
+The corpus gate, event fold runner, and server bootstrap/dual-client runner exist today. The
+connection-level client runner and the remaining server scenarios are still outstanding. Do not
+treat structural validation or event folding as evidence that a scenario has executed against a
+transport.
 
 ## Running the gate
 
-From the TypeScript workspace root:
+From the repository root:
 
 ```bash
-cd clients
-node scripts/check_conformance_corpus.mjs      # one-shot check, prints violations and exits non-zero
-pnpm test:conformance                          # the same check under node --test, with failure-mode tests
-pnpm --filter @vibesys/core-state test         # folds the shared event fixtures through core state
+node clients/scripts/check_conformance_corpus.mjs       # one-shot check, prints violations and exits non-zero
+pnpm --dir clients test:conformance                     # the same check under node --test, with failure-mode tests
+pnpm --dir clients --filter @vibesys/core-state test    # folds the shared event fixtures through core state
+uv run pytest -q tests/conformance/test_server_transports.py  # exercises both server transports
 ```
 
 `pnpm test:clients` runs `test:conformance` as part of the client test suite, so CI enforces it.

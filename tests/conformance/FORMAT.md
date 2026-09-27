@@ -71,7 +71,12 @@ Fields:
 - `decisions` (array): the wire-contract decision tokens this scenario exercises. Every token must
   appear as a decision in `docs/contributing/wire-protocol.md`. Across the whole corpus, every token
   in the contract must be tagged by at least one scenario.
+- `clients` (object, optional): named actors for a simultaneous multi-client scenario. Each value
+  has one `transport`, which must be listed by the scenario. Multi-client scenarios declare at
+  least two actors; single-client scenarios omit this field.
 - `steps` (array, non-empty): the ordered frames. Each step has:
+  - `client` (string): required when the scenario declares `clients`, forbidden otherwise. It routes
+    the step to that named actor while preserving one globally ordered exchange.
   - `dir`: `c2s` (client to server) or `s2c` (server to client).
   - exactly one of `frame` (the message sent) or `expect` (the message asserted on receipt). Both
     are partial protocol messages: they carry `type` and only the fields the scenario constrains. A

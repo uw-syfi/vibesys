@@ -1,0 +1,35 @@
+{
+  "id": "dual-transport-independent-subscriptions",
+  "title": "Unix and WebSocket subscriptions remain independent",
+  "description": "Two clients subscribe to one run simultaneously with different tail floors. Closing the Unix client does not interrupt WebSocket delivery, and shared teardown waits for both clients.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "clients": {
+    "terminal": {"transport": "unix"},
+    "browser": {"transport": "websocket"}
+  },
+  "decisions": [
+    "WP-DISCONNECT",
+    "WP-ROLES",
+    "WP-SUBSCRIBE-ACK"
+  ],
+  "steps": [
+    {
+      "client": "terminal",
+      "dir": "c2s",
+      "frame": {"type": "subscribe", "after_sequence": 0, "tail": 60}
+    },
+    {
+      "client": "browser",
+      "dir": "c2s",
+      "frame": {"type": "subscribe", "after_sequence": 0, "tail": 20}
+    },
+    {"client": "terminal", "dir": "s2c", "expect": {"type": "subscribed"}},
+    {"client": "browser", "dir": "s2c", "expect": {"type": "subscribed"}},
+    {"client": "terminal", "dir": "s2c", "expect": {"type": "event_batch"}},
+    {"client": "browser", "dir": "s2c", "expect": {"type": "event_batch"}}
+  ]
+}

@@ -13,6 +13,7 @@ import pytest
 from tests.server.support import build_server_parts
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
+from websockets.protocol import State
 
 from server.api.protocol import SnapshotQuery, SubscribeRequest
 from server.transport.discovery import WebInstanceRecord
@@ -212,6 +213,8 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
     assert _request_id("[]") == "unknown"
     assert _connection_closed(SimpleNamespace(state="CLOSED")) is True
     assert _connection_closed(SimpleNamespace(state="OPEN")) is False
+    assert _connection_closed(SimpleNamespace(state=State.CLOSED)) is True
+    assert _connection_closed(SimpleNamespace(state=State.OPEN)) is False
     assert _content_type(Path("file.json")) == "application/json; charset=utf-8"
     assert _content_type(Path("file.svg")) == "image/svg+xml"
     assert _content_type(Path("file.bin")) == "application/octet-stream"

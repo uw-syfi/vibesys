@@ -463,4 +463,4 @@ def _content_type(path: Path) -> str:
 
 def _connection_closed(connection: object) -> bool:
     state = getattr(connection, "state", None)
-    return str(state).endswith("CLOSED")
+    return state == "CLOSED" or getattr(state, "name", None) == "CLOSED"
