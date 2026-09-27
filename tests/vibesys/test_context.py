@@ -40,19 +40,15 @@ from vibesys.evaluators.input_manifest import (
 )
 from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
-from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
+from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
 from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
-from vibesys.run import (
-    LocalRunIntegration,
-    RunStateNamespace,
-)
+from vibesys.run import LocalRunIntegration
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
-from vibesys.search.hypothesis.state import HypothesisState
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResourceAccess
@@ -221,8 +217,6 @@ def _create_context(
     )
     plugin_setup = built_in_orchestrations().resolve(descriptor.id).prepare_plugin(descriptor).setup
     setup = RunSetup(
-        state_namespace="multi",
-        state_slots={"state.json": HypothesisState},
         resume_policy=plugin_setup.resume_policy,
     )
     with patch(
@@ -264,11 +258,7 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
         assert ctx.workspace == project
         assert ctx.project.root == project
         assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
-        assert (
-            not ctx.state.local(RunStateNamespace.AGENT)
-            .external_directory()
-            .is_relative_to(project)
-        )
+        assert not ctx.state.local("test-agent").external_directory().is_relative_to(project)
         objective_path = Path(ctx.run_environment_view.paths.objective)
         assert objective_path == (
             ctx.project.state.portable_namespace(ctx.run_id, "runtime").external_directory()
@@ -761,7 +751,7 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> N
     evaluator = _write_project(project)
 
     with _create_context(project, evaluator=evaluator) as ctx:
-        state = ctx.state.portable(RunStateNamespace.EVOLVE)
+        state = ctx.state.portable("evolve")
         state.save("old.json", _PortableStateProbe(round_idx=1))
         ctx.state.commit("state 1", state)
 
@@ -788,7 +778,7 @@ def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> N
                 scope_id="g2c3",
                 revision=parent_commit,
                 config=Config.model_validate({"model": {"name": "gpt-test"}}),
-                log_namespace=RunStateNamespace.EVOLVE,
+                log_namespace="evolve",
                 log_directory="candidates",
                 agent_backend="stub",
             ),
@@ -799,7 +789,7 @@ def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> N
             "g2c3",
         )
         assert candidate.log_dir == (
-            parent.state.local(RunStateNamespace.EVOLVE).external_directory("candidates/g2c3/logs")
+            parent.state.local("evolve").external_directory("candidates/g2c3/logs")
         )
         assert Path(candidate.run_environment_view.paths.objective).read_text() == (
             parent.effective_objective

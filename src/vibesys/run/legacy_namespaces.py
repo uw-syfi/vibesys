@@ -1,12 +1,10 @@
-"""Compatibility names for the built-in policies' persisted namespaces."""
+"""Stable names for product-owned persisted runtime namespaces."""
 
 from enum import StrEnum
 
 
 class RunStateNamespace(StrEnum):
-    """Stable legacy namespace names retained for existing loop callers."""
+    """Namespaces shared by product runtime composition."""
 
-    AGENT = "agent"
-    EVOLVE = "evolve"
     RUNTIME = "runtime"
     SKYPILOT = "skypilot"
