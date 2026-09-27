@@ -93,8 +93,6 @@
 {"path": "tests/vibesys/backends/test_rocm_backend.py", "rule": "mock", "count": 3}
 {"path": "tests/vibesys/backends/test_rocm_backend.py", "rule": "patch", "count": 3}
 {"path": "tests/vibesys/backends/test_trainium_backend.py", "rule": "mock", "count": 2}
-{"path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rule": "mock", "count": 5}
-{"path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/loops/issue_queue/test_plain_loop_cli.py", "rule": "mock", "count": 15}
 {"path": "tests/vibesys/loops/test_gates.py", "rule": "mock", "count": 10}
 {"path": "tests/vibesys/render/test_log.py", "rule": "mock", "count": 4}

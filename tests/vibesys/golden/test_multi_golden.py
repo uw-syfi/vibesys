@@ -2,9 +2,7 @@
 
 Drives ``MultiAgentOrchestrator.run(ctx)`` end-to-end (real workspace, git
 tracking, progress board, event journal) against a scripted
-:class:`FakeAgentClient`, the same integration pattern
-``tests/vibesys/loops/evolve/test_evolutionary_loop.py`` uses for evolve.
-No real agent CLI, sandbox, or subprocess ever runs.
+:class:`FakeAgentClient`. No real agent CLI, sandbox, or subprocess ever runs.
 
 Three scenarios cover the main round path without every branch:
 

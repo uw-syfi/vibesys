@@ -38,14 +38,14 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEventType
-from vibesys.loops.evolve.orchestration import EvolveOptions
-from vibesys.loops.evolve.orchestration import descriptor_from_options as evolve_descriptor
 from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.orchestrations.agent_options import (
     descriptor_from_options as agent_descriptor,
 )
+from vibesys.orchestrations.evolve import PLUGIN as EVOLVE_PLUGIN
+from vibesys.orchestrations.evolve.models import EvolveOptions
 from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestrations.issue_queue import IssueQueueOptions
 from vibesys.profilers import ProfilerKind
@@ -294,7 +294,7 @@ def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
         openevolve_migration_rate=0.25,
         frontier_bias=0.6,
         bootstrap_max_attempts=7,
-        keep_deployments=True,
+        keep_deployments=False,
         max_parallelism=2,
         metric_space=MetricSpace(
             objectives=(
@@ -303,7 +303,13 @@ def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
             )
         ),
     )
-    return _RecordedRun(evolve_descriptor(options))
+    return _RecordedRun(
+        OrchestrationDescriptor(
+            id=EVOLVE_PLUGIN.id,
+            config_version=EVOLVE_PLUGIN.config_version,
+            options=options.model_dump(mode="json"),
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -1539,7 +1545,7 @@ def test_evolve_resume_restores_its_configuration(
     assert args.openevolve_migration_rate == 0.25
     assert args.frontier_bias == 0.6
     assert args.bootstrap_max_attempts == 7
-    assert args.keep_deployments is True
+    assert args.keep_deployments is False
     assert args.max_parallelism == 2
     assert [(item.name, item.direction) for item in args.objective] == [
         ("latency", "min"),

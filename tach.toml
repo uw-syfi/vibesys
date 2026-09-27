@@ -282,11 +282,6 @@ layer = "loops"
 depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
 
 [[modules]]
-path = "vibesys.loops.evolve"
-layer = "loops"
-depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vs_agent", "vibesys.orchestration", "vibesys.orchestration.runtime", "vibesys.evaluators", "vibesys.runtime", "vibesys.search.population", "vibesys.roles", "vibesys.errors"]
-
-[[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
@@ -566,11 +561,6 @@ depends_on = ["vibesys.plugin_catalog"]
 
 [[modules]]
 # Thin product composition: in-repository plugins plus the temporary private
-# RunSetup adapter. Evolve remains on the legacy arm until its plugin lands.
+# RunSetup adapter.
 path = "vibesys.plugin_catalog"
-depends_on = ["vibesys.context", "vibesys.errors", "vibesys.loops.evolve.entrypoint", "vibesys.orchestration", "vibesys.orchestration.contracts", "vibesys.orchestration.memory", "vibesys.orchestrations", "vibesys.orchestrations.agent_options", "vs_project"]
-
-[[modules]]
-path = "vibesys.loops.evolve.entrypoint"
-layer = "loops"
-depends_on = ["vibesys.loops.evolve", "vs_project", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.evaluators", "vibesys.search.population"]
+depends_on = ["vibesys.context", "vibesys.errors", "vibesys.orchestration", "vibesys.orchestration.contracts", "vibesys.orchestration.memory", "vibesys.orchestrations", "vibesys.orchestrations.agent_options", "vs_project"]

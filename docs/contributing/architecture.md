@@ -115,22 +115,6 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vibesys.render
-    vibesys.loops.evolve --> vibesys
-    vibesys.loops.evolve --> vibesys.domains
-    vibesys.loops.evolve --> vibesys.errors
-    vibesys.loops.evolve --> vibesys.evaluators
-    vibesys.loops.evolve --> vibesys.orchestration
-    vibesys.loops.evolve --> vibesys.orchestration.runtime
-    vibesys.loops.evolve --> vibesys.prompts
-    vibesys.loops.evolve --> vibesys.roles
-    vibesys.loops.evolve --> vibesys.runtime
-    vibesys.loops.evolve --> vibesys.search.population
-    vibesys.loops.evolve.entrypoint --> vibesys.context
-    vibesys.loops.evolve.entrypoint --> vibesys.evaluators
-    vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
-    vibesys.loops.evolve.entrypoint --> vibesys.orchestration.runtime
-    vibesys.loops.evolve.entrypoint --> vibesys.orchestration.view
-    vibesys.loops.evolve.entrypoint --> vibesys.search.population
     vibesys.loops.multi --> vibesys
     vibesys.loops.multi --> vibesys.context
     vibesys.loops.multi --> vibesys.domains
@@ -274,7 +258,6 @@ graph TD
     vibesys.orchestrations.hypothesis_readmodel --> vibesys.search.hypothesis
     vibesys.plugin_catalog --> vibesys.context
     vibesys.plugin_catalog --> vibesys.errors
-    vibesys.plugin_catalog --> vibesys.loops.evolve.entrypoint
     vibesys.plugin_catalog --> vibesys.orchestration
     vibesys.plugin_catalog --> vibesys.orchestration.contracts
     vibesys.plugin_catalog --> vibesys.orchestration.memory
@@ -409,6 +392,7 @@ graph TD
     vibesys.api --> vibesys.sandbox
     vibesys.api --> vs_agent
     vibesys.api --> vs_project
+    vibesys.api --> vs_runtime
     vibesys.api --> vs_sandbox
     vibesys.api.agent --> vibesys.orchestration.memory
     vibesys.api.agent --> vibesys.orchestrations.agent_options
@@ -440,6 +424,7 @@ graph TD
     vibesys.context --> vibesys.sandbox
     vibesys.context --> vs_agent
     vibesys.context --> vs_project
+    vibesys.context --> vs_runtime
     vibesys.context --> vs_sandbox
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
@@ -449,25 +434,6 @@ graph TD
     vibesys.evaluators --> vs_loop_state
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
-    vibesys.loops.evolve --> vibesys
-    vibesys.loops.evolve --> vibesys.domains
-    vibesys.loops.evolve --> vibesys.errors
-    vibesys.loops.evolve --> vibesys.evaluators
-    vibesys.loops.evolve --> vibesys.orchestration
-    vibesys.loops.evolve --> vibesys.orchestration.runtime
-    vibesys.loops.evolve --> vibesys.prompts
-    vibesys.loops.evolve --> vibesys.roles
-    vibesys.loops.evolve --> vibesys.runtime
-    vibesys.loops.evolve --> vibesys.search.population
-    vibesys.loops.evolve --> vs_agent
-    vibesys.loops.evolve --> vs_project
-    vibesys.loops.evolve.entrypoint --> vibesys.context
-    vibesys.loops.evolve.entrypoint --> vibesys.evaluators
-    vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
-    vibesys.loops.evolve.entrypoint --> vibesys.orchestration.runtime
-    vibesys.loops.evolve.entrypoint --> vibesys.orchestration.view
-    vibesys.loops.evolve.entrypoint --> vibesys.search.population
-    vibesys.loops.evolve.entrypoint --> vs_project
     vibesys.loops.multi --> vibesys
     vibesys.loops.multi --> vibesys.context
     vibesys.loops.multi --> vibesys.domains
@@ -647,7 +613,6 @@ graph TD
     vibesys.orchestrations.hypothesis_readmodel --> vs_runtime
     vibesys.plugin_catalog --> vibesys.context
     vibesys.plugin_catalog --> vibesys.errors
-    vibesys.plugin_catalog --> vibesys.loops.evolve.entrypoint
     vibesys.plugin_catalog --> vibesys.orchestration
     vibesys.plugin_catalog --> vibesys.orchestration.contracts
     vibesys.plugin_catalog --> vibesys.orchestration.memory

@@ -1,7 +1,7 @@
 """Default scalar/Pareto selector: today's softmax/Pareto population logic.
 
 Pure functions over ``tuple[Individual, ...]``: no mutation, no I/O. Ported
-unchanged in algorithm from the former ``vibesys.loops.evolve.population``.
+unchanged in algorithm from the former evolve population module.
 
 ## Single-objective vs multi-objective modes
 
