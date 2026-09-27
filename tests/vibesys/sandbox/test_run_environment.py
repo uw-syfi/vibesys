@@ -164,6 +164,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
         "agent_backend": "stub",
         "cli_provider": None,
         "run_id": "run-123",
+        "framework_root": tmp_path / "framework",
     }
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
@@ -1495,6 +1496,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         agent_backend="cli",
         cli_provider="codex",
         run_id="20260429-100000-runa",
+        framework_root=tmp_path / "framework",
     )
     req_b = RunEnvironmentRequest(
         log_dir=log_b,
@@ -1504,6 +1506,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         agent_backend="cli",
         cli_provider="codex",
         run_id="20260429-100100-runb",
+        framework_root=tmp_path / "framework",
     )
     env.open(req_a)
     env.open(req_b)

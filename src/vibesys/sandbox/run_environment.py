@@ -37,7 +37,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from vibesys.constants import PROJECT_ROOT
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_agent.api import (
@@ -187,6 +186,7 @@ class RunEnvironmentRequest:
     agent_backend: str | None
     cli_provider: str | None
     run_id: str
+    framework_root: Path
     objective: str | None = None
     objective_document: Path | None = None
     accuracy_command: str | None = None
@@ -205,7 +205,6 @@ class RunEnvironmentRequest:
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     workspace_sources: tuple[WorkspaceSource, ...] = ()
     log: Callable[[str], None] | None = None
-    framework_root: Path = PROJECT_ROOT
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     state_namespace: StateNamespace | None = None
 
