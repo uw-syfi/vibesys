@@ -12,9 +12,9 @@ from pathlib import (
     PurePosixPath,
     PureWindowsPath,
 )  # Pydantic resolves WorkspaceRef at runtime.
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -667,30 +667,6 @@ class Run:
     observations: Observations
 
 
-class ProjectedRound(BaseModel):
-    """One completed policy round exposed to the VibeSys application."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    number: int
-    status: Literal["completed", "failed"]
-    attempts: int
-    judge_verdict: Literal["pass", "fail", "skipped"] | None = None
-    perf_metric: float | None = None
-    perf_unit: str | None = None
-    profile_skipped: bool = False
-
-
-class PluginProjection(BaseModel):
-    """Policy-owned JSON plus the generic facts observed by the application."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    payload: dict[str, JsonValue] | None
-    rounds: tuple[ProjectedRound, ...] = ()
-    experiment_revision: int | None = None
-
-
 @dataclass(frozen=True, slots=True)
 class OrchestrationResumeDecision:
     """A plugin-approved descriptor update and its workspace precondition."""
@@ -713,7 +689,7 @@ class OrchestrationPlugin:
     orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]]
     config_version: int = 1
     state: type[BaseModel] | None = None
-    project: Callable[[BaseModel], PluginProjection] | None = None
+    project: Callable[[BaseModel], BaseModel] | None = None
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],

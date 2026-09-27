@@ -8,7 +8,8 @@ from vibesys.orchestration.issue_queue.agents import AGENTS
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions, IssueQueueState
 from vibesys.orchestration.issue_queue.orchestration import orchestrate
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
-from vs_runtime.api import OrchestrationPlugin, PluginProjection
+from vibesys.run.contracts import PluginProjection
+from vs_runtime.api import OrchestrationPlugin
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:

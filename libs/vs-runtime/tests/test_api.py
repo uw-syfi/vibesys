@@ -21,9 +21,7 @@ from vs_runtime.api import (
     LocalValidationEvaluation,
     MetricDirection,
     OrchestrationPlugin,
-    PluginProjection,
     ProfileExecution,
-    ProjectedRound,
     Run,
     RunFacts,
     RunStatus,
@@ -569,22 +567,6 @@ def test_plugin_rejects_invalid_id() -> None:
         )
 
 
-def test_plugin_projection_contract_is_strict_and_immutable() -> None:
-    projection = PluginProjection(
-        payload={"summary": "complete"},
-        rounds=(ProjectedRound(number=1, status="completed", attempts=2),),
-        experiment_revision=4,
-    )
-
-    assert projection.rounds[0].attempts == 2
-    with pytest.raises(ValidationError):
-        projection.__setattr__("experiment_revision", 5)
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        PluginProjection.model_validate({"payload": None, "unknown": True})
-    with pytest.raises(ValidationError):
-        ProjectedRound.model_validate({"number": "1", "status": "completed", "attempts": 2})
-
-
 def test_plugin_projection_requires_declared_state() -> None:
     with pytest.raises(ValueError, match="projection requires a declared state model"):
         OrchestrationPlugin(
@@ -592,7 +574,7 @@ def test_plugin_projection_requires_declared_state() -> None:
             agents=(),
             options=_Options,
             orchestrate=_orchestrate,
-            project=lambda _state: PluginProjection(payload=None),
+            project=lambda _state: _Options(),
         )
 
 

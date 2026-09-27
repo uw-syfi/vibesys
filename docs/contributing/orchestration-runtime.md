@@ -101,9 +101,13 @@ different typed replies as the conversation progresses. Omitting `response`
 returns text.
 
 Plugin declarations may also name their typed state model, projection, resume
-policy, memory paths, or maximum-round projection. Declare only the hooks the
-policy uses. Product configuration is validated against `plugin.agents`, so an
-unknown role override fails before any run resource opens.
+policy, memory paths, or maximum-round projection. The reusable runtime treats
+projection results as opaque Pydantic models. VibeSys plugins return the strict
+`vibesys.api.PluginProjection` product contract, which reuses `RoundSummary`.
+The product catalog validates that exact result type before exposing a view.
+Declare only the hooks the policy uses. Product configuration is validated
+against `plugin.agents`, so an unknown role override fails before any run
+resource opens.
 
 Built-in plugins live in `orchestration/{single,multi,issue_queue,evolve}` and
 are registered in `vibesys.plugin_catalog.built_in_orchestrations`. Keep role

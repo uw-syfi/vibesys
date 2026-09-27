@@ -14,7 +14,8 @@ from vibesys.orchestration.single.models import (
     SingleState,
 )
 from vibesys.orchestration.single.orchestration import orchestrate, orchestrate_profile_guided
-from vs_runtime.api import OrchestrationPlugin, PluginProjection
+from vibesys.run.contracts import PluginProjection
+from vs_runtime.api import OrchestrationPlugin
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:

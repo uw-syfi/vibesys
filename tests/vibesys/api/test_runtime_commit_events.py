@@ -17,16 +17,22 @@ from typing import TYPE_CHECKING
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from vibesys.run.host import open_product_run_host
 
-from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_session
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    OrchestrationRegistry,
+    PluginProjection,
+    create_session,
+)
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import ResumeRef, RoundSummary, RunRequest, RunStatus, RunView
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import OrchestrationPlugin, PluginProjection, ProjectedRound, Run
+from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
@@ -65,7 +71,7 @@ def _project_state(state: BaseModel) -> PluginProjection:
     return PluginProjection(
         payload=None,
         rounds=tuple(
-            ProjectedRound(
+            RoundSummary(
                 number=number,
                 status="completed",
                 attempts=1,

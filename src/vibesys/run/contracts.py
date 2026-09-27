@@ -103,7 +103,7 @@ class RunStatus(StrEnum):
 class RoundSummary(BaseModel):
     """One policy round in the strategy-neutral shape used for run events."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     number: int
     status: Literal["completed", "failed"]
@@ -112,6 +112,16 @@ class RoundSummary(BaseModel):
     perf_metric: float | None = None
     perf_unit: str | None = None
     profile_skipped: bool = False
+
+
+class PluginProjection(BaseModel):
+    """Policy-owned JSON plus product-generic facts exposed by VibeSys."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    payload: dict[str, JsonValue] | None
+    rounds: tuple[RoundSummary, ...] = ()
+    experiment_revision: int | None = None
 
 
 class RunView(BaseModel):
@@ -128,6 +138,7 @@ class RunView(BaseModel):
 
 
 __all__ = [
+    "PluginProjection",
     "ProfilerKind",
     "ResumeRef",
     "RoundSummary",

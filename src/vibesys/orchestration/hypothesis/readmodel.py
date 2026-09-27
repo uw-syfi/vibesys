@@ -13,14 +13,13 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.hypothesis import HypothesisSearch, derive_hypothesis_title
-from vibesys.run.contracts import RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import PluginProjection, RoundSummary, RunStatus, RunView
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
     HypothesisResolution,
     PerfDeltaReason,
 )
-from vs_runtime.api import PluginProjection, ProjectedRound
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
@@ -193,7 +192,7 @@ def project_hypothesis_state(state: HypothesisState) -> PluginProjection:
     )
     return PluginProjection(
         payload=projection.model_dump(mode="json"),
-        rounds=tuple(_projected_round(record) for record in projection.rounds),
+        rounds=tuple(_round_summary(record) for record in projection.rounds),
         experiment_revision=state.experiment_revision,
     )
 
@@ -326,19 +325,6 @@ def _round_summary(view: RoundView) -> RoundSummary:
     `RoundFinishedData`: only a "fail" verdict is a failed round.
     """
     return RoundSummary(
-        number=view.round_number,
-        status="failed" if view.judge_verdict == "fail" else "completed",
-        attempts=view.attempts,
-        judge_verdict=view.judge_verdict,
-        perf_metric=view.perf_metric,
-        perf_unit=view.perf_unit,
-        profile_skipped=view.profile_skipped,
-    )
-
-
-def _projected_round(view: RoundView) -> ProjectedRound:
-    """Reshape one policy round into the runtime-neutral projection contract."""
-    return ProjectedRound(
         number=view.round_number,
         status="failed" if view.judge_verdict == "fail" else "completed",
         attempts=view.attempts,

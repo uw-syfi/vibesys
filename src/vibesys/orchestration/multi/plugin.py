@@ -10,7 +10,8 @@ from vibesys.orchestration.multi.agents import AGENTS
 from vibesys.orchestration.multi.models import MultiOptions, MultiState, ProfileGuidedMultiOptions
 from vibesys.orchestration.multi.orchestration import orchestrate, orchestrate_profile_guided
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
-from vs_runtime.api import OrchestrationPlugin, PluginProjection
+from vibesys.run.contracts import PluginProjection
+from vs_runtime.api import OrchestrationPlugin
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:

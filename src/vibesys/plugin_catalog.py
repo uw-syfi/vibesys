@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from vibesys.run.contracts import RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import PluginProjection, RunStatus, RunView
 from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from vs_project.api import Project
-    from vs_runtime.api import OrchestrationPlugin, PluginProjection
+    from vs_runtime.api import OrchestrationPlugin
 
 
 class OrchestrationProjector(Protocol):
@@ -46,7 +46,7 @@ class _PluginProjector:
             .slot("state.json", state_model)
             .load_optional()
         )
-        projection = callback(state) if state is not None else None
+        projection = _require_plugin_projection(callback(state)) if state is not None else None
         return _plugin_run_view(self.plugin.id, run_id, status, projection)
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
@@ -60,7 +60,23 @@ class _PluginProjector:
             or type(state) is not state_model
         ):
             return None
-        return _plugin_run_view(self.plugin.id, run_id, RunStatus.ACTIVE, callback(state))
+        return _plugin_run_view(
+            self.plugin.id,
+            run_id,
+            RunStatus.ACTIVE,
+            _require_plugin_projection(callback(state)),
+        )
+
+
+def _require_plugin_projection(value: BaseModel) -> PluginProjection:
+    """Reject projection callbacks that escape the product-owned contract."""
+    if not isinstance(value, PluginProjection) or type(value) is not PluginProjection:
+        message = (
+            "orchestration projection callback must return exactly "
+            f"PluginProjection, got {type(value).__name__}"
+        )
+        raise TypeError(message)
+    return value
 
 
 def _plugin_run_view(
@@ -77,7 +93,7 @@ def _plugin_run_view(
         loop=plugin_id,
         status=status,
         projection=projection.payload,
-        rounds=tuple(RoundSummary.model_validate(item.model_dump()) for item in projection.rounds),
+        rounds=projection.rounds,
         experiment_revision=projection.experiment_revision,
     )
 

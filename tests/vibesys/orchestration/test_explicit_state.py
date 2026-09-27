@@ -7,20 +7,19 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
-from vibesys.run.host import open_product_run_host
 
-from vibesys.api import RunStopped, create_session
+from vibesys.api import PluginProjection, RunStopped, create_session
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     OrchestrationPlugin,
-    PluginProjection,
     ProfileExecution,
     Run,
     RunStatus,

@@ -13,6 +13,7 @@ from vibesys.api import (
     Config,
     ConfigurationError,
     OrchestrationRegistry,
+    PluginProjection,
     ProfilerKind,
     RunRequest,
     RunStatus,
@@ -42,13 +43,12 @@ from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
 from vibesys.plugin_catalog import built_in_orchestrations
+from vibesys.run.contracts import RoundSummary
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     AgentRole,
     OrchestrationPlugin,
     OrchestrationResumeDecision,
-    PluginProjection,
-    ProjectedRound,
     Run,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
@@ -105,7 +105,7 @@ def _project_plugin(state: BaseModel) -> PluginProjection:
     return PluginProjection(
         payload={"completed_rounds": parsed.completed_rounds},
         rounds=tuple(
-            ProjectedRound(number=number, status="completed", attempts=1, judge_verdict="pass")
+            RoundSummary(number=number, status="completed", attempts=1, judge_verdict="pass")
             for number in range(1, parsed.completed_rounds + 1)
         ),
         experiment_revision=parsed.completed_rounds,
@@ -528,6 +528,58 @@ def test_projector_uses_same_committed_state_for_live_and_stored_views(tmp_path:
     assert committed[0].projection == {"revision": 4}
     assert session.view().projection == stored.projection == {"revision": 4}
     assert stored.status is RunStatus.UNKNOWN
+
+
+def test_projector_rejects_non_product_projection() -> None:
+    class WrongProjection(BaseModel):
+        payload: dict[str, int]
+
+    class DerivedProjection(PluginProjection):
+        pass
+
+    invalid_results: tuple[BaseModel, ...] = (
+        WrongProjection(payload={"revision": 4}),
+        DerivedProjection(payload={"revision": 4}),
+    )
+    for index, invalid in enumerate(invalid_results):
+
+        def project_invalid(_state: BaseModel, *, result: BaseModel = invalid) -> BaseModel:
+            return result
+
+        plugin = OrchestrationPlugin(
+            id=f"wrong-projection-{index}",
+            agents=(),
+            options=_TeamOptions,
+            orchestrate=_run_team,
+            state=_Evidence,
+            project=project_invalid,
+        )
+        registry = OrchestrationRegistry()
+        registry.register_plugin(plugin)
+        projector = registry.resolve(plugin.id).projector
+        assert projector is not None
+
+        with pytest.raises(
+            TypeError,
+            match=(f"must return exactly PluginProjection, got {type(invalid).__name__}"),
+        ):
+            projector.project_committed(plugin.id, _Evidence(revision=4), run_id="run-1")
+
+
+def test_product_projection_contract_is_strict_and_immutable() -> None:
+    projection = PluginProjection(
+        payload={"summary": "complete"},
+        rounds=(RoundSummary(number=1, status="completed", attempts=2),),
+        experiment_revision=4,
+    )
+
+    assert projection.rounds[0].attempts == 2
+    with pytest.raises(ValidationError):
+        projection.__setattr__("experiment_revision", 5)
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        PluginProjection.model_validate({"payload": None, "unknown": True})
+    with pytest.raises(ValidationError):
+        RoundSummary.model_validate({"number": "1", "status": "completed", "attempts": 2})
 
 
 def test_request_rejects_parallel_legacy_selector_fields(tmp_path: Path) -> None:

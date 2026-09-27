@@ -11,7 +11,15 @@ from typing import Protocol
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEvent, EventStatus
-from vibesys.run.contracts import ProfilerKind, ResumeRef, RunRequest, RunResult, RunStatus, RunView
+from vibesys.run.contracts import (
+    PluginProjection,
+    ProfilerKind,
+    ResumeRef,
+    RunRequest,
+    RunResult,
+    RunStatus,
+    RunView,
+)
 from vs_agent.api import MCPServerSpec
 from vs_project.api import OrchestrationDescriptor
 
@@ -24,6 +32,7 @@ __all__ = [
     "EventStatus",
     "MCPServerSpec",
     "OrchestrationDescriptor",
+    "PluginProjection",
     "ProfilerKind",
     "ResumeRef",
     "RunRequest",

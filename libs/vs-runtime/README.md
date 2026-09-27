@@ -13,9 +13,11 @@ Runtime composition and launchers share early lifecycle timing through
 `vs_runtime.api.boot_trace`; orchestration plugins do not use that module.
 
 Each `OrchestrationPlugin` is an explicit value with a stable ID, an options
-schema, an authoritative tuple of immutable agent roles, state and projection
-contracts, and its orchestration function. Sessions bind one declared role,
-workspace, and optional member ID for their full lifetime.
+schema, an authoritative tuple of immutable agent roles, an optional state
+model and opaque projection callback, and its orchestration function. The
+embedding product owns and validates the callback's result contract. Sessions
+bind one declared role, workspace, and optional member ID for their full
+lifetime.
 
 The production session manager also lives here. It fixes role configuration
 and tools at creation, serializes turns in one conversation, enforces workspace
