@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -24,26 +23,24 @@ from vs_runtime.api import (
     MetricDirection,
     RuntimeContractError,
     Workspace,
-    WorkspaceAccess,
-    validate_workspace_writable_paths,
 )
 from vs_runtime.api.infrastructure import (
     FrameworkValidationResult,
     LocalValidationRecipeError,
     LocalValidationRecipeErrorKind,
+    RuntimeWorkspaceEvaluation,
     ScalarBenchmarkContract,
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
     TrustedBenchmarkResult,
     ValidationRecipe,
-    run_local_validation,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.orchestration.request import RunRequest
-    from vs_runtime.api import Commands, Workspace
+    from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import WorkspaceRuntime
 
 
@@ -113,7 +110,7 @@ class _LocalValidationEvents:
 
 
 async def _validate_local(
-    commands: Commands,
+    evaluation: RuntimeWorkspaceEvaluation,
     events: CoreEventWriter,
     workspace: Workspace,
     *,
@@ -122,8 +119,7 @@ async def _validate_local(
 ) -> LocalValidationEvaluation:
     """Run the mechanism and map its detailed outcome to product feedback."""
     try:
-        results = await run_local_validation(
-            commands,
+        results = await evaluation.validate_local(
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
@@ -165,48 +161,12 @@ class _EvaluationAdapter:
         self._request = request
         self._runtime_evaluation = runtime.evaluation
         self._events = events
-        self._commands = runtime.commands
         self._log = log
         self._identifiers = count(1)
 
     def _live_workspace(self, workspace: Workspace) -> Workspace:
         self._runtime_evaluation.spec(workspace)
         return workspace
-
-    def _receipt(self, workspace: Workspace, revision: str) -> AccuracyReceipt:
-        return AccuracyReceipt(
-            run_id=self._run_id,
-            workspace_id=workspace.id,
-            revision=revision,
-        )
-
-    def _validate_receipt_owner(self, workspace: Workspace, receipt: AccuracyReceipt) -> None:
-        if receipt.run_id != self._run_id:
-            message = "accuracy receipt belongs to another run"
-            raise RuntimeContractError(message)
-        if receipt.workspace_id != workspace.id:
-            message = "accuracy receipt belongs to another workspace"
-            raise RuntimeContractError(message)
-
-    async def _validate_receipt_revision(
-        self,
-        workspace: Workspace,
-        receipt: AccuracyReceipt,
-    ) -> None:
-        current_revision = workspace.revision
-        if current_revision is None:
-            message = "accuracy receipt does not match the current workspace revision"
-            raise RuntimeContractError(message)
-        if receipt.revision == current_revision:
-            return
-        same_candidate = await self._runtime_evaluation.revisions_equivalent(
-            workspace,
-            receipt.revision,
-            current_revision,
-        )
-        if not same_candidate:
-            message = "accuracy receipt does not match the current candidate revision"
-            raise RuntimeContractError(message)
 
     async def accuracy(
         self,
@@ -216,45 +176,42 @@ class _EvaluationAdapter:
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
-        spec = self._runtime_evaluation.spec(live)
         if reuse is not None:
-            self._validate_receipt_owner(live, reuse)
-            await live.snapshot("framework-accuracy-reuse-input")
-            await self._validate_receipt_revision(live, reuse)
-            command = spec.accuracy_command
-            emit_gate_started(self._events, GateKind.ACCURACY, command=command)
+            run = await self._runtime_evaluation.accuracy(
+                self._run_id,
+                live,
+                reuse=reuse,
+            )
+            emit_gate_started(self._events, GateKind.ACCURACY, command=run.command)
             emit_gate_finished(
                 self._events,
                 GateFinishedData(gate=GateKind.ACCURACY, reused=True),
                 passed=True,
             )
-            return AccuracyEvaluation(executed=False, receipt=reuse)
+            return AccuracyEvaluation(executed=False, receipt=run.receipt)
         if self._request.agent_backend == "stub":
             return AccuracyEvaluation(executed=False)
 
-        candidate_revision = await live.snapshot("framework-accuracy-input")
+        spec = self._runtime_evaluation.spec(live)
         bundle = self._request.input_bundle
         release = (
             bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
         ) or not spec.benchmark_command
-        execution = self._command(
-            spec.accuracy_command,
-            candidate_revision,
-            spec.deployment_release_env_var if release else None,
-        )
-        result = await self._runtime_evaluation.accuracy(
+        run = await self._runtime_evaluation.accuracy(
+            self._run_id,
             live,
-            command_override=execution,
+            release=release,
         )
+        result = run.result
+        if result is None:
+            message = "runtime accuracy execution unexpectedly returned a reused result"
+            raise RuntimeContractError(message)
         self._log_provisioning(result.provisioned_volumes, result.failure)
         self._publish_accuracy(result, process_id=f"evaluation-accuracy-{next(self._identifiers)}")
-        if result.executed:
-            await live.snapshot("framework-accuracy-evaluation")
-        receipt = self._receipt(live, candidate_revision) if result.passed else None
         return AccuracyEvaluation(
             executed=result.executed,
             feedback=self._accuracy_feedback(result),
-            receipt=receipt,
+            receipt=run.receipt if result.passed else None,
         )
 
     async def benchmark(
@@ -268,31 +225,22 @@ class _EvaluationAdapter:
         live = self._live_workspace(workspace)
         if self._request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
-        spec = self._runtime_evaluation.spec(live)
-        candidate_revision = await live.snapshot("framework-benchmark-input")
-        execution = self._command(
-            spec.benchmark_command,
-            candidate_revision,
-            spec.deployment_release_env_var,
-        )
-        result = await self._runtime_evaluation.benchmark(
+        run = await self._runtime_evaluation.benchmark(
             live,
-            command_override=execution,
             required_metrics=frozenset(item.name for item in objectives),
         )
+        result = run.result
         self._log_provisioning(result.provisioned_volumes, result.failure)
         evaluation = self._interpret_benchmark(
             result,
             objectives,
-            spec.benchmark_contract,
+            run.contract,
         )
         self._publish_benchmark(
             result,
             evaluation,
             process_id=f"evaluation-benchmark-{next(self._identifiers)}",
         )
-        if result.executed:
-            await live.snapshot("framework-benchmark-evaluation")
         return evaluation
 
     async def validate_local(
@@ -303,15 +251,10 @@ class _EvaluationAdapter:
         report_location: str,
     ) -> LocalValidationEvaluation:
         """Run candidate-authored recipes while isolating workspace effects."""
-        validate_workspace_writable_paths(
-            WorkspaceAccess.LIMITED,
-            (recipe_artifact, report_location),
-        )
-        live = self._live_workspace(workspace)
         return await _validate_local(
-            self._commands,
+            self._runtime_evaluation,
             self._events,
-            live,
+            workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
         )
@@ -449,17 +392,6 @@ class _EvaluationAdapter:
         if len(names) != len(set(names)):
             message = "objective names must be unique"
             raise ValueError(message)
-
-    @staticmethod
-    def _command(command: str | None, revision: str | None, release_env: str | None) -> str | None:
-        if command is None:
-            return None
-        variables = []
-        if revision:
-            variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
-        if release_env:
-            variables.append(f"{release_env}=1")
-        return f"env {' '.join(variables)} {command}" if variables else command
 
     def _log_provisioning(
         self,

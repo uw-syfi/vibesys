@@ -7,17 +7,22 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._local_validation import LocalValidationEvents, run_local_validation
 from vs_runtime._workspaces import RuntimeWorkspaces, WorkspaceResource, run_sync
 from vs_runtime.contracts import (
+    AccuracyReceipt,
     CommandResult,
     RuntimeContractError,
     Workspace,
+    WorkspaceAccess,
     validate_command,
     validate_trusted_shell_command,
+    validate_workspace_writable_paths,
 )
 
 if TYPE_CHECKING:
     from vs_runtime._agent_sessions import RuntimeAgentSessions
+    from vs_runtime._local_validation import FrameworkValidationResult
     from vs_runtime._run_host import BlockingOperations
     from vs_runtime._trusted_evaluation import (
         TrustedAccuracyResult,
@@ -43,6 +48,24 @@ class WorkspaceEvaluationSpec:
     benchmark_command: str | None
     benchmark_contract: TrustedBenchmarkContract | None
     deployment_release_env_var: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeAccuracyRun:
+    """Policy-neutral result of one accuracy lifecycle."""
+
+    result: TrustedAccuracyResult | None
+    receipt: AccuracyReceipt
+    reused: bool
+    command: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeBenchmarkRun:
+    """Policy-neutral result and contract from one benchmark lifecycle."""
+
+    result: TrustedBenchmarkResult
+    contract: TrustedBenchmarkContract | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,10 +181,11 @@ class RuntimeCommands:
 
 
 class RuntimeWorkspaceEvaluation:
-    """Trusted evaluation operations over validated workspace handles."""
+    """Own the complete trusted-evaluation lifecycle for live workspaces."""
 
-    def __init__(self, workspaces: RuntimeWorkspaces) -> None:
+    def __init__(self, workspaces: RuntimeWorkspaces, commands: RuntimeCommands) -> None:
         self._workspaces = workspaces
+        self._commands = commands
 
     def spec(self, workspace: Workspace) -> WorkspaceEvaluationSpec:
         return self._workspaces.resource_for(
@@ -170,27 +194,92 @@ class RuntimeWorkspaceEvaluation:
 
     async def accuracy(
         self,
+        run_id: str,
         workspace: Workspace,
         *,
-        command_override: str | None,
-    ) -> TrustedAccuracyResult:
+        reuse: AccuracyReceipt | None = None,
+        release: bool = False,
+    ) -> RuntimeAccuracyRun:
+        """Run accuracy or validate explicit reuse for the current candidate."""
         managed = self._workspaces.workspace_for(workspace)
+        spec = self.spec(managed)
+        if reuse is not None:
+            self._validate_receipt_owner(run_id, managed, reuse)
+            await managed.snapshot("framework-accuracy-reuse-input")
+            await self._validate_receipt_revision(managed, reuse)
+            return RuntimeAccuracyRun(
+                result=None,
+                receipt=reuse,
+                reused=True,
+                command=spec.accuracy_command,
+            )
+
+        candidate_revision = await managed.snapshot("framework-accuracy-input")
+        command_override = _evaluation_command(
+            spec.accuracy_command,
+            candidate_revision,
+            spec.deployment_release_env_var if release else None,
+        )
         async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
-            return await self._workspaces.resource_for(managed).trusted_accuracy(command_override)
+            result = await self._workspaces.resource_for(managed).trusted_accuracy(command_override)
+        if result.executed:
+            await managed.snapshot("framework-accuracy-evaluation")
+        return RuntimeAccuracyRun(
+            result=result,
+            receipt=AccuracyReceipt(
+                run_id=run_id,
+                workspace_id=managed.id,
+                revision=candidate_revision,
+            ),
+            reused=False,
+            command=result.command,
+        )
 
     async def benchmark(
         self,
         workspace: Workspace,
         *,
-        command_override: str | None,
         required_metrics: frozenset[str],
-    ) -> TrustedBenchmarkResult:
+    ) -> RuntimeBenchmarkRun:
+        """Snapshot and benchmark the exact current candidate."""
         managed = self._workspaces.workspace_for(workspace)
+        spec = self.spec(managed)
+        candidate_revision = await managed.snapshot("framework-benchmark-input")
+        command_override = _evaluation_command(
+            spec.benchmark_command,
+            candidate_revision,
+            spec.deployment_release_env_var,
+        )
         async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
-            return await self._workspaces.resource_for(managed).trusted_benchmark(
+            result = await self._workspaces.resource_for(managed).trusted_benchmark(
                 command_override,
                 required_metrics,
             )
+        if result.executed:
+            await managed.snapshot("framework-benchmark-evaluation")
+        return RuntimeBenchmarkRun(result=result, contract=spec.benchmark_contract)
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+        events: LocalValidationEvents | None = None,
+    ) -> tuple[FrameworkValidationResult, ...]:
+        """Run candidate-authored recipes through runtime-owned commands."""
+        validate_workspace_writable_paths(
+            WorkspaceAccess.LIMITED,
+            (recipe_artifact, report_location),
+        )
+        managed = self._workspaces.workspace_for(workspace)
+        return await run_local_validation(
+            self._commands,
+            managed,
+            recipe_artifact=recipe_artifact,
+            report_location=report_location,
+            events=events,
+        )
 
     async def revisions_equivalent(
         self,
@@ -210,8 +299,51 @@ class RuntimeWorkspaceEvaluation:
         return left_patch == right_patch
 
     @staticmethod
+    def _validate_receipt_owner(
+        run_id: str,
+        workspace: Workspace,
+        receipt: AccuracyReceipt,
+    ) -> None:
+        if receipt.run_id != run_id:
+            message = "accuracy receipt belongs to another run"
+            raise RuntimeContractError(message)
+        if receipt.workspace_id != workspace.id:
+            message = "accuracy receipt belongs to another workspace"
+            raise RuntimeContractError(message)
+
+    async def _validate_receipt_revision(
+        self,
+        workspace: Workspace,
+        receipt: AccuracyReceipt,
+    ) -> None:
+        current_revision = workspace.revision
+        if current_revision is None:
+            message = "accuracy receipt does not match the current workspace revision"
+            raise RuntimeContractError(message)
+        if receipt.revision == current_revision:
+            return
+        if not await self.revisions_equivalent(workspace, receipt.revision, current_revision):
+            message = "accuracy receipt does not match the current candidate revision"
+            raise RuntimeContractError(message)
+
+    @staticmethod
     async def _blocking_patch(resource: WorkspaceResource, revision: str) -> str:
         return await run_sync(resource.candidate_patch, revision)
+
+
+def _evaluation_command(
+    command: str | None,
+    revision: str | None,
+    release_env: str | None,
+) -> str | None:
+    if command is None:
+        return None
+    variables = []
+    if revision:
+        variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
+    if release_env:
+        variables.append(f"{release_env}=1")
+    return f"env {' '.join(variables)} {command}" if variables else command
 
 
 def _command_result(result: CommandExecutionResult) -> CommandResult:

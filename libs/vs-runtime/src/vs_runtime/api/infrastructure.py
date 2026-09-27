@@ -213,6 +213,8 @@ from vs_runtime._workspace_resources import (
 )
 from vs_runtime._workspace_runtime import (
     CommandExecutionResult,
+    RuntimeAccuracyRun,
+    RuntimeBenchmarkRun,
     RuntimeCommands,
     RuntimeWorkspaceEvaluation,
     WorkspaceEvaluationSpec,
@@ -483,6 +485,8 @@ __all__ = [
     "RunHostResourceOwner",
     "RunState",
     "RunStopped",
+    "RuntimeAccuracyRun",
+    "RuntimeBenchmarkRun",
     "RuntimeRunHost",
     "RuntimeWorkspaceEvaluation",
     "SDKRoots",

@@ -46,6 +46,8 @@ class _Resource:
         self.executions: list[tuple[str, int | None]] = []
         self.scripted: deque[SandboxExecutionResult] = deque()
         self.unavailable_revisions: set[str] = set()
+        self.accuracy_calls: list[str | None] = []
+        self.benchmark_calls: list[tuple[str | None, frozenset[str]]] = []
 
     def snapshot(self, label: str) -> str:
         self.revision = f"{len(label):040x}"
@@ -100,6 +102,7 @@ class _Resource:
         )
 
     async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+        self.accuracy_calls.append(command_override)
         return TrustedAccuracyResult(
             command=command_override,
             executed=True,
@@ -111,7 +114,7 @@ class _Resource:
         command_override: str | None,
         required_metrics: frozenset[str],
     ) -> TrustedBenchmarkResult:
-        del required_metrics
+        self.benchmark_calls.append((command_override, required_metrics))
         return TrustedBenchmarkResult(
             command=command_override,
             executed=True,
@@ -328,6 +331,53 @@ def test_runtime_evaluation_validates_and_normalizes_unavailable_revisions(
             )
         with pytest.raises(TypeError, match="live handle"):
             runtime.evaluation.spec(FakeWorkspace(path=tmp_path))
+        await runtime.workspaces.close()
+
+    asyncio.run(exercise())
+
+
+def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(tmp_path: Path) -> None:
+    provider = _Provider(tmp_path)
+
+    async def exercise() -> None:
+        runtime = _runtime(provider)
+        workspace = runtime.workspaces.root
+        accuracy = await runtime.evaluation.accuracy(
+            "run-a",
+            workspace,
+            release=True,
+        )
+        benchmark = await runtime.evaluation.benchmark(
+            workspace,
+            required_metrics=frozenset({"throughput"}),
+        )
+
+        assert accuracy.result is not None
+        assert accuracy.result.passed
+        assert accuracy.receipt.run_id == "run-a"
+        assert accuracy.receipt.workspace_id is None
+        accuracy_command = provider.root.accuracy_calls[0]
+        assert accuracy_command is not None
+        assert accuracy.receipt.revision in accuracy_command
+        assert "python accuracy.py" in accuracy_command
+        assert benchmark.result.passed
+        assert provider.root.benchmark_calls[0][1] == frozenset({"throughput"})
+        benchmark_command = provider.root.benchmark_calls[0][0]
+        assert benchmark_command is not None
+        assert "python benchmark.py" in benchmark_command
+
+        with pytest.raises(RuntimeContractError, match="another run"):
+            await runtime.evaluation.accuracy(
+                "run-b",
+                workspace,
+                reuse=accuracy.receipt,
+            )
+        with pytest.raises(ValueError, match="writable path"):
+            await runtime.evaluation.validate_local(
+                workspace,
+                recipe_artifact="../recipes.json",
+                report_location="validation/report.json",
+            )
         await runtime.workspaces.close()
 
     asyncio.run(exercise())
