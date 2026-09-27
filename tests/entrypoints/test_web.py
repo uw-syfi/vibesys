@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -152,7 +151,7 @@ def test_browser_url_targets_the_replay_dev_server() -> None:
 
 
 def test_tunnel_requires_a_port_and_matching_forward() -> None:
-    missing_port = SimpleNamespace(
+    missing_port = argparse.Namespace(
         url="http://127.0.0.1/?token=secret",
         local_port=None,
         browser_origin="http://127.0.0.1:5173",
@@ -161,7 +160,7 @@ def test_tunnel_requires_a_port_and_matching_forward() -> None:
     with pytest.raises(SystemExit, match="missing its port"):
         _run_tunnel(missing_port)
 
-    mismatched = SimpleNamespace(
+    mismatched = argparse.Namespace(
         url="http://127.0.0.1:8765/?token=secret",
         local_port=5173,
         browser_origin="http://127.0.0.1:5173",
