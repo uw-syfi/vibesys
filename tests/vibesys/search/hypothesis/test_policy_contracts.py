@@ -12,7 +12,7 @@ from tests.support import make_orchestrator_plan
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration import artifacts, memory
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
 from vibesys.orchestrations.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
@@ -35,6 +35,7 @@ from vibesys.search.hypothesis.transitions import (
     trusted_candidate_records,
 )
 from vs_loop_state.api import RoundRecord
+from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     ValidationRecipe,
     ValidationRecipeArtifact,
@@ -109,7 +110,11 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         operator_constraints=("Preserve ordering",),
         metric_space=MetricSpace(),
     )
-    descriptor = descriptor_from_options(options, orchestration_id="single-agent")
+    descriptor = OrchestrationDescriptor(
+        id="single-agent",
+        config_version=1,
+        options=options.model_dump(mode="json"),
+    )
     assert descriptor.id == "single-agent"
     assert descriptor.config_version == 1
     assert descriptor.options == {

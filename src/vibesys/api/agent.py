@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.memory import framework_memory_paths
-from vibesys.orchestrations.agent_options import options_from_descriptor
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
 from vibesys.orchestrations.hypothesis_readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
@@ -36,9 +36,20 @@ def is_agent_run_manifest(manifest: OrchestrationRunManifest) -> bool:
 
 def agent_run_objectives(manifest: OrchestrationRunManifest) -> tuple[str, ...] | None:
     """Return the directed axes for a registered agent-run descriptor."""
-    if not is_agent_run_manifest(manifest):
+    # lint-waiver: LW-020003 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
+    from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
+
+    try:
+        registration = built_in_orchestrations().resolve(manifest.orchestration.id)
+    except ValueError:
         return None
-    space = options_from_descriptor(manifest.orchestration).metric_space
+    if registration.state_family != "agent":
+        return None
+    options = registration.prepare_plugin(manifest.orchestration).options
+    if not isinstance(options, AgentOrchestrationOptions):
+        message = f"agent orchestration {manifest.orchestration.id!r} has incompatible options"
+        raise TypeError(message)
+    space = options.metric_space
     return tuple(f"{axis.name}:{axis.direction}" for axis in space.objectives)
 
 

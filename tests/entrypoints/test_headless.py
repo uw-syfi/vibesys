@@ -41,9 +41,6 @@ from vibesys.events import CoreEventType
 from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
 )
-from vibesys.orchestrations.agent_options import (
-    descriptor_from_options as agent_descriptor,
-)
 from vibesys.orchestrations.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestrations.evolve.models import EvolveOptions
 from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
@@ -64,6 +61,17 @@ _LOOP_RUN_TARGETS = {
     "plain": "vibesys.api.session.run_plugin",
     "evolve": "vibesys.api.session.run_plugin",
 }
+
+
+def agent_descriptor(
+    options: AgentOrchestrationOptions, *, orchestration_id: str
+) -> OrchestrationDescriptor:
+    """Build the persisted descriptor at the product composition boundary."""
+    return OrchestrationDescriptor(
+        id=orchestration_id,
+        config_version=1,
+        options=options.model_dump(mode="json"),
+    )
 
 
 def _write_input_project(parent: Path, name: str = "queue-spsc") -> Path:

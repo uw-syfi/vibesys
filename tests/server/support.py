@@ -17,9 +17,9 @@ from vibesys.api import CoreEventType
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
-    descriptor_from_options,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
+from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import (
     RunControlChannel,
     RunControlTransition,
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunView
     from vs_agent.api import AgentSelection
-    from vs_project.api import OrchestrationDescriptor, Project
+    from vs_project.api import Project
 
 
 class _ControlBridge:
@@ -90,7 +90,11 @@ def agent_descriptor(
         memory_layout="files",
         metric_space=metric_space or MetricSpace(),
     )
-    return descriptor_from_options(options, orchestration_id="single-agent")
+    return OrchestrationDescriptor(
+        id="single-agent",
+        config_version=1,
+        options=options.model_dump(mode="json"),
+    )
 
 
 @dataclass(frozen=True)

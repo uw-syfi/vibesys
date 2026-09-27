@@ -42,9 +42,8 @@ from vibesys.events import CoreEventType
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
-    compare_resume_descriptors,
-    descriptor_from_options,
 )
+from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
 from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
 from vibesys.run import (
@@ -54,7 +53,7 @@ from vibesys.run import (
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_loop_state.api import PlainLoopCursor
-from vs_project.api import OrchestrationRunManifest, Project
+from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -193,11 +192,14 @@ def _create_context(
         )
     bundle = bundle.model_copy(update=updates)
     exp_name = options.get("exp_name", "queue")
+    descriptor = OrchestrationDescriptor(
+        id="multi-agent",
+        config_version=1,
+        options=(options.get("configuration") or _options()).model_dump(mode="json"),
+    )
     request = RunRequest(
         project_root=project,
-        orchestration=descriptor_from_options(
-            options.get("configuration") or _options(), orchestration_id="multi-agent"
-        ),
+        orchestration=descriptor,
         config=options.get("config") or Config.model_validate({"model": {"name": "gpt-test"}}),
         input_bundle=bundle,
         objective=options.get("objective", "Make the queue faster.\n"),
@@ -209,10 +211,11 @@ def _create_context(
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
     )
+    plugin_setup = built_in_orchestrations().resolve(descriptor.id).prepare_plugin(descriptor).setup
     setup = RunSetup(
         state_namespace="multi",
         state_slots={"state.json": HypothesisState},
-        resume_policy=compare_resume_descriptors,
+        resume_policy=plugin_setup.resume_policy,
     )
     with patch(
         "vibesys.context.resolve_domain",

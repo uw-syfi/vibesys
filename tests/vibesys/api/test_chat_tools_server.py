@@ -20,13 +20,18 @@ from mcp.server.fastmcp import FastMCP
 from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
 from vibesys.orchestrations.multi.models import MultiState
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vs_agent.api import register_tool
 from vs_loop_state.api import RoundRecord
-from vs_project.api import Project, RunEnvironmentRecord, RunExecutionRecord
+from vs_project.api import (
+    OrchestrationDescriptor,
+    Project,
+    RunEnvironmentRecord,
+    RunExecutionRecord,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -74,7 +79,11 @@ def _project_with_run(tmp_path: Path) -> tuple[Project, str]:
             inner_model="gpt-5.6-luna",
             inner_reasoning_effort="medium",
         ),
-        orchestration=descriptor_from_options(_configuration(), orchestration_id="multi-agent"),
+        orchestration=OrchestrationDescriptor(
+            id="multi-agent",
+            config_version=1,
+            options=_configuration().model_dump(mode="json"),
+        ),
         trusted_input_baseline="a" * 40,
         now=NOW,
         unique=UNIQUE,
