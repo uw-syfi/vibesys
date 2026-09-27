@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
+from vs_runtime.api import ValidationRecipeArtifact
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

@@ -33,6 +33,14 @@ from vs_runtime._linux_cpu_profiler import collect as collect_linux_profile
 from vs_runtime._linux_cpu_profiler import detect_capability as detect_linux_profiler
 from vs_runtime._linux_cpu_profiler import parse_command as parse_profile_command
 from vs_runtime._linux_cpu_profiler import summarize as summarize_linux_profile
+from vs_runtime._local_validation import (
+    FrameworkValidationResult,
+    LocalValidationEvents,
+    LocalValidationRecipeError,
+    LocalValidationRecipeErrorKind,
+    ValidationRecipe,
+    run_local_validation,
+)
 from vs_runtime._macos_cpu_profiler import (
     Capability as MacOSProfilerCapability,
 )
@@ -182,6 +190,9 @@ __all__ = [
     "LinuxProfilerDiagnostic",
     "LinuxProfilerEffects",
     "LinuxProfilerTool",
+    "LocalValidationEvents",
+    "LocalValidationRecipeError",
+    "LocalValidationRecipeErrorKind",
     "MacOSProfileResult",
     "MacOSProfilerCapability",
     "MacOSProfilerDiagnostic",
@@ -196,6 +207,7 @@ __all__ = [
     "SkillCatalogEntry",
     "SkillMetadataError",
     "SystemAcceleratorDiscovery",
+    "ValidationRecipe",
     "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",
@@ -212,5 +224,7 @@ __all__ = [
     "resolve_packaged_tree",
     "resolve_sdk_source",
     "resolve_skill_resources",
+    "FrameworkValidationResult",
+    "run_local_validation",
     "summarize_linux_profile",
 ]

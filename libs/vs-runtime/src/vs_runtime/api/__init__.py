@@ -1,5 +1,9 @@
 """Public contracts for the reusable VibeSys runtime."""
 
+from vs_runtime._local_validation import (
+    ValidationRecipe,
+    ValidationRecipeArtifact,
+)
 from vs_runtime.api import boot_trace as boot_trace
 from vs_runtime.contracts import (
     AccuracyEvaluation,
@@ -46,6 +50,7 @@ from vs_runtime.contracts import (
     WorkspaceSourceFact,
     validate_command,
     validate_member_id,
+    validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
 
@@ -86,6 +91,8 @@ __all__ = [
     "StateModelError",
     "StructuredResponseError",
     "UnknownAgentRoleError",
+    "ValidationRecipe",
+    "ValidationRecipeArtifact",
     "Workspace",
     "WorkspaceAccess",
     "WorkspaceRef",
@@ -95,5 +102,6 @@ __all__ = [
     "boot_trace",
     "validate_command",
     "validate_member_id",
+    "validate_trusted_shell_command",
     "validate_workspace_writable_paths",
 ]

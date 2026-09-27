@@ -39,12 +39,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.evaluators.perf_reply import ProfilerSummary
-    from vibesys.evaluators.validation_recipe import FrameworkValidationResult
     from vibesys.roles.implementer import ImplementerResponse
     from vibesys.roles.judge import JudgeResponse
     from vibesys.roles.pre_round import PreRoundDecision
     from vibesys.roles.single_agent import SingleAgentRoundResponse
     from vibesys.search.hypothesis import OrchestratorPlan
+    from vs_runtime.api.infrastructure import FrameworkValidationResult
 
 #: Every block this module renders starts with this heading shape; the round
 #: number is recovered from it rather than threaded separately through the

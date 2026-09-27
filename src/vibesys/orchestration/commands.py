@@ -9,7 +9,13 @@ import shlex
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.workspaces import WorkspaceHandle
-from vs_runtime.api import CommandResult, RuntimeContractError, Workspace, validate_command
+from vs_runtime.api import (
+    CommandResult,
+    RuntimeContractError,
+    Workspace,
+    validate_command,
+    validate_trusted_shell_command,
+)
 
 if TYPE_CHECKING:
     from vibesys.orchestration._host import HostResources
@@ -99,6 +105,31 @@ class _Commands:
                 if primary_error is None:
                     raise cleanup_error
                 primary_error.add_note(str(cleanup_error))
+
+    async def run_trusted_shell(
+        self,
+        command: str,
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run an independently audited recipe through the workspace shell."""
+        validate_trusted_shell_command(command, timeout_seconds)
+        if not isinstance(workspace, WorkspaceHandle):
+            message = "workspace must be a live handle from this run"
+            raise TypeError(message)
+        scope = self._host.workspaces._scope_of(workspace)
+        context = self._host.workspaces._resources_for(scope)
+        result = await self._host._run_blocking(
+            context.run_environment_session.sandbox.execute,
+            command,
+            timeout=timeout_seconds,
+        )
+        return CommandResult(
+            output=result.output,
+            exit_code=result.exit_code,
+            truncated=result.truncated,
+        )
 
     async def _remove_captured_output(
         self,

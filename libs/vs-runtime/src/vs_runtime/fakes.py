@@ -37,6 +37,7 @@ from vs_runtime.contracts import (
     validate_command,
     validate_member_id,
     validate_objectives,
+    validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
 
@@ -418,14 +419,24 @@ class FakeCommandCall:
     output_argument: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FakeTrustedShellCall:
+    """One recorded trusted shell recipe request."""
+
+    command: str
+    workspace: Workspace
+    timeout_seconds: int | None
+
+
 @dataclass(slots=True)
 class FakeCommands:
     """Scriptable in-memory command execution with contract validation."""
 
-    results: list[CommandResult] = field(default_factory=list)
+    results: list[CommandResult | BaseException] = field(default_factory=list)
     calls: list[FakeCommandCall] = field(default_factory=list)
+    trusted_shell_calls: list[FakeTrustedShellCall] = field(default_factory=list)
 
-    def script(self, *results: CommandResult) -> None:
+    def script(self, *results: CommandResult | BaseException) -> None:
         """Queue command results in invocation order."""
         self.results.extend(results)
 
@@ -440,7 +451,10 @@ class FakeCommands:
         validate_command(argv, timeout_seconds)
         self.calls.append(FakeCommandCall(argv, workspace, timeout_seconds))
         if self.results:
-            return self.results.pop(0)
+            result = self.results.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
         return CommandResult(output="", exit_code=0)
 
     async def capture_output(
@@ -456,7 +470,27 @@ class FakeCommands:
         validate_command((output_argument,), None)
         self.calls.append(FakeCommandCall(argv, workspace, timeout_seconds, output_argument))
         if self.results:
-            return self.results.pop(0)
+            result = self.results.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return CommandResult(output="", exit_code=0)
+
+    async def run_trusted_shell(
+        self,
+        command: str,
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Validate and record one audited shell recipe."""
+        validate_trusted_shell_command(command, timeout_seconds)
+        self.trusted_shell_calls.append(FakeTrustedShellCall(command, workspace, timeout_seconds))
+        if self.results:
+            result = self.results.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
         return CommandResult(output="", exit_code=0)
 
 
@@ -586,6 +620,8 @@ class FakeWorkspace:
         }
         self._snapshot_count = 0
         self._retained: dict[str, str] = {}
+        self._pending_changes: list[list[str]] = []
+        self.restore_calls: list[tuple[str, bool]] = []
 
     @property
     def id(self) -> str | None:
@@ -625,10 +661,20 @@ class FakeWorkspace:
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a known tree while leaving recorded history unchanged."""
-        del clean
+        self.restore_calls.append((revision, clean))
         if revision not in self._known_revisions:
             raise WorkspaceRestoreError(revision)
         self._tree_revision = revision
+
+    def script_pending_changes(self, *changes: list[str]) -> None:
+        """Queue workspace mutation observations in invocation order."""
+        self._pending_changes.extend(changes)
+
+    async def pending_changes(self) -> list[str]:
+        """Return the next scripted uncommitted-change listing."""
+        if self._pending_changes:
+            return self._pending_changes.pop(0)
+        return []
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
         """Return whether a known tree could be materialized."""

@@ -26,14 +26,15 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from vibesys.evaluators.validation_recipe import (
-    FrameworkValidationResult,
-    ValidationRecipeArtifact,
-)
 from vibesys.orchestration.memory import structured_artifact_root
+from vs_runtime.api import ValidationRecipeArtifact
+
+if TYPE_CHECKING:
+    from vs_runtime.api.infrastructure import FrameworkValidationResult
 
 
 def write_json(path: Path, payload: object) -> Path:

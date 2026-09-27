@@ -10,10 +10,6 @@ import pytest
 from tests.support import make_orchestrator_plan
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.evaluators.validation_recipe import (
-    ValidationRecipe,
-    ValidationRecipeArtifact,
-)
 from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.prompts import PROMPTS_DIR
@@ -41,6 +37,10 @@ from vibesys.search.hypothesis.transitions import (
     trusted_candidate_records,
 )
 from vs_loop_state.api import RoundRecord
+from vs_runtime.api import (
+    ValidationRecipe,
+    ValidationRecipeArtifact,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path

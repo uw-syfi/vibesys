@@ -155,6 +155,10 @@ class Workspace(Protocol):
         """Keep a revision reachable under a policy-owned semantic label."""
         ...
 
+    async def pending_changes(self) -> list[str]:
+        """List uncommitted workspace-relative paths."""
+        ...
+
 
 class CandidateWorkspace(Workspace, Protocol):
     """One isolated candidate workspace owned by its creating run."""
@@ -337,6 +341,20 @@ class Commands(Protocol):
         status. Failure to remove the artifact raises ``RuntimeContractError``
         unless another exception is already propagating, in which case the
         cleanup failure is attached as an exception note.
+        """
+        ...
+
+    async def run_trusted_shell(
+        self,
+        command: str,
+        *,
+        workspace: Workspace,
+        timeout_seconds: int | None = None,
+    ) -> CommandResult:
+        """Run one audited shell recipe exactly as declared.
+
+        This surface is for trusted evaluator inputs, not agent-authored policy
+        commands that have not passed an independent approval gate.
         """
         ...
 
@@ -750,6 +768,16 @@ def validate_command(argv: tuple[str, ...], timeout_seconds: int | None) -> None
         raise ValueError(message)
     if any(not isinstance(argument, str) or "\0" in argument for argument in argv):
         message = "command argv must contain only NUL-free strings"
+        raise ValueError(message)
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        message = "command timeout must be positive"
+        raise ValueError(message)
+
+
+def validate_trusted_shell_command(command: str, timeout_seconds: int | None) -> None:
+    """Reject malformed trusted shell recipes before opening execution effects."""
+    if not isinstance(command, str) or not command.strip() or "\0" in command:
+        message = "trusted shell command must be a nonempty NUL-free string"
         raise ValueError(message)
     if timeout_seconds is not None and timeout_seconds <= 0:
         message = "command timeout must be positive"

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from vibesys.run.event_journal import EventJournal
     from vibesys.runtime import AgentDefinition, AgentHandle, WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
-    from vs_runtime.api import Skills
+    from vs_runtime.api import Commands, Skills
 
 
 class _ExecutionResultLike(Protocol):
@@ -261,6 +261,11 @@ class HostResources(Protocol):
     @property
     def skills(self) -> Skills:
         """Return run-owned installed-skill resolution."""
+        ...
+
+    @property
+    def commands(self) -> Commands:
+        """Return run-owned sandboxed command execution."""
         ...
 
     _setup: RunSetup

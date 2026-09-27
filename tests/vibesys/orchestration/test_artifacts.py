@@ -7,16 +7,11 @@ each artifact kind under both memory layouts (legacy ``progress.md`` and the
 directory layout), and the durable-attempt-numbering contract
 (``next_implementer_attempt``) that survives a process killed mid-invoke.
 
-``FrameworkValidationResult``/``ValidationRecipeArtifact`` are imported from
-this module rather than their owning module directly: their owning module
-moves across the stack (``vibesys.schemas`` here, later
-``vibesys.evaluators.validation_recipe``), but ``artifacts`` always binds
-them under these names.
+Validation recipe contracts are imported from their public runtime API.
 """
 
 from __future__ import annotations
 
-import importlib
 import json
 from typing import TYPE_CHECKING
 
@@ -24,9 +19,7 @@ import pytest
 from pydantic import BaseModel
 
 from vibesys.orchestration.artifacts import (
-    FrameworkValidationResult,
     ImplementerStartMarker,
-    ValidationRecipeArtifact,
     implementer_artifact_path,
     implementer_artifact_paths,
     next_implementer_attempt,
@@ -42,36 +35,14 @@ from vibesys.orchestration.artifacts import (
     write_validation_result_artifact,
 )
 from vibesys.orchestration.memory import structured_artifact_root
-
-
-def _validation_recipe_cls() -> type:
-    """Resolve ``ValidationRecipe`` by dynamic lookup.
-
-    Its owning module moves across the stack (``vibesys.schemas`` here,
-    later ``vibesys.evaluators.validation_recipe``); a static import of the
-    not-yet-existing later location would fail type checking on this branch,
-    so this runs the lookup by name instead of statically importing either
-    candidate.
-    """
-    for module_name in ("vibesys.evaluators.validation_recipe", "vibesys.schemas"):
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:
-            continue
-        candidate = getattr(module, "ValidationRecipe", None)
-        if candidate is not None:
-            return candidate
-    message = "ValidationRecipe not found in any known location"
-    raise ImportError(message)
-
-
-ValidationRecipe = _validation_recipe_cls()
+from vs_runtime.api import ValidationRecipe, ValidationRecipeArtifact
+from vs_runtime.api.infrastructure import FrameworkValidationResult
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _recipe(name: str = "focused-tests"):  # noqa: ANN202  # LW-920445 [ANN202]; return type resolved dynamically above.
+def _recipe(name: str = "focused-tests") -> ValidationRecipe:
     return ValidationRecipe(
         name=name,
         command="uv run pytest -q test_server.py",
