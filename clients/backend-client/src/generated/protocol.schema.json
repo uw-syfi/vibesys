@@ -3029,14 +3029,14 @@
           "title": "Perf Unit"
         },
         "profile_skipped": {
-          "default": false,
           "title": "Profile Skipped",
           "type": "boolean"
         }
       },
       "required": [
         "attempts",
-        "judge_verdict"
+        "judge_verdict",
+        "profile_skipped"
       ],
       "title": "RoundFinishedData",
       "type": "object"

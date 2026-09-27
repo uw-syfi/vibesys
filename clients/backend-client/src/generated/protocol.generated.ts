@@ -1160,7 +1160,7 @@ export interface RoundFinishedData {
   judge_verdict: JudgeVerdict;
   perf_metric?: PerfMetric;
   perf_unit?: PerfUnit;
-  profile_skipped?: ProfileSkipped;
+  profile_skipped: ProfileSkipped;
   [k: string]: unknown;
 }
 /**
