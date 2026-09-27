@@ -78,6 +78,9 @@ def test_web_origins_accept_repeated_explicit_origins() -> None:
 
 
 def test_web_origins_reject_paths() -> None:
+    with pytest.raises(ValueError, match="requires an origin"):
+        _web_origins_from_argv(["--web-origin"])
+
     with pytest.raises(ValueError, match="without a path"):
         _web_origins_from_argv(["--web-origin", "http://localhost:5173/app"])
 
