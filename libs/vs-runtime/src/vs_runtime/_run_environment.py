@@ -32,6 +32,7 @@ import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from functools import partial
 from importlib import import_module
@@ -48,6 +49,7 @@ from vs_agent.api import (
     auth_paths,
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
+from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -62,6 +64,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_sandbox.api import (
+    DeviceLease,
     EnvironmentBindMount,
     HostResource,
     ProjectPathPolicy,
@@ -280,6 +283,90 @@ class RunEnvironmentSession(Protocol):
     def close(self) -> None:
         """Stop resources owned by this run session."""
         ...
+
+
+class RunEnvironmentResources:
+    """Concrete owner of one environment session and its compute-device lease."""
+
+    def __init__(
+        self,
+        request: RunEnvironmentRequest,
+        session: RunEnvironmentSession,
+        device: DeviceLease,
+        ownership: ExitStack,
+    ) -> None:
+        self.request = request
+        self.session = session
+        self.device = device
+        self._ownership = ownership
+        self._closed = False
+
+    @property
+    def view(self) -> RunEnvironmentView:
+        """Return environment facts resolved while opening the session."""
+        return self.session.view
+
+    def reselect_device(self) -> None:
+        """Re-pick the active compute device when the environment permits it."""
+        self.device.reselect()
+
+    def close(self) -> None:
+        """Release owned resources in reverse construction order exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        self._ownership.close()
+
+
+def _close_failed_environment_resources(
+    ownership: ExitStack, construction_error: BaseException
+) -> None:
+    try:
+        ownership.close()
+    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-994217 [BLE001]; cleanup must preserve the environment construction failure while reporting teardown failure.
+        construction_error.add_note(
+            "Additional error while cleaning up environment resources: "
+            f"{type(cleanup_error).__name__}: {cleanup_error}"
+        )
+
+
+def open_run_environment_resources(
+    request: RunEnvironmentRequest,
+    open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
+) -> RunEnvironmentResources:
+    """Open a root session and own its newly started device lease."""
+    ownership = ExitStack()
+    try:
+        with boot_trace.span("environment_open"):
+            session = ownership.enter_context(open_session(request))
+        with boot_trace.span("device_monitor_start"):
+            device = DeviceLease(
+                request.backend,
+                log_dir=request.log_dir,
+                run_environment_view=session.view,
+            )
+            ownership.callback(device.close)
+            device.start_monitor()
+        return RunEnvironmentResources(request, session, device, ownership)
+    except BaseException as construction_error:
+        _close_failed_environment_resources(ownership, construction_error)
+        raise
+
+
+def open_workspace_environment_resources(
+    request: RunEnvironmentRequest,
+    open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
+    *,
+    device: DeviceLease,
+) -> RunEnvironmentResources:
+    """Open a workspace session while borrowing the root run's device lease."""
+    ownership = ExitStack()
+    try:
+        session = ownership.enter_context(open_session(request))
+        return RunEnvironmentResources(request, session, device, ownership)
+    except BaseException as construction_error:
+        _close_failed_environment_resources(ownership, construction_error)
+        raise
 
 
 @dataclass(frozen=True)

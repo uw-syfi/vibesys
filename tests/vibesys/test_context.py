@@ -222,7 +222,6 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as ctx:
-        assert ctx.project_root == project
         assert ctx.workspace == project
         assert ctx.project.root == project
         assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
@@ -273,8 +272,6 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
             for name, spec in package.metadata.tools.items()
         )
 
-        assert ctx.evaluator_tools_root == tools_root
-        assert ctx.evaluator_tool_roots == expected_tool_roots
         assert tools_root.is_dir()
         assert not tools_root.is_relative_to(project)
         assert tools_root not in resources
@@ -453,14 +450,14 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             task_root=task,
         ) as ctx:
             runtime_model = runs_dir / ".cache" / "llm-serving" / ctx.run_id / "model"
-            copied_reference = ctx.project_root / ".vibesys" / "tasks" / "latency" / "reference"
+            copied_reference = ctx.workspace / ".vibesys" / "tasks" / "latency" / "reference"
 
             assert not (reference / "model").exists()
             assert not (copied_reference / "model").exists()
             assert runtime_model.resolve() == downloaded
             assert ctx.git.trusted_input_changes() == []
 
-        assert _git(ctx.project_root, "status", "--porcelain") == ""
+        assert _git(ctx.workspace, "status", "--porcelain") == ""
 
 
 def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path) -> None:
@@ -493,7 +490,7 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Pa
     runs_dir = tmp_path / "runs"
 
     with _create_context(source, runs_dir=runs_dir, evaluator=evaluator) as ctx:
-        project = ctx.project_root
+        project = ctx.workspace
         assert project.parent == runs_dir
         assert project.name == ctx.run_id
         assert ctx.workspace == project
@@ -541,7 +538,7 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) ->
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
     with _create_context(source, runs_dir=runs_dir, evaluator=evaluator) as first:
-        project = first.project_root
+        project = first.workspace
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
@@ -753,7 +750,7 @@ def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> N
             parent.state.local("evolve").external_directory("candidates/g2c3/logs")
         )
         assert Path(candidate.run_environment_view.paths.objective).read_text() == (
-            parent.effective_objective
+            parent.environment_request.objective
         )
         candidate.close()
         assert not candidate_root.exists()

@@ -29,7 +29,7 @@ from vibesys.events import (
     CoreEventType,
     ExperimentsChangedData,
 )
-from vibesys.inputs import InputBundle, WorkspaceSource
+from vibesys.inputs import InputBundle
 from vibesys.orchestration.environment import open_run_environment
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -45,7 +45,6 @@ from vibesys.orchestration.profilers import (
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.skills import platform_skill_excluded_paths, platform_skill_selection
 from vibesys.run import (
-    DeviceLease,
     ExperimentRepository,
     ProjectProvisioningSpec,
     provision_project,
@@ -80,13 +79,14 @@ from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
     MultiSlotRoundTransactionCoordinator,
     NativeCpuProfilerKind,
-    ProjectMaterializer,
     ProtocolBenchmarkContract,
     RoundRecoveryOutcome,
     RunEnvironment,
     RunEnvironmentRequest,
+    RunEnvironmentResources,
     RunEnvironmentSession,
     RunEnvironmentSpec,
+    RunEnvironmentView,
     RunState,
     ScalarBenchmarkContract,
     ScopedAgentEnvironment,
@@ -100,12 +100,14 @@ from vs_runtime.api.infrastructure import (
     load_evaluator_package,
     make_run_environment_spec,
     open_agent_execution_environment,
+    open_run_environment_resources,
+    open_workspace_environment_resources,
     preflight_native_cpu_profiler,
     run_environment_record,
 )
 from vs_sandbox.api import (
     ComputeBackendImpl,
-    EnvironmentBindMount,
+    DeviceLease,
     HostResource,
     create_compute_backend,
 )
@@ -408,7 +410,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     orchestration_descriptor = request.orchestration
     orchestration_resume = resume_policy or _exact_resume_descriptor
     trusted_input_baseline = None
-    debug = request.debug
     profiler_kind = request.profiler_kind
     profiler_domain = bundle.domain
     skills_dirs = request.skills_dirs
@@ -851,7 +852,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             )
             workspace_files.materialize(plan, existing=True)
 
-        with boot_trace.span("environment_open"):
+        with boot_trace.span("environment_plan"):
             runtime_state = project_state.portable_namespace(run_id, "runtime")
             objective_document: Path | None = None
             if objective is not None:
@@ -868,7 +869,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 evaluator_source=evaluator_source,
             )
 
-            tracked_experiment_repository: ExperimentRepository | None = None
             experiment_repository = ExperimentRepository(project_root, logger.lprint)
             origin_exists = experiment_repository.has_origin()
             if (
@@ -906,7 +906,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                             message=f"Could not configure project repository {remote_repo!r}: {exc}",
                         )
                     ) from exc
-                tracked_experiment_repository = experiment_repository
 
                 def _push_experiment_repository() -> None:
                     try:
@@ -947,14 +946,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
             )
-            session = teardown_stack.enter_context(
-                open_run_environment(environment, run_environment_request)
-            )
-        with boot_trace.span("device_monitor_start"):
-            # Start backend-specific background monitoring (CUDA: nvidia-smi).
-            device = DeviceLease(backend_impl, log_dir=log_dir, run_environment_view=session.view)
-            teardown_stack.callback(device.close)
-            device.start_monitor()
+        environment_resources = open_run_environment_resources(
+            run_environment_request,
+            lambda request: open_run_environment(environment, request),
+        )
+        teardown_stack.callback(environment_resources.close)
+        session = environment_resources.session
 
         # A microservice candidate is a container topology, so its local agent needs
         # resources the default confinement withholds. Other domains keep the
@@ -976,35 +973,14 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_environment=environment,
             integration=integration,
             logger=logger,
-            project_root=project_root,
-            log_dir=log_dir,
-            debug=debug,
-            backend_impl=backend_impl,
-            model_name=model_name,
-            input_path=input_path_str,
-            workspace_sources=(),
-            evaluator_path=evaluator_source,
-            evaluator_package_root=evaluator_package_root,
-            evaluator_tools_root=evaluator_tools_root,
-            evaluator_tool_roots=evaluator_tool_roots,
-            effective_objective=objective,
-            accuracy_command=accuracy_command,
-            benchmark_command=benchmark_command,
             profiler_kind=resolved_profiler_kind,
-            profiler_support_path=profiler_support_path,
-            profiler_support_name=profiler_support_name,
-            profiler_support_extra=profiler_support_extra,
             skill_source_paths=skill_source_paths,
             ref_name=ref_name,
-            environment_bind_mounts=model_artifacts.bind_mounts,
-            workspace_files=workspace_files,
+            excluded_workspace_dirs=workspace_files.excluded_dirs,
             git=git,
             trusted_evaluation_plan=_trusted_evaluation_plan(bundle, session),
-            experiment_repository=tracked_experiment_repository,
             teardown_stack=teardown_stack,
-            environment_request=run_environment_request,
-            run_environment_session=session,
-            device=device,
+            environment_resources=environment_resources,
             project=project,
             state=run_state,
             run_id=run_id,
@@ -1181,13 +1157,13 @@ def _assemble_workspace_resources(
 
     resolved_backend = str(spec.agent_backend or config.agent.backend or AgentBackend.CLI)
     resolved_cli_provider = spec.cli_provider or config.agent.cli_provider or "codex"
-    effective_objective = getattr(parent, "effective_objective", None)
+    effective_objective = parent.environment_request.objective
 
     git = GitTracker(
         workspace,
         run_id=parent.run_id,
         events=CoreGitTrackerEvents(parent.integration.events),
-        excluded_dirs=parent.EXCLUDED_WORKSPACE_DIRS,
+        excluded_dirs=parent.excluded_workspace_dirs,
         trusted_input_paths=trusted_project_input_paths(
             workspace,
             evaluator_source=None,
@@ -1198,7 +1174,7 @@ def _assemble_workspace_resources(
     workspace_files = create_project_materializer(
         workspace,
         environment=parent.run_environment,
-        backend=parent.backend_impl,
+        backend=parent.environment_request.backend,
         log=logger.lprint,
     )
     project_path_policy = build_project_path_policy(workspace, evaluator_source=None)
@@ -1213,58 +1189,44 @@ def _assemble_workspace_resources(
     workspace_environment_request = RunEnvironmentRequest(
         log_dir=log_dir,
         workspace=workspace,
-        seeded_workspace_paths=tuple(source.dest for source in parent.workspace_sources),
+        seeded_workspace_paths=parent.environment_request.seeded_workspace_paths,
         ref_dir=None,
-        backend=parent.backend_impl,
+        backend=parent.environment_request.backend,
         agent_backend=resolved_backend,
         cli_provider=resolved_cli_provider,
         run_id=parent.run_id,
         objective=effective_objective,
         objective_document=objective_document,
-        accuracy_command=parent.accuracy_command,
-        benchmark_command=parent.benchmark_command,
+        accuracy_command=parent.environment_request.accuracy_command,
+        benchmark_command=parent.environment_request.benchmark_command,
         benchmark_output_argument=parent.environment_request.benchmark_output_argument,
         evaluator_requirements=parent.environment_request.evaluator_requirements,
-        profiler_support_path=parent.profiler_support_path,
-        profiler_support_name=parent.profiler_support_name,
-        profiler_support_extra=parent.profiler_support_extra,
+        profiler_support_path=parent.environment_request.profiler_support_path,
+        profiler_support_name=parent.environment_request.profiler_support_name,
+        profiler_support_extra=parent.environment_request.profiler_support_extra,
         git_history_root=parent.git.history_root,
-        environment_bind_mounts=parent.environment_bind_mounts,
+        environment_bind_mounts=parent.environment_request.environment_bind_mounts,
         log=logger.lprint,
         framework_root=PROJECT_ROOT,
         project_path_policy=project_path_policy,
         state_namespace=parent.state.local(_SKYPILOT_STATE_NAMESPACE),
     )
-    session = teardown_stack.enter_context(
-        open_run_environment(parent.run_environment, workspace_environment_request)
+    environment_resources = open_workspace_environment_resources(
+        workspace_environment_request,
+        lambda request: open_run_environment(parent.run_environment, request),
+        device=parent.device,
     )
+    teardown_stack.callback(environment_resources.close)
+    session = environment_resources.session
     return _RunResources(
         backend=parent.backend,
         run_environment=parent.run_environment,
         integration=parent.integration,
         logger=logger,
-        project_root=workspace,
-        log_dir=log_dir,
-        debug=parent.debug,
-        backend_impl=parent.backend_impl,
-        model_name=parent.model_name,
-        input_path=parent.input_path,
-        workspace_sources=parent.workspace_sources,
-        evaluator_path=parent.evaluator_path,
-        evaluator_package_root=parent.evaluator_package_root,
-        evaluator_tools_root=parent.evaluator_tools_root,
-        evaluator_tool_roots=parent.evaluator_tool_roots,
-        effective_objective=effective_objective,
-        accuracy_command=parent.accuracy_command,
-        benchmark_command=parent.benchmark_command,
         profiler_kind=parent.profiler_kind,
-        profiler_support_path=parent.profiler_support_path,
-        profiler_support_name=parent.profiler_support_name,
-        profiler_support_extra=parent.profiler_support_extra,
         skill_source_paths=parent.skill_source_paths,
         ref_name=parent.ref_name,
-        environment_bind_mounts=parent.environment_bind_mounts,
-        workspace_files=workspace_files,
+        excluded_workspace_dirs=workspace_files.excluded_dirs,
         git=git,
         trusted_evaluation_plan=parent.trusted_evaluation_plan.model_copy(
             update={
@@ -1275,11 +1237,8 @@ def _assemble_workspace_resources(
         ),
         # Candidate worktrees share the parent repository and may run in
         # parallel. Only the parent context owns remote synchronization.
-        experiment_repository=None,
         teardown_stack=teardown_stack,
-        environment_request=workspace_environment_request,
-        run_environment_session=session,
-        device=parent.device,  # shared under the environment's parallel contract
+        environment_resources=environment_resources,
         project=parent.project,
         state=parent.state,
         run_id=parent.run_id,
@@ -1303,35 +1262,14 @@ class _RunResources:
         run_environment: RunEnvironment,
         integration: LocalRunIntegration,
         logger: RunLogger,
-        project_root: Path,
-        log_dir: Path,
-        debug: bool,
-        backend_impl: ComputeBackendImpl,
-        model_name: str,
-        input_path: str | None,
-        workspace_sources: tuple[WorkspaceSource, ...],
-        evaluator_path: Path | None,
-        evaluator_package_root: Path | None,
-        evaluator_tools_root: Path | None,
-        evaluator_tool_roots: tuple[Path, ...],
-        effective_objective: str | None,
-        accuracy_command: str,
-        benchmark_command: str,
         profiler_kind: ProfilerKind,
-        profiler_support_path: str | None,
-        profiler_support_name: str | None,
-        profiler_support_extra: tuple[tuple[str, str], ...],
         skill_source_paths: list[Path],
         ref_name: str,
-        environment_bind_mounts: tuple[EnvironmentBindMount, ...],
-        workspace_files: ProjectMaterializer,
+        excluded_workspace_dirs: set[str],
         git: GitTracker,
         trusted_evaluation_plan: TrustedEvaluationPlan,
-        experiment_repository: ExperimentRepository | None,
         teardown_stack: ExitStack,
-        environment_request: RunEnvironmentRequest,
-        run_environment_session: RunEnvironmentSession,
-        device: DeviceLease,
+        environment_resources: RunEnvironmentResources,
         project: Project,
         state: RunState,
         run_id: str,
@@ -1345,42 +1283,22 @@ class _RunResources:
         self.agent_host_resources = agent_host_resources
         self.run_environment = run_environment
         self.integration = integration
-        self.events = integration.events
         self.logger = logger
-        self.project_root = project_root
-        self.log_dir = log_dir
-        self.debug = debug
-        self.backend_impl = backend_impl
-        self.model_name = model_name
-        self.input_path = input_path
-        self.workspace_sources = workspace_sources
-        self.evaluator_path = evaluator_path
-        self.evaluator_package_root = evaluator_package_root
-        self.evaluator_tools_root = evaluator_tools_root
-        self.evaluator_tool_roots = evaluator_tool_roots
-        self.effective_objective = effective_objective
-        self.accuracy_command = accuracy_command
-        self.benchmark_command = benchmark_command
         self.profiler_kind = profiler_kind
-        self.profiler_support_path = profiler_support_path
-        self.profiler_support_name = profiler_support_name
-        self.profiler_support_extra = profiler_support_extra
         self._skill_source_paths = skill_source_paths
-        self.skills_for_agents = [src.name for src in skill_source_paths]
         self.ref_name = ref_name
-        self.environment_bind_mounts = environment_bind_mounts
-        self.workspace_files = workspace_files
-        self.EXCLUDED_WORKSPACE_DIRS = workspace_files.excluded_dirs
+        self.excluded_workspace_dirs = excluded_workspace_dirs
         self.git = git
+        self.environment_resources = environment_resources
         self.trusted_evaluation_plan = trusted_evaluation_plan
         self.trusted_evaluation: TrustedEvaluationExecutor = create_trusted_evaluation_executor(
             trusted_evaluation_plan,
-            workspace=project_root,
-            sandbox=run_environment_session.sandbox,
+            workspace=environment_resources.request.workspace,
+            sandbox=environment_resources.session.sandbox,
             git=git,
             model_requests=(
                 create_model_request_reconciler()
-                if run_environment_session.view.env_kind == "modal"
+                if environment_resources.view.env_kind == "modal"
                 else None
             ),
         )
@@ -1388,18 +1306,38 @@ class _RunResources:
         self.state = state
         self.run_id = run_id
         self._round_transaction_coordinator = round_transaction_coordinator
-        self._experiment_repository = experiment_repository
         self._teardown_stack = teardown_stack
-        self.environment_request = environment_request
-        self.run_environment_session = run_environment_session
-        self.run_environment_view = run_environment_session.view
-        self.device = device
         self._closed = False
 
     @property
     def workspace(self) -> Path:
         """Return the project root, which is also the only agent workspace."""
-        return self.project_root
+        return self.environment_resources.request.workspace
+
+    @property
+    def log_dir(self) -> Path:
+        """Return the environment's run-log directory."""
+        return self.environment_resources.request.log_dir
+
+    @property
+    def environment_request(self) -> RunEnvironmentRequest:
+        """Return the authoritative request used to open this workspace."""
+        return self.environment_resources.request
+
+    @property
+    def run_environment_session(self) -> RunEnvironmentSession:
+        """Return the lower-owned active environment session."""
+        return self.environment_resources.session
+
+    @property
+    def run_environment_view(self) -> RunEnvironmentView:
+        """Return environment facts resolved during session construction."""
+        return self.environment_resources.view
+
+    @property
+    def device(self) -> DeviceLease:
+        """Return the root-owned or candidate-borrowed device lease."""
+        return self.environment_resources.device
 
     def publish_committed_state(
         self,
@@ -1443,8 +1381,8 @@ class _RunResources:
         self.logger.switch(label)
 
     def reselect_gpu(self) -> None:
-        """Delegate mid-run device rebalance — see :meth:`DeviceLease.reselect`."""
-        self.device.reselect()
+        """Delegate mid-run device rebalance to the lower resource owner."""
+        self.environment_resources.reselect_device()
 
     def close(self) -> None:
         if self._closed:

@@ -16,13 +16,11 @@ from vibesys.run.project import (
     ProjectProvisioningSpec,
     provision_project,
 )
-from vs_sandbox.api import DeviceLease
 
 __all__ = [
     "CoreAgentEventSink",
     "CoreEvent",
     "CoreEventType",
-    "DeviceLease",
     "EventJournal",
     "ExperimentRepository",
     "LocalRunIntegration",
