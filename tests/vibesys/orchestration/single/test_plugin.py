@@ -11,13 +11,13 @@ from pydantic import ValidationError
 
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.models import (
     PaidAttempt,
     SingleAgentRoundResponse,
     SingleState,
 )
-from vibesys.schemas import Verdict
 from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 

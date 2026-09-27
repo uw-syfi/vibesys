@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
-from vibesys.schemas import Verdict
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

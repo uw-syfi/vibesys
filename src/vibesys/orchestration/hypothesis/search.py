@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.metrics import MetricSpace
-    from vibesys.schemas import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
+    from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
 
 __all__ = ["HypothesisSearch"]
 

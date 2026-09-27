@@ -6,13 +6,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.hypothesis import SkillResourceSelection
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.single.models import (
     SingleAgentRoundContext,
     SingleAgentRoundResponse,
 )
 from vibesys.orchestration.single.prompts import render_single_agent_prompt
-from vibesys.schemas import Verdict
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     RunHost,

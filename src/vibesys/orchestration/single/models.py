@@ -11,7 +11,8 @@ from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis import SkillResourceSelection
 from vibesys.orchestration.hypothesis.state import HypothesisState
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.schemas import CandidateDisposition, Verdict
+from vibesys.orchestration.review import Verdict
+from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
 
 _ProfileGuidedInput = input_manifest.ProfileGuidedInput

@@ -21,7 +21,7 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
-from vibesys.schemas import Verdict
+from vibesys.orchestration.review import Verdict
 from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost
 

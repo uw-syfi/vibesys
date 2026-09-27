@@ -16,8 +16,8 @@ from vibesys.events import CoreEvent, EventStatus
 from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.view import RunResult, RunStatus, RunView
-from vibesys.schemas import CandidateDisposition, PerfDeltaReason
 from vs_agent.api import MCPServerSpec
+from vs_loop_state.api import CandidateDisposition, PerfDeltaReason
 from vs_project.api import OrchestrationDescriptor
 
 __all__ = [

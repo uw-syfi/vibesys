@@ -14,12 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.hypothesis import HypothesisSearch, derive_hypothesis_title
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
-from vibesys.schemas import (
+from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
+    HypothesisResolution,
     PerfDeltaReason,
 )
-from vs_loop_state.api import HypothesisResolution
 from vs_runtime.api import PluginProjection, ProjectedRound
 
 if TYPE_CHECKING:

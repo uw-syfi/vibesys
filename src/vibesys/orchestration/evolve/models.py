@@ -12,7 +12,7 @@ from vibesys.orchestration.evolve.population import (
     PopulationState,
 )
 from vibesys.orchestration.metrics import MetricSpace, Objective
-from vibesys.schemas import Verdict
+from vibesys.orchestration.review import Verdict
 
 
 class MutatorContext(BaseModel):

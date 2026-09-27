@@ -30,6 +30,7 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusState,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.single.attribution import run_attribution
 from vibesys.orchestration.single.combined import CombinedTurnRequest, SingleAgentWorker
@@ -44,7 +45,6 @@ from vibesys.orchestration.single.models import (
     SingleState,
 )
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.schemas import Verdict
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,

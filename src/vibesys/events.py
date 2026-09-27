@@ -13,8 +13,8 @@ import vs_agent.api as _agent_api
 
 # AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
 # used directly below. CommandResultPayload and JsonResultPayload are only the
-# ToolResultPayload union members; re-exported here (like vs_loop_state's
-# enums in vibesys.schemas) so existing importers of vibesys.events keep working.
+# ToolResultPayload union members; re-exported here so existing importers of
+# vibesys.events keep working.
 from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,

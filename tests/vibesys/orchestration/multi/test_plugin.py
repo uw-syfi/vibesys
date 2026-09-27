@@ -20,7 +20,7 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState, PaidAttempt
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.schemas import Verdict
+from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     BenchmarkEvaluation,
     LocalValidationEvaluation,

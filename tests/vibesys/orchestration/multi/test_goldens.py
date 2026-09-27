@@ -24,7 +24,7 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.schemas import Verdict
+from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AccuracyEvaluation,
     BenchmarkEvaluation,

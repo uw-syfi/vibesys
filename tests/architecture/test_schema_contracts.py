@@ -16,8 +16,8 @@ from vibesys.orchestration.hypothesis import (
 )
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
 from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
-from vibesys.schemas import Verdict
 
 
 def _profiler_summary(

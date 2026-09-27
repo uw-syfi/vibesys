@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError,
 
 # AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
 # used directly below. CommandResultPayload and JsonResultPayload are only the
-# ToolResultPayload union members; re-exported here (like vs_loop_state's
-# enums in vibesys.schemas) so existing importers of server.events keep working.
+# ToolResultPayload union members; re-exported here so existing importers of
+# server.events keep working.
 import vs_agent.api as _agent_api
 from server.diagnostics import Diagnostic
 from server.event_index import (

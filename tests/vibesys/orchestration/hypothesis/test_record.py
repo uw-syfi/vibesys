@@ -15,11 +15,7 @@ from vibesys.orchestration.hypothesis.record import RecordInput, build_round_rec
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-)
-from vs_loop_state.api import RoundRecord
+from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 
 def _record_input() -> RecordInput:

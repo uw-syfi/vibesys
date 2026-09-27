@@ -36,12 +36,14 @@ from vibesys.orchestration.hypothesis.state import (
 )
 from vibesys.orchestration.hypothesis.transitions import reproject_run_evidence
 from vibesys.orchestration.single.models import SingleState
-from vibesys.schemas import (
+from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
+    MetricComparison,
     PerfDeltaReason,
+    PerfProvenance,
+    RoundRecord,
 )
-from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StateSlot
 
 if TYPE_CHECKING:

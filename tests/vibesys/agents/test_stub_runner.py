@@ -9,8 +9,8 @@ from vibesys.orchestration.multi.contracts import (
     JudgeResponse,
     PreRoundDecision,
 )
+from vibesys.orchestration.review import Verdict
 from vibesys.plugin_catalog import stub_response_factory
-from vibesys.schemas import Verdict
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient
 

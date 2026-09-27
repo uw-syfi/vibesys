@@ -42,8 +42,7 @@ from vibesys.orchestration.hypothesis.attempts import (
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome
-from vs_loop_state.api import RoundRecord
+from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 # --- helpers -----------------------------------------------------------
 

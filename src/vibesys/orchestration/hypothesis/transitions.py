@@ -21,7 +21,7 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.orchestration.metrics import Measurement, MetricComparison, MetricSpace
-from vibesys.schemas import (
+from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
     PerfDeltaReason,

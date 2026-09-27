@@ -38,7 +38,8 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusConfig,
     ProfileFocusState,
 )
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, Verdict
+from vibesys.orchestration.review import Verdict
+from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,

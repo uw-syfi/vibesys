@@ -1,9 +1,9 @@
 """Typed stub replies owned by the single policy."""
 
 from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.stub import scripted_response
-from vibesys.schemas import Verdict
 
 
 def test_scripted_single_trajectory_advances_every_two_rounds() -> None:

@@ -26,8 +26,7 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.orchestration.hypothesis.transitions import measurement_delta_reason
-from vibesys.schemas import CandidateDisposition
-from vs_loop_state.api import RoundRecord
+from vs_loop_state.api import CandidateDisposition, RoundRecord
 
 if TYPE_CHECKING:
     from vs_loop_state.api import MetricComparison

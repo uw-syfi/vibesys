@@ -10,8 +10,12 @@ from vibesys.orchestration.gates import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.state import HypothesisState
-    from vibesys.schemas import CandidateDisposition, HypothesisOutcome
-    from vs_loop_state.api import JudgeVerdict, PerfProvenance
+    from vs_loop_state.api import (
+        CandidateDisposition,
+        HypothesisOutcome,
+        JudgeVerdict,
+        PerfProvenance,
+    )
 
 
 class CandidateReply(Protocol):
@@ -70,7 +74,7 @@ class JudgeReviewed:
 
     ``verdict`` carries the persisted pass/fail vocabulary
     (``vs_loop_state.JudgeVerdict``, minus its ``"deferred"`` member), not
-    ``vibesys.schemas.Verdict``. A policy caller translates its reply verdict to this string
+    ``vibesys.orchestration.review.Verdict``. A policy caller translates its reply verdict to this string
     at the turn boundary.
     """
 

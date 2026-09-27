@@ -17,8 +17,7 @@ from vibesys.orchestration.hypothesis.transitions import (
     trusted_perf_provenance,
 )
 from vibesys.orchestration.metrics import Measurement
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome
-from vs_loop_state.api import RoundRecord
+from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.attempts import AttemptState, PerformanceProjection

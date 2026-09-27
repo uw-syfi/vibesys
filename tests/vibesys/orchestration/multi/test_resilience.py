@@ -16,7 +16,8 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.multi.models import MultiState
-from vibesys.schemas import HypothesisOutcome, Verdict
+from vibesys.orchestration.review import Verdict
+from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 

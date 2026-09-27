@@ -11,7 +11,8 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.schemas import HypothesisOutcome, Verdict
+from vibesys.orchestration.review import Verdict
+from vs_loop_state.api import HypothesisOutcome
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

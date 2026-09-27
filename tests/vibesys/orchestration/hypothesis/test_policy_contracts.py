@@ -30,11 +30,7 @@ from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts.contexts import display_path
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-)
-from vs_loop_state.api import RoundRecord
+from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     ValidationRecipe,
