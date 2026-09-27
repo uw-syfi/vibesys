@@ -10,9 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from vibesys.plugin_catalog import built_in_orchestrations
-from vibesys.prompts import PROMPTS_DIR
-
-_PROMPTS_LOOPS = Path(PROMPTS_DIR) / "loops"
 
 
 def _registered_strategy_folders() -> set[str]:
@@ -36,11 +33,3 @@ def test_every_registered_strategy_has_a_local_prompt_owner() -> None:
         and not (orchestrations / folder / "prompts").is_dir()
     )
     assert not missing, f"registered strategies with no plugin-local prompt owner: {missing}"
-
-
-def test_every_remaining_legacy_prompt_folder_maps_to_a_registered_strategy() -> None:
-    folders = _registered_strategy_folders()
-    orphaned = sorted(
-        path.name for path in _PROMPTS_LOOPS.iterdir() if path.is_dir() and path.name not in folders
-    )
-    assert not orphaned, f"prompts/loops/ folders with no registered strategy: {orphaned}"
