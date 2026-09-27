@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+from pydantic import ValidationError
+
 from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
     CoreEventType,
+    RoundFinishedData,
 )
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.infrastructure import (
@@ -16,6 +20,11 @@ from vs_runtime.api.infrastructure import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def test_current_round_event_requires_explicit_profile_outcome() -> None:
+    with pytest.raises(ValidationError, match="profile_skipped"):
+        RoundFinishedData.model_validate({"attempts": 1, "judge_verdict": "pass"})
 
 
 def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> None:

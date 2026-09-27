@@ -21,9 +21,6 @@ from vs_project.api import (
     is_project_state_path,
 )
 
-_LEGACY_AGENT_MEMORY_PATHS = ("progress.md", "pareto-frontier.md")
-"""Former root-level agent memory that remains hidden in recorded histories."""
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -186,12 +183,9 @@ class _LocalRunRecord:
         self._git_events = _GitReadEvents()
         self._git = GitTracker(project.root, run_id=run_id, events=self._git_events)
         self._git_lock = threading.Lock()
-        self._framework_prefixes = (
-            tuple(
-                path.relative_to(project.root).as_posix()
-                for path in framework_memory_paths(project.root)
-            )
-            + _LEGACY_AGENT_MEMORY_PATHS
+        self._framework_prefixes = tuple(
+            path.relative_to(project.root).as_posix()
+            for path in framework_memory_paths(project.root)
         )
 
     @property

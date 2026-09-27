@@ -171,6 +171,10 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
     (workspace / ".vibesys" / "state" / "note").write_text("bookkeeping\n", encoding="utf-8")
     (workspace / "progress.md").write_text("round 1\n", encoding="utf-8")
     (workspace / "pareto-frontier.md").write_text("# Pareto frontier\n", encoding="utf-8")
+    (workspace / "progress").mkdir()
+    (workspace / "progress" / "round-0001.md").write_text("framework\n", encoding="utf-8")
+    (workspace / "roadmap").mkdir()
+    (workspace / "roadmap" / "index.md").write_text("framework\n", encoding="utf-8")
     first = _commit_all(workspace, "round 1")
 
     (workspace / "src" / "ffi.rs").unlink()
@@ -199,6 +203,8 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
     assert (second_entry.base, second_entry.commit) == (first, second)
     assert first_entry.files is not None
     assert sorted((change.change, change.path) for change in first_entry.files) == [
+        ("added", "pareto-frontier.md"),
+        ("added", "progress.md"),
         ("added", "src/ffi.rs"),
         ("modified", "src/lib.rs"),
     ]
