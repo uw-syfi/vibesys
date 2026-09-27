@@ -73,13 +73,10 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
+    evaluator_helpers,
 )
 from vs_sandbox.api.command_translation import translate_command_arguments
-from vs_sandbox.api.evaluator_helpers import (
-    MODAL_EVALUATOR_HELPER,
-    SKYPILOT_EVALUATOR_HELPER,
-    encode_setup_command,
-)
+from vs_sandbox.api.evaluator_helpers import encode_setup_command
 from vs_sandbox.api.skypilot import (
     SkyPilotBridge,
     SkyPilotJobRunner,
@@ -751,7 +748,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             resources, docker_symlinks = _container_mount_plan(request)
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
             cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
-            helper_source = SKYPILOT_EVALUATOR_HELPER
+            helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
             socket_path = "/opt/vibesys-skypilot/bridge.sock"
             caller_state_path = "/opt/vibesys-skypilot/caller-state"
@@ -935,7 +932,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         resources.append(
             _resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
         )
-        evaluator_helper = MODAL_EVALUATOR_HELPER
+        evaluator_helper = evaluator_helpers.MODAL_EVALUATOR_HELPER
         evaluator_container_path = "/opt/vibesys-modal-evaluator.py"
         resources.append(
             _resource_for_mount(str(evaluator_helper), evaluator_container_path, read_only=True)

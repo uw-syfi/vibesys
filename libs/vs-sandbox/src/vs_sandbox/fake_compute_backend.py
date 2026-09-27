@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from vs_sandbox.accelerator_discovery import AcceleratorInventory
 from vs_sandbox.compute_backends import ComputeBackend
 from vs_sandbox.fake_sandbox import FakeSandbox
+from vs_sandbox.lifecycle import SandboxLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -86,7 +87,6 @@ class FakeComputeBackend:
             bind_mounts,
             extra_env,
             extra_init_commands,
-            lifecycle_hooks,
             attach_accelerator,
             ephemeral,
             container_image,
@@ -98,6 +98,7 @@ class FakeComputeBackend:
         if sandbox is None:
             sandbox = FakeSandbox()
             self.sandboxes[key] = sandbox
+        SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
         return sandbox
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:

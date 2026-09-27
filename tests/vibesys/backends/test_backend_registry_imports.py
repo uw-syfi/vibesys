@@ -56,6 +56,8 @@ def test_local_sandbox_construction_builds_a_local_shell_sandbox(tmp_path: Path)
         SandboxKind.LOCAL,
         host_workspace=str(tmp_path),
         log_path=None,
+        bind_mounts=[],
+        extra_env={},
     )
 
     assert isinstance(sandbox, LocalShellSandbox)

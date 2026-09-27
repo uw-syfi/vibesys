@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TypedDict, Unpack
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from tests.support import run_test_command
@@ -56,28 +56,8 @@ from vibesys.search.hypothesis.state import HypothesisState
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
-from vs_sandbox.api import HostResourceAccess, SandboxLifecycle, SandboxLifecycleHooks
-
-
-class _FakeBackend:
-    image = "fake-image"
-    selected_device = None
-
-    def __init__(self) -> None:
-        self.sandbox = MagicMock()
-        self.sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
-
-    def make_sandbox(
-        self,
-        *_args: object,
-        lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-        **_kwargs: object,
-    ) -> object:
-        SandboxLifecycle(lifecycle_hooks).before_ready(self.sandbox)
-        return self.sandbox
-
-    def make_monitor(self, _log_dir: object) -> None:
-        return None
+from vs_sandbox.api import HostResourceAccess
+from vs_sandbox.api.testing import FakeComputeBackend
 
 
 class _RecordingHooks:
@@ -116,7 +96,6 @@ class _CreateContextOptions(TypedDict, total=False):
 
 @pytest.fixture(autouse=True)
 def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("vibesys.context.backends.get", lambda *_args, **_kwargs: _FakeBackend())
     monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
         lambda kind: ProfilerPreflightResult(kind, usable=True),
@@ -242,7 +221,10 @@ def _create_context(
         ),
     ):
         return open_run_resources(
-            request, setup, options.get("integration") or LocalRunIntegration()
+            request,
+            setup,
+            options.get("integration") or LocalRunIntegration(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
         )
 
 

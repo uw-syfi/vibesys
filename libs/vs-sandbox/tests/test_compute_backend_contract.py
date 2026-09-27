@@ -14,11 +14,27 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api import ComputeBackendImpl, CudaBackend, SandboxKind
+from vs_sandbox.api import (
+    BeforeReadyContext,
+    ComputeBackendImpl,
+    CudaBackend,
+    SandboxKind,
+    SandboxLifecycleHooks,
+)
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sandbox.api import Sandbox
+
+
+class _RecordingHooks(SandboxLifecycleHooks):
+    def __init__(self) -> None:
+        self.sandbox: Sandbox | None = None
+
+    def before_ready(self, context: BeforeReadyContext) -> None:
+        self.sandbox = context.sandbox
 
 _FACTORIES = {
     "real": CudaBackend,
@@ -58,3 +74,19 @@ class TestComputeBackendContract:
 
         assert backend.make_monitor(tmp_path) is None
         backend.reselect_device()  # must not raise
+
+    def test_make_sandbox_runs_lifecycle_hooks_before_returning(
+        self, factory_name: str, tmp_path: Path
+    ) -> None:
+        backend = _FACTORIES[factory_name](tmp_path)
+        hooks = _RecordingHooks()
+
+        sandbox = backend.make_sandbox(
+            SandboxKind.LOCAL,
+            host_workspace=str(tmp_path),
+            log_path=None,
+            lifecycle_hooks=[hooks],
+            attach_accelerator=False,
+        )
+
+        assert hooks.sandbox is sandbox

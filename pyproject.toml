@@ -170,7 +170,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # profiler_support_extra: the extra sibling support dirs (shared capture
 # runtime, declared extra plugin kinds) staged alongside a profiler's own
 # support dir in Docker/Modal-via-Docker bind mounts.
-"src/vibesys/sandbox/run_environment.py" = 2159
+"src/vibesys/sandbox/run_environment.py" = 2158
 
 [tool.vibesys.test_isolation]
 # Shrink-only ratchet for test isolation, enforced by
