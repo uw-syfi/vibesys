@@ -42,6 +42,31 @@ class HypothesisStrategy(StrEnum):
     ABANDONED = "abandoned"
 
 
+def _validate_round_contract(record: RoundRecord) -> None:
+    if record.judge_verdict is None:
+        message = "round records must carry a judge_verdict"
+        raise ValueError(message)
+    if record.hypothesis_declared_outcome is not None:
+        HypothesisOutcome(record.hypothesis_declared_outcome)
+    if record.hypothesis_outcome is not None:
+        try:
+            HypothesisOutcome(record.hypothesis_outcome)
+        except ValueError:
+            HypothesisResolution(record.hypothesis_outcome)
+    CandidateDisposition(record.candidate_disposition)
+    if record.perf_metric is not None and record.perf_provenance is None:
+        message = "round records with a headline metric must carry perf_provenance"
+        raise ValueError(message)
+    if (
+        record.official_evaluation
+        and record.perf_metric is not None
+        and record.perf_provenance == "framework"
+        and record.perf_comparison is None
+    ):
+        message = "trusted official round records must carry perf_comparison"
+        raise ValueError(message)
+
+
 class HypothesisMeasurement(BaseModel):
     """Official headline measurement and its causal comparison baseline."""
 
@@ -57,7 +82,7 @@ class HypothesisMeasurement(BaseModel):
     baseline_value: FiniteFloat | None = None
     delta_pct: FiniteFloat | None = None
     # Why ``delta_pct`` is None, when the evidence can say. None whenever a
-    # baseline was found or the record predates provenance tracking.
+    # baseline was found.
     delta_reason: PerfDeltaReason | None = None
 
 
@@ -114,6 +139,8 @@ class Hypothesis(BaseModel):
         if any(record.hypothesis_id != self.hypothesis_id for record in self.rounds):
             message = "round hypothesis_id must match its owning hypothesis"
             raise ValueError(message)
+        for record in self.rounds:
+            _validate_round_contract(record)
         return self
 
     def clone(self) -> Hypothesis:
@@ -129,8 +156,8 @@ class HypothesisState(BaseModel):
     ``objectives.toml``. Every consumer that has to order two readings -- the
     loop, the hypothesis projection, checkpoint retention, the Pareto frontier,
     and the server read path -- reads it from here rather than being handed a
-    tolerance through a call chain. State written before this field existed
-    loads as the empty strict space, which is the behavior those runs had.
+    tolerance through a call chain. An empty space is valid for runs without
+    configured objective axes.
     """
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)

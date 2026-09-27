@@ -55,11 +55,10 @@ def trusted_perf_provenance(provenance: PerfProvenance | None) -> bool:
 
     The one trust rule shared by hypothesis resolution, scalar and Pareto
     retention, the recorded delta, and trusted Pareto-parent selection.
-    Legacy records carry no provenance and stay trusted, so reprojecting an
-    old run does not rewrite its historical resolutions; only an explicit
-    agent self-report is untrusted.
+    Only an explicit framework measurement is trusted. Missing provenance
+    fails closed.
     """
-    return provenance != "implementer"
+    return provenance == "framework"
 
 
 @dataclass(frozen=True)
@@ -359,70 +358,41 @@ def project_round_evidence(
     if any(item.round_number == record.round_number for item in hypothesis.rounds):
         _exception_message = f"round {record.round_number} already belongs to hypothesis"
         raise ValueError(_exception_message)
-    updated = hypothesis.clone()
-    updated.rounds.append(record)
+    updated = hypothesis.model_copy(
+        update={"rounds": [*hypothesis.rounds, record]},
+        deep=True,
+    )
     updated.declared_outcome = _declared_outcome(record.hypothesis_declared_outcome)
     updated.review = _review(record)
     measurement = _measurement(record, prior_rounds, space)
-    comparison = round_comparison(record, measurement, space)
-    if record.judge_verdict is not None:
-        updated.resolution = resolve_hypothesis_outcome(
-            ResolutionEvidence(
-                declared=updated.declared_outcome,
-                passed=record.passed,
-                reviewed=updated.review
-                not in {HypothesisReview.PENDING, HypothesisReview.DEFERRED},
-                comparison=comparison,
-            )
+    comparison = round_comparison(record)
+    updated.resolution = resolve_hypothesis_outcome(
+        ResolutionEvidence(
+            declared=updated.declared_outcome,
+            passed=record.passed,
+            reviewed=updated.review not in {HypothesisReview.PENDING, HypothesisReview.DEFERRED},
+            comparison=comparison,
         )
-    else:
-        updated.resolution = (
-            _resolution(record.hypothesis_outcome)
-            if updated.review not in {HypothesisReview.PENDING, HypothesisReview.DEFERRED}
-            else None
-        )
+    )
     if measurement is not None:
         updated.measurement = measurement
-    retained = _retained(record, prior_rounds, space)
+    retained = record.candidate_retained
     if retained is not None:
         updated.candidate_retained = retained
-    if record.judge_verdict is None:
-        _correct_legacy_resolution(updated, record, measurement, comparison)
     return Hypothesis.model_validate(updated.model_dump())
 
 
-def round_comparison(
-    record: RoundRecord,
-    measurement: HypothesisMeasurement | None,
-    space: MetricSpace,
-) -> MetricComparison | None:
+def round_comparison(record: RoundRecord) -> MetricComparison | None:
     """Return how one round's headline reading compared with its baseline.
 
-    A record that carries ``perf_comparison`` answers for itself, so a
-    resumed run does not disagree with what it recorded. The provenance guard
-    must come first: a self-reported round stores no comparison, which is
-    indistinguishable from a pre-provenance record, and without the guard the
-    fallback would re-derive one and resolve the hypothesis differently than
-    the loop that wrote it did.
+    The writer decides and stores this comparison once. Later projections do
+    not recompute historical decisions under a different metric space.
     """
     if not record.official_evaluation or record.perf_metric is None:
         return None
     if not trusted_perf_provenance(record.perf_provenance):
         return None
-    if record.perf_comparison is not None:
-        return record.perf_comparison
-    if measurement is None:
-        return MetricComparison.INCOMPARABLE
-    return space.compare(
-        _reading(measurement, measurement.value),
-        _reading(measurement, measurement.baseline_value),
-    )
-
-
-def _reading(measurement: HypothesisMeasurement, value: float | None) -> Measurement | None:
-    if value is None:
-        return None
-    return Measurement(metric=measurement.metric, value=value, direction=measurement.direction)
+    return record.perf_comparison
 
 
 def adopt_metric_space(state: HypothesisState, space: MetricSpace) -> HypothesisState:
@@ -493,59 +463,17 @@ def _validated_state(state: HypothesisState) -> HypothesisState:
     return HypothesisState.model_validate(state.model_dump())
 
 
-def _correct_legacy_resolution(
-    hypothesis: Hypothesis,
-    record: RoundRecord,
-    measurement: HypothesisMeasurement | None,
-    comparison: MetricComparison | None,
-) -> None:
-    """Re-decide a legacy record's self-declared ``proven`` from its evidence."""
-    if record.judge_verdict is not None or hypothesis.resolution is not HypothesisResolution.PROVEN:
-        return
-    if (
-        record.official_evaluation
-        and record.perf_metric is not None
-        and (measurement is None or measurement.direction is None or measurement.delta_pct is None)
-    ):
-        hypothesis.resolution = HypothesisResolution.INCONCLUSIVE
-        return
-    if measurement is None or comparison is None:
-        return
-    match comparison:
-        case MetricComparison.BETTER:
-            pass
-        case MetricComparison.WORSE:
-            hypothesis.resolution = HypothesisResolution.DISPROVEN
-        case MetricComparison.WITHIN_NOISE | MetricComparison.INCOMPARABLE:
-            hypothesis.resolution = HypothesisResolution.INCONCLUSIVE
-
-
 def _declared_outcome(value: str | None) -> HypothesisOutcome | None:
     if value is None:
         return None
-    try:
-        return HypothesisOutcome(value)
-    except ValueError:
-        return None
+    return HypothesisOutcome(value)
 
 
 def _review(record: RoundRecord) -> HypothesisReview:
-    if record.judge_verdict is not None:
-        return HypothesisReview(record.judge_verdict)
-    if not record.reviewed:
-        return HypothesisReview.DEFERRED
-    return HypothesisReview.PASS if record.passed else HypothesisReview.FAIL
-
-
-def _resolution(value: str | None) -> HypothesisResolution | None:
-    if value is None or value == HypothesisOutcome.CONTINUE.value:
-        return None
-    if value in {HypothesisOutcome.SUPPORTED.value, HypothesisOutcome.NOMINATED.value}:
-        return None
-    try:
-        return HypothesisResolution(value)
-    except ValueError:
-        return HypothesisResolution.INCONCLUSIVE
+    if record.judge_verdict is None:
+        message = "round record requires judge_verdict"
+        raise ValueError(message)
+    return HypothesisReview(record.judge_verdict)
 
 
 def _measurement(
@@ -565,30 +493,16 @@ def _measurement(
             metric=record.perf_unit, value=record.perf_metric, direction=record.perf_direction
         )
     )
-    baseline = _baseline(record, prior_rounds)
-    baseline_round = (
-        record.perf_baseline_round
-        if record.perf_baseline_round is not None
-        else baseline.round_number
-        if baseline is not None
-        else None
-    )
-    baseline_commit = record.perf_baseline_commit or (
-        baseline.commit if baseline is not None else None
-    )
+    baseline_round = record.perf_baseline_round
+    baseline_commit = record.perf_baseline_commit
     baseline_value = record.perf_baseline_metric
-    if baseline_value is None and baseline is not None:
-        baseline_value = record_metric_value(baseline, record.perf_unit)
     delta = record.perf_delta_pct
-    if delta is None and baseline_value is not None and baseline_value != 0:
-        delta = (record.perf_metric - baseline_value) / abs(baseline_value) * 100
     delta_reason = None
     if (
         delta is None
         and baseline_round is None
         and baseline_commit is None
         and baseline_value is None
-        and record.perf_provenance is not None
     ):
         delta_reason = (
             PerfDeltaReason.BASELINE_UNRESOLVED
@@ -607,47 +521,6 @@ def _measurement(
         delta_pct=delta,
         delta_reason=delta_reason,
     )
-
-
-def _baseline(record: RoundRecord, prior_rounds: Sequence[RoundRecord]) -> RoundRecord | None:
-    return metric_baseline(
-        parent_round=record.hypothesis_parent_round,
-        parent_commit=record.hypothesis_parent_commit,
-        metric=record.perf_unit,
-        rounds=prior_rounds,
-    )
-
-
-def _retained(
-    record: RoundRecord,
-    prior_rounds: Sequence[RoundRecord],
-    space: MetricSpace,
-) -> bool | None:
-    if record.candidate_retained is not None:
-        retained = record.candidate_retained
-    elif record.judge_verdict is not None:
-        retained = None
-    elif record.candidate_disposition in {"pareto_frontier", "prerequisite"}:
-        retained = True
-    elif record.candidate_disposition == "discard":
-        retained = False
-    elif not record.official_evaluation or record.perf_metric is None or record.perf_unit is None:
-        retained = None
-    else:
-        candidate = Measurement(
-            metric=record.perf_unit, value=record.perf_metric, direction=record.perf_direction
-        )
-        axis = space.direction(candidate)
-        comparable = [
-            Measurement(metric=record.perf_unit, value=value, direction=axis)
-            for prior in prior_rounds
-            if prior.official_evaluation
-            and prior.passed
-            and trusted_perf_provenance(prior.perf_provenance)
-            and (value := record_metric_value(prior, record.perf_unit)) is not None
-        ]
-        retained = scalar_candidate_retained(space.compare_to_best(candidate, comparable))
-    return retained
 
 
 # --- Evidence: retention, frontier, and carry-over text ---
@@ -671,21 +544,8 @@ def record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
 
 
 def record_candidate_retained(record: RoundRecord) -> bool | None:
-    """Read framework retention, with one isolated legacy-record adapter."""
-    if record.candidate_retained is not None:
-        return record.candidate_retained
-    if record.judge_verdict is not None:
-        return None
-    if record.candidate_disposition in {
-        CandidateDisposition.PARETO_FRONTIER.value,
-        CandidateDisposition.PREREQUISITE.value,
-    }:
-        return True
-    if record.candidate_disposition == CandidateDisposition.DISCARD.value:
-        return False
-    if record.hypothesis_outcome == HypothesisResolution.PROVEN.value:
-        return True
-    return None
+    """Read the framework's recorded checkpoint-retention decision."""
+    return record.candidate_retained
 
 
 def provisional_candidate_retained(disposition: CandidateDisposition) -> bool | None:

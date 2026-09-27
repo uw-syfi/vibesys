@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration import artifacts, memory
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
@@ -296,6 +296,7 @@ def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff() -> None
             hypothesis_outcome="disproven",
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={"throughput": 120.0, "latency": 90.0},
+            candidate_retained=True,
         )
     ]
 
@@ -349,6 +350,8 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
             candidate_metrics={"throughput": throughput, "latency": latency},
             candidate_evaluation_artifact=f"round-{round_number}.json",
             candidate_operating_point="concurrency=128",
+            candidate_retained=True,
+            perf_provenance="framework",
         )
 
     latency_parent = candidate(1, 100.0, 80.0)
@@ -373,6 +376,8 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate() -> 
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 8795.8, "latency": 7724.0},
+        candidate_retained=True,
+        perf_provenance="framework",
     )
 
     conflict = pareto_archive_conflict(
@@ -397,6 +402,8 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff() -> None:
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 100.0, "latency": 80.0},
+        candidate_retained=True,
+        perf_provenance="framework",
     )
 
     assert (
@@ -422,6 +429,8 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates() -> None:
         candidate_metrics={"throughput": 5307.2, "latency": 3289.7},
         candidate_evaluation_artifact="h31.json",
         candidate_operating_point="concurrency=128",
+        candidate_retained=True,
+        perf_provenance="framework",
     )
     pending = RoundRecord(
         51,
@@ -435,6 +444,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates() -> None:
         candidate_evaluation_artifact="h33.json",
         candidate_operating_point="concurrency=192",
         candidate_retention_reason="higher-throughput tradeoff",
+        candidate_retained=True,
     )
 
     summary = pareto_archive_summary([trusted, pending], _THROUGHPUT_LATENCY)
@@ -468,6 +478,7 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice() 
             candidate_evaluation_artifact=f"h{round_number}.json",
             candidate_operating_point="concurrency=192",
             candidate_retention_reason="higher-throughput tradeoff",
+            candidate_retained=True,
         )
         for round_number in range(1, 11)
     ]
@@ -507,6 +518,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count() -> N
             candidate_evaluation_artifact=f"h{round_number}.json",
             candidate_operating_point="concurrency=192",
             candidate_retention_reason="higher-throughput tradeoff",
+            candidate_retained=True,
         )
         # Nine records against a limit of eight omits exactly one.
         for round_number in range(1, 10)
@@ -533,6 +545,7 @@ def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit() -> N
                 "throughput": 6000.0 + round_number,
                 "latency": 3000.0 + round_number,
             },
+            candidate_retained=True,
         )
         for round_number in range(1, 9)
     ]
@@ -730,6 +743,7 @@ def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit() -> None:
         hypothesis_outcome="disproven",
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 6827.7, "latency": 3628.7},
+        candidate_retained=True,
     )
 
     notice = terminal_workspace_notice([record])
@@ -1026,6 +1040,9 @@ def _record(round_number: int, perf: float | None, unit: str = "tok/s") -> Round
         passed=perf is not None,
         official_evaluation=perf is not None,
         official_evaluation_reason="cadence" if perf is not None else None,
+        judge_verdict="pass" if perf is not None else "deferred",
+        perf_comparison=MetricComparison.INCOMPARABLE if perf is not None else None,
+        perf_provenance="framework" if perf is not None else None,
     )
 
 

@@ -64,6 +64,7 @@ def _search_state() -> HypothesisState:
                         judge_verdict="fail",
                         perf_metric=42.0,
                         perf_unit="tokens/s",
+                        perf_provenance="implementer",
                     )
                 ],
                 last_experiment_revision=7,

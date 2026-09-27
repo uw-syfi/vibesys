@@ -86,6 +86,8 @@ def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independ
     judge_verdict: Literal["pass", "fail", "deferred"] | None = "pass",
     provenance: Literal["framework", "implementer"] | None = "framework",
     unit: str = "total_ops_per_sec",
+    baseline_metric: float | None = None,
+    delta_pct: float | None = None,
 ) -> RoundRecord:
     return RoundRecord(
         round_number=number,
@@ -105,8 +107,16 @@ def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independ
         metrics={unit: metric} if metric is not None else {},
         official_evaluation=metric is not None,
         perf_direction=direction if metric is not None else None,
+        perf_baseline_round=parent_round if baseline_metric is not None else None,
+        perf_baseline_commit=parent_commit if baseline_metric is not None else None,
+        perf_baseline_metric=baseline_metric,
+        perf_delta_pct=delta_pct,
         candidate_retained=retained,
-        perf_comparison=comparison,
+        perf_comparison=(
+            comparison
+            if comparison is not None or provenance != "framework" or metric is None
+            else MetricComparison.INCOMPARABLE
+        ),
         perf_provenance=provenance if metric is not None else None,
     )
 
@@ -569,6 +579,8 @@ def test_within_noise_delta_resolves_inconclusive() -> None:
             parent_commit=records[0].commit,
             outcome="inconclusive",
             comparison=MetricComparison.WITHIN_NOISE,
+            baseline_metric=100.0,
+            delta_pct=1.0,
         ),
     )
     hypothesis = state.by_id("H-1")
@@ -861,63 +873,3 @@ def test_start_strategy_update_rejects_an_incomplete_hypothesis() -> None:
         search.start(
             state, _plan("next", updates=[update]), round_number=2, current_commit=None, records=[]
         )
-
-
-# --- legacy round evidence: no stored judge_verdict -----------------------
-#
-# A record with no ``judge_verdict`` predates the framework storing one, so
-# ``close_round`` (via ``project_round_evidence``) falls back to its
-# self-declared ``hypothesis_outcome`` and re-derives the comparison-driven
-# retention/resolution corrections a modern record already carries.
-
-
-def test_legacy_record_without_a_judge_verdict_resolves_from_its_declared_outcome() -> None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
-    record = _round(
-        1, 100.0, hypothesis_id="H-1", outcome="proven", judge_verdict=None, direction=None
-    )
-    state = _run_round(
-        search, search.initial(), [], hypothesis_id="H-1", round_number=1, record=record
-    )
-    hypothesis = state.by_id("H-1")
-    assert hypothesis is not None
-    assert hypothesis.measurement is not None
-    assert hypothesis.measurement.direction is None  # no objective axis: legacy space
-    assert hypothesis.resolution is HypothesisResolution.INCONCLUSIVE
-
-
-def test_legacy_record_retention_is_derived_from_comparison_history() -> None:
-    """A legacy record with no stored retention/verdict derives both from the
-    same comparison history a modern record's baseline selection uses.
-    """
-    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
-    space = MetricSpace(objectives=(Objective(name="total_ops_per_sec", direction="max"),))
-    state = HypothesisState(metrics=space)
-    baseline = _round(
-        1,
-        100.0,
-        hypothesis_id="H-base",
-        judge_verdict=None,
-        retained=None,
-        outcome="proven",
-        declared="nominated",
-    )
-    state = _run_round(search, state, [], hypothesis_id="H-base", round_number=1, record=baseline)
-    records = state.rounds
-    worse = _round(
-        2,
-        90.0,
-        hypothesis_id="H-1",
-        parent_round=1,
-        parent_commit=records[0].commit,
-        judge_verdict=None,
-        retained=None,
-        outcome="proven",
-        declared="nominated",
-    )
-    state = _run_round(search, state, records, hypothesis_id="H-1", round_number=2, record=worse)
-    hypothesis = state.by_id("H-1")
-    assert hypothesis is not None
-    # 90 does not advance a best of 100: retention derives False even though
-    # the record itself carries no stored ``candidate_retained``.
-    assert hypothesis.candidate_retained is False

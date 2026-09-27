@@ -76,10 +76,9 @@ def test_hypothesis_clone_has_independent_nested_state() -> None:
     assert cloned.gate_approved_metrics == {"throughput": 2.0}
 
 
-def test_state_written_before_the_metric_space_field_loads_as_the_empty_strict_space() -> None:
-    """State from a run predating ``MetricSpace`` persistence still loads."""
-    legacy = HypothesisState.model_validate({"schema_version": 1, "hypotheses": []})
-    assert legacy.metrics == MetricSpace()
+def test_state_without_objective_axes_uses_the_empty_strict_metric_space() -> None:
+    state = HypothesisState.model_validate({"schema_version": 1, "hypotheses": []})
+    assert state.metrics == MetricSpace()
 
 
 def test_state_rejects_duplicate_hypothesis_ids() -> None:
@@ -115,6 +114,7 @@ def test_state_rejects_duplicate_round_numbers_across_hypotheses() -> None:
                 perf_unit=None,
                 hypothesis_id="h1",
                 passed=True,
+                judge_verdict="pass",
             )
         ],
     )
@@ -130,8 +130,61 @@ def test_state_rejects_duplicate_round_numbers_across_hypotheses() -> None:
                 perf_unit=None,
                 hypothesis_id="h2",
                 passed=True,
+                judge_verdict="pass",
             )
         ],
     )
     with pytest.raises(ValidationError, match="globally unique"):
         HypothesisState(hypotheses=[one, two])
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        (
+            RoundRecord(
+                round_number=1,
+                commit="a" * 40,
+                perf_metric=None,
+                perf_unit=None,
+                passed=True,
+                hypothesis_id="h1",
+            ),
+            "judge_verdict",
+        ),
+        (
+            RoundRecord(
+                round_number=1,
+                commit="a" * 40,
+                perf_metric=1.0,
+                perf_unit="ops",
+                passed=True,
+                hypothesis_id="h1",
+                judge_verdict="pass",
+            ),
+            "provenance",
+        ),
+        (
+            RoundRecord(
+                round_number=1,
+                commit="a" * 40,
+                perf_metric=1.0,
+                perf_unit="ops",
+                passed=True,
+                hypothesis_id="h1",
+                judge_verdict="pass",
+                perf_provenance="framework",
+                official_evaluation=True,
+            ),
+            "perf_comparison",
+        ),
+    ],
+)
+def test_hypothesis_rejects_incomplete_round_contracts(record: RoundRecord, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Hypothesis(
+            hypothesis_id="h1",
+            plan=_plan(),
+            started_round=1,
+            rounds=[record],
+        )

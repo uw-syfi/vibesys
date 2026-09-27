@@ -8,7 +8,10 @@ match field-for-field.
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict, Unpack
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
+
+import pytest
+from pydantic import ValidationError
 
 from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
@@ -25,6 +28,9 @@ from vibesys.search.hypothesis.state import (
 )
 from vibesys.search.hypothesis.transitions import measurement_delta_reason
 from vs_loop_state.api import RoundRecord
+
+if TYPE_CHECKING:
+    from vibesys.evaluators.metrics import MetricComparison
 
 
 def _project_agent_view(
@@ -60,6 +66,8 @@ class _RoundFields(TypedDict, total=False):
     official_evaluation: bool
     candidate_disposition: str
     perf_delta_pct: float | None
+    perf_provenance: Literal["framework", "implementer"] | None
+    perf_comparison: MetricComparison | None
 
 
 class _HypothesisFields(TypedDict, total=False):
@@ -83,8 +91,11 @@ def _round(number: int, **overrides: Unpack[_RoundFields]) -> RoundRecord:
         "perf_metric": None,
         "perf_unit": None,
         "passed": False,
+        "judge_verdict": "deferred",
     }
     fields.update(overrides)
+    if fields["perf_metric"] is not None and "perf_provenance" not in overrides:
+        fields["perf_provenance"] = "implementer"
     return RoundRecord(**fields)
 
 
@@ -192,30 +203,16 @@ def test_hypothesis_view_matches_fixture_facts_field_for_field() -> None:
     assert api_round.reviewed is False
 
 
-def test_hypothesis_round_drops_a_retired_outcome_rather_than_failing() -> None:
-    state = HypothesisState(
-        hypotheses=[
-            _hypothesis(
-                "H-01",
-                1,
-                rounds=[
-                    _round(
-                        1,
-                        hypothesis_id="H-01",
-                        hypothesis_outcome="retired_value",
-                        candidate_disposition="retained",
-                    )
-                ],
-            )
-        ]
-    )
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("hypothesis_outcome", "retired_value"), ("candidate_disposition", "retained")],
+)
+def test_hypothesis_state_rejects_retired_round_vocabulary(field: str, value: str) -> None:
+    record = _round(1, hypothesis_id="H-01")
+    setattr(record, field, value)
 
-    (view,) = _project_agent_view(
-        state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=0
-    ).hypotheses
-
-    assert view.rounds[0].hypothesis_outcome is None
-    assert view.rounds[0].candidate_disposition is None
+    with pytest.raises(ValidationError):
+        _hypothesis("H-01", 1, rounds=[record])
 
 
 def test_hypothesis_view_falls_back_to_a_derived_title() -> None:

@@ -68,7 +68,8 @@ def _round(  # noqa: PLR0913  # LW-040065 [PLR0913]; the parameters are independ
         hypothesis_outcome=outcome,
         hypothesis_parent_round=parent_round,
         official_evaluation=True,
-        perf_comparison=comparison,
+        perf_comparison=comparison or MetricComparison.INCOMPARABLE,
+        perf_provenance="framework",
     )
 
 
@@ -97,15 +98,6 @@ def _within_noise_run() -> HypothesisState:
     )
 
 
-def _strip_stored_comparisons(state: HypothesisState) -> HypothesisState:
-    """Return *state* as if written before comparisons were persisted."""
-    payload = state.model_dump()
-    for hypothesis in payload["hypotheses"]:
-        for record in hypothesis["rounds"]:
-            record["perf_comparison"] = None
-    return HypothesisState.model_validate(payload)
-
-
 def test_resume_reprojection_agrees_with_the_recorded_round_outcome() -> None:
     """Regression for #507: ``--resume`` must not contradict the round record."""
     completed = _within_noise_run()
@@ -119,34 +111,6 @@ def test_resume_reprojection_agrees_with_the_recorded_round_outcome() -> None:
     assert reprojected.resolution is HypothesisResolution.INCONCLUSIVE
 
 
-def test_adopting_a_metric_space_rewrites_the_stored_space_and_evidence() -> None:
-    """The run's launch configuration is written once; readers take it from state.
-
-    Only a round with no stored comparison actually gets re-derived (see
-    ``test_a_stored_comparison_survives_a_space_whose_tolerance_changed``
-    below), so this uses a compatibility-path run predating that field.
-    """
-    strict_run = _strip_stored_comparisons(_within_noise_run()).model_copy(
-        update={
-            "metrics": MetricSpace(
-                objectives=(Objective(name="total_ops_per_sec", direction="max"),)
-            )
-        },
-        deep=True,
-    )
-    search = _search()
-    strict_projected = search.resume(strict_run, strict_run.metrics).by_id("H-1")
-    assert strict_projected is not None
-    assert strict_projected.resolution is HypothesisResolution.PROVEN
-
-    adopted = search.resume(strict_run, _NOISY_OPS)
-    hypothesis = adopted.by_id("H-1")
-
-    assert adopted.metrics == _NOISY_OPS
-    assert hypothesis is not None
-    assert hypothesis.resolution is HypothesisResolution.INCONCLUSIVE
-
-
 def test_a_stored_comparison_survives_a_space_whose_tolerance_changed() -> None:
     """The round answers for itself, so a re-configured space cannot rewrite it.
 
@@ -156,7 +120,7 @@ def test_a_stored_comparison_survives_a_space_whose_tolerance_changed() -> None:
     """
     recorded = _within_noise_run()
     assert [record.perf_comparison for record in recorded.rounds] == [
-        None,
+        MetricComparison.INCOMPARABLE,
         MetricComparison.WITHIN_NOISE,
     ]
     strict = MetricSpace(objectives=_NOISY_OPS.objectives)
@@ -212,6 +176,7 @@ def test_measurement_delta_reason_flags_a_self_reported_headline_with_no_measure
         hypothesis_id="H-1",
         official_evaluation=True,
         perf_provenance="implementer",
+        judge_verdict="pass",
     )
     hypothesis = Hypothesis(
         hypothesis_id="H-1", plan=_plan("H-1"), started_round=1, rounds=[record]

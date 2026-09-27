@@ -46,6 +46,7 @@ def _round(number: int, hypothesis_id: str) -> RoundRecord:
         perf_unit=None,
         passed=True,
         hypothesis_id=hypothesis_id,
+        judge_verdict="pass",
     )
 
 

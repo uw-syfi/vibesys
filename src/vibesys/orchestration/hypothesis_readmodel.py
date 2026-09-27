@@ -25,7 +25,7 @@ from vs_runtime.api import PluginProjection, ProjectedRound
 
 if TYPE_CHECKING:
     from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-    from vs_loop_state.api import RoundRecord
+    from vs_loop_state.api import JudgeVerdict, RoundRecord
 
 
 class HypothesisRoundView(BaseModel):
@@ -203,7 +203,7 @@ def _agent_run_projection(
     *,
     experiment_revision: int,
 ) -> AgentRunProjection:
-    """Build the shared agent payload used by plugin and legacy envelopes."""
+    """Build the shared agent payload used by plugin and run envelopes."""
     return AgentRunProjection(
         current_round=len(state.rounds),
         active_hypothesis_id=state.active_hypothesis_id,
@@ -346,13 +346,15 @@ def _projected_round(view: RoundView) -> ProjectedRound:
     )
 
 
-def _round_finished_verdict(value: str | None) -> Literal["pass", "fail", "skipped"] | None:
+def _round_finished_verdict(value: JudgeVerdict | None) -> Literal["pass", "fail", "skipped"]:
     """Map a round's stored verdict to the coarser `RoundFinishedData` vocabulary.
 
-    `"deferred"` (sparse-review policy skipped both the judge and the official
-    gates) and a legacy record with no recorded verdict both read as
-    `"skipped"`, matching what the strategies used to emit by hand.
+    `"deferred"` means sparse-review policy skipped both the judge and the
+    official gates, so it reads as `"skipped"`.
     """
+    if value is None:
+        message = "round record requires judge_verdict"
+        raise ValueError(message)
     if value in ("pass", "fail"):
         return value
     return "skipped"
@@ -367,25 +369,21 @@ def _outcome(value: str | None) -> str | None:
     the resolved string rather than the enum member: the two vocabularies
     (`HypothesisOutcome`, `HypothesisResolution`) are both core-private, and a
     single field can hold either, so a boundary DTO can only expose their
-    shared `str` value, never a member of either type. Anything else is a
-    legacy or retired value with no meaning for a client, so it projects as
-    "not recorded" rather than failing the log.
+    shared `str` value, never a member of either type.
     """
     if not value:
         return None
-    for vocabulary in (HypothesisOutcome, HypothesisResolution):
-        member = vocabulary.__members__.get(value.upper())
-        if member is not None and member.value == value:
-            return member.value
-    return None
+    try:
+        return HypothesisOutcome(value).value
+    except ValueError:
+        return HypothesisResolution(value).value
 
 
 def _disposition(value: str | None) -> str | None:
-    """Read a stored disposition, dropping values the framework retired."""
+    """Read a stored candidate disposition."""
     if not value:
         return None
-    member = CandidateDisposition.__members__.get(value.upper())
-    return member.value if member is not None and member.value == value else None
+    return CandidateDisposition(value).value
 
 
 def _judge_verdict(value: str | None) -> Literal["pass", "fail"] | None:
