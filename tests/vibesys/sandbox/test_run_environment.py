@@ -37,7 +37,6 @@ from vibesys.sandbox.run_environment import (
     _container_mount_plan,
     _ensure_pushed_for_remote_backend,
     _evaluator_requirements,
-    _materialize_effective_objective,
     _SkyPilotRunEnvironmentSession,
     build_run_environment,
     make_run_environment_spec,
@@ -1964,24 +1963,6 @@ def test_modal_open_requires_a_model_id_in_draft_metadata(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match=r"draft_meta\.json at .* missing required 'model_id'"):
         env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
-
-
-def test_effective_objective_must_match_a_document_inside_the_workspace(tmp_path: Path) -> None:
-    backend = FakeBackend()
-    outside = tmp_path / "OBJECTIVE.md"
-    outside.write_text("goal")
-    request = _request(tmp_path, backend, objective="goal", objective_document=outside)
-    with pytest.raises(ValueError, match="must be inside the project workspace"):
-        _materialize_effective_objective(request)
-
-    inside = request.workspace / "OBJECTIVE.md"
-    inside.write_text("stale goal")
-    request = _request(tmp_path, backend, objective="goal", objective_document=inside)
-    with pytest.raises(ValueError, match="does not match its committed document"):
-        _materialize_effective_objective(request)
-
-    inside.write_text("goal")
-    assert _materialize_effective_objective(request) == inside.resolve()
 
 
 def test_remote_push_failure_names_the_backend_and_image() -> None:

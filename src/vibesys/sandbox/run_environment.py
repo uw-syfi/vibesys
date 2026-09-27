@@ -58,6 +58,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
     evaluator_agent_toolchains,
+    materialize_objective_document,
     prepare_docker_evaluator_resources,
     prepare_trusted_evaluation_plan,
     remote_evaluator_setup_command,
@@ -1130,28 +1131,20 @@ def _modal_app_name(run_id: str, fallback: str) -> str:
 
 
 def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | None:
-    """Persist the exact run objective outside candidate Git history.
+    """Select and materialize the effective objective for this run.
 
-    Operator constraints are composed at the CLI boundary. Keeping the effective
-    text in the framework-owned log directory makes it survive candidate rollback
-    and resume, while isolated environments mount it read-only for every role.
+    Operator constraints are composed at the CLI boundary. VibeSys decides
+    whether an objective exists and which authored document it represents;
+    runtime infrastructure validates or writes the selected document.
     """
     if request.objective is None:
         return None
-    if request.objective_document is not None:
-        path = request.objective_document.resolve()
-        try:
-            path.relative_to(request.workspace.resolve())
-        except ValueError as exc:
-            message = f"effective objective must be inside the project workspace: {path}"
-            raise ValueError(message) from exc
-        if not path.is_file() or path.read_text() != request.objective:
-            message = f"effective objective does not match its committed document: {path}"
-            raise ValueError(message)
-        return path
-    path = request.log_dir / "effective-objective.md"
-    path.write_text(request.objective)
-    return path
+    return materialize_objective_document(
+        request.objective,
+        workspace=request.workspace,
+        authored_document=request.objective_document,
+        destination=request.log_dir / "effective-objective.md",
+    )
 
 
 def _isolated_paths(

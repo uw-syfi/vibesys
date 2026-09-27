@@ -82,6 +82,7 @@ from vs_runtime._managed_conversation import (
     create_managed_conversation,
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
+from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._project_materialization import (
     GitSourceMaterialization,
     InputProjectMaterialization,
@@ -456,6 +457,7 @@ __all__ = [
     "evaluator_container_setup",
     "load_skill_frontmatter",
     "materialize_input_project",
+    "materialize_objective_document",
     "open_run_host",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
