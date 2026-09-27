@@ -56,7 +56,6 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
     evaluator_agent_toolchains,
-    load_evaluator_package,
     materialize_objective_document,
     prepare_docker_evaluator_resources,
     prepare_trusted_evaluation_plan,
@@ -192,8 +191,9 @@ class RunEnvironmentRequest:
     accuracy_command: str | None = None
     benchmark_command: str | None = None
     benchmark_output_argument: str | None = None
-    evaluator_package_root: Path | None = None
-    evaluator_tools_root: Path | None = None
+    evaluator_requirements: TrustedEvaluatorRequirements = field(
+        default_factory=TrustedEvaluatorRequirements
+    )
     profiler_support_path: str | None = None
     profiler_support_name: str | None = None
     # Sibling support directories staged alongside the primary profiler
@@ -299,7 +299,7 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         """Create a host-local sandbox and its agent path view."""
         objective_document = _materialize_effective_objective(request)
-        requirements = _evaluator_requirements(request)
+        requirements = request.evaluator_requirements
         tools = requirements.tools
         lifecycle_hooks: list[SandboxLifecycleHooks] = []
         if tools:
@@ -378,7 +378,7 @@ class DockerEnvironment:
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
         image_helpers = import_module("vs_agent.api.images")
-        requirements = _evaluator_requirements(request)
+        requirements = request.evaluator_requirements
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
         # agent layer is applied on top of it.
@@ -584,7 +584,7 @@ class SkyPilotEnvironment(DockerEnvironment):
         profiles = load_cluster_profiles(self.config.profiles_file)
         cluster_resources = resolve_profile(profiles, self.config.profile, self.config.resources)
         cluster_name = stable_cluster_name(request.run_id, cluster_resources)
-        requirements = _evaluator_requirements(request)
+        requirements = request.evaluator_requirements
         evaluation = _prepare_evaluation_plan(
             request,
             requirements,
@@ -613,7 +613,7 @@ class SkyPilotEnvironment(DockerEnvironment):
             cluster_name=cluster_name,
             resources=cluster_resources,
             workspace=request.workspace,
-            evaluator_package_root=request.evaluator_package_root,
+            evaluator_package_root=requirements.package_root,
             hidden_paths=request.project_path_policy.hidden_paths,
             commands=commands,
             framework_setup_command=remote_evaluator_setup_command(requirements),
@@ -789,7 +789,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
         image_helpers = import_module("vs_agent.api.images")
 
-        requirements = _evaluator_requirements(request)
+        requirements = request.evaluator_requirements
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             toolchains=evaluator_agent_toolchains(requirements),
@@ -883,7 +883,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             evaluator_arguments.extend(
                 ("--setup-command-base64", encode_setup_command(("sh", "-c", remote_setup)))
             )
-        if request.evaluator_package_root is not None:
+        if requirements.package_root is not None:
             evaluator_arguments.extend(
                 ("--evaluator-package-root", "/opt/vibesys-evaluator-package")
             )
@@ -1160,7 +1160,7 @@ def _isolated_paths(
     built from the same resource list :func:`_container_mount_plan` declared.
     """
     objective_document = _materialize_effective_objective(request)
-    requirements = _evaluator_requirements(request)
+    requirements = request.evaluator_requirements
     evaluation = _prepare_evaluation_plan(
         request,
         requirements,
@@ -1196,19 +1196,6 @@ def _prefix_command(prefix: str, command: str | None) -> str | None:
 
 def _noop_log(message: str) -> None:
     del message
-
-
-def _evaluator_requirements(request: RunEnvironmentRequest) -> TrustedEvaluatorRequirements:
-    """Lower VibeSys package metadata into runtime-owned preparation inputs."""
-    if request.evaluator_package_root is None:
-        return TrustedEvaluatorRequirements(tools_root=request.evaluator_tools_root)
-    package = load_evaluator_package(request.evaluator_package_root)
-    return TrustedEvaluatorRequirements(
-        package_root=package.root,
-        toolchains=frozenset(package.metadata.toolchains),
-        tools=package.metadata.tools,
-        tools_root=request.evaluator_tools_root,
-    )
 
 
 def _prepare_evaluation_plan(
@@ -1302,10 +1289,10 @@ def _container_mount_plan(
             for extra_path, extra_name in request.profiler_support_extra
         )
 
-    if request.evaluator_package_root is not None:
+    if request.evaluator_requirements.package_root is not None:
         bind_mounts.append(
             (
-                str(request.evaluator_package_root),
+                str(request.evaluator_requirements.package_root),
                 "/opt/vibesys-evaluator-package",
                 True,
             )

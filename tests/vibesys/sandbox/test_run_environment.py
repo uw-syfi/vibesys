@@ -36,7 +36,6 @@ from vibesys.sandbox.run_environment import (
     _cli_provider_env_and_auth_files,
     _container_mount_plan,
     _ensure_pushed_for_remote_backend,
-    _evaluator_requirements,
     _SkyPilotRunEnvironmentSession,
     build_run_environment,
     make_run_environment_spec,
@@ -44,7 +43,11 @@ from vibesys.sandbox.run_environment import (
 )
 from vs_agent.api.images import ImagePushError
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
-from vs_runtime.api.infrastructure import docker_evaluator_tools_root
+from vs_runtime.api.infrastructure import (
+    TrustedEvaluatorRequirements,
+    docker_evaluator_tools_root,
+    load_evaluator_package,
+)
 from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
@@ -166,6 +169,21 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
         "run_id": "run-123",
         "framework_root": tmp_path / "framework",
     }
+    package_root = overrides.pop("evaluator_package_root", None)
+    tools_root = overrides.pop("evaluator_tools_root", None)
+    if "evaluator_requirements" not in overrides:
+        if package_root is None:
+            values["evaluator_requirements"] = TrustedEvaluatorRequirements(
+                tools_root=cast("Path | None", tools_root)
+            )
+        else:
+            package = load_evaluator_package(cast("Path", package_root))
+            values["evaluator_requirements"] = TrustedEvaluatorRequirements(
+                package_root=package.root,
+                toolchains=frozenset(package.metadata.toolchains),
+                tools=package.metadata.tools,
+                tools_root=cast("Path | None", tools_root),
+            )
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
     return RunEnvironmentRequest(**values)
@@ -620,7 +638,7 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
     )
     if environment_name == "docker":
         tool = package.metadata.tools["request-factory"]
-        requirements = _evaluator_requirements(request)
+        requirements = request.evaluator_requirements
         host_parent = docker_evaluator_tools_root(
             requirements,
             request.workspace,
@@ -909,7 +927,7 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
         backend,
         objective="Optimize the service.\n",
         git_history_root=history,
-        evaluator_package_root=package_root,
+        evaluator_requirements=TrustedEvaluatorRequirements(package_root=package_root),
         agent_backend="cli",
         cli_provider="codex",
     )

@@ -98,6 +98,7 @@ from vs_runtime.api.infrastructure import (
     ScalarBenchmarkContract,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
+    TrustedEvaluatorRequirements,
     create_model_request_reconciler,
     create_trusted_evaluation_executor,
     load_evaluator_package,
@@ -629,16 +630,31 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             project_state = project.state
             log_dir = project_state.log_directory(run_id)
             log_dir.mkdir(parents=True, exist_ok=True)
+            evaluator_package = (
+                load_evaluator_package(evaluator_package_root)
+                if evaluator_package_root is not None
+                else None
+            )
             evaluator_tools_root = None
             evaluator_tool_roots: tuple[Path, ...] = ()
-            if evaluator_package_root is not None:
-                evaluator_tools = load_evaluator_package(evaluator_package_root).metadata.tools
+            if evaluator_package is not None:
+                evaluator_tools = evaluator_package.metadata.tools
                 if evaluator_tools:
                     evaluator_tools_root = project_state.model_cache_directory("evaluator-tools")
                     evaluator_tool_roots = tuple(
                         tool_install_root(evaluator_tools_root, name, spec)
                         for name, spec in evaluator_tools.items()
                     )
+            evaluator_requirements = TrustedEvaluatorRequirements(
+                package_root=evaluator_package.root if evaluator_package is not None else None,
+                toolchains=(
+                    frozenset(evaluator_package.metadata.toolchains)
+                    if evaluator_package is not None
+                    else frozenset()
+                ),
+                tools=evaluator_package.metadata.tools if evaluator_package is not None else {},
+                tools_root=evaluator_tools_root,
+            )
         with boot_trace.span("log_bootstrap"):
             integration.attach(log_dir)
             logger = RunLogger(log_dir, emit=_run_log_emitter(integration.agent_events))
@@ -919,8 +935,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 accuracy_command=accuracy_command,
                 benchmark_command=benchmark_command,
                 benchmark_output_argument=benchmark_output_argument,
-                evaluator_package_root=evaluator_package_root,
-                evaluator_tools_root=evaluator_tools_root,
+                evaluator_requirements=evaluator_requirements,
                 profiler_support_path=profiler_support_path,
                 profiler_support_name=profiler_support_name,
                 profiler_support_extra=profiler_support_extra,
@@ -1231,8 +1246,7 @@ def _assemble_workspace_resources(
         accuracy_command=parent.accuracy_command,
         benchmark_command=parent.benchmark_command,
         benchmark_output_argument=parent.environment_request.benchmark_output_argument,
-        evaluator_package_root=parent.evaluator_package_root,
-        evaluator_tools_root=parent.evaluator_tools_root,
+        evaluator_requirements=parent.environment_request.evaluator_requirements,
         profiler_support_path=parent.profiler_support_path,
         profiler_support_name=parent.profiler_support_name,
         profiler_support_extra=parent.profiler_support_extra,
