@@ -1,0 +1,18 @@
+{
+  "summary": "Round one batching.",
+  "expected_behavior": "Fewer launches.",
+  "hypothesis_outcome": "nominated",
+  "evidence": "The local smoke check passed.",
+  "next_step": "",
+  "perf_metric": null,
+  "perf_unit": null,
+  "metrics": {},
+  "evaluation_artifact": null,
+  "candidate_disposition": "unassessed",
+  "candidate_metrics": {},
+  "candidate_evaluation_artifact": null,
+  "candidate_operating_point": "",
+  "candidate_retention_reason": "",
+  "skill_context_updates": [],
+  "validation_recipe_artifact": null
+}

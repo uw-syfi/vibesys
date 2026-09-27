@@ -1,0 +1,76 @@
+{
+  "experiment_revision": 2,
+  "payload": {
+    "active_hypothesis_id": null,
+    "current_round": 1,
+    "experiment_revision": 2,
+    "hypotheses": [
+      {
+        "action": "Batch prefill requests.",
+        "active": false,
+        "claim": "Batching removes per-request launch overhead.",
+        "first_round": 1,
+        "hypothesis_id": "H-01",
+        "judge_verdict": "pass",
+        "kept": null,
+        "last_experiment_revision": 2,
+        "last_round": 1,
+        "parent_commit": "fake-revision-2",
+        "perf_baseline_commit": null,
+        "perf_baseline_round": null,
+        "perf_baseline_value": null,
+        "perf_delta_pct": null,
+        "perf_delta_reason": null,
+        "perf_direction": null,
+        "perf_metric": null,
+        "perf_metric_name": null,
+        "perf_metric_round": null,
+        "perf_unit": null,
+        "resolved_outcome": "unmeasured",
+        "rounds": [
+          {
+            "candidate_disposition": "unassessed",
+            "commit": "fake-revision-7",
+            "hypothesis_outcome": "unmeasured",
+            "judge_verdict": "pass",
+            "official_evaluation": false,
+            "passed": true,
+            "perf_delta_pct": null,
+            "perf_metric": null,
+            "perf_unit": null,
+            "reviewed": true,
+            "round_number": 1
+          }
+        ],
+        "strategy_disposition": "available",
+        "strategy_reason": null,
+        "title": "Batch prefill"
+      }
+    ],
+    "kind": "agent",
+    "rounds": [
+      {
+        "attempts": 1,
+        "commit": "fake-revision-7",
+        "judge_verdict": "pass",
+        "official_evaluation": false,
+        "passed": true,
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_skipped": true,
+        "round_number": 1
+      }
+    ]
+  },
+  "rounds": [
+    {
+      "attempts": 1,
+      "judge_verdict": "pass",
+      "number": 1,
+      "perf_metric": null,
+      "perf_unit": null,
+      "profile_skipped": true,
+      "status": "completed"
+    }
+  ]
+}
