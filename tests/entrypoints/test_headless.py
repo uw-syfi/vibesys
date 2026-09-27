@@ -57,9 +57,9 @@ from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import run_environment_record
 
 _LOOP_RUN_TARGETS = {
-    "agent": "vibesys.api.session.run_plugin",
-    "plain": "vibesys.api.session.run_plugin",
-    "evolve": "vibesys.api.session.run_plugin",
+    "agent": "vibesys.api._session.run_plugin",
+    "plain": "vibesys.api._session.run_plugin",
+    "evolve": "vibesys.api._session.run_plugin",
 }
 
 

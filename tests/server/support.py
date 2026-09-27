@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 class _ControlBridge:
     """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
 
-    Mirrors what `vibesys.api.session._LocalRunSession`'s `steer`/`pause`/
+    Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
     `resume`/`stop` methods do in production: translate the `RunControl`
     protocol's names onto the channel's writer-side methods. `RunApi`'s
     `session_provider` returns this so `_execute_command` can route through

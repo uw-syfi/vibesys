@@ -44,9 +44,8 @@ if TYPE_CHECKING:
     from vibesys.constants import ComputeBackend
     from vs_project.api import Project
     from vs_runtime.api.infrastructure import (
-        RunEnvironment,
-        RunEnvironmentRequest,
-        RunEnvironmentSession,
+        ProjectRunResources,
+        RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
 
@@ -61,21 +60,16 @@ class RunResources:
     or host-resource grants.
     """
 
-    project: Project
-    run_id: str
-    workspace: Path
-    log_dir: Path
+    project_resources: ProjectRunResources
+    environment_resources: RunEnvironmentResources
     agent_backend: str
     driver: str
     provider: str
     model: str
     role_models: tuple[str, ...]
     config: Config
-    compute_backend: ComputeBackend
+    backend: ComputeBackend
     skill_source_dirs: tuple[Path, ...]
-    environment: RunEnvironment
-    environment_request: RunEnvironmentRequest
-    environment_session: RunEnvironmentSession
     host_resources: tuple[HostResource, ...]
 
 

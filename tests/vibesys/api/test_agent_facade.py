@@ -44,6 +44,7 @@ def _manifest(orchestration: OrchestrationDescriptor) -> OrchestrationRunManifes
 def test_generic_api_import_does_not_load_builtin_policies() -> None:
     script = (
         "import sys, vibesys.api; "
+        "assert 'vibesys.api._session' not in sys.modules; "
         "assert not any(name.startswith(('vibesys.orchestration.multi', "
         "'vibesys.orchestration.single')) for name in sys.modules)"
     )

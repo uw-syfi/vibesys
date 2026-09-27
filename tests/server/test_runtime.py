@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 class _SessionControlStub:
     """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
 
-    Mirrors what `vibesys.api.session._LocalRunSession`'s `steer`/`pause`/
+    Mirrors what `vibesys.api._session._LocalRunSession`'s `steer`/`pause`/
     `resume`/`stop` methods do in production, so a bare `runtime.run(...)`
     callback (which never goes through `ServerRuntime.drive`) can still stand
     in as the live session `runtime.api`'s `session_provider` reads.

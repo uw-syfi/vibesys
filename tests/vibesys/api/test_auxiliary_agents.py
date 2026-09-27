@@ -16,7 +16,7 @@ from vibesys.api import (
     AuxiliaryReadableInput,
     RunReady,
 )
-from vibesys.api.session import (
+from vibesys.api._session import (
     _LocalRunSession,  # test-isolation: compose the real public session over deterministic resource fakes.
 )
 from vibesys.config import Config
@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _EnvironmentRequest:
+    workspace: Path
+    log_dir: Path
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     agent_backend: str | None = "stub"
     cli_provider: str | None = "codex"
@@ -79,6 +81,18 @@ class _Environment:
         session = _EnvironmentSession(path_error=self._path_error)
         self.sessions.append(session)
         return session
+
+
+@dataclass(frozen=True)
+class _EnvironmentResources:
+    """Fake the lower owner while preserving its session-opening behavior."""
+
+    request: _EnvironmentRequest
+    session: _EnvironmentSession
+    environment: _Environment
+
+    def open_session(self, request: _EnvironmentRequest) -> _EnvironmentSession:
+        return self.environment.prepare(request).open(RunEnvironmentPresentation(prompt_notes=""))
 
 
 class _PreparedEnvironment:
@@ -144,11 +158,19 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
         )
     )
     shared_session = _EnvironmentSession()
+    environment_request = _EnvironmentRequest(workspace=workspace, log_dir=logs)
     return RunResources(
-        project=project,
-        run_id="run-1",
-        workspace=workspace,
-        log_dir=logs,
+        project_resources=cast(
+            "Any",
+            SimpleNamespace(
+                project=project,
+                state=SimpleNamespace(run_id="run-1"),
+            ),
+        ),
+        environment_resources=cast(
+            "Any",
+            _EnvironmentResources(environment_request, shared_session, environment),
+        ),
         agent_backend="stub",
         driver="agentshim",
         provider="codex",
@@ -160,11 +182,8 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
                 "agent": {"backend": "stub", "cli_provider": "codex"},
             }
         ),
-        compute_backend=ComputeBackend.CPU,
+        backend=ComputeBackend.CPU,
         skill_source_dirs=(),
-        environment=cast("Any", environment),
-        environment_request=cast("Any", _EnvironmentRequest()),
-        environment_session=cast("Any", shared_session),
         host_resources=(),
     )
 

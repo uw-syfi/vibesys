@@ -872,10 +872,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         )
         integration.publish_resources(
             RunResources(
-                project=project,
-                run_id=run_id,
-                workspace=project_root,
-                log_dir=log_dir,
+                project_resources=project_resources,
+                environment_resources=environment_resources,
                 agent_backend=resolved_backend,
                 driver=resolve_agent_driver(config).value,
                 provider=resolved_cli_provider,
@@ -886,11 +884,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     if role.model is not None
                 ),
                 config=config,
-                compute_backend=backend,
+                backend=backend,
                 skill_source_dirs=tuple(skill_source_paths),
-                environment=environment,
-                environment_request=run_environment_request,
-                environment_session=session,
                 host_resources=agent_host_resources,
             )
         )

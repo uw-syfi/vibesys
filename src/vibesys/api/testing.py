@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vibesys.api.session import RunSession, _create_session
+from vibesys.api._session import _create_session
 from vibesys.api.store import (
     RunDocument,
     RunRecordFacts,
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.api.contracts import EventSink, RunView
+    from vibesys.api.session import RunSession
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
     from vs_agent.api import AgentClientProtocol

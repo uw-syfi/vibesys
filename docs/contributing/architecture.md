@@ -15,17 +15,17 @@ uv run python scripts/check_tach_graph.py --write
 Views: a package-level overview, the `vibesys` core modules, and the full
 module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
-`vibesys.orchestration` owns built-in orchestration policy and the thin
-product-side composition needed to run and project plugins. Explicit plugins,
+`vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
 including the issue queue, live under the singular
 `vibesys.orchestration.<plugin>` namespace; `vibesys.plugin_catalog` registers
 them. Agent roles, plan and reply schemas, prompts, state transitions, and
 resume policy live with their owning orchestration. For example, the
 hypothesis planner's skill-selection and title rules are public through
 `vibesys.orchestration.hypothesis`, not a top-level schema catch-all. Generic
-session, workspace, persistence, and sandbox mechanisms live in the runtime
-libraries. Tach records each dependency. `vs_project` owns generic project
-layout and persistence operations.
+session composition lives behind the public `vibesys.api.session` contract;
+workspace, persistence, and sandbox mechanisms live in the runtime libraries.
+Tach records each dependency. `vs_project` owns generic project layout and
+persistence operations.
 The v5 manifest separates policy-specific descriptor options from the generic
 `execution` record. The latter is derived from `RunRequest` and resolved host
 settings, including the concrete profiler. Resume checks it before setup.
@@ -77,7 +77,10 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 graph TD
     vibesys.api --> vibesys
     vibesys.api --> vibesys.api.agent
+    vibesys.api --> vibesys.api.auxiliary
     vibesys.api --> vibesys.api.contracts
+    vibesys.api --> vibesys.api.session
+    vibesys.api --> vibesys.api.store
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration.agent_options
     vibesys.api --> vibesys.orchestration.evolve
@@ -88,13 +91,37 @@ graph TD
     vibesys.api --> vibesys.run.environment
     vibesys.api --> vibesys.run.host
     vibesys.api --> vibesys.run.skills
+    vibesys.api._session --> vibesys
+    vibesys.api._session --> vibesys.api.auxiliary
+    vibesys.api._session --> vibesys.api.contracts
+    vibesys.api._session --> vibesys.api.store
+    vibesys.api._session --> vibesys.plugin_catalog
+    vibesys.api._session --> vibesys.run
+    vibesys.api._session --> vibesys.run.contracts
+    vibesys.api._session --> vibesys.run.host
+    vibesys.api._session --> vibesys.run.skills
     vibesys.api.agent --> vibesys.orchestration.agent_options
     vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api.agent --> vibesys.plugin_catalog
+    vibesys.api.auxiliary --> vibesys.api.store
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.orchestration.metrics
     vibesys.api.contracts --> vibesys.run.contracts
+    vibesys.api.session --> vibesys.api._session
+    vibesys.api.session --> vibesys.api.auxiliary
+    vibesys.api.session --> vibesys.api.contracts
+    vibesys.api.session --> vibesys.plugin_catalog
+    vibesys.api.session --> vibesys.run.contracts
+    vibesys.api.store --> vibesys.api.contracts
+    vibesys.api.store --> vibesys.orchestration.agent_options
+    vibesys.api.store --> vibesys.plugin_catalog
+    vibesys.api.testing --> vibesys.api._session
+    vibesys.api.testing --> vibesys.api.contracts
+    vibesys.api.testing --> vibesys.api.session
+    vibesys.api.testing --> vibesys.api.store
+    vibesys.api.testing --> vibesys.plugin_catalog
+    vibesys.api.testing --> vibesys.run.contracts
     vibesys.context --> vibesys
     vibesys.context --> vibesys.errors
     vibesys.context --> vibesys.inputs
@@ -257,7 +284,10 @@ graph TD
     vibesys --> vs_sandbox
     vibesys.api --> vibesys
     vibesys.api --> vibesys.api.agent
+    vibesys.api --> vibesys.api.auxiliary
     vibesys.api --> vibesys.api.contracts
+    vibesys.api --> vibesys.api.session
+    vibesys.api --> vibesys.api.store
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration.agent_options
     vibesys.api --> vibesys.orchestration.evolve
@@ -272,11 +302,25 @@ graph TD
     vibesys.api --> vs_project
     vibesys.api --> vs_runtime
     vibesys.api --> vs_sandbox
+    vibesys.api._session --> vibesys
+    vibesys.api._session --> vibesys.api.auxiliary
+    vibesys.api._session --> vibesys.api.contracts
+    vibesys.api._session --> vibesys.api.store
+    vibesys.api._session --> vibesys.plugin_catalog
+    vibesys.api._session --> vibesys.run
+    vibesys.api._session --> vibesys.run.contracts
+    vibesys.api._session --> vibesys.run.host
+    vibesys.api._session --> vibesys.run.skills
+    vibesys.api._session --> vs_agent
+    vibesys.api._session --> vs_project
+    vibesys.api._session --> vs_runtime
+    vibesys.api._session --> vs_sandbox
     vibesys.api.agent --> vibesys.orchestration.agent_options
     vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api.agent --> vibesys.plugin_catalog
     vibesys.api.agent --> vs_loop_state
     vibesys.api.agent --> vs_project
+    vibesys.api.auxiliary --> vibesys.api.store
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.orchestration.metrics
@@ -284,6 +328,23 @@ graph TD
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_loop_state
     vibesys.api.contracts --> vs_project
+    vibesys.api.session --> vibesys.api._session
+    vibesys.api.session --> vibesys.api.auxiliary
+    vibesys.api.session --> vibesys.api.contracts
+    vibesys.api.session --> vibesys.plugin_catalog
+    vibesys.api.session --> vibesys.run.contracts
+    vibesys.api.store --> vibesys.api.contracts
+    vibesys.api.store --> vibesys.orchestration.agent_options
+    vibesys.api.store --> vibesys.plugin_catalog
+    vibesys.api.store --> vs_project
+    vibesys.api.testing --> vibesys.api._session
+    vibesys.api.testing --> vibesys.api.contracts
+    vibesys.api.testing --> vibesys.api.session
+    vibesys.api.testing --> vibesys.api.store
+    vibesys.api.testing --> vibesys.plugin_catalog
+    vibesys.api.testing --> vibesys.run.contracts
+    vibesys.api.testing --> vs_agent
+    vibesys.api.testing --> vs_sandbox
     vibesys.context --> vibesys
     vibesys.context --> vibesys.errors
     vibesys.context --> vibesys.inputs
