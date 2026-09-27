@@ -112,7 +112,7 @@ Example (inside `judge.md`):
 6. Export a `DEFINITION` from the domain package's `__init__.py`. If the domain
    needs setup/teardown behavior such as mounts or copy exclusions, implement
    `EnvironmentHooks` in that package and attach it to the definition.
-7. Register the definition in `vibesys.domains.registry.DOMAINS`.
+7. Register the definition in `vibesys.orchestration.domains.registry.DOMAINS`.
 8. Add `[agent].domain = "<name>"` to the input manifest and run either
    `uv run vibesys --outer-loop agent ...` or `uv run vibesys --outer-loop evolve ...` from the
    repository root.

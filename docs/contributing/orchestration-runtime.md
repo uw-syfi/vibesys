@@ -73,7 +73,7 @@ each their own API; there is no common interface across them. Rules,
 enforced by an architecture test:
 
 - no imports of `vibesys.orchestration`, `vibesys.loops`, `vibesys.roles`,
-  or `vibesys.prompts`: search answers questions and returns new state, it
+  or `vibesys.orchestration.prompts`: search answers questions and returns new state, it
   never drives agents, renders prompts, or decides which agent runs next;
 - no `os`/`subprocess`/`pathlib`/`time`/`datetime` imports: no I/O, no
   clock reads;

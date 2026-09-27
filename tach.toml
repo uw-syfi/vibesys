@@ -59,7 +59,7 @@ forbid_circular_dependencies = true
 # orchestration host > prompts + lower libs), enforced only where a module
 # already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`
 # stay unlayered; their order is still pinned by the explicit edges above).
-# `vibesys.prompts` (templates + renderer) sits in the bottom layer with the
+# `vibesys.orchestration.prompts` (templates + renderer) sits with policy,
 # other mechanics libraries: the host and lower layers render prompts, they
 # don't hand policy to the template layer, so `prompts` is a leaf every layer
 # above it may reach downward into.
@@ -124,7 +124,7 @@ depends_on = ["server.events", "server.diagnostics"]
 
 [[modules]]
 path = "server.read_model"
-depends_on = ["server.controller", "server.events"]
+depends_on = ["server.controller", "server.events", "vibesys.api"]
 
 [[modules]]
 path = "server.run_lifecycle"
@@ -160,7 +160,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.environment", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.environment", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.orchestration.contracts", "vibesys.orchestration.memory", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]
 
 [[modules]]
 path = "vibesys.api.agent"
@@ -188,17 +188,17 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vibesys.orch
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.prompts", "vibesys.errors", "vibesys.orchestration.profile_focus", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
+depends_on = ["vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.errors", "vibesys.orchestration.profile_focus", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.errors", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.orchestration.skills"]
+depends_on = ["vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.errors", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.orchestration.skills"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = [ "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
+depends_on = [ "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
@@ -218,7 +218,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_runtime", "vs_project", "vibesys.
 [[modules]]
 path = "vibesys.orchestration.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vs_runtime"]
+depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.view"
@@ -286,9 +286,9 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.contracts", "vibesys.orchestration.gates", "vibesys.orchestration.request", "vibesys.orchestration.skills", "vibesys.orchestration.state", "vibesys.orchestration.workspace_resources"]
 
 [[modules]]
-path = "vibesys.domains"
+path = "vibesys.orchestration.domains"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vibesys.prompts"]
+depends_on = ["vibesys", "vibesys.orchestration.prompts"]
 
 [[modules]]
 # Product-owned authored-input parsing, validation, rendering, and synthesis.
@@ -303,7 +303,7 @@ layer = "roles_search"
 depends_on = [ "vibesys.orchestration.metrics", "vibesys.orchestration.profilers"]
 
 [[modules]]
-path = "vibesys.prompts"
+path = "vibesys.orchestration.prompts"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_prompts"]
 
