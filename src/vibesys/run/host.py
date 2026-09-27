@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext, agent_spec_from_config
 from vibesys.context import _StateBinding, open_run_resources
-from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.gates import _EvaluationAdapter
-from vibesys.orchestration.state import _StateCommitObserver
 from vibesys.orchestration.steering import splice_steering
 from vibesys.orchestration.workspace_resources import (
     CandidateWorkspaceResourceFactory,
@@ -24,6 +22,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
     RunHostComponents,
+    create_runtime_control,
     create_state,
     create_workspace_runtime,
     open_run_host,
@@ -129,16 +128,14 @@ class _ProductHostFactory:
         workspaces = agent_runtime.workspaces
         commands = agent_runtime.commands
         skills = create_installed_skills(tuple(resources.skill_source_paths), blocking)
-        control = _RunControl(self.integration, debug=self.request.debug)
+        control = create_runtime_control(self.integration.control, blocking)
         state = create_state(
             state_model,
             resources.round_transaction_coordinator,
             workspaces,
             (
-                _StateCommitObserver(
-                    resources.publish_committed_state,
+                self.integration.state_commit_observer(
                     resources.run_id,
-                    self.integration.events,
                     self.projector,
                     state_namespace,
                 )

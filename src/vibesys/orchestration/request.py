@@ -37,7 +37,6 @@ class RunRequest(BaseModel):
     config: Config
     input_bundle: InputBundle
     objective: str | None = None
-    debug: bool = False
     resume: ResumeRef | None = None
     exp_name: str | None = None
     runs_dir: Path | None = None

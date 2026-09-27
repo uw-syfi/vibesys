@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 
 import pytest
 from pydantic import ValidationError
 
 from vs_runtime.api.infrastructure import (
+    BlockingOperations,
     RunControlTransition,
     RunControlTransitionKind,
     RunStopped,
     create_run_control_channel,
+    create_runtime_control,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
 
@@ -115,6 +118,61 @@ def test_stop_lands_on_every_boundary_until_resume_cancels_it() -> None:
         RunControlTransitionKind.STOP_REQUESTED,
         RunControlTransitionKind.STOPPED,
         RunControlTransitionKind.STOPPED,
+        RunControlTransitionKind.RESUMED,
+    ]
+
+
+def test_runtime_checkpoint_lands_stop_before_opening_a_worker() -> None:
+    events = FakeRunControlEventSink()
+    channel = create_run_control_channel(events)
+    blocking = BlockingOperations()
+    control = create_runtime_control(channel, blocking)
+    channel.request_stop()
+
+    async def exercise() -> None:
+        with pytest.raises(RunStopped):
+            await control.checkpoint()
+        blocking.begin_close()
+        assert await blocking.drain() == []
+
+    asyncio.run(exercise())
+
+    assert [transition.kind for transition in events.transitions] == [
+        RunControlTransitionKind.STOP_REQUESTED,
+        RunControlTransitionKind.STOPPED,
+    ]
+
+
+def test_cancelled_runtime_checkpoint_drains_its_paused_worker() -> None:
+    async def exercise() -> list[RunControlTransitionKind]:
+        paused = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        events = FakeRunControlEventSink(
+            on_transition=lambda transition: (
+                loop.call_soon_threadsafe(paused.set)
+                if transition.kind is RunControlTransitionKind.PAUSED
+                else None
+            )
+        )
+        channel = create_run_control_channel(events)
+        blocking = BlockingOperations()
+        control = create_runtime_control(channel, blocking)
+        channel.request_pause()
+        checkpoint = asyncio.create_task(control.checkpoint())
+        await paused.wait()
+        checkpoint.cancel()
+        await asyncio.sleep(0)
+        assert not checkpoint.done()
+        channel.resume()
+        with pytest.raises(asyncio.CancelledError):
+            await checkpoint
+        blocking.begin_close()
+        assert await blocking.drain() == []
+        return [transition.kind for transition in events.transitions]
+
+    assert asyncio.run(exercise()) == [
+        RunControlTransitionKind.PAUSE_REQUESTED,
+        RunControlTransitionKind.PAUSED,
         RunControlTransitionKind.RESUMED,
     ]
 

@@ -337,7 +337,6 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
             exp_name=args.exp_name,
             runs_dir=args.runs_dir,
-            debug=args.debug,
             profiler_kind=args.profiler,
             skills_dirs=skills,
             run_environment=run_environment,

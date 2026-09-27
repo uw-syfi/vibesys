@@ -272,7 +272,7 @@ depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github"
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.control", "vibesys.orchestration.contracts", "vibesys.orchestration.gates", "vibesys.orchestration.request", "vibesys.orchestration.skills", "vibesys.orchestration.state", "vibesys.orchestration.steering", "vibesys.orchestration.workspace_resources"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.contracts", "vibesys.orchestration.gates", "vibesys.orchestration.request", "vibesys.orchestration.skills", "vibesys.orchestration.steering", "vibesys.orchestration.workspace_resources"]
 
 [[modules]]
 path = "vibesys.orchestration.domains"
@@ -413,19 +413,9 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-path = "vibesys.orchestration.state"
-layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.orchestration.view"]
-
-[[modules]]
 path = "vibesys.orchestration.gates"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.context", "vs_runtime", "vibesys.orchestration.workspace_resources", "vibesys.orchestration.request"]
-
-[[modules]]
-path = "vibesys.orchestration.control"
-layer = "orchestration_host"
-depends_on = ["vibesys.run"]
 
 [[modules]]
 path = "vibesys.orchestration._common"

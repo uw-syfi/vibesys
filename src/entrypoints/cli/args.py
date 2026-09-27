@@ -396,11 +396,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="SkyPilot CLI executable. Default: sky.",
     )
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Pause for Enter at each step in loop mode.",
-    )
-    parser.add_argument(
         "--repo",
         default=None,
         metavar="[OWNER/]NAME",

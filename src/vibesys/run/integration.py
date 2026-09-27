@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.events import (
     AgentExecutionActivityData,
@@ -12,9 +12,11 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     EventStatus,
+    ExperimentsChangedData,
     InvocationFinishedData,
     InvocationStartedData,
     PhaseData,
+    RoundFinishedData,
     json_value,
 )
 from vibesys.run.agent_events import CoreAgentEventSink
@@ -30,6 +32,7 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+    from typing import Literal
 
     from pydantic import BaseModel
 
@@ -87,6 +90,129 @@ class _CoreRunControlEvents:
             round_label=transition.round_label,
             execution_id=transition.execution_id,
         )
+
+
+class _RoundProjection(Protocol):
+    """Product facts needed to translate one projected round into events."""
+
+    @property
+    def number(self) -> int: ...
+
+    @property
+    def status(self) -> Literal["completed", "failed"]: ...
+
+    @property
+    def attempts(self) -> int: ...
+
+    @property
+    def judge_verdict(self) -> Literal["pass", "fail", "skipped"] | None: ...
+
+    @property
+    def perf_metric(self) -> float | None: ...
+
+    @property
+    def perf_unit(self) -> str | None: ...
+
+    @property
+    def profile_skipped(self) -> bool: ...
+
+
+class _RunProjection(Protocol):
+    """Product facts needed to diff two committed state projections."""
+
+    @property
+    def rounds(self) -> tuple[_RoundProjection, ...]: ...
+
+    @property
+    def experiment_revision(self) -> int | None: ...
+
+
+class _CommittedStateProjector(Protocol):
+    def project_committed(
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        run_id: str,
+    ) -> _RunProjection | None: ...
+
+
+class _StateCommitObserver:
+    """Publish product projections only after runtime durability succeeds."""
+
+    def __init__(
+        self,
+        integration: LocalRunIntegration,
+        run_id: str,
+        projector: _CommittedStateProjector | None,
+        namespace: str,
+    ) -> None:
+        self._integration = integration
+        self._run_id = run_id
+        self._projector = projector
+        self._namespace = namespace
+
+    def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
+        """Publish the durable state hint before its derived semantic events."""
+        self._integration.publish_committed_state(self._namespace, current)
+        _emit_commit_events(
+            self._integration.events,
+            self._project(previous),
+            self._project(current),
+        )
+
+    def _project(self, value: BaseModel | None) -> _RunProjection | None:
+        projector = self._projector
+        if projector is None or value is None:
+            return None
+        return projector.project_committed(self._namespace, value, run_id=self._run_id)
+
+
+def _round_entries(view: _RunProjection | None) -> dict[int, _RoundProjection]:
+    if view is None:
+        return {}
+    return {round_summary.number: round_summary for round_summary in view.rounds}
+
+
+def _emit_commit_events(
+    events: EventJournal,
+    before: _RunProjection | None,
+    after: _RunProjection | None,
+) -> None:
+    """Emit semantic changes newly made observable by one durable commit."""
+    if after is None:
+        return
+    before_rounds = _round_entries(before)
+    after_rounds = _round_entries(after)
+    new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
+    for number in new_round_numbers:
+        _emit_round_finished(events, after_rounds[number])
+    if before is None:
+        return
+    before_revision = before.experiment_revision
+    after_revision = after.experiment_revision
+    if after_revision is not None and after_revision != before_revision:
+        reason = "round_persisted" if new_round_numbers else "active_hypothesis_changed"
+        events.emit(
+            CoreEventType.EXPERIMENTS_CHANGED,
+            data=ExperimentsChangedData(reason=reason, revision=after_revision),
+        )
+
+
+def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) -> None:
+    status = EventStatus.FAILED if round_summary.status == "failed" else EventStatus.COMPLETED
+    events.emit(
+        CoreEventType.ROUND_FINISHED,
+        status=status,
+        round_label=f"round-{round_summary.number}",
+        data=RoundFinishedData(
+            attempts=round_summary.attempts,
+            judge_verdict=round_summary.judge_verdict or "skipped",
+            perf_metric=round_summary.perf_metric,
+            perf_unit=round_summary.perf_unit,
+            profile_skipped=round_summary.profile_skipped,
+        ),
+    )
 
 
 class LocalRunIntegration:
@@ -194,6 +320,15 @@ class LocalRunIntegration:
     ) -> None:
         """Register the sole application projection of freshly committed state."""
         self._committed_state_listener = listener
+
+    def state_commit_observer(
+        self,
+        run_id: str,
+        projector: _CommittedStateProjector | None,
+        namespace: str,
+    ) -> _StateCommitObserver:
+        """Bind durable plugin state to product hints and semantic events."""
+        return _StateCommitObserver(self, run_id, projector, namespace)
 
     def publish_committed_state(
         self,

@@ -1,6 +1,6 @@
 """``ctx.state.commit`` derives round/experiment events strategy-agnostically.
 
-Covers the host mechanism in ``vibesys.orchestration.state``: after a
+Covers the run integration mechanism: after a
 checkpoint, the host diffs the previous published `RunView` against the new
 one and emits `ROUND_FINISHED` for newly observed rounds and
 `EXPERIMENTS_CHANGED` when the experiment revision moved. These tests never
@@ -23,7 +23,6 @@ from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.state import _emit_commit_events
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -41,6 +40,7 @@ class _FakeAgentState(BaseModel):
 
     round_numbers: tuple[int, ...] = ()
     experiment_revision: int = 0
+    profile_skipped: bool = False
 
 
 class _Options(BaseModel):
@@ -66,7 +66,13 @@ def _project_state(state: BaseModel) -> PluginProjection:
     return PluginProjection(
         payload=None,
         rounds=tuple(
-            ProjectedRound(number=number, status="completed", attempts=1, judge_verdict="pass")
+            ProjectedRound(
+                number=number,
+                status="completed",
+                attempts=1,
+                judge_verdict="pass",
+                profile_skipped=typed.profile_skipped,
+            )
             for number in typed.round_numbers
         ),
         experiment_revision=typed.experiment_revision,
@@ -92,7 +98,12 @@ class _FakeProjector:
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         if namespace != "commit-probe" or not isinstance(state, _FakeAgentState):
             return None
-        return _agent_view(state.round_numbers, state.experiment_revision, run_id=run_id)
+        return _agent_view(
+            state.round_numbers,
+            state.experiment_revision,
+            run_id=run_id,
+            profile_skipped=state.profile_skipped,
+        )
 
 
 def _write_project(root: Path) -> None:
@@ -215,26 +226,29 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
     assert len(round_finished_events) == 1  # only round 2 -- round 1 is not replayed
 
 
-def _agent_view(round_numbers: Sequence[int], revision: int, *, run_id: str = "probe") -> RunView:
+def _agent_view(
+    round_numbers: Sequence[int],
+    revision: int,
+    *,
+    run_id: str = "probe",
+    profile_skipped: bool = False,
+) -> RunView:
     return RunView(
         run_id=run_id,
         loop="commit-probe",
         status=RunStatus.ACTIVE,
         rounds=tuple(
-            RoundSummary(number=number, status="completed", attempts=1, judge_verdict="pass")
+            RoundSummary(
+                number=number,
+                status="completed",
+                attempts=1,
+                judge_verdict="pass",
+                profile_skipped=profile_skipped,
+            )
             for number in round_numbers
         ),
         experiment_revision=revision,
     )
-
-
-class _FakeEvents:
-    def __init__(self) -> None:
-        self.calls: list[tuple[CoreEventType, dict[str, object]]] = []
-
-    def emit(self, event_type: CoreEventType, *args: object, **kwargs: object) -> None:
-        del args
-        self.calls.append((event_type, kwargs))
 
 
 @given(
@@ -261,29 +275,36 @@ def test_commit_events_property_no_double_emission_and_revision_iff_changed(
     """
     round_numbers: list[int] = []
     revision = 0
-    views: list[RunView] = [_agent_view((), 0)]
+    states: list[_FakeAgentState] = [_FakeAgentState()]
     for new_rounds, revision_delta in steps:
         next_round = (round_numbers[-1] + 1) if round_numbers else 1
         round_numbers.extend(range(next_round, next_round + new_rounds))
         revision += revision_delta + (1 if new_rounds else 0)
-        views.append(_agent_view(tuple(round_numbers), revision))
+        states.append(
+            _FakeAgentState(
+                round_numbers=tuple(round_numbers),
+                experiment_revision=revision,
+            )
+        )
 
-    events = _FakeEvents()
+    integration = LocalRunIntegration()
+    observer = integration.state_commit_observer("probe", _FakeProjector(), "commit-probe")
+    captured = []
+    integration.events.subscribe(captured.append)
     seen_round_finished: list[int] = []
-    for index in range(1, len(views)):
-        before = views[index - 1]
+    for index in range(1, len(states)):
+        before = states[index - 1]
         # "Resume": recompute `before` from the durable value rather than
         # reusing the Python object from the prior loop iteration. Both must
         # produce identical diff results.
         if index == resume_at:
-            before = RunView.model_validate(before.model_dump())
-        _emit_commit_events(events, before, views[index])
+            before = _FakeAgentState.model_validate(before.model_dump())
+        observer.committed(before, states[index])
 
-    for event_type, kwargs in events.calls:
-        if event_type is CoreEventType.ROUND_FINISHED:
-            label = kwargs["round_label"]
-            assert isinstance(label, str)
-            number = int(label.removeprefix("round-"))
+    for event in captured:
+        if event.type is CoreEventType.ROUND_FINISHED:
+            assert event.round_label is not None
+            number = int(event.round_label.removeprefix("round-"))
             assert number not in seen_round_finished, "round finished twice"
             seen_round_finished.append(number)
 
@@ -292,12 +313,38 @@ def test_commit_events_property_no_double_emission_and_revision_iff_changed(
     # EXPERIMENTS_CHANGED fired exactly when the revision differed between
     # consecutive views (skipping the very first commit, which has nothing
     # to compare against).
-    changed_count = sum(
-        1 for event_type, _ in events.calls if event_type is CoreEventType.EXPERIMENTS_CHANGED
-    )
+    changed_count = sum(1 for event in captured if event.type is CoreEventType.EXPERIMENTS_CHANGED)
     expected_changes = sum(
         1
-        for index in range(1, len(views))
-        if views[index - 1].experiment_revision != views[index].experiment_revision
+        for index in range(1, len(states))
+        if states[index - 1].experiment_revision != states[index].experiment_revision
     )
     assert changed_count == expected_changes
+
+
+def test_commit_projection_preserves_profile_skip_and_publication_order() -> None:
+    integration = LocalRunIntegration()
+    order: list[str] = []
+    captured = []
+    integration.add_committed_state_listener(
+        lambda _namespace, _state, _changed: order.append("state_published")
+    )
+    integration.events.subscribe(
+        lambda event: (order.append(event.type.value), captured.append(event))
+    )
+    observer = integration.state_commit_observer("probe", _FakeProjector(), "commit-probe")
+
+    observer.committed(
+        None,
+        _FakeAgentState(
+            round_numbers=(1,),
+            experiment_revision=1,
+            profile_skipped=True,
+        ),
+    )
+
+    round_finished = next(event for event in captured if event.type is CoreEventType.ROUND_FINISHED)
+    assert round_finished.data is not None
+    assert round_finished.data.kind == "round_finished"
+    assert round_finished.data.profile_skipped is True
+    assert order[:2] == ["state_published", CoreEventType.ROUND_FINISHED.value]

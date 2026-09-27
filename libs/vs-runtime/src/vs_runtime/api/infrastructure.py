@@ -163,6 +163,7 @@ from vs_runtime._run_host import (
     RunHostComponents,
     RunHostResourceOwner,
     RuntimeRunHost,
+    create_runtime_control,
     open_run_host,
 )
 from vs_runtime._run_state import RunState
@@ -511,6 +512,7 @@ __all__ = [
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
+    "create_runtime_control",
     "create_state",
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspaces import OwnedWorkspaces
     from vs_runtime.contracts import (
         AgentSessions,
@@ -80,6 +81,27 @@ class BlockingOperations:
             if error := operation.exception():
                 errors.append(error)
         return errors
+
+
+class RuntimeControl:
+    """Land cooperative stop and pause requests at policy checkpoints."""
+
+    def __init__(self, channel: RunControlChannel, blocking: BlockingOperations) -> None:
+        self._channel = channel
+        self._blocking = blocking
+
+    async def checkpoint(self) -> None:
+        """Raise a pending stop or wait for a pending pause to resume."""
+        self._channel.raise_if_stopped()
+        await self._blocking.run(self._channel.wait_while_paused)
+
+
+def create_runtime_control(
+    channel: RunControlChannel,
+    blocking: BlockingOperations,
+) -> Control:
+    """Bind cooperative control to the host's cancellation-safe worker owner."""
+    return RuntimeControl(channel, blocking)
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,5 +237,6 @@ __all__ = [
     "RunHostComponents",
     "RunHostResourceOwner",
     "RuntimeRunHost",
+    "create_runtime_control",
     "open_run_host",
 ]
