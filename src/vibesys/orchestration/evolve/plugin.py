@@ -8,8 +8,12 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.evolve.agents import AGENTS
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.orchestration import orchestrate
-from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import OrchestrationPlugin, OrchestrationResumeDecision, PluginProjection
+from vs_runtime.api import (
+    OrchestrationDescriptor,
+    OrchestrationPlugin,
+    OrchestrationResumeDecision,
+    PluginProjection,
+)
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:

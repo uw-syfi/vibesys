@@ -21,6 +21,12 @@ _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
 _ALLOWED_EXTERNAL_POLICY_IMPORTS = {"plugin_catalog.py", "api/evolve.py"}
+_INFRASTRUCTURE_LIBRARIES = (
+    "vs_agent",
+    "vs_evaluator_protocol",
+    "vs_project",
+    "vs_sandbox",
+)
 
 
 def _strategy_names() -> set[str]:
@@ -61,6 +67,22 @@ def test_no_strategy_package_imports_a_peer_strategy_package() -> None:
                 if other is not None and other != strategy:
                     violations.append(f"{path.relative_to(_SRC)} imports {module_name}")
     assert not violations, "strategy package imports a peer strategy: " + "; ".join(violations)
+
+
+def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> None:
+    """Keep product policy independent of concrete execution libraries."""
+    violations: list[str] = []
+    for strategy in _strategy_names():
+        for path in (_ORCHESTRATION / strategy).rglob("*.py"):
+            for module_name in _imported_module_names(path):
+                if any(
+                    module_name == package or module_name.startswith(f"{package}.")
+                    for package in _INFRASTRUCTURE_LIBRARIES
+                ):
+                    violations.append(f"{path.relative_to(_SRC)} imports {module_name}")
+    assert not violations, (
+        "strategy package bypasses vs_runtime.api for infrastructure: " + "; ".join(violations)
+    )
 
 
 def test_nothing_outside_orchestration_imports_a_strategy_package_except_catalog() -> None:

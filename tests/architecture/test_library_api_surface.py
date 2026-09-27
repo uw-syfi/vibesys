@@ -16,6 +16,7 @@ import pytest
         "vs_loop_state.api",
         "vs_project.api",
         "vs_prompts.api",
+        "vs_runtime.api",
         "vs_sandbox.api",
     ],
 )

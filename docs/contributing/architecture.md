@@ -366,7 +366,6 @@ graph TD
     vibesys.orchestration.evolve --> vibesys.orchestration.metrics
     vibesys.orchestration.evolve --> vibesys.orchestration.profilers
     vibesys.orchestration.evolve --> vibesys.prompts
-    vibesys.orchestration.evolve --> vs_project
     vibesys.orchestration.evolve --> vs_prompts
     vibesys.orchestration.evolve --> vs_runtime
     vibesys.orchestration.evolve.population --> vibesys.orchestration.gates

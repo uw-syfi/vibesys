@@ -202,7 +202,7 @@ depends_on = ["vibesys.domains", "vibesys.orchestration.agent_options", "vibesys
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = [ "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vs_runtime", "vs_prompts", "vibesys.errors", "vs_project", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers"]
+depends_on = [ "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"

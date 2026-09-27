@@ -1,5 +1,6 @@
 """Public contracts for the reusable VibeSys runtime."""
 
+from vs_project.api import OrchestrationDescriptor
 from vs_runtime._local_validation import (
     ValidationRecipe,
     ValidationRecipeArtifact,
@@ -74,6 +75,7 @@ __all__ = [
     "Evaluation",
     "LocalValidationEvaluation",
     "MetricDirection",
+    "OrchestrationDescriptor",
     "OrchestrationPlugin",
     "OrchestrationResumeDecision",
     "PluginProjection",
