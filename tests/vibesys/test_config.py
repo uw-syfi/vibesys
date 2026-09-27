@@ -367,3 +367,34 @@ model = "gpt-legacy"
 
         with pytest.raises(ValueError, match="Bad Role"):
             load_config(cfg_file)
+
+    @pytest.mark.parametrize("field", ["model", "reasoning_effort"])
+    @pytest.mark.parametrize("value", ["", "x" * 257])
+    def test_invalid_role_policy_text_is_rejected(
+        self,
+        tmp_path: Path,
+        field: str,
+        value: str,
+    ) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(
+            f'[model]\nname = "gpt-5.6-sol"\n\n[agent.roles.orchestrator]\n{field} = "{value}"\n'
+        )
+
+        with pytest.raises(ValueError, match=field):
+            load_config(cfg_file)
+
+    def test_role_policy_text_accepts_portable_boundary(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        value = "x" * 256
+        cfg_file.write_text(
+            '[model]\nname = "gpt-5.6-sol"\n\n'
+            "[agent.roles.orchestrator]\n"
+            f'model = "{value}"\n'
+            f'reasoning_effort = "{value}"\n'
+        )
+
+        config = load_config(cfg_file)
+
+        assert config.agent.roles["orchestrator"].model == value
+        assert config.agent.roles["orchestrator"].reasoning_effort == value

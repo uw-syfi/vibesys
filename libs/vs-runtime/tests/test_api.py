@@ -112,6 +112,9 @@ def test_role_is_a_strict_complete_declaration() -> None:
         )
     with pytest.raises(ValidationError, match="id"):
         _role("Bad Role")
+    assert len(_role("a" * 128).id) == 128
+    with pytest.raises(ValidationError, match="id"):
+        _role("a" * 129)
 
 
 def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:

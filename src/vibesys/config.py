@@ -86,10 +86,14 @@ class AgentRoleCfg(_Strict):
 
     model: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=256,
         description="CLI model override for this role. None uses [model].name.",
     )
     reasoning_effort: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=256,
         description=(
             "CLI reasoning-effort override for this role (for Codex, for example "
             "'low'/'medium'/'high'/'xhigh'). None uses [thinking].level."

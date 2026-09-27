@@ -179,7 +179,10 @@ class WorkspaceRef(BaseModel):
     path: Path
 
 
-AgentRoleId = Annotated[str, Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")]
+AgentRoleId = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=r"^[a-z0-9][a-z0-9._-]*$"),
+]
 
 
 class AgentRole(BaseModel):

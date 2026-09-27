@@ -56,6 +56,15 @@ class _PortableStateProbe(BaseModel):
     round_idx: int
 
 
+class _RecordingBackendFactory:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
+        self.calls += 1
+        return FakeComputeBackend()
+
+
 class _CreateContextOptions(TypedDict, total=False):
     runs_dir: Path | None
     evaluator: Path | None
@@ -73,6 +82,7 @@ class _CreateContextOptions(TypedDict, total=False):
     remote_repo: str | None
     integration: LocalRunIntegration | None
     agent_roles: tuple[AgentRole, ...]
+    backend_factory: _RecordingBackendFactory
 
 
 @pytest.fixture(autouse=True)
@@ -204,7 +214,7 @@ def _create_context(
             provider=request.cli_provider,
         ),
         resume_policy=plugin.resume_policy,
-        backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+        backend_factory=options.get("backend_factory") or _RecordingBackendFactory(),
     )
 
 
@@ -577,6 +587,7 @@ def test_agent_v5_resume_rejects_changed_plugin_role_catalog(
         if change == "add"
         else tuple(role for role in plugin_roles if role.id != "profiler")
     )
+    backend_factory = _RecordingBackendFactory()
 
     with pytest.raises(ConfigurationError, match=expected_detail):
         _create_context(
@@ -585,7 +596,9 @@ def test_agent_v5_resume_rejects_changed_plugin_role_catalog(
             exp_name=run_id,
             existing=True,
             agent_roles=selected_roles,
+            backend_factory=backend_factory,
         )
+    assert backend_factory.calls == 0
 
 
 def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) -> None:

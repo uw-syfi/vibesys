@@ -227,26 +227,7 @@ def _resume_orchestration_decision(
                 message="resuming a run cannot change its recorded run_environment",
             )
         )
-    recorded_roles = recorded.execution.agent_roles.keys()
-    selected_roles = execution.agent_roles.keys()
-    missing_roles = sorted(selected_roles - recorded_roles)
-    unknown_roles = sorted(recorded_roles - selected_roles)
-    if missing_roles or unknown_roles:
-        details = []
-        if missing_roles:
-            details.append(f"missing recorded roles: {', '.join(missing_roles)}")
-        if unknown_roles:
-            details.append(f"unknown recorded roles: {', '.join(unknown_roles)}")
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_invalid",
-                stage="resume_resolution",
-                message=(
-                    "recorded agent roles do not match the selected orchestration: "
-                    + "; ".join(details)
-                ),
-            )
-        )
+    _validate_agent_role_catalog(recorded.execution.agent_roles, execution.agent_roles)
     if recorded.execution != execution:
         changed = ", ".join(
             name
@@ -276,6 +257,33 @@ def _resume_orchestration_decision(
             )
         )
     return resume_policy(recorded.orchestration, requested)
+
+
+def _validate_agent_role_catalog(
+    recorded: Mapping[str, object],
+    selected: Mapping[str, object],
+) -> None:
+    """Reject role-catalog drift using only authoritative mapping keys."""
+    recorded_roles = recorded.keys()
+    selected_roles = selected.keys()
+    missing_roles = sorted(selected_roles - recorded_roles)
+    unknown_roles = sorted(recorded_roles - selected_roles)
+    if missing_roles or unknown_roles:
+        details = []
+        if missing_roles:
+            details.append(f"missing recorded roles: {', '.join(missing_roles)}")
+        if unknown_roles:
+            details.append(f"unknown recorded roles: {', '.join(unknown_roles)}")
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_invalid",
+                stage="resume_resolution",
+                message=(
+                    "recorded agent roles do not match the selected orchestration: "
+                    + "; ".join(details)
+                ),
+            )
+        )
 
 
 @overload
@@ -489,6 +497,10 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                         )
                     ) from exc
 
+            if existing:
+                recorded_run = Project.open(project_root).state.load_run(run_id)
+                _validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
+
         with boot_trace.span("backend_and_model"):
             backend_get = backend_factory or create_compute_backend
             backend_impl = backend_get(
@@ -565,7 +577,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 thinking_budget=config.thinking.budget,
                 agent_roles={
                     role_id: AgentRoleExecutionRecord(
-                        model=spec.model or config.model.name,
+                        model=spec.model if spec.model is not None else config.model.name,
                         reasoning_effort=spec.reasoning_effort,
                     )
                     for role_id, spec in agent_specs.items()
