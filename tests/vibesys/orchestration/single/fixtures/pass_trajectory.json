@@ -12,8 +12,10 @@
     "queue.py": "VALUE = 1\n"
   },
   "artifacts": [
-    "progress-artifacts/plans/round-0001.json",
-    "progress.md",
-    "roadmap.md"
+    "roadmap/index.md",
+    "progress/README.md",
+    "progress/pareto-frontier.md",
+    "progress/plans/round-0001.json",
+    "progress/round-0001.md"
   ]
 }
