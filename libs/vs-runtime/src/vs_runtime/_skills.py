@@ -10,12 +10,16 @@ import yaml
 
 from vs_runtime.contracts import (
     ResolvedSkillResources,
+    SkillCatalogError,
     SkillResolution,
     SkillResourceRequest,
+    Skills,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+    from vs_runtime._run_host import BlockingOperations
 
 _FRONTMATTER_DELIMITER = "---"
 _MATERIALIZATION_EXCLUDED_NAMES = frozenset({".git", "repos", "__pycache__"})
@@ -189,10 +193,46 @@ def resolve_skill_resources(
     )
 
 
+class _InstalledSkills:
+    """Resolve policy-owned requests against one run's installed catalog."""
+
+    def __init__(
+        self,
+        source_paths: tuple[Path, ...],
+        blocking: BlockingOperations,
+    ) -> None:
+        self._source_paths = source_paths
+        self._blocking = blocking
+
+    async def resolve(self, requests: tuple[SkillResourceRequest, ...]) -> SkillResolution:
+        """Return partial valid selections, diagnostics, or a catalog failure."""
+        if not requests:
+            return SkillResolution()
+        if not self._source_paths:
+            return SkillResolution(diagnostics=("no skill sources are installed",))
+        try:
+            return await self._blocking.run(_resolve_installed_skills, requests, self._source_paths)
+        except (OSError, ValueError) as error:
+            detail = f"{type(error).__name__}: {error}"
+            raise SkillCatalogError(detail) from error
+
+
+def _resolve_installed_skills(
+    requests: tuple[SkillResourceRequest, ...], sources: tuple[Path, ...]
+) -> SkillResolution:
+    return resolve_skill_resources(requests, build_skill_catalog(sources))
+
+
+def create_installed_skills(source_paths: tuple[Path, ...], blocking: BlockingOperations) -> Skills:
+    """Create the runtime capability for resolving installed skill resources."""
+    return _InstalledSkills(source_paths, blocking)
+
+
 __all__ = [
     "SkillCatalogEntry",
     "SkillMetadataError",
     "build_skill_catalog",
+    "create_installed_skills",
     "discover_skill_dirs",
     "load_skill_frontmatter",
     "resolve_skill_resources",

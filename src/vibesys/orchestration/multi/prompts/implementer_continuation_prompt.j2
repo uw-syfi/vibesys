@@ -48,7 +48,7 @@ a terminal outcome with empty `next_step`.
 {% if recommended_skills %}
 Previously selected references:
 {% for selection in recommended_skills %}
-- `{{ selection.router_path|default(selection.skill ~ '/SKILL.md') }}`{% if selection.resource_paths %}: {% for path in selection.resource_paths %}`{{ path if path.startswith(selection.skill ~ '/') else selection.skill ~ '/' ~ path }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+- `{{ selection.router_path|default(selection.name ~ '/SKILL.md') }}`{% if selection.resource_paths %}: {% for path in selection.resource_paths %}`{{ path if path.startswith(selection.name ~ '/') else selection.name ~ '/' ~ path }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
   Purpose: {{ selection.purpose }}
 {% endfor %}
 Do not reread references already loaded in this session. Load another installed

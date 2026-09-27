@@ -37,10 +37,10 @@ from vibesys.orchestration.multi.prompts import (
 )
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.skills import ResolvedSkillSelection
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vs_runtime.api import (
     AgentTurnTimeoutError,
+    ResolvedSkillResources,
     RunHost,
     SkillCatalogError,
     SkillResourceRequest,
@@ -150,7 +150,7 @@ def _fallback_judge() -> JudgeResponse:
 async def _resolve_skills(
     host: RunHost,
     selections: list[SkillResourceSelection],
-) -> tuple[list[SkillResourceSelection], list[ResolvedSkillSelection]]:
+) -> tuple[list[SkillResourceSelection], list[ResolvedSkillResources]]:
     if not selections:
         return [], []
     requests = tuple(
@@ -176,16 +176,7 @@ async def _resolve_skills(
         )
         for item in result.resolved
     ]
-    prompt = [
-        ResolvedSkillSelection(
-            skill=item.name,
-            router_path=item.router_path,
-            resource_paths=item.resource_paths,
-            purpose=item.purpose,
-        )
-        for item in result.resolved
-    ]
-    return portable, prompt
+    return portable, list(result.resolved)
 
 
 class MultiAgentTurns:

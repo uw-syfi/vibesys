@@ -51,7 +51,7 @@ input-owned contract files as the semantic authority.
 
 The designer recommends these zero-or-more references for this hypothesis:
 {% for selection in recommended_skills %}
-- `{{ selection.router_path|default(selection.skill ~ '/SKILL.md') }}`{% if selection.resource_paths %}: {% for path in selection.resource_paths %}`{{ path if path.startswith(selection.skill ~ '/') else selection.skill ~ '/' ~ path }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+- `{{ selection.router_path|default(selection.name ~ '/SKILL.md') }}`{% if selection.resource_paths %}: {% for path in selection.resource_paths %}`{{ path if path.startswith(selection.name ~ '/') else selection.name ~ '/' ~ path }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
   Purpose: {{ selection.purpose }}
 {% endfor %}
 

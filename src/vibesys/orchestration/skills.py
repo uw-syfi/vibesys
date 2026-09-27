@@ -9,12 +9,6 @@ from pathlib import Path
 import vs_agent.api as _agent_api
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vs_agent.api import SkillSelection
-from vs_runtime.api import SkillCatalogError, SkillResolution, SkillResourceRequest
-from vs_runtime.api.infrastructure import (
-    BlockingOperations,
-    build_skill_catalog,
-    resolve_skill_resources,
-)
 from vs_runtime.api.infrastructure import (
     discover_skill_dirs as _discover_skill_dirs,
 )
@@ -128,16 +122,6 @@ class SkillMetadata:
     def supports_domain(self, domain: DomainName) -> bool:
         """True when this skill should be loaded for *domain*."""
         return self.domains is None or domain in self.domains
-
-
-@dataclass(frozen=True)
-class ResolvedSkillSelection:
-    """Validated, agent-visible paths for one advisory skill selection."""
-
-    skill: str
-    router_path: str
-    resource_paths: tuple[str, ...]
-    purpose: str
 
 
 def _metadata_error(path: Path, message: str) -> SkillMetadataError:
@@ -406,49 +390,15 @@ def validate_skill_tree(root: Path) -> list[SkillMetadata]:
     return metadata
 
 
-class _Skills:
-    """Resolve policy-owned recommendations against this run's installed catalog."""
-
-    def __init__(
-        self,
-        source_paths: tuple[Path, ...],
-        blocking: BlockingOperations,
-    ) -> None:
-        self._source_paths = source_paths
-        self._blocking = blocking
-
-    async def resolve(self, requests: tuple[SkillResourceRequest, ...]) -> SkillResolution:
-        """Return partial valid selections, diagnostics, or a catalog failure."""
-        if not requests:
-            return SkillResolution()
-        if not self._source_paths:
-            return SkillResolution(diagnostics=("no skill sources are installed",))
-        try:
-            resolution = await self._blocking.run(self._resolve, requests, self._source_paths)
-        except (OSError, ValueError) as error:
-            detail = f"{type(error).__name__}: {error}"
-            raise SkillCatalogError(detail) from error
-        return resolution
-
-    @staticmethod
-    def _resolve(
-        requests: tuple[SkillResourceRequest, ...], sources: tuple[Path, ...]
-    ) -> SkillResolution:
-        """Resolve neutral requests against the installed runtime catalog."""
-        return resolve_skill_resources(requests, build_skill_catalog(sources))
-
-
 __all__ = [
     "NULL_SKILL_SELECTION",
     "PLATFORMS_PARENT",
     "PLATFORM_SKELETON",
     "SIDECAR_NAME",
-    "ResolvedSkillSelection",
     "SkillMetadata",
     "SkillMetadataError",
     "SkillRule",
     "SkillSelection",
-    "_Skills",
     "coerce_skill_root",
     "discover_sidecar_rules",
     "effective_skill_metadata",

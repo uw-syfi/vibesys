@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vibesys.orchestration.hypothesis import SkillResourceSelection
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.skills import ResolvedSkillSelection
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
+from vs_runtime.api import ResolvedSkillResources
 
 
 class PlanContext(BaseModel):
@@ -63,7 +63,7 @@ class ImplementerContext(BaseModel):
     framework_benchmark_enabled: bool
     official_evaluation_due: bool
     official_evaluation_reason: str | None
-    recommended_skills: list[ResolvedSkillSelection]
+    recommended_skills: list[ResolvedSkillResources]
     prior_attempt_artifact_locations: tuple[str, ...]
     active_component: str | None = None
 
@@ -85,7 +85,7 @@ class ImplementerContinuationContext(BaseModel):
     retry: int
     continuation_step: str
     feedback: str | None
-    recommended_skills: list[ResolvedSkillSelection]
+    recommended_skills: list[ResolvedSkillResources]
     framework_revert_applied: bool
     framework_revert_round: int | None
     framework_revert_commit: str | None

@@ -12,7 +12,6 @@ from vibesys.orchestration.agents import _Agents, _AgentToolResolver
 from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.gates import _EvaluationAdapter
-from vibesys.orchestration.skills import _Skills
 from vibesys.orchestration.state import _StateCommitObserver
 from vibesys.orchestration.workspace_resources import WorkspaceResourceProvider
 from vs_agent.api import AgentSessionState, DurableSessionStore
@@ -24,6 +23,7 @@ from vs_runtime.api.infrastructure import (
     create_workspaces,
     open_run_host,
 )
+from vs_runtime.api.infrastructure_skills import create_installed_skills
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -112,7 +112,7 @@ class _ProductHostFactory:
             )
         )
         commands = _Commands(workspaces, blocking)
-        skills = _Skills(tuple(resources.skill_source_paths), blocking)
+        skills = create_installed_skills(tuple(resources.skill_source_paths), blocking)
         control = _RunControl(self.integration, debug=self.request.debug)
         state = create_state(
             state_model,

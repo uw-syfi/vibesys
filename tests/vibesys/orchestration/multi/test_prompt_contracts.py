@@ -68,7 +68,7 @@ _BASE_CONTEXT: dict[str, object] = {
     "feedback": "The survivor-task counter was not sampled after cancellation.",
     "recommended_skills": [
         {
-            "skill": "serving-systems",
+            "name": "serving-systems",
             "resource_paths": ["references/algorithms/async-scheduling.md"],
             "purpose": "Audit sender-task lifecycle.",
         }
