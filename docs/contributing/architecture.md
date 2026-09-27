@@ -340,6 +340,7 @@ graph TD
     vibesys.context --> vs_sandbox
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
+    vibesys.domains --> vs_sandbox
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_runtime
