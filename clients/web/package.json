@@ -9,7 +9,7 @@
     "build": "vite build",
     "build:browser": "vite build --config vite.browser.config.ts",
     "prebuild": "pnpm --filter @vibesys/web^... build",
-    "check": "tsc -p tsconfig.check.json",
+    "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.browser.json",
     "precheck": "pnpm --filter @vibesys/web^... build",
     "test": "bun test --max-concurrency 1 src",
     "test:e2e": "playwright test"
