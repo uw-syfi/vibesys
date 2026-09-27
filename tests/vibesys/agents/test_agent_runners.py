@@ -9,7 +9,7 @@ import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
-from vibesys.agent_spec_config import agent_spec_from_config
+from vibesys.api import agent_spec_from_config
 from vibesys.config import Config
 from vibesys.orchestration.multi.contracts import JudgeResponse
 from vibesys.orchestration.review import Verdict

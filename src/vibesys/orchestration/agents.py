@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from vibesys.agent_spec_config import agent_spec_from_config
+from vibesys.composition import agent_spec_from_config
 from vibesys.context import borrow_run_agent_environment, open_scoped_agent_environment
 from vibesys.orchestration.steering import splice_steering
 from vibesys.orchestration.workspace_resources import resources_for

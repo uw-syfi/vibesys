@@ -11,10 +11,9 @@ from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent, RunReady
 from vibesys.api.contracts import RunResult, RunStatus
-from vibesys.composition import AGENT_TOOL_BINDINGS
+from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id

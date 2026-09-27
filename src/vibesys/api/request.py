@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.agent_spec_config import resolve_agent_driver
+from vibesys.composition import resolve_agent_driver
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.evaluators.input_synthesis import (

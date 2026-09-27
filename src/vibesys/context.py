@@ -13,7 +13,7 @@ from typing import TextIO, cast, overload
 
 from pydantic import BaseModel
 
-from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
+from vibesys.composition import agent_spec_from_config, resolve_agent_driver
 from vibesys.config import BUNDLED_RESOURCES, Config, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
