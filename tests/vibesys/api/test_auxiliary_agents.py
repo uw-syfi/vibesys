@@ -169,7 +169,7 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
 def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> None:
     environment = _Environment()
     session = _session()
-    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948027 [SLF001]; exercise real product composition over deterministic resources.
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948029 [SLF001]; exercise real product composition over deterministic resources.
     evidence = tmp_path / "evidence"
     evidence.mkdir()
 
@@ -199,7 +199,7 @@ def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
     with pytest.raises(RuntimeError, match="not ready"):
         session.create_auxiliary_agent(_launch(missing))
 
-    session._handle_resources(_resources(tmp_path, _Environment()))  # noqa: SLF001  # lint-waiver: LW-948027 [SLF001]; inject the private composition fact needed to test public rejection.
+    session._handle_resources(_resources(tmp_path, _Environment()))  # noqa: SLF001  # lint-waiver: LW-948030 [SLF001]; inject the private composition fact needed to test public rejection.
     with pytest.raises(FileNotFoundError, match="does not exist"):
         session.create_auxiliary_agent(_launch(missing))
 

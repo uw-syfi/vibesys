@@ -130,7 +130,10 @@ class _RuntimeManagedConversation:
             for resource in reversed(self._resources):
                 try:
                     resource.close()
-                except BaseException as exc:  # noqa: BLE001  # Runtime cleanup must attempt every transferred resource, including under cancellation.
+                # lint-waiver: LW-948028 [BLE001]; cleanup must attempt every transferred resource and preserve the first failure.
+                # > Catching Exception misses cancellation and process-exit failures; a helper
+                # > would still require the same broad catch while obscuring reverse ownership.
+                except BaseException as exc:  # noqa: BLE001
                     first_error = first_error or exc
             self._resources = ()
             if first_error is not None:
