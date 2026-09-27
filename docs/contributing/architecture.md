@@ -100,6 +100,9 @@ graph TD
     vibesys.api._session --> vibesys.run.contracts
     vibesys.api._session --> vibesys.run.host
     vibesys.api._session --> vibesys.run.skills
+    vibesys.api._store --> vibesys.api.contracts
+    vibesys.api._store --> vibesys.orchestration.agent_options
+    vibesys.api._store --> vibesys.plugin_catalog
     vibesys.api.agent --> vibesys.orchestration.agent_options
     vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api.agent --> vibesys.plugin_catalog
@@ -113,8 +116,7 @@ graph TD
     vibesys.api.session --> vibesys.api.contracts
     vibesys.api.session --> vibesys.plugin_catalog
     vibesys.api.session --> vibesys.run.contracts
-    vibesys.api.store --> vibesys.api.contracts
-    vibesys.api.store --> vibesys.orchestration.agent_options
+    vibesys.api.store --> vibesys.api._store
     vibesys.api.store --> vibesys.plugin_catalog
     vibesys.api.testing --> vibesys.api._session
     vibesys.api.testing --> vibesys.api.contracts
@@ -313,6 +315,10 @@ graph TD
     vibesys.api._session --> vs_project
     vibesys.api._session --> vs_runtime
     vibesys.api._session --> vs_sandbox
+    vibesys.api._store --> vibesys.api.contracts
+    vibesys.api._store --> vibesys.orchestration.agent_options
+    vibesys.api._store --> vibesys.plugin_catalog
+    vibesys.api._store --> vs_project
     vibesys.api.agent --> vibesys.orchestration.agent_options
     vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api.agent --> vibesys.plugin_catalog
@@ -331,8 +337,7 @@ graph TD
     vibesys.api.session --> vibesys.api.contracts
     vibesys.api.session --> vibesys.plugin_catalog
     vibesys.api.session --> vibesys.run.contracts
-    vibesys.api.store --> vibesys.api.contracts
-    vibesys.api.store --> vibesys.orchestration.agent_options
+    vibesys.api.store --> vibesys.api._store
     vibesys.api.store --> vibesys.plugin_catalog
     vibesys.api.store --> vs_project
     vibesys.api.testing --> vibesys.api._session

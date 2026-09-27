@@ -184,6 +184,10 @@ depends_on = ["vibesys.api.store"]
 
 [[modules]]
 path = "vibesys.api.store"
+depends_on = ["vibesys.api._store", "vibesys.plugin_catalog", "vs_project"]
+
+[[modules]]
+path = "vibesys.api._store"
 depends_on = ["vibesys.api.contracts", "vibesys.orchestration.agent_options", "vibesys.plugin_catalog", "vs_project"]
 
 [[modules]]
