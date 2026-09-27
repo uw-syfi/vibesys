@@ -39,13 +39,13 @@ from vibesys.repository import (
 )
 from vibesys.resource_paths import default_skill_roots
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.sandbox.images import build_task_image
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
     run_environment_record,
 )
-from vibesys.sandbox.task_image import build_task_image
 from vibesys.skills import resolve_skill_source_dirs
 
 if TYPE_CHECKING:
