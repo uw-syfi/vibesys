@@ -45,6 +45,14 @@ def _payload_lines(payload: dict[str, Any]) -> list[str]:
         value = payload.get(key)
         if value:
             lines.append(f"- **{key.replace('_', ' ').title()}**: {value}")
+    for key in ("throughput_trend", "latency_trend"):
+        value = payload.get(key)
+        if value:
+            lines.append(f"- **{key.replace('_', ' ').title()}**: {value}")
+    evaluator_feedback = payload.get("evaluator_feedback") or []
+    if evaluator_feedback:
+        lines.append("- **Evaluator Feedback**:")
+        lines.extend(f"  - {item}" for item in evaluator_feedback)
     files = payload.get("files_touched") or []
     if files:
         lines.append("- **Files touched**: " + ", ".join(f"`{path}`" for path in files))

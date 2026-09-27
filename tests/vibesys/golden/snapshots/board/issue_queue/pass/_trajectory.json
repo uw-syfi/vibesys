@@ -1,0 +1,124 @@
+{
+  "calls": [
+    {
+      "prior_messages": 0,
+      "response_schema": "IssueImplementerResponse",
+      "role": "implementer"
+    },
+    {
+      "prior_messages": 0,
+      "response_schema": "IssueJudgeResponse",
+      "role": "judge"
+    },
+    {
+      "prior_messages": 0,
+      "response_schema": "IssuePerfEvalResponse",
+      "role": "perf_eval"
+    }
+  ],
+  "commits": [
+    {
+      "label": "issue_queue: initialize issue board",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [],
+        "phase": "implementer",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: begin implementer for issue 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": 1,
+        "performance": [],
+        "phase": "implementer",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: begin judge for issue 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": 1,
+        "performance": [],
+        "phase": "judge",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: record judge result for issue 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [],
+        "phase": "implementer",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: begin performance evaluation 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [],
+        "phase": "perf_eval",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: record performance evaluation 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [
+          {
+            "iteration": 1,
+            "latency_trend": "improved",
+            "metrics": {
+              "extra": {},
+              "load_levels": []
+            },
+            "new_issue_ids": [],
+            "throughput_trend": "improved"
+          }
+        ],
+        "phase": "perf_eval",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: complete performance evaluation 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [
+          {
+            "iteration": 1,
+            "latency_trend": "improved",
+            "metrics": {
+              "extra": {},
+              "load_levels": []
+            },
+            "new_issue_ids": [],
+            "throughput_trend": "improved"
+          }
+        ],
+        "phase": "implementer",
+        "round_idx": 1,
+        "version": 1
+      }
+    }
+  ],
+  "logs": [
+    "round 1/1"
+  ],
+  "status": "succeeded"
+}

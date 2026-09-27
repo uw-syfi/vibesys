@@ -1,0 +1,23 @@
+{
+  "experiment_revision": null,
+  "payload": {
+    "bootstrap_done": true,
+    "current_issue_id": null,
+    "performance": [
+      {
+        "iteration": 1,
+        "latency_trend": "improved",
+        "metrics": {
+          "extra": {},
+          "load_levels": []
+        },
+        "new_issue_ids": [],
+        "throughput_trend": "improved"
+      }
+    ],
+    "phase": "implementer",
+    "round_idx": 1,
+    "version": 1
+  },
+  "rounds": []
+}

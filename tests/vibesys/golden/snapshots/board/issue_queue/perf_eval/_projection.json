@@ -1,0 +1,57 @@
+{
+  "experiment_revision": null,
+  "payload": {
+    "bootstrap_done": true,
+    "current_issue_id": null,
+    "performance": [
+      {
+        "iteration": 1,
+        "latency_trend": "mixed",
+        "metrics": {
+          "extra": {},
+          "load_levels": [
+            {
+              "actual_rate": 7.9,
+              "duration": 20.0,
+              "num_completed": 100,
+              "num_failed": 0,
+              "num_requests": 100,
+              "target_rate": 8.0,
+              "throughput": {
+                "request_throughput": 7.9,
+                "token_throughput": 1011.2
+              },
+              "total_latency": {
+                "mean_ms": 900.0,
+                "p50_ms": 880.0,
+                "p90_ms": 1000.0,
+                "p95_ms": 1050.0,
+                "p99_ms": 1200.0
+              },
+              "tpot": {
+                "mean_ms": 9.0,
+                "p50_ms": 8.5,
+                "p90_ms": 11.0,
+                "p95_ms": 12.0,
+                "p99_ms": 15.0
+              },
+              "ttft": {
+                "mean_ms": 42.0,
+                "p50_ms": 40.0,
+                "p90_ms": 55.0,
+                "p95_ms": 60.0,
+                "p99_ms": 70.0
+              }
+            }
+          ]
+        },
+        "new_issue_ids": [],
+        "throughput_trend": "improved"
+      }
+    ],
+    "phase": "implementer",
+    "round_idx": 1,
+    "version": 1
+  },
+  "rounds": []
+}
