@@ -1,4 +1,4 @@
-"""CUDA backend: NVIDIA GPU + nvcr.io PyTorch container + nsys profiler."""
+"""CUDA backend: NVIDIA GPU and nvcr.io PyTorch container."""
 
 from __future__ import annotations
 
@@ -10,30 +10,27 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, assert_never, cast
 
-from vibesys.backends.base import (
+from vs_sandbox.compute_backends import (
+    ComputeBackend,
     ContentionMonitor,
     SandboxKind,
     make_local_shell_sandbox,
 )
-from vibesys.backends.cuda.gpu_monitor import (
+from vs_sandbox.gpu_monitor import (
     GpuContentionMonitor,
     GpuInfo,
     pick_gpu,
     query_gpu_info,
 )
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import DockerSandbox as DockerSandboxType
-    from vs_sandbox.api import (
-        HostResource,
-        LocalShellSandbox,
-        Sandbox,
-        SandboxLifecycleHooks,
-    )
+    from vs_sandbox.docker_sandbox import DockerSandbox as DockerSandboxType
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sandbox.local_shell import LocalShellSandbox
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -48,7 +45,6 @@ class CudaBackend:
     """
 
     name = ComputeBackend.CUDA
-    profiler_kind = ProfilerKind.NSYS
 
     def __init__(
         self,

@@ -17,9 +17,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
-    from vibesys.backends.cuda import GpuInfo
     from vibesys.sandbox.run_environment import RunEnvironmentView
+    from vs_sandbox.api import ComputeBackendImpl, ContentionMonitor, GpuInfo
 
 
 class DeviceLease:

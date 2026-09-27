@@ -65,6 +65,7 @@ graph TD
     vs_agent --> vs_sandbox
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_project
     vs_runtime --> vs_sandbox
     vs_sandbox --> vs_project
 ```
@@ -100,11 +101,8 @@ graph TD
     vibesys.api.contracts --> vibesys.orchestration.request
     vibesys.api.contracts --> vibesys.orchestration.view
     vibesys.api.evolve --> vibesys.orchestrations
-    vibesys.api.testing --> vibesys.backends
     vibesys.api.testing --> vibesys.orchestration.fake_gates
-    vibesys.backends --> vibesys
     vibesys.context --> vibesys
-    vibesys.context --> vibesys.backends
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.errors
     vibesys.context --> vibesys.evaluators
@@ -170,7 +168,6 @@ graph TD
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
-    vibesys.orchestration.runner --> vibesys.backends
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
     vibesys.orchestration.runner --> vibesys.orchestration.environment
     vibesys.orchestration.runner --> vibesys.orchestration.gates
@@ -178,7 +175,6 @@ graph TD
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
-    vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.orchestration.agents
     vibesys.orchestration.runtime --> vibesys.orchestration.commands
@@ -237,12 +233,10 @@ graph TD
     vibesys.roles --> vibesys.search.hypothesis
     vibesys.roles --> vibesys.search.population
     vibesys.run --> vibesys
-    vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
     vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
     vibesys.sandbox --> vibesys
-    vibesys.sandbox --> vibesys.backends
     vibesys.sandbox --> vibesys.domains
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
@@ -341,6 +335,7 @@ graph TD
     vibesys --> vs_agent
     vibesys --> vs_loop_state
     vibesys --> vs_runtime
+    vibesys --> vs_sandbox
     vibesys.api --> vibesys
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
@@ -373,13 +368,8 @@ graph TD
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
     vibesys.api.evolve --> vibesys.orchestrations
-    vibesys.api.testing --> vibesys.backends
     vibesys.api.testing --> vibesys.orchestration.fake_gates
-    vibesys.backends --> vibesys
-    vibesys.backends --> vs_runtime
-    vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
-    vibesys.context --> vibesys.backends
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.errors
     vibesys.context --> vibesys.evaluators
@@ -471,7 +461,6 @@ graph TD
     vibesys.orchestration.request --> vibesys.sandbox
     vibesys.orchestration.request --> vs_project
     vibesys.orchestration.resume --> vs_project
-    vibesys.orchestration.runner --> vibesys.backends
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
     vibesys.orchestration.runner --> vibesys.orchestration.environment
     vibesys.orchestration.runner --> vibesys.orchestration.gates
@@ -480,8 +469,8 @@ graph TD
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runner --> vs_agent
     vibesys.orchestration.runner --> vs_runtime
+    vibesys.orchestration.runner --> vs_sandbox
     vibesys.orchestration.runtime --> vibesys
-    vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.orchestration.agents
     vibesys.orchestration.runtime --> vibesys.orchestration.commands
@@ -498,6 +487,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.runtime --> vs_agent
     vibesys.orchestration.runtime --> vs_runtime
+    vibesys.orchestration.runtime --> vs_sandbox
     vibesys.orchestration.skills --> vibesys
     vibesys.orchestration.skills --> vibesys.orchestration._host
     vibesys.orchestration.skills --> vs_runtime
@@ -557,7 +547,6 @@ graph TD
     vibesys.roles --> vs_issue_tracker
     vibesys.roles --> vs_loop_state
     vibesys.run --> vibesys
-    vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
     vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
@@ -569,7 +558,6 @@ graph TD
     vibesys.runtime --> vs_agent
     vibesys.runtime --> vs_sandbox
     vibesys.sandbox --> vibesys
-    vibesys.sandbox --> vibesys.backends
     vibesys.sandbox --> vibesys.domains
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
@@ -587,6 +575,7 @@ graph TD
     vs_agent --> vs_sandbox
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_project
     vs_runtime --> vs_sandbox
     vs_sandbox --> vs_project
 ```

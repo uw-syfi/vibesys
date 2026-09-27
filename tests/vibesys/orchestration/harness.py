@@ -11,7 +11,6 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch  # test-isolation: module seams patched below
 
-from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
 from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
@@ -20,6 +19,7 @@ from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

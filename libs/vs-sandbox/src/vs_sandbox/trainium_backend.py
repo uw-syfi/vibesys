@@ -1,4 +1,4 @@
-"""Trainium backend: AWS NeuronCores + Neuron DLC container + neuron-explorer.
+"""Trainium backend: AWS NeuronCores and a Neuron DLC container.
 
 Trainium (Trn1/Trn2) is neither CUDA nor Metal:
 
@@ -26,19 +26,20 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.backends.base import (
+from vs_sandbox.accelerator_discovery import AcceleratorDiscovery, SystemAcceleratorDiscovery
+from vs_sandbox.compute_backends import (
+    ComputeBackend,
     ContentionMonitor,
     SandboxKind,
     make_local_shell_sandbox,
 )
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
-from vs_runtime.api.infrastructure import AcceleratorDiscovery, SystemAcceleratorDiscovery
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
 # AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
 # PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries
@@ -68,7 +69,6 @@ class TrainiumBackend:
     """AWS Trainium / NeuronCore backend (local or Docker; no Modal)."""
 
     name = ComputeBackend.TRAINIUM
-    profiler_kind = ProfilerKind.NEURON
 
     def __init__(
         self,

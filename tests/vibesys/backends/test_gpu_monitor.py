@@ -8,25 +8,19 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
-from vibesys.backends.base import (
-    SandboxKind,
-)
-from vibesys.backends.cuda import (
-    CudaBackend,
-)
-from vibesys.backends.cuda.gpu_monitor import (
-    GpuContentionMonitor,
-    GpuInfo,
-    _parse_proc_output,
-    pick_gpu,
-    query_gpu_info,
-)
 from vibesys.run import (
     DeviceLease,
 )
 from vs_sandbox.api import (
+    CudaBackend,
     DockerSandbox,
+    GpuContentionMonitor,
+    GpuInfo,
     LocalShellSandbox,
+    SandboxKind,
+    parse_gpu_process_output,
+    pick_gpu,
+    query_gpu_info,
 )
 
 if TYPE_CHECKING:
@@ -57,7 +51,7 @@ def _gpu(index: int, uuid: str, used: int = 0, total: int = 81559, util: int = 0
 
 
 class TestQueryGpuInfo:
-    @patch("vibesys.backends.cuda.gpu_monitor.subprocess.run")
+    @patch("vs_sandbox.gpu_monitor.subprocess.run")
     def test_parses_csv(self, mock_run: MagicMock) -> None:
         mock_run.return_value = type(
             "R",
@@ -74,12 +68,12 @@ class TestQueryGpuInfo:
         assert gpus[0].memory_used_mib == 5000
         assert gpus[1].memory_free_mib == 81559 - 100
 
-    @patch("vibesys.backends.cuda.gpu_monitor.subprocess.run")
+    @patch("vs_sandbox.gpu_monitor.subprocess.run")
     def test_returns_empty_on_failure(self, mock_run: MagicMock) -> None:
         mock_run.return_value = type("R", (), {"returncode": 1, "stdout": ""})()
         assert query_gpu_info() == []
 
-    @patch("vibesys.backends.cuda.gpu_monitor.subprocess.run")
+    @patch("vs_sandbox.gpu_monitor.subprocess.run")
     def test_returns_empty_on_missing_nvidia_smi(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = FileNotFoundError
         assert query_gpu_info() == []
@@ -111,19 +105,19 @@ class TestPickGpu:
 class TestParseProcOutput:
     def test_parses_four_columns(self) -> None:
         raw = f"1000, python, 4096, {GPU_A}\n"
-        procs = _parse_proc_output(raw)
+        procs = parse_gpu_process_output(raw)
         assert len(procs) == 1
         assert procs[0]["gpu_uuid"] == GPU_A
         assert procs[0]["pid"] == 1000
 
     def test_empty(self) -> None:
-        assert _parse_proc_output("") == []
+        assert parse_gpu_process_output("") == []
 
     def test_skips_header(self) -> None:
-        assert _parse_proc_output("pid, process_name, used_memory, gpu_uuid\n") == []
+        assert parse_gpu_process_output("pid, process_name, used_memory, gpu_uuid\n") == []
 
     def test_skips_short_rows(self) -> None:
-        assert _parse_proc_output("100, python, 4096\n") == []
+        assert parse_gpu_process_output("100, python, 4096\n") == []
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +126,8 @@ class TestParseProcOutput:
 
 
 class TestMonitorLifecycle:
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_start_stop(self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path) -> None:
         del mock_query
         mock_procs.return_value = ""
@@ -150,8 +144,8 @@ class TestMonitorLifecycle:
         assert stopped_call_count > 1
         assert mock_procs.call_count == stopped_call_count
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_baseline_captured_on_start(
         self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
     ) -> None:
@@ -169,8 +163,8 @@ class TestMonitorLifecycle:
         assert not mon.status.is_contended
         mon.stop()
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_new_pid_triggers_contention(
         self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
     ) -> None:
@@ -194,8 +188,8 @@ class TestMonitorLifecycle:
         assert status.is_contended
         assert any(p["pid"] == 200 for p in status.new_procs)
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_new_pid_on_different_gpu_ignored(
         self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
     ) -> None:
@@ -217,8 +211,8 @@ class TestMonitorLifecycle:
         mon.stop()
         assert not status.is_contended
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_contention_logged_to_file(
         self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
     ) -> None:
@@ -248,8 +242,8 @@ class TestMonitorLifecycle:
         assert event["gpu_uuid"] == GPU_A
         assert any(p["pid"] == 200 for p in event["new_procs"])
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_no_log_when_no_contention(
         self, mock_procs: MagicMock, mock_query: MagicMock, tmp_path: Path
     ) -> None:
@@ -271,7 +265,7 @@ class TestMonitorLifecycle:
         if log_file.exists():
             assert log_file.read_text().strip() == ""
 
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs")
     def test_smi_failure_does_not_crash(self, mock_procs: MagicMock, tmp_path: Path) -> None:
         mock_procs.side_effect = Exception("nvidia-smi not found")
         log_dir = tmp_path / "logs"
@@ -369,14 +363,14 @@ class TestReselectGpu:
         ctx.logger = MagicMock()  # lprint / run_log_file delegate to RunLogger
         return ctx
 
-    @patch("vibesys.backends.cuda.pick_gpu")
+    @patch("vs_sandbox.cuda_backend.pick_gpu")
     def test_noop_when_cuda_visible_set(self, mock_pick: MagicMock, tmp_path: Path) -> None:
         ctx = self._make_ctx(tmp_path, selected_gpu=_gpu(0, GPU_A))
         with patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "0"}):
             ctx.device.reselect()
         mock_pick.assert_not_called()
 
-    @patch("vibesys.backends.cuda.pick_gpu", return_value=None)
+    @patch("vs_sandbox.cuda_backend.pick_gpu", return_value=None)
     def test_noop_when_no_gpus(self, mock_pick: MagicMock, tmp_path: Path) -> None:
         del mock_pick
         ctx = self._make_ctx(tmp_path, selected_gpu=_gpu(0, GPU_A))
@@ -384,7 +378,7 @@ class TestReselectGpu:
         assert ctx.device.selected_device is not None
         assert ctx.device.selected_device.index == 0  # unchanged
 
-    @patch("vibesys.backends.cuda.pick_gpu")
+    @patch("vs_sandbox.cuda_backend.pick_gpu")
     def test_noop_when_same_gpu(self, mock_pick: MagicMock, tmp_path: Path) -> None:
         gpu0 = _gpu(0, GPU_A, used=100)
         ctx = self._make_ctx(tmp_path, selected_gpu=gpu0)
@@ -393,9 +387,9 @@ class TestReselectGpu:
         # Still the original object (not updated since index matches)
         assert ctx.device.selected_device is gpu0
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.pick_gpu")
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs", return_value="")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.cuda_backend.pick_gpu")
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs", return_value="")
     def test_local_backend_env_updated(
         self,
         mock_procs: MagicMock,
@@ -420,9 +414,9 @@ class TestReselectGpu:
         assert implementer_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
         assert judge_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.pick_gpu")
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs", return_value="")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.cuda_backend.pick_gpu")
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs", return_value="")
     def test_contention_monitor_restarted(
         self,
         mock_procs: MagicMock,
@@ -442,7 +436,7 @@ class TestReselectGpu:
 
         next_monitor = MagicMock()
         with patch(
-            "vibesys.backends.cuda.GpuContentionMonitor",
+            "vs_sandbox.cuda_backend.GpuContentionMonitor",
             side_effect=[old_monitor, next_monitor],
         ) as monitor_factory:
             ctx.device.start_monitor()
@@ -455,9 +449,9 @@ class TestReselectGpu:
         # Clean up
         ctx.device.monitor.stop()
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.pick_gpu")
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs", return_value="")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.cuda_backend.pick_gpu")
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs", return_value="")
     def test_docker_backends_restarted(
         self,
         mock_procs: MagicMock,
@@ -485,9 +479,9 @@ class TestReselectGpu:
     # Note: symlink replay on restart is the sandbox class's responsibility
     # (it runs lifecycle hooks before becoming ready).
 
-    @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
-    @patch("vibesys.backends.cuda.pick_gpu")
-    @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs", return_value="")
+    @patch("vs_sandbox.gpu_monitor.query_gpu_info", return_value=[])
+    @patch("vs_sandbox.cuda_backend.pick_gpu")
+    @patch("vs_sandbox.gpu_monitor._query_gpu_procs", return_value="")
     def test_first_selection_from_none(
         self,
         mock_procs: MagicMock,

@@ -23,7 +23,7 @@ from vibesys.sandbox.run_environment import LocalEnvironment
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vibesys.backends.base import ComputeBackendImpl
+    from vs_sandbox.api import ComputeBackendImpl
 
 
 class _StubRunEnvironment(LocalEnvironment):

@@ -137,7 +137,7 @@ def _query_gpu_procs() -> str:
     return result.stdout
 
 
-def _parse_proc_output(raw: str) -> list[dict[str, Any]]:
+def parse_gpu_process_output(raw: str) -> list[dict[str, Any]]:
     """Parse nvidia-smi compute-apps CSV into process dicts."""
     procs: list[dict[str, Any]] = []
     for line in raw.strip().splitlines():
@@ -236,7 +236,7 @@ class GpuContentionMonitor:
         """Return the set of PIDs currently on the monitored GPU."""
         try:
             raw = _query_gpu_procs()
-            procs = _parse_proc_output(raw)
+            procs = parse_gpu_process_output(raw)
         except Exception:  # noqa: BLE001  # lint-waiver: LW-009050 [BLE001]; GPU telemetry is best effort, and any driver failure must leave monitoring available.
             return set()
         return {p["pid"] for p in procs if p["gpu_uuid"] == self._gpu_uuid}
@@ -247,7 +247,7 @@ class GpuContentionMonitor:
         while not self._stop_event.is_set():
             try:
                 raw = _query_gpu_procs()
-                procs = _parse_proc_output(raw)
+                procs = parse_gpu_process_output(raw)
                 gpu_procs = [p for p in procs if p["gpu_uuid"] == self._gpu_uuid]
 
                 new_procs = [p for p in gpu_procs if p["pid"] not in self._baseline_pids]

@@ -8,16 +8,20 @@ from typing import TYPE_CHECKING
 from tests.support import capture_docker_start_argv
 
 from entrypoints.cli import _add_common_args
-from vibesys import backends
-from vibesys.backends import SandboxKind
-from vibesys.backends.rocm import _DEFAULT_IMAGE, RocmBackend
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, RocmComputeBackendFragment
 from vibesys.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
-from vs_runtime.api.infrastructure import AcceleratorInventory
-from vs_runtime.api.testing import FakeAcceleratorDiscovery
-from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
+from vs_sandbox.api import (
+    AcceleratorInventory,
+    ComputeBackend,
+    DockerSandbox,
+    HostResource,
+    HostResourceAccess,
+    LocalShellSandbox,
+    RocmBackend,
+    SandboxKind,
+    create_compute_backend,
+)
+from vs_sandbox.api.testing import FakeAcceleratorDiscovery
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -39,13 +43,12 @@ def _make_backend(
 
 class TestRocmRegistry:
     def test_rocm_in_registry(self, tmp_path: Path) -> None:
-        impl = backends.get(ComputeBackend.ROCM, log_dir=tmp_path)
+        impl = create_compute_backend(ComputeBackend.ROCM, log_dir=tmp_path)
         assert isinstance(impl, RocmBackend)
         assert impl.name is ComputeBackend.ROCM
         # rocprofv3 / rocprof-compute is the dedicated system- and
         # kernel-altitude toolkit for ROCm; torch.profiler is still
         # selectable via --profiler torch.
-        assert impl.profiler_kind is ProfilerKind.ROCPROF
 
 
 class TestRocmSandbox:
@@ -145,10 +148,10 @@ class TestRocmSandbox:
         env = [argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "-e"]
         assert any(value.startswith("UV_EXTRA_INDEX_URL=") and "rocm" in value for value in env)
 
-    def test_default_image_is_pinned(self) -> None:
+    def test_default_image_is_pinned(self, tmp_path: Path) -> None:
         """A floating :latest tag can drift past the host kernel driver."""
 
-        assert not _DEFAULT_IMAGE.endswith(":latest")
+        assert not _make_backend(tmp_path).image.endswith(":latest")
 
     def test_hip_visible_devices_is_respected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

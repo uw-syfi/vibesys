@@ -19,18 +19,19 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.backends.base import (
+from vs_sandbox.compute_backends import (
+    ComputeBackend,
     ContentionMonitor,
     SandboxKind,
     make_local_shell_sandbox,
 )
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
@@ -49,13 +50,11 @@ class LocalBackend:
         """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
         if name is ComputeBackend.METAL:
-            self.profiler_kind = ProfilerKind.TORCH
             self._unavailable_reason = (
                 "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
             )
             self._supports_docker = False
         else:
-            self.profiler_kind = ProfilerKind.LINUX_CPU
             self._unavailable_reason = "Modal CPU execution is not wired up for this backend"
             self._supports_docker = True
         self.log_dir = Path(log_dir)

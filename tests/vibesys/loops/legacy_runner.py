@@ -15,7 +15,6 @@ from vibesys.orchestration.runtime import RunContext
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.context import RunSetup
     from vibesys.orchestration.contracts import OrchestrationProjector
     from vibesys.orchestration.environment import AgentEnvironment
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
     from vs_project.api import OrchestrationDescriptor
+    from vs_sandbox.api import ComputeBackendImpl
 
 
 class LegacyOrchestrator(Protocol):

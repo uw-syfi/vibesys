@@ -77,7 +77,6 @@ from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
 
-    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.context import _RunResources
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
@@ -87,6 +86,7 @@ if TYPE_CHECKING:
     from vibesys.runtime import AgentDefinition, WorkspaceScope
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import AgentRole, OrchestrationPlugin
+    from vs_sandbox.api import ComputeBackendImpl
 
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
@@ -179,7 +179,7 @@ class RunContext:
 
         ``agent_client_factory`` and ``backend_factory`` are injection seams a
         test uses in place of monkeypatching this module's real client/backend
-        constructors (``build_agent_client``, ``vibesys.backends.get``). Each
+        constructors (``build_agent_client``, ``create_compute_backend``). Each
         defaults to the real implementation when omitted, so production call
         sites are unchanged. ``agent_client_factory`` overrides
         :func:`vs_agent.api.build_agent_client`, looked up as this module's

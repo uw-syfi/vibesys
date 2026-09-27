@@ -1,4 +1,4 @@
-"""ROCm backend: AMD Instinct GPUs + ROCm PyTorch container + torch profiler.
+"""ROCm backend: AMD Instinct GPUs and a ROCm PyTorch container.
 
 ROCm shares the discrete-accelerator model with CUDA — separate device
 memory, dynamic shapes, per-kernel launch cost — so the serving techniques
@@ -21,7 +21,7 @@ carry over. What differs is plumbing:
    exercised against MI300-class hardware in this repository. Device
    discovery and the container contract follow the documented ROCm
    conventions; treat them as unverified until a run confirms them. Like
-   :class:`~vibesys.backends.local.LocalBackend`'s ``metal`` and ``cpu``
+   :class:`~vs_sandbox.local_compute_backend.LocalBackend`'s ``metal`` and ``cpu``
    bindings; serving-domain prompts may also need target-specific adaptation.
 
 There is no remote-GPU sandbox path: ``make_sandbox`` supports only
@@ -36,19 +36,20 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.backends.base import (
+from vs_sandbox.accelerator_discovery import AcceleratorDiscovery, SystemAcceleratorDiscovery
+from vs_sandbox.compute_backends import (
+    ComputeBackend,
     ContentionMonitor,
     SandboxKind,
     make_local_shell_sandbox,
 )
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
-from vs_runtime.api.infrastructure import AcceleratorDiscovery, SystemAcceleratorDiscovery
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
 # Pinned rather than ``:latest`` for reproducibility and because the
@@ -80,7 +81,6 @@ class RocmBackend:
     """
 
     name = ComputeBackend.ROCM
-    profiler_kind = ProfilerKind.ROCPROF
 
     def __init__(
         self,

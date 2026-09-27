@@ -2,14 +2,22 @@
 
 ## Responsibility
 
-This package provides workspace execution backends, host resource and path
-policies, lifecycle hooks, and Modal model-weight volume provisioning.
-Applications select a backend and declare the resources their agents need.
+This package provides compute backend implementations, accelerator discovery
+and monitoring, workspace execution backends, host resource and path policies,
+lifecycle hooks, and Modal model-weight volume provisioning. Applications
+select a compute stack and profiler policy, then declare the resources their
+agents need.
 
 ## Concepts
 
 - `Sandbox` is the command-execution protocol (`id`, `execute`) every sandbox
   kind satisfies; `SandboxExecutionResult` is its bounded result.
+- `ComputeBackendImpl` constructs sandboxes for one compute stack. The public
+  registry supplies CUDA, ROCm, Trainium, Metal, and CPU implementations;
+  application code retains the policy for choosing among them.
+- `AcceleratorDiscovery` and the GPU contention monitor isolate host hardware
+  inspection from orchestration. Their deterministic Fakes are public through
+  `vs_sandbox.api.testing`.
 - `LocalShellSandbox` runs shell commands directly on the host with no
   isolation, for backends that have no container.
 - `DockerSandbox` runs agent operations in a local Docker container with

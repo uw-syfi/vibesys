@@ -29,9 +29,9 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.constants import ComputeBackend
     from vibesys.sandbox.run_environment import RunEnvironment
+    from vs_sandbox.api import ComputeBackendImpl
 
 # Directories excluded from project materialization, Git tracking, and the
 # Modal-side tar download. ``_auth`` and ``_opt_vibesys`` are

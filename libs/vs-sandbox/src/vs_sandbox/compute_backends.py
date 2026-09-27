@@ -1,4 +1,4 @@
-"""Compute backend protocol — the contract every compute target implements.
+"""Compute backend protocol and registry for sandbox construction.
 
 A ``ComputeBackendImpl`` knows how to:
 
@@ -16,17 +16,30 @@ compute backend supplies the right values for its platform inside
 from __future__ import annotations
 
 from enum import StrEnum
+from functools import cache
+from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from vs_sandbox.api import LocalShellSandbox, SandboxLifecycle
+from vs_sandbox.lifecycle import SandboxLifecycle
+from vs_sandbox.local_shell import LocalShellSandbox
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vibesys.constants import ComputeBackend
-    from vibesys.profilers import ProfilerKind
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
+
+
+class ComputeBackend(StrEnum):
+    """Compute stacks supported by sandbox construction."""
+
+    CUDA = "cuda"
+    METAL = "metal"
+    TRAINIUM = "trainium"
+    ROCM = "rocm"
+    CPU = "cpu"
 
 
 class SandboxKind(StrEnum):
@@ -60,7 +73,6 @@ class ComputeBackendImpl(Protocol):
     """Per-platform backend.  See module docstring for the contract."""
 
     name: ComputeBackend
-    profiler_kind: ProfilerKind  # picks profiler support, MCP, and prompt template
 
     def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011111 [PLR0913]; Runtime-checkable ComputeBackendImpl exposes these sandbox controls as protocol keywords; a config object would break every backend implementation and caller.
         self,
@@ -142,3 +154,58 @@ def make_local_shell_sandbox(
     sandbox = LocalShellSandbox(host_workspace, env=env, inherit_env=True)
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox
+
+
+_REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
+
+
+def register_compute_backend(
+    backend: ComputeBackend,
+    factory: Callable[..., ComputeBackendImpl],
+) -> None:
+    """Register the factory used to construct one compute backend."""
+    _REGISTRY[backend] = factory
+
+
+def create_compute_backend(
+    backend: ComputeBackend,
+    log_dir: Path,
+    *,
+    log: Callable[[str], None] | None = None,
+    image: str | None = None,
+) -> ComputeBackendImpl:
+    """Construct the registered implementation for one compute stack."""
+    _ensure_defaults()
+    if backend not in _REGISTRY:
+        message = f"No backend impl registered for {backend!r}"
+        raise ValueError(message)
+    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image)
+
+
+def _register_defaults() -> None:
+    cuda = import_module("vs_sandbox.cuda_backend")
+    local = import_module("vs_sandbox.local_compute_backend")
+    rocm = import_module("vs_sandbox.rocm_backend")
+    trainium = import_module("vs_sandbox.trainium_backend")
+
+    register_compute_backend(ComputeBackend.CUDA, cuda.CudaBackend)
+    register_compute_backend(ComputeBackend.METAL, local.metal_backend)
+    register_compute_backend(ComputeBackend.TRAINIUM, trainium.TrainiumBackend)
+    register_compute_backend(ComputeBackend.ROCM, rocm.RocmBackend)
+    register_compute_backend(ComputeBackend.CPU, local.cpu_backend)
+
+
+@cache
+def _ensure_defaults() -> None:
+    _register_defaults()
+
+
+__all__ = [
+    "ComputeBackend",
+    "ComputeBackendImpl",
+    "ContentionMonitor",
+    "Device",
+    "SandboxKind",
+    "create_compute_backend",
+    "register_compute_backend",
+]

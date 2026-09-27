@@ -13,9 +13,7 @@ from typing import TextIO, cast, overload
 
 from pydantic import BaseModel
 
-from vibesys import backends
 from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
-from vibesys.backends.base import ComputeBackendImpl
 from vibesys.config import Config, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
@@ -44,6 +42,7 @@ from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerDefinition,
     ProfilerKind,
+    default_profiler_for_backend,
     preflight_profiler_kind,
     profiler_definition,
     resolve_profiler_kind,
@@ -101,7 +100,14 @@ from vs_runtime.api.infrastructure import (
     RoundRecoveryOutcome,
     RunState,
 )
-from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy, Sandbox
+from vs_sandbox.api import (
+    ComputeBackendImpl,
+    HostResource,
+    HostResourceAccess,
+    ProjectPathPolicy,
+    Sandbox,
+    create_compute_backend,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,8 +331,8 @@ def open_run_resources(
     """Open the one project context from a canonical request and policy setup.
 
     ``backend_factory`` overrides how the compute backend is constructed
-    (default: the registered ``vibesys.backends.get``); a test injects
-    ``vibesys.api.testing.FakeComputeBackend`` here instead of monkeypatching
+    (default: ``vs_sandbox.api.create_compute_backend``); a test injects
+    ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of monkeypatching
     the registry or a backend's internal sandbox constructor.
     """
     teardown_stack = ExitStack()
@@ -458,7 +464,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                     ) from exc
 
         with boot_trace.span("backend_and_model"):
-            backend_get = backend_factory or backends.get
+            backend_get = backend_factory or create_compute_backend
             backend_impl = backend_get(
                 backend,
                 log_dir=Project.log_directory_for(project_root, run_id),
@@ -472,7 +478,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             resolved_profiler_kind = resolve_profiler_kind(
                 profiler_kind,
                 domain=profiler_domain,
-                backend_profiler_kind=getattr(backend_impl, "profiler_kind", None),
+                backend_profiler_kind=default_profiler_for_backend(backend),
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )

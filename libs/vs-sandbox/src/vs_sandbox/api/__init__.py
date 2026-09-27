@@ -13,8 +13,30 @@ from typing import TYPE_CHECKING
 from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
 
 if TYPE_CHECKING:
+    from vs_sandbox.accelerator_discovery import (
+        AcceleratorDiscovery,
+        AcceleratorInventory,
+        SystemAcceleratorDiscovery,
+    )
+    from vs_sandbox.compute_backends import (
+        ComputeBackend,
+        ComputeBackendImpl,
+        ContentionMonitor,
+        Device,
+        SandboxKind,
+        create_compute_backend,
+        register_compute_backend,
+    )
+    from vs_sandbox.cuda_backend import CudaBackend
     from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox
     from vs_sandbox.execution import Sandbox, SandboxExecutionResult
+    from vs_sandbox.gpu_monitor import (
+        GpuContentionMonitor,
+        GpuInfo,
+        parse_gpu_process_output,
+        pick_gpu,
+        query_gpu_info,
+    )
     from vs_sandbox.host_resources import (
         HostResource,
         HostResourceAccess,
@@ -37,13 +59,25 @@ if TYPE_CHECKING:
         SandboxLifecycleError,
         SandboxLifecycleHooks,
     )
+    from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellSandbox
     from vs_sandbox.modal_model_setup import ensure_model_volume
+    from vs_sandbox.rocm_backend import RocmBackend
+    from vs_sandbox.trainium_backend import TrainiumBackend
 
 __all__ = [
     "AGENT_HOME",
+    "AcceleratorDiscovery",
+    "AcceleratorInventory",
     "BeforeReadyContext",
+    "ComputeBackend",
+    "ComputeBackendImpl",
+    "ContentionMonitor",
+    "CudaBackend",
+    "Device",
     "DockerSandbox",
+    "GpuContentionMonitor",
+    "GpuInfo",
     "HostResource",
     "HostResourceAccess",
     "HostResourceContext",
@@ -51,23 +85,55 @@ __all__ = [
     "HostSandbox",
     "LandlockSandbox",
     "LinuxBackend",
+    "LocalBackend",
     "LocalShellSandbox",
     "ProjectPathPolicy",
     "ProjectPathPolicyError",
+    "RocmBackend",
     "Sandbox",
     "SandboxExecutionResult",
+    "SandboxKind",
     "SandboxLifecycle",
     "SandboxLifecycleError",
     "SandboxLifecycleHooks",
     "SandboxUnavailableError",
     "SeatbeltSandbox",
+    "SystemAcceleratorDiscovery",
+    "TrainiumBackend",
     "WorkspaceSandbox",
     "build_host_sandbox",
+    "create_compute_backend",
     "declare_resources",
     "ensure_model_volume",
+    "parse_gpu_process_output",
+    "pick_gpu",
+    "query_gpu_info",
+    "register_compute_backend",
 ]
 
 _LAZY_EXPORTS = {
+    "AcceleratorDiscovery": ("accelerator_discovery", "AcceleratorDiscovery"),
+    "AcceleratorInventory": ("accelerator_discovery", "AcceleratorInventory"),
+    "SystemAcceleratorDiscovery": (
+        "accelerator_discovery",
+        "SystemAcceleratorDiscovery",
+    ),
+    "ComputeBackend": ("compute_backends", "ComputeBackend"),
+    "ComputeBackendImpl": ("compute_backends", "ComputeBackendImpl"),
+    "ContentionMonitor": ("compute_backends", "ContentionMonitor"),
+    "Device": ("compute_backends", "Device"),
+    "SandboxKind": ("compute_backends", "SandboxKind"),
+    "create_compute_backend": ("compute_backends", "create_compute_backend"),
+    "register_compute_backend": ("compute_backends", "register_compute_backend"),
+    "CudaBackend": ("cuda_backend", "CudaBackend"),
+    "GpuContentionMonitor": ("gpu_monitor", "GpuContentionMonitor"),
+    "GpuInfo": ("gpu_monitor", "GpuInfo"),
+    "parse_gpu_process_output": ("gpu_monitor", "parse_gpu_process_output"),
+    "pick_gpu": ("gpu_monitor", "pick_gpu"),
+    "query_gpu_info": ("gpu_monitor", "query_gpu_info"),
+    "LocalBackend": ("local_compute_backend", "LocalBackend"),
+    "RocmBackend": ("rocm_backend", "RocmBackend"),
+    "TrainiumBackend": ("trainium_backend", "TrainiumBackend"),
     "AGENT_HOME": ("docker_sandbox", "AGENT_HOME"),
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),
     "Sandbox": ("execution", "Sandbox"),

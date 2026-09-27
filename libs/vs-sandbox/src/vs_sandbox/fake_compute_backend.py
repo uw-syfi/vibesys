@@ -1,4 +1,4 @@
-"""In-memory :class:`~vibesys.backends.base.ComputeBackendImpl` test double.
+"""In-memory :class:`ComputeBackendImpl` test double.
 
 No GPU probing, no container runtime, no subprocess: every sandbox
 ``make_sandbox`` returns is an in-memory
@@ -12,23 +12,46 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
-from vs_sandbox.api.testing import FakeSandbox
+from vs_sandbox.accelerator_discovery import AcceleratorInventory
+from vs_sandbox.compute_backends import ComputeBackend
+from vs_sandbox.fake_sandbox import FakeSandbox
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vibesys.backends.base import ContentionMonitor, SandboxKind
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from vs_sandbox.compute_backends import ContentionMonitor, SandboxKind
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
+
+
+class FakeAcceleratorDiscovery:
+    """Deterministic in-memory accelerator inventory."""
+
+    def __init__(
+        self,
+        *,
+        trainium: AcceleratorInventory | None = None,
+        rocm: AcceleratorInventory | None = None,
+    ) -> None:
+        """Store deterministic accelerator inventories for both platforms."""
+        self._trainium = trainium or AcceleratorInventory()
+        self._rocm = rocm or AcceleratorInventory()
+
+    def discover_trainium(self) -> AcceleratorInventory:
+        """Return the configured Trainium inventory."""
+        return self._trainium
+
+    def discover_rocm(self) -> AcceleratorInventory:
+        """Return the configured ROCm inventory."""
+        return self._rocm
 
 
 class FakeComputeBackend:
-    """Configurable in-memory double for :class:`~vibesys.backends.base.ComputeBackendImpl`."""
+    """Configurable in-memory double for :class:`ComputeBackendImpl`."""
 
     name = ComputeBackend.CUDA
-    profiler_kind = ProfilerKind.NONE
 
     def __init__(
         self,

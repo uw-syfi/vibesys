@@ -15,11 +15,6 @@ from typing import TYPE_CHECKING, Protocol, TypeVar
 from pydantic import BaseModel
 
 from vs_agent.api import AgentCapabilities, AgentSessionKey, ToolServerDescriptor
-from vs_runtime._accelerators import (
-    AcceleratorDiscovery,
-    AcceleratorInventory,
-    SystemAcceleratorDiscovery,
-)
 from vs_runtime._agent_sessions import RuntimeAgentSessions
 from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
 from vs_runtime._checkpoint import (
@@ -324,8 +319,6 @@ def create_model_request_reconciler(
 
 
 __all__ = [
-    "AcceleratorDiscovery",
-    "AcceleratorInventory",
     "AgentExecution",
     "AgentExecutionFactory",
     "AgentSessionRuntime",
@@ -362,7 +355,6 @@ __all__ = [
     "SDKRoots",
     "SkillCatalogEntry",
     "SkillMetadataError",
-    "SystemAcceleratorDiscovery",
     "ValidationRecipe",
     "build_skill_catalog",
     "collect_linux_profile",

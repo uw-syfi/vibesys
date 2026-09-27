@@ -41,7 +41,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from vibesys.backends import SandboxKind
 from vibesys.constants import PROJECT_ROOT
 from vibesys.evaluators import (
     PROJECT_ROOT_TOKEN,
@@ -72,6 +71,7 @@ from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,
+    SandboxKind,
     SandboxLifecycleHooks,
 )
 from vs_sandbox.api.command_translation import translate_command_arguments
@@ -129,11 +129,10 @@ for attempt in range(5):
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.domains.environment import EnvironmentBindMount
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vs_project.api import StateNamespace
-    from vs_sandbox.api import Sandbox
+    from vs_sandbox.api import ComputeBackendImpl, Sandbox
 
 
 @dataclass(frozen=True)

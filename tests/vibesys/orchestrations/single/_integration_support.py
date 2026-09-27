@@ -11,7 +11,6 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
@@ -24,7 +23,8 @@ from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
-from vs_sandbox.execution import SandboxExecutionResult
+from vs_sandbox.api import SandboxExecutionResult
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -33,12 +33,12 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vibesys.backends.base import SandboxKind
     from vibesys.events import CoreEvent
     from vs_agent.api import AgentSpec
     from vs_agent.api.testing import FakeAgentClient
     from vs_runtime.api import OrchestrationPlugin, RunStatus
-    from vs_sandbox.fake_sandbox import FakeSandbox
+    from vs_sandbox.api import SandboxKind
+    from vs_sandbox.api.testing import FakeSandbox
 
 
 class InterruptedTurnError(RuntimeError):

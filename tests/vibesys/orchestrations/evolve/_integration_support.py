@@ -10,7 +10,6 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
-from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.evaluators.input_manifest import load_input_bundle
@@ -22,6 +21,7 @@ from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

@@ -1,4 +1,4 @@
-"""Host accelerator discovery mechanisms."""
+"""Host accelerator discovery mechanisms for compute backends."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ class SystemAcceleratorDiscovery:
         device_root: Path = Path("/dev"),
         executable_search_path: str | None = None,
     ) -> None:
+        """Configure filesystem and subprocess seams used for discovery."""
         self._device_root = Path(device_root)
         self._executable_search_path = executable_search_path
 

@@ -9,7 +9,6 @@ from vibesys.orchestration.runtime import RunContext
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.orchestration.contracts import (
         OrchestrationProjector,
         PreparedPlugin,
@@ -20,6 +19,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
     from vs_runtime.api import RunStatus, Workspace
+    from vs_sandbox.api import ComputeBackendImpl
 
 
 async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime collaborators retain independent ownership.

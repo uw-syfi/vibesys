@@ -1,6 +1,6 @@
 """Registering compute backends must stay side-effect free.
 
-``backends.get`` runs on the startup path of every entry point. Importing
+``create_compute_backend`` runs on the startup path of every entry point. Importing
 ``vs_sandbox.docker_sandbox`` installs a process-wide SIGINT handler and an
 ``atexit`` hook, so the backend modules defer it until a Docker sandbox is
 actually constructed.
@@ -14,19 +14,19 @@ from pathlib import Path
 
 from tests.support import run_test_command
 
-from vibesys import backends
-from vibesys.backends import SandboxKind
-from vibesys.backends.local import cpu_backend
-from vibesys.constants import ComputeBackend
-from vs_sandbox.api import LocalShellSandbox
+from vs_sandbox.api import (
+    ComputeBackend,
+    LocalShellSandbox,
+    SandboxKind,
+    create_compute_backend,
+)
 
 _PROBE = """
 import sys
 
-from vibesys import backends
-from vibesys.constants import ComputeBackend
+from vs_sandbox.api import ComputeBackend, create_compute_backend
 
-backends.get(ComputeBackend.{backend}, log_dir={log_dir!r})
+create_compute_backend(ComputeBackend.{backend}, log_dir={log_dir!r})
 print("vs_sandbox.docker_sandbox" in sys.modules)
 """
 
@@ -52,7 +52,7 @@ def test_constructing_a_compute_backend_does_not_import_docker_sandbox(tmp_path:
 
 def test_local_sandbox_construction_builds_a_local_shell_sandbox(tmp_path: Path) -> None:
     """The local sandbox kind resolves to the first-party local shell."""
-    sandbox = cpu_backend(log_dir=tmp_path).make_sandbox(
+    sandbox = create_compute_backend(ComputeBackend.CPU, log_dir=tmp_path).make_sandbox(
         SandboxKind.LOCAL,
         host_workspace=str(tmp_path),
         log_path=None,
@@ -70,4 +70,4 @@ def test_backend_registry_still_resolves_every_default(tmp_path: Path) -> None:
         ComputeBackend.ROCM,
         ComputeBackend.TRAINIUM,
     ):
-        assert backends.get(backend, log_dir=tmp_path) is not None
+        assert create_compute_backend(backend, log_dir=tmp_path) is not None

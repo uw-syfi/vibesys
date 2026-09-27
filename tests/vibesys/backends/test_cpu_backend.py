@@ -8,18 +8,17 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from entrypoints.cli import _add_common_args
-from vibesys import backends
-from vibesys.backends import SandboxKind
-from vibesys.backends.local import LocalBackend
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
 from vs_sandbox.api import (
     BeforeReadyContext,
+    ComputeBackend,
     DockerSandbox,
     HostResource,
     HostResourceAccess,
+    LocalBackend,
     LocalShellSandbox,
+    SandboxKind,
     SandboxLifecycleHooks,
+    create_compute_backend,
 )
 
 if TYPE_CHECKING:
@@ -35,7 +34,7 @@ class _RecordingHooks(SandboxLifecycleHooks):
 
 
 def _make_backend(tmp_path: Path) -> LocalBackend:
-    impl = backends.get(ComputeBackend.CPU, log_dir=tmp_path / "logs")
+    impl = create_compute_backend(ComputeBackend.CPU, log_dir=tmp_path / "logs")
     assert isinstance(impl, LocalBackend)
     return impl
 
@@ -55,10 +54,9 @@ def _docker_run_command(sandbox: DockerSandbox) -> list[str]:
 
 class TestCpuRegistry:
     def test_cpu_in_registry(self, tmp_path: Path) -> None:
-        impl = backends.get(ComputeBackend.CPU, log_dir=tmp_path)
+        impl = create_compute_backend(ComputeBackend.CPU, log_dir=tmp_path)
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.CPU
-        assert impl.profiler_kind is ProfilerKind.LINUX_CPU
 
 
 class TestCpuSandbox:

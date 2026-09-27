@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_runtime.api.infrastructure import (
+from vs_sandbox.api import (
     AcceleratorDiscovery,
     AcceleratorInventory,
     SystemAcceleratorDiscovery,
 )
-from vs_runtime.api.testing import FakeAcceleratorDiscovery
+from vs_sandbox.api.testing import FakeAcceleratorDiscovery
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -14,8 +14,7 @@ from vibesys.sandbox.run_environment import AgentPaths, RunEnvironmentView
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.backends.base import ContentionMonitor, SandboxKind
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.api import ContentionMonitor, Sandbox, SandboxKind
 
 
 class _FakeDevice:

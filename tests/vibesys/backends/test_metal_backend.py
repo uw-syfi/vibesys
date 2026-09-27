@@ -8,29 +8,29 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints.cli import _add_common_args
-from vibesys import backends
-from vibesys.backends import SandboxKind
-from vibesys.backends.local import LocalBackend
-from vibesys.constants import ComputeBackend
-from vibesys.profilers import ProfilerKind
-from vs_sandbox.api import LocalShellSandbox
+from vs_sandbox.api import (
+    ComputeBackend,
+    LocalBackend,
+    LocalShellSandbox,
+    SandboxKind,
+    create_compute_backend,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def _make_backend(tmp_path: Path) -> LocalBackend:
-    impl = backends.get(ComputeBackend.METAL, log_dir=tmp_path / "logs")
+    impl = create_compute_backend(ComputeBackend.METAL, log_dir=tmp_path / "logs")
     assert isinstance(impl, LocalBackend)
     return impl
 
 
 class TestMetalRegistry:
     def test_metal_in_registry(self, tmp_path: Path) -> None:
-        impl = backends.get(ComputeBackend.METAL, log_dir=tmp_path)
+        impl = create_compute_backend(ComputeBackend.METAL, log_dir=tmp_path)
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.METAL
-        assert impl.profiler_kind is ProfilerKind.TORCH
 
 
 class TestMetalSandbox:

@@ -8,7 +8,7 @@ from enum import StrEnum
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from vibesys.constants import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vs_runtime.api.infrastructure import (
     NativeCpuProfilerKind,
     NativeCpuProfilerPreflight,
@@ -34,6 +34,20 @@ class ProfilerKind(StrEnum):
     MACOS_CPU = "macos_cpu"
     LINUX_CPU = "linux_cpu"
     HEADROOM = "headroom"
+
+
+_BACKEND_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
+    ComputeBackend.CUDA: ProfilerKind.NSYS,
+    ComputeBackend.METAL: ProfilerKind.TORCH,
+    ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
+    ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+    ComputeBackend.CPU: ProfilerKind.LINUX_CPU,
+}
+
+
+def default_profiler_for_backend(backend: ComputeBackend) -> ProfilerKind:
+    """Return the application policy default for one compute stack."""
+    return _BACKEND_PROFILERS[backend]
 
 
 def tool_server(profiler_kind: ProfilerKind) -> ToolServerDescriptor | None:

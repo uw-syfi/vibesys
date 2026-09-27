@@ -15,7 +15,6 @@ import pytest
 from tests.support import provider_profiles as fake_profiles
 from tests.support import run_test_command
 
-from vibesys.backends import SandboxKind
 from vibesys.constants import ComputeBackend
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.evaluators import (
@@ -61,6 +60,7 @@ from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,
+    SandboxKind,
     SandboxLifecycle,
 )
 
@@ -68,9 +68,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from subprocess import CompletedProcess
 
-    from vibesys.backends.base import ContentionMonitor
     from vibesys.sandbox.run_environment import RunEnvironment
-    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.api import ContentionMonitor, Sandbox
 
 
 # A committed two-file overlay, not a submodule: the contract under test is

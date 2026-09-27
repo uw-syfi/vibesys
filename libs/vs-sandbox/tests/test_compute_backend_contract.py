@@ -1,11 +1,11 @@
-"""Shared contract for every :class:`~vibesys.backends.base.ComputeBackendImpl`.
+"""Shared contract for every public ``ComputeBackendImpl``.
 
-Parametrized over the real :class:`~vibesys.backends.cuda.CudaBackend` (cheap
+Parametrized over the real ``CudaBackend`` (cheap
 and real when built with ``attach_accelerator=False``: no ``nvidia-smi``
 call, no container runtime, just the unconfined local shell sandbox) and
-:class:`~vibesys.api.testing.FakeComputeBackend` (in-memory, no subprocess at
+``FakeComputeBackend`` (in-memory, no subprocess at
 all). Both satisfy ``ComputeBackendImpl`` and are used interchangeably by
-``vibesys.context``'s ``backend_factory`` seam.
+the application ``backend_factory`` seam.
 """
 
 from __future__ import annotations
@@ -14,9 +14,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.api.testing import FakeComputeBackend
-from vibesys.backends.base import ComputeBackendImpl, SandboxKind
-from vibesys.backends.cuda import CudaBackend
+from vs_sandbox.api import ComputeBackendImpl, CudaBackend, SandboxKind
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path

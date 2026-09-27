@@ -4,10 +4,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.backends import SandboxKind
-from vibesys.backends.cuda import CudaBackend
-from vibesys.backends.cuda.gpu_monitor import GpuInfo
-from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess
+from vs_sandbox.api import (
+    CudaBackend,
+    DockerSandbox,
+    GpuInfo,
+    HostResource,
+    HostResourceAccess,
+    SandboxKind,
+)
 
 
 def _docker_run_command(sandbox: DockerSandbox) -> list[str]:
@@ -29,7 +33,7 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
 ) -> None:
     backend = CudaBackend(tmp_path)
     pick_device = MagicMock()
-    monkeypatch.setattr("vibesys.backends.cuda.pick_gpu", pick_device)
+    monkeypatch.setattr("vs_sandbox.cuda_backend.pick_gpu", pick_device)
 
     sandbox = backend.make_sandbox(
         SandboxKind.DOCKER,
@@ -64,10 +68,10 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
     monkeypatch.setattr(sandbox, "stop", stop)
     monitor = MagicMock()
     monkeypatch.setattr(
-        "vibesys.backends.cuda.pick_gpu",
+        "vs_sandbox.cuda_backend.pick_gpu",
         lambda: GpuInfo(1, "GPU-bbbb", "H100", 0, 100, 0),
     )
-    monkeypatch.setattr("vibesys.backends.cuda.GpuContentionMonitor", lambda **_kwargs: monitor)
+    monkeypatch.setattr("vs_sandbox.cuda_backend.GpuContentionMonitor", lambda **_kwargs: monitor)
     backend.reselect_device()
     start.assert_not_called()
     stop.assert_not_called()
