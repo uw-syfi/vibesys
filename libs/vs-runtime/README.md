@@ -27,8 +27,8 @@ until sandbox and client construction move into this library as well.
 
 The runtime also owns strict local-validation recipe contracts and parsing,
 exact-input pass reuse, trusted shell execution, mutation rollback, and atomic
-reports. VibeSys retains validation cadence, gate events, and policy-facing
-feedback interpretation.
+reports. VibeSys retains validation cadence, projects the trusted execution as
+paired gate lifecycle events, and owns policy-facing feedback interpretation.
 
 `Run.workspaces.root` supplies the live root workspace. Policies may read
 its recorded revision and trusted-input baseline, snapshot and restore its

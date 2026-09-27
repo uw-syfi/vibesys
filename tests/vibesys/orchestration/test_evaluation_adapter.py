@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,7 +12,13 @@ from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.events import CoreEventType, EventStatus, GateFinishedData, GateStartedData
+from vibesys.events import (
+    CoreEventType,
+    EventStatus,
+    GateFinishedData,
+    GateKind,
+    GateStartedData,
+)
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
@@ -29,6 +36,8 @@ from vs_runtime.api import (
     RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeWorkspace
+from vs_sandbox.api import SandboxExecutionResult, SandboxKind
+from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -39,6 +48,21 @@ if TYPE_CHECKING:
 
 
 _PLUGIN = capability_plugin("evaluation")
+
+
+class _BlockingEvaluationSandbox(FakeSandbox):
+    """Hold trusted execution until its lifecycle event is observable."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+        if not self.started.is_set():
+            self.started.set()
+            self.release.wait()
+        return super().execute(command, timeout=timeout)
 
 
 def _write_project(
@@ -314,7 +338,7 @@ def test_adapter_rejects_duplicate_objectives_before_execution(tmp_path: Path) -
     integration.close()
 
 
-def test_adapter_rejects_foreign_receipt_and_workspace(tmp_path: Path) -> None:
+def test_adapter_pairs_foreign_receipt_exception_with_terminal_gate(tmp_path: Path) -> None:
     async def body(ctx: Run) -> None:
         with pytest.raises(TypeError, match="live handle"):
             await ctx.evaluation.accuracy(FakeWorkspace(path=ctx.workspaces.root.path))
@@ -329,4 +353,86 @@ def test_adapter_rejects_foreign_receipt_and_workspace(tmp_path: Path) -> None:
             )
 
     _, integration = _run(tmp_path, body)
-    integration.close()
+    try:
+        gate_events = [
+            event
+            for event in integration.events.read()
+            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+        ]
+        assert [type(event.data) for event in gate_events] == [
+            GateStartedData,
+            GateFinishedData,
+        ]
+        assert gate_events[0].status is EventStatus.ACTIVE
+        assert gate_events[1].status is EventStatus.FAILED
+        finished = gate_events[1].data
+        assert isinstance(finished, GateFinishedData)
+        assert finished.output_tail is not None
+        assert "RuntimeContractError" in finished.output_tail
+        assert "another run" in finished.output_tail
+    finally:
+        integration.close()
+
+
+@pytest.mark.parametrize("gate", [GateKind.ACCURACY, GateKind.BENCHMARK])
+def test_gate_starts_before_execution_and_finishes_on_cancellation(
+    tmp_path: Path,
+    gate: GateKind,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+    sandbox = _BlockingEvaluationSandbox()
+    backend = FakeComputeBackend()
+    backend.script_sandbox(SandboxKind.LOCAL, str(project_root), sandbox)
+
+    async def exercise() -> None:
+        async with open_product_run_host(
+            _request(project_root),
+            integration,
+            plugin=_PLUGIN,
+            backend_factory=lambda *_args, **_kwargs: backend,
+        ) as ctx:
+            operation = (
+                ctx.evaluation.accuracy(ctx.workspaces.root)
+                if gate is GateKind.ACCURACY
+                else ctx.evaluation.benchmark(ctx.workspaces.root)
+            )
+            evaluation = asyncio.create_task(operation)
+            await asyncio.to_thread(sandbox.started.wait)
+            try:
+                gate_events = [
+                    event
+                    for event in integration.events.read()
+                    if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+                ]
+                assert [type(event.data) for event in gate_events] == [GateStartedData]
+                started = gate_events[0].data
+                assert isinstance(started, GateStartedData)
+                assert started.gate is gate
+                assert evaluation.cancel()
+            finally:
+                sandbox.release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await evaluation
+
+    try:
+        asyncio.run(exercise())
+        gate_events = [
+            event
+            for event in integration.events.read()
+            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+        ]
+        assert [type(event.data) for event in gate_events] == [
+            GateStartedData,
+            GateFinishedData,
+        ]
+        assert gate_events[0].status is EventStatus.ACTIVE
+        assert gate_events[1].status is EventStatus.FAILED
+        finished = gate_events[1].data
+        assert isinstance(finished, GateFinishedData)
+        assert finished.gate is gate
+        assert finished.output_tail == "evaluation cancelled"
+    finally:
+        sandbox.release.set()
+        integration.close()

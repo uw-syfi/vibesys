@@ -199,6 +199,13 @@ owns Git, sandbox, worktree, and cleanup mechanics. Similarly, orchestration
 decides when correctness or performance evaluation is due and interprets the
 typed result; the runtime performs the trusted evaluation.
 
+The runtime and thin product wiring publish the lifecycle semantics that
+existing consumers use: agent-turn start and finish, workspace snapshots and
+restore warnings, evaluation-gate start and terminal finish, and state
+projections after durable commit. Resource creation, adoption, discard, and
+write-ahead-log checkpoints remain runtime-owned tested mechanics, not public
+events without a consumer. Plugins do not manually duplicate these facts.
+
 ## Policy organization
 
 Keep code near the plugin that owns the decision:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -207,13 +208,21 @@ class _EvaluationAdapter:
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
+        spec = self._runtime_evaluation.spec(live)
         if reuse is not None:
-            run = await self._runtime_evaluation.accuracy(
-                self._run_id,
-                live,
-                reuse=reuse,
-            )
-            emit_gate_started(self._events, GateKind.ACCURACY, command=run.command)
+            emit_gate_started(self._events, GateKind.ACCURACY, command=spec.accuracy_command)
+            try:
+                run = await self._runtime_evaluation.accuracy(
+                    self._run_id,
+                    live,
+                    reuse=reuse,
+                )
+            except asyncio.CancelledError:
+                self._finish_gate_error(GateKind.ACCURACY, "evaluation cancelled")
+                raise
+            except Exception as error:
+                self._finish_gate_error(GateKind.ACCURACY, self._error_text(error))
+                raise
             emit_gate_finished(
                 self._events,
                 GateFinishedData(gate=GateKind.ACCURACY, reused=True),
@@ -223,27 +232,38 @@ class _EvaluationAdapter:
         if self._request.agent_backend == "stub":
             return AccuracyEvaluation(executed=False)
 
-        spec = self._runtime_evaluation.spec(live)
         bundle = self._request.input_bundle
         release = (
             bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
         ) or not spec.benchmark_command
-        run = await self._runtime_evaluation.accuracy(
-            self._run_id,
-            live,
-            release=release,
-        )
-        result = run.result
-        if result is None:
-            message = "runtime accuracy execution unexpectedly returned a reused result"
-            raise RuntimeContractError(message)
-        self._log_provisioning(result.provisioned_volumes, result.failure)
-        self._publish_accuracy(result, process_id=f"evaluation-accuracy-{next(self._identifiers)}")
-        return AccuracyEvaluation(
-            executed=result.executed,
-            feedback=self._accuracy_feedback(result),
-            receipt=run.receipt if result.passed else None,
-        )
+        emit_gate_started(self._events, GateKind.ACCURACY, command=spec.accuracy_command)
+        try:
+            run = await self._runtime_evaluation.accuracy(
+                self._run_id,
+                live,
+                release=release,
+            )
+            result = self._require_accuracy_result(run.result)
+            self._log_provisioning(result.provisioned_volumes, result.failure)
+            self._publish_streams(
+                result.stdout,
+                result.stderr,
+                f"evaluation-accuracy-{next(self._identifiers)}",
+                "accuracy_checker",
+            )
+            evaluation = AccuracyEvaluation(
+                executed=result.executed,
+                feedback=self._accuracy_feedback(result),
+                receipt=run.receipt if result.passed else None,
+            )
+        except asyncio.CancelledError:
+            self._finish_gate_error(GateKind.ACCURACY, "evaluation cancelled")
+            raise
+        except Exception as error:
+            self._finish_gate_error(GateKind.ACCURACY, self._error_text(error))
+            raise
+        self._finish_accuracy(result)
+        return evaluation
 
     async def benchmark(
         self,
@@ -256,22 +276,33 @@ class _EvaluationAdapter:
         live = self._live_workspace(workspace)
         if self._request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
-        run = await self._runtime_evaluation.benchmark(
-            live,
-            required_metrics=frozenset(item.name for item in objectives),
-        )
-        result = run.result
-        self._log_provisioning(result.provisioned_volumes, result.failure)
-        evaluation = self._interpret_benchmark(
-            result,
-            objectives,
-            run.contract,
-        )
-        self._publish_benchmark(
-            result,
-            evaluation,
-            process_id=f"evaluation-benchmark-{next(self._identifiers)}",
-        )
+        spec = self._runtime_evaluation.spec(live)
+        emit_gate_started(self._events, GateKind.BENCHMARK, command=spec.benchmark_command)
+        try:
+            run = await self._runtime_evaluation.benchmark(
+                live,
+                required_metrics=frozenset(item.name for item in objectives),
+            )
+            result = run.result
+            self._log_provisioning(result.provisioned_volumes, result.failure)
+            evaluation = self._interpret_benchmark(
+                result,
+                objectives,
+                run.contract,
+            )
+            self._publish_streams(
+                result.stdout,
+                result.stderr,
+                f"evaluation-benchmark-{next(self._identifiers)}",
+                "benchmark",
+            )
+        except asyncio.CancelledError:
+            self._finish_gate_error(GateKind.BENCHMARK, "evaluation cancelled")
+            raise
+        except Exception as error:
+            self._finish_gate_error(GateKind.BENCHMARK, self._error_text(error))
+            raise
+        self._finish_benchmark(result, evaluation)
         return evaluation
 
     async def validate_local(
@@ -290,14 +321,7 @@ class _EvaluationAdapter:
             report_location=report_location,
         )
 
-    def _publish_accuracy(self, result: TrustedAccuracyResult, *, process_id: str) -> None:
-        provisioning_failure = result.failure is not None and result.failure.startswith(
-            "Model-weight request"
-        )
-        if result.command is None or (not result.executed and provisioning_failure):
-            return
-        emit_gate_started(self._events, GateKind.ACCURACY, command=result.command)
-        self._publish_streams(result.stdout, result.stderr, process_id, "accuracy_checker")
+    def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:
         emit_gate_finished(
             self._events,
             GateFinishedData(
@@ -307,17 +331,20 @@ class _EvaluationAdapter:
             passed=result.passed,
         )
 
-    def _publish_benchmark(
+    @staticmethod
+    def _require_accuracy_result(
+        result: TrustedAccuracyResult | None,
+    ) -> TrustedAccuracyResult:
+        if result is None:
+            message = "runtime accuracy execution unexpectedly returned a reused result"
+            raise RuntimeContractError(message)
+        return result
+
+    def _finish_benchmark(
         self,
         result: TrustedBenchmarkResult,
         evaluation: BenchmarkEvaluation,
-        *,
-        process_id: str,
     ) -> None:
-        if not result.executed or result.command is None:
-            return
-        emit_gate_started(self._events, GateKind.BENCHMARK, command=result.command)
-        self._publish_streams(result.stdout, result.stderr, process_id, "benchmark")
         emit_gate_finished(
             self._events,
             GateFinishedData(
@@ -331,6 +358,18 @@ class _EvaluationAdapter:
             ),
             passed=result.passed,
         )
+
+    def _finish_gate_error(self, gate: GateKind, output: str) -> None:
+        emit_gate_finished(
+            self._events,
+            GateFinishedData(gate=gate, output_tail=output[-GATE_LOG_TAIL_CHARS:]),
+            passed=False,
+        )
+
+    @staticmethod
+    def _error_text(error: Exception) -> str:
+        detail = str(error)
+        return f"{type(error).__name__}: {detail}" if detail else type(error).__name__
 
     def _publish_streams(
         self,
