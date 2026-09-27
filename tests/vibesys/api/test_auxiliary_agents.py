@@ -21,6 +21,7 @@ from vibesys.run.integration import RunResources
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import OrchestrationPlugin, RunHost
 from vs_runtime.api import RunStatus as PluginRunStatus
+from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -59,11 +60,28 @@ class _Environment:
         self.requests: list[_EnvironmentRequest] = []
         self.sessions: list[_EnvironmentSession] = []
 
-    def open(self, request: _EnvironmentRequest) -> _EnvironmentSession:
+    def prepare(self, request: _EnvironmentRequest) -> _PreparedEnvironment:
+        return _PreparedEnvironment(self, request)
+
+    def _open(self, request: _EnvironmentRequest) -> _EnvironmentSession:
         self.requests.append(request)
         session = _EnvironmentSession()
         self.sessions.append(session)
         return session
+
+
+class _PreparedEnvironment:
+    """Prepared local environment with product presentation supplied explicitly."""
+
+    presentation_facts = LocalEnvironmentFacts()
+
+    def __init__(self, environment: _Environment, request: _EnvironmentRequest) -> None:
+        self._environment = environment
+        self._request = request
+
+    def open(self, presentation: RunEnvironmentPresentation) -> _EnvironmentSession:
+        assert presentation == RunEnvironmentPresentation(prompt_notes="")
+        return self._environment._open(self._request)  # noqa: SLF001  # lint-waiver: LW-948032 [SLF001]; this prepared fake completes its paired environment's open phase.
 
 
 class _StubOptions(BaseModel):
