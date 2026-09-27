@@ -41,7 +41,6 @@
 source_roots = [
     "src",
     "libs/vs-evaluator-protocol/src",
-    "libs/vs-feature-flags/src",
     "libs/vs-github/src",
     "libs/vs-issue-board/src",
     "libs/vs-loop-state/src",
@@ -152,7 +151,7 @@ depends_on = [ "vs_agent"]
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
+depends_on = ["vs_loop_state", "vs_agent"]
 
 [[modules]]
 # Typed user-facing failures shared by CLI, application transports, and the
@@ -367,11 +366,6 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
-path = "vs_feature_flags"
-layer = "prompts_and_lower_libs"
-depends_on = []
-
-[[modules]]
 path = "vs_github"
 layer = "prompts_and_lower_libs"
 depends_on = []
@@ -386,10 +380,6 @@ from = ["vs_agent"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_evaluator_protocol"]
-
-[[interfaces]]
-expose = ["api", "api\\..*"]
-from = ["vs_feature_flags"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]

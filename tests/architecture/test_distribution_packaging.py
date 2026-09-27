@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_DISTRIBUTIONS = {
     "vs-evaluator-protocol",
-    "vs-feature-flags",
     "vs-github",
     "vs-issue-board",
     "vs-loop-state",
@@ -34,7 +33,6 @@ INTERNAL_DISTRIBUTIONS = {
 }
 INTERNAL_IMPORT_PACKAGES = {
     "vs_evaluator_protocol",
-    "vs_feature_flags",
     "vs_github",
     "vs_issue_board",
     "vs_loop_state",
@@ -173,7 +171,6 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
     assert package_dirs["vibesys"] == "src/vibesys"
     assert package_dirs["entrypoints"] == "src/entrypoints"
     assert package_dirs["server"] == "src/server"
-    assert package_dirs["vs_feature_flags"] == ("libs/vs-feature-flags/src/vs_feature_flags")
     assert package_dirs["vs_prompts"] == "libs/vs-prompts/src/vs_prompts"
     assert package_dirs["vs_runtime"] == "libs/vs-runtime/src/vs_runtime"
     assert package_dirs["vs_sandbox"] == "libs/vs-sandbox/src/vs_sandbox"

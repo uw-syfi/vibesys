@@ -40,7 +40,6 @@ FRAMEWORK_PACKAGES = (
     "headless",
     "vs_agent",
     "vs_evaluator_protocol",
-    "vs_feature_flags",
     "vs_github",
     "vs_issue_board",
     "vs_loop_state",

@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 
 from vibesys.config import _load_dotenv_file, load_config
-from vibesys.features import FeatureFlag
 
 
 class TestLoadConfigValid:
@@ -50,7 +49,6 @@ region = "us-east5"
         assert config.thinking.budget is None
         assert config.providers.vertex_ai is None
         assert config.providers.openai_compatible is None
-        assert config.feature_flags == {}
         assert config.repository.owner is None
         assert config.repository.visibility == "private"
 
@@ -113,21 +111,7 @@ provider = "bedrock"
         with pytest.raises(ValueError, match="bedrock"):
             load_config(cfg_file)
 
-    def test_unknown_feature_flag(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text("""\
-[model]
-name = "claude-sonnet-4-6"
-
-[feature_flags]
-new_loop = true
-""")
-        with pytest.raises(ValueError, match="Unknown feature flag 'new_loop'"):
-            load_config(cfg_file)
-
-
-class TestLoadConfigFeatureFlags:
-    def test_feature_flags_parsed_as_typed_overrides(self, tmp_path: Path) -> None:
+    def test_removed_feature_flags_section_is_rejected(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
@@ -136,20 +120,7 @@ name = "claude-sonnet-4-6"
 [feature_flags]
 example_feature = true
 """)
-        config = load_config(cfg_file)
-
-        assert config.feature_flags == {FeatureFlag.EXAMPLE_FEATURE: True}
-
-    def test_removed_omnigent_agent_backend_flag_is_rejected(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text("""\
-[model]
-name = "claude-sonnet-4-6"
-
-[feature_flags]
-omnigent_agent_backend = true
-""")
-        with pytest.raises(ValueError, match="Unknown feature flag 'omnigent_agent_backend'"):
+        with pytest.raises(ValueError, match="feature_flags"):
             load_config(cfg_file)
 
 

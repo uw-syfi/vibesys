@@ -45,9 +45,6 @@ visibility = "private"       # private, public, or internal
 # session without changing the file. Ignored in headless mode.
 # theme = "dark"
 
-# [feature_flags]
-# VibeSys feature flags are declared in src/vibesys/features.py.
-
 # [backend]
 # Hardware/runtime backend to target. Supported values are "cuda", "metal",
 # "trainium", "rocm", and "cpu". The --backend flag on `./vs` overrides this

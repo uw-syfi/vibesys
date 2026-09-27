@@ -53,12 +53,10 @@ significant, put it behind a focused Python interface. One-off calls stay local.
 - Make the runner injectable and test with a Fake covering success,
   missing-tool, timeout, nonzero-exit, and malformed-output cases.
 
-## Contracts And Feature Flags
+## Contracts
 
 - Test serialized contracts at the boundary: round-trip representative payloads
   and exercise each consumer, not only the producer.
-- Add a `FeatureFlag` member and its `FeatureDefinition` together, and use
-  `FeatureFlag.X` at call sites.
 
 ## Prompts, Templates, And Skills
 

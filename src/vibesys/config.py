@@ -20,9 +20,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
-from vibesys.features import FeatureFlag
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
-from vs_feature_flags.api import parse_feature_flag_overrides
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -302,15 +300,6 @@ class Config(_Strict):
         default_factory=PerfEvalCfg,
         description="[perf_eval] — performance-evaluation settings.",
     )
-    feature_flags: dict[FeatureFlag, bool] = Field(
-        default_factory=dict,
-        description="[feature_flags] — typed feature-flag overrides.",
-    )
-
-    @field_validator("feature_flags", mode="before")
-    @classmethod
-    def _parse_feature_flags(cls, value: object) -> dict[FeatureFlag, bool]:
-        return parse_feature_flag_overrides(value, FeatureFlag)
 
 
 def as_config(config: "Config | Mapping[str, Any]") -> "Config":

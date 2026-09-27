@@ -11,7 +11,6 @@ import pytest
     "module_name",
     [
         "vs_evaluator_protocol.api",
-        "vs_feature_flags.api",
         "vs_github.api",
         "vs_issue_board.api",
         "vs_issue_board.api.mcp",

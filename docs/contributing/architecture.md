@@ -53,7 +53,6 @@ graph TD
     server --> vs_sandbox
     vibesys --> vs_agent
     vibesys --> vs_evaluator_protocol
-    vibesys --> vs_feature_flags
     vibesys --> vs_github
     vibesys --> vs_issue_board
     vibesys --> vs_loop_state
@@ -356,7 +355,6 @@ graph TD
     server.transport --> server.api
     server.transport --> vs_project
     vibesys --> vs_agent
-    vibesys --> vs_feature_flags
     vibesys --> vs_loop_state
     vibesys.api --> vibesys
     vibesys.api --> vibesys.api.contracts

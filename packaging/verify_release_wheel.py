@@ -40,7 +40,6 @@ FRAMEWORK_PACKAGES = (
     "headless",
     "vs_agent",
     "vs_evaluator_protocol",
-    "vs_feature_flags",
     "vs_github",
     "vs_issue_board",
     "vs_loop_state",
@@ -53,7 +52,6 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
     {
         "vs-agent",
         "vs-evaluator-protocol",
-        "vs-feature-flags",
         "vs-github",
         "vs-issue-board",
         "vs-loop-state",
@@ -72,7 +70,6 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-evaluator-protocol/src/vs_evaluator_protocol"): PurePosixPath(
         "vs_evaluator_protocol"
     ),
-    Path("libs/vs-feature-flags/src/vs_feature_flags"): PurePosixPath("vs_feature_flags"),
     Path("libs/vs-github/src/vs_github"): PurePosixPath("vs_github"),
     Path("libs/vs-issue-board/src/vs_issue_board"): PurePosixPath("vs_issue_board"),
     Path("libs/vs-loop-state/src/vs_loop_state"): PurePosixPath("vs_loop_state"),
