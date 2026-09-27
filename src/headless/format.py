@@ -1,11 +1,11 @@
-"""Plain-text formatting shared by the terminal renderer and the run log."""
+"""Plain-text formatting owned by the headless terminal frontend."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vibesys.events import AgentStatusData
+    from vibesys.api import AgentStatusData
 
 _THOUSAND = 1_000
 _MILLION = 1_000_000

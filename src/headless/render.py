@@ -12,6 +12,7 @@ import re
 import sys
 from typing import TextIO
 
+from headless.format import format_status_prefix
 from vibesys.api import (
     AgentOutputChunkData,
     CoreEvent,
@@ -20,10 +21,9 @@ from vibesys.api import (
     ToolCallData,
     ToolResultData,
     format_framework_event,
-    format_status_prefix,
 )
 
-# Presentation constants owned by this frontend (mirrors vibesys.constants).
+# Presentation constants owned by this frontend.
 DIM = "\033[2m"
 YELLOW = "\033[33m"
 GREEN = "\033[32m"

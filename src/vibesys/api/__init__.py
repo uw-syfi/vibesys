@@ -43,6 +43,7 @@ from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
+    AgentStatusData,
     CoreEventType,
     TodoItemData,
     TodoUpdateData,
@@ -51,11 +52,10 @@ from vibesys.events import (
 )
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.profilers import ProfilerKind
-from vibesys.render.format import format_status_prefix
-from vibesys.render.run_log import format_framework_event
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
 from vibesys.run.integration import RunResourceHandoff
+from vibesys.run.log_projection import format_framework_event
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
@@ -67,6 +67,7 @@ __all__ = [
     "AgentExecutionStartedData",
     "AgentOutputChunkData",
     "AgentSpec",
+    "AgentStatusData",
     "ComputeBackend",
     "Config",
     "ConfigurationDiagnostic",
@@ -103,7 +104,6 @@ __all__ = [
     "boot_trace",
     "create_session",
     "format_framework_event",
-    "format_status_prefix",
     "load_config",
     "open_run_store",
 ]

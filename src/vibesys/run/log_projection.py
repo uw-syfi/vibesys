@@ -2,8 +2,7 @@
 
 The bracket-tagged line format lives here, in one renderer, instead of in the
 producers: gates, loops, and the Git tracker publish typed events, and this
-module decides what those look like in ``run-*.log`` and on a headless
-terminal.
+module decides what those look like in ``run-*.log``.
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
-"""Plain-text status-prefix formatting for agent callbacks.
+"""Plain-text status-prefix formatting for agent callback log lines.
 
-Vendored from ``vibesys.render.format`` so the agent package's callback
-plumbing does not need to import core's render module. Core keeps its own
-copy for its other (non-agent) callers.
+The agent package owns its log-line rendering independently of product
+frontends such as ``headless``.
 """
 
 from __future__ import annotations

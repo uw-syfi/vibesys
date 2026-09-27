@@ -1,4 +1,4 @@
-"""Tests for the run-log rendering of typed framework events."""
+"""Tests for projecting typed framework events into the durable run log."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from vibesys.events import (
     WorkspaceSnapshotData,
     make_core_event,
 )
-from vibesys.render.run_log import RunLogRenderer, format_framework_event
+from vibesys.run.log_projection import RunLogRenderer, format_framework_event
 
 
 def _event(

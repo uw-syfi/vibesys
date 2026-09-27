@@ -6,7 +6,6 @@ import pytest
 
 from headless.render import HeadlessRenderer
 from vibesys.api import CoreAgentEventSink
-from vibesys.constants import DIM, RED
 from vibesys.events import AgentOutputChunkData, CoreEvent, ToolCallData, ToolResultData
 from vs_agent import (
     callbacks,
@@ -19,6 +18,8 @@ from vs_agent.callbacks import (
 from vs_agent.client import _LoggerObserver
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+_DIM = "\033[2m"
+_RED = "\033[31m"
 
 
 def _strip_ansi(s: str) -> str:
@@ -155,16 +156,16 @@ class TestToolResultOutput:
         logger.log_tool_result("shell", "ok")
         out = capsys.readouterr().out
         assert "ok" in out
-        assert DIM not in out
-        assert RED not in out
+        assert _DIM not in out
+        assert _RED not in out
 
     def test_error_status_is_plain_text(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(event_sink=_rendering_sink())
         logger.log_tool_result("shell", "Error: file not found")
         out = capsys.readouterr().out
         assert "Error: file not found" in out
-        assert RED not in out
-        assert DIM not in out
+        assert _RED not in out
+        assert _DIM not in out
 
     def test_command_failed_exit_code_is_plain_text(
         self, capsys: pytest.CaptureFixture[str]
@@ -180,8 +181,8 @@ class TestToolResultOutput:
         )
         out = capsys.readouterr().out
         assert "Exit code: 128" in out
-        assert RED not in out
-        assert DIM not in out
+        assert _RED not in out
+        assert _DIM not in out
 
     def test_command_succeeded_exit_code_is_plain_text(
         self, capsys: pytest.CaptureFixture[str]
@@ -190,8 +191,8 @@ class TestToolResultOutput:
         logger.log_tool_result("execute", "hello world\n[Command succeeded with exit code 0]")
         out = capsys.readouterr().out
         assert "hello world" in out
-        assert DIM not in out
-        assert RED not in out
+        assert _DIM not in out
+        assert _RED not in out
 
 
 class TestLogFile:

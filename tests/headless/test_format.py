@@ -1,7 +1,7 @@
-"""Tests for the shared plain-text formatting helpers."""
+"""Tests for headless terminal status formatting."""
 
-from vibesys.events import AgentStatusData
-from vibesys.render import format_status_prefix, format_token_count
+from headless.format import format_status_prefix, format_token_count
+from vibesys.api import AgentStatusData
 
 
 class TestFormatTokenCount:
