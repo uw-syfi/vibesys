@@ -1,21 +1,10 @@
 [model]
 name = "gpt-5.4"
 # Choose a model supported by the selected CLI provider.
-# provider = "vertex-ai"    # deprecated: accepted for old configs, ignored
 
 # [thinking]
 # level = "medium"          # minimal, low, medium, high (Gemini 3+ models)
 # budget = 1024             # token budget (Gemini 2.5 models, -1 for dynamic)
-
-# Every [providers.*] table below is deprecated: accepted for old configs, ignored.
-# [providers.vertex-ai]
-# json = "~/keys/vertex.json"
-# project = "my-project"
-# region = "us-east5"
-
-# [providers.anthropic]
-
-# [providers.google-genai]
 
 # [agent]
 # Selects the agent backend used by the outer loops. The default is "cli",
@@ -25,14 +14,14 @@ name = "gpt-5.4"
 # CLI flags --agent-backend / --cli-provider on `./vs` override these values.
 # backend = "cli"
 # cli_provider = "codex"      # used when backend = "cli";
-                              # one of: claude, gemini, codex, opencode
+# one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-invocation timeout in seconds
 
 [repository]
 # Optional GitHub user or organization override. If omitted, use the account
 # authenticated with `gh auth login`.
 # owner = "your-github-user"
-visibility = "private"       # private, public, or internal
+visibility = "private"  # private, public, or internal
 
 # [tui]
 # Theme for the interactive client, as light/dark pairs:

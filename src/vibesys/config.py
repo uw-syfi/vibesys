@@ -24,7 +24,6 @@ from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
 
 
 class _Strict(BaseModel):
@@ -34,14 +33,9 @@ class _Strict(BaseModel):
 
 
 class ModelCfg(_Strict):
-    """Model identifier and deprecated provider key from agent.toml."""
+    """Model identifier from agent.toml."""
 
     name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
-    # Deprecated: accepted so existing agent.toml files load, but ignored.
-    provider: Provider | None = Field(
-        default=None,
-        description="Deprecated and ignored: the agent CLI provider is selected by [agent].",
-    )
 
 
 class ThinkingCfg(_Strict):
@@ -69,87 +63,6 @@ class ThinkingCfg(_Strict):
             message = "thinking.level and thinking.budget are mutually exclusive"
             raise ValueError(message)
         return self
-
-
-class VertexCfg(_Strict):
-    """Deprecated Vertex AI fields accepted for configuration compatibility."""
-
-    # Deprecated: accepted so existing agent.toml files load, but ignored.
-    # The attribute is ``json_path`` to avoid shadowing ``BaseModel.json``; the
-    # TOML key stays ``json`` via the alias.
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    json_path: str | None = Field(
-        default=None,
-        alias="json",
-        description=("Path to the Vertex AI service-account JSON key file. Accepted but ignored."),
-    )
-    project: str | None = Field(
-        default=None,
-        description=("GCP project id. Accepted but ignored."),
-    )
-    region: str = Field(
-        default="us-east5",
-        description="Vertex AI region/location.",
-    )
-
-
-class OpenAICompatCfg(_Strict):
-    """Deprecated OpenAI-compatible endpoint fields."""
-
-    # Deprecated: accepted so existing agent.toml files load, but ignored.
-    base_url: str | None = Field(
-        default=None,
-        description=(
-            "Base URL of the OpenAI-compatible endpoint "
-            "(e.g. 'http://localhost:8000/v1'). Required for this provider."
-        ),
-    )
-    api_key: str = Field(
-        default="no-key",
-        description="API key for the endpoint; 'no-key' for unauthenticated local servers.",
-    )
-
-
-class _CredEnvProviderCfg(_Strict):
-    """A provider whose credentials come from the environment (``.env``).
-
-    The ``[providers.<name>]`` table carries no keys; it exists only as a marker.
-    Declared so the table validates under ``extra="forbid"`` while still
-    rejecting stray keys placed under it.
-    """
-
-
-class ProvidersCfg(_Strict):
-    """Deprecated provider tables accepted while configuration migrates."""
-
-    # Deprecated: every [providers.*] table is accepted so existing agent.toml
-    # files load, but none is read.
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    vertex_ai: VertexCfg | None = Field(
-        default=None,
-        alias="vertex-ai",
-        description="Vertex AI provider settings ([providers.vertex-ai]).",
-    )
-    openai_compatible: OpenAICompatCfg | None = Field(
-        default=None,
-        alias="openai-compatible",
-        description=("OpenAI-compatible endpoint settings ([providers.openai-compatible])."),
-    )
-    anthropic: _CredEnvProviderCfg | None = Field(
-        default=None,
-        description="Anthropic provider marker. Accepted but ignored.",
-    )
-    google_genai: _CredEnvProviderCfg | None = Field(
-        default=None,
-        alias="google-genai",
-        description="Google GenAI provider marker. Accepted but ignored.",
-    )
-    openai: _CredEnvProviderCfg | None = Field(
-        default=None,
-        description="OpenAI provider marker. Accepted but ignored.",
-    )
 
 
 class BackendCfg(_Strict):
@@ -280,10 +193,6 @@ class Config(_Strict):
     model: ModelCfg = Field(description="[model] — model name and provider. Required.")
     thinking: ThinkingCfg = Field(
         default_factory=ThinkingCfg, description="[thinking] — reasoning/thinking controls."
-    )
-    providers: ProvidersCfg = Field(
-        default_factory=ProvidersCfg,
-        description="[providers.*] — per-provider credentials and endpoints.",
     )
     backend: BackendCfg = Field(
         default_factory=BackendCfg, description="[backend] — compute backend selection."

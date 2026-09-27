@@ -15,40 +15,22 @@ class TestLoadConfigValid:
         cfg_file.write_text("""\
 [model]
 name = "claude-sonnet-4-6"
-provider = "vertex-ai"
 
 [thinking]
 level = "medium"
-
-[providers.vertex-ai]
-json = "~/keys/vertex.json"
-project = "my-project"
-region = "us-east5"
-
-[providers.anthropic]
-
-[providers.google-genai]
 """)
         config = load_config(cfg_file)
         assert config.model.name == "claude-sonnet-4-6"
-        assert config.model.provider == "vertex-ai"
         assert config.thinking.level == "medium"
         assert config.thinking.budget is None
-        assert config.providers.vertex_ai is not None
-        assert config.providers.vertex_ai.json_path == "~/keys/vertex.json"
-        assert config.providers.vertex_ai.project == "my-project"
-        assert config.providers.vertex_ai.region == "us-east5"
 
     def test_minimal_config(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
         config = load_config(cfg_file)
         assert config.model.name == "claude-sonnet-4-6"
-        assert config.model.provider is None
         assert config.thinking.level is None
         assert config.thinking.budget is None
-        assert config.providers.vertex_ai is None
-        assert config.providers.openai_compatible is None
         assert config.repository.owner is None
         assert config.repository.visibility == "private"
 
@@ -101,14 +83,25 @@ class TestLoadConfigErrors:
         with pytest.raises(tomllib.TOMLDecodeError):
             load_config(cfg_file)
 
-    def test_unknown_provider(self, tmp_path: Path) -> None:
+    def test_removed_model_provider_is_rejected(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
 name = "claude-sonnet-4-6"
-provider = "bedrock"
+provider = "openai"
 """)
-        with pytest.raises(ValueError, match="bedrock"):
+        with pytest.raises(ValueError, match="provider"):
+            load_config(cfg_file)
+
+    def test_removed_providers_section_is_rejected(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "gpt-5.4"
+
+[providers.openai]
+""")
+        with pytest.raises(ValueError, match="providers"):
             load_config(cfg_file)
 
     def test_removed_feature_flags_section_is_rejected(self, tmp_path: Path) -> None:
@@ -155,40 +148,6 @@ class TestLoadConfigStrict:
         )
         with pytest.raises(ValueError, match="cli_model"):
             load_config(cfg_file)
-
-
-class TestLoadConfigProviderDefault:
-    def test_missing_provider_defaults_to_none(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
-        config = load_config(cfg_file)
-        assert config.model.provider is None
-
-
-class TestDeprecatedProviderKeys:
-    def test_accepted_but_ignored_provider_keys_still_load(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text("""\
-[model]
-name = "gpt-5.4"
-provider = "openai"
-
-[providers.vertex-ai]
-json = "~/k.json"
-project = "p"
-region = "us-east5"
-
-[providers.openai-compatible]
-base_url = "http://localhost:8000/v1"
-
-[providers.anthropic]
-[providers.google-genai]
-[providers.openai]
-""")
-        config = load_config(cfg_file)
-        assert config.model.provider == "openai"
-        assert config.providers.openai_compatible is not None
-        assert config.providers.google_genai is not None
 
 
 class TestLoadDotenvFile:
