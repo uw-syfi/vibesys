@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,7 +22,7 @@ from vibesys.orchestration.multi.contracts import (
     JudgeResponse,
     PreRoundDecision,
 )
-from vibesys.schemas import Verdict
+from vibesys.orchestration.review import Verdict
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import Project
@@ -27,7 +30,6 @@ from vs_runtime.api import RunStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from pydantic import BaseModel
 
@@ -36,6 +38,22 @@ _CAPABILITIES = AgentCapabilities(
     session_reuse=True,
     provider_session_resume=True,
 )
+
+
+def _delete_loose_git_object(workspace: Path, revision: str) -> None:
+    """Remove a newly written object from Git's actual, possibly shared store."""
+    git = shutil.which("git")
+    assert git is not None
+    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-948032 [S603]; fixed Git argv resolves the repository-owned object store without a shell.
+        [git, "rev-parse", "--path-format=absolute", "--git-path", "objects"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    loose_object = Path(result.stdout.strip()) / revision[:2] / revision[2:]
+    assert loose_object.is_file()
+    loose_object.unlink()
 
 
 def _pre_round() -> PreRoundDecision:
@@ -237,9 +255,7 @@ def test_failed_rollback_restore_warns_and_continues(tmp_path: Path) -> None:
         assert len(state.search.rounds) == 1
         revision = state.search.rounds[0].commit
         assert revision is not None
-        object_path = invocation.workspace / ".git" / "objects" / revision[:2] / revision[2:]
-        assert object_path.is_file()
-        object_path.unlink()
+        _delete_loose_git_object(invocation.workspace, revision)
 
     clients = [
         _client("orchestrator", _pre_round()),

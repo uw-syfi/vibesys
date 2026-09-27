@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,9 +21,9 @@ from tests.vibesys.orchestration.single._integration_support import (
 
 from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse, SingleState
-from vibesys.schemas import Verdict
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project
@@ -90,6 +92,22 @@ def _client() -> FakeAgentClient:
             provider_session_resume=True,
         ),
     )
+
+
+def _delete_loose_git_object(workspace: Path, revision: str) -> None:
+    """Remove a newly written object from Git's actual, possibly shared store."""
+    git = shutil.which("git")
+    assert git is not None
+    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-948031 [S603]; fixed Git argv resolves the repository-owned object store without a shell.
+        [git, "rev-parse", "--path-format=absolute", "--git-path", "objects"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    loose_object = Path(result.stdout.strip()) / revision[:2] / revision[2:]
+    assert loose_object.is_file()
+    loose_object.unlink()
 
 
 def _state_summary(project_root: Path, run_id: str) -> tuple[object, ...]:
@@ -209,9 +227,7 @@ def test_corrupt_rollback_target_warns_and_commits_the_next_round(tmp_path: Path
         assert state is not None
         commit = state.search.rounds[0].commit
         assert commit is not None
-        loose_object = invocation.workspace / ".git" / "objects" / commit[:2] / commit[2:]
-        assert loose_object.is_file()
-        loose_object.unlink()
+        _delete_loose_git_object(invocation.workspace, commit)
 
     second_designer.on_invoke(invalidate_target)
     events = []
