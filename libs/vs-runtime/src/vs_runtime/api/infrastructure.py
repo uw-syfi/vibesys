@@ -98,6 +98,7 @@ from vs_runtime._managed_conversation import (
     ManagedConversation,
     ManagedConversationSpec,
     create_managed_conversation,
+    open_managed_conversation,
 )
 from vs_runtime._model_artifacts import (
     ModelArtifactDownloader,
@@ -115,6 +116,18 @@ from vs_runtime._project_materialization import (
     ProjectMaterializer,
     ProjectTreeCopy,
     WorkspaceSourceValue,
+)
+from vs_runtime._project_run import (
+    ProjectRunBaselineMissingError,
+    ProjectRunDirtyResumeError,
+    ProjectRunEffects,
+    ProjectRunError,
+    ProjectRunMismatchError,
+    ProjectRunMismatchKind,
+    ProjectRunRequest,
+    ProjectRunResources,
+    ProjectStateDeclaration,
+    open_project_run_resources,
 )
 from vs_runtime._run_control import (
     RunControlChannel,
@@ -439,6 +452,15 @@ __all__ = [
     "ProjectMaterializationEffects",
     "ProjectMaterializationStep",
     "ProjectMaterializer",
+    "ProjectRunBaselineMissingError",
+    "ProjectRunDirtyResumeError",
+    "ProjectRunEffects",
+    "ProjectRunError",
+    "ProjectRunMismatchError",
+    "ProjectRunMismatchKind",
+    "ProjectRunRequest",
+    "ProjectRunResources",
+    "ProjectStateDeclaration",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
     "ResolvedEvaluatorPackage",
@@ -504,6 +526,8 @@ __all__ = [
     "materialize_input_project",
     "materialize_objective_document",
     "open_agent_execution_environment",
+    "open_managed_conversation",
+    "open_project_run_resources",
     "open_run_environment_resources",
     "open_run_host",
     "open_workspace_environment_resources",

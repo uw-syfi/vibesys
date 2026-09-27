@@ -87,7 +87,7 @@
 {"path": "tests/vibesys/skypilot/test_evaluator_helper.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "rule": "mock", "count": 2}
 {"path": "tests/vibesys/test_config.py", "rule": "mock", "count": 6}
-{"path": "tests/vibesys/test_context.py", "rule": "mock", "count": 6}
+{"path": "tests/vibesys/test_context.py", "rule": "mock", "count": 5}
 {"path": "tests/vibesys/test_context.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/test_git_snapshot_resilience.py", "rule": "patch", "count": 3}
 {"path": "tests/vibesys/test_kubernetes_runtime.py", "rule": "patch", "count": 25}

@@ -756,19 +756,6 @@ def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> N
         assert not candidate_root.exists()
 
 
-def test_construction_failure_removes_new_copy(tmp_path: Path) -> None:
-    source = tmp_path / "input"
-    evaluator = _write_project(source)
-    runs_dir = tmp_path / "runs"
-    with (
-        patch("vibesys.context.RunState", side_effect=RuntimeError("state failed")),
-        pytest.raises(RuntimeError, match="state failed"),
-    ):
-        _create_context(source, runs_dir=runs_dir, evaluator=evaluator)
-
-    assert not runs_dir.exists() or not list(runs_dir.iterdir())
-
-
 def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)

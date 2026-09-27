@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import TextIO, overload
+from typing import Protocol, TextIO, overload
 
 from pydantic import BaseModel
 
@@ -79,8 +79,14 @@ from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
     MultiSlotRoundTransactionCoordinator,
     NativeCpuProfilerKind,
+    ProjectRunBaselineMissingError,
+    ProjectRunDirtyResumeError,
+    ProjectRunEffects,
+    ProjectRunMismatchError,
+    ProjectRunMismatchKind,
+    ProjectRunRequest,
+    ProjectStateDeclaration,
     ProtocolBenchmarkContract,
-    RoundRecoveryOutcome,
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentResources,
@@ -100,6 +106,7 @@ from vs_runtime.api.infrastructure import (
     load_evaluator_package,
     make_run_environment_spec,
     open_agent_execution_environment,
+    open_project_run_resources,
     open_run_environment_resources,
     open_workspace_environment_resources,
     preflight_native_cpu_profiler,
@@ -152,12 +159,7 @@ def _trusted_evaluation_plan(
     )
 
 
-@dataclass(frozen=True, slots=True)
-class _StateBinding:
-    """Composition-only plugin state declaration for resource assembly."""
-
-    namespace: str
-    model: type[BaseModel]
+_StateBinding = ProjectStateDeclaration
 
 
 def _profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, str], ...]:
@@ -311,24 +313,22 @@ def _exact_resume_descriptor(
     return OrchestrationResumeDecision(descriptor=None)
 
 
-def _round_transaction_for_state(
-    binding: _StateBinding | None,
-) -> Callable[[Project, GitTracker, str], MultiSlotRoundTransactionCoordinator] | None:
-    if binding is None:
-        return None
-
-    def open_coordinator(
-        project: Project, git: GitTracker, run_id: str
-    ) -> MultiSlotRoundTransactionCoordinator:
-        return MultiSlotRoundTransactionCoordinator(
-            project,
-            git,
-            run_id,
-            namespace=binding.namespace,
-            models={"state.json": binding.model},
-        )
-
-    return open_coordinator
+def _project_run_configuration_error(
+    error: ProjectRunBaselineMissingError | ProjectRunMismatchError | ProjectRunDirtyResumeError,
+) -> ConfigurationError:
+    """Translate policy-neutral runtime failures into stable product diagnostics."""
+    if isinstance(error, ProjectRunBaselineMissingError):
+        code, stage = "project_trusted_baseline_missing", "workspace_setup"
+    elif isinstance(error, ProjectRunDirtyResumeError):
+        code, stage = "project_resume_configuration_dirty", "resume_resolution"
+    else:
+        code = {
+            ProjectRunMismatchKind.TRUSTED_INPUT_BASELINE: "project_trusted_baseline_mismatch",
+            ProjectRunMismatchKind.BRANCH: "project_state_mismatch",
+            ProjectRunMismatchKind.TASK: "project_task_mismatch",
+        }[error.kind]
+        stage = "resume_resolution"
+    return ConfigurationError(ConfigurationDiagnostic(code=code, stage=stage, message=str(error)))
 
 
 def open_run_resources(
@@ -409,7 +409,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     existing = request.resume is not None
     orchestration_descriptor = request.orchestration
     orchestration_resume = resume_policy or _exact_resume_descriptor
-    trusted_input_baseline = None
     profiler_kind = request.profiler_kind
     profiler_domain = bundle.domain
     skills_dirs = request.skills_dirs
@@ -419,7 +418,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     backend = request.backend
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
-    round_transaction_factory = _round_transaction_for_state(state_binding)
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
@@ -629,172 +627,96 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             else:
                 workspace_files.create()
 
-        with boot_trace.span("project_open"):
-            project = Project.open(project_root)
-            project_state = project.state
-            log_dir = project_state.log_directory(run_id)
-            log_dir.mkdir(parents=True, exist_ok=True)
-            evaluator_package = (
-                load_evaluator_package(evaluator_package_root)
-                if evaluator_package_root is not None
-                else None
-            )
-            evaluator_tools_root = None
-            evaluator_tool_roots: tuple[Path, ...] = ()
-            if evaluator_package is not None:
-                evaluator_tools = evaluator_package.metadata.tools
-                if evaluator_tools:
-                    evaluator_tools_root = project_state.model_cache_directory("evaluator-tools")
-                    evaluator_tool_roots = tuple(
-                        tool_install_root(evaluator_tools_root, name, spec)
-                        for name, spec in evaluator_tools.items()
-                    )
-            evaluator_requirements = TrustedEvaluatorRequirements(
-                package_root=evaluator_package.root if evaluator_package is not None else None,
-                toolchains=(
-                    frozenset(evaluator_package.metadata.toolchains)
-                    if evaluator_package is not None
-                    else frozenset()
-                ),
-                tools=evaluator_package.metadata.tools if evaluator_package is not None else {},
-                tools_root=evaluator_tools_root,
-            )
-        with boot_trace.span("log_bootstrap"):
-            integration.attach(log_dir)
-            logger = RunLogger(log_dir, emit=_run_log_emitter(integration.agent_events))
-            teardown_stack.callback(logger.close)
-            for message in buffered_logs:
-                logger.lprint(message)
-
         if existing:
             with boot_trace.span("workspace_repair"):
                 workspace_files.repair()
+        project_excluded_dirs = set(workspace_files.excluded_dirs)
+        if profiler_support_name is not None:
+            project_excluded_dirs.add(profiler_support_name)
+        project_excluded_dirs.update(name for _path, name in profiler_support_extra)
 
-        with boot_trace.span("git_tracker_init"):
-            project_excluded_dirs = set(workspace_files.excluded_dirs)
-            if profiler_support_name is not None:
-                project_excluded_dirs.add(profiler_support_name)
-            project_excluded_dirs.update(name for _path, name in profiler_support_extra)
-            git = GitTracker(
-                project_root,
-                run_id=run_id,
-                events=CoreGitTrackerEvents(integration.events),
-                excluded_dirs=project_excluded_dirs,
-                trusted_input_paths=trusted_project_input_paths(
-                    project_root,
-                    evaluator_source=evaluator_source,
-                ),
+        def resolve_recorded_run(
+            recorded: OrchestrationRunManifest,
+        ) -> OrchestrationResumeDecision:
+            return _resume_orchestration_decision(
+                recorded,
+                orchestration_descriptor,
+                run_environment_spec,
+                execution_record,
+                orchestration_resume,
             )
-            git.init(existing=existing, trusted_input_baseline=trusted_input_baseline)
-        with boot_trace.span("project_state_resume"):
-            effective_orchestration = orchestration_descriptor
-            round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None = None
-            if existing:
-                project_state.load_project()
-                run_manifest = project_state.load_run(run_id)
-                if git.trusted_input_baseline is None:
-                    git.configure_trusted_input_baseline(run_manifest.trusted_input_baseline)
-                elif git.trusted_input_baseline != run_manifest.trusted_input_baseline:
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="project_trusted_baseline_mismatch",
-                            stage="resume_resolution",
-                            message=(
-                                f"run {run_id!r} records trusted input baseline "
-                                f"{run_manifest.trusted_input_baseline!r}, but the requested "
-                                f"baseline resolves to {git.trusted_input_baseline!r}"
-                            ),
-                        )
-                    )
-                if run_manifest.branch != git.project_branch:
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="project_state_mismatch",
-                            stage="resume_resolution",
-                            message=(
-                                f"run {run_id!r} records branch {run_manifest.branch!r}, "
-                                f"but Git selected {git.project_branch!r}"
-                            ),
-                        )
-                    )
-                if run_manifest.task_name != task_name:
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="project_task_mismatch",
-                            stage="resume_resolution",
-                            message=(
-                                f"run {run_id!r} records task {run_manifest.task_name!r}, "
-                                f"but task {task_name!r} was selected"
-                            ),
-                        )
-                    )
-                decision = _resume_orchestration_decision(
-                    run_manifest,
-                    effective_orchestration,
-                    run_environment_spec,
-                    execution_record,
-                    orchestration_resume,
-                )
-                if round_transaction_factory is not None:
-                    round_transaction_coordinator = round_transaction_factory(project, git, run_id)
-                    recovery = round_transaction_coordinator.recover()
-                    if recovery is not RoundRecoveryOutcome.NO_TRANSACTION:
-                        logger.lprint(f"[project] recovered round transaction: {recovery.value}")
-                if decision.descriptor is not None:
-                    if decision.requires_clean_workspace:
-                        pending = git.pending_changes()
-                        if pending:
-                            raise ConfigurationError(
-                                ConfigurationDiagnostic(
-                                    code="project_resume_configuration_dirty",
-                                    stage="resume_resolution",
-                                    message=(
-                                        "commit or discard pending project changes before increasing "
-                                        f"the run limit: {', '.join(pending)}"
-                                    ),
-                                )
-                            )
-                    project_state.update_run_orchestration(run_id, decision.descriptor)
-                    snapshot = project_state.run_manifest_snapshot(run_id)
-                    if decision.requires_clean_workspace:
-                        git.snapshot_with_framework_metadata(
-                            "vibesys: update run orchestration", snapshot
-                        )
-                    else:
-                        git.snapshot_framework_metadata_only(
-                            "vibesys: migrate run orchestration", snapshot
-                        )
-                project_state.set_current_run(run_id)
-            else:
-                project_state.create_project(project_root.name)
-                if git.trusted_input_baseline is None:
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="project_trusted_baseline_missing",
-                            stage="workspace_setup",
-                            message="Git did not provide the project run branch-point commit",
-                        )
-                    )
-                run_manifest = project_state.new_run_manifest(
-                    exp_name,
-                    task_name=task_name,
+
+        try:
+            project_resources = open_project_run_resources(
+                ProjectRunRequest(
+                    project_root=project_root,
                     run_id=run_id,
-                    branch=git.project_branch,
-                    vibesys_version=_installed_vibesys_version(),
+                    display_name=exp_name,
+                    task_name=task_name,
+                    existing=existing,
+                    framework_version=_installed_vibesys_version(),
                     run_environment=run_environment_record(run_environment_spec),
                     execution=execution_record,
-                    orchestration=effective_orchestration,
-                    trusted_input_baseline=git.trusted_input_baseline,
-                )
-                project_state.create_run(run_manifest)
-                git.snapshot_with_framework_metadata(
-                    f"vibesys: initialize run {run_id}",
-                    project_state.initialization_snapshot(run_id),
-                )
+                    orchestration=orchestration_descriptor,
+                    excluded_dirs=frozenset(project_excluded_dirs),
+                    trusted_input_paths=tuple(
+                        trusted_project_input_paths(
+                            project_root,
+                            evaluator_source=evaluator_source,
+                        )
+                    ),
+                    state=(
+                        ProjectStateDeclaration(state_binding.namespace, state_binding.model)
+                        if state_binding is not None
+                        else None
+                    ),
+                ),
+                effects=ProjectRunEffects(
+                    git_events=CoreGitTrackerEvents(integration.events),
+                    log_emit=_run_log_emitter(integration.agent_events),
+                    on_log_ready=integration.attach,
+                ),
+                buffered_logs=buffered_logs,
+                resolve_resume=resolve_recorded_run,
+            )
+        except (
+            ProjectRunBaselineMissingError,
+            ProjectRunMismatchError,
+            ProjectRunDirtyResumeError,
+        ) as error:
+            raise _project_run_configuration_error(error) from error
+        teardown_stack.callback(project_resources.close)
+        project = project_resources.project
+        project_state = project.state
+        log_dir = project_resources.logger.log_dir
+        logger = project_resources.logger
+        git = project_resources.git
 
-        with boot_trace.span("round_transaction_recovery"):
-            if not existing and round_transaction_factory is not None:
-                round_transaction_coordinator = round_transaction_factory(project, git, run_id)
+        evaluator_package = (
+            load_evaluator_package(evaluator_package_root)
+            if evaluator_package_root is not None
+            else None
+        )
+        evaluator_tools_root = None
+        evaluator_tool_roots: tuple[Path, ...] = ()
+        if evaluator_package is not None:
+            evaluator_tools = evaluator_package.metadata.tools
+            if evaluator_tools:
+                evaluator_tools_root = project_state.model_cache_directory("evaluator-tools")
+                evaluator_tool_roots = tuple(
+                    tool_install_root(evaluator_tools_root, name, spec)
+                    for name, spec in evaluator_tools.items()
+                )
+        evaluator_requirements = TrustedEvaluatorRequirements(
+            package_root=evaluator_package.root if evaluator_package is not None else None,
+            toolchains=(
+                frozenset(evaluator_package.metadata.toolchains)
+                if evaluator_package is not None
+                else frozenset()
+            ),
+            tools=evaluator_package.metadata.tools if evaluator_package is not None else {},
+            tools_root=evaluator_tools_root,
+        )
 
         with boot_trace.span("workspace_setup"):
             integration.attach(log_dir, project=project, run_id=run_id)
@@ -966,25 +888,18 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         if not session.view.cli_sandboxed:
             agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
 
-        run_state = RunState(project, git, run_id)
-
         result = _RunResources(
             backend=backend,
             run_environment=environment,
             integration=integration,
-            logger=logger,
             profiler_kind=resolved_profiler_kind,
             skill_source_paths=skill_source_paths,
             ref_name=ref_name,
             excluded_workspace_dirs=workspace_files.excluded_dirs,
-            git=git,
             trusted_evaluation_plan=_trusted_evaluation_plan(bundle, session),
             teardown_stack=teardown_stack,
             environment_resources=environment_resources,
-            project=project,
-            state=run_state,
-            run_id=run_id,
-            round_transaction_coordinator=round_transaction_coordinator,
+            project_resources=project_resources,
             agent_host_resources=agent_host_resources,
         )
         integration.publish_resources(
@@ -1030,6 +945,38 @@ class WorkspaceResourceSpec:
     log_directory: str = "workspaces"
     agent_backend: str | None = None
     cli_provider: str | None = None
+
+
+class _ProjectResources(Protocol):
+    """Project mechanics consumed by the remaining product composition."""
+
+    @property
+    def project(self) -> Project: ...
+
+    @property
+    def git(self) -> GitTracker: ...
+
+    @property
+    def logger(self) -> RunLogger: ...
+
+    @property
+    def state(self) -> RunState: ...
+
+    @property
+    def round_transaction_coordinator(
+        self,
+    ) -> MultiSlotRoundTransactionCoordinator | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkspaceProjectResources:
+    """Candidate project facts assembled around a parent-owned project."""
+
+    project: Project
+    git: GitTracker
+    logger: RunLogger
+    state: RunState
+    round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None = None
 
 
 def borrow_run_agent_environment(
@@ -1221,12 +1168,10 @@ def _assemble_workspace_resources(
         backend=parent.backend,
         run_environment=parent.run_environment,
         integration=parent.integration,
-        logger=logger,
         profiler_kind=parent.profiler_kind,
         skill_source_paths=parent.skill_source_paths,
         ref_name=parent.ref_name,
         excluded_workspace_dirs=workspace_files.excluded_dirs,
-        git=git,
         trusted_evaluation_plan=parent.trusted_evaluation_plan.model_copy(
             update={
                 "accuracy_command": session.view.paths.accuracy_command,
@@ -1238,9 +1183,12 @@ def _assemble_workspace_resources(
         # parallel. Only the parent context owns remote synchronization.
         teardown_stack=teardown_stack,
         environment_resources=environment_resources,
-        project=parent.project,
-        state=parent.state,
-        run_id=parent.run_id,
+        project_resources=_WorkspaceProjectResources(
+            project=parent.project,
+            git=git,
+            logger=logger,
+            state=parent.state,
+        ),
         agent_host_resources=parent.agent_host_resources,
     )
 
@@ -1260,19 +1208,14 @@ class _RunResources:
         backend: ComputeBackend,
         run_environment: RunEnvironment,
         integration: LocalRunIntegration,
-        logger: RunLogger,
         profiler_kind: ProfilerKind,
         skill_source_paths: list[Path],
         ref_name: str,
         excluded_workspace_dirs: set[str],
-        git: GitTracker,
         trusted_evaluation_plan: TrustedEvaluationPlan,
         teardown_stack: ExitStack,
         environment_resources: RunEnvironmentResources,
-        project: Project,
-        state: RunState,
-        run_id: str,
-        round_transaction_coordinator: (MultiSlotRoundTransactionCoordinator | None) = None,
+        project_resources: _ProjectResources,
         agent_host_resources: tuple[HostResource, ...] = (),
     ) -> None:
         self.backend = backend
@@ -1282,29 +1225,24 @@ class _RunResources:
         self.agent_host_resources = agent_host_resources
         self.run_environment = run_environment
         self.integration = integration
-        self.logger = logger
         self.profiler_kind = profiler_kind
         self._skill_source_paths = skill_source_paths
         self.ref_name = ref_name
         self.excluded_workspace_dirs = excluded_workspace_dirs
-        self.git = git
+        self._project_resources = project_resources
         self.environment_resources = environment_resources
         self.trusted_evaluation_plan = trusted_evaluation_plan
         self.trusted_evaluation: TrustedEvaluationExecutor = create_trusted_evaluation_executor(
             trusted_evaluation_plan,
             workspace=environment_resources.request.workspace,
             sandbox=environment_resources.session.sandbox,
-            git=git,
+            git=project_resources.git,
             model_requests=(
                 create_model_request_reconciler()
                 if environment_resources.view.env_kind == "modal"
                 else None
             ),
         )
-        self.project = project
-        self.state = state
-        self.run_id = run_id
-        self._round_transaction_coordinator = round_transaction_coordinator
         self._teardown_stack = teardown_stack
         self._closed = False
 
@@ -1312,6 +1250,26 @@ class _RunResources:
     def workspace(self) -> Path:
         """Return the project root, which is also the only agent workspace."""
         return self.environment_resources.request.workspace
+
+    @property
+    def project(self) -> Project:
+        return self._project_resources.project
+
+    @property
+    def git(self) -> GitTracker:
+        return self._project_resources.git
+
+    @property
+    def logger(self) -> RunLogger:
+        return self._project_resources.logger
+
+    @property
+    def state(self) -> RunState:
+        return self._project_resources.state
+
+    @property
+    def run_id(self) -> str:
+        return self._project_resources.state.run_id
 
     @property
     def log_dir(self) -> Path:
@@ -1370,7 +1328,7 @@ class _RunResources:
     @property
     def round_transaction_coordinator(self) -> MultiSlotRoundTransactionCoordinator | None:
         """Return the checkpoint coordinator prepared for plugin state."""
-        return self._round_transaction_coordinator
+        return self._project_resources.round_transaction_coordinator
 
     def lprint(self, text: str) -> None:
         self.logger.lprint(text)
