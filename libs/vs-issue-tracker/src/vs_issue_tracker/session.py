@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -18,7 +17,6 @@ if TYPE_CHECKING:
 
     from vs_github.api import GitHubClient
     from vs_issue_tracker.core import Issue, IssueTracker
-    from vs_issue_tracker.policy import CreateIssuePolicy
     from vs_issue_tracker.progress import ProgressLog
 
 
@@ -58,16 +56,6 @@ class IssueTrackerConfig(BaseModel):
         return self
 
 
-@dataclass(frozen=True, slots=True)
-class IssueToolServer:
-    """Agent tool launch data, independent of agent driver packages."""
-
-    name: str
-    command: str = "python"
-    args: tuple[str, ...] = ()
-    env: tuple[tuple[str, str], ...] = ()
-
-
 class IssueTrackerSession(Protocol):
     """Issue and progress capabilities opened for one workflow run."""
 
@@ -85,10 +73,6 @@ class IssueTrackerSession(Protocol):
         """Refresh and publish the current issue view."""
         ...
 
-    def issue_tool_server(self, grant: CreateIssuePolicy) -> IssueToolServer:
-        """Expose issue operations under a per-turn creation policy."""
-        ...
-
 
 class _OpenedIssueTrackerSession:
     def __init__(
@@ -96,12 +80,10 @@ class _OpenedIssueTrackerSession:
         *,
         tracker: IssueTracker,
         progress: ProgressLog,
-        tool_target_args: tuple[str, ...],
         view_sink: Callable[[list[Issue]], None] | None,
     ) -> None:
         self._tracker = tracker
         self._progress = progress
-        self._tool_target_args = tool_target_args
         self._view_sink = view_sink
 
     @property
@@ -118,29 +100,12 @@ class _OpenedIssueTrackerSession:
             self._view_sink(issues)
         return issues
 
-    def issue_tool_server(self, grant: CreateIssuePolicy) -> IssueToolServer:
-        args = [
-            "-m",
-            "vs_issue_tracker.mcp",
-            *self._tool_target_args,
-            "--creator",
-            grant.creator,
-            "--iteration",
-            str(grant.iteration),
-            "--allowed-types",
-            ",".join(sorted(issue_type.value for issue_type in grant.allowed_types)),
-        ]
-        if grant.cap is not None:
-            args.extend(("--cap", str(grant.cap)))
-        return IssueToolServer(name="vibesys-issues", args=tuple(args))
-
 
 def open_issue_tracker_session(  # noqa: PLR0913  # lint-waiver: LW-920430 [PLR0913]; provider-neutral run resources are explicit inputs to the composition factory.
     config: IssueTrackerConfig,
     *,
     local_store_path: Path,
     local_progress_path: Path,
-    tool_store_path: str,
     run_id: str,
     view_sink: Callable[[list[Issue]], None] | None = None,
     github_cli: GitHubClient | None = None,
@@ -158,23 +123,19 @@ def open_issue_tracker_session(  # noqa: PLR0913  # lint-waiver: LW-920430 [PLR0
             on_change=publish_local_view if view_sink is not None else None,
         )
         progress: ProgressLog = FileProgressLog(local_progress_path)
-        tool_target_args = (tool_store_path,)
     else:
         repository = cast("str", config.repository)
         tracker = GitHubIssueTracker(repository, cli=github_cli)
         progress = GitHubProgressLog(repository, run_id, cli=github_cli)
-        tool_target_args = ("--github-repository", repository)
 
     return _OpenedIssueTrackerSession(
         tracker=tracker,
         progress=progress,
-        tool_target_args=tool_target_args,
         view_sink=view_sink,
     )
 
 
 __all__ = [
-    "IssueToolServer",
     "IssueTrackerConfig",
     "IssueTrackerSession",
     "open_issue_tracker_session",

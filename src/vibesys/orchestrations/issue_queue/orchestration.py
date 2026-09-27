@@ -106,7 +106,6 @@ class _IssueQueueRun:
             self.options.tracker,
             local_store_path=self.root / _ISSUES_FILE,
             local_progress_path=self.root / _PROGRESS_FILE,
-            tool_store_path=_ISSUES_FILE,
             run_id=self.host.run_id,
             view_sink=lambda issues: render_all(self.root / _ISSUES_DIRECTORY, issues),
         )

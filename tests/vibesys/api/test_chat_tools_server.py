@@ -1,9 +1,8 @@
 """Direct unit tests for `vibesys.api.chat_tools_server`'s read-only MCP tools.
 
-Mirrors `vs_issue_tracker.mcp`'s own test pattern (see
-`libs/vs-issue-tracker/tests/test_mcp.py`): build the tool list, register it on
-a bare `FastMCP` via `vs_agent.mcp_server.register_tool`, and call tools
-through `FastMCP.call_tool`. We do not test the stdio JSON-RPC framing or
+Build the tool list, register it on a bare `FastMCP` via
+`vs_agent.mcp_server.register_tool`, and call tools through
+`FastMCP.call_tool`. We do not test the stdio JSON-RPC framing or
 `main`/`serve_stdio`; those are `mcp`/`vs_agent`'s responsibility.
 """
 

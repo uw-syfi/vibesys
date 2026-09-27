@@ -52,10 +52,9 @@ def is_codex(provider: str | None) -> bool:
 # --- Docker container environment -------------------------------------------
 
 _COMMON_DOCKER_ENV: dict[str, str] = {"PYTHONPATH": "/opt/vibesys"}
-"""Every shipped provider's container CLI needs this so it can spawn
-``python -m vs_issue_tracker.mcp`` against the bind-mounted project root (added
-in ``DockerSandbox.start`` for all four CLI providers). Without it the MCP
-server module would not be importable inside the container.
+"""Every shipped provider's container CLI needs this so agent-launched product
+tool modules can import VibeSys from the bind-mounted project root (added in
+``DockerSandbox.start`` for all four CLI providers).
 
 This is the whole of ``DOCKER_PROVIDER_ENV``'s per-provider contribution: the
 rest of a containerized run's extra environment (``UV_CACHE_DIR``, and

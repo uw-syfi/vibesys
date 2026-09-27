@@ -39,7 +39,6 @@ Repository = "https://github.com/uw-syfi/vibesys"
 Issues = "https://github.com/uw-syfi/vibesys/issues"
 
 [project.scripts]
-vibesys-issue-mcp = "vs_issue_tracker.mcp:main"
 # The `vibesys` launcher: starts the interactive TUI (bundled only when the
 # wheel was built with a JavaScript toolchain), or runs the headless engine with
 # `--headless`/`validate`/no TTY. The engine itself is

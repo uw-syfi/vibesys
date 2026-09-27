@@ -28,21 +28,15 @@ def test_console_entry_points_run_installed_commands_with_help(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vibesys_marker = tmp_path / "vibesys-args"
-    mcp_marker = tmp_path / "mcp-args"
     vibesys = tmp_path / "vibesys"
     vibesys.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$VIBESYS_TEST_ARGS"\n')
     vibesys.chmod(0o755)
-    issue_mcp = tmp_path / "vibesys-issue-mcp"
-    issue_mcp.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$VIBESYS_MCP_TEST_ARGS"\n')
-    issue_mcp.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv("VIBESYS_TEST_ARGS", str(vibesys_marker))
-    monkeypatch.setenv("VIBESYS_MCP_TEST_ARGS", str(mcp_marker))
 
     verifier.verify_console_entry_point()
 
     assert vibesys_marker.read_text().splitlines() == ["--headless", "--help"]
-    assert mcp_marker.read_text().splitlines() == ["--help"]
 
 
 def test_first_launch_defaults_use_user_owned_launch_directory_configuration(

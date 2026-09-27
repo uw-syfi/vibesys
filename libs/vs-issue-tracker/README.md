@@ -10,8 +10,8 @@ is not published as a separate Python distribution.
 
 This package owns the storage-neutral `IssueTracker` and `ProgressLog`
 contracts, local and GitHub implementations, issue state and history, create
-policies, text formatting, backend configuration, run-scoped sessions, and
-agent tool exposure. Applications provide paths, run identity, and loop policy.
+policies, text formatting, backend configuration, and run-scoped sessions.
+Applications provide paths, run identity, and loop policy.
 
 ## Concepts
 
@@ -21,7 +21,7 @@ agent tool exposure. Applications provide paths, run identity, and loop policy.
 - `ProgressLog` is a separate append/read contract with local file and
   GitHub-backed implementations.
 - `IssueTrackerSession` opens the selected issue and progress implementations
-  together and exposes the same agent tools for every backend.
+  together.
 - `Issue`, `IssueEvent`, `IssueStatus`, and `IssueType` are typed Pydantic
   models/enums for issue state and history.
 - `IssueBoard.reload()` lets multiple processes coordinate through the same
@@ -31,7 +31,7 @@ agent tool exposure. Applications provide paths, run identity, and loop policy.
 - `on_change` lets applications attach derived views such as markdown mirrors
   without making rendering part of the core library.
 - `CreateIssuePolicy` keeps role-specific create limits out of application
-  wrappers, so MCP and in-process tool paths can share the same semantics.
+  wrappers.
 
 GitHub issue types use `vibesys:type/*` labels. In-progress and blocked states
 use `vibesys:status/*` labels, while GitHub's native open/closed state handles
@@ -93,41 +93,11 @@ issue, message = create_issue_under_policy(
 `message` is suitable to return directly to an agent-facing tool. On success it
 is `created issue #N`; on rejection it is a stable error string.
 
-## MCP Server
-
-The package ships a stdio MCP server for generic issue-board access:
-
-```bash
-uv run vibesys-issue-mcp issues.json --creator agent --allowed-types bug,feature,perf
-```
-
-It can also be launched as a module:
-
-```bash
-uv run python -m vs_issue_tracker.mcp issues.json --read-only
-```
-
-The server registers:
-
-- `list_issues`
-- `get_issue`
-- `search_issues`
-- `create_issue`, unless `--read-only` is passed
-
-Useful options:
-
-- `--creator`: value recorded as `created_by` for new issues.
-- `--iteration`: iteration number used for create-cap accounting.
-- `--cap`: max issues this creator may file in the iteration.
-- `--allowed-types`: comma-separated subset of `bug,feature,perf`.
-- `--read-only`: expose only read/search tools.
-
 ## Ownership Boundary
 
 Keep generic behavior in this package when it can be reused without importing
 VibeSys. Examples: persistence selection, issue lifecycle state, type
-validation, formatting, create policies, progress storage, and agent tool
-exposure.
+validation, formatting, create policies, and progress storage.
 
 Keep application-specific behavior outside the package. Examples: prompt text,
 loop scheduling, markdown report rendering, and VibeSys-specific CLI flags.

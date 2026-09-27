@@ -3,7 +3,7 @@
 ``IssueTracker`` defines storage-neutral issue operations; ``IssueBoard`` is
 its JSON-backed implementation. Use ``CreateIssuePolicy`` and its helpers when
 creating issues under an iteration cap. Format helpers produce short and full
-text representations. MCP helpers are exposed by :mod:`vs_issue_tracker.api.mcp`.
+text representations.
 """
 
 from vs_issue_tracker.core import (
@@ -31,7 +31,6 @@ from vs_issue_tracker.progress import (
     open_progress_log,
 )
 from vs_issue_tracker.session import (
-    IssueToolServer,
     IssueTrackerConfig,
     IssueTrackerSession,
     open_issue_tracker_session,
@@ -47,7 +46,6 @@ __all__ = [
     "IssueBoardLoadError",
     "IssueEvent",
     "IssueStatus",
-    "IssueToolServer",
     "IssueTracker",
     "IssueTrackerConfig",
     "IssueTrackerLoadError",

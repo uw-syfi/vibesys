@@ -148,10 +148,6 @@ def verify_console_entry_point() -> None:
     if executable is None:
         _fail("Installed vibesys console script is absent from PATH")
     _run([executable, "--headless", "--help"], timeout=30)
-    issue_mcp = shutil.which("vibesys-issue-mcp")
-    if issue_mcp is None:
-        _fail("Installed vibesys-issue-mcp console script is absent from PATH")
-    _run([issue_mcp, "--help"], timeout=30)
 
 
 def verify_first_launch_defaults() -> None:

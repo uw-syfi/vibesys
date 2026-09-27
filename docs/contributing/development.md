@@ -163,13 +163,7 @@ Keep target-specific APIs, ABIs, ownership rules, and service protocols in the
 task's `CANDIDATE_CONTRACT.md` or design documentation rather than in the
 neutral framework prompts.
 
-## Internal tools and workflows
-
-The plain loop's issue MCP server is an internal development tool:
-
-```bash
-uv run vibesys-issue-mcp
-```
+## Internal workflows
 
 For issue forms and repository issue conventions, see
 [`docs/contributing/issue-authoring.md`](issue-authoring.md). For evolutionary search policy
