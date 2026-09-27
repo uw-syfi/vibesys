@@ -110,6 +110,6 @@ def experiment_origin_matches(destination: Path, repository: str) -> bool:
     `repository` is a GitHub `OWNER/NAME` slug. Delegates to
     `ExperimentRepository.origin_matches` with a no-op logger so callers get
     the git-origin check without importing `ExperimentRepository` itself,
-    which also carries `push`/`sync`/`create_remote`.
+    which also carries `push`/`create_remote`.
     """
     return ExperimentRepository(destination, lambda _message: None).origin_matches(repository)

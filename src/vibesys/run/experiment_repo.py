@@ -119,10 +119,6 @@ class ExperimentRepository:
         self._run(["git", "push", "-u", "origin", *refspecs], tool="git")
         self.log(f"[repo] pushed {branch} to origin")
 
-    def sync(self) -> None:
-        """Compatibility name for :meth:`push`, without staging or committing."""
-        self.push()
-
     def _current_run_branch(self) -> str:
         result = self._run(
             ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
