@@ -34,8 +34,8 @@ if TYPE_CHECKING:
 IMPLEMENTER, JUDGE, PERF_EVALUATOR = PLUGIN.agents
 
 
-def _options(**changes: object) -> BaseModel:
-    return PLUGIN.options.model_validate(
+def _options(**changes: object) -> IssueQueueOptions:
+    return IssueQueueOptions.model_validate(
         {
             "max_rounds": 2,
             "max_attempts_per_issue": 2,
@@ -624,6 +624,66 @@ def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path:
     board = IssueBoard(tmp_path / "issues.json")
     assert board.list()[0].status is IssueStatus.IN_PROGRESS
     assert all(session.closed for session in host.agents.sessions)
+
+
+def test_judge_crash_reopens_without_repeating_paid_implementation(tmp_path: Path) -> None:
+    baseline_status, baseline_host = _run(
+        tmp_path / "baseline",
+        _Script(_implementation(), _review(passed=True), _performance()),
+        options=_options(max_rounds=1),
+    )
+    baseline_state = asyncio.run(baseline_host.state.load(IssueQueueState))
+    assert baseline_state is not None
+
+    interrupted_script = _Script(_implementation(), RuntimeError("judge disconnected"))
+    resumed_script = _Script(_review(passed=True), _performance())
+
+    async def crash_and_reopen() -> tuple[RunStatus, FakeRunHost, FakeRunHost]:
+        project_root = tmp_path / "reopened"
+        interrupted = _fake_host(project_root, interrupted_script)
+        try:
+            with pytest.raises(RuntimeError, match="judge disconnected"):
+                await PLUGIN.orchestrate(interrupted, _options(max_rounds=1))
+            persisted = await interrupted.state.load(IssueQueueState)
+            assert persisted is not None
+            assert (persisted.round_idx, persisted.phase, persisted.current_issue_id) == (
+                0,
+                "judge",
+                1,
+            )
+        finally:
+            await interrupted.close()
+
+        reopened = _fake_host(project_root, resumed_script)
+        await reopened.state.commit(
+            persisted,
+            workspace=reopened.workspaces.root,
+            label="reopen persisted issue-queue state",
+        )
+        try:
+            status = await PLUGIN.orchestrate(reopened, _options(max_rounds=1))
+            return status, interrupted, reopened
+        finally:
+            await reopened.close()
+
+    resumed_status, interrupted, reopened = asyncio.run(crash_and_reopen())
+
+    assert baseline_status is resumed_status is RunStatus.SUCCEEDED
+    assert [call[0] for call in (*interrupted_script.calls, *resumed_script.calls)] == [
+        "implementer",
+        "judge",
+        "judge",
+        "perf_eval",
+    ]
+    resumed_state = asyncio.run(reopened.state.load(IssueQueueState))
+    assert resumed_state == baseline_state
+    issue = IssueBoard(tmp_path / "reopened" / "issues.json").get(1)
+    assert issue is not None
+    assert issue.status is IssueStatus.CLOSED
+    assert issue.attempts == 1
+    assert [event.actor for event in issue.history if event.action == "attempt"] == ["implementer"]
+    assert all(session.closed for session in interrupted.agents.sessions)
+    assert all(session.closed for session in reopened.agents.sessions)
 
 
 @pytest.mark.parametrize(
