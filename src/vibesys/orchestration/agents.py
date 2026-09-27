@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.context import borrow_run_agent_environment, open_scoped_agent_environment
 from vibesys.orchestration.steering import splice_steering
-from vibesys.orchestration.workspaces import WorkspaceHandle
+from vibesys.orchestration.workspace_resources import resources_for
 from vibesys.run.agent_events import CoreAgentEventSink
 from vs_agent.api import build_agent_client
 from vs_runtime.api import AgentRole, Workspace
@@ -20,6 +20,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionEnvironment,
     AgentExecutionLifecycleSink,
     AgentExecutionScope,
+    ManagedAgentWorkspace,
     create_agent_session_runtime,
 )
 
@@ -85,12 +86,9 @@ class _Agents:
             writable_paths=writable_paths,
         )
 
-    def _resolve_workspace(self, workspace: Workspace) -> WorkspaceHandle:
-        if not isinstance(workspace, WorkspaceHandle):
-            message = "workspace must be a live handle from this run"
-            raise TypeError(message)
-        self._host.workspaces._scope_of(workspace)
-        return workspace
+    def _resolve_workspace(self, workspace: Workspace) -> ManagedAgentWorkspace:
+        resources_for(self._host.workspaces, workspace)
+        return cast("ManagedAgentWorkspace", workspace)
 
     def _resolve_execution(
         self,
@@ -98,8 +96,7 @@ class _Agents:
         workspace: Workspace,
     ) -> tuple[AgentExecutionConfiguration, AgentExecutionScope]:
         managed = self._resolve_workspace(workspace)
-        scope = self._host.workspaces._scope_of(managed)
-        resources = self._host.workspaces._resources_for(scope)
+        resources = resources_for(self._host.workspaces, managed)
         request = self._host.request
         spec = agent_spec_from_config(
             request.config,
@@ -117,7 +114,7 @@ class _Agents:
             open_environment=partial(
                 self._open_environment,
                 resources,
-                root=scope is None,
+                root=managed is self._host.workspaces.root,
             ),
             current_log_file=lambda: resources.run_log_file,
             environment_variables=resources.device.gpu_env,
@@ -151,7 +148,7 @@ class _Agents:
             cli_provider=configuration.spec.provider,
         )
 
-    async def close_workspace(self, workspace: WorkspaceHandle) -> None:
+    async def close_workspace(self, workspace: Workspace) -> None:
         """Close workspace-bound sessions before environment teardown."""
         await self._explicit.close_workspace(workspace)
 

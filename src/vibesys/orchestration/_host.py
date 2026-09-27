@@ -23,7 +23,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Callable
     from pathlib import Path
 
@@ -34,10 +33,9 @@ if TYPE_CHECKING:
     from vibesys.orchestration.request import RunRequest
     from vibesys.orchestration.view import RunView
     from vibesys.run.event_journal import EventJournal
-    from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
     from vs_agent.api import DurableSessionStore
-    from vs_runtime.api import Commands, Skills
+    from vs_runtime.api import Commands, Skills, Workspace, Workspaces
 
 
 class _ExecutionResultLike(Protocol):
@@ -51,60 +49,6 @@ class _ExecutionResultLike(Protocol):
     @property
     def exit_code(self) -> int | None:
         """Return the process exit status, or ``None`` when unavailable."""
-        ...
-
-
-class _WorkspaceHandleLike(Protocol):
-    """What ``gates.py``/``agents.py`` need from ``ctx.workspaces.root``."""
-
-    async def snapshot(self, label: str) -> str:
-        """Snapshot this workspace and return the recorded revision."""
-        ...
-
-    async def restore(
-        self,
-        revision: str,
-        *,
-        clean: bool = True,
-        preserve_paths: tuple[str, ...] = (),
-        preserve_memory: bool = True,
-    ) -> None:
-        """Restore this workspace to a retained revision."""
-        ...
-
-    async def pending_changes(self) -> list[str]:
-        """List uncommitted candidate changes in this workspace."""
-        ...
-
-
-class _WorkspacesLike(Protocol):
-    """What other capabilities need from ``ctx.workspaces``.
-
-    ``_resources_for``/``_scope_of`` accept ``Any`` for ``scope`` (rather
-    than a precise union), because their real parameter type is
-    ``WorkspaceScope | WorkspaceHandle | None``: ``WorkspaceHandle`` is a
-    concrete class private to ``workspaces.py`` that this module cannot name
-    without an import cycle, and a *structural* stand-in for it does not
-    satisfy Protocol method contravariance (the concrete method would have
-    to accept every object shaped like the stand-in, not just real
-    ``WorkspaceHandle``s). Every other member here keeps its precise type.
-    """
-
-    @property
-    def root(self) -> _WorkspaceHandleLike:
-        """Return this run's non-isolated (parent-tree) workspace."""
-        ...
-
-    def _resources_for(self, scope: Any) -> _RunResources:  # noqa: ANN401  # LW-040086 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        """Resolve the resource assembly for a scope (parent tree if ``None``)."""
-        ...
-
-    def _scope_of(self, scope: Any) -> WorkspaceScope | None:  # noqa: ANN401  # LW-040087 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        """Normalize a scope or workspace handle to a plain ``WorkspaceScope``."""
-        ...
-
-    def _mutation_lock(self, scope: Any) -> asyncio.Lock:  # noqa: ANN401  # lint-waiver: LW-837219 [ANN401]; the private concrete workspace handle cannot be named here without a sibling-module cycle.
-        """Return the lock shared by workspace mutation and evaluation."""
         ...
 
 
@@ -146,6 +90,14 @@ class _ProgressLike(Protocol):
         ...
 
 
+class _AgentSessionsLike(Protocol):
+    """Product session owner with candidate-scoped early cleanup."""
+
+    async def close_workspace(self, workspace: Workspace) -> None:
+        """Close sessions bound to a candidate before its environment closes."""
+        ...
+
+
 class _CommittedStateProjectorLike(Protocol):
     """Structurally identical to ``state.py``'s own ``_CommittedStateProjector``.
 
@@ -178,7 +130,7 @@ class HostResources(Protocol):
         ...
 
     @property
-    def workspaces(self) -> _WorkspacesLike:
+    def workspaces(self) -> Workspaces:
         """Return this run's workspace capability."""
         ...
 
@@ -202,10 +154,13 @@ class HostResources(Protocol):
         """Return run-owned sandboxed command execution."""
         ...
 
+    @property
+    def agents(self) -> _AgentSessionsLike:
+        """Return run-owned explicit agent sessions."""
+        ...
+
     _setup: RunSetup
     _projector: _CommittedStateProjectorLike | None
-    _parent_mutation_lock: asyncio.Lock
-    _workspace_lifecycle_lock: asyncio.Lock
     _session_store: DurableSessionStore | None
 
     @property

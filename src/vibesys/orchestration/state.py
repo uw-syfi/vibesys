@@ -1,84 +1,25 @@
-"""``ctx.state``: checkpoint/commit and the round/experiment events they derive.
+"""Product projection derived after runtime commits opaque plugin state."""
 
-Split from ``runtime.py`` by capability; see that module's docstring.
-"""
-
-# Capabilities in this module share one private owner for resource lifetime.
-# lint-waiver: LW-920434 [SLF001]; capabilities in this module share one private owner for resource lifetime.
+# The observer translates a durable runtime transition through its temporary host.
+# lint-waiver: LW-920434 [SLF001]; this thin composition adapter is removed with RunContext.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-from typing import (
-    TYPE_CHECKING,
-    NotRequired,
-    Protocol,
-    TypedDict,
-    TypeVar,
-    Unpack,
-    overload,
-)
+from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel
-
-from vibesys.events import (
-    CoreEventType,
-    EventStatus,
-    ExperimentsChangedData,
-    RoundFinishedData,
-)
+from vibesys.events import CoreEventType, EventStatus, ExperimentsChangedData, RoundFinishedData
 from vibesys.orchestration import progress_log
-from vs_runtime.api import RuntimeContractError, StateModelError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from pathlib import Path
+    from pydantic import BaseModel
 
     from vibesys.events import CoreEventData
     from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.view import RoundSummary, RunView
-    from vs_project.api import StateNamespace, StateSlot
-    from vs_runtime.api import Workspace as RuntimeWorkspace
-
-T = TypeVar("T", bound=BaseModel)
-
-
-class _CheckpointOptions(TypedDict):
-    publish: NotRequired[BaseModel | None]
-    candidate: NotRequired[bool]
-    label: NotRequired[str | None]
-
-
-class _LegacyCommitOptions(TypedDict):
-    sequence: NotRequired[int]
-    writes: NotRequired[Mapping[str, BaseModel]]
-    publish: NotRequired[BaseModel | None]
-    candidate: NotRequired[bool | None]
-
-
-class _CommittedStateProjector(Protocol):
-    """The one projector method `ctx.state.commit` needs.
-
-    Structurally identical to (and satisfied by any)
-    `vibesys.orchestration.contracts.OrchestrationProjector`; declared locally
-    rather than imported so this module, the dependency graph's base layer,
-    never depends on `contracts` (which itself depends on this module).
-    """
-
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
-        """Project a state just committed by the host."""
-        ...
 
 
 class _EventSink(Protocol):
-    """The one method `_emit_commit_events` needs from `ctx.events`.
-
-    Declared locally (rather than typed as `EventJournal` directly) so the
-    derivation logic can be exercised against a minimal fake in tests,
-    without constructing a full `RunContext`.
-    """
-
     def emit(
         self,
         event_type: CoreEventType,
@@ -86,327 +27,33 @@ class _EventSink(Protocol):
         *,
         data: CoreEventData | None = None,
         **fields: object,
-    ) -> object:
-        """Create, record, and publish one core event."""
-        ...
+    ) -> object: ...
 
 
-class _TypedRunStateSlot[T: BaseModel]:
-    """Read one declared typed file from the policy's portable namespace."""
+class _StateCommitObserver:
+    """Publish semantic product projections after runtime durability succeeds."""
 
-    def __init__(self, host: HostResources, slot: StateSlot[T]) -> None:
+    def __init__(self, host: HostResources, namespace: str) -> None:
         self._host = host
-        self._slot = slot
+        self._namespace = namespace
 
-    async def load(self) -> T | None:
-        """Load and validate the last staged or committed model."""
-        return await self._host._run_blocking(self._slot.load_optional)
-
-
-class _RunState:
-    """Policy-bound portable state and machine-local staging paths."""
-
-    def __init__(
-        self,
-        host: HostResources,
-        state_model: type[BaseModel] | None = None,
-        *,
-        plugin_bound: bool = False,
-    ) -> None:
-        self._host = host
-        self._state_model = state_model
-        self._plugin_bound = plugin_bound
-        self._next_transaction_sequence = 1
-        # Cache of the last published `RunView`, used by `commit` to derive
-        # round/experiment events from a before/after diff without re-reading
-        # the run's durable state on every call. `_last_view_loaded` is False
-        # until this process has computed it once; the first `commit` call
-        # then resolves it from whatever was already durable (see
-        # `_previous_view`), so a resumed run does not replay events for
-        # already-committed rounds.
-        self._last_view: RunView | None = None
-        self._last_view_loaded = False
-
-    @property
-    def namespace(self) -> StateNamespace:
-        """Return the policy's portable namespace for existing paid-work journals."""
-        setup = self._host._setup
-        if setup.state_namespace is None:
-            message = "policy did not declare a portable state namespace"
-            raise TypeError(message)
-        context = self._host._resources
-        return context.state.portable(setup.state_namespace)
-
-    @property
-    def local_namespace(self) -> StateNamespace:
-        """Return machine-local state for uncommitted paid-work cursors."""
-        setup = self._host._setup
-        if setup.state_namespace is None:
-            message = "policy did not declare a state namespace"
-            raise TypeError(message)
-        return self._host._resources.state.local(setup.state_namespace)
-
-    def local_path(self, name: str) -> Path:
-        """Return a validated machine-local file path owned by this run."""
-        relative = PurePosixPath(name)
-        parent = relative.parent
-        directory = self.local_namespace.external_directory(
-            None if parent == PurePosixPath(".") else parent
-        )
-        if relative.name in {"", ".", ".."} or relative.is_absolute():
-            message = f"invalid local state path {name!r}"
-            raise ValueError(message)
-        return directory / relative.name
-
-    def artifact_path(self, name: str) -> Path:
-        """Return a validated portable artifact directory path."""
-        return self.namespace.external_directory(name)
-
-    def slot(self, name: str, model: type[T]) -> _TypedRunStateSlot[T]:
-        """Bind one declared typed portable file."""
-        setup = self._host._setup
-        declared = setup.state_slots or {}
-        if declared.get(name) is not model:
-            message = f"policy state slot {name!r} is not declared with {model.__name__}"
-            raise TypeError(message)
-        return _TypedRunStateSlot(self._host, self.namespace.slot(name, model))
-
-    async def load(self, model: type[T]) -> T | None:
-        """Load the validated state after interrupted checkpoint recovery."""
-        if self._plugin_bound and model is not self._state_model:
-            raise StateModelError(self._state_model, model)
-        return await self.slot("state.json", model).load()
-
-    async def checkpoint(
-        self,
-        *,
-        sequence: int,
-        writes: Mapping[str, BaseModel],
-        **options: Unpack[_CheckpointOptions],
-    ) -> str:
-        """Journal and commit typed writes with candidate edits, then publish."""
-        async with self._host._parent_mutation_lock:
-            revision, _committed = await self._host._run_blocking(
-                self._checkpoint,
-                sequence,
-                writes,
-                options.get("publish"),
-                candidate=options.get("candidate", True),
-                label=options.get("label"),
-            )
-            return revision
-
-    @overload
-    async def commit(
-        self,
-        value: BaseModel,
-        *,
-        workspace: RuntimeWorkspace | None = None,
-        label: str | None = None,
-    ) -> None: ...
-
-    @overload
-    async def commit(
-        self,
-        *,
-        sequence: int,
-        writes: Mapping[str, BaseModel],
-        publish: BaseModel | None = None,
-        candidate: bool | None = None,
-        label: str | None = None,
-    ) -> str: ...
-
-    async def commit(
-        self,
-        value: BaseModel | None = None,
-        *,
-        workspace: RuntimeWorkspace | None = None,
-        label: str | None = None,
-        **legacy: Unpack[_LegacyCommitOptions],
-    ) -> str | None:
-        """Use the plugin-bound API or temporarily dispatch a legacy state write."""
-        if value is not None:
-            if legacy:
-                message = "plugin state commit cannot use legacy checkpoint arguments"
-                raise TypeError(message)
-            await self._commit_public(value, workspace=workspace, label=label)
-            return None
-        sequence = legacy.get("sequence")
-        writes = legacy.get("writes")
-        if sequence is None or writes is None:
-            message = "state commit requires a value"
-            raise TypeError(message)
-        if workspace is not None:
-            message = "legacy state commit cannot take a workspace"
-            raise TypeError(message)
-        candidate = legacy.get("candidate")
-        if candidate is None:
-            candidate = True
-        return await self._commit_legacy(
-            sequence=sequence,
-            writes=writes,
-            publish=legacy.get("publish"),
-            candidate=candidate,
-            label=label,
-        )
-
-    async def _commit_public(
-        self,
-        value: BaseModel,
-        *,
-        workspace: RuntimeWorkspace | None = None,
-        label: str | None = None,
-    ) -> None:
-        """Persist, project, and publish one deep-validated plugin state value."""
-        model = self._state_model
-        if model is None or type(value) is not model:
-            raise StateModelError(model, type(value))
-        if workspace is not None and workspace is not self._host.workspaces.root:
-            message = "state can commit only the live root workspace for this run"
-            raise RuntimeContractError(message)
-        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
-        namespace = self._host._setup.state_namespace
-        if namespace is None:
-            message = "plugin did not declare a durable state namespace"
-            raise TypeError(message)
-        async with self._host._parent_mutation_lock:
-            before = await self._previous_view()
-            sequence = self._next_transaction_sequence
-            self._next_transaction_sequence += 1
-            await self._host._run_blocking(
-                self._persist,
-                sequence,
-                {"state.json": snapshot},
-                candidate=workspace is not None,
-                label=label,
-            )
-            self._host._resources.publish_committed_state(namespace, snapshot)
-        after = self._project(snapshot)
-        self._last_view = after
-        self._last_view_loaded = True
-        _emit_commit_events(self._host.events, before, after)
-        self._flush_progress()
-
-    async def _commit_legacy(
-        self,
-        *,
-        sequence: int,
-        writes: Mapping[str, BaseModel],
-        **options: Unpack[_CheckpointOptions],
-    ) -> str:
-        """Checkpoint typed writes, publish, then emit the events that follow.
-
-        A thin wrapper over `checkpoint` that additionally diffs the read
-        model before and after this write and emits `ROUND_FINISHED` for
-        every newly completed round and `EXPERIMENTS_CHANGED` when the
-        experiment revision moved, so strategies stop hand-rolling that
-        sequence themselves. Strategies whose read projection carries no
-        rounds or revision (evolve, issue_queue) see no events derived here.
-
-        The framework log's one write point is flushed here, after the
-        checkpoint durably lands and before this call returns -- always
-        before the next turn, which is the only ordering the board needs.
-        Resume never depends on this file: it is a derived, regenerable
-        narration of state that is already durable by the time this writes
-        it. A strategy declares its progress path once with
-        `ctx.progress.declare` and notes pending blocks with
-        `ctx.progress.note` (see `vibesys.orchestration.progress`); this
-        drains and writes that buffer.
-        """
-        async with self._host._parent_mutation_lock:
-            before = await self._previous_view()
-            revision, committed = await self._host._run_blocking(
-                self._checkpoint,
-                sequence,
-                writes,
-                options.get("publish"),
-                candidate=options.get("candidate", True),
-                label=options.get("label"),
-            )
-        after = self._project(committed)
-        self._last_view = after
-        self._last_view_loaded = True
-        _emit_commit_events(self._host.events, before, after)
-        self._flush_progress()
-        return revision
-
-    def _flush_progress(self) -> None:
-        """Write the host-owned buffer's pending framework-log blocks, in order."""
+    def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
+        self._host._resources.publish_committed_state(self._namespace, current)
+        _emit_commit_events(self._host.events, self._project(previous), self._project(current))
         progress = self._host.progress
-        path = progress.path
-        if path is None:
-            return
-        for block in progress.drain():
-            progress_log.write(path, block)
+        if progress.path is not None:
+            for block in progress.drain():
+                progress_log.write(progress.path, block)
 
-    async def _previous_view(self) -> RunView | None:
-        """Return the last published view, resolving it from disk once."""
-        if not self._last_view_loaded:
-            self._last_view = await self._load_previous_view()
-            self._last_view_loaded = True
-        return self._last_view
-
-    async def _load_previous_view(self) -> RunView | None:
-        setup = self._host._setup
-        declared = setup.state_slots or {}
-        model = declared.get("state.json")
-        if model is None:
-            return None
-        state = await self.slot("state.json", model).load()
-        return self._project(state)
-
-    def _project(self, state: BaseModel | None) -> RunView | None:
+    def _project(self, value: BaseModel | None) -> RunView | None:
         projector = self._host._projector
-        namespace = self._host._setup.state_namespace
-        if projector is None or namespace is None or state is None:
+        if projector is None or value is None:
             return None
-        return projector.project_committed(namespace, state, run_id=self._host._resources.run_id)
-
-    def _checkpoint(
-        self,
-        sequence: int,
-        writes: Mapping[str, BaseModel],
-        publish: BaseModel | None,
-        *,
-        candidate: bool,
-        label: str | None,
-    ) -> tuple[str, BaseModel | None]:
-        context = self._host._resources
-        revision = self._persist(
-            sequence,
-            writes,
-            candidate=candidate,
-            label=label,
+        return projector.project_committed(
+            self._namespace,
+            value,
+            run_id=self._host._resources.run_id,
         )
-        committed = publish or writes.get("state.json")
-        if committed is not None:
-            namespace = self._host._setup.state_namespace
-            if namespace is None:
-                message = "policy did not declare a durable state slot"
-                raise TypeError(message)
-            context.publish_committed_state(namespace, committed)
-        return revision, committed
-
-    def _persist(
-        self,
-        sequence: int,
-        writes: Mapping[str, BaseModel],
-        *,
-        candidate: bool,
-        label: str | None,
-    ) -> str:
-        """Commit exact typed bytes through the existing recoverable transaction."""
-        context = self._host._resources
-        coordinator = context._round_transaction_coordinator
-        if coordinator is None:
-            message = "policy did not declare checkpoint slots"
-            raise TypeError(message)
-        coordinator.begin(sequence, writes=writes, candidate=candidate, label=label).complete()
-        revision = context.git.current_sha()
-        if revision is None:
-            message = "checkpoint completed without a Git revision"
-            raise RuntimeError(message)
-        return revision
 
 
 def _round_entries(view: RunView | None) -> dict[int, RoundSummary]:
@@ -416,13 +63,7 @@ def _round_entries(view: RunView | None) -> dict[int, RoundSummary]:
 
 
 def _emit_commit_events(events: _EventSink, before: RunView | None, after: RunView | None) -> None:
-    """Emit the round/experiment events one `commit` newly made observable.
-
-    Diffs `RunView.rounds`/`experiment_revision`, the typed fields every
-    strategy projector populates (see `vibesys.orchestration.view.RunView`);
-    a strategy that leaves them empty/`None` (no round concept) naturally
-    yields no diff, so this holds no knowledge of any one policy's shape.
-    """
+    """Emit semantic changes newly made observable by one durable commit."""
     if after is None:
         return
     before_rounds = _round_entries(before)
@@ -430,9 +71,6 @@ def _emit_commit_events(events: _EventSink, before: RunView | None, after: RunVi
     new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
     for number in new_round_numbers:
         _emit_round_finished(events, after_rounds[number])
-    # A run's very first commit has no prior view to diff against (see
-    # `_previous_view`): nothing has been observed yet, so nothing changed,
-    # regardless of the revision value that first view happens to carry.
     if before is None:
         return
     before_revision = before.experiment_revision

@@ -8,7 +8,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.workspaces import WorkspaceHandle
+from vibesys.orchestration.workspace_resources import resources_for
 from vs_runtime.api import (
     CommandResult,
     RuntimeContractError,
@@ -37,11 +37,7 @@ class _Commands:
     ) -> CommandResult:
         """Run one safely quoted argv in the selected workspace environment."""
         validate_command(argv, timeout_seconds)
-        if not isinstance(workspace, WorkspaceHandle):
-            message = "workspace must be a live handle from this run"
-            raise TypeError(message)
-        scope = self._host.workspaces._scope_of(workspace)
-        context = self._host.workspaces._resources_for(scope)
+        context = resources_for(self._host.workspaces, workspace)
         result = await self._host._run_blocking(
             context.run_environment_session.sandbox.execute,
             shlex.join(argv),
@@ -64,11 +60,7 @@ class _Commands:
         """Capture a command's runtime-managed output artifact and remove it."""
         validate_command(argv, timeout_seconds)
         validate_command((output_argument,), None)
-        if not isinstance(workspace, WorkspaceHandle):
-            message = "workspace must be a live handle from this run"
-            raise TypeError(message)
-        scope = self._host.workspaces._scope_of(workspace)
-        context = self._host.workspaces._resources_for(scope)
+        context = resources_for(self._host.workspaces, workspace)
         sandbox = context.run_environment_session.sandbox
         temporary = await self._host._run_blocking(
             sandbox.execute,
@@ -115,11 +107,7 @@ class _Commands:
     ) -> CommandResult:
         """Run an independently audited recipe through the workspace shell."""
         validate_trusted_shell_command(command, timeout_seconds)
-        if not isinstance(workspace, WorkspaceHandle):
-            message = "workspace must be a live handle from this run"
-            raise TypeError(message)
-        scope = self._host.workspaces._scope_of(workspace)
-        context = self._host.workspaces._resources_for(scope)
+        context = resources_for(self._host.workspaces, workspace)
         result = await self._host._run_blocking(
             context.run_environment_session.sandbox.execute,
             command,

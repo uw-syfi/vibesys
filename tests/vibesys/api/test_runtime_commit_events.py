@@ -30,6 +30,8 @@ from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime.api import OrchestrationPlugin, RunHost
+from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -43,6 +45,24 @@ class _FakeAgentState(BaseModel):
     experiment_revision: int = 0
 
 
+class _Options(BaseModel):
+    pass
+
+
+async def _orchestrate(run: RunHost, options: BaseModel) -> PluginRunStatus:
+    del run, options
+    return PluginRunStatus.SUCCEEDED
+
+
+_PLUGIN = OrchestrationPlugin(
+    id="commit-probe",
+    agents=(),
+    options=_Options,
+    orchestrate=_orchestrate,
+    state=_FakeAgentState,
+)
+
+
 class _FakeProjector:
     """Project `_FakeAgentState` into the generic `"kind": "agent"` shape."""
 
@@ -50,7 +70,7 @@ class _FakeProjector:
         raise NotImplementedError
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
-        if namespace != "commit_probe" or not isinstance(state, _FakeAgentState):
+        if namespace != "commit-probe" or not isinstance(state, _FakeAgentState):
             return None
         return _agent_view(state.round_numbers, state.experiment_revision, run_id=run_id)
 
@@ -83,10 +103,6 @@ def _request(
     )
 
 
-def _setup() -> RunSetup:
-    return RunSetup(state_namespace="commit_probe", state_slots={"state.json": _FakeAgentState})
-
-
 def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -> None:
     """One session: round completion and a bare revision bump each fire once."""
     project_root = tmp_path / "project"
@@ -97,36 +113,24 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
 
     async def exercise() -> None:
         async with RunContext.open(
-            _request(project_root), integration, setup=_setup(), projector=_FakeProjector()
+            _request(project_root),
+            integration,
+            setup=RunSetup(),
+            projector=_FakeProjector(),
+            plugin=_PLUGIN,
         ) as ctx:
             # First commit ever for this run: establishes round 1, revision 1.
             # No prior view exists, so no EXPERIMENTS_CHANGED fires for it
             # (nothing was previously observed to compare against).
-            await ctx.state.commit(
-                sequence=1,
-                writes={"state.json": _FakeAgentState(round_numbers=(1,), experiment_revision=1)},
-                candidate=False,
-            )
+            await ctx.state.commit(_FakeAgentState(round_numbers=(1,), experiment_revision=1))
             # Bare revision bump, no new round: EXPERIMENTS_CHANGED only.
-            await ctx.state.commit(
-                sequence=2,
-                writes={"state.json": _FakeAgentState(round_numbers=(1,), experiment_revision=2)},
-                candidate=False,
-            )
+            await ctx.state.commit(_FakeAgentState(round_numbers=(1,), experiment_revision=2))
             # New round 2, same revision as before this commit -> revision 3:
             # both ROUND_FINISHED and EXPERIMENTS_CHANGED fire.
-            await ctx.state.commit(
-                sequence=3,
-                writes={"state.json": _FakeAgentState(round_numbers=(1, 2), experiment_revision=3)},
-                candidate=False,
-            )
+            await ctx.state.commit(_FakeAgentState(round_numbers=(1, 2), experiment_revision=3))
             # Re-committing identical content: nothing new is observable, so
             # no derived events fire at all (no double emission).
-            await ctx.state.commit(
-                sequence=4,
-                writes={"state.json": _FakeAgentState(round_numbers=(1, 2), experiment_revision=3)},
-                candidate=False,
-            )
+            await ctx.state.commit(_FakeAgentState(round_numbers=(1, 2), experiment_revision=3))
 
     try:
         asyncio.run(exercise())
@@ -158,15 +162,13 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
         integration = LocalRunIntegration()
         try:
             async with RunContext.open(
-                _request(project_root), integration, setup=_setup(), projector=_FakeProjector()
+                _request(project_root),
+                integration,
+                setup=RunSetup(),
+                projector=_FakeProjector(),
+                plugin=_PLUGIN,
             ) as ctx:
-                await ctx.state.commit(
-                    sequence=1,
-                    writes={
-                        "state.json": _FakeAgentState(round_numbers=(1,), experiment_revision=1)
-                    },
-                    candidate=False,
-                )
+                await ctx.state.commit(_FakeAgentState(round_numbers=(1,), experiment_revision=1))
                 return ctx._resources.run_id  # noqa: SLF001  # LW-040114 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
         finally:
             integration.close()
@@ -181,14 +183,11 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
         async with RunContext.open(
             _request(project_root, resume=ResumeRef(run_id=run_id)),
             resumed_integration,
-            setup=_setup(),
+            setup=RunSetup(),
             projector=_FakeProjector(),
+            plugin=_PLUGIN,
         ) as ctx:
-            await ctx.state.commit(
-                sequence=2,
-                writes={"state.json": _FakeAgentState(round_numbers=(1, 2), experiment_revision=2)},
-                candidate=False,
-            )
+            await ctx.state.commit(_FakeAgentState(round_numbers=(1, 2), experiment_revision=2))
 
     try:
         asyncio.run(resume_and_commit_round_two())

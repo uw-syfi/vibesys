@@ -107,6 +107,7 @@ from vs_runtime._skills import (
     load_skill_frontmatter,
     resolve_skill_resources,
 )
+from vs_runtime._state import CommittedStateObserver, create_state
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
@@ -117,6 +118,14 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     TrustedMetricDeclaration,
     create_trusted_evaluation_executor,
+)
+from vs_runtime._workspaces import (
+    OwnedWorkspaces,
+    WorkspaceResource,
+    WorkspaceResourceProvider,
+    create_workspaces,
+    resolve_workspace_resource,
+    run_workspace_exclusive,
 )
 from vs_runtime.contracts import AgentSessions, Workspace
 
@@ -334,6 +343,7 @@ __all__ = [
     "AgentMessageRouter",
     "AgentSessionRuntime",
     "AgentToolResolver",
+    "CommittedStateObserver",
     "CompletedRound",
     "FrameworkValidationResult",
     "GitSourceMaterialization",
@@ -362,6 +372,7 @@ __all__ = [
     "MultiSlotRoundTransactionCoordinator",
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
+    "OwnedWorkspaces",
     "ProjectMaterializationEffects",
     "ProjectMaterializationStep",
     "ProjectMaterializer",
@@ -386,6 +397,8 @@ __all__ = [
     "TrustedEvaluationPlan",
     "TrustedMetricDeclaration",
     "ValidationRecipe",
+    "WorkspaceResource",
+    "WorkspaceResourceProvider",
     "WorkspaceSourceValue",
     "build_skill_catalog",
     "collect_linux_profile",
@@ -393,7 +406,9 @@ __all__ = [
     "create_agent_session_runtime",
     "create_model_request_reconciler",
     "create_run_control_channel",
+    "create_state",
     "create_trusted_evaluation_executor",
+    "create_workspaces",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",
@@ -406,6 +421,8 @@ __all__ = [
     "resolve_packaged_tree",
     "resolve_sdk_source",
     "resolve_skill_resources",
+    "resolve_workspace_resource",
     "run_local_validation",
+    "run_workspace_exclusive",
     "summarize_linux_profile",
 ]

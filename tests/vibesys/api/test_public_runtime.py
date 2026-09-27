@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from pydantic import BaseModel
 
 from vibesys.api import (
     ComputeBackend,
@@ -32,10 +31,6 @@ if TYPE_CHECKING:
 
     from vibesys.context import _RunResources
     from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
-
-
-class _PolicyState(BaseModel):
-    value: int
 
 
 def _write_project(root: Path) -> None:
@@ -117,42 +112,25 @@ def test_skypilot_agents_borrow_the_workspace_session() -> None:
         borrow_run_agent_environment(context, cli_provider="codex")
 
 
-def test_root_workspace_and_typed_state_capabilities(tmp_path: Path) -> None:
+def test_root_workspace_capabilities(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        setup = RunSetup(state_namespace="public_probe", state_slots={"state.json": _PolicyState})
-        async with RunContext.open(_request(project_root), integration, setup=setup) as ctx:
-            assert ctx.state.local_path("notes/cursor.json").name == "cursor.json"
-            assert ctx.state.artifact_path("reports").is_dir()
-            with pytest.raises(TypeError, match="not declared"):
-                ctx.state.slot("other.json", _PolicyState)
-            await ctx.state.checkpoint(
-                sequence=1,
-                writes={"state.json": _PolicyState(value=7)},
-                candidate=False,
-            )
-            assert await ctx.state.load(_PolicyState) == _PolicyState(value=7)
-
+        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
             root = ctx.workspaces.root
             original = root.revision
             assert original is not None
-            assert await root.trusted_input_changes() == []
             (root.path / "queue.py").write_text("VALUE = 2\n")
             assert "queue.py" in await root.pending_changes()
             changed = await root.snapshot("public runtime candidate")
             assert changed == root.revision
-            assert "VALUE = 2" in await root.candidate_patch(changed)
             await root.restore(original)
             assert (root.path / "queue.py").read_text() == "VALUE = 1\n"
             await root.restore(changed)
             assert (root.path / "queue.py").read_text() == "VALUE = 2\n"
-            retained_reference = await root.retain_named("public-probe", changed)
-            assert retained_reference.endswith("/candidates/public-probe")
-            with pytest.raises(ValueError, match="run root cannot be discarded"):
-                await root.discard()
+            assert await root.retain(changed, label="public-probe") is None
             assert not ctx.workspaces.supports_parallel_candidates
             with pytest.raises(RuntimeError, match="cannot open isolated candidate sandboxes"):
                 await ctx.workspaces.create_candidate()
@@ -170,8 +148,6 @@ def test_root_environment_and_trusted_evaluator_capabilities(tmp_path: Path) -> 
 
     async def exercise() -> None:
         async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
-            with pytest.raises(TypeError, match="portable state namespace"):
-                _ = ctx.state.namespace
             assert ctx.environment.view.env_kind == "local"
             assert ctx.environment.view_for() is ctx.environment.view
             assert ctx.environment.reference_path

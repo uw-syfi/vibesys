@@ -3,7 +3,7 @@
 import asyncio
 import shutil
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
@@ -166,8 +166,6 @@ class RunStartHints:
 class RunSetup:
     """Policy-owned facts needed before the shared run context can open."""
 
-    state_namespace: str | None = None
-    state_slots: Mapping[str, type[BaseModel]] | None = None
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
@@ -185,17 +183,13 @@ class RunSetup:
     surviving the restore and then failing the post-restore isolation check.
     """
 
-    def __post_init__(self) -> None:
-        """Reject incomplete policy-owned state slot declarations."""
-        if self.state_namespace is None and self.state_slots:
-            message = "RunSetup state slots require state_namespace"
-            raise ValueError(message)
-        if self.state_namespace is not None and not self.state_slots:
-            message = "RunSetup requires at least one state slot"
-            raise ValueError(message)
-        if self.state_namespace == "":
-            message = "RunSetup.state_namespace must be nonempty"
-            raise ValueError(message)
+
+@dataclass(frozen=True, slots=True)
+class _StateBinding:
+    """Composition-only plugin state declaration for resource assembly."""
+
+    namespace: str
+    model: type[BaseModel]
 
 
 def _profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, str], ...]:
@@ -344,22 +338,21 @@ def _exact_resume_descriptor(
     return OrchestrationResumeDecision(descriptor=None)
 
 
-def _round_transaction_for_setup(
-    setup: RunSetup,
+def _round_transaction_for_state(
+    binding: _StateBinding | None,
 ) -> Callable[[Project, GitTracker, str], MultiSlotRoundTransactionCoordinator] | None:
-    namespace = setup.state_namespace
-    models = setup.state_slots
-    if namespace is None:
+    if binding is None:
         return None
-    if models is None:
-        message = "RunSetup requires declared state slots"
-        raise TypeError(message)
 
     def open_coordinator(
         project: Project, git: GitTracker, run_id: str
     ) -> MultiSlotRoundTransactionCoordinator:
         return MultiSlotRoundTransactionCoordinator(
-            project, git, run_id, namespace=namespace, models=models
+            project,
+            git,
+            run_id,
+            namespace=binding.namespace,
+            models={"state.json": binding.model},
         )
 
     return open_coordinator
@@ -370,6 +363,7 @@ def open_run_resources(
     setup: RunSetup,
     integration: LocalRunIntegration,
     *,
+    state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
     """Open the one project context from a canonical request and policy setup.
@@ -386,6 +380,7 @@ def open_run_resources(
             request=request,
             setup=setup,
             integration=integration,
+            state_binding=state_binding,
             backend_factory=backend_factory,
         )
     except BaseException as construction_error:
@@ -406,12 +401,13 @@ def _close_after_construction_failure(
         )
 
 
-def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
+def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
     *,
     teardown_stack: ExitStack,
     request: RunRequest,
     setup: RunSetup,
     integration: LocalRunIntegration,
+    state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
     bundle = request.input_bundle
@@ -446,7 +442,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
     environment_hooks = resolve_domain(bundle.domain).environment_hooks
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
-    round_transaction_factory = _round_transaction_for_setup(setup)
+    round_transaction_factory = _round_transaction_for_state(state_binding)
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once

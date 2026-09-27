@@ -27,6 +27,7 @@ from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime.api import OrchestrationPlugin, RunHost, RunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,6 +39,24 @@ class _FakeState(BaseModel):
     """Minimal typed state; only its presence as a committed slot matters here."""
 
     marker: int = 0
+
+
+class _Options(BaseModel):
+    pass
+
+
+async def _orchestrate(run: RunHost, options: BaseModel) -> RunStatus:
+    del run, options
+    return RunStatus.SUCCEEDED
+
+
+_PLUGIN = OrchestrationPlugin(
+    id="progress-probe",
+    agents=(),
+    options=_Options,
+    orchestrate=_orchestrate,
+    state=_FakeState,
+)
 
 
 def _write_project(root: Path) -> None:
@@ -65,10 +84,6 @@ def _request(project_root: Path) -> RunRequest:
     )
 
 
-def _setup() -> RunSetup:
-    return RunSetup(state_namespace="progress_probe", state_slots={"state.json": _FakeState})
-
-
 def test_commit_flushes_noted_entries_in_order(tmp_path: Path) -> None:
     """Entries noted before a commit land in `progress.md`, in note order."""
     project_root = tmp_path / "project"
@@ -77,23 +92,19 @@ def test_commit_flushes_noted_entries_in_order(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> str:
-        async with RunContext.open(_request(project_root), integration, setup=_setup()) as ctx:
+        async with RunContext.open(
+            _request(project_root), integration, setup=RunSetup(), plugin=_PLUGIN
+        ) as ctx:
             ctx.progress.declare(progress_path)
             ctx.progress.note("## Round 1 — Alpha\n- **info**: first\n")
             ctx.progress.note("## Round 1 — Beta\n- **info**: second\n")
 
-            await ctx.state.commit(
-                sequence=1, writes={"state.json": _FakeState(marker=1)}, candidate=False
-            )
+            await ctx.state.commit(_FakeState(marker=1))
             # A commit with nothing newly noted flushes nothing further.
-            await ctx.state.commit(
-                sequence=2, writes={"state.json": _FakeState(marker=1)}, candidate=False
-            )
+            await ctx.state.commit(_FakeState(marker=1))
 
             ctx.progress.note("## Round 2 — Gamma\n- **info**: third\n")
-            await ctx.state.commit(
-                sequence=3, writes={"state.json": _FakeState(marker=2)}, candidate=False
-            )
+            await ctx.state.commit(_FakeState(marker=2))
             return progress_path.read_text(encoding="utf-8")
 
     try:

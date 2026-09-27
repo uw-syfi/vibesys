@@ -9,18 +9,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys.orchestration.workspace_resources import resources_for
+
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.config import Config
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.orchestration._host import HostResources
-    from vibesys.orchestration.workspaces import WorkspaceHandle
     from vibesys.profilers import ProfilerKind
-    from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentView
     from vibesys.skills import SkillSelection
     from vs_agent.api import ToolServerDescriptor
+    from vs_runtime.api import Workspace
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox, SandboxExecutionResult
 
 
@@ -112,9 +113,9 @@ class _Environment:
         """Return the resolved root environment's policy-neutral facts."""
         return self.view_for()
 
-    def view_for(self, scope: WorkspaceScope | WorkspaceHandle | None = None) -> RunEnvironmentView:
+    def view_for(self, scope: Workspace | None = None) -> RunEnvironmentView:
         """Return environment facts for one live workspace."""
-        return self._host.workspaces._resources_for(scope).run_environment_view
+        return self._resources(scope).run_environment_view
 
     @property
     def reference_path(self) -> str:
@@ -156,10 +157,10 @@ class _Environment:
         generation: int,
         child_idx: int,
         *,
-        scope: WorkspaceScope | WorkspaceHandle | None = None,
+        scope: Workspace | None = None,
     ) -> CandidateRuntime:
         """Resolve candidate prompt notes and deployment identity."""
-        context = self._host.workspaces._resources_for(scope)
+        context = self._resources(scope)
         return context.run_environment.candidate_runtime(
             context.run_environment_view, generation, child_idx
         )
@@ -171,11 +172,9 @@ class _Environment:
             context.run_environment.teardown_deployment, name, log=context.lprint
         )
 
-    async def reselect_device(
-        self, *, scope: WorkspaceScope | WorkspaceHandle | None = None
-    ) -> None:
+    async def reselect_device(self, *, scope: Workspace | None = None) -> None:
         """Rebalance the device assigned to a workspace before a paid turn."""
-        context = self._host.workspaces._resources_for(scope)
+        context = self._resources(scope)
         await self._host._run_blocking(context.reselect_gpu)
 
     async def execute(
@@ -183,10 +182,16 @@ class _Environment:
         command: str,
         *,
         timeout_seconds: int | None = None,
-        scope: WorkspaceScope | WorkspaceHandle | None = None,
+        scope: Workspace | None = None,
     ) -> SandboxExecutionResult:
         """Execute a policy-selected command in the selected run environment."""
-        context = self._host.workspaces._resources_for(scope)
+        context = self._resources(scope)
         return await self._host._run_blocking(
             context.run_environment_session.sandbox.execute, command, timeout=timeout_seconds
+        )
+
+    def _resources(self, workspace: Workspace | None):  # noqa: ANN202  # lint-waiver: LW-228414 [ANN202]; the private product resource type is intentionally confined to the composition adapter.
+        return resources_for(
+            self._host.workspaces,
+            workspace or self._host.workspaces.root,
         )

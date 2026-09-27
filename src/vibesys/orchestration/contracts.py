@@ -119,8 +119,6 @@ class OrchestrationRegistration:
         setup = self.plugin_setup(options) if self.plugin_setup is not None else RunSetup()
         setup = replace(
             setup,
-            state_namespace=plugin.id if plugin.state is not None else None,
-            state_slots={"state.json": plugin.state} if plugin.state is not None else None,
             start_hints=replace(
                 setup.start_hints or RunStartHints(),
                 expected_roles=tuple(role.id for role in plugin.agents),

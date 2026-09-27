@@ -17,7 +17,7 @@ from vs_runtime.api.infrastructure import (
 
 if TYPE_CHECKING:
     from vibesys.orchestration._host import HostResources
-    from vibesys.orchestration.workspaces import WorkspaceHandle
+    from vs_runtime.api import Workspace
 
 
 class _GateEvents:
@@ -50,7 +50,7 @@ class _GateEvents:
 
 async def validate_local(
     host: HostResources,
-    workspace: WorkspaceHandle,
+    workspace: Workspace,
     *,
     recipe_artifact: str,
     report_location: str,

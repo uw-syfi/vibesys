@@ -1,10 +1,5 @@
 """VibeSys evaluation policy over runtime-owned trusted execution."""
 
-# This policy adapter consumes the private workspace/resource owner until that
-# owner moves to vs_runtime.
-# lint-waiver: LW-040101 [SLF001]; the adapter and workspace manager share one run-owned resource lifetime.
-# ruff: noqa: SLF001
-
 from __future__ import annotations
 
 import shlex
@@ -20,7 +15,7 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.events import CoreEventType, GateFinishedData, GateKind, SubprocessOutputData
 from vibesys.orchestration.local_validation import validate_local
-from vibesys.orchestration.workspaces import WorkspaceHandle
+from vibesys.orchestration.workspace_resources import resources_for
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -38,6 +33,7 @@ from vs_runtime.api.infrastructure import (
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
     TrustedBenchmarkResult,
+    run_workspace_exclusive,
 )
 
 if TYPE_CHECKING:
@@ -52,21 +48,18 @@ class _EvaluationAdapter:
         self._host = host
         self._identifiers = count(1)
 
-    @staticmethod
-    def _live_workspace(workspace: Workspace) -> WorkspaceHandle:
-        if not isinstance(workspace, WorkspaceHandle):
-            message = "workspace must be a live handle from this run"
-            raise TypeError(message)
+    def _live_workspace(self, workspace: Workspace) -> Workspace:
+        resources_for(self._host.workspaces, workspace)
         return workspace
 
-    def _receipt(self, workspace: WorkspaceHandle, revision: str) -> AccuracyReceipt:
+    def _receipt(self, workspace: Workspace, revision: str) -> AccuracyReceipt:
         return AccuracyReceipt(
             run_id=self._host.run_id,
             workspace_id=workspace.id,
             revision=revision,
         )
 
-    def _validate_receipt_owner(self, workspace: WorkspaceHandle, receipt: AccuracyReceipt) -> None:
+    def _validate_receipt_owner(self, workspace: Workspace, receipt: AccuracyReceipt) -> None:
         if receipt.run_id != self._host.run_id:
             message = "accuracy receipt belongs to another run"
             raise RuntimeContractError(message)
@@ -74,16 +67,14 @@ class _EvaluationAdapter:
             message = "accuracy receipt belongs to another workspace"
             raise RuntimeContractError(message)
 
-    def _validate_receipt_revision(
-        self, workspace: WorkspaceHandle, receipt: AccuracyReceipt
-    ) -> None:
+    def _validate_receipt_revision(self, workspace: Workspace, receipt: AccuracyReceipt) -> None:
         current_revision = workspace.revision
         if current_revision is None:
             message = "accuracy receipt does not match the current workspace revision"
             raise RuntimeContractError(message)
         if receipt.revision == current_revision:
             return
-        git = self._host.workspaces._resources_for(workspace).git
+        git = resources_for(self._host.workspaces, workspace).git
         try:
             same_candidate = git.candidate_patch(receipt.revision) == git.candidate_patch(
                 current_revision
@@ -103,7 +94,7 @@ class _EvaluationAdapter:
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
-        resources = self._host.workspaces._resources_for(live)
+        resources = resources_for(self._host.workspaces, live)
         if reuse is not None:
             self._validate_receipt_owner(live, reuse)
             await live.snapshot("framework-accuracy-reuse-input")
@@ -130,8 +121,11 @@ class _EvaluationAdapter:
             candidate_revision,
             view.deployment_release_env_var if release else None,
         )
-        async with self._host.workspaces._mutation_lock(live):
-            result = await resources.trusted_evaluation.accuracy(command_override=execution)
+        result = await run_workspace_exclusive(
+            self._host.workspaces,
+            live,
+            lambda: resources.trusted_evaluation.accuracy(command_override=execution),
+        )
         self._log_provisioning(resources, result.provisioned_volumes, result.failure)
         self._publish_accuracy(result, process_id=f"evaluation-accuracy-{next(self._identifiers)}")
         if result.executed:
@@ -154,7 +148,7 @@ class _EvaluationAdapter:
         live = self._live_workspace(workspace)
         if self._host.request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
-        resources = self._host.workspaces._resources_for(live)
+        resources = resources_for(self._host.workspaces, live)
         candidate_revision = await live.snapshot("framework-benchmark-input")
         view = resources.run_environment_view
         execution = self._command(
@@ -162,11 +156,14 @@ class _EvaluationAdapter:
             candidate_revision,
             view.deployment_release_env_var,
         )
-        async with self._host.workspaces._mutation_lock(live):
-            result = await resources.trusted_evaluation.benchmark(
+        result = await run_workspace_exclusive(
+            self._host.workspaces,
+            live,
+            lambda: resources.trusted_evaluation.benchmark(
                 command_override=execution,
                 required_metrics=frozenset(item.name for item in objectives),
-            )
+            ),
+        )
         self._log_provisioning(resources, result.provisioned_volumes, result.failure)
         evaluation = self._interpret_benchmark(
             result,

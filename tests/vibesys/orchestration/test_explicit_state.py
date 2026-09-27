@@ -14,7 +14,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.contracts import OrchestrationRegistry
-from vibesys.orchestration.request import RunRequest
+from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
@@ -131,6 +131,54 @@ def test_plugin_state_is_deep_copied_persisted_and_published(tmp_path: Path) -> 
         .load_optional()
     )
     assert stored == _State(values=[1])
+
+
+def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+
+    class _ProjectionError(RuntimeError):
+        def __init__(self) -> None:
+            super().__init__("projection failed")
+
+    class _FailingProjector:
+        def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> None:
+            del namespace, state, run_id
+            raise _ProjectionError
+
+    async def first_commit() -> str:
+        integration = LocalRunIntegration()
+        try:
+            async with RunContext.open(
+                _request(project_root),
+                integration,
+                setup=RunSetup(),
+                plugin=PLUGIN,
+                projector=_FailingProjector(),
+            ) as run:
+                run_id = run.run_id
+                with pytest.raises(_ProjectionError, match="projection failed"):
+                    await run.state.commit(_State(values=[1]))
+                return run_id
+        finally:
+            integration.close()
+
+    async def resume_and_commit(run_id: str) -> None:
+        integration = LocalRunIntegration()
+        request = _request(project_root).model_copy(
+            update={"resume": ResumeRef(run_id=run_id), "exp_name": None}
+        )
+        try:
+            async with RunContext.open(
+                request, integration, setup=RunSetup(), plugin=PLUGIN
+            ) as run:
+                assert await run.state.load(_State) == _State(values=[1])
+                await run.state.commit(_State(values=[2]))
+                assert await run.state.load(_State) == _State(values=[2])
+        finally:
+            integration.close()
+
+    asyncio.run(resume_and_commit(asyncio.run(first_commit())))
 
 
 def test_public_session_composes_a_registered_plugin_with_typed_state(tmp_path: Path) -> None:

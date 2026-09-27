@@ -27,11 +27,11 @@ from __future__ import annotations
 import asyncio
 import sys
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from vibesys.context import (
     RunSetup,
+    _StateBinding,
     open_run_resources,
 )
 from vibesys.events import (
@@ -50,24 +50,19 @@ from vibesys.orchestration.environment import _Environment
 from vibesys.orchestration.gates import _EvaluationAdapter
 from vibesys.orchestration.progress import _Progress
 from vibesys.orchestration.skills import _Skills
-from vibesys.orchestration.state import _RunState
-from vibesys.orchestration.workspaces import (
-    WorkspaceHandle,
-    WorkspaceRestoreError,
-    WorkspaceTransaction,
-    WorkspaceTransactionKeep,
-    _Workspaces,
-)
+from vibesys.orchestration.state import _StateCommitObserver
+from vibesys.orchestration.workspace_resources import WorkspaceResourceProvider
 from vs_agent.api import AgentSessionState, DurableSessionStore
-from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
+from vs_runtime.api import ProfileExecution, RunFacts, State, Workspaces, WorkspaceSourceFact
+from vs_runtime.api.infrastructure import OwnedWorkspaces, create_state, create_workspaces
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
 
     from vibesys.context import _RunResources
+    from vibesys.orchestration._host import _CommittedStateProjectorLike
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
-    from vibesys.orchestration.state import _CommittedStateProjector
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
@@ -78,10 +73,6 @@ if TYPE_CHECKING:
 # rather than from the capability module that now owns them.
 __all__ = [
     "RunContext",
-    "WorkspaceHandle",
-    "WorkspaceRestoreError",
-    "WorkspaceTransaction",
-    "WorkspaceTransactionKeep",
 ]
 
 
@@ -137,7 +128,7 @@ class RunContext:
         *,
         setup: RunSetup,
         open_agent_environment: Callable[..., AgentEnvironment] | None,
-        projector: _CommittedStateProjector | None = None,
+        projector: _CommittedStateProjectorLike | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
@@ -167,13 +158,6 @@ class RunContext:
                 message = "agent roles must come from the orchestration plugin"
                 raise ValueError(message)
             agent_roles = plugin.agents
-            setup = replace(
-                setup,
-                state_namespace=(
-                    setup.state_namespace or plugin.id if plugin.state is not None else None
-                ),
-                state_slots={"state.json": plugin.state} if plugin.state is not None else None,
-            )
         self.request = request
         self._setup = setup
         self._integration = integration
@@ -182,19 +166,17 @@ class RunContext:
         self._resource_owner: _RunResources | None = None
         self._facts: RunFacts | None = None
         self._session_store: DurableSessionStore | None = None
-        self._workspace_lifecycle_lock = asyncio.Lock()
-        self._parent_mutation_lock = asyncio.Lock()
         self._blocking: set[asyncio.Task] = set()
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self.control = _RunControl(integration, debug=request.debug)
         self.commands = _Commands(self)
         self.skills = _Skills(self)
-        self.state = _RunState(
-            self,
-            plugin.state if plugin is not None else None,
-            plugin_bound=plugin is not None,
+        self._state_model = plugin.state if plugin is not None else None
+        self._state_namespace = (
+            plugin.id if plugin is not None and plugin.state is not None else None
         )
+        self._state: State | None = None
         self.evaluation = _EvaluationAdapter(self)
         self.agents = _Agents(
             self,
@@ -205,7 +187,7 @@ class RunContext:
             open_agent_environment=open_agent_environment,
             client_factory=agent_client_factory,
         )
-        self.workspaces = _Workspaces(self, self.agents.close_workspace)
+        self._workspaces: OwnedWorkspaces | None = None
         self.environment = _Environment(self)
         self.progress = _Progress(self)
 
@@ -213,6 +195,20 @@ class RunContext:
     def events(self) -> EventJournal:
         """Return the run's semantic event journal."""
         return self._integration.events
+
+    @property
+    def workspaces(self) -> Workspaces:
+        """Return the prepared runtime-owned workspace collection."""
+        if self._workspaces is None:
+            raise _RuntimeClosedError
+        return self._workspaces
+
+    @property
+    def state(self) -> State:
+        """Return plugin-bound state after the run resources are prepared."""
+        if self._state is None:
+            raise _RuntimeClosedError
+        return self._state
 
     @property
     def run_id(self) -> str:
@@ -311,7 +307,7 @@ class RunContext:
         *,
         setup: RunSetup | None = None,
         open_agent_environment: Callable[..., AgentEnvironment] | None = None,
-        projector: _CommittedStateProjector | None = None,
+        projector: _CommittedStateProjectorLike | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
@@ -362,6 +358,17 @@ class RunContext:
     def _prepare(self) -> None:
         """Open the canonical run context once."""
         resources = self._ensure_resources()
+        self._workspaces = create_workspaces(WorkspaceResourceProvider(self))
+        self._state = create_state(
+            self._state_model,
+            resources._round_transaction_coordinator,
+            self._workspaces,
+            (
+                _StateCommitObserver(self, self._state_namespace)
+                if self._state_namespace is not None
+                else None
+            ),
+        )
         bundle = self.request.input_bundle
         view = resources.run_environment_view
         self._facts = RunFacts(
@@ -393,6 +400,11 @@ class RunContext:
             self.request,
             self._setup,
             self._integration,
+            state_binding=(
+                _StateBinding(self._state_namespace, self._state_model)
+                if self._state_namespace is not None and self._state_model is not None
+                else None
+            ),
             backend_factory=self._backend_factory,
         )
         self._session_store = DurableSessionStore(
@@ -416,13 +428,13 @@ class RunContext:
             await _wait_until_done(operation)
             if error := operation.exception():
                 errors.append(error)
-        async with self._workspace_lifecycle_lock:
+        try:
+            await self.agents.close()
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-040112 [BLE001]; handle cleanup below must continue if explicit-session cleanup fails.
+            errors.append(exc)
+        if self._workspaces is not None:
             try:
-                await self.agents.close()
-            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-040112 [BLE001]; handle cleanup below must continue if explicit-session cleanup fails.
-                errors.append(exc)
-            try:
-                await self.workspaces.close()
+                await self._workspaces.close()
             except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020035 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if self._resource_owner is not None:
