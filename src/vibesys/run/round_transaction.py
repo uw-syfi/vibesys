@@ -1,11 +1,11 @@
 """Recoverable checkpoint for a policy's portable state namespace.
 
-A v4 write-ahead log records exact typed state transitions and other namespace
+A v5 write-ahead log records exact typed state transitions and other namespace
 files before candidate or framework state is committed. Completing or
 recovering the checkpoint applies those bytes and commits the namespace with
 candidate edits when requested.
 
-Only version 4 journals are accepted. Older journals need an older VibeSys
+Only version 5 journals are accepted. Older journals need an older VibeSys
 release to recover them.
 """
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitTracker, Project
 
-_JOURNAL_SCHEMA_VERSION: Literal[4] = 4
+_JOURNAL_SCHEMA_VERSION: Literal[5] = 5
 _GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -166,7 +166,7 @@ class _StrictJournal(BaseModel):
 class _MultiSlotJournal(_StrictJournal):
     """Exact typed replacements for one portable policy namespace."""
 
-    schema_version: Literal[4]
+    schema_version: Literal[5]
     transitions_base64: dict[str, str]
     namespace_files_base64: dict[str, str]
     transitions_sha256: Annotated[str, Field(pattern=_SHA256_PATTERN)]

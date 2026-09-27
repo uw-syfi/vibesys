@@ -328,6 +328,15 @@ def test_journal_from_another_run_is_rejected(tmp_path: Path) -> None:
         coordinator.recover()
 
 
+def test_version_4_journal_is_rejected(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+    _edit_journal(project, schema_version=4)
+
+    with pytest.raises(RoundTransactionError, match="Invalid checkpoint journal"):
+        coordinator.recover()
+
+
 def test_journal_with_empty_run_id_is_invalid(tmp_path: Path) -> None:
     project, _tracker, coordinator = _project(tmp_path)
     _begin_one(project, coordinator)
