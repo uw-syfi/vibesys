@@ -117,9 +117,9 @@ class RoundView(BaseModel):
     passed: bool
     profile_skipped: bool = False
     official_evaluation: bool = False
-    # The two fields below exist so `RunContext.state.commit` can derive a
+    # The two fields below let the post-durability state observer derive a
     # byte-identical `RoundFinishedData` from this view alone, without any
-    # strategy-specific knowledge (see `vibesys.orchestration.runtime`).
+    # strategy-specific knowledge (see `vibesys.run.integration`).
     attempts: int = 1
     judge_verdict: Literal["pass", "fail", "skipped"] | None = None
 

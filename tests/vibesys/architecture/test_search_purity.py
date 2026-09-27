@@ -3,7 +3,7 @@
 Rules (see the orchestration-simplify design brief):
   - No imports of orchestration execution policy or vibesys.loops,
     vibesys.orchestration.prompts (search answers questions and returns new state; it never
-    drives agents, renders prompts, or touches RunContext).
+    drives agents, renders prompts, or uses runtime capabilities).
   - No os / subprocess / pathlib / time / datetime imports (search must do no
     I/O and touch no clock; every effect is deterministic and resume-safe).
   - ``random`` may be imported freely (for the ``Random`` type and

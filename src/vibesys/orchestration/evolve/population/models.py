@@ -1,7 +1,7 @@
 """Pure, serializable data types for evolutionary population search.
 
 Every type here is a frozen pydantic model: no method mutates in place, and
-every field is plain data (no ``RunContext``, agent handle, or filesystem
+every field is plain data (no runtime capability, agent handle, or filesystem
 path). :class:`PopulationState` is the single value orchestration persists
 and reloads between rounds; :class:`PopulationSearch` (in ``search.py``) is
 the only thing that reads or produces one.

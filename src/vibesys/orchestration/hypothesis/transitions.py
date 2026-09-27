@@ -3,7 +3,7 @@
 Ported from the former ``vibesys.agent_run.hypotheses`` and
 ``vibesys.agent_run.evidence`` modules (agent_run has since dissolved).
 Semantics are unchanged; only names and module boundaries were cleaned up.
-Every function here is a pure function of its arguments: no ``RunContext``,
+Every function here is a pure function of its arguments: no runtime capabilities,
 no agents, no prompts, no filesystem, no clock, no global RNG.
 """
 

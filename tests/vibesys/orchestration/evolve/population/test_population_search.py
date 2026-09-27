@@ -1,7 +1,7 @@
 """Behavioral and property tests for evolve's population policy.
 
 These exercise the pure ``PopulationSearch`` state machine directly (no
-``RunContext``, no filesystem, no agents): determinism, resume-equivalence
+runtime capabilities, no filesystem, no agents): determinism, resume-equivalence
 after a simulated crash, and hypothesis property tests covering frontier
 non-domination, id uniqueness/monotonicity, and OpenEvolve state boundedness
 (the R4 regression: upstream snapshots must not grow without bound).

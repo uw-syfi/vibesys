@@ -2,9 +2,9 @@
 
 Layering:
 
-    policy -> RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
+    product composition -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
 
-``RunContext`` prepares run resources before opening this session.
+Product composition prepares run resources before opening this session.
 
 ``RunEnvironment`` owns run-level execution policy for a location such as local,
 Docker, or Modal.  It decides path exposure, bind mounts, execution constraints,

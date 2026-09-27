@@ -5,7 +5,7 @@ while they run:
 
 * the *dispatch preamble* — ``_dispatch`` (``main.py``) parses the CLI
   invocation and announces the run before any loop starts;
-* *run-context assembly* (``context.py``), whose early stages run before the
+* *run-resource assembly* (``vibesys.run.resources``), whose early stages run before the
   ``RunLogger`` they will eventually write to is open.
 
 Both are measured with :func:`span`, an OpenTelemetry-shaped context manager
@@ -33,9 +33,8 @@ the operator's terminal, not a diagnostics channel::
 
     VIBESYS_BOOT_TRACE=1 vibesys --input ... 2>trace.log
 
-This module imports nothing from VibeSys, so ``main.py`` and ``cli.py`` can
-use it before paying for the framework packages that ``vibesys.context``
-pulls in (``vs_agent``, concrete compute backends, ...). There is no
+This module imports nothing from VibeSys, so product entrypoints can use it
+before importing product composition and concrete execution backends. There is no
 exporter, sampler, or propagation machinery: the span shape is the point, so
 one could be added later without touching call sites.
 """

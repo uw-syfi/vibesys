@@ -1,10 +1,8 @@
 """Pure parsing of one profiler's attribution output.
 
-The impure half (running the configured profiler command over ``RunContext``)
-stays in ``loops/profile_multi/attribution.py`` until the rewiring phase
-moves the orchestration call site here. This module owns only what is
-deterministic: extracting the framed result-protocol-v1 payload from raw
-command output and validating it.
+Orchestration call sites run the configured profiler through ``Run.commands``.
+This module owns only what is deterministic: extracting the framed
+result-protocol-v1 payload from raw command output and validating it.
 """
 
 from __future__ import annotations
