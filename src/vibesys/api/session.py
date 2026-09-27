@@ -21,12 +21,11 @@ from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
-from vibesys.orchestration._common import resolved_run_id
-from vibesys.orchestration.environment import open_run_environment
-from vibesys.orchestration.skills import platform_skill_selection
 from vibesys.plugin_catalog import project_run
+from vibesys.run.environment import open_run_environment
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.skills import platform_skill_selection
 from vs_agent.api import (
     ToolServerDescriptor,
     agent_catalog,
@@ -268,7 +267,7 @@ class _LocalRunSession:
         """Use the provisioned ID once a custom runtime has created its run."""
         if self._resources is not None:
             return self._resources.run_id
-        return resolved_run_id(self._request)
+        return self._request.resolved_run_id
 
     def _open_agent_environment(
         self,

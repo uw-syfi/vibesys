@@ -51,6 +51,16 @@ class RunRequest(BaseModel):
     remote_repo: str | None = None
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE
 
+    @property
+    def resolved_run_id(self) -> str:
+        """Return the resume target or the identity of a fresh run."""
+        if self.resume is not None:
+            return self.resume.run_id
+        if self.exp_name is None:
+            message = "RunRequest.exp_name must be set for a fresh (non-resume) run"
+            raise ValueError(message)
+        return self.exp_name
+
 
 class RunResult(BaseModel):
     """Terminal outcome of one run."""

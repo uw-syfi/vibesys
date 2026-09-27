@@ -27,7 +27,6 @@ from vibesys.events import (
     ExperimentsChangedData,
 )
 from vibesys.inputs import InputBundle
-from vibesys.orchestration.environment import open_run_environment
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILERS_COMMON_STAGED_NAME,
@@ -39,19 +38,20 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.orchestration.skills import platform_skill_excluded_paths
 from vibesys.run import (
     ExperimentRepository,
     ProjectProvisioningSpec,
     provision_project,
 )
 from vibesys.run.contracts import RunRequest
+from vibesys.run.environment import open_run_environment
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
+from vibesys.run.skills import platform_skill_excluded_paths
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     create_project_materializer,
@@ -380,10 +380,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
     bundle = request.input_bundle
-    exp_name = request.resume.run_id if request.resume is not None else request.exp_name
-    if exp_name is None:
-        message = "RunRequest.exp_name is required for a fresh run"
-        raise ValueError(message)
+    exp_name = request.resolved_run_id
     config = request.config
     input_path = str(bundle.root)
     accuracy_command = bundle.accuracy_command_display

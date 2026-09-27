@@ -16,7 +16,6 @@ from vibesys.orchestration.hypothesis.readmodel import (
     RoundView,
     agent_projection,
 )
-from vibesys.orchestration.memory import framework_memory_paths
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -72,6 +71,5 @@ __all__ = [
     "RoundView",
     "agent_projection",
     "agent_run_objectives",
-    "framework_memory_paths",
     "is_agent_run_manifest",
 ]

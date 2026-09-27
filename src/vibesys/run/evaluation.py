@@ -1,4 +1,4 @@
-"""VibeSys evaluation policy over runtime-owned trusted execution."""
+"""Product evaluation semantics over runtime-owned trusted execution."""
 
 from __future__ import annotations
 

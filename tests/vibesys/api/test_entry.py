@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api import Config, OrchestrationDescriptor, RunRequest
+import pytest
+
+from vibesys.api import Config, OrchestrationDescriptor, ResumeRef, RunRequest
 from vibesys.api.request import load_input_bundle
 from vs_project.api import Project
 
@@ -32,3 +34,16 @@ def test_canonical_request_builds_a_runnable_request(repo_root: Path) -> None:
     assert request.orchestration.id == "multi-agent"
     assert request.project_root == project.root
     assert request.objective
+
+
+def test_run_request_owns_fresh_and_resumed_identity(repo_root: Path) -> None:
+    request = _request(Project.open(repo_root / _EXAMPLE).root)
+
+    with pytest.raises(ValueError, match="exp_name must be set"):
+        _ = request.resolved_run_id
+
+    fresh = request.model_copy(update={"exp_name": "fresh-run"})
+    resumed = fresh.model_copy(update={"resume": ResumeRef(run_id="prior-run")})
+
+    assert fresh.resolved_run_id == "fresh-run"
+    assert resumed.resolved_run_id == "prior-run"

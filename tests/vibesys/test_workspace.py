@@ -8,7 +8,7 @@ import pytest
 
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import WorkspaceSource
-from vibesys.orchestration.skills import platform_skill_excluded_paths
+from vibesys.run.skills import platform_skill_excluded_paths
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     materialization_source,

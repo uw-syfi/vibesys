@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict
 
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.memory import framework_memory_paths
 from vibesys.plugin_catalog import project_run
 from vs_project.api import (
     GitTracker,
@@ -183,9 +182,9 @@ class _LocalRunRecord:
         self._git_events = _GitReadEvents()
         self._git = GitTracker(project.root, run_id=run_id, events=self._git_events)
         self._git_lock = threading.Lock()
-        self._framework_prefixes = tuple(
-            path.relative_to(project.root).as_posix()
-            for path in framework_memory_paths(project.root)
+        registration = self._registration(self._manifest())
+        self._framework_prefixes = (
+            registration.plugin.memory_paths if registration is not None else ()
         )
 
     @property

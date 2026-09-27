@@ -44,7 +44,6 @@ def _manifest(orchestration: OrchestrationDescriptor) -> OrchestrationRunManifes
 def test_generic_api_import_does_not_load_builtin_policies() -> None:
     script = (
         "import sys, vibesys.api; "
-        "assert 'vibesys.plugin_catalog' not in sys.modules; "
         "assert not any(name.startswith(('vibesys.orchestration.multi', "
         "'vibesys.orchestration.single')) for name in sys.modules)"
     )
@@ -61,7 +60,6 @@ def test_frontend_projection_names_are_available_from_the_top_level_facade() -> 
     policy_helpers = {
         "RoundView",
         "agent_run_objectives",
-        "framework_memory_paths",
         "is_agent_run_manifest",
     }
     assert frontend_projection <= set(generic_api.__all__)

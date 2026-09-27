@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
 from vibesys.api import OrchestrationRegistry, open_run_store
@@ -24,6 +26,25 @@ from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+_GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+
+
+def _git(root: Path, *args: str) -> str:
+    return run_test_command(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, **_GIT_IDENTITY},
+    ).stdout.strip()
 
 
 @pytest.mark.parametrize("schema_version", [1, 2, 3, 4])
@@ -217,3 +238,60 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
     documents = open_run_store(project).get_record(manifest.run_id).history_documents()
 
     assert [document.relative_path.name for document in documents] == ["agent.json"]
+
+
+def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    (root / "service.py").write_text("VALUE = 1\n")
+    _git(root, "add", "service.py")
+    _git(root, "commit", "-q", "-m", "baseline")
+    baseline = _git(root, "rev-parse", "HEAD")
+
+    project = Project.open(root)
+    project.state.create_project("custom memory project")
+    manifest = project.state.new_run_manifest(
+        "custom memory run",
+        run_id="custom-memory-run",
+        branch="vibesys-runs/custom-memory-run",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="memory-policy", config_version=1, options={}),
+        trusted_input_baseline=baseline,
+    )
+    project.state.create_run(manifest)
+
+    (root / "private-memory").mkdir()
+    (root / "private-memory" / "notes.md").write_text("framework notes\n")
+    (root / "service.py").write_text("VALUE = 2\n")
+    _git(root, "add", "private-memory/notes.md", "service.py")
+    _git(root, "commit", "-q", "-m", "candidate")
+    head = _git(root, "rev-parse", "HEAD")
+
+    class MemoryOptions(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+    async def run_memory(host: RunHost, options: BaseModel) -> PluginRunStatus:
+        del host, options
+        return PluginRunStatus.SUCCEEDED
+
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        OrchestrationPlugin(
+            id="memory-policy",
+            agents=(),
+            options=MemoryOptions,
+            orchestrate=run_memory,
+            memory_paths=("private-memory",),
+        )
+    )
+
+    changes = (
+        open_run_store(project, registry=registry)
+        .get_record(manifest.run_id)
+        .workspace_changes(baseline, head)
+    )
+
+    assert [change.path for change in changes] == ["service.py"]

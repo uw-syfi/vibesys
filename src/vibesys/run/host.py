@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext, agent_spec_from_config
 from vibesys.context import _StateBinding, open_run_resources
-from vibesys.orchestration.gates import _EvaluationAdapter
-from vibesys.orchestration.skills import platform_skill_selection
 from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
+from vibesys.run.evaluation import _EvaluationAdapter
+from vibesys.run.skills import platform_skill_selection
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 from vs_runtime.api.infrastructure import (

@@ -37,7 +37,6 @@ from vibesys.orchestration.profilers import (
     ProfilerKind,
     coerce_profiler_kind,
 )
-from vibesys.orchestration.skills import resolve_skill_source_dirs
 from vibesys.repository import (
     REPOSITORY_SLUG,
     generate_experiment_name,
@@ -45,6 +44,7 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.skills import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
 from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,

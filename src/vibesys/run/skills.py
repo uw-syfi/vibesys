@@ -1,4 +1,4 @@
-"""VibeSys policy for selecting, routing, and resolving agent skills."""
+"""Product binding for selecting, routing, and resolving agent skills."""
 
 from __future__ import annotations
 
