@@ -51,9 +51,6 @@ graph TD
     entrypoints --> vs_project
     headless --> vibesys
     server --> vibesys
-    server --> vs_agent
-    server --> vs_loop_state
-    server --> vs_project
     vibesys --> vs_agent
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
@@ -79,6 +76,7 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 ```mermaid
 graph TD
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.api.agent
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration._common
@@ -214,8 +212,7 @@ graph TD
     entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys.api
-    server --> vs_agent
-    server --> vs_project
+    server --> vibesys.api
     server.api --> server.chat
     server.api --> server.controller
     server.api --> server.diagnostics
@@ -226,9 +223,6 @@ graph TD
     server.api --> server.run_lifecycle
     server.api --> server.settings
     server.api --> vibesys.api
-    server.api --> vibesys.api.agent
-    server.api --> vs_loop_state
-    server.api --> vs_project
     server.chat --> server
     server.chat --> server.controller
     server.chat --> server.events
@@ -236,18 +230,16 @@ graph TD
     server.chat --> server.journal
     server.chat --> server.run_lifecycle
     server.chat --> vibesys.api
-    server.chat --> vs_agent
     server.controller --> server.diagnostics
     server.controller --> server.events
     server.controller --> server.execution
     server.controller --> server.journal
     server.controller --> server.run_lifecycle
     server.controller --> vibesys.api
-    server.controller --> vs_project
     server.events --> server.diagnostics
     server.events --> server.event_index
     server.events --> server.run_lifecycle
-    server.events --> vs_agent
+    server.events --> vibesys.api
     server.execution --> server.diagnostics
     server.execution --> server.events
     server.execution --> server.journal
@@ -262,7 +254,6 @@ graph TD
     server.integration --> server.read_model
     server.integration --> server.run_lifecycle
     server.integration --> vibesys.api
-    server.integration --> vs_project
     server.journal --> server.diagnostics
     server.journal --> server.events
     server.read_model --> server.controller
@@ -281,13 +272,13 @@ graph TD
     server.runtime --> server.transport
     server.runtime --> vibesys.api
     server.settings --> vibesys.api
-    server.tool_payloads --> vs_agent
+    server.tool_payloads --> vibesys.api
     server.transport --> server.api
-    server.transport --> vs_project
     vibesys --> vs_agent
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.api.agent
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration._common
@@ -311,6 +302,7 @@ graph TD
     vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
     vibesys.api.agent --> vibesys.orchestration.memory
     vibesys.api.agent --> vibesys.plugin_catalog
+    vibesys.api.agent --> vs_loop_state
     vibesys.api.agent --> vs_project
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
