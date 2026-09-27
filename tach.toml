@@ -160,7 +160,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.run.host", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve"]
 
 [[modules]]
 path = "vibesys.api.agent"
@@ -406,11 +406,6 @@ depends_on = ["vs_project", "vibesys.errors", "vs_runtime"]
 path = "vibesys.orchestration.contracts"
 layer = "orchestration_host"
 depends_on = [ "vs_project", "vs_runtime", "vibesys.orchestration.view"]
-
-[[modules]]
-path = "vibesys.orchestration.runner"
-layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.run.host", "vibesys.orchestration.request", "vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration.commands"

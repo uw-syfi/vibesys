@@ -18,7 +18,7 @@ from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
 from vibesys.orchestration.contracts import project_run
-from vibesys.orchestration.runner import run_plugin
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import (
@@ -31,18 +31,21 @@ from vs_runtime.api.infrastructure import ManagedConversationSpec, create_manage
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from pydantic import BaseModel
 
     from vibesys.api.contracts import EventSink, RunView
     from vibesys.config import Config
-    from vibesys.orchestration.contracts import OrchestrationRegistry
+    from vibesys.orchestration.contracts import OrchestrationProjector, OrchestrationRegistry
     from vibesys.orchestration.request import RunRequest
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
     from vs_agent.api import AgentClientProtocol
+    from vs_runtime.api import OrchestrationPlugin, Workspace
+    from vs_runtime.api import RunStatus as PluginRunStatus
+    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
     from vs_sandbox.api import ComputeBackendImpl, ProjectPathPolicy, Sandbox
 
 
@@ -146,6 +149,35 @@ def _create_session(
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
     )
+
+
+async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the product composition boundary binds independently owned runtime effects once.
+    request: RunRequest,
+    integration: LocalRunIntegration,
+    plugin: OrchestrationPlugin,
+    options: BaseModel,
+    *,
+    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
+    projector: OrchestrationProjector | None = None,
+    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    agent_tool_bindings: Mapping[
+        str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
+    ]
+    | None = None,
+) -> PluginRunStatus:
+    """Compose the private runtime host and invoke one validated plugin."""
+    async with open_product_run_host(
+        request,
+        integration,
+        open_agent_environment=open_agent_environment,
+        projector=projector,
+        agent_client_factory=agent_client_factory,
+        backend_factory=backend_factory,
+        agent_tool_bindings=agent_tool_bindings,
+        plugin=plugin,
+    ) as host:
+        return await plugin.orchestrate(host, options)
 
 
 class _LocalRunSession:
