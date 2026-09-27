@@ -16,6 +16,7 @@ from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestrations.hypothesis_readmodel import project_run_view
+from vibesys.orchestrations.single.models import SingleState
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
@@ -620,6 +621,13 @@ def _project_run(project: Path, *, trusted_input_baseline: str) -> tuple[Project
     return vibesys_project, manifest.run_id
 
 
+def _save_single_state(project: Project, run_id: str, search: HypothesisState) -> None:
+    """Persist the exact aggregate declared by the registered single plugin."""
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(search=search)
+    )
+
+
 def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
     workspace = _repo(tmp_path / "project")
     (workspace / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
@@ -628,8 +636,9 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    portable = project.state.portable_namespace(run_id, "single")
-    portable.slot("state.json", HypothesisState).save(
+    _save_single_state(
+        project,
+        run_id,
         HypothesisState(
             hypotheses=[
                 _hypothesis(
@@ -638,7 +647,7 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
                     rounds=[_round(1, hypothesis_id="H-01", commit=first, passed=True)],
                 )
             ]
-        )
+        ),
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
@@ -660,12 +669,14 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
+    _save_single_state(
+        project,
+        run_id,
         HypothesisState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])
             ],
-        )
+        ),
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
@@ -702,12 +713,14 @@ def test_service_reuses_one_design_projection_per_run(
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
+    _save_single_state(
+        project,
+        run_id,
         HypothesisState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])
             ],
-        )
+        ),
     )
     constructions = 0
     diff_calls = 0
