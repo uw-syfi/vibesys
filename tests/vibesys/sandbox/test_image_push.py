@@ -1,7 +1,7 @@
 """Tests for pushing and verifying agent images in a registry.
 
 :func:`push_agent_image`, :func:`agent_image_is_pushed`, and
-:func:`ensure_pushed` are the remote-backend half of ``vibesys.sandbox.images``
+:func:`ensure_pushed` are the remote-backend half of ``vs_agent.api.images``
 (see ``agent_image`` itself, covered by ``test_images.py``). A local
 ``--docker`` run never calls any of these; only Modal and SkyPilot do, once
 their run environment resolves the agent image it needs to run from.
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
-from vibesys.sandbox.images import (
+from vs_agent.api.images import (
     DEFAULT_AGENT_IMAGE_REGISTRY,
     ImagePushError,
     agent_image_is_pushed,

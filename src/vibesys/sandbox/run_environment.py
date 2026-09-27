@@ -469,7 +469,7 @@ class DockerEnvironment:
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
-        image_helpers = import_module("vibesys.sandbox.images")
+        image_helpers = import_module("vs_agent.api.images")
         tools = _evaluator_tools(request)
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
@@ -736,7 +736,7 @@ class SkyPilotEnvironment(DockerEnvironment):
         try:
             bridge.start()
 
-            image_helpers = import_module("vibesys.sandbox.images")
+            image_helpers = import_module("vs_agent.api.images")
 
             tools = _evaluator_tools(request)
             container_image = image_helpers.agent_image(
@@ -878,8 +878,8 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         cold-start overhead that this design eliminates.
 
         The container starts from the same agent image the plain Docker path
-        builds (:func:`~vibesys.sandbox.images.agent_image`), pushed to and
-        pulled back from a registry (:func:`~vibesys.sandbox.images.ensure_pushed`),
+        builds (:func:`~vs_agent.api.images.agent_image`), pushed to and
+        pulled back from a registry (:func:`~vs_agent.api.images.ensure_pushed`),
         since this backend's Docker daemon is not guaranteed to already have
         it locally the way the local ``--docker`` path's is. Nothing installs
         anything at container start any more, including the Modal Python SDK
@@ -898,7 +898,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self._ensure_model_volume(request)
         self._ensure_draft_volume(request)
 
-        image_helpers = import_module("vibesys.sandbox.images")
+        image_helpers = import_module("vs_agent.api.images")
 
         tools = _evaluator_tools(request)
         container_image = image_helpers.agent_image(
@@ -1736,13 +1736,13 @@ def _ensure_pushed_for_remote_backend(
 ) -> str:
     """Push and verify *image_id*, naming it and *backend_label* on failure.
 
-    ``ensure_pushed`` (:func:`vibesys.sandbox.images.ensure_pushed`) already
-    raises :class:`~vibesys.sandbox.images.ImagePushError` naming the image
+    ``ensure_pushed`` (:func:`vs_agent.api.images.ensure_pushed`) already
+    raises :class:`~vs_agent.api.images.ImagePushError` naming the image
     and what went wrong; this only adds which run environment could not
     start because of it, so the operator does not have to guess whether a
     Modal or a SkyPilot launch is the one that failed to reach the registry.
     """
-    image_push_error = import_module("vibesys.sandbox.images").ImagePushError
+    image_push_error = import_module("vs_agent.api.images").ImagePushError
 
     try:
         return ensure_pushed(image_id)

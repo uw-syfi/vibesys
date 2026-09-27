@@ -49,7 +49,7 @@ vibesys = "entrypoints.launcher:main"
 [tool.setuptools.package-data]
 # ``entrypoints/_tui`` is produced at build time by setup.py's build_py step;
 # the glob keeps it as package data when present.
-vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestrations/*/prompts/*.j2", "orchestrations/*/prompts/**/*.j2", "domains/README.md", "_resources/**/*", "_sdk/**/*", "sandbox/images/**"]
+vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestrations/*/prompts/*.j2", "orchestrations/*/prompts/**/*.j2", "domains/README.md", "_resources/**/*", "_sdk/**/*"]
 entrypoints = ["py.typed", "_tui/**/*"]
 server = ["py.typed"]
 vs_evaluator_protocol = ["py.typed"]
@@ -60,7 +60,7 @@ vs_project = ["py.typed"]
 vs_prompts = ["py.typed"]
 vs_runtime = ["py.typed"]
 vs_sandbox = ["py.typed"]
-vs_agent = ["py.typed"]
+vs_agent = ["py.typed", "images/*.Dockerfile"]
 
 [dependency-groups]
 dev = [

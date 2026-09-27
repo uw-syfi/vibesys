@@ -1,8 +1,8 @@
 # Agent layer, built on top of a task image (or a backend base image when the
 # task has no Dockerfile of its own). Installs the shipped CLIs, helper
 # tools, and a non-root `agent` user; ends with `USER agent` so a container
-# never runs a provider CLI as root. Built by `vibesys.sandbox.images.agent_image`,
-# which supplies every ARG below from `vibesys.agents.provider_policy`.
+# never runs a provider CLI as root. Built by `vs_agent.api.images.agent_image`,
+# which supplies every ARG below from `vs_agent.provider_policy`.
 #
 # Debian/Ubuntu only: the apt step below requires it. All current backend
 # bases and task Dockerfiles are.

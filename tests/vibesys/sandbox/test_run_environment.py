@@ -32,7 +32,6 @@ from vibesys.evaluators.input_manifest import (
 )
 from vibesys.evaluators.tools import EvaluatorToolError
 from vibesys.profilers import ProfilerKind
-from vibesys.sandbox.images import ImagePushError
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
@@ -55,6 +54,7 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
     run_environment_record,
 )
+from vs_agent.api.images import ImagePushError
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_sandbox.api import (
     BeforeReadyContext,
@@ -310,7 +310,7 @@ def fake_agent_image(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         )
         return "sha256:" + "a" * 64
 
-    monkeypatch.setattr("vibesys.sandbox.images.agent_image", fake_agent_image)
+    monkeypatch.setattr("vs_agent.api.images.agent_image", fake_agent_image)
     return calls
 
 
@@ -333,7 +333,7 @@ def fake_ensure_pushed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(image_id)
         return _PUSHED_DIGEST
 
-    monkeypatch.setattr("vibesys.sandbox.images.ensure_pushed", fake_ensure_pushed)
+    monkeypatch.setattr("vs_agent.api.images.ensure_pushed", fake_ensure_pushed)
     return calls
 
 
@@ -729,7 +729,7 @@ def test_isolated_environments_install_and_translate_evaluator_tools(
             lambda _request, _tools, **_kwargs: [(str(built_root), str(container_root), True)],
         )
         monkeypatch.setattr(
-            "vibesys.sandbox.images.agent_image",
+            "vs_agent.api.images.agent_image",
             lambda *_args, **_kwargs: "sha256:pinned",
         )
 

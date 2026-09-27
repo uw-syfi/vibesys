@@ -39,7 +39,6 @@ from vibesys.repository import (
 )
 from vibesys.resource_paths import default_skill_roots
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.sandbox.images import build_task_image
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     build_run_environment,
@@ -47,6 +46,7 @@ from vibesys.sandbox.run_environment import (
     run_environment_record,
 )
 from vibesys.skills import resolve_skill_source_dirs
+from vs_agent.api.images import build_task_image
 
 if TYPE_CHECKING:
     from pathlib import Path

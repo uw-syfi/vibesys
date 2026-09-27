@@ -113,8 +113,8 @@ def cli_skill_dirs() -> tuple[str, ...]:
 
 # --- Agent image ------------------------------------------------------------
 #
-# Versions baked into ``vibesys/sandbox/images/agent.Dockerfile`` as build
-# args (see ``vibesys.sandbox.images.agent_image``). Pinned rather than left
+# Versions baked into ``vs_agent/images/agent.Dockerfile`` as build args
+# (see ``vs_agent.api.images.agent_image``). Pinned rather than left
 # to float so the container CLI matches the feature set VibeSys prompts were
 # validated against, and so a rebuild with unchanged pins resolves to the same
 # image from Docker's layer cache.

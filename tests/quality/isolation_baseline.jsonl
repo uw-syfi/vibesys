@@ -91,14 +91,10 @@
 {"path": "tests/vibesys/render/test_log.py", "rule": "mock", "count": 4}
 {"path": "tests/vibesys/run/test_round_transaction.py", "rule": "patch", "count": 2}
 {"path": "tests/vibesys/run/test_run_control.py", "rule": "sleep", "count": 2}
-{"path": "tests/vibesys/sandbox/test_images.py", "rule": "mock", "count": 2}
-{"path": "tests/vibesys/sandbox/test_images.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 32}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "patch", "count": 23}
-{"path": "tests/vibesys/sandbox/test_task_image.py", "rule": "mock", "count": 4}
-{"path": "tests/vibesys/sandbox/test_task_image.py", "rule": "patch", "count": 3}
 {"path": "tests/vibesys/skypilot/test_bridge.py", "rule": "patch", "count": 3}
 {"path": "tests/vibesys/skypilot/test_evaluator_helper.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "rule": "mock", "count": 2}

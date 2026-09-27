@@ -145,14 +145,14 @@ experiment chat is the caller that does this today
 
 ## Images
 
-A `--docker` run starts from two images, built by `vibesys.sandbox.images`:
+A `--docker` run starts from two images, built by `vs_agent.api.images`:
 
 - The **task image**, built from the task's own `Dockerfile` when it has one
   (`build_task_image`), or the backend's base image otherwise. It installs
   only what the task needs to build and test candidate code, and serves the
   evaluator as well as the agent.
 - The **agent image**, built on top of the task image from
-  `src/vibesys/sandbox/images/agent.Dockerfile` (`agent_image`). It installs
+  `libs/vs-agent/src/vs_agent/images/agent.Dockerfile` (`agent_image`). It installs
   Node, all four shipped CLIs (`claude`, `codex`, `gemini`, `opencode`),
   ripgrep, `uv`, and Python's `mcp` package, then creates a non-root `agent`
   user and ends with `USER agent`. The provider a session runs is a run-time
@@ -162,7 +162,7 @@ A `--docker` run starts from two images, built by `vibesys.sandbox.images`:
 The agent layer sits on top so that a CLI version bump rebuilds only that top
 layer, and a task image stays pure enough to serve the evaluator on its own.
 Docker's layer cache is what makes a repeat build of either image cheap;
-`vibesys.sandbox.images` builds an image once per launch and resolves its
+`vs_agent.api.images` builds an image once per launch and resolves its
 immutable manifest ID rather than keeping a manifest of its own.
 
 CLI and toolchain versions are not in the Dockerfile: they are build args
@@ -194,7 +194,7 @@ to already have the image locally, so their local editor container is
 started from a pushed, pulled-back reference instead of the bare local image
 ID.
 
-`vibesys.sandbox.images` carries the push and verification side of this:
+`vs_agent.api.images` carries the push and verification side of this:
 
 - `push_agent_image(image_id)` tags the image as
   `ghcr.io/uw-syfi/vibesys-agent:<short id>` (a name derived from the image's
@@ -214,7 +214,7 @@ ID.
 GHCR because the repository is on GitHub and it is cloud-neutral for
 SkyPilot's arbitrary infra targets. Pushing requires the Docker daemon to
 already be logged in (`docker login ghcr.io` with a token carrying
-`write:packages`; CI supplies this as `GITHUB_TOKEN`); `vibesys.sandbox.images`
+`write:packages`; CI supplies this as `GITHUB_TOKEN`); `vs_agent.api.images`
 performs no login of its own and never logs a credential value, only image
 references and exit codes.
 

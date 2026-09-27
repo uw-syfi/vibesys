@@ -23,7 +23,7 @@ import sys
 import pytest
 from tests.support import run_test_command
 
-from vibesys.sandbox.images import agent_image
+from vs_agent.api.images import agent_image
 
 ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 
