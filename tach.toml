@@ -293,7 +293,7 @@ depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.e
 [[modules]]
 path = "vibesys.evaluators"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_project", "vs_sandbox"]
+depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve.population"

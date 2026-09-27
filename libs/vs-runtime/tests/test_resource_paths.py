@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_runtime.api import BundledResources
 from vs_runtime.api.infrastructure import (
+    BundledResources,
     InputProjectError,
     relative_sdk_source,
     resolve_bundled_tree,

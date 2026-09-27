@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vibesys.constants import PROJECT_ROOT
-from vibesys.evaluators import load_evaluator_package
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_agent.api import (
@@ -58,6 +57,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
     evaluator_agent_toolchains,
+    load_evaluator_package,
     materialize_objective_document,
     prepare_docker_evaluator_resources,
     prepare_trusted_evaluation_plan,

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from vibesys.config import BUNDLED_RESOURCES
 from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN, PYTHON_TOKEN
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 
@@ -33,11 +32,6 @@ _TOOL_TOKEN_PATTERN = re.compile(
 )
 _VERSION_PATTERN = re.compile(r"^[A-Za-z0-9]+(?:[._+-][A-Za-z0-9]+)*$")
 _DIGEST_EXCLUDED_NAMES = frozenset({".git", "__pycache__", "target"})
-
-
-def evaluator_packages_dir() -> Path | None:
-    """Return the bundled evaluator package collection, when installed."""
-    return BUNDLED_RESOURCES.directory("evaluators")
 
 
 class EvaluatorPackageError(ValueError):
@@ -94,14 +88,6 @@ class EvaluatorPackageNotFoundError(EvaluatorPackageError):
         """Describe an exact package version absent from a collection."""
         detail = f"; available packages: {available}" if available else ""
         return cls(f"evaluator package {name}=={version} not found in {path}{detail}")
-
-    @classmethod
-    def resources_unavailable(cls) -> EvaluatorPackageNotFoundError:
-        """Describe a distribution without bundled evaluator package resources."""
-        return cls(
-            "VibeSys evaluator package resources are not available; install a complete "
-            "VibeSys distribution or pass packages_root"
-        )
 
 
 class EvaluatorPackageRequirement(BaseModel):
@@ -275,7 +261,7 @@ class ResolvedEvaluatorPackage:
         )
 
 
-class EvaluatorPackageRegistry:
+class _EvaluatorPackageRegistry:
     """Resolve exact evaluator versions from one local package collection."""
 
     def __init__(self, root: Path) -> None:
@@ -334,15 +320,11 @@ def load_evaluator_package(path: Path) -> ResolvedEvaluatorPackage:
 
 
 def resolve_evaluator_package(
+    packages_root: Path,
     requirement: EvaluatorPackageRequirement,
-    *,
-    packages_root: Path | None = None,
 ) -> ResolvedEvaluatorPackage:
-    """Resolve a package from an explicit collection or VibeSys resources."""
-    root = packages_root if packages_root is not None else evaluator_packages_dir()
-    if root is None:
-        raise EvaluatorPackageNotFoundError.resources_unavailable()
-    return EvaluatorPackageRegistry(root).resolve(requirement)
+    """Resolve one exact package from an explicit local collection."""
+    return _EvaluatorPackageRegistry(packages_root).resolve(requirement)
 
 
 def _content_digest(root: Path) -> str:
@@ -365,3 +347,16 @@ def _content_digest(root: Path) -> str:
         digest.update(len(content).to_bytes(8, "big"))
         digest.update(content)
     return f"sha256:{digest.hexdigest()}"
+
+
+__all__ = [
+    "PACKAGE_ROOT_TOKEN",
+    "TOOL_TOKEN_PREFIX",
+    "EvaluatorPackageError",
+    "EvaluatorPackageMetadata",
+    "EvaluatorPackageNotFoundError",
+    "EvaluatorPackageRequirement",
+    "ResolvedEvaluatorPackage",
+    "load_evaluator_package",
+    "resolve_evaluator_package",
+]

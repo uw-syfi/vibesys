@@ -342,6 +342,7 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vs_project
+    vibesys.evaluators --> vs_runtime
     vibesys.evaluators --> vs_sandbox
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.agent_options --> vibesys.evaluators

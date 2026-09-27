@@ -29,7 +29,7 @@ from vibesys.domains.environment import (
 )
 from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.evaluators import load_evaluator_package, tool_install_root
+from vibesys.evaluators import tool_install_root
 from vibesys.evaluators.input_manifest import InputBundle, WorkspaceSource
 from vibesys.events import (
     CoreEventType,
@@ -100,6 +100,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     create_model_request_reconciler,
     create_trusted_evaluation_executor,
+    load_evaluator_package,
 )
 from vs_sandbox.api import (
     ComputeBackendImpl,

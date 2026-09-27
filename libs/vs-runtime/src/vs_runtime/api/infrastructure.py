@@ -31,7 +31,11 @@ from vs_runtime._agent_execution import (
     AgentMessageRouter,
 )
 from vs_runtime._agent_sessions import RuntimeAgentSessions
-from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
+from vs_runtime._bundled_paths import (
+    BundledResources,
+    resolve_bundled_tree,
+    resolve_packaged_tree,
+)
 from vs_runtime._checkpoint import (
     CompletedRound,
     MultiSlotRoundTransaction,
@@ -40,6 +44,17 @@ from vs_runtime._checkpoint import (
     RoundTransactionError,
 )
 from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._evaluator_packages import (
+    PACKAGE_ROOT_TOKEN,
+    TOOL_TOKEN_PREFIX,
+    EvaluatorPackageError,
+    EvaluatorPackageMetadata,
+    EvaluatorPackageNotFoundError,
+    EvaluatorPackageRequirement,
+    ResolvedEvaluatorPackage,
+    load_evaluator_package,
+    resolve_evaluator_package,
+)
 from vs_runtime._event_journal import DurableEventJournal, EventCodec
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
@@ -358,8 +373,10 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "PACKAGE_ROOT_TOKEN",
     "REMOTE_EVALUATOR_TOOLS_ROOT",
     "SANDBOX_EVALUATOR_TOOLS_ROOT",
+    "TOOL_TOKEN_PREFIX",
     "AgentExecutionConfiguration",
     "AgentExecutionEnvironment",
     "AgentExecutionFinished",
@@ -373,9 +390,14 @@ __all__ = [
     "AgentSessionRuntime",
     "AgentToolResolver",
     "BlockingOperations",
+    "BundledResources",
     "CommittedStateObserver",
     "CompletedRound",
     "DurableEventJournal",
+    "EvaluatorPackageError",
+    "EvaluatorPackageMetadata",
+    "EvaluatorPackageNotFoundError",
+    "EvaluatorPackageRequirement",
     "EventCodec",
     "FrameworkValidationResult",
     "GitSourceMaterialization",
@@ -412,6 +434,7 @@ __all__ = [
     "ProjectMaterializer",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
+    "ResolvedEvaluatorPackage",
     "RoundRecoveryOutcome",
     "RoundTransactionError",
     "RunControlChannel",
@@ -455,6 +478,7 @@ __all__ = [
     "docker_evaluator_tools_root",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
+    "load_evaluator_package",
     "load_skill_frontmatter",
     "materialize_input_project",
     "materialize_objective_document",
@@ -467,6 +491,7 @@ __all__ = [
     "remote_evaluator_setup_command",
     "required_evaluator_tools_root",
     "resolve_bundled_tree",
+    "resolve_evaluator_package",
     "resolve_packaged_tree",
     "resolve_sdk_source",
     "resolve_skill_resources",

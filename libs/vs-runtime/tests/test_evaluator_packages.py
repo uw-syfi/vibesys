@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluators import (
-    CargoGitToolSpec,
+from vs_runtime.api.infrastructure import (
     EvaluatorPackageError,
     EvaluatorPackageNotFoundError,
-    EvaluatorPackageRegistry,
     EvaluatorPackageRequirement,
     load_evaluator_package,
     resolve_evaluator_package,
-    tool_token,
 )
+from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, tool_token
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -126,8 +123,8 @@ def test_registry_resolves_an_exact_version(tmp_path: Path) -> None:
     expected = _write_package(packages / "v1", version="1.0.0")
     _write_package(packages / "v2", version="2.0.0")
 
-    package = EvaluatorPackageRegistry(packages).resolve(
-        EvaluatorPackageRequirement(name="vibesys-evaluator-test", version="1.0.0")
+    package = resolve_evaluator_package(
+        packages, EvaluatorPackageRequirement(name="vibesys-evaluator-test", version="1.0.0")
     )
 
     assert package.root == expected
@@ -143,8 +140,8 @@ def test_registry_reports_available_versions(tmp_path: Path) -> None:
         match=r"vibesys-evaluator-test==2\.0\.0.*available packages: "
         r"vibesys-evaluator-test==1\.0\.0",
     ):
-        EvaluatorPackageRegistry(packages).resolve(
-            EvaluatorPackageRequirement(name="vibesys-evaluator-test", version="2.0.0")
+        resolve_evaluator_package(
+            packages, EvaluatorPackageRequirement(name="vibesys-evaluator-test", version="2.0.0")
         )
 
 
@@ -154,8 +151,8 @@ def test_registry_rejects_duplicate_name_and_version(tmp_path: Path) -> None:
     _write_package(packages / "second")
 
     with pytest.raises(EvaluatorPackageError, match="duplicate evaluator package"):
-        EvaluatorPackageRegistry(packages).resolve(
-            EvaluatorPackageRequirement(name="vibesys-evaluator-test", version="1.2.3")
+        resolve_evaluator_package(
+            packages, EvaluatorPackageRequirement(name="vibesys-evaluator-test", version="1.2.3")
         )
 
 
@@ -291,40 +288,6 @@ def test_unknown_entrypoint_lists_available_names(tmp_path: Path) -> None:
         package.command("missing")
 
 
-def test_framework_resolver_finds_bundled_queue_package() -> None:
-    package = resolve_evaluator_package(
-        EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
-    )
-
-    assert package.root.name == "queue"
-    assert package.command("vibesys-queue")[:3] == ("go", "-C", str(package.root))
-
-
-@pytest.mark.parametrize(
-    ("name", "entrypoints"),
-    [
-        ("vibesys-evaluator-queue", {"vibesys-queue"}),
-        (
-            "vibesys-evaluator-microservice",
-            {"kubernetes-runtime", "otelcapture", "otelinject", "python", "servicebench"},
-        ),
-        (
-            "vibesys-evaluator-request-factory",
-            {
-                "request-factory-adapter",
-                "request-factory-engine",
-                "request-factory-fixed-text-v1",
-            },
-        ),
-    ],
-)
-def test_bundled_evaluator_package_metadata(name: str, entrypoints: set[str]) -> None:
-    package = resolve_evaluator_package(EvaluatorPackageRequirement(name=name, version="0.1.0"))
-
-    assert set(package.metadata.entrypoints) == entrypoints
-    assert len(package.digest) == len("sha256:") + 64
-
-
 def test_package_digest_ignores_rust_build_output(tmp_path: Path) -> None:
     root = _write_package(tmp_path / "package")
     before = load_evaluator_package(root).digest
@@ -333,29 +296,6 @@ def test_package_digest_ignores_rust_build_output(tmp_path: Path) -> None:
     artifact.write_bytes(b"machine-local build output")
 
     assert load_evaluator_package(root).digest == before
-
-
-def test_bundled_evaluator_packages_declare_only_required_toolchains() -> None:
-    queue = resolve_evaluator_package(
-        EvaluatorPackageRequirement(name="vibesys-evaluator-queue", version="0.1.0")
-    )
-    microservice = resolve_evaluator_package(
-        EvaluatorPackageRequirement(name="vibesys-evaluator-microservice", version="0.1.0")
-    )
-
-    assert queue.metadata.toolchains == ("go", "rust")
-    assert microservice.metadata.toolchains == ("go",)
-
-
-def test_bundled_request_factory_package_pins_cargo_git_tool() -> None:
-    package = resolve_evaluator_package(
-        EvaluatorPackageRequirement(name="vibesys-evaluator-request-factory", version="0.1.0")
-    )
-
-    tool = package.metadata.tools["request-factory"]
-    assert tool.rev == "118da6137275fda3a290e9012853214dc437c6c0"
-    assert tool.package == "req-frontend"
-    assert tool.bins == ("session_runner",)
 
 
 def test_load_package_reports_missing_directory_and_metadata(tmp_path: Path) -> None:
@@ -379,23 +319,14 @@ def test_load_package_wraps_unparseable_metadata(tmp_path: Path) -> None:
 def test_registry_reports_missing_collection_without_available_list(tmp_path: Path) -> None:
     requirement = EvaluatorPackageRequirement(name="pkg", version="1")
     with pytest.raises(EvaluatorPackageNotFoundError, match="collection does not exist"):
-        EvaluatorPackageRegistry(tmp_path / "nowhere").resolve(requirement)
+        resolve_evaluator_package(tmp_path / "nowhere", requirement)
 
     empty = tmp_path / "empty"
     empty.mkdir()
     with pytest.raises(EvaluatorPackageNotFoundError) as excinfo:
-        EvaluatorPackageRegistry(empty).resolve(requirement)
+        resolve_evaluator_package(empty, requirement)
     assert "pkg==1 not found" in str(excinfo.value)
     assert "available packages" not in str(excinfo.value)
-
-
-def test_resolve_package_without_bundled_resources_requires_packages_root() -> None:
-    requirement = EvaluatorPackageRequirement(name="pkg", version="1")
-    with (
-        patch("vibesys.evaluators.packages.evaluator_packages_dir", return_value=None),
-        pytest.raises(EvaluatorPackageNotFoundError, match="pass packages_root"),
-    ):
-        resolve_evaluator_package(requirement)
 
 
 _TOOL_HEAD = """[tools.tool]
