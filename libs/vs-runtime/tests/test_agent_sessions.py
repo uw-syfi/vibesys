@@ -274,7 +274,7 @@ def _scope(
 
 @dataclass(frozen=True, slots=True)
 class _RuntimeEffects:
-    clients: Callable[..., AgentClientProtocol]
+    clients: Callable[..., AgentClientProtocol] | None
     environments: _EnvironmentOpener
     lifecycle: FakeAgentExecutionLifecycleSink
     tool_bindings: dict[str, Callable[[Workspace], tuple[ToolServerDescriptor, ...]]] | None = None
@@ -470,6 +470,27 @@ def test_session_fixes_role_binding_and_continues_provider_context() -> None:
         for event in lifecycle.events
         if isinstance(event, AgentExecutionFinished)
     )
+
+
+def test_workspace_runtime_owns_the_default_agent_client_factory() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                None,
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+        assert await session.turn("inspect") == (
+            "Stub agent inspected the available experiment trajectory."
+        )
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
 
 
 def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: Path) -> None:

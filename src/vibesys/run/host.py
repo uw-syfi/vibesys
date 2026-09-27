@@ -4,24 +4,28 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
-from vibesys.composition import AgentToolContext
+from vibesys.composition import AgentToolContext, agent_spec_from_config
 from vibesys.context import _StateBinding, open_run_resources
-from vibesys.orchestration.agents import _AgentToolResolver, create_agents_and_workspaces
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.gates import _EvaluationAdapter
 from vibesys.orchestration.state import _StateCommitObserver
+from vibesys.orchestration.steering import splice_steering
 from vibesys.orchestration.workspace_resources import (
     CandidateWorkspaceResourceFactory,
     root_workspace_resource,
 )
+from vibesys.run.agent_events import CoreAgentEventSink
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 from vs_runtime.api.infrastructure import (
+    AgentExecutionConfiguration,
     BlockingOperations,
     RunHostComponents,
     create_state,
+    create_workspace_runtime,
     open_run_host,
 )
 from vs_runtime.api.infrastructure_skills import create_installed_skills
@@ -35,10 +39,17 @@ if TYPE_CHECKING:
     from vibesys.orchestration.contracts import OrchestrationProjector
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
-    from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import OrchestrationPlugin, RunHost
-    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
+    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
+    from vs_runtime.api import AgentRole, OrchestrationPlugin, RunHost, Workspace
+    from vs_runtime.api.infrastructure import (
+        AgentExecutionEnvironment,
+        WorkspaceResource,
+        WorkspaceRuntime,
+    )
     from vs_sandbox.api import ComputeBackendImpl
+
+
+type _AgentToolResolver = Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,22 +107,14 @@ class _ProductHostFactory:
             resources.state.local("agent").slot("sessions.json", AgentSessionState),
             log=resources.logger.lprint,
         )
-        agent_runtime = create_agents_and_workspaces(
-            self.request,
+        agent_runtime = self._agent_runtime(
+            resources,
             session_store,
-            self.integration.events,
-            resources.lprint,
-            AgentToolContext(resources.profiler_kind.value),
-            self.plugin.agents,
-            self.agent_tool_bindings,
             root_resource=root_workspace_resource(
                 resources,
                 self.plugin.memory_paths,
                 self.integration.events,
                 self.open_agent_environment,
-            ),
-            supports_parallel_candidates=(
-                resources.run_environment_view.supports_parallel_candidate_evaluation
             ),
             create_candidate_resource=CandidateWorkspaceResourceFactory(
                 resources,
@@ -120,10 +123,7 @@ class _ProductHostFactory:
                 self.integration.events,
                 self.open_agent_environment,
             ),
-            control=self.integration.control,
-            lifecycle_events=self.integration.agent_execution_event,
             blocking=blocking,
-            client_factory=self.agent_client_factory,
         )
         agents = agent_runtime.agents
         workspaces = agent_runtime.workspaces
@@ -166,6 +166,52 @@ class _ProductHostFactory:
             log=resources.lprint,
             blocking=blocking,
             resources=resources,
+        )
+
+    def _agent_runtime(
+        self,
+        resources: _RunResources,
+        session_store: DurableSessionStore,
+        *,
+        root_resource: WorkspaceResource,
+        create_candidate_resource: CandidateWorkspaceResourceFactory,
+        blocking: BlockingOperations,
+    ) -> WorkspaceRuntime:
+        """Bind product configuration to the runtime's resource owner."""
+
+        def resolve_configuration(role: AgentRole) -> AgentExecutionConfiguration:
+            spec = agent_spec_from_config(
+                self.request.config,
+                backend=self.request.agent_backend,
+                provider=self.request.cli_provider,
+            )
+            return AgentExecutionConfiguration(
+                agent_id=role.id,
+                spec=spec,
+                reasoning_effort=spec.role_reasoning_efforts.get(role.id, spec.reasoning_effort),
+            )
+
+        tool_context = AgentToolContext(resources.profiler_kind.value)
+        return create_workspace_runtime(
+            self.plugin.agents,
+            root_resource=root_resource,
+            supports_parallel_candidates=(
+                resources.run_environment_view.supports_parallel_candidate_evaluation
+            ),
+            create_candidate_resource=create_candidate_resource,
+            resolve_configuration=resolve_configuration,
+            session_store=lambda: session_store,
+            control=self.integration.control,
+            lifecycle_events=self.integration.agent_execution_event,
+            agent_events=CoreAgentEventSink(self.integration.events.record),
+            route_message=splice_steering,
+            blocking=blocking,
+            client_factory=self.agent_client_factory,
+            tool_bindings={
+                tool_id: partial(resolver, tool_context)
+                for tool_id, resolver in dict(self.agent_tool_bindings or {}).items()
+            },
+            log=resources.lprint,
         )
 
 

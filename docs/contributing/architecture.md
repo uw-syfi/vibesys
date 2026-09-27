@@ -115,12 +115,6 @@ graph TD
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.agent_options --> vibesys.inputs
     vibesys.orchestration.agent_options --> vibesys.orchestration.metrics
-    vibesys.orchestration.agents --> vibesys
-    vibesys.orchestration.agents --> vibesys.context
-    vibesys.orchestration.agents --> vibesys.orchestration.request
-    vibesys.orchestration.agents --> vibesys.orchestration.steering
-    vibesys.orchestration.agents --> vibesys.orchestration.workspace_resources
-    vibesys.orchestration.agents --> vibesys.run
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.control --> vibesys.run
@@ -196,13 +190,13 @@ graph TD
     vibesys.run --> vibesys.inputs
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.context
-    vibesys.run.host --> vibesys.orchestration.agents
     vibesys.run.host --> vibesys.orchestration.contracts
     vibesys.run.host --> vibesys.orchestration.control
     vibesys.run.host --> vibesys.orchestration.gates
     vibesys.run.host --> vibesys.orchestration.request
     vibesys.run.host --> vibesys.orchestration.skills
     vibesys.run.host --> vibesys.orchestration.state
+    vibesys.run.host --> vibesys.orchestration.steering
     vibesys.run.host --> vibesys.orchestration.workspace_resources
     vibesys.run.host --> vibesys.run
 ```
@@ -344,14 +338,6 @@ graph TD
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.agent_options --> vibesys.inputs
     vibesys.orchestration.agent_options --> vibesys.orchestration.metrics
-    vibesys.orchestration.agents --> vibesys
-    vibesys.orchestration.agents --> vibesys.context
-    vibesys.orchestration.agents --> vibesys.orchestration.request
-    vibesys.orchestration.agents --> vibesys.orchestration.steering
-    vibesys.orchestration.agents --> vibesys.orchestration.workspace_resources
-    vibesys.orchestration.agents --> vibesys.run
-    vibesys.orchestration.agents --> vs_agent
-    vibesys.orchestration.agents --> vs_runtime
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.artifacts --> vs_runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
@@ -459,13 +445,13 @@ graph TD
     vibesys.run --> vs_sandbox
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.context
-    vibesys.run.host --> vibesys.orchestration.agents
     vibesys.run.host --> vibesys.orchestration.contracts
     vibesys.run.host --> vibesys.orchestration.control
     vibesys.run.host --> vibesys.orchestration.gates
     vibesys.run.host --> vibesys.orchestration.request
     vibesys.run.host --> vibesys.orchestration.skills
     vibesys.run.host --> vibesys.orchestration.state
+    vibesys.run.host --> vibesys.orchestration.steering
     vibesys.run.host --> vibesys.orchestration.workspace_resources
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vs_agent

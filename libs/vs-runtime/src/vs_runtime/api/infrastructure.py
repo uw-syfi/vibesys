@@ -235,7 +235,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     agent_events: AgentEventSink,
     route_message: AgentMessageRouter,
     blocking: BlockingOperations,
-    client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
+    client_factory: Callable[..., AgentClientProtocol] | None = None,
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
 ) -> WorkspaceRuntime:
@@ -254,7 +254,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         lifecycle_events=lifecycle_events,
         agent_events=agent_events,
         route_message=route_message,
-        client_factory=client_factory,
+        client_factory=client_factory or build_agent_client,
         tool_bindings=tool_bindings,
         log=log,
     )
