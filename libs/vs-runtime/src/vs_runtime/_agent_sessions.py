@@ -18,6 +18,7 @@ from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_execution import RuntimeAgentExecution
 from vs_runtime.contracts import (
     AgentBinding,
+    AgentCapability,
     AgentRole,
     AgentTurnTimeoutError,
     RuntimeContractError,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vs_agent.api import (
+        AgentCapabilities,
         AgentClientProtocol,
         AgentEventSink,
         SessionStore,
@@ -51,6 +53,16 @@ if TYPE_CHECKING:
     )
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+
+def _supports_required_capability(
+    capabilities: AgentCapabilities,
+    capability: AgentCapability,
+) -> bool:
+    """Translate plugin capability names to the agent client's contract."""
+    if capability is AgentCapability.MCP_SERVERS:
+        return capabilities.tool_servers
+    return bool(getattr(capabilities, capability.value))
 
 
 def _unauthorized_paths(
@@ -352,7 +364,7 @@ class RuntimeAgentSessions:
         missing = {
             capability.value
             for capability in role.required_capabilities
-            if not getattr(execution.capabilities, capability.value)
+            if not _supports_required_capability(execution.capabilities, capability)
         }
         if member_id is not None and not execution.capabilities.provider_session_resume:
             missing.add("provider_session_resume")

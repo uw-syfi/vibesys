@@ -160,15 +160,13 @@ def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
     }
 
 
-def _normalize_mcp_servers(
+def _translate_tool_servers(
     servers: Iterable[ToolServerDescriptor] | None,
-    legacy_servers: Iterable[MCPServerSpec] | None = None,
 ) -> tuple[MCPServerSpec, ...]:
     """Translate generic tool declarations into the driver's MCP contract."""
-    selected = (*(servers or ()), *(legacy_servers or ()))
     return tuple(
         MCPServerSpec(name=item.name, command=item.command, args=item.args, env=item.env)
-        for item in selected
+        for item in servers or ()
     )
 
 
@@ -276,8 +274,6 @@ class AgentClient:
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         tool_servers: list[ToolServerDescriptor] | None = None,
-        # Deprecated: converted to the internal driver contract.
-        mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> T:
@@ -293,7 +289,6 @@ class AgentClient:
             invocation_id=invocation_id,
             progress=progress,
             tool_servers=tool_servers,
-            mcp_servers=mcp_servers,
             reuse_session=reuse_session,
             session_key=session_key,
         )
@@ -334,8 +329,6 @@ class AgentClient:
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         tool_servers: list[ToolServerDescriptor] | None = None,
-        # Deprecated: converted to the internal driver contract.
-        mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> str:
@@ -351,7 +344,6 @@ class AgentClient:
             invocation_id=invocation_id,
             progress=progress,
             tool_servers=tool_servers,
-            mcp_servers=mcp_servers,
             reuse_session=reuse_session,
             session_key=session_key,
         )
@@ -387,7 +379,6 @@ class AgentClient:
         invocation_id: str | None,
         progress: AgentProgress | None,
         tool_servers: list[ToolServerDescriptor] | None,
-        mcp_servers: list[MCPServerSpec] | None,
         reuse_session: bool | None,
         session_key: AgentSessionKey | None,
     ) -> tuple[AgentTurnResult, AgentLogger]:
@@ -406,7 +397,7 @@ class AgentClient:
             workspace=workspace,
             policy=self._policy,
             model=model,
-            mcp_servers=_normalize_mcp_servers(tool_servers, mcp_servers),
+            mcp_servers=_translate_tool_servers(tool_servers),
             skills=self._skills,
             environment=tuple(sorted((env or {}).items())),
             reasoning_effort=reasoning_effort,

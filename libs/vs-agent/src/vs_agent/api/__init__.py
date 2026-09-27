@@ -72,10 +72,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.client import AgentClient
-    from vs_agent.factory import (
-        agent_driver_supports_mcp_servers,
-        agent_driver_supports_tool_servers,
-    )
+    from vs_agent.factory import agent_driver_supports_tool_servers
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
@@ -125,7 +122,6 @@ __all__ = [
     "ToolServerDescriptor",
     "ToolSpec",
     "agent_catalog",
-    "agent_driver_supports_mcp_servers",
     "agent_driver_supports_tool_servers",
     "auth_bind_mounts",
     "auth_copy_paths",
@@ -150,17 +146,12 @@ def __getattr__(name: str) -> object:
         )
 
         return AgentClient
-    if name in {"agent_driver_supports_mcp_servers", "agent_driver_supports_tool_servers"}:
+    if name == "agent_driver_supports_tool_servers":
         from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010115 [PLC0415]; Keep this dependency lazy in __getattr__ so unused providers and import cycles stay unloaded.
-            agent_driver_supports_mcp_servers,
             agent_driver_supports_tool_servers,
         )
 
-        return (
-            agent_driver_supports_tool_servers
-            if name == "agent_driver_supports_tool_servers"
-            else agent_driver_supports_mcp_servers
-        )
+        return agent_driver_supports_tool_servers
     message = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(message)
 

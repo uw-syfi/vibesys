@@ -48,11 +48,6 @@ def agent_driver_supports_tool_servers(spec: AgentSpec) -> bool | None:
     return AGENTSHIM_CAPABILITIES.tool_servers
 
 
-def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
-    """Compatibility alias for :func:`agent_driver_supports_tool_servers`."""
-    return agent_driver_supports_tool_servers(spec)
-
-
 def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Preserve build_agent_client's named-argument contract because callers pass these independent settings directly.
     *,
     spec: AgentSpec,

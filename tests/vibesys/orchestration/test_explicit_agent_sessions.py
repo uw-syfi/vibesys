@@ -27,8 +27,8 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import (
     AgentCapabilities,
     AgentSessionKey,
-    MCPServerSpec,
     SessionScope,
+    StdioServerDescriptor,
     ToolServerDescriptor,
 )
 from vs_agent.api import (
@@ -449,7 +449,7 @@ def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
 def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
     tmp_path: Path,
 ) -> None:
-    client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True))
+    client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, tool_servers=True))
     client.enqueue_text("profiler", "analysis").enqueue("profiler", _Reply(value=4))
     resolutions = 0
 
@@ -483,8 +483,8 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
     )
     assert resolutions == 1
     assert client.calls[0].tool_servers == client.calls[1].tool_servers
-    assert client.calls[0].mcp_servers == [
-        MCPServerSpec(
+    assert client.calls[0].tool_servers == [
+        StdioServerDescriptor(
             name="vibesys-otel-profiler",
             command="python",
             args=("otel_profiler/server.py",),
@@ -493,7 +493,7 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
 
 
 def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
-    client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True))
+    client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, tool_servers=True))
     role = AgentRole(
         id="worker",
         system_prompt="Use the workspace-scoped tool.",
@@ -501,9 +501,9 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     )
     resolved_workspaces: list[Workspace] = []
 
-    def bind_tool(_host: object, workspace: Workspace) -> tuple[MCPServerSpec, ...]:
+    def bind_tool(_host: object, workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
         resolved_workspaces.append(workspace)
-        return (MCPServerSpec(name="workspace-tool", command="tool-server"),)
+        return (StdioServerDescriptor(name="workspace-tool", command="tool-server"),)
 
     async def body(ctx: RunContext) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
@@ -554,7 +554,7 @@ def test_candidate_discard_invalidates_its_public_sessions(tmp_path: Path) -> No
 
 def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) -> None:
     client = FakeAgentClient(
-        capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True)
+        capabilities=AgentCapabilities(session_reuse=True, tool_servers=True)
     ).enqueue_text("judge", "reviewed")
     role = AgentRole(
         id="judge",
@@ -573,8 +573,8 @@ def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) 
         declaration=(role,),
         configuration=_RunConfiguration(tool_bindings=AGENT_TOOL_BINDINGS),
     )
-    assert client.calls[0].mcp_servers == [
-        MCPServerSpec(
+    assert client.calls[0].tool_servers == [
+        StdioServerDescriptor(
             name="vibesys-issue-board",
             command="python",
             args=(
@@ -592,7 +592,7 @@ def test_issue_queue_plugin_can_create_all_declared_sessions(tmp_path: Path) -> 
     capabilities = AgentCapabilities(
         session_reuse=True,
         provider_session_resume=True,
-        mcp_servers=True,
+        tool_servers=True,
     )
     clients = [FakeAgentClient(capabilities=capabilities) for _role in ISSUE_QUEUE_PLUGIN.agents]
 
@@ -630,7 +630,7 @@ def test_intrinsic_shell_tool_does_not_bind_an_mcp_server(tmp_path: Path) -> Non
         assert await session.turn("work") == "done"
 
     _run_with_clients(tmp_path, [client], body, declaration=(role,))
-    assert client.calls[0].mcp_servers is None
+    assert client.calls[0].tool_servers is None
 
 
 def test_read_only_session_restores_writes_and_early_close_is_idempotent(

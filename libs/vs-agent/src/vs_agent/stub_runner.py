@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from vs_agent.contracts import AgentCapabilities, MCPServerSpec
+from vs_agent.contracts import AgentCapabilities
 from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
@@ -34,7 +34,7 @@ class StubAgentClient:
     def capabilities(self) -> AgentCapabilities:
         """Emulate every conversation capability used by built-in smoke runs."""
         return AgentCapabilities(
-            mcp_servers=True,
+            tool_servers=True,
             session_reuse=True,
             provider_session_resume=True,
         )
@@ -114,8 +114,6 @@ class StubAgentClient:
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         tool_servers: list[ToolServerDescriptor] | None = None,
-        # Deprecated compatibility spelling.
-        mcp_servers: list[MCPServerSpec] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> str:
@@ -126,7 +124,6 @@ class StubAgentClient:
             env,
             progress,
             tool_servers,
-            mcp_servers,
             reuse_session,
             session_key,
         )

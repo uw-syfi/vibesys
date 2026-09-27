@@ -74,4 +74,4 @@ def test_stub_runner_emulates_builtin_conversation_capabilities() -> None:
 
     assert capabilities.session_reuse
     assert capabilities.provider_session_resume
-    assert capabilities.mcp_servers
+    assert capabilities.tool_servers

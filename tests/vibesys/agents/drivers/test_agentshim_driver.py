@@ -1506,7 +1506,7 @@ def test_capabilities_report_the_provider_and_execution_mode(provider: str) -> N
 
     profile = agentshim.get_provider(provider).profile
     assert capabilities.provider_session_resume is profile.supports_resume
-    assert capabilities.mcp_servers is True
+    assert capabilities.tool_servers is True
     assert capabilities.host_path_grants is True
     assert capabilities.container_execution is False
 

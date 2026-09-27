@@ -368,6 +368,7 @@ def test_role_tools_are_resolved_once_and_fixed_for_the_session() -> None:
         id="worker",
         system_prompt="Work.",
         tools=(AgentTool(id="shell"), AgentTool(id="board")),
+        required_capabilities=frozenset({AgentCapability.MCP_SERVERS}),
     )
     client = _client(responses=("done",))
     resolutions = 0

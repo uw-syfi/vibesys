@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 _CAPABILITIES = AgentCapabilities(
     session_reuse=True,
     provider_session_resume=True,
-    mcp_servers=True,
+    tool_servers=True,
 )
 
 
