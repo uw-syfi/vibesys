@@ -67,11 +67,9 @@ from vs_agent.todos import todos_from_tool_call
 from vs_agent.tools import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, expose_as_tools
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Iterable
     from pathlib import Path
     from typing import TextIO
-
-    from pydantic import BaseModel
 
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_driver_supports_tool_servers
@@ -172,9 +170,6 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
-    stub_response_factory: (
-        Callable[[type[BaseModel], int], BaseModel | Mapping[str, object] | None] | None
-    ) = None,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
     from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
@@ -194,5 +189,4 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         require_host_sandbox=require_host_sandbox,
         session_store=session_store,
         events=events,
-        stub_response_factory=stub_response_factory,
     )

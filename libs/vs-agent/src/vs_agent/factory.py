@@ -11,11 +11,9 @@ from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.spec import AgentBackend, Driver
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Iterable
     from pathlib import Path
     from typing import TextIO
-
-    from pydantic import BaseModel
 
     from vs_agent.contracts import AgentClientProtocol
     from vs_agent.session_store import SessionStore
@@ -64,9 +62,6 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
-    stub_response_factory: (
-        Callable[[type[BaseModel], int], BaseModel | Mapping[str, object] | None] | None
-    ) = None,
 ) -> AgentClientProtocol:
     """Build the configured application-level agent service from ``spec``."""
     host_resources = tuple(host_resources)
@@ -84,10 +79,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             StubAgentClient,
         )
 
-        return StubAgentClient(
-            event_sink=events,
-            response_factory=stub_response_factory,
-        )
+        return StubAgentClient(event_sink=events)
 
     if backend != AgentBackend.CLI:
         message = f"unknown agent backend: {backend.value!r}"

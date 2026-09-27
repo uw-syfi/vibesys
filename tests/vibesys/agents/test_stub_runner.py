@@ -1,36 +1,29 @@
 from pathlib import Path
-from typing import TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.multi.contracts import (
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-)
-from vibesys.orchestration.review import Verdict
-from vibesys.plugin_catalog import stub_response_factory
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient
 
-T = TypeVar("T", bound=BaseModel)
+
+class _Response(BaseModel):
+    value: int
 
 
-def test_stub_runner_returns_valid_agent_loop_responses(tmp_path: Path) -> None:
-    responses = stub_response_factory("multi-agent")
-    assert responses is not None
-    runner = StubAgentClient(response_factory=responses)
+def test_stub_runner_uses_the_callers_typed_fallback(tmp_path: Path) -> None:
+    runner = StubAgentClient()
 
-    pre_round = invoke(runner, tmp_path, "orchestrator", PreRoundDecision)
-    plan = invoke(runner, tmp_path, "orchestrator", OrchestratorPlan)
-    implementation = invoke(runner, tmp_path, "implementer", ImplementerResponse)
-    judgment = invoke(runner, tmp_path, "judge", JudgeResponse)
+    response = runner.invoke(
+        kind="worker",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        response_cls=_Response,
+        fallback_factory=lambda: _Response(value=7),
+        round_label="stub-worker",
+    )
 
-    assert pre_round.need_profile is False
-    assert plan.task
-    assert implementation.summary
-    assert judgment.verdict is Verdict.PASS
+    assert response == _Response(value=7)
 
 
 def test_stub_runner_returns_plain_chat_text(tmp_path: Path) -> None:
@@ -46,21 +39,6 @@ def test_stub_runner_returns_plain_chat_text(tmp_path: Path) -> None:
     )
 
     assert answer == "Stub agent inspected the available experiment trajectory."
-
-
-def invoke(runner: StubAgentClient, workspace: Path, kind: str, response_cls: type[T]) -> T:
-    def fallback() -> T:
-        return response_cls.model_construct()
-
-    return runner.invoke(
-        kind=kind,
-        workspace=workspace,
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=response_cls,
-        fallback_factory=fallback,
-        round_label=f"stub-{kind}",
-    )
 
 
 def test_stub_runner_names_no_provider_conversation() -> None:

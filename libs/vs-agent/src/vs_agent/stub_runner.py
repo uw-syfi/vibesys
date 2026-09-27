@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from typing import TYPE_CHECKING, TypeVar
 
@@ -12,7 +11,7 @@ from vs_agent.contracts import AgentCapabilities
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
     from pathlib import Path
 
     from vs_agent.progress import AgentProgress
@@ -21,13 +20,8 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
-def _round_number_from_label(round_label: str | None) -> int:
-    match = re.search(r"(\d+)", round_label or "")
-    return int(match.group(1)) if match else 1
-
-
 class StubAgentClient:
-    """Return valid canned responses without invoking an external agent."""
+    """Exercise the agent-client contract without invoking an external agent."""
 
     backend_name = "stub"
 
@@ -35,17 +29,13 @@ class StubAgentClient:
         self,
         *,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
-        response_factory: (
-            Callable[[type[BaseModel], int], BaseModel | Mapping[str, object] | None] | None
-        ) = None,
     ) -> None:
         """Create a stateless deterministic client."""
         self._sink = event_sink
-        self._response_factory = response_factory
 
     @property
     def capabilities(self) -> AgentCapabilities:
-        """Emulate every conversation capability used by built-in smoke runs."""
+        """Emulate the conversation capabilities used by interface smoke runs."""
         return AgentCapabilities(
             tool_servers=True,
             session_reuse=True,
@@ -98,30 +88,19 @@ class StubAgentClient:
         **kwargs: object,
     ) -> T:
         """Emit a deterministic stub response for one requested agent turn."""
-        del workspace, system_prompt, user_prompt, progress, kwargs
+        del workspace, system_prompt, user_prompt, response_cls, progress, kwargs
         self._sink.agent_output(
             f"[stub-agent] {round_label}: starting {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
         )
         time.sleep(0.05)
-        response = (
-            self._response_factory(response_cls, _round_number_from_label(round_label))
-            if self._response_factory is not None
-            else None
-        )
         self._sink.agent_output(
             f"[stub-agent] {round_label}: completed {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
         )
-        if response is None:
-            return fallback_factory()
-        if isinstance(response, response_cls):
-            return response
-        if isinstance(response, BaseModel):
-            return response_cls.model_validate(response.model_dump())
-        return response_cls.model_validate(response)
+        return fallback_factory()
 
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010192 [PLR0913]; Preserve StubAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import threading
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
-from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.agent_spec_config import agent_spec_from_config
@@ -169,25 +168,16 @@ class _LocalRunSession:
     ) -> None:
         self._request = request
         self._sink = sink
-        response_factory = None
         if registry is None:
             # lint-waiver: LW-020004 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
-            from vibesys.plugin_catalog import (  # noqa: PLC0415
-                built_in_orchestrations,
-                stub_response_factory,
-            )
+            from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
 
             registry = built_in_orchestrations()
-            response_factory = stub_response_factory(request.orchestration.id)
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
         self._agent_client_factory = agent_client_factory
-        if self._agent_client_factory is None and response_factory is not None:
-            self._agent_client_factory = partial(
-                build_agent_client, stub_response_factory=response_factory
-            )
         self._backend_factory = backend_factory
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
