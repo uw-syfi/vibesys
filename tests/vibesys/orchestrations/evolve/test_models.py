@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from vibesys.roles.mutator import MutatorContext
+from vibesys.orchestrations.evolve.models import MutatorContext
 from vibesys.search.population.models import Individual
 
 

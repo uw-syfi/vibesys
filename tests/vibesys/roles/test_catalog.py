@@ -27,7 +27,6 @@ def _role_search_names() -> dict[int, str]:
         roles.judge,
         roles.profiler,
         roles.single_agent,
-        roles.mutator,
     ):
         for name, value in vars(family).items():
             if name.startswith("_") or not _IDENTIFIER.match(name):

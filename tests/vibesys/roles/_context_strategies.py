@@ -32,15 +32,12 @@ from hypothesis import strategies as st
 
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.roles.designer import PlanContext
-from vibesys.roles.mutator import MutatorContext
-from vibesys.search.population.models import Individual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic import BaseModel
 
-_INDIVIDUAL = st.builds(Individual, metrics=st.just({}))
 _PROFILER_SUMMARY = st.builds(ProfilerSummary, metrics=st.just({}))
 
 # Context-model field overrides, keyed by the exact model class (never by
@@ -48,43 +45,13 @@ _PROFILER_SUMMARY = st.builds(ProfilerSummary, metrics=st.just({}))
 # different models.
 _CONTEXT_OVERRIDES: dict[type[BaseModel], dict[str, st.SearchStrategy]] = {
     PlanContext: {"profiler_summary": st.none() | _PROFILER_SUMMARY},
-    MutatorContext: {
-        "inspirations": st.lists(_INDIVIDUAL, max_size=2),
-    },
 }
-
-
-def _mutator_context_strategy() -> st.SearchStrategy[MutatorContext]:
-    """Custom strategy for MutatorContext that respects the constraint
-    that parent is required unless is_cold_start is True.
-    """
-    # Two paths: cold_start=True (parent optional) or cold_start=False (parent required)
-    is_cold_start_true = True
-    is_cold_start_false = False
-    cold_start_strategy = st.builds(
-        MutatorContext,
-        is_cold_start=st.just(is_cold_start_true),
-        parent=st.none(),
-        inspirations=st.lists(_INDIVIDUAL, max_size=2),
-        modality=st.none(),
-    )
-    non_cold_start_strategy = st.builds(
-        MutatorContext,
-        is_cold_start=st.just(is_cold_start_false),
-        parent=_INDIVIDUAL,
-        inspirations=st.lists(_INDIVIDUAL, max_size=2),
-        modality=st.none(),
-    )
-    return st.one_of(cold_start_strategy, non_cold_start_strategy)
-
 
 _CONTEXT_VALIDITY: dict[type[BaseModel], Callable[[BaseModel], bool]] = {}
 
 
 def context_strategy(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
     """A hypothesis strategy of valid instances of a ``Role.context`` model."""
-    if model is MutatorContext:
-        return _mutator_context_strategy()
     overrides = dict(_CONTEXT_OVERRIDES.get(model, {}))
     if "modality" in model.model_fields:
         overrides.setdefault("modality", st.none())

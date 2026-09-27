@@ -16,9 +16,8 @@ from tests.vibesys.orchestrations.evolve._integration_support import (
     write_input,
 )
 
+from vibesys.orchestrations.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.roles.common import Verdict
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.mutator import MutatorResponse
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project

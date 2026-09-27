@@ -1,9 +1,7 @@
 """Profiler role family: run one profiler kind and summarize it.
 
 Used by ``multi`` (one role per :class:`~vibesys.profilers.ProfilerKind`,
-shared with ``profile_multi`` via ``search/profile_focus`` composition) and
-by ``evolve`` (the candidate profiler, one role per kind, reusing the same
-shared per-kind templates behind its own wrapper templates and context).
+shared with ``profile_multi`` via ``search/profile_focus`` composition).
 
 Deviation from the design brief: ``ProfilerSummary``'s canonical definition
 lives in ``vibesys.evaluators.perf_reply`` (re-exported here), not defined
@@ -19,13 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.profilers import PROFILER_DEFINITIONS, ProfilerKind
-from vibesys.runtime import Fresh, ReadOnly, Reuse, Role
+from vibesys.runtime import Fresh, ReadOnly, Role
 
 __all__ = [
     "ALL_ROLES",
-    "CANDIDATE_PROFILERS",
     "MULTI_PROFILERS",
-    "CandidateProfilerContext",
     "ProfilerContext",
     "ProfilerResponse",
     "ProfilerSummary",
@@ -54,29 +50,6 @@ class ProfilerContext(BaseModel):
     profiler_support_name: str
     profiler_mcp_name: str
     profiler_campaign_context: str
-
-
-class CandidateProfilerContext(BaseModel):
-    """Shared context for every evolve candidate-profiler-kind role.
-
-    Mirrors :class:`ProfilerContext`, but evolve's per-round addendum is the
-    Pareto-frontier objectives list (``pareto_objectives_addendum``) rather
-    than multi's campaign-context recap, so it gets its own context model
-    rather than reusing ``ProfilerContext``.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    benchmark_command: str | None
-    domain_profiler: str
-    modality: str | None
-    objective: str | None
-    pareto_objectives_addendum: str
-    profile_execution: str
-    profile_focus: str
-    profiler_mcp_name: str
-    profiler_support_name: str
-    runtime_notes: str
 
 
 class ProfilerResponse(BaseModel):
@@ -136,39 +109,4 @@ MULTI_PROFILERS: dict[ProfilerKind, Role] = {
 }
 
 
-def _fallback_candidate_profiler() -> ProfilerSummary:
-    return ProfilerSummary(
-        analysis="Profiler produced no structured response.",
-        bottlenecks="n/a",
-        suggestions="n/a",
-        perf_metric=None,
-        perf_unit=None,
-    )
-
-
-def _candidate_profiler_role(kind: ProfilerKind) -> Role:
-    """One role per profiler kind for evolve's candidate profiler.
-
-    Renders from evolve's own ``loops/evolve/profilers/<kind>.j2`` wrapper
-    (which includes the same ``prompts/shared/profilers/<kind>.j2`` body
-    multi's role renders, then appends the Pareto-objectives addendum), so
-    it is a distinct ``Role`` from ``MULTI_PROFILERS[kind]`` with its own
-    fallback shape and context model.
-    """
-    return Role(
-        id="profiler",
-        template=f"loops/evolve/profilers/{kind.value}.j2",
-        reply=ProfilerSummary,
-        fallback=_fallback_candidate_profiler,
-        context=CandidateProfilerContext,
-        access=ReadOnly(),
-        session=Reuse(),
-        message="Profile the server and return exactly one JSON object matching the schema above.",
-    )
-
-
-CANDIDATE_PROFILERS: dict[ProfilerKind, Role] = {
-    kind: _candidate_profiler_role(kind) for kind in PROFILER_DEFINITIONS
-}
-
-ALL_ROLES = (*MULTI_PROFILERS.values(), *CANDIDATE_PROFILERS.values())
+ALL_ROLES = (*MULTI_PROFILERS.values(),)

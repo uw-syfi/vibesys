@@ -16,11 +16,10 @@ Families:
   - ``designer``:        round-planning roles (multi, single, profile_single)
   - ``pre_round``:       pre-round profiling decision (multi)
   - ``implementer``:     hypothesis implementer roles (multi)
-  - ``judge``:           hypothesis/candidate judge roles (multi, evolve)
-  - ``profiler``:        per-profiler-kind roles (multi, evolve)
+  - ``judge``:           hypothesis judge role (multi)
+  - ``profiler``:        per-profiler-kind roles (multi)
   - ``single_agent``:    combined implement+judge+profile roles (single,
                          profile_single)
-  - ``mutator``:         evolve's mutation-operator role (candidate implementer)
   - ``common``:          reply-schema pieces shared by more than one family
                          (``Verdict``, ``SkillResourceSelection``)
 
@@ -28,9 +27,9 @@ Families:
 roles (implementer, judge, profiler, designer, pre_round) via
 ``search/profile_focus`` composition.
 
-The catalog is complete: every role any strategy uses lives in one of these
-modules; ``tests/vibesys/roles/test_catalog.py`` asserts every role here is
-used by at least one registered strategy.
+The catalog is complete for policies that still use :class:`vibesys.runtime.Role`.
+Explicit orchestration plugins own their :class:`vs_runtime.api.AgentRole`
+declarations and response contracts within their policy packages.
 """
 
 from __future__ import annotations
@@ -40,7 +39,6 @@ from vibesys.roles import (
     designer,
     implementer,
     judge,
-    mutator,
     pre_round,
     profiler,
     single_agent,
@@ -53,7 +51,6 @@ ALL_ROLES = (
     *judge.ALL_ROLES,
     *profiler.ALL_ROLES,
     *single_agent.ALL_ROLES,
-    *mutator.ALL_ROLES,
 )
 
 __all__ = [
@@ -62,7 +59,6 @@ __all__ = [
     "designer",
     "implementer",
     "judge",
-    "mutator",
     "pre_round",
     "profiler",
     "single_agent",

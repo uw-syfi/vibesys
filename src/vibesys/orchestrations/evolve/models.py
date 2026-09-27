@@ -6,8 +6,90 @@ from typing import Annotated, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vibesys.evaluators.metrics import MetricSpace
-from vibesys.search.population import OpenEvolveSelectorConfig, PopulationState
+from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.roles.common import Verdict
+from vibesys.search.population import Individual, OpenEvolveSelectorConfig, PopulationState
+
+
+class MutatorContext(BaseModel):
+    """Inputs for one evolve mutation turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy_command: str | None
+    benchmark_command: str | None
+    domain_implementer: str
+    failed_lessons: list[str]
+    inspirations: list[Individual]
+    interface: str
+    is_cold_start: bool
+    modality: str | None
+    num_failed_attempts: int
+    objective: str
+    objectives: list[Objective] | None
+    parent: Individual | None
+    reference_path: str
+    repair_seed: bool
+    runtime_notes: str
+
+    @model_validator(mode="after")
+    def _require_parent_unless_cold_start(self) -> Self:
+        if not self.is_cold_start and self.parent is None:
+            message = "parent is required unless is_cold_start is True"
+            raise ValueError(message)
+        return self
+
+
+class MutatorResponse(BaseModel):
+    """Mutation rationale recorded on the resulting population member."""
+
+    summary: str = Field(description="Short description of the change made to the parent.")
+    hypothesis: str = Field(
+        description="Why this change is expected to improve the headline metric.",
+    )
+    expected_behavior: str = Field(description="Observable change a reviewer should expect.")
+
+
+class CandidateJudgeContext(BaseModel):
+    """Inputs for one independent evolve candidate review."""
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy_command: str | None
+    benchmark_command: str | None
+    domain_judge: str
+    interface: str
+    modality: str | None
+    objective: str | None
+    pass_criteria: str
+    runtime_notes: str
+
+
+class JudgeResponse(BaseModel):
+    """Review decision for one evolve candidate."""
+
+    analysis: str = Field(description="Detailed analysis of the candidate implementation.")
+    feedback: str = Field(
+        description="Specific actionable feedback for the mutator. Empty string if passing."
+    )
+    verdict: Verdict = Field(description="PASS if all criteria are met, FAIL otherwise.")
+
+
+class CandidateProfilerContext(BaseModel):
+    """Inputs shared by all evolve candidate profiler kinds."""
+
+    model_config = ConfigDict(frozen=True)
+
+    benchmark_command: str | None
+    domain_profiler: str
+    modality: str | None
+    objective: str | None
+    pareto_objectives_addendum: str
+    profile_execution: str
+    profile_focus: str
+    profiler_mcp_name: str
+    profiler_support_name: str
+    runtime_notes: str
 
 
 class OpenEvolveOverrides(TypedDict, total=False):
@@ -132,4 +214,13 @@ class EvolveState(BaseModel):
     admitted_slots: int = Field(default=0, ge=0)
 
 
-__all__ = ["EvolveOptions", "EvolveState", "resolve_openevolve_options"]
+__all__ = [
+    "CandidateJudgeContext",
+    "CandidateProfilerContext",
+    "EvolveOptions",
+    "EvolveState",
+    "JudgeResponse",
+    "MutatorContext",
+    "MutatorResponse",
+    "resolve_openevolve_options",
+]

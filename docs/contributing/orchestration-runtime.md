@@ -38,13 +38,14 @@ policy's state model and role definitions.
 
 ## roles/: declarations, not execution
 
-Each module in `roles/` is one role *family* (`designer`, `pre_round`,
-`implementer`, `judge`, `profiler`, `single_agent`, `mutator`,
+For policies still using the legacy role runner, each module in `roles/` is
+one role *family* (`designer`, `pre_round`,
+`implementer`, `judge`, `profiler`, `single_agent`,
 `common`). A role is a `vibesys.runtime.Role`: a template path, a pydantic
 reply type, a fallback, a typed prompt-context model, workspace-access
 policy, and session policy. Different prompts or reply types are always
 different roles, never one role branching on which strategy called it. A
-strategy invokes a role through `ctx.agents.turn(role, ...)`; it never
+Such a strategy invokes a role through `ctx.agents.turn(role, ...)`; it never
 hand-rolls rendering, isolation, timeout fallback, or correction retries.
 
 ```python

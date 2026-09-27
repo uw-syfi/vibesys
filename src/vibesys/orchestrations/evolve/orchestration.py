@@ -13,13 +13,18 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.evolve.agents import JUDGE, MUTATOR, PROFILER
-from vibesys.orchestrations.evolve.models import EvolveOptions, EvolveState
+from vibesys.orchestrations.evolve.models import (
+    CandidateJudgeContext,
+    CandidateProfilerContext,
+    EvolveOptions,
+    EvolveState,
+    JudgeResponse,
+    MutatorContext,
+    MutatorResponse,
+)
 from vibesys.orchestrations.evolve.prompts import render_judge, render_mutator, render_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.roles.common import Verdict
-from vibesys.roles.judge import CandidateJudgeContext, JudgeResponse
-from vibesys.roles.mutator import MutatorContext, MutatorResponse
-from vibesys.roles.profiler import CandidateProfilerContext
 from vibesys.search.population import (
     CandidateOutcome,
     Individual,

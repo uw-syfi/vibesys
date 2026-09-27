@@ -1,18 +1,11 @@
-"""Judge role family: hypothesis and candidate judge roles.
-
-Covers ``multi``'s hypothesis judge and ``evolve``'s candidate judge.
-
-``CANDIDATE_JUDGE`` (evolve's offspring judge) reuses ``JudgeResponse`` but
-renders its own template with its own context model, so it stays a distinct
-``Role`` in this module rather than a variant of ``MULTI_JUDGE``.
-"""
+"""Judge role family for multi's hypothesis judge."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.roles.common import SkillResourceSelection, Verdict
-from vibesys.runtime import Fresh, ReadOnly, Reuse, Role
+from vibesys.runtime import Fresh, ReadOnly, Role
 
 
 class JudgeContext(BaseModel):
@@ -51,21 +44,6 @@ class JudgeContext(BaseModel):
     validation_recipe_contract_location: str
 
 
-class CandidateJudgeContext(BaseModel):
-    """Context for evolve's candidate-judge role (``judge_prompt.j2``)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    accuracy_command: str | None
-    benchmark_command: str | None
-    domain_judge: str
-    interface: str
-    modality: str | None
-    objective: str | None
-    pass_criteria: str
-    runtime_notes: str
-
-
 class JudgeResponse(BaseModel):
     """Structured response from the hypothesis judge agent (multi)."""
 
@@ -93,14 +71,6 @@ def _fallback_hypothesis_judge() -> JudgeResponse:
     )
 
 
-def _fallback_candidate_judge() -> JudgeResponse:
-    return JudgeResponse(
-        analysis="Judge produced no structured response.",
-        feedback="No structured response received.",
-        verdict=Verdict.FAIL,
-    )
-
-
 MULTI_JUDGE = Role(
     id="judge",
     template="loops/multi/judge_prompt.j2",
@@ -113,15 +83,4 @@ MULTI_JUDGE = Role(
     message="Review the implementation per the criteria above. Return only the JSON verdict.",
 )
 
-CANDIDATE_JUDGE = Role(
-    id="judge",
-    template="loops/evolve/judge_prompt.j2",
-    reply=JudgeResponse,
-    fallback=_fallback_candidate_judge,
-    context=CandidateJudgeContext,
-    access=ReadOnly(),
-    session=Reuse(),
-    message="Review the offspring per the criteria above. Return only the JSON verdict.",
-)
-
-ALL_ROLES = (MULTI_JUDGE, CANDIDATE_JUDGE)
+ALL_ROLES = (MULTI_JUDGE,)

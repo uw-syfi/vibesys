@@ -1,13 +1,18 @@
 """Prompt rendering owned by the evolve plugin."""
 
+from pathlib import Path
+
+from vibesys.orchestrations.evolve.models import (
+    CandidateJudgeContext,
+    CandidateProfilerContext,
+    MutatorContext,
+)
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.roles.judge import CandidateJudgeContext
-from vibesys.roles.mutator import MutatorContext
-from vibesys.roles.profiler import CandidateProfilerContext
 from vs_prompts.api import TemplateRenderer
 
+_PROMPT_DIR = Path(__file__).resolve().parent
 _RENDERER = TemplateRenderer(
-    PROMPTS_DIR / "loops" / "evolve",
+    _PROMPT_DIR,
     fallback_roots=(PROMPTS_DIR / "shared", PROMPTS_DIR),
 )
 
