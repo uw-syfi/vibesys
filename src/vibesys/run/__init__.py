@@ -11,7 +11,6 @@ from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.run.legacy_namespaces import RunStateNamespace
 from vibesys.run.project import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,
@@ -30,6 +29,5 @@ __all__ = [
     "ProjectProvisioningError",
     "ProjectProvisioningSpec",
     "RepositoryVisibility",
-    "RunStateNamespace",
     "provision_project",
 ]

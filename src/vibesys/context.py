@@ -55,7 +55,6 @@ from vibesys.run import (
     DeviceLease,
     ExperimentRepository,
     ProjectProvisioningSpec,
-    RunStateNamespace,
     provision_project,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
@@ -114,6 +113,9 @@ from vs_sandbox.api import (
     Sandbox,
     create_compute_backend,
 )
+
+_RUNTIME_STATE_NAMESPACE = "runtime"
+_SKYPILOT_STATE_NAMESPACE = "skypilot"
 
 
 def _run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
@@ -1034,7 +1036,7 @@ class WorkspaceResourceSpec:
     scope_id: str
     revision: str
     config: Config
-    log_namespace: str = RunStateNamespace.RUNTIME
+    log_namespace: str = _RUNTIME_STATE_NAMESPACE
     log_directory: str = "workspaces"
     agent_backend: str | None = None
     cli_provider: str | None = None
@@ -1213,7 +1215,7 @@ def _assemble_workspace_resources(
     objective_document = None
     if effective_objective is not None:
         objective_document = parent.state.portable(
-            RunStateNamespace.RUNTIME
+            _RUNTIME_STATE_NAMESPACE
         ).equivalent_external_file(workspace, "effective-objective.md")
 
     # Reuse adapter-owned resources provisioned when the parent environment was
@@ -1242,7 +1244,7 @@ def _assemble_workspace_resources(
         log=logger.lprint,
         framework_root=PROJECT_ROOT,
         project_path_policy=project_path_policy,
-        state_namespace=parent.state.local(RunStateNamespace.SKYPILOT),
+        state_namespace=parent.state.local(_SKYPILOT_STATE_NAMESPACE),
     )
     session = teardown_stack.enter_context(
         parent.run_environment.open(workspace_environment_request)
