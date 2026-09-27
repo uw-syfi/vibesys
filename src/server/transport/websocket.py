@@ -97,6 +97,9 @@ class WebSocketGateway:
         """Bind loopback and wait until the port is accepting connections."""
         if self._thread is not None:
             raise RuntimeError("WebSocket gateway is already running")  # noqa: TRY003  # lint-waiver: LW-101010 [TRY003]; reject a second start before it can race the event loop
+        self._stop.clear()
+        self._ready.clear()
+        self._startup_error = None
         self._thread = threading.Thread(
             target=self._run,
             name="vibesys-server-websocket",
