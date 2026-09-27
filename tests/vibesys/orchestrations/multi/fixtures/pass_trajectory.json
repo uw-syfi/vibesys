@@ -1,0 +1,33 @@
+{
+  "artifacts": [
+    "progress/README.md",
+    "progress/evidence/round-0001-attempt-01-implementer.json",
+    "progress/pareto-frontier.md",
+    "progress/plans/round-0001.json",
+    "progress/round-0001.md",
+    "progress/validation/recipe-schema.json",
+    "roadmap/index.md"
+  ],
+  "member_ids": [
+    null,
+    null,
+    "H-01",
+    null
+  ],
+  "retained": {},
+  "roles": [
+    "orchestrator",
+    "orchestrator",
+    "implementer",
+    "judge"
+  ],
+  "rounds": [
+    {
+      "attempts": 1,
+      "hypothesis_id": "H-01",
+      "judge_verdict": "pass",
+      "number": 1,
+      "passed": true
+    }
+  ]
+}
