@@ -13,7 +13,7 @@ from vibesys.search.hypothesis import OrchestratorPlan
 from vs_runtime.api import RunHost, SkillCatalogError, SkillResourceRequest, StructuredResponseError
 
 if TYPE_CHECKING:
-    from vibesys.roles.designer import PlanContext
+    from vibesys.orchestrations.single.models import PlanContext
     from vibesys.search.hypothesis import HypothesisSearch, HypothesisState
     from vs_runtime.api import Workspace
 

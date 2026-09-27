@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.roles.single_agent import SingleAgentRoundResponse
+    from vibesys.orchestrations.single.models import SingleAgentRoundResponse
     from vibesys.search.hypothesis import OrchestratorPlan
 
 

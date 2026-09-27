@@ -12,8 +12,11 @@ import pytest
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestrations.single import PLUGIN
 from vibesys.orchestrations.single.combined import CombinedTurnRequest, SingleAgentWorker
+from vibesys.orchestrations.single.models import (
+    SingleAgentRoundContext,
+    SingleAgentRoundResponse,
+)
 from vibesys.roles.common import Verdict
-from vibesys.roles.single_agent import SingleAgentRoundContext, SingleAgentRoundResponse
 from vibesys.schemas import SkillResourceSelection
 from vibesys.search.hypothesis import (
     AttemptState,

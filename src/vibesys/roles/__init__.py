@@ -13,13 +13,11 @@ strategies name the "same" conceptual step (e.g. ``multi`` and ``single`` each
 have their own plan role): never a role branching on which strategy called it.
 
 Families:
-  - ``designer``:        round-planning roles (multi, single, profile_single)
+  - ``designer``:        round-planning role (multi)
   - ``pre_round``:       pre-round profiling decision (multi)
   - ``implementer``:     hypothesis implementer roles (multi)
   - ``judge``:           hypothesis judge role (multi)
   - ``profiler``:        per-profiler-kind roles (multi)
-  - ``single_agent``:    combined implement+judge+profile roles (single,
-                         profile_single)
   - ``common``:          reply-schema pieces shared by more than one family
                          (``Verdict``, ``SkillResourceSelection``)
 
@@ -41,7 +39,6 @@ from vibesys.roles import (
     judge,
     pre_round,
     profiler,
-    single_agent,
 )
 
 ALL_ROLES = (
@@ -50,7 +47,6 @@ ALL_ROLES = (
     *implementer.ALL_ROLES,
     *judge.ALL_ROLES,
     *profiler.ALL_ROLES,
-    *single_agent.ALL_ROLES,
 )
 
 __all__ = [
@@ -61,5 +57,4 @@ __all__ = [
     "judge",
     "pre_round",
     "profiler",
-    "single_agent",
 ]

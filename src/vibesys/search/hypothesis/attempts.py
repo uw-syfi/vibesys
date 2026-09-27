@@ -20,7 +20,7 @@ class CandidateReply(Protocol):
     Structural, not nominal: search must never import ``vibesys.roles``
     (roles depends on search, not the reverse), so this describes the shared
     shape of ``roles.implementer.ImplementerResponse`` and
-    ``roles.single_agent.SingleAgentRoundResponse`` without importing either.
+    ``orchestrations.single.models.SingleAgentRoundResponse`` without importing it.
     """
 
     candidate_disposition: CandidateDisposition
@@ -47,7 +47,7 @@ class ImplementerReply(CandidateReply, Protocol):
 
 
 class SingleAgentReply(CandidateReply, Protocol):
-    """The ``roles.single_agent.SingleAgentRoundResponse`` fields attempt policies read."""
+    """The single plugin response fields attempt policies read."""
 
     perf_metric: float | None
     perf_unit: str | None

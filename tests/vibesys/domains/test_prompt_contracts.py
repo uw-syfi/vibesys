@@ -16,13 +16,13 @@ from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration import memory
+from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
-_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 
 
 @dataclass(frozen=True)
@@ -145,7 +145,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         ),
         "single_agent_nsys": render_template(
             "single_agent_round_prompt.j2",
-            template_dir=_SINGLE_TEMPLATE_DIR,
+            template_dir=SINGLE_PROMPT_DIR,
             modality=context["modality"],
             interface=context["interface"],
             profile_execution=context["profile_execution"],
@@ -167,7 +167,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         ),
         "single_agent_torch": render_template(
             "single_agent_round_prompt.j2",
-            template_dir=_SINGLE_TEMPLATE_DIR,
+            template_dir=SINGLE_PROMPT_DIR,
             modality=context["modality"],
             interface=context["interface"],
             profile_execution=context["profile_execution"],

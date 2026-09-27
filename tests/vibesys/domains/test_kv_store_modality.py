@@ -10,7 +10,6 @@ from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project.api import Project
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
-_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 

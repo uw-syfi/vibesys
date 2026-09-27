@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestrations.single.agents import IMPLEMENTER
+from vibesys.orchestrations.single.models import (
+    SingleAgentRoundContext,
+    SingleAgentRoundResponse,
+)
 from vibesys.orchestrations.single.prompts import render_single_agent_prompt
 from vibesys.roles.common import Verdict
-from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import SkillResourceSelection
 from vs_runtime.api import (
     AgentTurnTimeoutError,
@@ -19,7 +22,6 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.roles.single_agent import SingleAgentRoundContext
     from vibesys.search.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
     from vibesys.search.hypothesis.state import RoundRecord
     from vs_runtime.api import AgentBinding, AgentSession, Workspace

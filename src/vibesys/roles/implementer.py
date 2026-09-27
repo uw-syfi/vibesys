@@ -1,7 +1,7 @@
 """Implementer role family for multi's hypothesis implementers.
 
 ``single`` and ``profile_single`` fold implementer + judge + profiler into
-one combined role; see :mod:`vibesys.roles.single_agent` for those.
+one plugin-owned agent role.
 """
 
 from __future__ import annotations

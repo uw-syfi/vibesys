@@ -12,7 +12,7 @@ import pytest
 from vibesys.errors import InvalidPlanError
 from vibesys.orchestrations.single import PLUGIN
 from vibesys.orchestrations.single.designer import DesignerPlanRequest, request_plan
-from vibesys.roles.designer import PlanContext
+from vibesys.orchestrations.single.models import PlanContext
 from vibesys.schemas import SkillResourceSelection
 from vibesys.search.hypothesis import (
     Hypothesis,

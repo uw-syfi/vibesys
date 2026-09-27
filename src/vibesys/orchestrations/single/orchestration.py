@@ -19,14 +19,14 @@ from vibesys.orchestrations.single.designer import DesignerPlanRequest, request_
 from vibesys.orchestrations.single.files import SingleFiles
 from vibesys.orchestrations.single.models import (
     PaidAttempt,
+    PlanContext,
     ProfileGuidedSingleOptions,
+    SingleAgentRoundContext,
     SingleOptions,
     SingleState,
 )
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.roles.common import Verdict
-from vibesys.roles.designer import PlanContext
-from vibesys.roles.single_agent import SingleAgentRoundContext
 from vibesys.search.hypothesis import (
     AttemptState,
     Continue,

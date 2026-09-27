@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from vibesys.roles.implementer import ImplementerResponse
     from vibesys.roles.judge import JudgeResponse
     from vibesys.roles.pre_round import PreRoundDecision
-    from vibesys.roles.single_agent import SingleAgentRoundResponse
     from vibesys.search.hypothesis import OrchestratorPlan
     from vs_runtime.api.infrastructure import FrameworkValidationResult
 
@@ -199,40 +198,6 @@ def render_official_evaluation_decision(  # noqa: PLR0913  # LW-011115 [PLR0913]
         f"- **reason**: {reason}\n"
         f"- **cadence**: every {official_eval_every} accepted candidate checkpoints\n"
         f"- **provisional_candidates_before_this_round**: {provisional_candidates}\n"
-    )
-
-
-def render_single_agent_round(
-    round_number: int,
-    retry: int,
-    response: SingleAgentRoundResponse,
-) -> str:
-    """Render the result of a single-agent round."""
-    perf_line = ""
-    if response.perf_metric is not None:
-        unit = response.perf_unit or ""
-        perf_line = f"- **perf_metric**: {response.perf_metric} {unit}\n".rstrip() + "\n"
-    candidate_line = (
-        f"- **candidate_disposition**: {response.candidate_disposition.value}\n"
-        f"- **candidate_metrics**: {response.candidate_metrics or {}}\n"
-        "- **candidate_evaluation_artifact**: "
-        f"{response.candidate_evaluation_artifact or '(missing)'}\n"
-        f"- **candidate_operating_point**: {response.candidate_operating_point or '(none)'}\n"
-        "- **candidate_retention_reason**: "
-        f"{response.candidate_retention_reason or '(none)'}\n"
-    )
-    return (
-        f"## Round {round_number} — Single-agent (attempt {retry})\n"
-        f"- **verdict**: {response.verdict.value}\n"
-        f"- **expected_behavior**: {response.expected_behavior}\n"
-        f"{perf_line}"
-        f"{candidate_line}"
-        f"### Summary\n{response.summary}\n\n"
-        f"### Self-review\n{response.self_review}\n\n"
-        f"### Feedback\n{response.feedback}\n\n"
-        f"### Bottlenecks\n{response.bottlenecks}\n\n"
-        f"### Suggestions\n{response.suggestions}\n\n"
-        f"### Profile analysis\n{response.profile_analysis}\n"
     )
 
 

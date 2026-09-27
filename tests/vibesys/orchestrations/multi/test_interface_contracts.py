@@ -19,6 +19,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError, UnsupportedProfilerError
+from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -30,7 +31,6 @@ from vibesys.prompts import PROMPTS_DIR, render_template
 if TYPE_CHECKING:
     from pathlib import Path
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
-_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 _CRITERION_TEXT = "PC"
 
 
@@ -270,7 +270,7 @@ def _render_single_agent(
     )
     return render_template(
         "single_agent_round_prompt.j2",
-        template_dir=_SINGLE_TEMPLATE_DIR,
+        template_dir=SINGLE_PROMPT_DIR,
         modality=None,
         interface=interface,
         profile_execution="local",

@@ -18,18 +18,18 @@ from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.orchestrations.single.models import SingleAgentRoundResponse
+from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.roles.pre_round import PreRoundDecision
-from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
-_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 
 _ROLES = ("implementer", "implementer_continuation", "judge", "single_agent", "orchestrator")
@@ -203,7 +203,7 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
         profiler = profiler_definition(ProfilerKind.NSYS)
         return render_template(
             "single_agent_round_prompt.j2",
-            template_dir=_SINGLE_TEMPLATE_DIR,
+            template_dir=SINGLE_PROMPT_DIR,
             **common,
             modality=context["modality"],
             interface=context["interface"],

@@ -12,6 +12,7 @@ from tests.support import make_orchestrator_plan
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
@@ -1178,7 +1179,6 @@ def test_read_roadmap_missing_returns_empty(tmp_path: Path) -> None:
 
 def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
     template_dir = PROMPTS_DIR / "loops" / "multi"
-    single_template_dir = PROMPTS_DIR / "loops" / "single"
     plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
     pre_prompt = (template_dir / "orchestrator_pre_round_prompt.j2").read_text()
 
@@ -1196,7 +1196,7 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> No
     assert "recent_progress_text" not in pre_prompt
 
     for name in ("implementer_prompt.j2", "judge_prompt.j2", "single_agent_round_prompt.j2"):
-        role_dir = single_template_dir if name == "single_agent_round_prompt.j2" else template_dir
+        role_dir = SINGLE_PROMPT_DIR if name == "single_agent_round_prompt.j2" else template_dir
         role_prompt = (role_dir / name).read_text()
         assert "pareto_archive_location" in role_prompt
         assert "pareto_archive_summary" not in role_prompt
