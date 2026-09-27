@@ -12,6 +12,12 @@ import {manifestErrors} from './check_ts_package_manifests.mjs';
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.cjs');
 
+test('dependency-cruiser rule names are unique', async () => {
+  const options = await extractDepcruiseOptions(CONFIG);
+  const names = options.ruleSet.forbidden.map(rule => rule.name);
+  assert.equal(new Set(names).size, names.length);
+});
+
 test('dependency-cruiser rejects forbidden package and runtime edges', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-dependency-rules-'));
   await writeFile(
