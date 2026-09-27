@@ -55,7 +55,9 @@ def test_web_port_and_asset_parsers_cover_invalid_and_explicit_values(tmp_path: 
     assert _web_assets_from_argv(["--web-assets", str(asset_dir)]) == asset_dir.resolve()
 
 
-def test_web_instance_record_is_project_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_web_instance_record_is_project_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     project_a = tmp_path / "a"
     project_b = tmp_path / "b"
     project_a.mkdir()
@@ -86,7 +88,9 @@ def test_second_web_launch_reuses_live_instance(
         started_at=1.0,
     )
     opened: list[str] = []
+    # test-isolation: inject the discovered live gateway to exercise reuse without a real launcher
     monkeypatch.setattr(server_entrypoint, "_discover_web_instance", lambda _path: record)
+    # test-isolation: capture browser opening so the test remains headless and deterministic
     monkeypatch.setattr(
         server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
     )
