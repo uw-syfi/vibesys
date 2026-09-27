@@ -154,8 +154,6 @@ Use the guide that matches the surface you are adding:
   MCP tools, and profiler prompts.
 - [Update CLI flags and combinations](../cli-flags.md) when changing the user
   facing command contract.
-- [Update feature flags](feature-flags.md) for opt-in
-  experiments and optional framework behavior.
 
 The experimental Omnigent adapter is a developer-facing alternative to the
 standard CLI adapter. It currently supports Claude and Codex on the host path
