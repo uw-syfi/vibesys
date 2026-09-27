@@ -35,7 +35,6 @@ import tempfile
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
-from contextlib import suppress
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
@@ -60,7 +59,6 @@ from vs_agent.api import (
 )
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_sandbox.api import (
-    BeforeReadyContext,
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,
@@ -69,6 +67,11 @@ from vs_sandbox.api import (
     evaluator_helpers,
 )
 from vs_sandbox.api.command_translation import translate_command_arguments
+from vs_sandbox.api.docker_workspace import (
+    DockerWorkspaceRepairError,
+    remove_docker_workspace_child,
+    repair_docker_workspace,
+)
 from vs_sandbox.api.evaluator_helpers import encode_setup_command
 from vs_sandbox.api.evaluator_tools import (
     CargoGitToolSpec,
@@ -85,6 +88,11 @@ from vs_sandbox.api.skypilot import (
     load_cluster_profiles,
     resolve_profile,
     stable_cluster_name,
+)
+from vs_sandbox.api.symlink_mounts import (
+    collect_symlink_mounts,
+    find_mount_root,
+    symlink_lifecycle_hooks,
 )
 
 _RunEnvironmentName = Literal["local", "docker", "modal", "skypilot"]
@@ -500,7 +508,7 @@ class DockerEnvironment:
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         resources = _dedupe_resources(resources)
-        lifecycle_hooks = _symlink_lifecycle_hooks(docker_symlinks)
+        lifecycle_hooks = symlink_lifecycle_hooks(docker_symlinks)
 
         sandbox = request.backend.make_sandbox(
             SandboxKind.DOCKER,
@@ -542,39 +550,20 @@ class DockerEnvironment:
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
     ) -> None:
         """Chown workspace files back to the host user after Docker writes."""
-        if not workspace.exists():
-            return
-        uid, gid = os.getuid(), os.getgid()
-        chown_cmd = f"chown -R {uid}:{gid} /workspace"
         try:
-            result = _docker_workspace_run(
-                workspace,
-                backend=backend,
-                shell_command=chown_cmd,
-                timeout=120,
-            )
-            if result.returncode != 0:
-                log(
-                    f"[warn] chown failed for {workspace} "
-                    f"(rc={result.returncode}): "
-                    f"{result.stderr.decode(errors='replace').strip()}"
-                )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            log(f"[warn] chown failed for {workspace}: {exc}")
+            repair_docker_workspace(workspace, image=getattr(backend, "image", "ubuntu:latest"))
+        except DockerWorkspaceRepairError as exc:
+            log(f"[warn] {exc}")
 
     def remove_workspace_child(
         self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
     ) -> bool:
         """Remove a workspace-relative child inside the Docker sandbox."""
-        target = workspace / rel_path
-        with suppress(OSError, subprocess.TimeoutExpired):
-            _docker_workspace_run(
-                workspace,
-                backend=backend,
-                shell_command=f"rm -rf -- {shlex.quote(f'/workspace/{rel_path}')}",
-                timeout=120,
-            )
-        return not (target.exists() or target.is_symlink())
+        return remove_docker_workspace_child(
+            workspace,
+            rel_path,
+            image=getattr(backend, "image", "ubuntu:latest"),
+        )
 
     def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
         """Leave deployment teardown to the owning Docker session."""
@@ -786,7 +775,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 resources=_dedupe_resources(resources),
                 extra_env=cli_provider_env,
                 auth_files=auth_files,
-                lifecycle_hooks=_symlink_lifecycle_hooks(docker_symlinks),
+                lifecycle_hooks=symlink_lifecycle_hooks(docker_symlinks),
                 container_image=container_image,
                 attach_accelerator=False,
             )
@@ -959,7 +948,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             )
 
         resources = _dedupe_resources(resources)
-        lifecycle_hooks = _symlink_lifecycle_hooks(docker_symlinks)
+        lifecycle_hooks = symlink_lifecycle_hooks(docker_symlinks)
 
         sandbox = request.backend.make_sandbox(
             SandboxKind.DOCKER,
@@ -1448,32 +1437,6 @@ def _remote_evaluator_command(
     return translate_command_arguments(arguments, replacements)
 
 
-def _docker_workspace_run(
-    workspace: Path,
-    *,
-    backend: ComputeBackendImpl,
-    shell_command: str,
-    timeout: int,
-) -> subprocess.CompletedProcess[bytes]:
-    image = getattr(backend, "image", "ubuntu:latest")
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-009089 [S603]; Docker receives framework-built commands and a quoted workspace path with no host shell.
-        [  # noqa: S607  # lint-waiver: LW-009090 [S607]; Docker is intentionally resolved from the operator's configured PATH.
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{workspace}:/workspace",
-            image,
-            "bash",
-            "-c",
-            shell_command,
-        ],
-        capture_output=True,
-        check=False,
-        timeout=timeout,
-    )
-
-
 def _resource_for_mount(
     host_path: str,
     container_path: str,
@@ -1549,7 +1512,7 @@ def _container_mount_plan(
 
     if ref_dir is not None:
         reference_container_path = _reference_container_path(request)
-        _collect_symlink_mounts(
+        collect_symlink_mounts(
             ref_dir,
             reference_container_path,
             bind_mounts=bind_mounts,
@@ -1557,7 +1520,7 @@ def _container_mount_plan(
             skip=skip_environment_mount_symlinks,
         )
         if ref_dir.parent != ref_dir:
-            _collect_symlink_mounts(
+            collect_symlink_mounts(
                 ref_dir.parent,
                 str(Path(reference_container_path).parent),
                 bind_mounts=bind_mounts,
@@ -1572,7 +1535,7 @@ def _container_mount_plan(
         bind_mounts.append((str(request.git_history_root), "/opt/vibesys-history", True))
     for mount in request.environment_bind_mounts:
         resolved = mount.host_path.resolve()
-        host_path = _find_mount_root(resolved)
+        host_path = find_mount_root(resolved)
         if host_path == resolved:
             bind_mounts.append((str(host_path), mount.container_path, mount.read_only))
         else:
@@ -2078,83 +2041,3 @@ def _required_evaluator_tools_root(request: RunEnvironmentRequest) -> Path:
         return root
     message = "evaluator tools root must be outside the candidate workspace"
     raise ValueError(message)
-
-
-@dataclass(frozen=True)
-class _SymlinkLifecycleHooks(SandboxLifecycleHooks):
-    commands: tuple[str, ...]
-
-    def before_ready(self, context: BeforeReadyContext) -> None:
-        for command in self.commands:
-            result = context.sandbox.execute(command)
-            if result.exit_code != 0:
-                message = f"failed to create sandbox symlink with {command!r}: {result.output}"
-                raise RuntimeError(message)
-        save_symlink_commands = getattr(context.sandbox, "save_symlink_commands", None)
-        if callable(save_symlink_commands):
-            save_symlink_commands(list(self.commands))
-
-
-def _symlink_lifecycle_hooks(
-    symlinks: list[tuple[str, str]],
-) -> list[SandboxLifecycleHooks]:
-    if not symlinks:
-        return []
-    commands = tuple(
-        f"ln -sfn {shlex.quote(target)} {shlex.quote(link)}" for link, target in symlinks
-    )
-    return [_SymlinkLifecycleHooks(commands)]
-
-
-def _collect_symlink_mounts(
-    scan_dir: Path,
-    container_prefix: str,
-    *,
-    bind_mounts: list[tuple[str, str, bool]],
-    symlinks: list[tuple[str, str]],
-    skip: set[str] | None = None,
-) -> None:
-    for child in scan_dir.iterdir():
-        if not child.is_symlink():
-            continue
-        if skip and child.name in skip:
-            continue
-        target = child.resolve()
-        try:
-            target.relative_to(scan_dir.resolve())
-        except ValueError:
-            pass
-        else:
-            continue
-
-        host_path = _find_mount_root(target)
-        if host_path == target:
-            bind_mounts.append((str(host_path), f"{container_prefix}/{child.name}", True))
-        else:
-            rel = target.relative_to(host_path)
-            ancestor_mount = f"/workspace/_mounts/{child.name}"
-            bind_mounts.append((str(host_path), ancestor_mount, True))
-            symlinks.append((f"{container_prefix}/{child.name}", f"{ancestor_mount}/{rel}"))
-
-
-def _find_mount_root(target: Path) -> Path:
-    if not target.is_dir():
-        return target
-    needs_ancestor = False
-    for path in target.rglob("*"):
-        if path.is_symlink():
-            link_target = path.parent / path.readlink()
-            try:
-                link_target.resolve().relative_to(target.resolve())
-            except ValueError:
-                needs_ancestor = True
-                break
-    if not needs_ancestor:
-        return target
-    root = target
-    for path in target.rglob("*"):
-        if path.is_symlink():
-            resolved = (path.parent / path.readlink()).resolve()
-            while not str(resolved).startswith(str(root)):
-                root = root.parent
-    return root

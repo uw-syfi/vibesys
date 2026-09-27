@@ -47,7 +47,6 @@ from vibesys.sandbox.run_environment import (
     _materialize_effective_objective,
     _resolve_docker_image_id,
     _SkyPilotRunEnvironmentSession,
-    _symlink_lifecycle_hooks,
     build_run_environment,
     make_run_environment_spec,
     run_environment_record,
@@ -55,7 +54,6 @@ from vibesys.sandbox.run_environment import (
 from vs_agent.api.images import ImagePushError
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
 from vs_sandbox.api import (
-    BeforeReadyContext,
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,
@@ -517,29 +515,6 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
 
     session.close()
     backend.sandbox.stop.assert_called_once()
-
-
-def test_symlink_lifecycle_hooks_install_and_record_quoted_commands() -> None:
-    sandbox = MagicMock()
-    sandbox.execute.return_value = MagicMock(exit_code=0, output="")
-    hooks = _symlink_lifecycle_hooks([("/workspace/model link", "/workspace/_mounts/model target")])
-
-    hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox))
-
-    command = "ln -sfn '/workspace/_mounts/model target' '/workspace/model link'"
-    sandbox.execute.assert_called_once_with(command)
-    sandbox.save_symlink_commands.assert_called_once_with([command])
-
-
-def test_symlink_lifecycle_hooks_reject_failed_setup() -> None:
-    sandbox = MagicMock()
-    sandbox.execute.return_value = MagicMock(exit_code=17, output="permission denied")
-    hooks = _symlink_lifecycle_hooks([("/workspace/model", "/mount/model")])
-
-    with pytest.raises(RuntimeError, match="permission denied"):
-        hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox))
-
-    sandbox.save_symlink_commands.assert_not_called()
 
 
 def test_isolated_environment_mounts_and_translates_evaluator_package(
@@ -1963,34 +1938,6 @@ remote_artifact_root = "/remote/vibesys"
     session.close()
 
 
-def test_docker_remove_workspace_child_quotes_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("docker"))
-    calls = []
-
-    def fake_run(cmd: object, **_kwargs: object) -> object:
-        calls.append(cmd)
-        result = MagicMock()
-        result.returncode = 0
-        result.stderr = b""
-        return result
-
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
-
-    ok = env.remove_workspace_child(
-        tmp_path,
-        "semi;touch hacked",
-        backend=backend,
-    )
-
-    assert ok is True
-    shell_command = calls[0][-1]
-    assert "rm -rf -- " in shell_command
-    assert "'/workspace/semi;touch hacked'" in shell_command
-
-
 def test_modal_teardown_deployment_stops_app_via_cli(monkeypatch: pytest.MonkeyPatch) -> None:
 
     env = build_run_environment(RunEnvironmentSpec("modal"))
@@ -2226,15 +2173,16 @@ def test_docker_repair_workspace_logs_launch_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = build_run_environment(RunEnvironmentSpec("docker"))
-    monkeypatch.setattr(
-        "vibesys.sandbox.run_environment.subprocess.run",
-        MagicMock(side_effect=OSError("docker unavailable")),
-    )
+    empty_path = tmp_path / "empty-path"
+    empty_path.mkdir()
+    monkeypatch.setenv("PATH", str(empty_path))
     logs: list[str] = []
 
     env.repair_workspace(tmp_path, backend=FakeBackend(), log=logs.append)
 
-    assert logs == [f"[warn] chown failed for {tmp_path}: docker unavailable"]
+    assert len(logs) == 1
+    assert logs[0].startswith(f"[warn] chown failed for {tmp_path}:")
+    assert "docker" in logs[0]
 
 
 def test_docker_candidate_runtime_reuses_the_session_namespace(tmp_path: Path) -> None:
