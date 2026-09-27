@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -330,27 +329,6 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
     assert resource_closed == 1
 
 
-@dataclass(frozen=True)
-class _ExternalDirectory:
-    path: Path
-
-    def external_directory(self, _name: str) -> Path:
-        return self.path
-
-
-@dataclass(frozen=True)
-class _ProjectState:
-    path: Path
-
-    def local_namespace(self, _run_id: str, _owner: str) -> _ExternalDirectory:
-        return _ExternalDirectory(self.path)
-
-
-@dataclass(frozen=True)
-class _Project:
-    state: _ProjectState
-
-
 def _factory_for_test(
     parts: ServerParts,
     tmp_path: Path,
@@ -364,8 +342,7 @@ def _factory_for_test(
         executions=cast("Any", object()),
         session=cast("Any", object()),
         attachment=RunAttachment(
-            project=cast("Any", _Project(_ProjectState(tmp_path / "chat"))),
-            run_id="run-1",
+            chat_state_dir=tmp_path / "chat",
             agent_defaults=AgentSelection(
                 driver=defaults.driver,
                 provider=defaults.provider,

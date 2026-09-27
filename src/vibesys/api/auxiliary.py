@@ -13,27 +13,30 @@ from typing import Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from vibesys.api.store import RunRecord
+
 
 class RunReady(BaseModel):
     """Stable facts a frontend needs once a run has acquired its resources.
 
-    ``project_root`` lets a frontend open the project's public state API.
-    ``log_directory`` is where a frontend attaches its own durable projection.
+    ``record`` is the run's semantic read model; project storage stays private.
+    ``log_directory`` is where a frontend attaches its event projection.
+    ``frontend_state_directory`` is private durable state for that frontend.
     The remaining fields describe the configured default for optional
     run-attached agents without exposing the run's configuration or sandbox.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
-    run_id: str
-    project_root: Path
+    record: RunRecord
     log_directory: Path
+    frontend_state_directory: Path
     agent_driver: str
     agent_provider: str
     agent_model: str
     role_models: tuple[str, ...] = ()
 
-    @field_validator("project_root", "log_directory")
+    @field_validator("log_directory", "frontend_state_directory")
     @classmethod
     def _absolute_path(cls, value: Path) -> Path:
         """Keep frontend attachment locations absolute and normalized."""

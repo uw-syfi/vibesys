@@ -13,7 +13,7 @@ from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTr
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
-from vibesys.api import CoreEventType, MetricSpace
+from vibesys.api import CoreEventType, MetricSpace, open_run_store
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from server.chat.factory import ChatAgentBuilder
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunView
+    from vibesys.api import RunRecord, RunView
     from vs_agent.api import AgentSelection
     from vs_project.api import Project
 
@@ -86,7 +86,6 @@ def agent_descriptor(
         max_retries_per_round=1,
         judge_every=1,
         official_eval_every=1,
-        memory_layout="files",
         metric_space=metric_space or MetricSpace(),
     )
     return OrchestrationDescriptor(
@@ -94,6 +93,11 @@ def agent_descriptor(
         config_version=1,
         options=options.model_dump(mode="json"),
     )
+
+
+def run_record(project: Project, run_id: str) -> RunRecord:
+    """Open the semantic record used by server-facing integration tests."""
+    return open_run_store(project).get_record(run_id)
 
 
 @dataclass(frozen=True)
@@ -141,8 +145,7 @@ class ServerParts:
         self,
         log_dir: Path,
         *,
-        project: Project | None = None,
-        run_id: str | None = None,
+        record: RunRecord | None = None,
     ) -> None:
         """Attach the integration and core event journal to durable state.
 
@@ -151,8 +154,11 @@ class ServerParts:
         session, so `core_events` needs its own attach call to write
         ``core-events.jsonl`` under *log_dir*.
         """
-        self.integration.attach(log_dir, project=project, run_id=run_id)
-        self.core_events.attach(log_dir, run_id or log_dir.parent.name)
+        self.integration.attach(log_dir, record=record)
+        self.core_events.attach(
+            log_dir,
+            record.run_id if record is not None else log_dir.parent.name,
+        )
 
     def close(self) -> None:
         """Release subscriptions owned by the integration adapter."""
@@ -173,8 +179,7 @@ class ServerParts:
 def build_server_parts(
     log_dir: Path | None = None,
     *,
-    project: Project | None = None,
-    run_id: str | None = None,
+    record: RunRecord | None = None,
     tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     chat_agent_builder: ChatAgentBuilder | None = None,
 ) -> ServerParts:
@@ -224,5 +229,5 @@ def build_server_parts(
         control=control,
     )
     if log_dir is not None:
-        parts.attach(log_dir, project=project, run_id=run_id)
+        parts.attach(log_dir, record=record)
     return parts

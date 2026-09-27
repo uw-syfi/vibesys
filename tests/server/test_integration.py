@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.server.support import ServerParts, agent_descriptor, build_server_parts
+from tests.server.support import ServerParts, agent_descriptor, build_server_parts, run_record
 from tests.support.run_execution import run_execution_record
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
@@ -22,7 +22,7 @@ from server.integration import (
     _EVENT_DATA_ADAPTER,
 )
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
-from server.run_attachment import AgentSelection, RunAttachment
+from server.run_attachment import AgentSelection
 from vibesys.api import RunReady
 from vibesys.events import (
     AgentExecutionActivityData,
@@ -107,18 +107,26 @@ def _emit_execution_started(
     return execution_id
 
 
-def _attach_test_run(parts: ServerParts, attachment: RunAttachment, log_dir: Path) -> None:
+def _attach_test_run(
+    parts: ServerParts,
+    project: Project,
+    run_id: str,
+    defaults: AgentSelection,
+    log_dir: Path,
+) -> None:
     """Publish the narrow public run-readiness contract."""
     parts.integration.handle_run_ready(
         cast("RunSession", object()),
         RunReady(
-            run_id=attachment.run_id,
-            project_root=attachment.project.root,
+            record=run_record(project, run_id),
             log_directory=log_dir,
-            agent_driver=attachment.agent_defaults.driver,
-            agent_provider=attachment.agent_defaults.provider,
-            agent_model=attachment.agent_defaults.model,
-            role_models=attachment.agent_defaults.role_models,
+            frontend_state_directory=project.state.local_namespace(
+                run_id, "server"
+            ).external_directory(),
+            agent_driver=defaults.driver,
+            agent_provider=defaults.provider,
+            agent_model=defaults.model,
+            role_models=defaults.role_models,
         ),
     )
 
@@ -390,11 +398,9 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
     parts = build_server_parts(chat_agent_builder=build_agent)
     _attach_test_run(
         parts,
-        RunAttachment(
-            project=project,
-            run_id=run_id,
-            agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
-        ),
+        project,
+        run_id,
+        AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
     response = parts.api.execute(ChatQuery(text="what improved?"))
@@ -431,11 +437,9 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
     parts = build_server_parts(chat_agent_builder=build_agent)
     _attach_test_run(
         parts,
-        RunAttachment(
-            project=project,
-            run_id=run_id,
-            agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
-        ),
+        project,
+        run_id,
+        AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
 

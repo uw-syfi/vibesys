@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.server.support import agent_descriptor, build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts, run_record
 from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
@@ -100,7 +100,7 @@ def _view(state: HypothesisState) -> RunView:
 
 def _service(project: Project, run_id: str) -> RunApi:
     return build_server_parts(
-        project.state.log_directory(run_id), project=project, run_id=run_id
+        project.state.log_directory(run_id), record=run_record(project, run_id)
     ).api
 
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from tests.server.support import agent_descriptor, build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts, run_record
 from tests.support.run_execution import run_execution_record
 
 from server.diagnostics import DiagnosticScope
@@ -69,7 +69,9 @@ def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
             )
         ),
     )
-    parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
+    parts = build_server_parts(
+        project.state.log_directory(run_id), record=run_record(project, run_id)
+    )
     inspector = RunInspector(parts.integration)
 
     assert '"round_number": 1' in inspector.round_detail(1)

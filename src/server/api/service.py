@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from server.api.design import DesignLog
@@ -45,29 +44,23 @@ from server.api.protocol import (
     StopCommand,
     TuiDefaultsQuery,
 )
-from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.api import open_run_store
-from vibesys.api.agent import agent_projection, agent_run_objectives, is_agent_run_manifest
-from vs_project.api import (
-    GitTracker,
-    NullGitTrackerEvents,
-    ProjectStateError,
+from vibesys.api import (
+    RunRecordReadError,
 )
+from vibesys.api.agent import agent_projection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from server.chat.manager import ChatManager
-    from server.controller import ProjectRunState, RunController
+    from server.controller import RunController
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
     from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunControl, RunView
-    from vs_project.api import Project
+    from vibesys.api import RunControl, RunRecord, RunView, WorkspaceChange
 
 
 @dataclass(frozen=True)
@@ -97,7 +90,7 @@ class SubscriptionCheckpoint:
     active_executions: list[ActiveAgentExecution]
 
 
-class _DesignLogGitEvents(NullGitTrackerEvents):
+class _DesignLogGitEvents:
     """Forward design-projection git warnings to a journal sink.
 
     The design projection's git access is read-only (``diff_name_status``
@@ -144,10 +137,10 @@ class RunApi:
         self._tui_defaults_lock = threading.Lock()
         # Keyed by the attached run so the projection's diff cache survives
         # across requests but never outlives the run it was built for.
-        self._design: tuple[tuple[Path, str], DesignLog] | None = None
+        self._design: tuple[str, DesignLog] | None = None
         self._design_lock = threading.Lock()
         self._experiment_projection = ExperimentProjection()
-        self._experiment_run_kind: tuple[tuple[Path, str], bool] | None = None
+        self._experiment_run_kind: tuple[str, bool] | None = None
         self._experiment_run_kind_lock = threading.Lock()
         self._journal.add_listener(
             self._observe_experiment_change,
@@ -179,10 +172,10 @@ class RunApi:
             )
         if isinstance(request, ExperimentQuery):
             self._journal.record(EventType.STATUS_QUERY, "/experiments")
-            project_run = self._controller.project_run
-            ready = project_run is not None
+            attached_run = self._controller.attached_run
+            ready = attached_run is not None
             result = (
-                self._query_experiments(project_run, request) if project_run is not None else None
+                self._query_experiments(attached_run, request) if attached_run is not None else None
             )
             return Response(
                 request_id=request.request_id,
@@ -192,7 +185,7 @@ class RunApi:
             )
         if isinstance(request, DesignQuery):
             self._journal.record(EventType.STATUS_QUERY, "/design")
-            ready = self._controller.project_run is not None
+            ready = self._controller.attached_run is not None
             return Response(
                 request_id=request.request_id,
                 design=self.design_rounds() if ready else [],
@@ -393,11 +386,10 @@ class RunApi:
         `profile_skipped`) is copied verbatim from the run's own round
         history, not re-derived from core state.
         """
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return []
-        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
-        projection = agent_projection(run_view)
+        projection = agent_projection(record.view())
         if projection is None:
             return []
         return [
@@ -420,27 +412,24 @@ class RunApi:
         so `build_performance_context` can select the newest one without a
         core-private `HypothesisMeasurement`.
         """
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return None
-        manifest = project_run.project.state.load_run(project_run.run_id)
-        objectives = agent_run_objectives(manifest)
+        objectives = record.facts().objectives
         if objectives is None:
             return None
-        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         return build_performance_context(
-            run_view,
+            record.view(),
             objectives=objectives,
             objective_description=self._objective_description(),
         )
 
     def experiments(self) -> list[HypothesisEntry]:
         """Build the experiment log for an agent outer loop."""
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return []
-        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
-        return build_experiment_log(run_view)
+        return build_experiment_log(record.view())
 
     def design_rounds(self) -> list[DesignRound]:
         """Project the per-round design log for the attached run.
@@ -449,23 +438,23 @@ class RunApi:
         `RunView`; the design log itself only adds what a `RunView` does not
         carry, the workspace's own git history.
         """
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return []
-        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
-        design = self._design_log(project_run.project.root, project_run.run_id)
-        manifest = project_run.project.state.load_run(project_run.run_id)
-        return design.rounds(run_view, baseline=manifest.trusted_input_baseline)
+        design = self._design_log(record)
+        return design.rounds(
+            record.view(),
+            baseline=record.facts().trusted_input_baseline,
+        )
 
     def design_patch(self, base: str, head: str, path: str) -> DesignPatch | None:
         """Read one file's patch for a published design range, None unattached."""
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return None
-        design = self._design_log(project_run.project.root, project_run.run_id)
-        return design.patch(base, head, path)
+        return self._design_log(record).patch(base, head, path)
 
-    def _design_log(self, workspace: Path, run_id: str) -> DesignLog:
+    def _design_log(self, record: RunRecord) -> DesignLog:
         """Return the design projection for one run, building it once.
 
         The projection caches a git diff per round commit range. Those ranges
@@ -475,17 +464,29 @@ class RunApi:
         """
         with self._design_lock:
             cached = self._design
-            if cached is not None and cached[0] == (workspace, run_id):
+            if cached is not None and cached[0] == record.identity:
                 return cached[1]
             events = _DesignLogGitEvents(self._publish_git_diagnostic())
-            tracker = GitTracker(workspace, run_id=run_id, events=events)
-            reader = WorkspacePatchReader(workspace, warning=events.warning)
+
+            def changes(base: str, head: str) -> tuple[WorkspaceChange, ...] | None:
+                try:
+                    return record.workspace_changes(base, head)
+                except RunRecordReadError as error:
+                    events.warning(error.summary, detail=error.detail)
+                    return None
+
+            def patch(base: str, head: str, paths: tuple[str, ...]) -> str | None:
+                try:
+                    return record.workspace_patch(base, head, paths)
+                except RunRecordReadError as error:
+                    events.warning(error.summary, detail=error.detail)
+                    return None
+
             design = DesignLog(
-                workspace=workspace,
-                diff=tracker.diff_name_status,
-                patch=reader.diff_patch,
+                changes=changes,
+                patch=patch,
             )
-            self._design = ((workspace, run_id), design)
+            self._design = (record.identity, design)
             return design
 
     def _publish_git_diagnostic(self) -> Callable[[str], None]:
@@ -527,22 +528,15 @@ class RunApi:
         return self._journal.latest_sequence
 
     def _objective_description(self) -> str | None:
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return None
-        try:
-            runtime = project_run.project.state.portable_namespace(project_run.run_id, "runtime")
-            document = runtime.external_directory() / "effective-objective.md"
-            if not document.is_file():
-                return None
-            text = document.read_text(encoding="utf-8")
-        except (OSError, ProjectStateError):
-            return None
-        return summarize_objective(text)
+        text = record.facts().effective_objective
+        return summarize_objective(text) if text is not None else None
 
     def _query_experiments(
         self,
-        project_run: ProjectRunState,
+        record: RunRecord,
         request: ExperimentQuery,
     ) -> ExperimentQueryResult | None:
         """Answer from memory, loading once outside projection locks if needed.
@@ -553,26 +547,25 @@ class RunApi:
         filesystem read (see `test_service_projects_committed_live_state_
         without_reloading_history` in `tests/server/test_experiments.py`, which
         asserts zero `AgentRunStateStore.load_optional` calls on that path).
-        An authoritative reload here, by contrast, goes through
-        `vibesys.api.open_run_store`, which always re-reads from disk; that
-        is expected since this branch only runs once per cache miss or race.
+        An authoritative ``RunRecord.view`` reload here re-reads durable state;
+        that is expected since this branch runs only on a cache miss or race.
         """
-        while self._is_agent_run(project_run.project, project_run.run_id):
-            projection_id = self._experiment_projection_id(project_run)
+        while self._is_agent_run(record):
+            projection_id = record.identity
             cached = self._experiment_projection.query(
-                project_run.run_id,
+                record.run_id,
                 projection_id,
                 request.after,
             )
             if isinstance(cached, ExperimentQueryResult):
                 return cached
-            view = open_run_store(project_run.project).get_run(project_run.run_id)
+            view = record.view()
             if agent_projection(view) is None:
                 return None
-            current = self._controller.project_run
-            if current is not None and self._same_project_run(current, project_run):
+            current = self._controller.attached_run
+            if current is not None and current.identity == record.identity:
                 installed = self._experiment_projection.install_loaded(
-                    project_run.run_id,
+                    record.run_id,
                     projection_id,
                     view,
                     cached,
@@ -582,28 +575,19 @@ class RunApi:
                 continue
             if current is None:
                 return None
-            project_run = current
+            record = current
         return None
 
-    def _is_agent_run(self, project: Project, run_id: str) -> bool:
-        key = (project.root, run_id)
+    def _is_agent_run(self, record: RunRecord) -> bool:
+        key = record.identity
         with self._experiment_run_kind_lock:
             cached = self._experiment_run_kind
             if cached is not None and cached[0] == key:
                 return cached[1]
-        is_agent = is_agent_run_manifest(project.state.load_run(run_id))
+        is_agent = record.facts().is_agent_run
         with self._experiment_run_kind_lock:
             self._experiment_run_kind = (key, is_agent)
         return is_agent
-
-    @staticmethod
-    def _same_project_run(left: ProjectRunState, right: ProjectRunState) -> bool:
-        return left.project.root == right.project.root and left.run_id == right.run_id
-
-    @staticmethod
-    def _experiment_projection_id(project_run: ProjectRunState) -> str:
-        identity = f"{project_run.project.root.resolve()}\0{project_run.run_id}"
-        return sha256(identity.encode()).hexdigest()[:16]
 
     def observe_committed_state(self, view: RunView, changed_keys: tuple[str, ...] | None) -> None:
         """Incrementally project a state object immediately after its commit.
@@ -614,12 +598,12 @@ class RunApi:
         calling this, so there is no `namespace`/raw-state handling left to
         do here.
         """
-        project_run = self._controller.project_run
-        if project_run is None or agent_projection(view) is None:
+        record = self._controller.attached_run
+        if record is None or agent_projection(view) is None:
             return
         self._experiment_projection.update(
-            project_run.run_id,
-            self._experiment_projection_id(project_run),
+            record.run_id,
+            record.identity,
             view,
             changed_keys=changed_keys,
         )
@@ -632,12 +616,11 @@ class RunApi:
         if event.type is not EventType.EXPERIMENTS_CHANGED or data is None:
             return
         if data.kind == "experiments_changed":
-            project_run = self._controller.project_run
-            if project_run is None or project_run.run_id != event.run_id:
+            record = self._controller.attached_run
+            if record is None or record.run_id != event.run_id:
                 return
-            projection_id = self._experiment_projection_id(project_run)
             self._experiment_projection.invalidate(
                 event.run_id,
-                projection_id,
+                record.identity,
                 data.revision,
             )

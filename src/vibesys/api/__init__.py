@@ -38,11 +38,14 @@ from vibesys.api.contracts import (
 from vibesys.api.entry import load_config
 from vibesys.api.session import RunControl, RunSession, create_session
 from vibesys.api.store import (
+    RunDocument,
+    RunRecord,
+    RunRecordFacts,
+    RunRecordReadError,
     RunStore,
+    WorkspaceChange,
+    WorkspaceChangeKind,
     open_run_store,
-)
-from vibesys.api.store import (
-    portable_history_snapshots as _portable_history_snapshots,  # noqa: F401  # lint-waiver: LW-020001 [F401]; server.controller imports this private facade helper by name, so the alias is a deliberate re-export.
 )
 from vibesys.composition import agent_spec_from_config
 from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
@@ -102,7 +105,11 @@ __all__ = [
     "ResumeRef",
     "RunConfiguredData",
     "RunControl",
+    "RunDocument",
     "RunReady",
+    "RunRecord",
+    "RunRecordFacts",
+    "RunRecordReadError",
     "RunRequest",
     "RunResult",
     "RunSession",
@@ -114,6 +121,8 @@ __all__ = [
     "TodoUpdateData",
     "ToolCallData",
     "ToolResultData",
+    "WorkspaceChange",
+    "WorkspaceChangeKind",
     "WorkspaceSnapshotData",
     "agent_spec_from_config",
     "boot_trace",

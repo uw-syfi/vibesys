@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent, RunReady
 from vibesys.api.contracts import RunResult, RunStatus
+from vibesys.api.store import open_run_store
 from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
@@ -254,7 +255,7 @@ class _LocalRunSession:
     def _handle_resources(self, resources: RunResources) -> None:
         self._resources = resources
         if self._ready_listener is not None:
-            self._ready_listener(_run_ready(resources))
+            self._ready_listener(_run_ready(resources, self._registry))
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
@@ -520,12 +521,17 @@ class _LocalRunSession:
             raise first_error
 
 
-def _run_ready(resources: RunResources) -> RunReady:
+def _run_ready(
+    resources: RunResources,
+    registry: OrchestrationRegistry,
+) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
     return RunReady(
-        run_id=resources.run_id,
-        project_root=resources.project.root,
+        record=open_run_store(resources.project, registry=registry).get_record(resources.run_id),
         log_directory=resources.log_dir,
+        frontend_state_directory=resources.project.state.local_namespace(
+            resources.run_id, "server"
+        ).external_directory(),
         agent_driver=resources.driver,
         agent_provider=resources.provider,
         agent_model=resources.model,

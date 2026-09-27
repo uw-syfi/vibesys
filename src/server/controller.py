@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType, RunStatusChangedData
 from server.execution import AgentExecutionRequest
 from server.run_lifecycle import RunStatus, RunTrigger, transition
-from vibesys.api import _portable_history_snapshots
 
 if TYPE_CHECKING:
     import threading
@@ -17,19 +15,7 @@ if TYPE_CHECKING:
 
     from server.execution import ExecutionHandle, ExecutionTracker
     from server.journal import WireJournal
-    from vs_project.api import Project, StateSnapshot
-
-
-@dataclass(frozen=True)
-class ProjectRunState:
-    """Typed access to one attached canonical project run."""
-
-    project: Project
-    run_id: str
-
-    def history_snapshots(self) -> tuple[StateSnapshot, ...]:
-        """Return portable history snapshots relevant to frontend queries."""
-        return _portable_history_snapshots(self.project, self.run_id)
+    from vibesys.api import RunRecord
 
 
 class RunController:
@@ -46,13 +32,13 @@ class RunController:
         self._journal = journal
         self._executions = executions
         self._status: RunStatus = RunStatus.STARTING
-        self._project_run: ProjectRunState | None = None
+        self._attached_run: RunRecord | None = None
 
     @property
-    def project_run(self) -> ProjectRunState | None:
-        """Return the canonical project run attached to this controller."""
+    def attached_run(self) -> RunRecord | None:
+        """Return the semantic run record attached to this controller."""
         with self._condition:
-            return self._project_run
+            return self._attached_run
 
     @property
     def current_round(self) -> str | None:
@@ -63,17 +49,13 @@ class RunController:
         self,
         log_dir: Path,
         *,
-        project: Project | None = None,
-        run_id: str | None = None,
+        record: RunRecord | None = None,
     ) -> None:
-        """Attach durable run storage and optional canonical project state."""
-        if project is not None and run_id is None:
-            message = "run_id is required when project is provided"
-            raise ValueError(message)
+        """Attach durable presentation storage and an optional run record."""
         with self._condition:
-            if project is not None and run_id is not None:
-                self._project_run = ProjectRunState(project, run_id)
-            self._journal.attach(log_dir, run_id=run_id)
+            if record is not None:
+                self._attached_run = record
+            self._journal.attach(log_dir, run_id=record.run_id if record is not None else None)
             self._apply_locked(RunTrigger.ATTACHED)
 
     def _apply_locked(

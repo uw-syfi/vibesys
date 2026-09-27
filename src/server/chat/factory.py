@@ -118,8 +118,7 @@ class ExperimentChatFactory:
         self._manager = manager
         self._controller = controller
         self._executions = executions
-        self._project = attachment.project
-        self._run_id = attachment.run_id
+        self._chat_state_dir = attachment.chat_state_dir
         self._defaults = ChatRunSettings(
             driver=attachment.agent_defaults.driver,
             provider=attachment.agent_defaults.provider,
@@ -235,9 +234,7 @@ class ExperimentChatFactory:
         with self._lock:
             if self._closed:
                 raise _factory_closed_error()
-        shared_state_dir = self._project.state.local_namespace(
-            self._run_id, "server"
-        ).external_directory("chat")
+        shared_state_dir = self._chat_state_dir
         agent = self._build_agent(
             ChatAgentBuildRequest(
                 session=self._session,

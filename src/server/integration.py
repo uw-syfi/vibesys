@@ -27,17 +27,16 @@ from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
 from vibesys.api import CoreEventType
-from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from server.chat.manager import ChatManager
-    from server.controller import ProjectRunState, RunController
+    from server.controller import RunController
     from server.execution import ExecutionTracker
     from server.journal import WireJournal
-    from vibesys.api import CoreEvent, RunReady, RunSession
+    from vibesys.api import CoreEvent, RunReady, RunRecord, RunSession
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
 _TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
@@ -204,9 +203,9 @@ class RunIntegrationAdapter:
         self._failure_diagnostics: dict[str, Diagnostic] = {}
 
     @property
-    def project_run(self) -> ProjectRunState | None:
-        """Return the attached canonical project run, if available."""
-        return self.controller.project_run
+    def attached_run(self) -> RunRecord | None:
+        """Return the attached semantic run record, if available."""
+        return self.controller.attached_run
 
     @property
     def current_round(self) -> str | None:
@@ -226,12 +225,11 @@ class RunIntegrationAdapter:
         self,
         log_dir: Path,
         *,
-        project: Project | None = None,
-        run_id: str | None = None,
+        record: RunRecord | None = None,
     ) -> None:
         """Attach the wire journal to durable run storage."""
         self._failure_diagnostics.clear()
-        self.controller.attach(log_dir, project=project, run_id=run_id)
+        self.controller.attach(log_dir, record=record)
 
     def handle_run_ready(self, session: RunSession, ready: RunReady) -> None:
         """Attach frontend projection and chat from narrow readiness facts.
@@ -240,11 +238,9 @@ class RunIntegrationAdapter:
         attach runs first so the wire journal is ready before experiment chat
         can read the run history.
         """
-        project = Project.open(ready.project_root)
-        self.attach(ready.log_directory, project=project, run_id=ready.run_id)
+        self.attach(ready.log_directory, record=ready.record)
         attachment = RunAttachment(
-            project=project,
-            run_id=ready.run_id,
+            chat_state_dir=ready.frontend_state_directory / "chat",
             agent_defaults=AgentSelection(
                 driver=ready.agent_driver,
                 provider=ready.agent_provider,

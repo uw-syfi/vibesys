@@ -11,7 +11,6 @@ from tests.support.run_execution import run_execution_record
 
 from vibesys.api import OrchestrationRegistry, open_run_store
 from vibesys.api.contracts import RunStatus
-from vibesys.api.store import portable_history_snapshots
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.issue_queue import IssueQueueState
 from vs_project.api import (
@@ -163,7 +162,7 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
     project.state.portable_namespace(manifest.run_id, "team-search").write_bytes(
         "notes.txt", b"candidate review"
     )
-    assert portable_history_snapshots(project, manifest.run_id) == ()
+    assert open_run_store(project).get_record(manifest.run_id).history_documents() == ()
 
     class EvidenceOptions(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -188,8 +187,10 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
             config_version=2,
         )
     )
-    snapshots = portable_history_snapshots(project, manifest.run_id, registry=registry)
-    assert [file.relative_path.name for file in snapshots[0].files] == ["notes.txt"]
+    documents = (
+        open_run_store(project, registry=registry).get_record(manifest.run_id).history_documents()
+    )
+    assert [document.relative_path.name for document in documents] == ["notes.txt"]
 
 
 def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
@@ -213,7 +214,6 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
     )
     project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")
 
-    snapshots = portable_history_snapshots(project, manifest.run_id)
+    documents = open_run_store(project).get_record(manifest.run_id).history_documents()
 
-    assert len(snapshots) == 1
-    assert [file.relative_path.name for file in snapshots[0].files] == ["agent.json"]
+    assert [document.relative_path.name for document in documents] == ["agent.json"]

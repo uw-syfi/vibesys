@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
+from tests.support.run_execution import run_execution_record
 
 from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput, RunReady
 from vibesys.api.session import (
@@ -17,7 +18,7 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.run.integration import RunResources
-from vs_project.api import OrchestrationDescriptor
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import OrchestrationPlugin, RunHost
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
@@ -28,7 +29,6 @@ if TYPE_CHECKING:
 
     from vibesys.api.contracts import EventSink
     from vibesys.orchestration.request import RunRequest
-    from vs_project.api import Project
 
 
 @dataclass(frozen=True)
@@ -116,8 +116,23 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
     workspace.mkdir()
     logs.mkdir()
     project_root.mkdir()
+    (project_root / "OBJECTIVE.md").write_text("Test the auxiliary API.\n", encoding="utf-8")
+    project = Project.open(project_root)
+    project.state.create_project("test")
+    project.state.create_run(
+        project.state.new_run_manifest(
+            "test",
+            run_id="run-1",
+            branch="vibesys/run-1",
+            vibesys_version="test",
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
+            trusted_input_baseline="0" * 40,
+        )
+    )
     return RunResources(
-        project=cast("Project", SimpleNamespace(root=project_root)),
+        project=project,
         run_id="run-1",
         workspace=workspace,
         log_dir=logs,
@@ -171,9 +186,9 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
 
     assert observed == [
         RunReady(
-            run_id="run-1",
-            project_root=tmp_path / "project",
+            record=observed[0].record,
             log_directory=tmp_path / "logs",
+            frontend_state_directory=observed[0].frontend_state_directory,
             agent_driver="agentshim",
             agent_provider="codex",
             agent_model="gpt-test",

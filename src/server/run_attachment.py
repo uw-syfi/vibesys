@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from vs_agent.api import AgentSelection
 
 if TYPE_CHECKING:
-    from vs_project.api import Project
+    from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,8 +24,7 @@ class RunAttachment:
     retains only state identity and the defaults shown in chat settings.
     """
 
-    project: Project
-    run_id: str
+    chat_state_dir: Path
     agent_defaults: AgentSelection
 
 

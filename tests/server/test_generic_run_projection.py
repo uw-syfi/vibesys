@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from server.api.design import DesignLog
 from server.api.experiments import build_experiment_log
 from server.api.performance import build_performance_context
 from vibesys.api import RunStatus, RunView
 
-if TYPE_CHECKING:
-    from pathlib import Path
 
-
-def test_agent_readers_ignore_a_custom_projection(tmp_path: Path) -> None:
+def test_agent_readers_ignore_a_custom_projection() -> None:
     view = RunView(
         run_id="team-run",
         loop="team-search",
@@ -21,8 +16,7 @@ def test_agent_readers_ignore_a_custom_projection(tmp_path: Path) -> None:
         projection={"kind": "team-search", "workers": 3},
     )
     design = DesignLog(
-        workspace=tmp_path,
-        diff=lambda _base, _head: "",
+        changes=lambda _base, _head: (),
         patch=lambda _base, _head, _paths: "",
     )
 

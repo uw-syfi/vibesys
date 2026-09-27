@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import socket
 import socketserver
+import sys
 import threading
 import time
 from contextlib import suppress
@@ -21,7 +23,6 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.transport.subscriptions import SubscriptionTracker
-from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,6 +40,29 @@ _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 # window overran that grace.
 _DISCONNECT_POLL_SECONDS = 0.1
 _SHUTDOWN_POLL_SECONDS = 0.1
+MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
+
+
+class SocketPathTooLongError(OSError):
+    """A server transport path does not fit in ``sockaddr_un.sun_path``."""
+
+    def __init__(self, path: Path, limit: int) -> None:
+        """Describe the encoded path and platform byte limit."""
+        encoded = len(str(path).encode())
+        super().__init__(
+            errno.ENAMETOOLONG,
+            f"Unix socket path is {encoded} bytes, over this platform's "
+            f"{limit}-byte limit: {path}. Choose a shorter directory.",
+        )
+        self.path = path
+        self.limit = limit
+
+
+def validate_socket_path(path: Path) -> Path:
+    """Return a bindable transport path or raise a precise path error."""
+    if len(str(path).encode()) > MAX_SOCKET_PATH_BYTES:
+        raise SocketPathTooLongError(path, MAX_SOCKET_PATH_BYTES)
+    return path
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):

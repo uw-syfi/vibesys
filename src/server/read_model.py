@@ -12,8 +12,8 @@ from server.events import ConfigurationFailedData, EventStatus, EventType, RunEv
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from server.controller import ProjectRunState
     from server.events import EventData
+    from vibesys.api import RunRecord
 
 
 class RunInspectionSource(Protocol):
@@ -24,8 +24,8 @@ class RunInspectionSource(Protocol):
     """
 
     @property
-    def project_run(self) -> ProjectRunState | None:
-        """Return the attached canonical project run, if available."""
+    def attached_run(self) -> RunRecord | None:
+        """Return the attached semantic run record, if available."""
         ...
 
     @property
@@ -165,17 +165,16 @@ class RunInspector:
 
     def _history_documents(self) -> list[_HistoryDocument]:
         documents: list[_HistoryDocument] = []
-        project_run = self.integration.project_run
-        if project_run is not None:
-            for snapshot in project_run.history_snapshots():
-                documents.extend(
-                    _HistoryDocument(
-                        name=item.relative_path.name,
-                        text=item.contents.decode("utf-8", errors="replace"),
-                    )
-                    for item in snapshot.files
-                    if item.relative_path.suffix in {".json", ".jsonl", ".log", ".md", ".txt"}
+        attached_run = self.integration.attached_run
+        if attached_run is not None:
+            documents.extend(
+                _HistoryDocument(
+                    name=item.relative_path.name,
+                    text=item.contents.decode("utf-8", errors="replace"),
                 )
+                for item in attached_run.history_documents()
+                if item.relative_path.suffix in {".json", ".jsonl", ".log", ".md", ".txt"}
+            )
         latest = self.latest_run_log()
         if latest is not None:
             documents.append(

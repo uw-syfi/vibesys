@@ -54,6 +54,29 @@ def _committed_repository(root: Path) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
+def test_diff_patch_reads_only_the_requested_literal_paths(tmp_path: Path) -> None:
+    base = _committed_repository(tmp_path)
+    (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("OTHER = True\n", encoding="utf-8")
+    _git(tmp_path, "add", "main.py", "other.py")
+    _git(tmp_path, "commit", "-q", "-m", "change files")
+    head = _git(tmp_path, "rev-parse", "HEAD")
+
+    patch = _tracker(tmp_path).diff_patch(base, head, ("main.py",))
+
+    assert patch is not None
+    assert "+VALUE = 2" in patch
+    assert "other.py" not in patch
+
+
+@pytest.mark.parametrize("value", ["HEAD~1", "--output=escape"])
+def test_diff_patch_rejects_revision_expressions(tmp_path: Path, value: str) -> None:
+    _committed_repository(tmp_path)
+
+    with pytest.raises(ValueError, match="not a commit object name"):
+        _tracker(tmp_path).diff_patch(value, "a" * 40, ("main.py",))
+
+
 def _initialized_tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
     (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     tracker = _tracker(root, run_id)
