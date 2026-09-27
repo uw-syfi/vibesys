@@ -699,16 +699,7 @@ class OrchestrationPlugin:
     orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]]
     config_version: int = 1
     state: type[BaseModel] | None = None
-    project: Callable[[BaseModel], BaseModel] | None = None
-    resume_policy: (
-        Callable[
-            [OrchestrationDescriptor, OrchestrationDescriptor],
-            OrchestrationResumeDecision,
-        ]
-        | None
-    ) = None
     memory_paths: tuple[str, ...] = ()
-    project_max_rounds: Callable[[BaseModel], int | None] | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate role IDs before any run resources open."""
@@ -723,9 +714,6 @@ class OrchestrationPlugin:
             raise ValueError(message)
         if self.state is not None and not _is_concrete_model_class(self.state):
             message = "orchestration plugin state must be a concrete BaseModel subclass"
-            raise ValueError(message)
-        if self.project is not None and self.state is None:
-            message = "orchestration plugin projection requires a declared state model"
             raise ValueError(message)
         seen: set[str] = set()
         duplicates: set[str] = set()

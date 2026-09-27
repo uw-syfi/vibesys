@@ -14,7 +14,12 @@ from tests.vibesys.golden.helpers import (
     prompt_text,
 )
 
-from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueOptions, IssueQueueState
+from vibesys.orchestration.issue_queue import (
+    PLUGIN,
+    REGISTRATION,
+    IssueQueueOptions,
+    IssueQueueState,
+)
 from vs_runtime.api import AgentCapability, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRun
 
@@ -249,7 +254,7 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
             assert status is RunStatus.SUCCEEDED
             state = await run.state.load(IssueQueueState)
             assert state is not None
-            assert PLUGIN.project is not None
+            assert REGISTRATION.project is not None
             return {
                 "calls": script.calls,
                 "artifacts": _artifact_snapshot(tmp_path),
@@ -272,7 +277,7 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
                         for commit in run.state.commits
                     ],
                 },
-                "projection": PLUGIN.project(state).model_dump(mode="json"),
+                "projection": REGISTRATION.project(state).model_dump(mode="json"),
                 "retained": run.workspaces.root.retained,
             }
         finally:

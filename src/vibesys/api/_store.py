@@ -142,7 +142,7 @@ def _open_run_store(
     """Compose a product store over one canonical project."""
     if registry is None:
         # lint-waiver: LW-020005 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
-        from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
+        from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
 
         registry = built_in_orchestrations()
     return _LocalRunStore(project, registry=registry)

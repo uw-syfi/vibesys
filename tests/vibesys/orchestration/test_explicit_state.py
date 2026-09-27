@@ -13,7 +13,7 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.plugin_catalog import OrchestrationRegistry
+from vibesys.plugin_catalog import OrchestrationRegistration, OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -68,8 +68,8 @@ PLUGIN = OrchestrationPlugin(
     options=_Options,
     orchestrate=_orchestrate,
     state=_State,
-    project=_project_state,
 )
+REGISTRATION = OrchestrationRegistration(plugin=PLUGIN, project=_project_state)
 
 
 def _discard_event(event: CoreEvent) -> None:
@@ -140,7 +140,7 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
     project_root = tmp_path / "project"
     _write_project(project_root)
     registry = OrchestrationRegistry()
-    registry.register_plugin(PLUGIN)
+    registry.register(REGISTRATION)
 
     class _ProjectionError(RuntimeError):
         def __init__(self) -> None:
@@ -187,7 +187,7 @@ def test_public_session_composes_a_registered_plugin_with_typed_state(tmp_path: 
     project_root = tmp_path / "project"
     _write_project(project_root)
     registry = OrchestrationRegistry()
-    registry.register_plugin(PLUGIN)
+    registry.register(REGISTRATION)
     session = create_session(_request(project_root), sink=_discard_event, registry=registry)
     session.start()
 

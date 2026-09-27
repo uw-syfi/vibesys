@@ -29,7 +29,7 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     profiler_support_extra,
 )
-from vibesys.plugin_catalog import built_in_orchestrations
+from vibesys.plugin_builtins import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vibesys.run.resources import (
@@ -194,7 +194,8 @@ def _create_context(
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
     )
-    plugin = built_in_orchestrations().resolve(descriptor.id).plugin
+    registration = built_in_orchestrations().resolve(descriptor.id)
+    plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
     return open_run_resources(
         request,
@@ -205,7 +206,7 @@ def _create_context(
             backend=request.agent_backend,
             provider=request.cli_provider,
         ),
-        resume_policy=plugin.resume_policy,
+        resume_policy=registration.resume_policy,
         backend_factory=options.get("backend_factory") or _RecordingBackendFactory(),
     )
 
@@ -542,7 +543,7 @@ def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     view = open_run_store(Project.open(project)).get_run(run_id)
     assert view.loop == "multi-agent"
     registration = built_in_orchestrations().resolve(stored.orchestration.id)
-    assert registration.plugin.project is not None
+    assert registration.project is not None
 
     with _create_context(
         project,

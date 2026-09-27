@@ -16,8 +16,9 @@ from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
 from vibesys.orchestration.multi import (
-    PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
+    PROFILE_GUIDED_REGISTRATION as PROFILE_MULTI_REGISTRATION,
 )
+from vibesys.orchestration.multi import REGISTRATION as MULTI_REGISTRATION
 from vibesys.orchestration.profile_focus import ProfileFocusState
 from vibesys.orchestration.single import (
     PLUGIN as SINGLE_PLUGIN,
@@ -25,19 +26,24 @@ from vibesys.orchestration.single import (
 from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
+from vibesys.orchestration.single import (
+    PROFILE_GUIDED_REGISTRATION as PROFILE_SINGLE_REGISTRATION,
+)
+from vibesys.orchestration.single import REGISTRATION as SINGLE_REGISTRATION
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vibesys.plugin_catalog import OrchestrationRegistration
     from vs_runtime.api import OrchestrationPlugin
 
 
-PLUGINS = (
-    SINGLE_PLUGIN,
-    PROFILE_SINGLE_PLUGIN,
-    MULTI_PLUGIN,
-    PROFILE_MULTI_PLUGIN,
+REGISTRATIONS = (
+    SINGLE_REGISTRATION,
+    PROFILE_SINGLE_REGISTRATION,
+    MULTI_REGISTRATION,
+    PROFILE_MULTI_REGISTRATION,
 )
 
 
@@ -91,13 +97,16 @@ def _plugin_state(
     return state_model.model_validate({"search": search or _search_state()})
 
 
-@pytest.mark.parametrize("plugin", PLUGINS, ids=lambda plugin: plugin.id)
+@pytest.mark.parametrize(
+    "registration", REGISTRATIONS, ids=lambda registration: registration.plugin.id
+)
 def test_plugin_projects_aggregate_state_without_mutating_it(
-    plugin: OrchestrationPlugin,
+    registration: OrchestrationRegistration,
 ) -> None:
+    plugin = registration.plugin
     state = _plugin_state(plugin)
     before = state.model_dump_json()
-    project = plugin.project
+    project = registration.project
     assert project is not None
 
     projection = project(state)
@@ -131,8 +140,8 @@ def test_profile_guidance_does_not_change_the_public_run_projection() -> None:
     search = _search_state()
     search.profile_guidance = ProfileFocusState()
     profile_state = _plugin_state(PROFILE_SINGLE_PLUGIN, search=search)
-    plain_project = SINGLE_PLUGIN.project
-    profile_project = PROFILE_SINGLE_PLUGIN.project
+    plain_project = SINGLE_REGISTRATION.project
+    profile_project = PROFILE_SINGLE_REGISTRATION.project
     assert plain_project is not None
     assert profile_project is not None
 
@@ -140,18 +149,18 @@ def test_profile_guidance_does_not_change_the_public_run_projection() -> None:
 
 
 @pytest.mark.parametrize(
-    ("plugin", "wrong_state_plugin"),
+    ("registration", "wrong_state_plugin"),
     [
-        (SINGLE_PLUGIN, MULTI_PLUGIN),
-        (MULTI_PLUGIN, SINGLE_PLUGIN),
+        (SINGLE_REGISTRATION, MULTI_PLUGIN),
+        (MULTI_REGISTRATION, SINGLE_PLUGIN),
     ],
     ids=("single-rejects-multi", "multi-rejects-single"),
 )
 def test_plugin_projection_rejects_another_plugins_state_model(
-    plugin: OrchestrationPlugin,
+    registration: OrchestrationRegistration,
     wrong_state_plugin: OrchestrationPlugin,
 ) -> None:
-    project = plugin.project
+    project = registration.project
     assert project is not None
 
     with pytest.raises(ValidationError, match="Input should be a valid dictionary"):

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from vibesys.orchestration.issue_queue.agents import AGENTS
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions, IssueQueueState
 from vibesys.orchestration.issue_queue.orchestration import orchestrate
+from vibesys.orchestration.registration import OrchestrationRegistration
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
 from vibesys.run.contracts import PluginProjection
 from vs_runtime.api import OrchestrationPlugin
@@ -24,6 +25,9 @@ PLUGIN = OrchestrationPlugin(
     options=IssueQueueOptions,
     state=IssueQueueState,
     orchestrate=orchestrate,
+)
+REGISTRATION = OrchestrationRegistration(
+    plugin=PLUGIN,
     project=_project,
     resume_policy=partial(
         compare_round_budget,
@@ -33,4 +37,4 @@ PLUGIN = OrchestrationPlugin(
     project_max_rounds=partial(project_round_budget, options_type=IssueQueueOptions),
 )
 
-__all__ = ["PLUGIN"]
+__all__ = ["PLUGIN", "REGISTRATION"]

@@ -17,7 +17,12 @@ from tests.vibesys.golden.helpers import (
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.metrics import MetricSpace, Objective
-from vibesys.orchestration.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
+from vibesys.orchestration.multi import (
+    PLUGIN,
+    PROFILE_GUIDED_PLUGIN,
+    PROFILE_GUIDED_REGISTRATION,
+    REGISTRATION,
+)
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
@@ -44,7 +49,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_runtime.api import AgentRole, OrchestrationPlugin
+    from vibesys.plugin_catalog import OrchestrationRegistration
+    from vs_runtime.api import AgentRole
 
 
 def _pre_round(*, profile: bool = False) -> PreRoundDecision:
@@ -263,25 +269,27 @@ def _assert_golden(
 
 
 @pytest.mark.parametrize(
-    ("plugin", "preset", "scenario"),
+    ("registration", "preset", "scenario"),
     [
-        (PLUGIN, "multi", "pass"),
-        (PLUGIN, "multi", "retry_then_pass"),
-        (PLUGIN, "multi", "gate"),
-        (PLUGIN, "multi", "profile"),
-        (PLUGIN, "multi", "rollback"),
-        (PROFILE_GUIDED_PLUGIN, "profile_multi", "pass"),
-        (PROFILE_GUIDED_PLUGIN, "profile_multi", "retry_then_pass"),
-        (PROFILE_GUIDED_PLUGIN, "profile_multi", "gate"),
-        (PROFILE_GUIDED_PLUGIN, "profile_multi", "profile"),
+        (REGISTRATION, "multi", "pass"),
+        (REGISTRATION, "multi", "retry_then_pass"),
+        (REGISTRATION, "multi", "gate"),
+        (REGISTRATION, "multi", "profile"),
+        (REGISTRATION, "multi", "rollback"),
+        (PROFILE_GUIDED_REGISTRATION, "profile_multi", "pass"),
+        (PROFILE_GUIDED_REGISTRATION, "profile_multi", "retry_then_pass"),
+        (PROFILE_GUIDED_REGISTRATION, "profile_multi", "gate"),
+        (PROFILE_GUIDED_REGISTRATION, "profile_multi", "profile"),
     ],
 )
 def test_public_policy_trajectory_matches_golden(
     tmp_path: Path,
-    plugin: OrchestrationPlugin,
+    registration: OrchestrationRegistration,
     preset: str,
     scenario: str,
 ) -> None:
+    plugin = registration.plugin
+
     async def run() -> dict[str, object]:
         script = _Script(*_scenario(scenario))
         rounds = 2 if scenario == "rollback" else 1
@@ -326,11 +334,11 @@ def test_public_policy_trajectory_matches_golden(
             assert state_model is not None
             state = await run.state.load(state_model)
             assert state is not None
-            assert plugin.project is not None
+            assert registration.project is not None
             return {
                 "calls": script.calls,
                 "artifacts": _artifact_snapshot(tmp_path),
-                "projection": plugin.project(state).model_dump(mode="json"),
+                "projection": registration.project(state).model_dump(mode="json"),
                 "retained": run.workspaces.root.retained,
             }
         finally:

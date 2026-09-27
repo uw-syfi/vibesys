@@ -28,6 +28,7 @@ from vibesys.api import (
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.plugin_catalog import OrchestrationRegistration
 from vibesys.run.contracts import ResumeRef, RoundSummary, RunRequest, RunStatus, RunView
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -90,8 +91,8 @@ _PLUGIN = OrchestrationPlugin(
     options=_Options,
     orchestrate=_orchestrate,
     state=_FakeAgentState,
-    project=_project_state,
 )
+_REGISTRATION = OrchestrationRegistration(plugin=_PLUGIN, project=_project_state)
 
 
 class _FakeProjector:
@@ -197,7 +198,7 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
     project_root = tmp_path / "project"
     _write_project(project_root)
     registry = OrchestrationRegistry()
-    registry.register_plugin(_PLUGIN)
+    registry.register(_REGISTRATION)
 
     async def commit_round_one() -> str:
         session = create_session(_request(project_root), sink=_discard_event, registry=registry)

@@ -38,7 +38,14 @@ if TYPE_CHECKING:
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vibesys.run.resources import _PreparedRun
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
-    from vs_runtime.api import AgentRole, OrchestrationPlugin, Run, Workspace
+    from vs_runtime.api import (
+        AgentRole,
+        OrchestrationDescriptor,
+        OrchestrationPlugin,
+        OrchestrationResumeDecision,
+        Run,
+        Workspace,
+    )
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         WorkspaceRuntime,
@@ -79,6 +86,13 @@ class _ProductHostFactory:
     backend_factory: Callable[..., ComputeBackendImpl] | None
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None
     plugin: OrchestrationPlugin
+    resume_policy: (
+        Callable[
+            [OrchestrationDescriptor, OrchestrationDescriptor],
+            OrchestrationResumeDecision,
+        ]
+        | None
+    )
 
     def prepare(self) -> RunHostComponents:
         """Open product resources and bind focused runtime capabilities."""
@@ -100,7 +114,7 @@ class _ProductHostFactory:
             self.request,
             self.integration,
             agent_specs=agent_specs,
-            resume_policy=plugin.resume_policy,
+            resume_policy=self.resume_policy,
             state_binding=(
                 _StateBinding(state_namespace, plugin.state)
                 if state_namespace is not None and plugin.state is not None
@@ -255,6 +269,13 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     integration: LocalRunIntegration,
     *,
     plugin: OrchestrationPlugin,
+    resume_policy: (
+        Callable[
+            [OrchestrationDescriptor, OrchestrationDescriptor],
+            OrchestrationResumeDecision,
+        ]
+        | None
+    ) = None,
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
@@ -271,6 +292,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         backend_factory=backend_factory,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
+        resume_policy=resume_policy,
     )
     async with open_run_host(factory.prepare) as host:
         yield host.run

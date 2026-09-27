@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
@@ -42,7 +42,8 @@ from vibesys.orchestration.single import (
 from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
-from vibesys.plugin_catalog import built_in_orchestrations
+from vibesys.plugin_builtins import built_in_orchestrations
+from vibesys.plugin_catalog import OrchestrationRegistration
 from vibesys.run.contracts import RoundSummary
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
@@ -128,9 +129,12 @@ _SETUP_PLUGIN = OrchestrationPlugin(
     options=_PluginOptions,
     orchestrate=_run_plugin,
     state=_PluginState,
+    memory_paths=(".vibesys-memory/progress.md",),
+)
+_SETUP_REGISTRATION = OrchestrationRegistration(
+    plugin=_SETUP_PLUGIN,
     project=_project_plugin,
     resume_policy=_accept_resume,
-    memory_paths=(".vibesys-memory/progress.md",),
     project_max_rounds=_project_max_rounds,
 )
 
@@ -246,10 +250,10 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         assert registration.plugin.id == descriptor.id
         assert descriptor.options == agent_options
         assert options.max_rounds == descriptor.options["max_rounds"]
-        assert registration.plugin.project_max_rounds is not None
-        assert registration.plugin.project_max_rounds(options) == 4
+        assert registration.project_max_rounds is not None
+        assert registration.project_max_rounds(options) == 4
         assert registration.plugin.memory_paths == declared_memory_paths()
-        assert registration.plugin.resume_policy is not None
+        assert registration.resume_policy is not None
 
     plain = OrchestrationDescriptor(
         id="plain",
@@ -266,10 +270,10 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
     assert isinstance(plain_options, IssueQueueOptions)
     assert plain.options["load_levels"] == [{"rate": 4, "duration": 20, "max_tokens": 64}]
     assert plain_options.max_rounds == plain.options["max_rounds"]
-    assert registration.plugin.project_max_rounds is not None
-    assert registration.plugin.project_max_rounds(plain_options) == 5
+    assert registration.project_max_rounds is not None
+    assert registration.project_max_rounds(plain_options) == 5
     assert registration.plugin.memory_paths == ()
-    assert registration.plugin.resume_policy is not None
+    assert registration.resume_policy is not None
 
 
 @pytest.mark.parametrize(
@@ -347,7 +351,7 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
         assert isinstance(parsed, EvolveOptions)
         observed = tuple(item.name for item in parsed.metric_space.objectives)
     assert observed == expected_tuple
-    compare = registration.plugin.resume_policy
+    compare = registration.resume_policy
     assert compare is not None
     assert compare(descriptor, descriptor).descriptor is None
 
@@ -364,7 +368,7 @@ def test_builtin_plugins_allow_only_increased_total_budget_on_resume() -> None:
             "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
         },
     )
-    compare = registry.resolve(recorded.id).plugin.resume_policy
+    compare = registry.resolve(recorded.id).resume_policy
     assert compare is not None
 
     increased = recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 3}})
@@ -406,11 +410,12 @@ def test_evolve_plugin_resume_allows_only_increased_generation_budget() -> None:
         config_version=1,
         options=options,
     )
-    plugin = registry.resolve("evolve").plugin
-    compare = plugin.resume_policy
+    registration = registry.resolve("evolve")
+    plugin = registration.plugin
+    compare = registration.resume_policy
     assert compare is not None
-    assert plugin.project_max_rounds is not None
-    assert plugin.project_max_rounds(plugin.options.model_validate(recorded.options)) == 2
+    assert registration.project_max_rounds is not None
+    assert registration.project_max_rounds(plugin.options.model_validate(recorded.options)) == 2
 
     assert compare(recorded, recorded).descriptor is None
     increased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 3}})
@@ -441,7 +446,7 @@ def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
             "official_eval_every": 3,
         },
     )
-    compare = registry.resolve(recorded.id).plugin.resume_policy
+    compare = registry.resolve(recorded.id).resume_policy
     assert compare is not None
 
     changed = recorded.model_copy(
@@ -506,15 +511,18 @@ _EVIDENCE_PLUGIN = OrchestrationPlugin(
     options=_TeamOptions,
     orchestrate=_run_evidence,
     state=_Evidence,
-    project=_project_evidence,
     config_version=2,
+)
+_EVIDENCE_REGISTRATION = OrchestrationRegistration(
+    plugin=_EVIDENCE_PLUGIN,
+    project=_project_evidence,
 )
 
 
 def test_projector_uses_same_committed_state_for_live_and_stored_views(tmp_path: Path) -> None:
     request = _custom_request(tmp_path)
     registry = OrchestrationRegistry()
-    registry.register_plugin(_EVIDENCE_PLUGIN)
+    registry.register(_EVIDENCE_REGISTRATION)
     session = create_session(request, sink=_discard_event, registry=registry)
     committed: list[RunView] = []
     session.on_committed_view(lambda view, _keys: committed.append(view))
@@ -543,8 +551,8 @@ def test_projector_rejects_non_product_projection() -> None:
     )
     for index, invalid in enumerate(invalid_results):
 
-        def project_invalid(_state: BaseModel, *, result: BaseModel = invalid) -> BaseModel:
-            return result
+        def project_invalid(_state: BaseModel, *, result: BaseModel = invalid) -> PluginProjection:
+            return cast("PluginProjection", result)
 
         plugin = OrchestrationPlugin(
             id=f"wrong-projection-{index}",
@@ -552,10 +560,9 @@ def test_projector_rejects_non_product_projection() -> None:
             options=_TeamOptions,
             orchestrate=_run_team,
             state=_Evidence,
-            project=project_invalid,
         )
         registry = OrchestrationRegistry()
-        registry.register_plugin(plugin)
+        registry.register(OrchestrationRegistration(plugin=plugin, project=project_invalid))
         projector = registry.resolve(plugin.id).projector
         assert projector is not None
 
@@ -615,7 +622,7 @@ def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> No
         }
     )
     registry = OrchestrationRegistry()
-    registry.register_plugin(_SETUP_PLUGIN)
+    registry.register(_SETUP_REGISTRATION)
     events: list[CoreEvent] = []
     committed: list[RunView] = []
 
@@ -676,9 +683,9 @@ def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> No
     assert historical.model_copy(update={"status": RunStatus.ACTIVE}) == committed[-1]
     registration = registry.resolve(_SETUP_PLUGIN.id)
     parsed = registration.parse_options(request.orchestration)
-    assert registration.plugin.resume_policy is _accept_resume
-    assert registration.plugin.project_max_rounds is not None
-    assert registration.plugin.project_max_rounds(parsed) == 3
+    assert registration.resume_policy is _accept_resume
+    assert registration.project_max_rounds is not None
+    assert registration.project_max_rounds(parsed) == 3
     assert tuple(role.id for role in registration.plugin.agents) == ("worker",)
     assert registration.plugin.memory_paths == (".vibesys-memory/progress.md",)
 
@@ -736,3 +743,15 @@ def test_plugin_registration_derives_projection_only_when_declared() -> None:
     stateless_registration = registry.resolve(stateless.id)
     assert stateless_registration.projector is None
     assert stateless_registration.plugin.state is None
+
+
+def test_registration_rejects_projection_without_declared_state() -> None:
+    plugin = OrchestrationPlugin(
+        id="stateless-projector",
+        agents=(),
+        options=_PluginOptions,
+        orchestrate=_run_plugin,
+    )
+
+    with pytest.raises(ValueError, match="projection requires a declared state model"):
+        OrchestrationRegistration(plugin=plugin, project=_project_plugin)

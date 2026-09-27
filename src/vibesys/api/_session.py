@@ -44,7 +44,8 @@ if TYPE_CHECKING:
     from vibesys.plugin_catalog import OrchestrationProjector, OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
     from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import OrchestrationPlugin, Workspace
+    from vs_project.api import OrchestrationDescriptor
+    from vs_runtime.api import OrchestrationPlugin, OrchestrationResumeDecision, Workspace
     from vs_runtime.api import RunStatus as PluginRunStatus
     from vs_runtime.api.infrastructure import AgentExecutionEnvironment
     from vs_sandbox.api import ComputeBackendImpl
@@ -76,6 +77,13 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     *,
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: OrchestrationProjector | None = None,
+    resume_policy: (
+        Callable[
+            [OrchestrationDescriptor, OrchestrationDescriptor],
+            OrchestrationResumeDecision,
+        ]
+        | None
+    ) = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[
@@ -89,6 +97,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         integration,
         open_agent_environment=open_agent_environment,
         projector=projector,
+        resume_policy=resume_policy,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
         agent_tool_bindings=agent_tool_bindings,
@@ -118,7 +127,7 @@ class _LocalRunSession:
         self._sink = sink
         if registry is None:
             # lint-waiver: LW-020004 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
-            from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
+            from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
 
             registry = built_in_orchestrations()
         self._registry = registry
@@ -283,9 +292,8 @@ class _LocalRunSession:
         request = self._request
         plugin = self._registration.plugin
         options = self._plugin_options
-        max_rounds = (
-            plugin.project_max_rounds(options) if plugin.project_max_rounds is not None else None
-        )
+        project_max_rounds = self._registration.project_max_rounds
+        max_rounds = project_max_rounds(options) if project_max_rounds is not None else None
         try:
             self._integration.events.emit(
                 CoreEventType.RUN_STARTED,
@@ -304,6 +312,7 @@ class _LocalRunSession:
                 options,
                 open_agent_environment=self._open_agent_environment,
                 projector=self._registration.projector,
+                resume_policy=self._registration.resume_policy,
                 agent_client_factory=self._agent_client_factory,
                 backend_factory=self._backend_factory,
                 agent_tool_bindings=AGENT_TOOL_BINDINGS,

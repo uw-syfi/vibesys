@@ -103,17 +103,17 @@ role. A response schema is selected per turn, so one session may request
 different typed replies as the conversation progresses. Omitting `response`
 returns text.
 
-Plugin declarations may also name their typed state model, projection, resume
-policy, memory paths, or maximum-round projection. The reusable runtime treats
-projection results as opaque Pydantic models. VibeSys plugins return the strict
-`vibesys.api.PluginProjection` product contract, which reuses `RoundSummary`.
-The product catalog validates that exact result type before exposing a view.
-Declare only the hooks the policy uses. Product configuration is validated
-against `plugin.agents`, so an unknown role override fails before any run
-resource opens.
+Plugin declarations may also name their typed state model and memory paths.
+VibeSys-specific projection, resume compatibility, and maximum-round display
+policy live in the plugin's product `OrchestrationRegistration`, not in the
+reusable runtime contract. Projection callbacks return the strict
+`vibesys.api.PluginProjection` contract, which reuses `RoundSummary`; the
+product catalog validates that exact result type before exposing a view.
+Product configuration is validated against `plugin.agents`, so an unknown role
+override fails before any run resource opens.
 
 Built-in plugins live in `orchestration/{single,multi,issue_queue,evolve}` and
-are registered in `vibesys.plugin_catalog.built_in_orchestrations`. Keep role
+are registered in `vibesys.plugin_builtins.built_in_orchestrations`. Keep role
 declarations in the owning plugin package, normally in `agents.py`, and expose
 them through the plugin's `agents` tuple.
 
@@ -233,7 +233,8 @@ builders, or callback bundles merely to shorten orchestration code.
 2. Construct one `OrchestrationPlugin`; its `agents` tuple is authoritative.
 3. Use only `Run` capabilities for effects. Keep selection, cadence,
    message routing, and response interpretation in the plugin.
-4. Register the plugin in `vibesys.plugin_catalog.built_in_orchestrations`.
+4. Export its product registration and add it to
+   `vibesys.plugin_builtins.built_in_orchestrations`.
 5. Add policy tests through `FakeRun`, prompt or state-transition tests as
    appropriate, and integration coverage for product composition only when the
    boundary itself changes.

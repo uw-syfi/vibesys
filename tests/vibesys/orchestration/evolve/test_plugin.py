@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from vibesys.api import PluginProjection
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
-from vibesys.orchestration.evolve.plugin import PLUGIN
+from vibesys.orchestration.evolve.plugin import PLUGIN, REGISTRATION
 from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
     PopulationConfig,
@@ -544,8 +544,8 @@ def test_projection_exposes_committed_population_and_metric_space() -> None:
     population = PopulationSearch(PopulationConfig(space=space, seed=3)).initial()
     state = EvolveState(population=population, metric_space=space)
 
-    assert PLUGIN.project is not None
-    projection = PLUGIN.project(state)
+    assert REGISTRATION.project is not None
+    projection = REGISTRATION.project(state)
     assert isinstance(projection, PluginProjection)
     assert projection.payload is not None
     assert projection.payload["generation"] == 0

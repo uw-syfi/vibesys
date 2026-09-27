@@ -653,17 +653,6 @@ def test_plugin_requires_concrete_state_model(invalid_state: object) -> None:
         )
 
 
-def test_plugin_projection_requires_declared_state() -> None:
-    with pytest.raises(ValueError, match="projection requires a declared state model"):
-        OrchestrationPlugin(
-            id="stateless-projector",
-            agents=(),
-            options=_Options,
-            orchestrate=_orchestrate,
-            project=lambda _state: _Options(),
-        )
-
-
 def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
     async def scenario() -> None:
         run = FakeRun(_plugin(_role()))

@@ -8,6 +8,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.evolve.agents import AGENTS
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.orchestration import orchestrate
+from vibesys.orchestration.registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection
 from vs_runtime.api import (
     OrchestrationDescriptor,
@@ -90,9 +91,12 @@ PLUGIN = OrchestrationPlugin(
     options=EvolveOptions,
     state=EvolveState,
     orchestrate=orchestrate,
+)
+REGISTRATION = OrchestrationRegistration(
+    plugin=PLUGIN,
     project=_project,
     resume_policy=_compare_resume,
     project_max_rounds=_project_max_rounds,
 )
 
-__all__ = ["PLUGIN"]
+__all__ = ["PLUGIN", "REGISTRATION"]
