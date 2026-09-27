@@ -782,7 +782,7 @@ def test_list_runs_skips_an_incompatible_run_and_surfaces_it(tmp_path: Path) -> 
     store = _store(tmp_path)
     first = _run(store, minute=1)
     second = _run(store, minute=2)
-    _corrupt_schema_version(store, first.run_id, version=3)
+    _corrupt_schema_version(store, first.run_id, version=4)
 
     assert store.state.list_runs() == [second]
 
