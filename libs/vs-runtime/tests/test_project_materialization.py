@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from vs_runtime.api.infrastructure import (
+    FreshProjectError,
+    FreshProjectErrorKind,
     GitSourceMaterialization,
     ProjectMaterializer,
     ProjectTreeCopy,
@@ -44,6 +46,12 @@ def _source(*, dest: str = "library", strip_git: bool = True) -> GitSourceMateri
             strip_git=strip_git,
         ),
     )
+
+
+def _write_partial_then_fail(destination: Path) -> None:
+    (destination / "partial.txt").write_text("partial")
+    message = "finalization failed"
+    raise RuntimeError(message)
 
 
 def test_copy_tree_replaces_children_but_preserves_excluded_mounts(tmp_path: Path) -> None:
@@ -124,6 +132,83 @@ def test_materialize_rejects_reserved_destination_before_copy(tmp_path: Path) ->
             ),
             existing=True,
         )
+
+
+def test_fresh_project_removes_partial_destination_on_failure(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    destination = tmp_path / "runs" / "workspace"
+    materializer = _materializer(destination)
+
+    with (
+        pytest.raises(RuntimeError, match="finalization failed"),
+        materializer.fresh_project(source, destination),
+    ):
+        _write_partial_then_fail(destination)
+
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("destination", "materializer_root", "expected"),
+    [
+        ("source/child", "source/child", FreshProjectErrorKind.DESTINATION_INSIDE_SOURCE),
+        ("existing", "existing", FreshProjectErrorKind.DESTINATION_EXISTS),
+        ("destination", "other", FreshProjectErrorKind.ROOT_MISMATCH),
+    ],
+)
+def test_fresh_project_rejects_unsafe_destination(
+    tmp_path: Path,
+    destination: str,
+    materializer_root: str,
+    expected: FreshProjectErrorKind,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    resolved_destination = tmp_path / destination
+    if expected is FreshProjectErrorKind.DESTINATION_EXISTS:
+        resolved_destination.mkdir()
+
+    with (
+        pytest.raises(FreshProjectError) as info,
+        _materializer(tmp_path / materializer_root).fresh_project(
+            source,
+            resolved_destination,
+        ),
+    ):
+        pass
+
+    assert info.value.kind is expected
+
+
+def test_relocate_copied_tree_removes_original_copy(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    evaluator = source_root / "checks" / "trusted"
+    evaluator.mkdir(parents=True)
+    (evaluator / "check.py").write_text("print('ok')\n")
+    destination = tmp_path / "workspace"
+    copied_evaluator = destination / "checks" / "trusted"
+    copied_evaluator.mkdir(parents=True)
+    (copied_evaluator / "stale.py").write_text("stale\n")
+    canonical = destination / "_evaluator" / "trusted"
+
+    _materializer(destination).relocate_copied_tree(
+        ProjectTreeCopy(src=evaluator, dest=canonical),
+        copied_from=source_root,
+    )
+
+    assert not copied_evaluator.exists()
+    assert (canonical / "check.py").read_text() == "print('ok')\n"
+
+
+def test_remove_paths_rejects_project_root_and_external_paths(tmp_path: Path) -> None:
+    destination = tmp_path / "workspace"
+    destination.mkdir()
+    materializer = _materializer(destination)
+
+    for path in (destination, tmp_path / "outside"):
+        with pytest.raises(ValueError, match="escapes project root"):
+            materializer.remove_paths((path,))
 
 
 def test_repair_is_delegated_to_environment_effects(tmp_path: Path) -> None:

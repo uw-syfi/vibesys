@@ -11,14 +11,16 @@ import json
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_runtime._input_project import materialize_input_project
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from vs_runtime._sdk_paths import SDKRoots
 
@@ -38,6 +40,32 @@ class ProjectMaterializationEffects(Protocol):
     def remove_child(self, workspace: Path, name: str) -> bool:
         """Remove a child through a privileged environment, if available."""
         ...
+
+
+class FreshProjectErrorKind(StrEnum):
+    """Closed reasons a fresh project destination cannot be opened."""
+
+    DESTINATION_INSIDE_SOURCE = "destination_inside_source"
+    DESTINATION_EXISTS = "destination_exists"
+    ROOT_MISMATCH = "root_mismatch"
+
+
+class FreshProjectError(ValueError):
+    """A fresh project destination violates the materializer contract."""
+
+    def __init__(
+        self,
+        kind: FreshProjectErrorKind,
+        *,
+        source: Path,
+        destination: Path,
+        materializer_root: Path,
+    ) -> None:
+        self.kind = kind
+        self.source = source
+        self.destination = destination
+        self.materializer_root = materializer_root
+        super().__init__(kind.value)
 
 
 @dataclass(frozen=True)
@@ -111,6 +139,54 @@ class ProjectMaterializer:
     def create(self) -> None:
         """Create the workspace root directory if it does not exist."""
         self.root.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def fresh_project(self, source: Path, destination: Path) -> Iterator[None]:
+        """Own one fresh destination and remove it if provisioning fails.
+
+        The caller owns authored-input validation and the ordered plan. This
+        boundary owns destination safety, creation, and cleanup on every
+        failure raised while the plan and any product finalization execute.
+        """
+        resolved_source = source.expanduser().resolve()
+        resolved_destination = destination.expanduser().resolve()
+        resolved_root = self.root.expanduser().resolve()
+        if resolved_destination == resolved_source or resolved_destination.is_relative_to(
+            resolved_source
+        ):
+            raise FreshProjectError(
+                FreshProjectErrorKind.DESTINATION_INSIDE_SOURCE,
+                source=resolved_source,
+                destination=resolved_destination,
+                materializer_root=resolved_root,
+            )
+        if resolved_destination.exists() or resolved_destination.is_symlink():
+            raise FreshProjectError(
+                FreshProjectErrorKind.DESTINATION_EXISTS,
+                source=resolved_source,
+                destination=resolved_destination,
+                materializer_root=resolved_root,
+            )
+        if resolved_root != resolved_destination:
+            raise FreshProjectError(
+                FreshProjectErrorKind.ROOT_MISMATCH,
+                source=resolved_source,
+                destination=resolved_destination,
+                materializer_root=resolved_root,
+            )
+
+        resolved_destination.mkdir(parents=True)
+        try:
+            yield
+        except BaseException as exc:
+            try:
+                self._remove_path(resolved_destination)
+            except OSError as cleanup_error:
+                exc.add_note(
+                    "Failed to remove partial provisioned project "
+                    f"{resolved_destination}: {cleanup_error}"
+                )
+            raise
 
     def repair(self) -> None:
         """Fix ownership of files a previous root-running sandbox left behind.
@@ -206,6 +282,45 @@ class ProjectMaterializer:
 
         if source.strip_git:
             shutil.rmtree(dest / ".git")
+
+    def relocate_copied_tree(self, spec: ProjectTreeCopy, *, copied_from: Path) -> None:
+        """Move a source tree copied with its parent into its canonical location.
+
+        If ``spec.src`` was already copied from ``copied_from``, its copied
+        location is removed before the canonical copy. Git ignores are applied
+        when the source itself is a Git worktree.
+        """
+        source_root = copied_from.expanduser().resolve()
+        source = spec.src.expanduser().resolve()
+        destination = spec.dest.expanduser().resolve()
+        try:
+            copied_relative = source.relative_to(source_root)
+        except ValueError:
+            copied_relative = None
+
+        if copied_relative is not None:
+            copied_path = self.root.expanduser().resolve() / copied_relative
+            if copied_path == destination:
+                return
+            self.remove_paths((copied_path,))
+
+        self.materialize(
+            (replace(spec, respect_gitignore=self._is_git_worktree(source)),),
+            existing=True,
+        )
+
+    def remove_paths(self, paths: Iterable[Path]) -> None:
+        """Remove selected descendants of this project, deepest paths first."""
+        root = self.root.expanduser().absolute()
+        selected: list[Path] = []
+        for path in paths:
+            candidate = path.expanduser().absolute()
+            if candidate == root or not candidate.is_relative_to(root):
+                message = f"project cleanup path escapes project root: {path}"
+                raise ValueError(message)
+            selected.append(candidate)
+        for path in sorted(selected, key=lambda item: len(item.parts), reverse=True):
+            self._remove_path(path)
 
     # -- copy machinery -------------------------------------------------------
 
@@ -378,6 +493,24 @@ class ProjectMaterializer:
             Path(os.fsdecode(raw).rstrip("/")).parts for raw in result.stdout.split(b"\0") if raw
         )
 
+    @staticmethod
+    def _is_git_worktree(path: Path) -> bool:
+        git = shutil.which("git") or "git"
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010239 [S603]; this checks the supplied project path using a fixed non-shell Git command.
+            [git, "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    @staticmethod
+    def _remove_path(path: Path) -> None:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        elif path.exists() or path.is_symlink():
+            path.unlink()
+
 
 def _run_git(args: Sequence[str], cwd: Path) -> str:
     git = shutil.which("git") or "git"
@@ -396,6 +529,8 @@ def _run_git(args: Sequence[str], cwd: Path) -> str:
 
 
 __all__ = [
+    "FreshProjectError",
+    "FreshProjectErrorKind",
     "GitSourceMaterialization",
     "InputProjectMaterialization",
     "ProjectMaterializationEffects",

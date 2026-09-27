@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +19,8 @@ from vibesys.inputs import (
 from vibesys.run.workspace_policy import materialization_source
 from vs_project.api import Project, is_project_state_path
 from vs_runtime.api.infrastructure import (
+    FreshProjectError,
+    FreshProjectErrorKind,
     InputProjectMaterialization,
     ProjectMaterializationStep,
     ProjectMaterializer,
@@ -131,7 +131,6 @@ def provision_project(
         require_legacy_objective=spec.task_name is None,
     )
     destination = destination_root.expanduser().resolve()
-    _validate_destination(source, destination, materializer=spec.materializer)
     repository_task = spec.task_name is not None
     manifest_root = (
         Project.open(source).select_task(spec.task_name).path if repository_task else source
@@ -146,35 +145,29 @@ def provision_project(
     primary_steps = _primary_steps(source, destination, spec, copy_excludes)
 
     try:
-        spec.materializer.create()
-        spec.materializer.materialize(primary_steps, existing=False)
-        evaluator_relative = _materialize_evaluator(
-            source,
-            destination,
-            manifest,
-            spec,
-        )
-        _remove_private_entries(destination)
-        if not repository_task:
-            normalized = manifest.model_copy(
-                update={
-                    "workspace": None,
-                    "evaluator": (
-                        EvaluatorInput(source=evaluator_relative)
-                        if evaluator_relative is not None
-                        else None
-                    ),
-                }
+        with spec.materializer.fresh_project(source, destination):
+            spec.materializer.materialize(primary_steps, existing=False)
+            evaluator_relative = _materialize_evaluator(
+                source,
+                destination,
+                manifest,
+                spec,
             )
-            (destination / MANIFEST_NAME).write_text(render_input_manifest(normalized))
-    except BaseException as exc:
-        try:
-            _remove_path(destination)
-        except OSError as cleanup_error:
-            exc.add_note(
-                f"Failed to remove partial provisioned project {destination}: {cleanup_error}"
-            )
-        raise
+            _remove_private_entries(destination, materializer=spec.materializer)
+            if not repository_task:
+                normalized = manifest.model_copy(
+                    update={
+                        "workspace": None,
+                        "evaluator": (
+                            EvaluatorInput(source=evaluator_relative)
+                            if evaluator_relative is not None
+                            else None
+                        ),
+                    }
+                )
+                (destination / MANIFEST_NAME).write_text(render_input_manifest(normalized))
+    except FreshProjectError as exc:
+        raise _provisioning_error(exc) from exc
 
     return destination
 
@@ -190,19 +183,15 @@ def _require_input_root(path: Path, *, require_legacy_objective: bool) -> Path:
     return root
 
 
-def _validate_destination(
-    source: Path,
-    destination: Path,
-    *,
-    materializer: ProjectMaterializer,
-) -> None:
-    if destination == source or destination.is_relative_to(source):
-        raise ProjectProvisioningError.destination_inside_input(destination)
-    if destination.exists() or destination.is_symlink():
-        raise ProjectProvisioningError.destination_exists(destination)
-    workspace_root = materializer.root.expanduser().resolve()
-    if workspace_root != destination:
-        raise ProjectProvisioningError.workspace_root_mismatch(workspace_root, destination)
+def _provisioning_error(error: FreshProjectError) -> ProjectProvisioningError:
+    if error.kind is FreshProjectErrorKind.DESTINATION_INSIDE_SOURCE:
+        return ProjectProvisioningError.destination_inside_input(error.destination)
+    if error.kind is FreshProjectErrorKind.DESTINATION_EXISTS:
+        return ProjectProvisioningError.destination_exists(error.destination)
+    return ProjectProvisioningError.workspace_root_mismatch(
+        error.materializer_root,
+        error.destination,
+    )
 
 
 def _load_manifest(source: Path) -> InputManifest:
@@ -280,37 +269,23 @@ def _materialize_evaluator(
     relative = Path("_evaluator") / evaluator_source.name
     evaluator_destination = destination / relative
 
-    try:
-        source_relative = evaluator_source.relative_to(source)
-    except ValueError:
-        source_relative = None
-
-    if source_relative == relative:
-        return relative.as_posix()
-
-    if source_relative is not None:
-        _remove_path(destination / source_relative)
-
-    spec.materializer.materialize(
-        (
-            ProjectTreeCopy(
-                src=evaluator_source,
-                dest=evaluator_destination,
-                respect_gitignore=_is_git_worktree(evaluator_source),
-                extra_excludes=_project_copy_excludes(evaluator_source),
-                require_absent=evaluator_destination,
-                require_absent_message=(
-                    "evaluator destination already exists in provisioned project: "
-                    f"{relative.as_posix()}"
-                ),
+    spec.materializer.relocate_copied_tree(
+        ProjectTreeCopy(
+            src=evaluator_source,
+            dest=evaluator_destination,
+            extra_excludes=_project_copy_excludes(evaluator_source),
+            require_absent=evaluator_destination,
+            require_absent_message=(
+                "evaluator destination already exists in provisioned project: "
+                f"{relative.as_posix()}"
             ),
         ),
-        existing=True,
+        copied_from=source,
     )
     return relative.as_posix()
 
 
-def _remove_private_entries(root: Path) -> None:
+def _remove_private_entries(root: Path, *, materializer: ProjectMaterializer) -> None:
     private_paths = sorted(
         (
             path
@@ -320,8 +295,7 @@ def _remove_private_entries(root: Path) -> None:
         key=lambda path: len(path.parts),
         reverse=True,
     )
-    for path in private_paths:
-        _remove_path(path)
+    materializer.remove_paths(private_paths)
 
 
 def _should_copy_project_entry(relative_path: Path) -> bool:
@@ -330,21 +304,3 @@ def _should_copy_project_entry(relative_path: Path) -> bool:
         part in _PRIVATE_PROJECT_ENTRY_NAMES or part == ".env" or part.startswith(".env.")
         for part in relative_path.parts
     )
-
-
-def _is_git_worktree(path: Path) -> bool:
-    git = shutil.which("git") or "git"
-    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010236 [S603]; this checks the supplied project path using a fixed non-shell Git command.
-        [git, "-C", str(path), "rev-parse", "--is-inside-work-tree"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and result.stdout.strip() == "true"
-
-
-def _remove_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    elif path.exists() or path.is_symlink():
-        path.unlink()

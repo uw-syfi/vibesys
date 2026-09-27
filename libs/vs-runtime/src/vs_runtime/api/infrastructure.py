@@ -109,6 +109,8 @@ from vs_runtime._model_artifacts import (
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._project_materialization import (
+    FreshProjectError,
+    FreshProjectErrorKind,
     GitSourceMaterialization,
     InputProjectMaterialization,
     ProjectMaterializationEffects,
@@ -422,6 +424,8 @@ __all__ = [
     "EvaluatorPackageRequirement",
     "EventCodec",
     "FrameworkValidationResult",
+    "FreshProjectError",
+    "FreshProjectErrorKind",
     "GitSourceMaterialization",
     "InputDependency",
     "InputProjectError",
