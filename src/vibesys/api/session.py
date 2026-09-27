@@ -400,7 +400,7 @@ class _LocalRunSession:
             except BaseException as construction_error:
                 try:
                     ownership.close()
-                except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-948024 [BLE001]; cleanup must preserve the construction failure while releasing every acquired resource.
+                except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-948033 [BLE001]; cleanup must preserve the construction failure while releasing every acquired resource.
                     construction_error.add_note(
                         "Additional error while cleaning up auxiliary-agent construction: "
                         f"{type(cleanup_error).__name__}: {cleanup_error}"

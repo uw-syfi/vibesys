@@ -252,7 +252,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         tool_bindings=tool_bindings,
         log=log,
     )
-    workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837216 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
+    workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
     return WorkspaceRuntime(
         agents=agents,
         workspaces=workspaces,

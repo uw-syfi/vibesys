@@ -297,7 +297,7 @@ class RuntimeAgentSessions:
                 raise RuntimeContractError(message)
 
             managed_workspace = self._workspaces.workspace_for(workspace)
-            async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837217 [SLF001]; session construction holds the owning workspace alive through execution binding.
+            async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.
                 tool_servers = tuple(
                     spec
                     for tool_id in bound_tool_ids

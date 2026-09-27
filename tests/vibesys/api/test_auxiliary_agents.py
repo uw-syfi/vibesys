@@ -80,7 +80,7 @@ class _PreparedEnvironment:
 
     def open(self, presentation: RunEnvironmentPresentation) -> _EnvironmentSession:
         assert presentation == RunEnvironmentPresentation(prompt_notes="")
-        return self._environment._open(self._request)  # noqa: SLF001  # lint-waiver: LW-948032 [SLF001]; this prepared fake completes its paired environment's open phase.
+        return self._environment._open(self._request)  # noqa: SLF001  # lint-waiver: LW-948034 [SLF001]; this prepared fake completes its paired environment's open phase.
 
 
 class _StubOptions(BaseModel):
