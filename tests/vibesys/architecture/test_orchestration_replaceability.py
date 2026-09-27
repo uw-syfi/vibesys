@@ -71,15 +71,16 @@ def test_no_strategy_package_imports_a_peer_strategy_package() -> None:
 
 def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> None:
     """Keep product policy independent of concrete execution libraries."""
-    violations: list[str] = []
-    for strategy in _strategy_names():
-        for path in (_ORCHESTRATION / strategy).rglob("*.py"):
-            for module_name in _imported_module_names(path):
-                if any(
-                    module_name == package or module_name.startswith(f"{package}.")
-                    for package in _INFRASTRUCTURE_LIBRARIES
-                ):
-                    violations.append(f"{path.relative_to(_SRC)} imports {module_name}")
+    violations = [
+        f"{path.relative_to(_SRC)} imports {module_name}"
+        for strategy in _strategy_names()
+        for path in (_ORCHESTRATION / strategy).rglob("*.py")
+        for module_name in _imported_module_names(path)
+        if any(
+            module_name == package or module_name.startswith(f"{package}.")
+            for package in _INFRASTRUCTURE_LIBRARIES
+        )
+    ]
     assert not violations, (
         "strategy package bypasses vs_runtime.api for infrastructure: " + "; ".join(violations)
     )
