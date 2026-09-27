@@ -21,7 +21,7 @@ from vs_project.api import (
     ProjectStateError,
     RunEnvironmentRecord,
 )
-from vs_runtime.api import OrchestrationPlugin, RunHost
+from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
@@ -197,7 +197,7 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
     class EvidenceState(BaseModel):
         revision: int = 0
 
-    async def run_evidence(host: RunHost, options: BaseModel) -> PluginRunStatus:
+    async def run_evidence(host: Run, options: BaseModel) -> PluginRunStatus:
         del host, options
         return PluginRunStatus.SUCCEEDED
 
@@ -277,7 +277,7 @@ def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) ->
     class MemoryOptions(BaseModel):
         model_config = ConfigDict(extra="forbid")
 
-    async def run_memory(host: RunHost, options: BaseModel) -> PluginRunStatus:
+    async def run_memory(host: Run, options: BaseModel) -> PluginRunStatus:
         del host, options
         return PluginRunStatus.SUCCEEDED
 

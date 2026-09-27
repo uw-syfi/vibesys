@@ -23,7 +23,7 @@ from vs_runtime.api import (
     RunStatus,
     RuntimeContractError,
 )
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -83,9 +83,9 @@ async def _reopen_host(
     *,
     project_root: Path,
     supports_parallel_candidates: bool = False,
-) -> FakeRunHost:
-    """Build a new fake host from only the last publicly persisted state."""
-    host = FakeRunHost(
+) -> FakeRun:
+    """Build a new fake run from only the last publicly persisted state."""
+    run = FakeRun(
         PLUGIN,
         project_root=project_root,
         responder=_passing_responder,
@@ -93,13 +93,13 @@ async def _reopen_host(
     )
     for individual in persisted.population.individuals:
         if individual.commit is not None:
-            host.workspaces.root.add_retained_revision(individual.commit)
-    await host.state.commit(
+            run.workspaces.root.add_retained_revision(individual.commit)
+    await run.state.commit(
         persisted,
-        workspace=host.workspaces.root,
+        workspace=run.workspaces.root,
         label="reopen persisted evolve state",
     )
-    return host
+    return run
 
 
 def test_deployment_retention_is_rejected_outside_the_runtime_boundary() -> None:
@@ -109,24 +109,24 @@ def test_deployment_retention_is_rejected_outside_the_runtime_boundary() -> None
 
 def test_profiler_none_reuses_only_mutator_and_judge_sessions(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=_passing_responder)
-        status = await PLUGIN.orchestrate(host, _options())
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=_passing_responder)
+        status = await PLUGIN.orchestrate(run, _options())
 
         assert status is RunStatus.SUCCEEDED
-        assert [session.role.id for session in host.agents.sessions] == ["implementer", "judge"]
-        assert [len(session.history) for session in host.agents.sessions] == [2, 2]
-        state = await host.state.load(EvolveState)
+        assert [session.role.id for session in run.agents.sessions] == ["implementer", "judge"]
+        assert [len(session.history) for session in run.agents.sessions] == [2, 2]
+        state = await run.state.load(EvolveState)
         assert state is not None
         assert len(state.population.individuals) == 2
         assert state.population.generation == 1
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
 
 def test_parallel_candidates_get_isolated_explicit_profiler_sessions(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
@@ -139,41 +139,41 @@ def test_parallel_candidates_get_isolated_explicit_profiler_sessions(tmp_path: P
             ),
         )
         status = await PLUGIN.orchestrate(
-            host,
+            run,
             _options(children_per_generation=2, max_parallelism=2),
         )
 
         assert status is RunStatus.SUCCEEDED
-        assert [candidate.id for candidate in host.workspaces.candidates] == [
+        assert [candidate.id for candidate in run.workspaces.candidates] == [
             "candidate-1",
             "candidate-2",
         ]
-        assert all(candidate.discarded for candidate in host.workspaces.candidates)
+        assert all(candidate.discarded for candidate in run.workspaces.candidates)
         profiler_sessions = [
-            session for session in host.agents.sessions if session.role.id == "profiler"
+            session for session in run.agents.sessions if session.role.id == "profiler"
         ]
         assert len(profiler_sessions) == 3
         assert all(len(session.history) == 1 for session in profiler_sessions)
         candidate_session_workspaces = {
-            session.workspace.id for session in host.agents.sessions if session.workspace.id
+            session.workspace.id for session in run.agents.sessions if session.workspace.id
         }
         assert candidate_session_workspaces == {"candidate-1", "candidate-2"}
-        assert len(host.evaluation.accuracy_calls) == 3
-        assert len(host.evaluation.benchmark_calls) == 3
-        await host.close()
+        assert len(run.evaluation.accuracy_calls) == 3
+        assert len(run.evaluation.benchmark_calls) == 3
+        await run.close()
 
     asyncio.run(scenario())
 
 
 def test_candidate_is_discarded_when_session_construction_fails(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
             supports_parallel_candidates=True,
         )
-        host.agents.script_creation(
+        run.agents.script_creation(
             None,
             None,
             None,
@@ -182,26 +182,26 @@ def test_candidate_is_discarded_when_session_construction_fails(tmp_path: Path) 
 
         with pytest.raises(RuntimeContractError, match="judge failed to open"):
             await PLUGIN.orchestrate(
-                host,
+                run,
                 _options(max_parallelism=2),
             )
 
-        assert len(host.workspaces.candidates) == 1
-        assert host.workspaces.candidates[0].discarded
-        await host.close()
+        assert len(run.workspaces.candidates) == 1
+        assert run.workspaces.candidates[0].discarded
+        await run.close()
 
     asyncio.run(scenario())
 
 
 def test_parallel_failure_finishes_cleanup_for_every_created_candidate(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
             supports_parallel_candidates=True,
         )
-        host.agents.script_creation(
+        run.agents.script_creation(
             None,
             None,
             None,
@@ -212,16 +212,16 @@ def test_parallel_failure_finishes_cleanup_for_every_created_candidate(tmp_path:
 
         with pytest.raises(RuntimeContractError, match="second candidate judge failed"):
             await PLUGIN.orchestrate(
-                host,
+                run,
                 _options(children_per_generation=2, max_parallelism=2),
             )
 
-        assert [candidate.id for candidate in host.workspaces.candidates] == [
+        assert [candidate.id for candidate in run.workspaces.candidates] == [
             "candidate-1",
             "candidate-2",
         ]
-        assert all(candidate.discarded for candidate in host.workspaces.candidates)
-        await host.close()
+        assert all(candidate.discarded for candidate in run.workspaces.candidates)
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -238,20 +238,20 @@ def test_judge_failure_skips_trusted_evaluation(tmp_path: Path) -> None:
         return _passing_responder(role, history, message, response)
 
     async def scenario() -> None:
-        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=failing_judge)
-        status = await PLUGIN.orchestrate(host, _options())
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=failing_judge)
+        status = await PLUGIN.orchestrate(run, _options())
 
         assert status is RunStatus.FAILED
-        assert host.evaluation.accuracy_calls == []
-        assert host.evaluation.benchmark_calls == []
-        await host.close()
+        assert run.evaluation.accuracy_calls == []
+        assert run.evaluation.benchmark_calls == []
+        await run.close()
 
     asyncio.run(scenario())
 
 
 def test_trusted_accuracy_rejects_candidate_after_judge_passes(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
@@ -262,35 +262,33 @@ def test_trusted_accuracy_rejects_candidate_after_judge_passes(tmp_path: Path) -
                 benchmark_configured=True,
             ),
         )
-        host.evaluation.script_accuracy(
+        run.evaluation.script_accuracy(
             AccuracyEvaluation(
                 executed=True,
                 feedback="trusted accuracy rejected the candidate",
             )
         )
 
-        status = await PLUGIN.orchestrate(host, _options())
+        status = await PLUGIN.orchestrate(run, _options())
 
         assert status is RunStatus.FAILED
-        assert len(host.evaluation.accuracy_calls) == 1
-        assert host.evaluation.benchmark_calls == []
-        profiler = next(
-            session for session in host.agents.sessions if session.role.id == "profiler"
-        )
+        assert len(run.evaluation.accuracy_calls) == 1
+        assert run.evaluation.benchmark_calls == []
+        profiler = next(session for session in run.agents.sessions if session.role.id == "profiler")
         assert profiler.history == ()
-        state = await host.state.load(EvolveState)
+        state = await run.state.load(EvolveState)
         assert state is not None
         assert len(state.population.individuals) == 1
         assert state.population.individuals[0].passed is False
         assert state.population.individuals[0].feedback == "trusted accuracy rejected the candidate"
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
 
 def test_parallelism_option_falls_back_to_serial_workspace(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
@@ -298,18 +296,18 @@ def test_parallelism_option_falls_back_to_serial_workspace(tmp_path: Path) -> No
         )
 
         status = await PLUGIN.orchestrate(
-            host,
+            run,
             _options(children_per_generation=2, max_parallelism=2),
         )
 
         assert status is RunStatus.SUCCEEDED
-        assert host.workspaces.candidates == ()
-        assert [session.workspace.id for session in host.agents.sessions] == [None, None]
-        assert [len(session.history) for session in host.agents.sessions] == [3, 3]
-        state = await host.state.load(EvolveState)
+        assert run.workspaces.candidates == ()
+        assert [session.workspace.id for session in run.agents.sessions] == [None, None]
+        assert [len(session.history) for session in run.agents.sessions] == [3, 3]
+        state = await run.state.load(EvolveState)
         assert state is not None
         assert len(state.population.individuals) == 3
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -331,7 +329,7 @@ def test_interrupted_parallel_batch_reopens_atomically_and_cleans_up(tmp_path: P
         return _passing_responder(role, history, message, response)
 
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=interrupt_once,
@@ -340,22 +338,22 @@ def test_interrupted_parallel_batch_reopens_atomically_and_cleans_up(tmp_path: P
         options = _options(children_per_generation=2, max_parallelism=2)
 
         with pytest.raises(_ParallelBatchInterruptedError):
-            await PLUGIN.orchestrate(host, options)
+            await PLUGIN.orchestrate(run, options)
 
-        interrupted = await host.state.load(EvolveState)
+        interrupted = await run.state.load(EvolveState)
         assert interrupted is not None
         assert len(interrupted.population.individuals) == 1
         assert interrupted.generation_start is not None
         assert interrupted.admitted_slots == 0
-        assert len(host.workspaces.candidates) == 2
-        assert all(candidate.discarded for candidate in host.workspaces.candidates)
+        assert len(run.workspaces.candidates) == 2
+        assert all(candidate.discarded for candidate in run.workspaces.candidates)
         interrupted_candidate_sessions = [
-            session for session in host.agents.sessions if session.workspace.id is not None
+            session for session in run.agents.sessions if session.workspace.id is not None
         ]
         assert len(interrupted_candidate_sessions) == 4
         assert all(session.closed for session in interrupted_candidate_sessions)
 
-        await host.close()
+        await run.close()
         resumed_host = await _reopen_host(
             interrupted,
             project_root=tmp_path,
@@ -391,7 +389,7 @@ def test_crash_after_admit_before_state_commit_replays_only_uncommitted_slot(
 ) -> None:
     async def scenario() -> None:
         options = _options()
-        interrupted_host = FakeRunHost(
+        interrupted_host = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
@@ -456,10 +454,10 @@ def test_bootstrap_repairs_the_retained_wip_seed(tmp_path: Path) -> None:
         return _passing_responder(role, history, message, response)
 
     async def scenario() -> None:
-        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=responder)
-        status = await PLUGIN.orchestrate(host, _options(bootstrap_max_attempts=2))
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=responder)
+        status = await PLUGIN.orchestrate(run, _options(bootstrap_max_attempts=2))
 
-        state = await host.state.load(EvolveState)
+        state = await run.state.load(EvolveState)
         assert status is RunStatus.SUCCEEDED
         assert state is not None
         failed, seed, child = state.population.individuals
@@ -474,7 +472,7 @@ def test_bootstrap_repairs_the_retained_wip_seed(tmp_path: Path) -> None:
             in (implementer_messages[1])
         )
         assert "add the missing endpoint" in implementer_messages[1]
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -512,7 +510,7 @@ def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> No
         }
 
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             responder=responder,
@@ -522,9 +520,9 @@ def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> No
                 profiler_id="linux_cpu",
             ),
         )
-        status = await PLUGIN.orchestrate(host, _options(metric_space=space))
+        status = await PLUGIN.orchestrate(run, _options(metric_space=space))
 
-        state = await host.state.load(EvolveState)
+        state = await run.state.load(EvolveState)
         assert status is RunStatus.SUCCEEDED
         assert state is not None
         seed, child = state.population.individuals
@@ -532,7 +530,7 @@ def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> No
         assert child.metrics == {"throughput": 80.0, "latency_ms": 50.0}
         search = PopulationSearch(PopulationConfig(space=space, seed=0))
         assert {item.id for item in search.frontier(state.population)} == {seed.id, child.id}
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -551,18 +549,18 @@ def test_projection_exposes_committed_population_and_metric_space() -> None:
 
 def test_openevolve_exports_every_passing_revision_through_runtime(tmp_path: Path) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=_passing_responder)
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=_passing_responder)
         status = await PLUGIN.orchestrate(
-            host,
+            run,
             _options(search_policy="openevolve"),
         )
 
         assert status is RunStatus.SUCCEEDED
-        assert len(host.workspaces.export_patch_calls) == 2
-        state = await host.state.load(EvolveState)
+        assert len(run.workspaces.export_patch_calls) == 2
+        state = await run.state.load(EvolveState)
         assert state is not None
         assert state.population.selector_state is not None
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -570,7 +568,7 @@ def test_openevolve_exports_every_passing_revision_through_runtime(tmp_path: Pat
 def test_resume_replays_proposals_but_skips_admitted_slots(tmp_path: Path) -> None:
     async def scenario() -> None:
         options = _options(children_per_generation=2)
-        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=_passing_responder)
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=_passing_responder)
         search = PopulationSearch(
             PopulationConfig(
                 space=options.metric_space,
@@ -588,7 +586,7 @@ def test_resume_replays_proposals_but_skips_admitted_slots(tmp_path: Path) -> No
                 parent_id=None,
                 summary="seed",
                 feedback="",
-                commit=host.workspaces.root.revision,
+                commit=run.workspaces.root.revision,
             ),
         )
         generation_start = search.end_generation(seeded)
@@ -604,27 +602,27 @@ def test_resume_replays_proposals_but_skips_admitted_slots(tmp_path: Path) -> No
                 feedback="failed",
             ),
         )
-        await host.state.commit(
+        await run.state.commit(
             EvolveState(
                 population=after_first,
                 metric_space=options.metric_space,
                 generation_start=generation_start,
                 admitted_slots=1,
             ),
-            workspace=host.workspaces.root,
+            workspace=run.workspaces.root,
             label="interrupted after slot one",
         )
 
-        status = await PLUGIN.orchestrate(host, options)
+        status = await PLUGIN.orchestrate(run, options)
 
         assert status is RunStatus.SUCCEEDED
-        assert [len(session.history) for session in host.agents.sessions] == [1, 1]
-        assert len(host.evaluation.accuracy_calls) == 1
-        state = await host.state.load(EvolveState)
+        assert [len(session.history) for session in run.agents.sessions] == [1, 1]
+        assert len(run.evaluation.accuracy_calls) == 1
+        state = await run.state.load(EvolveState)
         assert state is not None
         assert len(state.population.individuals) == 3
         assert state.generation_start is None
         assert state.admitted_slots == 0
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())

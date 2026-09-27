@@ -9,7 +9,7 @@ from vibesys.orchestration.profile_focus import ProfileAttributionError, parse_a
 if TYPE_CHECKING:
     from vibesys.inputs import ProfileGuidedInput
     from vibesys.orchestration.profile_focus import ProfileBottleneck
-    from vs_runtime.api import CommandResult, RunHost, Workspace
+    from vs_runtime.api import CommandResult, Run, Workspace
 
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
 _END = "__VIBESYS_ATTRIBUTION_END__"
@@ -31,7 +31,7 @@ class _AttributionCommandError(ProfileAttributionError):
 
 
 async def _capture_output(
-    host: RunHost,
+    run: Run,
     argv: tuple[str, ...],
     *,
     workspace: Workspace,
@@ -39,7 +39,7 @@ async def _capture_output(
     timeout_seconds: int,
 ) -> CommandResult:
     try:
-        return await host.commands.capture_output(
+        return await run.commands.capture_output(
             argv,
             workspace=workspace,
             output_argument=output_argument,
@@ -50,15 +50,15 @@ async def _capture_output(
 
 
 async def run_attribution(
-    host: RunHost,
+    run: Run,
     config: ProfileGuidedInput,
     *,
     workspace: Workspace,
 ) -> tuple[ProfileBottleneck, ...]:
     """Run the configured profiler and validate profile result protocol v1."""
-    host.log(f"[profile-guidance] running attribution: {' '.join(config.command)}")
+    run.observations.note(f"[profile-guidance] running attribution: {' '.join(config.command)}")
     result = await _capture_output(
-        host,
+        run,
         config.command,
         workspace=workspace,
         output_argument="--vs-output",

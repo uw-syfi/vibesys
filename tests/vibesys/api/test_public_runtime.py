@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.vibesys.orchestration.plugin import capability_plugin
+from vibesys.run.host import open_product_run_host
 
 from vibesys.api import (
     ComputeBackend,
@@ -17,7 +18,12 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.run.host import open_product_run_host
+from vibesys.events import (
+    AgentOutputChunkData,
+    CoreEventType,
+    FrameworkSource,
+    FrameworkWarningData,
+)
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import ToolServerDescriptor
 from vs_runtime.api import Workspace
@@ -131,6 +137,41 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
         integration.close()
 
 
+def test_product_observations_log_once_and_publish_typed_warnings(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with open_product_run_host(
+            _request(project_root), integration, plugin=_PLUGIN
+        ) as run:
+            assert not hasattr(run, "log")
+            assert not hasattr(run, "close")
+            run.observations.note("policy note")
+            run.observations.warning("policy warning")
+
+    try:
+        asyncio.run(exercise())
+        events = integration.events.read()
+    finally:
+        integration.close()
+
+    diagnostic_lines = [
+        event.data.content
+        for event in events
+        if isinstance(event.data, AgentOutputChunkData) and event.data.channel == "diagnostic"
+    ]
+    assert diagnostic_lines.count("policy note\n") == 1
+    assert diagnostic_lines.count("policy warning\n") == 1
+    warnings = [event for event in events if event.type is CoreEventType.FRAMEWORK_WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].data == FrameworkWarningData(
+        summary="policy warning",
+        source=FrameworkSource.LOOP,
+    )
+
+
 def test_product_host_closes_resources_when_capability_assembly_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
@@ -149,7 +190,7 @@ def test_product_host_closes_resources_when_capability_assembly_fails(tmp_path: 
                 backend_factory=backend_factory,
                 agent_tool_bindings=_FailingToolBindings(),
             ):
-                pytest.fail("failed product assembly yielded a host")
+                pytest.fail("failed product assembly yielded a run")
 
     try:
         asyncio.run(exercise())

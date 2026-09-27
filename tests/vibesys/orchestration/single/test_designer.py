@@ -23,7 +23,7 @@ from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.designer import DesignerPlanRequest, request_plan
 from vibesys.orchestration.single.models import PlanContext
 from vs_runtime.api import StructuredResponseError, WorkspaceAccess
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -93,20 +93,20 @@ def _run(
     state: HypothesisState | None = None,
     round_number: int = 1,
     installed: dict[str, tuple[str, ...]] | None = None,
-) -> tuple[OrchestratorPlan, FakeRunHost]:
-    async def scenario() -> tuple[OrchestratorPlan, FakeRunHost]:
-        host = FakeRunHost(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
-        host.skills.installed_resources = installed or {}
+) -> tuple[OrchestratorPlan, FakeRun]:
+    async def scenario() -> tuple[OrchestratorPlan, FakeRun]:
+        run = FakeRun(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
+        run.skills.installed_resources = installed or {}
         request = DesignerPlanRequest(
             round_number=round_number,
             state=state or HypothesisState(),
             context=_context(),
-            workspace=host.workspaces.root,
+            workspace=run.workspaces.root,
         )
         try:
-            return await request_plan(host, _search(), request), host
+            return await request_plan(run, _search(), request), run
         finally:
-            await host.close()
+            await run.close()
 
     return asyncio.run(scenario())
 
@@ -125,7 +125,7 @@ def test_designer_renders_context_normalizes_plan_and_resolves_skills() -> None:
         )
     )
 
-    plan, host = _run(
+    plan, run = _run(
         script,
         installed={"profiling": ("SKILL.md", "references/att.md")},
     )
@@ -143,11 +143,11 @@ def test_designer_renders_context_normalizes_plan_and_resolves_skills() -> None:
     assert script.calls[0][2] is OrchestratorPlan
     assert "progress/roadmap.md" in script.calls[0][1]
     assert "Use the allocated device." in script.calls[0][1]
-    assert len(host.agents.sessions) == 1
-    assert host.agents.sessions[0].role.workspace_access is WorkspaceAccess.LIMITED
-    assert host.agents.sessions[0].writable_paths == ("progress/roadmap.md",)
-    assert host.agents.sessions[0].closed
-    assert any("missing.md" in line for line in host.logs)
+    assert len(run.agents.sessions) == 1
+    assert run.agents.sessions[0].role.workspace_access is WorkspaceAccess.LIMITED
+    assert run.agents.sessions[0].writable_paths == ("progress/roadmap.md",)
+    assert run.agents.sessions[0].closed
+    assert any("missing.md" in call.message for call in run.observations.calls)
 
 
 def test_reused_hypothesis_id_gets_one_correction_in_same_session() -> None:
@@ -155,14 +155,14 @@ def test_reused_hypothesis_id_gets_one_correction_in_same_session() -> None:
     state = HypothesisState(hypotheses=[previous])
     script = _Script(_plan("H-01"), _plan("H-02"))
 
-    plan, host = _run(script, state=state, round_number=2)
+    plan, run = _run(script, state=state, round_number=2)
 
     assert plan.hypothesis_id == "H-02"
     assert [len(history) for history, _message, _type in script.calls] == [0, 1]
     assert "H-01" in script.calls[1][1]
     assert "previous plan was rejected" in script.calls[1][1]
     assert "You are the Orchestrator" not in script.calls[1][1]
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed
 
 
 def test_invalid_correction_propagates_and_releases_session() -> None:
@@ -175,27 +175,27 @@ def test_invalid_correction_propagates_and_releases_session() -> None:
         ],
     )
     script = _Script(invalid, invalid.model_copy(deep=True))
-    host = FakeRunHost(PLUGIN, responder=script.respond)
+    run = FakeRun(PLUGIN, responder=script.respond)
 
     async def scenario() -> None:
         try:
             with pytest.raises(InvalidPlanError, match="new hypothesis"):
                 await request_plan(
-                    host,
+                    run,
                     _search(),
                     DesignerPlanRequest(
                         round_number=1,
                         state=HypothesisState(),
                         context=_context(),
-                        workspace=host.workspaces.root,
+                        workspace=run.workspaces.root,
                     ),
                 )
         finally:
-            await host.close()
+            await run.close()
 
     asyncio.run(scenario())
     assert len(script.calls) == 2
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed
 
 
 def test_state_dependent_update_is_rejected_before_skill_resolution() -> None:
@@ -209,22 +209,22 @@ def test_state_dependent_update_is_rejected_before_skill_resolution() -> None:
     )
     script = _Script(invalid, _plan("H-02"))
 
-    plan, host = _run(script)
+    plan, run = _run(script)
 
     assert plan.hypothesis_id == "H-02"
     assert len(script.calls) == 2
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed
 
 
 def test_unparseable_plan_uses_policy_fallback() -> None:
     script = _Script(StructuredResponseError("orchestrator", OrchestratorPlan))
 
-    plan, host = _run(script, round_number=3)
+    plan, run = _run(script, round_number=3)
 
     assert plan.hypothesis_id == "hypothesis-0003"
     assert "fallback" in plan.reasoning
     assert len(script.calls) == 1
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed
 
 
 def test_unparseable_correction_uses_policy_fallback() -> None:
@@ -240,9 +240,9 @@ def test_unparseable_correction_uses_policy_fallback() -> None:
         StructuredResponseError("orchestrator", OrchestratorPlan),
     )
 
-    plan, host = _run(script, round_number=2)
+    plan, run = _run(script, round_number=2)
 
     assert plan.hypothesis_id == "hypothesis-0002"
     assert "fallback" in plan.reasoning
     assert [len(history) for history, _message, _type in script.calls] == [0, 1]
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed

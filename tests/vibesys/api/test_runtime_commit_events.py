@@ -1,7 +1,7 @@
 """``ctx.state.commit`` derives round/experiment events strategy-agnostically.
 
 Covers the run integration mechanism: after a
-checkpoint, the host diffs the previous published `RunView` against the new
+checkpoint, the run diffs the previous published `RunView` against the new
 one and emits `ROUND_FINISHED` for newly observed rounds and
 `EXPERIMENTS_CHANGED` when the experiment revision moved. These tests never
 reference a specific strategy ID; they use a synthetic ``"kind": "agent"``
@@ -17,16 +17,16 @@ from typing import TYPE_CHECKING
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
+from vibesys.run.host import open_product_run_host
 
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_session
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import ResumeRef, RoundSummary, RunRequest, RunStatus, RunView
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import OrchestrationPlugin, PluginProjection, ProjectedRound, RunHost
+from vs_runtime.api import OrchestrationPlugin, PluginProjection, ProjectedRound, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ class _Options(BaseModel):
     pass
 
 
-async def _orchestrate(run: RunHost, options: BaseModel) -> PluginRunStatus:
+async def _orchestrate(run: Run, options: BaseModel) -> PluginRunStatus:
     _Options.model_validate(options)
     previous = await run.state.load(_FakeAgentState)
     round_numbers = previous.round_numbers if previous is not None else ()
@@ -171,8 +171,8 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
         integration.close()
 
     round_finished = [data for kind, data in captured if kind is CoreEventType.ROUND_FINISHED]
-    # "project_attached" is unrelated: `vibesys.context` emits it once when the
-    # project attaches, independent of this host mechanism.
+    # "project_attached" is unrelated: product resource composition emits it once when the
+    # project attaches, independent of this run mechanism.
     experiments_changed = [
         data
         for kind, data in captured
@@ -266,9 +266,9 @@ def test_commit_events_property_no_double_emission_and_revision_iff_changed(
 
     ``steps`` is a list of ``(new_rounds, revision_delta)`` pairs describing
     each commit's effect on the durable state. ``resume_at`` simulates a
-    process restart partway through: the "previous view" the host diffs
+    process restart partway through: the "previous view" the run diffs
     against is recomputed from the last-committed state (exactly what
-    ``RunHost.state`` does when it re-reads durable state after a
+    ``Run.state`` does when it re-reads durable state after a
     process restart), which must be indistinguishable from an in-memory
     cache for the invariants below to hold.
     """

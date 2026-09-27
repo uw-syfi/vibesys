@@ -23,7 +23,7 @@ from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -133,9 +133,9 @@ def _attribution_payload(cost: float) -> str:
     )
 
 
-def _script_attribution(host: FakeRunHost, *costs: float) -> None:
+def _script_attribution(run: FakeRun, *costs: float) -> None:
     for cost in costs:
-        host.commands.script(CommandResult(output=_attribution_payload(cost), exit_code=0))
+        run.commands.script(CommandResult(output=_attribution_payload(cost), exit_code=0))
 
 
 def _benchmark() -> BenchmarkEvaluation:
@@ -166,7 +166,7 @@ def test_profile_preset_declares_required_profile_options() -> None:
 def test_profile_guidance_persists_without_changing_official_cadence(
     tmp_path: Path,
 ) -> None:
-    async def scenario() -> tuple[RunStatus, FakeRunHost, _Script]:
+    async def scenario() -> tuple[RunStatus, FakeRun, _Script]:
         script = _Script(
             _pre_round(),
             _plan("H-01"),
@@ -177,7 +177,7 @@ def test_profile_guidance_persists_without_changing_official_cadence(
             _implementation(),
             _judge(),
         )
-        host = FakeRunHost(
+        run = FakeRun(
             PROFILE_GUIDED_PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(
@@ -187,15 +187,15 @@ def test_profile_guidance_persists_without_changing_official_cadence(
             ),
             responder=script.respond,
         )
-        _script_attribution(host, 40.0, 35.0)
-        host.evaluation.script_benchmark(_benchmark())
+        _script_attribution(run, 40.0, 35.0)
+        run.evaluation.script_benchmark(_benchmark())
         try:
-            status = await PROFILE_GUIDED_PLUGIN.orchestrate(host, _options())
-            return status, host, script
+            status = await PROFILE_GUIDED_PLUGIN.orchestrate(run, _options())
+            return status, run, script
         finally:
-            await host.close()
+            await run.close()
 
-    status, host, script = asyncio.run(scenario())
+    status, run, script = asyncio.run(scenario())
 
     assert status is RunStatus.SUCCEEDED
     designer_prompts = [message for role, _history, message in script.calls if role == DESIGNER.id]
@@ -209,10 +209,10 @@ def test_profile_guidance_persists_without_changing_official_cadence(
     assert "profile-guided component measurement" in implementer_prompts[0]
     assert "profile-guided component measurement" in judge_prompts[0]
 
-    state = asyncio.run(host.state.load(MultiState))
+    state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     assert [record.official_evaluation for record in state.search.rounds] == [False, True]
-    assert len(host.evaluation.accuracy_calls) == 1
+    assert len(run.evaluation.accuracy_calls) == 1
     focus = state.search.profile_guidance
     assert focus is not None
     assert focus.active_component == _COMPONENT
@@ -220,11 +220,11 @@ def test_profile_guidance_persists_without_changing_official_cadence(
     assert [sample.round for sample in focus.components[0].attribution_history] == [1, 2]
     assert focus.components[0].improvement_history == []
 
-    assert len(host.commands.calls) == 2
-    assert all(call.argv == ("python", "attribute.py") for call in host.commands.calls)
-    assert all(call.output_argument == "--vs-output" for call in host.commands.calls)
-    assert all(call.timeout_seconds == 73 for call in host.commands.calls)
-    assert [session.member_id for session in host.agents.sessions] == [
+    assert len(run.commands.calls) == 2
+    assert all(call.argv == ("python", "attribute.py") for call in run.commands.calls)
+    assert all(call.output_argument == "--vs-output" for call in run.commands.calls)
+    assert all(call.timeout_seconds == 73 for call in run.commands.calls)
+    assert [session.member_id for session in run.agents.sessions] == [
         None,
         None,
         "H-01",
@@ -234,13 +234,13 @@ def test_profile_guidance_persists_without_changing_official_cadence(
         "H-02",
         None,
     ]
-    assert all(session.closed for session in host.agents.sessions)
+    assert all(session.closed for session in run.agents.sessions)
 
 
 def test_continuation_reuses_implementer_without_reprofiling_or_replanning(
     tmp_path: Path,
 ) -> None:
-    async def scenario() -> tuple[FakeRunHost, _Script]:
+    async def scenario() -> tuple[FakeRun, _Script]:
         script = _Script(
             _pre_round(),
             _plan("H-01"),
@@ -249,7 +249,7 @@ def test_continuation_reuses_implementer_without_reprofiling_or_replanning(
             _implementation(),
             _judge(),
         )
-        host = FakeRunHost(
+        run = FakeRun(
             PROFILE_GUIDED_PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(
@@ -259,17 +259,17 @@ def test_continuation_reuses_implementer_without_reprofiling_or_replanning(
             ),
             responder=script.respond,
         )
-        _script_attribution(host, 40.0)
-        host.evaluation.script_benchmark(_benchmark())
+        _script_attribution(run, 40.0)
+        run.evaluation.script_benchmark(_benchmark())
         try:
-            assert await PROFILE_GUIDED_PLUGIN.orchestrate(host, _options()) is RunStatus.SUCCEEDED
-            return host, script
+            assert await PROFILE_GUIDED_PLUGIN.orchestrate(run, _options()) is RunStatus.SUCCEEDED
+            return run, script
         finally:
-            await host.close()
+            await run.close()
 
-    host, script = asyncio.run(scenario())
+    run, script = asyncio.run(scenario())
 
-    assert len(host.commands.calls) == 1
+    assert len(run.commands.calls) == 1
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
         DESIGNER.id,
@@ -281,14 +281,14 @@ def test_continuation_reuses_implementer_without_reprofiling_or_replanning(
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     implementer_sessions = [
-        session for session in host.agents.sessions if session.role.id == IMPLEMENTER.id
+        session for session in run.agents.sessions if session.role.id == IMPLEMENTER.id
     ]
     assert len(implementer_sessions) == 1
     assert implementer_sessions[0].member_id == "H-01"
-    judge_sessions = [session for session in host.agents.sessions if session.role.id == JUDGE.id]
+    judge_sessions = [session for session in run.agents.sessions if session.role.id == JUDGE.id]
     assert len(judge_sessions) == 2
     assert all(not session.history[:-1] for session in judge_sessions)
-    state = asyncio.run(host.state.load(MultiState))
+    state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     focus = state.search.profile_guidance
     assert focus is not None
@@ -298,18 +298,18 @@ def test_continuation_reuses_implementer_without_reprofiling_or_replanning(
 def test_profile_command_failure_is_typed_and_opens_no_agent_sessions(
     tmp_path: Path,
 ) -> None:
-    async def scenario() -> FakeRunHost:
-        host = FakeRunHost(PROFILE_GUIDED_PLUGIN, project_root=tmp_path)
-        host.commands.script(CommandResult(output="profiler failed", exit_code=2))
+    async def scenario() -> FakeRun:
+        run = FakeRun(PROFILE_GUIDED_PLUGIN, project_root=tmp_path)
+        run.commands.script(CommandResult(output="profiler failed", exit_code=2))
         try:
             with pytest.raises(ProfileAttributionError, match="exit code 2"):
-                await PROFILE_GUIDED_PLUGIN.orchestrate(host, _options(max_rounds=1))
+                await PROFILE_GUIDED_PLUGIN.orchestrate(run, _options(max_rounds=1))
         finally:
-            await host.close()
-        return host
+            await run.close()
+        return run
 
-    host = asyncio.run(scenario())
+    run = asyncio.run(scenario())
 
-    assert len(host.commands.calls) == 1
-    assert host.commands.calls[0].output_argument == "--vs-output"
-    assert host.agents.sessions == ()
+    assert len(run.commands.calls) == 1
+    assert run.commands.calls[0].output_argument == "--vs-output"
+    assert run.agents.sessions == ()

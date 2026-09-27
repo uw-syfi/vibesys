@@ -16,9 +16,10 @@ from vs_runtime.fakes import (
     FakeLocalValidationCall,
     FakeModelVolumeProvisioner,
     FakeModelVolumeRequest,
+    FakeObservations,
     FakeProjectMaterializationEffects,
+    FakeRun,
     FakeRunControlEventSink,
-    FakeRunHost,
     FakeSkills,
     FakeState,
     FakeStateCommit,
@@ -28,6 +29,7 @@ from vs_runtime.fakes import (
     FakeTrustedShellCall,
     FakeWorkspace,
     FakeWorkspaces,
+    ObservationCall,
     TurnResponder,
 )
 
@@ -47,9 +49,10 @@ __all__ = [
     "FakeLocalValidationCall",
     "FakeModelVolumeProvisioner",
     "FakeModelVolumeRequest",
+    "FakeObservations",
     "FakeProjectMaterializationEffects",
+    "FakeRun",
     "FakeRunControlEventSink",
-    "FakeRunHost",
     "FakeSkills",
     "FakeState",
     "FakeStateCommit",
@@ -59,5 +62,6 @@ __all__ = [
     "FakeTrustedShellCall",
     "FakeWorkspace",
     "FakeWorkspaces",
+    "ObservationCall",
     "TurnResponder",
 ]

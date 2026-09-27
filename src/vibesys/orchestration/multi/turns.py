@@ -45,7 +45,7 @@ from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     ResolvedSkillResources,
-    RunHost,
+    Run,
     SkillCatalogError,
     SkillResourceRequest,
     StructuredResponseError,
@@ -152,7 +152,7 @@ def _fallback_judge() -> JudgeResponse:
 
 
 async def _resolve_skills(
-    host: RunHost,
+    run: Run,
     selections: list[SkillResourceSelection],
 ) -> tuple[list[SkillResourceSelection], list[ResolvedSkillResources]]:
     if not selections:
@@ -166,12 +166,14 @@ async def _resolve_skills(
         for item in selections
     )
     try:
-        result = await host.skills.resolve(requests)
+        result = await run.skills.resolve(requests)
     except SkillCatalogError as error:
-        host.log(f"[skills] ignored recommendations because the catalog is invalid: {error}")
+        run.observations.warning(
+            f"[skills] ignored recommendations because the catalog is invalid: {error}"
+        )
         return [], []
     for diagnostic in result.diagnostics:
-        host.log(f"[skills] {diagnostic}")
+        run.observations.warning(f"[skills] {diagnostic}")
     portable = [
         SkillResourceSelection(
             skill=item.name,
@@ -188,18 +190,18 @@ class MultiAgentTurns:
 
     def __init__(
         self,
-        host: RunHost,
+        run: Run,
         options: MultiOptions | ProfileGuidedMultiOptions,
         search: HypothesisSearch,
         files: MultiFiles,
     ) -> None:
         """Bind run effects and pure policy without opening conversations."""
-        self.host = host
+        self.run = run
         self.options = options
         self.search = search
         self.files = files
-        self.workspace = host.workspaces.root
-        self.domain = resolve_domain(DomainName(host.facts.domain_id))
+        self.workspace = run.workspaces.root
+        self.domain = resolve_domain(DomainName(run.facts.domain_id))
         self.modality = options.modality
         if self.modality is None and self.domain.name is DomainName.LLM_SERVING:
             self.modality = "text_generation"
@@ -207,7 +209,7 @@ class MultiAgentTurns:
         self._closed = False
 
     def _domain_context(self, *, trusted_commands: bool = True) -> dict[str, object]:
-        facts = self.host.facts
+        facts = self.run.facts
         return {
             "modality": self.modality,
             "interface": self.options.interface,
@@ -227,7 +229,7 @@ class MultiAgentTurns:
         has_history: bool,
     ) -> PreRoundDecision:
         """Ask a fresh designer conversation whether specialist evidence is useful."""
-        facts = self.host.facts
+        facts = self.run.facts
         context = PreRoundContext(
             objective_location=facts.objective_location,
             regression_info=carry.regression_info,
@@ -237,7 +239,7 @@ class MultiAgentTurns:
             profile_execution=facts.profile_execution.value,
             has_history=has_history,
         )
-        session = await self.host.agents.create_session(
+        session = await self.run.agents.create_session(
             DESIGNER,
             workspace=self.workspace,
             writable_paths=(self.files.roadmap_location,),
@@ -255,7 +257,7 @@ class MultiAgentTurns:
         return decision
 
     def _plan_context(self, request: PlanRequest) -> PlanContext:
-        facts = self.host.facts
+        facts = self.run.facts
         return PlanContext(
             objective_location=facts.objective_location,
             profiler_summary=request.profiler_summary,
@@ -308,7 +310,7 @@ class MultiAgentTurns:
     async def plan(self, request: PlanRequest) -> OrchestratorPlan:
         """Return one normalized, state-valid plan after at most one correction."""
         context = self._plan_context(request)
-        session = await self.host.agents.create_session(
+        session = await self.run.agents.create_session(
             DESIGNER,
             workspace=request.workspace,
             writable_paths=(self.files.roadmap_location,),
@@ -340,13 +342,15 @@ class MultiAgentTurns:
                         "hypothesis at most once, and never the new one. Produce a corrected "
                         "plan for this round. Return only the JSON object."
                     )
-                    self.host.log(f"[orchestrator] plan rejected ({error}); reprompting once")
+                    self.run.observations.warning(
+                        f"[orchestrator] plan rejected ({error}); reprompting once"
+                    )
                     try:
                         plan = await session.turn(feedback, response=OrchestratorPlan)
                     except StructuredResponseError:
                         plan = _fallback_plan()
                     continue
-                portable, _ = await _resolve_skills(self.host, plan.recommended_skills)
+                portable, _ = await _resolve_skills(self.run, plan.recommended_skills)
                 plan.recommended_skills = portable
                 self.files.write_plan(request.round_number, plan)
                 self.files.note_plan(request.round_number, plan)
@@ -374,7 +378,7 @@ production path cannot be measured safely.
 
     async def profile(self, round_number: int, focus: str) -> ProfilerSummary | None:
         """Collect optional evidence in one fresh bounded-write conversation."""
-        facts = self.host.facts
+        facts = self.run.facts
         kind = ProfilerKind(facts.profiler_id)
         if kind is ProfilerKind.NONE:
             return None
@@ -398,7 +402,7 @@ production path cannot be measured safely.
             profiler_mcp_name=definition.mcp_name,
             profiler_campaign_context=self._profiler_campaign_context(artifact),
         )
-        session = await self.host.agents.create_session(
+        session = await self.run.agents.create_session(
             PROFILER,
             workspace=self.workspace,
             writable_paths=(artifact,),
@@ -412,7 +416,7 @@ production path cannot be measured safely.
             except StructuredResponseError:
                 summary = _fallback_profiler()
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920440 [BLE001]; profiling is advisory; a failed specialist must not abort the policy round.
-            self.host.log(f"[profiler] failed: {error}")
+            self.run.observations.warning(f"[profiler] failed: {error}")
             return None
         finally:
             await session.close()
@@ -426,11 +430,9 @@ production path cannot be measured safely.
     ) -> ImplementerContext:
         plan = request.plan
         hypothesis = request.active_hypothesis
-        plan.recommended_skills, resolved = await _resolve_skills(
-            self.host, plan.recommended_skills
-        )
+        plan.recommended_skills, resolved = await _resolve_skills(self.run, plan.recommended_skills)
         plan_location = self.files.write_plan(request.round_number, plan)
-        facts = self.host.facts
+        facts = self.run.facts
         return ImplementerContext(
             reference_path=facts.reference_location,
             modality=self.modality,
@@ -475,19 +477,17 @@ production path cannot be measured safely.
     ) -> ImplementerContinuationContext:
         plan = request.plan
         hypothesis = request.active_hypothesis
-        plan.recommended_skills, resolved = await _resolve_skills(
-            self.host, plan.recommended_skills
-        )
+        plan.recommended_skills, resolved = await _resolve_skills(self.run, plan.recommended_skills)
         plan_location = self.files.write_plan(request.round_number, plan)
         return ImplementerContinuationContext(
             hypothesis_id=plan.hypothesis_id,
-            objective_location=self.host.facts.objective_location,
+            objective_location=self.run.facts.objective_location,
             plan_artifact_location=plan_location,
             progress_location=self.files.progress_location,
             pareto_archive_location=self.files.pareto_location,
             validation_location=self.files.validation_location,
             validation_recipe_contract_location=self.files.validation_schema_location,
-            runtime_notes=self.host.facts.environment_notes,
+            runtime_notes=self.run.facts.environment_notes,
             prior_attempt_artifact_locations=self.files.prior_implementer_locations(
                 request.round_number
             ),
@@ -520,7 +520,7 @@ production path cannot be measured safely.
         )
         session = self._workers.get(plan.hypothesis_id)
         if session is None:
-            session = await self.host.agents.create_session(
+            session = await self.run.agents.create_session(
                 IMPLEMENTER,
                 workspace=request.workspace,
                 member_id=plan.hypothesis_id,
@@ -544,10 +544,10 @@ production path cannot be measured safely.
             "Implementer produced no structured response.",
             "Implementer invocation timed out.",
         }
-        updates, _ = await _resolve_skills(self.host, response.skill_context_updates)
+        updates, _ = await _resolve_skills(self.run, response.skill_context_updates)
         if updates:
             plan.recommended_skills, _ = await _resolve_skills(
-                self.host,
+                self.run,
                 [*plan.recommended_skills, *updates],
             )
             self.files.write_plan(request.round_number, plan)
@@ -566,7 +566,7 @@ production path cannot be measured safely.
         if implementation is None:
             message = "judge requires an implementer response"
             raise RuntimeError(message)
-        facts = self.host.facts
+        facts = self.run.facts
         plan_location = self.files.write_plan(request.round_number, request.plan)
         evidence_location = self.files.write_implementer(
             request.round_number,
@@ -604,7 +604,7 @@ production path cannot be measured safely.
             validation_location=self.files.validation_location,
             validation_recipe_contract_location=self.files.validation_schema_location,
         )
-        session = await self.host.agents.create_session(JUDGE, workspace=request.workspace)
+        session = await self.run.agents.create_session(JUDGE, workspace=request.workspace)
         try:
             try:
                 response = await session.turn(

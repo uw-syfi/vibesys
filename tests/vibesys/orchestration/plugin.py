@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from vs_runtime.api import OrchestrationPlugin, RunStatus
 
 if TYPE_CHECKING:
-    from vs_runtime.api import AgentRole, RunHost
+    from vs_runtime.api import AgentRole, Run
 
 
 class EmptyOptions(BaseModel):
@@ -23,7 +23,7 @@ class _UnexpectedOrchestrationError(AssertionError):
         super().__init__("capability test plugins are not orchestrated")
 
 
-async def _not_orchestrated(_host: RunHost, _options: BaseModel) -> RunStatus:
+async def _not_orchestrated(_host: Run, _options: BaseModel) -> RunStatus:
     raise _UnexpectedOrchestrationError
 
 

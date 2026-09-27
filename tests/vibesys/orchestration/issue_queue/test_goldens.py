@@ -16,7 +16,7 @@ from tests.vibesys.golden.helpers import (
 
 from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueOptions, IssueQueueState
 from vs_runtime.api import RunFacts, RunStatus
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -218,7 +218,7 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
             _review(),
             _performance(detailed=scenario == "perf_eval"),
         )
-        host = FakeRunHost(
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(
@@ -235,9 +235,9 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
             responder=script.respond,
         )
         try:
-            status = await PLUGIN.orchestrate(host, _options())
+            status = await PLUGIN.orchestrate(run, _options())
             assert status is RunStatus.SUCCEEDED
-            state = await host.state.load(IssueQueueState)
+            state = await run.state.load(IssueQueueState)
             assert state is not None
             assert PLUGIN.project is not None
             return {
@@ -245,7 +245,7 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
                 "artifacts": _artifact_snapshot(tmp_path),
                 "trajectory": {
                     "status": status.value,
-                    "logs": list(host.logs),
+                    "logs": [call.message for call in run.observations.calls],
                     "calls": [
                         {
                             "role": call["role"],
@@ -259,13 +259,13 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
                             "label": commit.label,
                             "state": commit.value.model_dump(mode="json"),
                         }
-                        for commit in host.state.commits
+                        for commit in run.state.commits
                     ],
                 },
                 "projection": PLUGIN.project(state).model_dump(mode="json"),
-                "retained": host.workspaces.root.retained,
+                "retained": run.workspaces.root.retained,
             }
         finally:
-            await host.close()
+            await run.close()
 
     _assert_golden(scenario, asyncio.run(run()), workspace=tmp_path)

@@ -18,7 +18,7 @@ from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -113,9 +113,9 @@ def _attribution_payload(*, cost: float) -> str:
     )
 
 
-def _script_attribution(host: FakeRunHost, *costs: float) -> None:
+def _script_attribution(run: FakeRun, *costs: float) -> None:
     for cost in costs:
-        host.commands.script(
+        run.commands.script(
             CommandResult(output=_attribution_payload(cost=cost), exit_code=0),
         )
 
@@ -138,9 +138,9 @@ def test_profile_preset_declares_required_profile_options() -> None:
 def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cadence(
     tmp_path: Path,
 ) -> None:
-    async def scenario() -> tuple[RunStatus, FakeRunHost, _Script]:
+    async def scenario() -> tuple[RunStatus, FakeRun, _Script]:
         script = _Script(_plan("H-01"), _response(), _plan("H-02"), _response())
-        host = FakeRunHost(
+        run = FakeRun(
             PROFILE_GUIDED_PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(
@@ -150,8 +150,8 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
             ),
             responder=script.respond,
         )
-        _script_attribution(host, 40.0, 35.0)
-        host.evaluation.script_benchmark(
+        _script_attribution(run, 40.0, 35.0)
+        run.evaluation.script_benchmark(
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -161,12 +161,12 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
             ),
         )
         try:
-            status = await PROFILE_GUIDED_PLUGIN.orchestrate(host, _options())
-            return status, host, script
+            status = await PROFILE_GUIDED_PLUGIN.orchestrate(run, _options())
+            return status, run, script
         finally:
-            await host.close()
+            await run.close()
 
-    status, host, script = asyncio.run(scenario())
+    status, run, script = asyncio.run(scenario())
 
     assert status is RunStatus.SUCCEEDED
     designer_prompts = [message for role, _history, message in script.calls if role == DESIGNER.id]
@@ -179,7 +179,7 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
 
     state_type = PROFILE_GUIDED_PLUGIN.state
     assert state_type is not None
-    state = asyncio.run(host.state.load(state_type))
+    state = asyncio.run(run.state.load(state_type))
     assert state is not None
     dumped = state.model_dump()
     records = [
@@ -187,7 +187,7 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
     ]
     assert records[0]["official_evaluation"] is False
     assert records[1]["official_evaluation"] is True
-    assert len(host.evaluation.accuracy_calls) == 1
+    assert len(run.evaluation.accuracy_calls) == 1
     focus = dumped["search"]["profile_guidance"]
     assert focus["active_component"] == _COMPONENT
     component = focus["components"][0]
@@ -196,13 +196,13 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
     assert [sample["round"] for sample in component["attribution_history"]] == [1, 2]
     assert component["improvement_history"] == []
 
-    assert len(host.commands.calls) == 2
-    first_run = host.commands.calls[0]
+    assert len(run.commands.calls) == 2
+    first_run = run.commands.calls[0]
     assert first_run.argv == ("python", "attribute.py")
     assert first_run.output_argument == "--vs-output"
     assert first_run.timeout_seconds == 73
     assert [
-        commit.label for commit in host.state.commits if commit.label and "prepare" in commit.label
+        commit.label for commit in run.state.commits if commit.label and "prepare" in commit.label
     ] == [
         "profile-guided: prepare round 1",
         "profile-guided: prepare round 2",
@@ -210,17 +210,17 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
 
 
 def test_profile_command_failure_is_typed(tmp_path: Path) -> None:
-    async def scenario() -> FakeRunHost:
-        host = FakeRunHost(PROFILE_GUIDED_PLUGIN, project_root=tmp_path)
-        host.commands.script(CommandResult(output="profiler failed", exit_code=2))
+    async def scenario() -> FakeRun:
+        run = FakeRun(PROFILE_GUIDED_PLUGIN, project_root=tmp_path)
+        run.commands.script(CommandResult(output="profiler failed", exit_code=2))
         try:
             with pytest.raises(ProfileAttributionError, match="exit code 2"):
-                await PROFILE_GUIDED_PLUGIN.orchestrate(host, _options(max_rounds=1))
+                await PROFILE_GUIDED_PLUGIN.orchestrate(run, _options(max_rounds=1))
         finally:
-            await host.close()
-        return host
+            await run.close()
+        return run
 
-    host = asyncio.run(scenario())
+    run = asyncio.run(scenario())
 
-    assert len(host.commands.calls) == 1
-    assert host.commands.calls[0].output_argument == "--vs-output"
+    assert len(run.commands.calls) == 1
+    assert run.commands.calls[0].output_argument == "--vs-output"

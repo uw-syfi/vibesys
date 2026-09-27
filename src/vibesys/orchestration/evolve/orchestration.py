@@ -36,7 +36,7 @@ from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     MetricDirection,
-    RunHost,
+    Run,
     RunStatus,
     StructuredResponseError,
     Workspace,
@@ -113,12 +113,12 @@ class _CandidateTask:
     target_island: int | None = None
 
 
-async def _open_sessions(host: RunHost, workspace: Workspace) -> _Sessions:
-    mutator = await host.agents.create_session(MUTATOR, workspace=workspace)
-    judge = await host.agents.create_session(JUDGE, workspace=workspace)
+async def _open_sessions(run: Run, workspace: Workspace) -> _Sessions:
+    mutator = await run.agents.create_session(MUTATOR, workspace=workspace)
+    judge = await run.agents.create_session(JUDGE, workspace=workspace)
     profiler = (
-        await host.agents.create_session(PROFILER, workspace=workspace)
-        if ProfilerKind(host.facts.profiler_id) is not ProfilerKind.NONE
+        await run.agents.create_session(PROFILER, workspace=workspace)
+        if ProfilerKind(run.facts.profiler_id) is not ProfilerKind.NONE
         else None
     )
     return _Sessions(mutator=mutator, judge=judge, profiler=profiler)
@@ -153,10 +153,10 @@ def _fallback_profiler() -> ProfilerSummary:
 class _EvolveRun:
     """One crash-recoverable evolutionary campaign."""
 
-    def __init__(self, host: RunHost, options: EvolveOptions) -> None:
-        self.host = host
+    def __init__(self, run: Run, options: EvolveOptions) -> None:
+        self.run = run
         self.options = options
-        self.root = host.workspaces.root
+        self.root = run.workspaces.root
         self.objectives = tuple(
             BenchmarkObjective(
                 name=item.name,
@@ -171,10 +171,10 @@ class _EvolveRun:
         self.search: PopulationSearch
         self.state: EvolveState
         self.root_sessions: _Sessions
-        self.domain = resolve_domain(DomainName(host.facts.domain_id))
+        self.domain = resolve_domain(DomainName(run.facts.domain_id))
 
     async def initialize(self) -> None:
-        loaded = await self.host.state.load(EvolveState)
+        loaded = await self.run.state.load(EvolveState)
         selector_config = self.options.openevolve_config()
         selector = self.options.search_policy
         if selector is None:
@@ -202,17 +202,17 @@ class _EvolveRun:
         self.state = loaded or EvolveState(
             population=self.search.initial(), metric_space=self.options.metric_space
         )
-        self.root_sessions = await _open_sessions(self.host, self.root)
+        self.root_sessions = await _open_sessions(self.run, self.root)
         await self._commit("evolve: initialize search state")
 
     async def _commit(self, label: str) -> None:
-        await self.host.state.commit(self.state, workspace=self.root, label=label)
+        await self.run.state.commit(self.state, workspace=self.root, label=label)
 
-    async def run(self) -> RunStatus:
+    async def execute(self) -> RunStatus:
         await self.initialize()
         try:
             if self.search.needs_bootstrap(self.state.population):
-                await self.host.control.checkpoint()
+                await self.run.control.checkpoint()
                 if not await self._bootstrap():
                     return RunStatus.FAILED
             start = (
@@ -221,11 +221,11 @@ class _EvolveRun:
                 else self.state.population.generation + 1
             )
             for generation in range(start, self.options.max_generations + 1):
-                await self.host.control.checkpoint()
+                await self.run.control.checkpoint()
                 await self._run_generation(generation)
             best = self.search.best(self.state.population)
             if best is not None and best.commit is not None:
-                await self.host.workspaces.adopt(best.commit)
+                await self.run.workspaces.adopt(best.commit)
                 await self.root.snapshot(f"evolve: select individual {best.id}")
             return RunStatus.SUCCEEDED
         finally:
@@ -295,13 +295,13 @@ class _EvolveRun:
             raise RuntimeError(message)
         proposals = self._proposals(generation_start)
         pending = range(self.state.admitted_slots + 1, self.options.children_per_generation + 1)
-        if self.options.max_parallelism > 1 and self.host.workspaces.supports_parallel_candidates:
+        if self.options.max_parallelism > 1 and self.run.workspaces.supports_parallel_candidates:
             outcomes = await self._parallel(generation, proposals, tuple(pending))
             for slot in pending:
                 await self._admit(generation, slot, outcomes.get(slot))
         else:
             for slot in pending:
-                await self.host.control.checkpoint()
+                await self.run.control.checkpoint()
                 proposal = proposals[slot - 1]
                 outcome = (
                     await self._serial_candidate(generation, slot, proposal)
@@ -369,10 +369,10 @@ class _EvolveRun:
     async def _isolated_candidate(
         self, generation: int, slot: int, proposal: Proposal
     ) -> CandidateOutcome:
-        candidate = await self.host.workspaces.create_candidate(proposal.parent.commit)
+        candidate = await self.run.workspaces.create_candidate(proposal.parent.commit)
         sessions = None
         try:
-            sessions = await _open_sessions(self.host, candidate)
+            sessions = await _open_sessions(self.run, candidate)
             return await self._evaluate(
                 workspace=candidate,
                 sessions=sessions,
@@ -430,10 +430,10 @@ class _EvolveRun:
         feedback = verdict.feedback if verdict.verdict is Verdict.FAIL else None
         benchmark = None
         if feedback is None:
-            accuracy = await self.host.evaluation.accuracy(workspace)
+            accuracy = await self.run.evaluation.accuracy(workspace)
             feedback = accuracy.feedback
-        if feedback is None and self.host.facts.benchmark_configured:
-            benchmark = await self.host.evaluation.benchmark(workspace, objectives=self.objectives)
+        if feedback is None and self.run.facts.benchmark_configured:
+            benchmark = await self.run.evaluation.benchmark(workspace, objectives=self.objectives)
             feedback = benchmark.feedback
         if feedback is not None:
             return CandidateOutcome(
@@ -449,7 +449,7 @@ class _EvolveRun:
         label = "gen-0-seed" if task.cold_start else f"gen-{task.generation}-child-{task.child}"
         revision = await workspace.snapshot(label)
         metric, unit, metrics = self._fitness(profile, benchmark)
-        code = await self.host.workspaces.export_patch(revision) if self.search.needs_code else None
+        code = await self.run.workspaces.export_patch(revision) if self.search.needs_code else None
         return CandidateOutcome(
             passed=True,
             parent_id=task.parent.id if task.parent is not None else None,
@@ -475,8 +475,8 @@ class _EvolveRun:
         repair_seed: bool,
     ) -> MutatorResponse:
         context = MutatorContext(
-            accuracy_command=self.host.facts.accuracy_command,
-            benchmark_command=self.host.facts.benchmark_command,
+            accuracy_command=self.run.facts.accuracy_command,
+            benchmark_command=self.run.facts.benchmark_command,
             domain_implementer=render_domain_section(
                 self.domain, DomainRole.IMPLEMENTER, **self._domain_context()
             ),
@@ -486,12 +486,12 @@ class _EvolveRun:
             is_cold_start=cold_start,
             modality=self.options.modality,
             num_failed_attempts=sum(not item.passed for item in self.state.population.individuals),
-            objective=self.host.facts.objective,
+            objective=self.run.facts.objective,
             objectives=None,
             parent=parent,
-            reference_path=self.host.facts.reference_location,
+            reference_path=self.run.facts.reference_location,
             repair_seed=repair_seed,
-            runtime_notes=self.host.facts.environment_notes,
+            runtime_notes=self.run.facts.environment_notes,
         )
         try:
             return await session.turn(render_mutator(context), response=MutatorResponse)
@@ -500,16 +500,16 @@ class _EvolveRun:
 
     async def _judge(self, session: AgentSession) -> JudgeResponse:
         context = CandidateJudgeContext(
-            accuracy_command=self.host.facts.accuracy_command,
-            benchmark_command=self.host.facts.benchmark_command,
+            accuracy_command=self.run.facts.accuracy_command,
+            benchmark_command=self.run.facts.benchmark_command,
             domain_judge=render_domain_section(
                 self.domain, DomainRole.JUDGE, **self._domain_context()
             ),
             interface=_INTERFACE,
             modality=self.options.modality,
-            objective=self.host.facts.objective,
+            objective=self.run.facts.objective,
             pass_criteria=_CANDIDATE_REQUIREMENTS,
-            runtime_notes=self.host.facts.environment_notes,
+            runtime_notes=self.run.facts.environment_notes,
         )
         try:
             return await session.turn(render_judge(context), response=JudgeResponse)
@@ -517,7 +517,7 @@ class _EvolveRun:
             return _fallback_judge()
 
     async def _profile(self, session: AgentSession | None) -> ProfilerSummary | None:
-        kind = ProfilerKind(self.host.facts.profiler_id)
+        kind = ProfilerKind(self.run.facts.profiler_id)
         if kind is ProfilerKind.NONE or session is None:
             return None
         definition = profiler_definition(kind)
@@ -527,20 +527,20 @@ class _EvolveRun:
         )
         addendum = _PARETO_PROFILER_ADDENDUM.format(objective_list=objectives) if objectives else ""
         context = CandidateProfilerContext(
-            benchmark_command=self.host.facts.benchmark_command,
+            benchmark_command=self.run.facts.benchmark_command,
             domain_profiler=render_domain_section(
                 self.domain, DomainRole.PROFILER, **self._domain_context()
             ),
             modality=self.options.modality,
-            objective=self.host.facts.objective,
+            objective=self.run.facts.objective,
             pareto_objectives_addendum=addendum,
-            profile_execution=self.host.facts.profile_execution.value,
+            profile_execution=self.run.facts.profile_execution.value,
             profile_focus=(
                 "Measure the headline metric for this candidate; rank top kernel-level bottlenecks."
             ),
             profiler_mcp_name=definition.mcp_name,
             profiler_support_name=definition.support_name,
-            runtime_notes=self.host.facts.environment_notes,
+            runtime_notes=self.run.facts.environment_notes,
         )
         try:
             return await session.turn(
@@ -549,11 +549,11 @@ class _EvolveRun:
         except StructuredResponseError:
             return _fallback_profiler()
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920437 [BLE001]; profiling is advisory and provider failures are not normalized to one stable runtime exception yet; restricting this catch would make an optional profile abort accepted candidates.
-            self.host.log(f"profiler failed: {error}")
+            self.run.observations.warning(f"profiler failed: {error}")
             return None
 
     def _domain_context(self) -> dict[str, object]:
-        facts = self.host.facts
+        facts = self.run.facts
         return {
             "modality": self.options.modality,
             "interface": _INTERFACE,
@@ -591,9 +591,9 @@ class _EvolveRun:
         )
 
 
-async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
+async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run one evolutionary search campaign."""
-    return await _EvolveRun(host, EvolveOptions.model_validate(raw_options)).run()
+    return await _EvolveRun(run, EvolveOptions.model_validate(raw_options)).execute()
 
 
 __all__ = ["orchestrate"]

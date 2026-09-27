@@ -24,8 +24,8 @@ from vs_runtime.api import (
     PluginProjection,
     ProfileExecution,
     ProjectedRound,
+    Run,
     RunFacts,
-    RunHost,
     RunStatus,
     RuntimeContractError,
     SessionClosedError,
@@ -38,7 +38,7 @@ from vs_runtime.api import (
     WorkspaceSourceFact,
     validate_workspace_writable_paths,
 )
-from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
+from vs_runtime.api.testing import FakeRun, FakeWorkspace, ObservationCall
 
 
 class _Options(BaseModel):
@@ -78,7 +78,7 @@ def _role(role_id: str = "implementer") -> AgentRole:
     )
 
 
-async def _orchestrate(_host: RunHost, _options: BaseModel) -> RunStatus:
+async def _orchestrate(_host: Run, _options: BaseModel) -> RunStatus:
     return RunStatus.SUCCEEDED
 
 
@@ -133,11 +133,11 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
         profile_execution=ProfileExecution.REMOTE,
         workspace_sources=(WorkspaceSourceFact(name="runtime", dest="src/runtime"),),
     )
-    host = FakeRunHost(_plugin(), facts=facts)
+    run = FakeRun(_plugin(), facts=facts)
 
-    assert host.facts is facts
+    assert run.facts is facts
     with pytest.raises(ValidationError):
-        host.facts.__setattr__("domain_id", "generic")
+        run.facts.__setattr__("domain_id", "generic")
     with pytest.raises(ValidationError):
         RunFacts.model_validate({"domain_id": "generic", "backend": "modal"})
     with pytest.raises(ValidationError):
@@ -149,13 +149,31 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
 
 
 def test_fake_run_facts_have_a_policy_neutral_default() -> None:
-    host = FakeRunHost(_plugin())
+    run = FakeRun(_plugin())
 
-    assert host.facts == RunFacts(domain_id="generic", objective="Test objective.")
-    assert host.facts.objective == "Test objective."
-    assert host.facts.objective_location == "OBJECTIVE.md"
-    assert host.facts.reference_location == "."
-    assert host.facts.profiler_id == "none"
+    assert run.facts == RunFacts(domain_id="generic", objective="Test objective.")
+    assert run.facts.objective == "Test objective."
+    assert run.facts.objective_location == "OBJECTIVE.md"
+    assert run.facts.reference_location == "."
+    assert run.facts.profiler_id == "none"
+
+
+def test_run_is_a_fixed_value_with_typed_ordered_observations() -> None:
+    run = FakeRun(_plugin())
+
+    assert isinstance(run, Run)
+    assert not hasattr(Run, "log")
+    assert not hasattr(Run, "close")
+
+    run.observations.note("round started")
+    run.observations.warning("candidate was restored")
+    run.observations.note("round continued")
+
+    assert run.observations.calls == (
+        ObservationCall("note", "round started"),
+        ObservationCall("warning", "candidate was restored"),
+        ObservationCall("note", "round continued"),
+    )
 
 
 def test_limited_session_grants_are_validated_and_fixed() -> None:
@@ -166,8 +184,8 @@ def test_limited_session_grants_are_validated_and_fixed() -> None:
             workspace_access=WorkspaceAccess.LIMITED,
         )
         regular_role = _role()
-        host = FakeRunHost(_plugin(role, regular_role))
-        session = await host.agents.create_session(
+        run = FakeRun(_plugin(role, regular_role))
+        session = await run.agents.create_session(
             role,
             workspace=_workspace(),
             writable_paths=("memory", "evidence/report.json"),
@@ -179,14 +197,14 @@ def test_limited_session_grants_are_validated_and_fixed() -> None:
             setattr(session, writable_paths_attribute, ("elsewhere",))
 
         with pytest.raises(ValueError, match="requires writable_paths"):
-            await host.agents.create_session(role, workspace=_workspace())
+            await run.agents.create_session(role, workspace=_workspace())
         with pytest.raises(ValueError, match="cannot declare writable_paths"):
-            await host.agents.create_session(
+            await run.agents.create_session(
                 regular_role,
                 workspace=_workspace(),
                 writable_paths=("memory",),
             )
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -226,18 +244,18 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
 
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role), responder=respond)
+        run = FakeRun(_plugin(role), responder=respond)
         workspace = _workspace()
-        first = await host.agents.create_session(role, workspace=workspace, member_id="candidate-1")
+        first = await run.agents.create_session(role, workspace=workspace, member_id="candidate-1")
         assert await first.turn("one") == "one"
         assert await first.turn("two", response=_Reply) == _Reply(answer="two")
-        second = await host.agents.create_session(role, workspace=_workspace())
+        second = await run.agents.create_session(role, workspace=_workspace())
         assert await second.turn("fresh") == "fresh"
         assert first.role == role
         assert first.workspace is workspace
         assert first.member_id == "candidate-1"
         assert first.binding == AgentBinding(backend="fake", driver="fake", provider="fake")
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
     assert observed_history_lengths == [0, 1, 0]
@@ -246,10 +264,10 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
 def test_fake_read_write_turns_snapshot_input_and_completed_output() -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role))
-        workspace = host.workspaces.root
+        run = FakeRun(_plugin(role))
+        workspace = run.workspaces.root
         initial = workspace.revision
-        session = await host.agents.create_session(role, workspace=workspace)
+        session = await run.agents.create_session(role, workspace=workspace)
 
         assert await session.turn("write") == "write"
         assert workspace.revision != initial
@@ -268,8 +286,8 @@ def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
             model="gpt-6-sol",
             reasoning_effort="high",
         )
-        host = FakeRunHost(_plugin(role), agent_bindings={role.id: binding})
-        session = await host.agents.create_session(role, workspace=_workspace())
+        run = FakeRun(_plugin(role), agent_bindings={role.id: binding})
+        session = await run.agents.create_session(role, workspace=_workspace())
 
         assert session.binding is binding
         with pytest.raises(ValidationError):
@@ -281,24 +299,24 @@ def test_fake_binding_is_explicitly_configurable_and_immutable() -> None:
 def test_fake_session_creation_failures_are_scriptable_without_leaking_sessions() -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role))
-        host.agents.script_creation(RuntimeError("construction failed"), None)
+        run = FakeRun(_plugin(role))
+        run.agents.script_creation(RuntimeError("construction failed"), None)
 
         with pytest.raises(RuntimeError, match="construction failed"):
-            await host.agents.create_session(role, workspace=host.workspaces.root)
-        assert host.agents.sessions == ()
+            await run.agents.create_session(role, workspace=run.workspaces.root)
+        assert run.agents.sessions == ()
 
-        session = await host.agents.create_session(role, workspace=host.workspaces.root)
-        assert host.agents.sessions == (session,)
+        session = await run.agents.create_session(role, workspace=run.workspaces.root)
+        assert run.agents.sessions == (session,)
 
     asyncio.run(scenario())
 
 
 def test_factory_rejects_role_not_declared_by_plugin() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
+        run = FakeRun(_plugin(_role()))
         with pytest.raises(UnknownAgentRoleError, match="reviewer"):
-            await host.agents.create_session(_role("reviewer"), workspace=_workspace())
+            await run.agents.create_session(_role("reviewer"), workspace=_workspace())
 
     asyncio.run(scenario())
 
@@ -306,10 +324,10 @@ def test_factory_rejects_role_not_declared_by_plugin() -> None:
 def test_run_owner_closes_sessions_and_closed_turn_fails() -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role))
-        session = await host.agents.create_session(role, workspace=_workspace())
-        await host.close()
-        await host.close()
+        run = FakeRun(_plugin(role))
+        session = await run.agents.create_session(role, workspace=_workspace())
+        await run.close()
+        await run.close()
         assert session.closed
         with pytest.raises(SessionClosedError):
             await session.turn("late")
@@ -320,17 +338,17 @@ def test_run_owner_closes_sessions_and_closed_turn_fails() -> None:
 def test_fake_retains_discarded_workspace_sessions_for_observation() -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role), supports_parallel_candidates=True)
-        candidate = await host.workspaces.create_candidate()
-        session = await host.agents.create_session(role, workspace=candidate)
+        run = FakeRun(_plugin(role), supports_parallel_candidates=True)
+        candidate = await run.workspaces.create_candidate()
+        session = await run.agents.create_session(role, workspace=candidate)
 
         await candidate.discard()
 
         assert session.closed
-        assert host.agents.sessions == (session,)
+        assert run.agents.sessions == (session,)
         with pytest.raises(SessionClosedError):
             await session.turn("late")
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -338,12 +356,12 @@ def test_fake_retains_discarded_workspace_sessions_for_observation() -> None:
 def test_session_can_close_early_idempotently() -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role))
-        session = await host.agents.create_session(role, workspace=_workspace())
+        run = FakeRun(_plugin(role))
+        session = await run.agents.create_session(role, workspace=_workspace())
         await session.close()
         await session.close()
         assert session.closed
-        await host.close()
+        await run.close()
 
     asyncio.run(scenario())
 
@@ -388,31 +406,31 @@ def test_fake_workspace_models_root_revision_operations() -> None:
 
 def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(
+        run = FakeRun(
             _plugin(),
             project_root=Path("/project"),
             supports_parallel_candidates=True,
         )
-        root_revision = host.workspaces.root.revision
+        root_revision = run.workspaces.root.revision
         assert root_revision is not None
-        assert host.workspaces.supports_parallel_candidates
+        assert run.workspaces.supports_parallel_candidates
 
         await asyncio.gather(
-            host.workspaces.create_candidate(root_revision),
-            host.workspaces.create_candidate(root_revision),
+            run.workspaces.create_candidate(root_revision),
+            run.workspaces.create_candidate(root_revision),
         )
-        first, second = host.workspaces.candidates
+        first, second = run.workspaces.candidates
         assert first.id == "candidate-1"
         assert second.id == "candidate-2"
         assert first.path != second.path
-        assert first.path != host.workspaces.root.path
+        assert first.path != run.workspaces.root.path
 
         first_revision = await first.snapshot("candidate one")
         second_revision = await second.snapshot("candidate two")
         assert first_revision != second_revision
-        host.workspaces.set_patch(first_revision, "diff --git a/queue.py b/queue.py")
+        run.workspaces.set_patch(first_revision, "diff --git a/queue.py b/queue.py")
         assert (
-            await host.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
+            await run.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
         )
 
         await first.discard()
@@ -421,12 +439,12 @@ def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None
         with pytest.raises(RuntimeContractError, match="closed"):
             await first.snapshot("too late")
 
-        await host.workspaces.adopt(first_revision)
-        assert await host.workspaces.root.try_restore(first_revision)
+        await run.workspaces.adopt(first_revision)
+        assert await run.workspaces.root.try_restore(first_revision)
         with pytest.raises(RuntimeContractError, match="not retained"):
-            await host.workspaces.adopt("other-run-revision")
+            await run.workspaces.adopt("other-run-revision")
 
-        await host.close()
+        await run.close()
         assert second.discarded
 
     asyncio.run(scenario())
@@ -434,10 +452,10 @@ def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None
 
 def test_fake_candidate_creation_rejects_unsupported_runs() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(), supports_parallel_candidates=False)
-        assert not host.workspaces.supports_parallel_candidates
+        run = FakeRun(_plugin(), supports_parallel_candidates=False)
+        assert not run.workspaces.supports_parallel_candidates
         with pytest.raises(RuntimeContractError, match="does not support"):
-            await host.workspaces.create_candidate()
+            await run.workspaces.create_candidate()
 
     asyncio.run(scenario())
 
@@ -445,13 +463,13 @@ def test_fake_candidate_creation_rejects_unsupported_runs() -> None:
 def test_fake_candidate_discard_invalidates_bound_sessions() -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role), supports_parallel_candidates=True)
-        candidate = await host.workspaces.create_candidate()
+        run = FakeRun(_plugin(role), supports_parallel_candidates=True)
+        candidate = await run.workspaces.create_candidate()
         candidate_sessions = (
-            await host.agents.create_session(role, workspace=candidate),
-            await host.agents.create_session(role, workspace=candidate),
+            await run.agents.create_session(role, workspace=candidate),
+            await run.agents.create_session(role, workspace=candidate),
         )
-        root_session = await host.agents.create_session(role, workspace=host.workspaces.root)
+        root_session = await run.agents.create_session(role, workspace=run.workspaces.root)
 
         await candidate.discard()
         await candidate.discard()
@@ -467,39 +485,39 @@ def test_fake_candidate_discard_invalidates_bound_sessions() -> None:
 
 def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
-        workspace = host.workspaces.root
+        run = FakeRun(_plugin(_role()))
+        workspace = run.workspaces.root
         expected = CommandResult(output="profile data", exit_code=7, truncated=True)
-        host.commands.script(expected)
+        run.commands.script(expected)
 
-        result = await host.commands.run(
+        result = await run.commands.run(
             ("profiler", "--label", "value with spaces"),
             workspace=workspace,
             timeout_seconds=30,
         )
 
         assert result is expected
-        assert host.commands.calls[0].argv == (
+        assert run.commands.calls[0].argv == (
             "profiler",
             "--label",
             "value with spaces",
         )
-        assert host.commands.calls[0].workspace is workspace
-        assert host.commands.calls[0].timeout_seconds == 30
-        assert host.commands.calls[0].output_argument is None
+        assert run.commands.calls[0].workspace is workspace
+        assert run.commands.calls[0].timeout_seconds == 30
+        assert run.commands.calls[0].output_argument is None
 
         captured = CommandResult(output='{"version":1}', exit_code=0)
-        host.commands.script(captured)
-        result = await host.commands.capture_output(
+        run.commands.script(captured)
+        result = await run.commands.capture_output(
             ("profiler", "--mode", "summary"),
             workspace=workspace,
             output_argument="--result-file",
             timeout_seconds=45,
         )
         assert result is captured
-        assert host.commands.calls[1].argv == ("profiler", "--mode", "summary")
-        assert host.commands.calls[1].output_argument == "--result-file"
-        assert host.commands.calls[1].timeout_seconds == 45
+        assert run.commands.calls[1].argv == ("profiler", "--mode", "summary")
+        assert run.commands.calls[1].output_argument == "--result-file"
+        assert run.commands.calls[1].timeout_seconds == 45
 
     asyncio.run(scenario())
 
@@ -517,14 +535,14 @@ def test_fake_commands_reject_invalid_requests_before_recording(
     argv: tuple[str, ...], timeout_seconds: int | None
 ) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
+        run = FakeRun(_plugin(_role()))
         with pytest.raises(ValueError, match="command"):
-            await host.commands.run(
+            await run.commands.run(
                 argv,
-                workspace=host.workspaces.root,
+                workspace=run.workspaces.root,
                 timeout_seconds=timeout_seconds,
             )
-        assert host.commands.calls == []
+        assert run.commands.calls == []
 
     asyncio.run(scenario())
 
@@ -533,10 +551,10 @@ def test_fake_commands_reject_invalid_requests_before_recording(
 def test_session_rejects_invalid_member_id_before_creation(member_id: str) -> None:
     async def scenario() -> None:
         role = _role()
-        host = FakeRunHost(_plugin(role))
+        run = FakeRun(_plugin(role))
         with pytest.raises(ValueError, match="invalid agent member ID"):
-            await host.agents.create_session(role, workspace=_workspace(), member_id=member_id)
-        assert host.agents.sessions == ()
+            await run.agents.create_session(role, workspace=_workspace(), member_id=member_id)
+        assert run.agents.sessions == ()
 
     asyncio.run(scenario())
 
@@ -580,8 +598,8 @@ def test_plugin_projection_requires_declared_state() -> None:
 
 def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
-        workspace = host.workspaces.root
+        run = FakeRun(_plugin(_role()))
+        workspace = run.workspaces.root
         objective = BenchmarkObjective(name="tokens_per_second", direction=MetricDirection.MAXIMIZE)
         accuracy = AccuracyEvaluation(executed=True)
         benchmark = BenchmarkEvaluation(
@@ -596,33 +614,31 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
             feedback="focused tests failed",
             report_location="progress/validation/round-1.json",
         )
-        host.evaluation.script_accuracy(accuracy)
-        host.evaluation.script_benchmark(benchmark)
-        host.evaluation.script_local_validation(local_validation)
+        run.evaluation.script_accuracy(accuracy)
+        run.evaluation.script_benchmark(benchmark)
+        run.evaluation.script_local_validation(local_validation)
 
-        accuracy_result = await host.evaluation.accuracy(workspace)
+        accuracy_result = await run.evaluation.accuracy(workspace)
         assert accuracy_result.executed
         assert accuracy_result.receipt is not None
-        assert await host.evaluation.benchmark(workspace, objectives=(objective,)) == benchmark
+        assert await run.evaluation.benchmark(workspace, objectives=(objective,)) == benchmark
         assert (
-            await host.evaluation.validate_local(
+            await run.evaluation.validate_local(
                 workspace,
                 recipe_artifact="progress/validation/recipes.json",
                 report_location="progress/validation/round-1.json",
             )
             == local_validation
         )
-        assert host.evaluation.accuracy_calls[0].workspace is workspace
-        assert host.evaluation.benchmark_calls[0].objectives == (objective,)
-        assert host.evaluation.local_validation_calls[0].recipe_artifact.endswith("recipes.json")
+        assert run.evaluation.accuracy_calls[0].workspace is workspace
+        assert run.evaluation.benchmark_calls[0].objectives == (objective,)
+        assert run.evaluation.local_validation_calls[0].recipe_artifact.endswith("recipes.json")
         assert accuracy_result.passed
         assert benchmark.passed
 
         serialized = accuracy_result.receipt.model_dump_json()
         restored = AccuracyReceipt.model_validate_json(serialized)
-        resumed_host = FakeRunHost(
-            _plugin(_role()), run_id=host.run_id, project_root=workspace.path
-        )
+        resumed_host = FakeRun(_plugin(_role()), run_id=run.run_id, project_root=workspace.path)
         reused = await resumed_host.evaluation.accuracy(
             resumed_host.workspaces.root, reuse=restored
         )
@@ -647,39 +663,39 @@ def test_local_validation_result_requires_consistent_feedback(
 @pytest.mark.parametrize("path", ["../recipe.json", "/recipe.json", ".", "bad\\path"])
 def test_fake_local_validation_rejects_noncanonical_paths(path: str) -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
+        run = FakeRun(_plugin(_role()))
         with pytest.raises(ValueError, match="canonical workspace-relative"):
-            await host.evaluation.validate_local(
-                host.workspaces.root,
+            await run.evaluation.validate_local(
+                run.workspaces.root,
                 recipe_artifact=path,
                 report_location="progress/validation/round-1.json",
             )
-        assert host.evaluation.local_validation_calls == []
+        assert run.evaluation.local_validation_calls == []
 
     asyncio.run(scenario())
 
 
 def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
+        run = FakeRun(_plugin(_role()))
         objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
         with pytest.raises(ValueError, match="objective names must be unique"):
-            await host.evaluation.benchmark(
-                host.workspaces.root,
+            await run.evaluation.benchmark(
+                run.workspaces.root,
                 objectives=(objective, objective),
             )
-        assert host.evaluation.benchmark_calls == []
+        assert run.evaluation.benchmark_calls == []
 
     asyncio.run(scenario())
 
 
 def test_fake_skills_resolve_partial_selections_and_merge_in_order() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
-        host.skills.installed_resources = {
+        run = FakeRun(_plugin(_role()))
+        run.skills.installed_resources = {
             "profiling": ("SKILL.md", "guide.md", "references/metrics.md"),
         }
-        result = await host.skills.resolve(
+        result = await run.skills.resolve(
             (
                 SkillResourceRequest(
                     name="profiling",
@@ -724,88 +740,88 @@ def test_fake_skills_resolve_partial_selections_and_merge_in_order() -> None:
 def test_fake_skills_no_catalog_and_catalog_errors_are_distinct() -> None:
     async def scenario() -> None:
         request = SkillResourceRequest(name="profiling", purpose="inspect profiling")
-        host = FakeRunHost(_plugin(_role()))
-        absent = await host.skills.resolve((request,))
+        run = FakeRun(_plugin(_role()))
+        absent = await run.skills.resolve((request,))
         assert absent.resolved == ()
         assert absent.diagnostics == ("no skill sources are installed",)
 
-        host.skills.catalog_error = "invalid catalog"
-        no_requests = await host.skills.resolve(())
+        run.skills.catalog_error = "invalid catalog"
+        no_requests = await run.skills.resolve(())
         assert no_requests.resolved == ()
         assert no_requests.diagnostics == ()
 
         with pytest.raises(SkillCatalogError, match="invalid catalog"):
-            await host.skills.resolve((request,))
+            await run.skills.resolve((request,))
 
     asyncio.run(scenario())
 
 
 def test_fake_state_is_plugin_bound_and_stores_detached_values() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role(), state=_State))
-        assert await host.state.load(_State) is None
+        run = FakeRun(_plugin(_role(), state=_State))
+        assert await run.state.load(_State) is None
 
         value = _State(values=[1])
-        await host.state.commit(value, label="state only")
+        await run.state.commit(value, label="state only")
         value.values.append(2)
 
-        assert await host.state.load(_State) == _State(values=[1])
-        assert host.state.commits[0].value == _State(values=[1])
-        assert host.state.commits[0].workspace is None
+        assert await run.state.load(_State) == _State(values=[1])
+        assert run.state.commits[0].value == _State(values=[1])
+        assert run.state.commits[0].workspace is None
 
-        await host.state.commit(
+        await run.state.commit(
             _State(values=[3]),
-            workspace=host.workspaces.root,
+            workspace=run.workspaces.root,
             label="with workspace",
         )
-        assert host.state.commits[-1].workspace is host.workspaces.root
+        assert run.state.commits[-1].workspace is run.workspaces.root
 
         with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
-            await host.state.load(_OtherState)
+            await run.state.load(_OtherState)
         with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
-            await host.state.commit(_OtherState(value=1))
+            await run.state.commit(_OtherState(value=1))
         with pytest.raises(RuntimeError, match="live root workspace"):
-            await host.state.commit(_State(), workspace=_workspace())
+            await run.state.commit(_State(), workspace=_workspace())
 
     asyncio.run(scenario())
 
 
 def test_fake_state_rejects_operations_when_plugin_declares_none() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(_role()))
+        run = FakeRun(_plugin(_role()))
         with pytest.raises(StateModelError, match="does not declare durable state"):
-            await host.state.load(_State)
+            await run.state.load(_State)
         with pytest.raises(StateModelError, match="does not declare durable state"):
-            await host.state.commit(_State())
+            await run.state.commit(_State())
 
     asyncio.run(scenario())
 
 
 def test_fake_state_preserves_round_trip_pydantic_values() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(state=_JsonState))
+        run = FakeRun(_plugin(state=_JsonState))
         value = _JsonState(value='{"nested":[1,2]}')
 
-        await host.state.commit(value)
+        await run.state.commit(value)
 
-        assert await host.state.load(_JsonState) == value
-        assert host.state.commits[0].value == value
+        assert await run.state.load(_JsonState) == value
+        assert run.state.commits[0].value == value
 
     asyncio.run(scenario())
 
 
 def test_fake_state_scripts_commit_failures_without_replacing_durable_value() -> None:
     async def scenario() -> None:
-        host = FakeRunHost(_plugin(state=_State))
-        await host.state.commit(_State(values=[1]))
-        host.state.script_commit(None, RuntimeError("storage unavailable"))
+        run = FakeRun(_plugin(state=_State))
+        await run.state.commit(_State(values=[1]))
+        run.state.script_commit(None, RuntimeError("storage unavailable"))
 
-        await host.state.commit(_State(values=[2]))
+        await run.state.commit(_State(values=[2]))
         with pytest.raises(RuntimeError, match="storage unavailable"):
-            await host.state.commit(_State(values=[3]))
+            await run.state.commit(_State(values=[3]))
 
-        assert await host.state.load(_State) == _State(values=[2])
-        assert [commit.value for commit in host.state.commits] == [
+        assert await run.state.load(_State) == _State(values=[2])
+        assert [commit.value for commit in run.state.commits] == [
             _State(values=[1]),
             _State(values=[2]),
         ]
@@ -818,13 +834,13 @@ def test_fake_control_records_checkpoints_and_propagates_stop() -> None:
         pass
 
     async def scenario() -> None:
-        host = FakeRunHost(_plugin())
-        await host.control.checkpoint()
-        assert host.control.checkpoints == 1
+        run = FakeRun(_plugin())
+        await run.control.checkpoint()
+        assert run.control.checkpoints == 1
 
-        host.control.fail_with(_Stopped())
+        run.control.fail_with(_Stopped())
         with pytest.raises(_Stopped):
-            await host.control.checkpoint()
-        assert host.control.checkpoints == 2
+            await run.control.checkpoint()
+        assert run.control.checkpoints == 2
 
     asyncio.run(scenario())

@@ -3,7 +3,7 @@
 VibeSys orchestration is ordinary Python policy over a small runtime contract.
 A plugin declares its agent roles and policy entry point. The runtime supplies
 sessions, workspaces, evaluation, durable state, control, commands, skills, and
-logging through `RunHost`.
+typed observations through `Run`.
 
 The boundary is deliberate:
 
@@ -34,7 +34,7 @@ from vs_runtime.api import (
     AgentRole,
     AgentTool,
     OrchestrationPlugin,
-    RunHost,
+    Run,
     RunStatus,
     WorkspaceAccess,
 )
@@ -61,7 +61,7 @@ WORKER = AgentRole(
 )
 
 
-async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
+async def orchestrate(host: Run, raw_options: BaseModel) -> RunStatus:
     options = Options.model_validate(raw_options)
     session = await host.agents.create_session(
         WORKER,
@@ -73,7 +73,7 @@ async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
                 f"Implement round {round_number}.",
                 response=WorkerReply,
             )
-            host.log(reply.summary)
+            host.observations.note(reply.summary)
     finally:
         await session.close()
     return RunStatus.SUCCEEDED
@@ -171,9 +171,9 @@ Concurrent work is also ordinary Python. Use `asyncio.TaskGroup` only when the
 chosen workspaces and policy state are independent. Do not concurrently call
 `turn` on one session; turns in a conversation are sequential.
 
-## `RunHost` capabilities
+## `Run` capabilities
 
-`RunHost` exposes semantics needed by policy, not product or provider
+`Run` exposes semantics needed by policy, not product or provider
 implementation objects:
 
 | Capability | Policy use |
@@ -186,7 +186,7 @@ implementation objects:
 | `control` | Check cooperative pause and stop state at policy-selected boundaries |
 | `commands` | Run validated commands in a selected workspace |
 | `skills` | Resolve policy-selected installed skill resources |
-| `log` | Emit presentation-neutral run log messages |
+| `observations` | Publish informational notes or non-fatal semantic warnings |
 
 Workspace and candidate lifetimes are explicit. A plugin creates a candidate
 with `host.workspaces.create_candidate()`, retains or adopts a revision through
@@ -217,10 +217,10 @@ builders, or callback bundles merely to shorten orchestration code.
 1. Create `src/vibesys/orchestration/<plugin>/` with strict Pydantic options,
    any typed state, role declarations, prompts, and the orchestration function.
 2. Construct one `OrchestrationPlugin`; its `agents` tuple is authoritative.
-3. Use only `RunHost` capabilities for effects. Keep selection, cadence,
+3. Use only `Run` capabilities for effects. Keep selection, cadence,
    message routing, and response interpretation in the plugin.
 4. Register the plugin in `vibesys.plugin_catalog.built_in_orchestrations`.
-5. Add policy tests through `FakeRunHost`, prompt or state-transition tests as
+5. Add policy tests through `FakeRun`, prompt or state-transition tests as
    appropriate, and integration coverage for product composition only when the
    boundary itself changes.
 6. Add any new module edge to `tach.toml` and run `uv run tach check`.
@@ -240,7 +240,7 @@ import asyncio
 from collections import deque
 
 from pydantic import BaseModel
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 
 replies = deque([WorkerReply(summary="implemented")])
@@ -260,7 +260,7 @@ def respond(
 
 
 async def scenario() -> None:
-    host = FakeRunHost(PLUGIN, responder=respond)
+    host = FakeRun(PLUGIN, responder=respond)
     try:
         status = await PLUGIN.orchestrate(host, Options())
         assert status is RunStatus.SUCCEEDED

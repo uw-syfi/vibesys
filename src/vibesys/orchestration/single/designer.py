@@ -13,7 +13,7 @@ from vibesys.orchestration.hypothesis import (
 )
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
-from vs_runtime.api import RunHost, SkillCatalogError, SkillResourceRequest, StructuredResponseError
+from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest, StructuredResponseError
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis import HypothesisSearch, HypothesisState
@@ -74,7 +74,7 @@ def _correction_message(plan: OrchestratorPlan, error: ValueError) -> str:
     )
 
 
-async def _resolve_recommendations(host: RunHost, plan: OrchestratorPlan) -> None:
+async def _resolve_recommendations(run: Run, plan: OrchestratorPlan) -> None:
     if not plan.recommended_skills:
         return
     requests = tuple(
@@ -86,13 +86,15 @@ async def _resolve_recommendations(host: RunHost, plan: OrchestratorPlan) -> Non
         for item in plan.recommended_skills
     )
     try:
-        result = await host.skills.resolve(requests)
+        result = await run.skills.resolve(requests)
     except SkillCatalogError as error:
-        host.log(f"[skills] ignored recommendations because the catalog is invalid: {error}")
+        run.observations.warning(
+            f"[skills] ignored recommendations because the catalog is invalid: {error}"
+        )
         plan.recommended_skills = []
         return
     for diagnostic in result.diagnostics:
-        host.log(f"[skills] {diagnostic}")
+        run.observations.warning(f"[skills] {diagnostic}")
     plan.recommended_skills = [
         SkillResourceSelection(
             skill=item.name,
@@ -104,14 +106,14 @@ async def _resolve_recommendations(host: RunHost, plan: OrchestratorPlan) -> Non
 
 
 async def request_plan(
-    host: RunHost, search: HypothesisSearch, request: DesignerPlanRequest
+    run: Run, search: HypothesisSearch, request: DesignerPlanRequest
 ) -> OrchestratorPlan:
     """Return one normalized, state-valid plan after at most one correction.
 
     A single run-owned designer session carries the rejected plan into its
     correction turn. Resource cleanup occurs on success, failure, and cancellation.
     """
-    session = await host.agents.create_session(
+    session = await run.agents.create_session(
         DESIGNER,
         workspace=request.workspace,
         writable_paths=(request.context.roadmap_location,),
@@ -133,7 +135,9 @@ async def request_plan(
             except ValueError as error:
                 if attempt:
                     raise
-                host.log(f"[orchestrator] plan rejected ({error}); reprompting once")
+                run.observations.warning(
+                    f"[orchestrator] plan rejected ({error}); reprompting once"
+                )
                 try:
                     plan = await session.turn(
                         _correction_message(plan, error), response=OrchestratorPlan
@@ -141,7 +145,7 @@ async def request_plan(
                 except StructuredResponseError:
                     plan = _fallback_plan()
                 continue
-            await _resolve_recommendations(host, plan)
+            await _resolve_recommendations(run, plan)
             return plan
         message = "designer correction loop exited without a validated plan"
         raise RuntimeError(message)

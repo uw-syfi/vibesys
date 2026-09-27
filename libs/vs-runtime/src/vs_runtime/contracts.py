@@ -639,57 +639,32 @@ class RunStatus(StrEnum):
     FAILED = "failed"
 
 
-class RunHost(Protocol):
-    """Small run-owned capability surface initially required by orchestration."""
+class Observations(Protocol):
+    """Publish plugin-authored live observations outside durable policy state."""
 
-    @property
-    def run_id(self) -> str:
-        """Return this run's stable identity."""
+    def note(self, message: str) -> None:
+        """Publish one informational note for the run operator."""
         ...
 
-    @property
-    def facts(self) -> RunFacts:
-        """Return immutable prompt-visible facts fixed during run setup."""
+    def warning(self, message: str) -> None:
+        """Publish one non-fatal policy warning for the run operator."""
         ...
 
-    @property
-    def agents(self) -> AgentSessions:
-        """Return the run-owned agent-session capability."""
-        ...
 
-    @property
-    def workspaces(self) -> Workspaces:
-        """Return this run's live workspace capability."""
-        ...
+@dataclass(frozen=True, slots=True)
+class Run:
+    """One runtime-created capability value passed to orchestration policy."""
 
-    @property
-    def evaluation(self) -> Evaluation:
-        """Return this run's trusted evaluation capability."""
-        ...
-
-    @property
-    def state(self) -> State:
-        """Return plugin-bound typed state durability."""
-        ...
-
-    @property
-    def control(self) -> Control:
-        """Return the cooperative operator-control capability."""
-        ...
-
-    @property
-    def commands(self) -> Commands:
-        """Return sandboxed argv execution for policy-selected commands."""
-        ...
-
-    @property
-    def skills(self) -> Skills:
-        """Return run-owned resolution for installed skill resources."""
-        ...
-
-    def log(self, message: str) -> None:
-        """Record a presentation-neutral run log message."""
-        ...
+    run_id: str
+    facts: RunFacts
+    agents: AgentSessions
+    workspaces: Workspaces
+    evaluation: Evaluation
+    state: State
+    control: Control
+    commands: Commands
+    skills: Skills
+    observations: Observations
 
 
 class ProjectedRound(BaseModel):
@@ -735,7 +710,7 @@ class OrchestrationPlugin:
     id: str
     agents: tuple[AgentRole, ...]
     options: type[BaseModel]
-    orchestrate: Callable[[RunHost, BaseModel], Awaitable[RunStatus]]
+    orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]]
     config_version: int = 1
     state: type[BaseModel] | None = None
     project: Callable[[BaseModel], PluginProjection] | None = None

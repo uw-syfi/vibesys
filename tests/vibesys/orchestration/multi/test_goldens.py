@@ -32,7 +32,7 @@ from vs_runtime.api import (
     RunFacts,
     RunStatus,
 )
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -289,13 +289,13 @@ def test_public_policy_trajectory_matches_golden(
             accuracy_configured=scenario == "gate",
             benchmark_configured=scenario == "gate",
         )
-        host = FakeRunHost(plugin, project_root=tmp_path, facts=facts, responder=script.respond)
+        run = FakeRun(plugin, project_root=tmp_path, facts=facts, responder=script.respond)
         if profile_guided:
             for _round in range(rounds):
-                host.commands.script(CommandResult(output=_attribution(), exit_code=0))
+                run.commands.script(CommandResult(output=_attribution(), exit_code=0))
         if scenario == "gate":
-            host.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
-            host.evaluation.script_benchmark(
+            run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
+            run.evaluation.script_benchmark(
                 BenchmarkEvaluation(
                     executed=True,
                     metric_name="throughput",
@@ -310,19 +310,19 @@ def test_public_policy_trajectory_matches_golden(
             else _plain_options(rounds=rounds, official_every=official_every)
         )
         try:
-            assert await plugin.orchestrate(host, options) is RunStatus.SUCCEEDED
+            assert await plugin.orchestrate(run, options) is RunStatus.SUCCEEDED
             state_model = plugin.state
             assert state_model is not None
-            state = await host.state.load(state_model)
+            state = await run.state.load(state_model)
             assert state is not None
             assert plugin.project is not None
             return {
                 "calls": script.calls,
                 "artifacts": _artifact_snapshot(tmp_path),
                 "projection": plugin.project(state).model_dump(mode="json"),
-                "retained": host.workspaces.root.retained,
+                "retained": run.workspaces.root.retained,
             }
         finally:
-            await host.close()
+            await run.close()
 
     _assert_golden(preset, scenario, asyncio.run(run()), workspace=tmp_path)

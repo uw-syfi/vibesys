@@ -15,7 +15,7 @@ from vibesys.orchestration.single.models import (
 from vibesys.orchestration.single.prompts import render_single_agent_prompt
 from vs_runtime.api import (
     AgentTurnTimeoutError,
-    RunHost,
+    Run,
     SkillCatalogError,
     SkillResourceRequest,
     StructuredResponseError,
@@ -81,7 +81,7 @@ def _timeout_response(timeout_seconds: float) -> SingleAgentRoundResponse:
 
 
 async def _resolve_skills(
-    host: RunHost, selections: list[SkillResourceSelection]
+    run: Run, selections: list[SkillResourceSelection]
 ) -> list[SkillResourceSelection]:
     if not selections:
         return []
@@ -94,12 +94,14 @@ async def _resolve_skills(
         for item in selections
     )
     try:
-        result = await host.skills.resolve(requests)
+        result = await run.skills.resolve(requests)
     except SkillCatalogError as error:
-        host.log(f"[skills] ignored recommendations because the catalog is invalid: {error}")
+        run.observations.warning(
+            f"[skills] ignored recommendations because the catalog is invalid: {error}"
+        )
         return []
     for diagnostic in result.diagnostics:
-        host.log(f"[skills] {diagnostic}")
+        run.observations.warning(f"[skills] {diagnostic}")
     return [
         SkillResourceSelection(
             skill=item.name,
@@ -113,9 +115,9 @@ async def _resolve_skills(
 class SingleAgentWorker:
     """Own one named implementer conversation per hypothesis until closed."""
 
-    def __init__(self, host: RunHost, search: HypothesisSearch) -> None:
+    def __init__(self, run: Run, search: HypothesisSearch) -> None:
         """Bind run effects and pure search policy without opening a session."""
-        self._host = host
+        self._run = run
         self._search = search
         self._sessions: dict[str, AgentSession] = {}
         self._closed = False
@@ -130,10 +132,10 @@ class SingleAgentWorker:
             message = "single-agent worker is closed"
             raise RuntimeError(message)
         plan = request.plan
-        plan.recommended_skills = await _resolve_skills(self._host, plan.recommended_skills)
+        plan.recommended_skills = await _resolve_skills(self._run, plan.recommended_skills)
         session = self._sessions.get(plan.hypothesis_id)
         if session is None:
-            session = await self._host.agents.create_session(
+            session = await self._run.agents.create_session(
                 IMPLEMENTER,
                 workspace=request.workspace,
                 member_id=plan.hypothesis_id,
@@ -152,11 +154,11 @@ class SingleAgentWorker:
         except AgentTurnTimeoutError as error:
             response = _timeout_response(error.timeout_seconds)
         response.skill_context_updates = await _resolve_skills(
-            self._host, response.skill_context_updates
+            self._run, response.skill_context_updates
         )
         if response.skill_context_updates:
             plan.recommended_skills = await _resolve_skills(
-                self._host,
+                self._run,
                 [*plan.recommended_skills, *response.skill_context_updates],
             )
         conflict = self._search.pareto_conflict(

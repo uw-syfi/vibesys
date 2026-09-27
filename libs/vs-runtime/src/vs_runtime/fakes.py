@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, TypeAlias, TypeVar, overload
+from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel
 
@@ -26,6 +26,7 @@ from vs_runtime.contracts import (
     LocalValidationEvaluation,
     OrchestrationPlugin,
     ResolvedSkillResources,
+    Run,
     RunFacts,
     RuntimeContractError,
     SessionClosedError,
@@ -1282,8 +1283,47 @@ class FakeEvaluation:
         return self.default_local_validation
 
 
-class FakeRunHost:
-    """In-memory run host that owns fake sessions and captured log lines."""
+@dataclass(frozen=True, slots=True)
+class ObservationCall:
+    """One ordered call captured by :class:`FakeObservations`."""
+
+    kind: Literal["note", "warning"]
+    message: str
+
+
+class FakeObservations:
+    """In-memory observation capability preserving kind and call order."""
+
+    def __init__(self) -> None:
+        """Create an empty ordered observation log."""
+        self._calls: list[ObservationCall] = []
+
+    @property
+    def calls(self) -> tuple[ObservationCall, ...]:
+        """Return observation calls in publication order."""
+        return tuple(self._calls)
+
+    def note(self, message: str) -> None:
+        """Capture one informational note."""
+        self._calls.append(ObservationCall("note", message))
+
+    def warning(self, message: str) -> None:
+        """Capture one non-fatal warning."""
+        self._calls.append(ObservationCall("warning", message))
+
+
+class FakeRun(Run):
+    """In-memory run value with scriptable capabilities and owned cleanup."""
+
+    agents: FakeAgentSessions
+    workspaces: FakeWorkspaces
+    evaluation: FakeEvaluation
+    state: FakeState
+    control: FakeControl
+    commands: FakeCommands
+    skills: FakeSkills
+    observations: FakeObservations
+    _closed: bool
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-040117 [PLR0913]; these are independent fake inputs, and a fake-host options bundle would add a second public configuration shape solely to shorten this signature.
         self,
@@ -1296,87 +1336,38 @@ class FakeRunHost:
         agent_bindings: dict[str, AgentBinding] | None = None,
         supports_parallel_candidates: bool = False,
     ) -> None:
-        """Create a host whose private role map derives from ``plugin.agents``."""
-        self._run_id = run_id
-        self._facts = (
+        """Create a run whose private role map derives from ``plugin.agents``."""
+        facts = (
             RunFacts(domain_id="generic", objective="Test objective.") if facts is None else facts
         )
-        self._agents = FakeAgentSessions(
+        agents = FakeAgentSessions(
             plugin.agents,
             responder=responder,
             bindings=agent_bindings,
         )
-        self._workspaces = FakeWorkspaces(
+        workspaces = FakeWorkspaces(
             FakeWorkspace(path=project_root),
             supports_parallel_candidates=supports_parallel_candidates,
-            sessions=self._agents,
+            sessions=agents,
         )
-        self._evaluation = FakeEvaluation(run_id=run_id)
-        self._state = FakeState(plugin.state, self._workspaces.root)
-        self._control = FakeControl()
-        self._commands = FakeCommands()
-        self._skills = FakeSkills()
-        self._logs: list[str] = []
-        self._closed = False
-
-    @property
-    def run_id(self) -> str:
-        """Return this fake run's stable identity."""
-        return self._run_id
-
-    @property
-    def facts(self) -> RunFacts:
-        """Return the configured immutable run facts."""
-        return self._facts
-
-    @property
-    def workspaces(self) -> FakeWorkspaces:
-        """Return the fake live-workspace capability."""
-        return self._workspaces
-
-    @property
-    def agents(self) -> FakeAgentSessions:
-        """Return the run-owned fake session factory."""
-        return self._agents
-
-    @property
-    def evaluation(self) -> FakeEvaluation:
-        """Return the scriptable trusted evaluation capability."""
-        return self._evaluation
-
-    @property
-    def state(self) -> FakeState:
-        """Return plugin-bound in-memory state durability."""
-        return self._state
-
-    @property
-    def control(self) -> FakeControl:
-        """Return the deterministic cooperative-control capability."""
-        return self._control
-
-    @property
-    def commands(self) -> FakeCommands:
-        """Return deterministic sandboxed command execution."""
-        return self._commands
-
-    @property
-    def skills(self) -> FakeSkills:
-        """Return deterministic installed-skill resolution."""
-        return self._skills
-
-    @property
-    def logs(self) -> tuple[str, ...]:
-        """Return recorded log messages in call order."""
-        return tuple(self._logs)
-
-    def log(self, message: str) -> None:
-        """Capture one log message."""
-        self._logs.append(message)
+        super().__init__(
+            run_id=run_id,
+            facts=facts,
+            agents=agents,
+            workspaces=workspaces,
+            evaluation=FakeEvaluation(run_id=run_id),
+            state=FakeState(plugin.state, workspaces.root),
+            control=FakeControl(),
+            commands=FakeCommands(),
+            skills=FakeSkills(),
+            observations=FakeObservations(),
+        )
+        object.__setattr__(self, "_closed", False)
 
     async def close(self) -> None:
         """Close all run-owned resources idempotently."""
         if self._closed:
             return
-        self._closed = True
-        self._workspaces.begin_close()
-        await self._workspaces.close()
+        object.__setattr__(self, "_closed", True)
+        self.workspaces.begin_close()
+        await self.workspaces.close()

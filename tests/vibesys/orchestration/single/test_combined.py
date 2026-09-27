@@ -27,7 +27,7 @@ from vibesys.orchestration.single.models import (
 )
 from vs_loop_state.api import CandidateDisposition, RoundRecord
 from vs_runtime.api import AgentTurnTimeoutError, StructuredResponseError
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -123,8 +123,8 @@ class _Script:
         return value
 
 
-def _host(script: _Script) -> FakeRunHost:
-    return FakeRunHost(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
+def _host(script: _Script) -> FakeRun:
+    return FakeRun(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
 
 
 def _search() -> HypothesisSearch:
@@ -133,16 +133,16 @@ def _search() -> HypothesisSearch:
 
 def test_retry_preserves_one_named_session_and_new_prompt_evidence() -> None:
     script = _Script(_response(verdict=Verdict.FAIL, feedback="Fix validation."), _response())
-    host = _host(script)
+    run = _host(script)
 
     async def scenario() -> None:
-        worker = SingleAgentWorker(host, _search())
+        worker = SingleAgentWorker(run, _search())
         try:
             plan = _plan("H-01")
-            first = await worker.turn(_request(host.workspaces.root, plan))
+            first = await worker.turn(_request(run.workspaces.root, plan))
             second = await worker.turn(
                 _request(
-                    host.workspaces.root,
+                    run.workspaces.root,
                     plan,
                     attempt=AttemptState(
                         agent_run_state=HypothesisState(),
@@ -153,42 +153,42 @@ def test_retry_preserves_one_named_session_and_new_prompt_evidence() -> None:
             )
             assert first.verdict is Verdict.FAIL
             assert second.verdict is Verdict.PASS
-            assert len(host.agents.sessions) == 1
-            assert host.agents.sessions[0].member_id == "H-01"
+            assert len(run.agents.sessions) == 1
+            assert run.agents.sessions[0].member_id == "H-01"
             assert [len(history) for _role, history, _message, _type in script.calls] == [0, 1]
             assert "Fix validation." in script.calls[1][2]
             assert all(call[3] is SingleAgentRoundResponse for call in script.calls)
         finally:
             await worker.close()
-            await host.close()
+            await run.close()
 
     asyncio.run(scenario())
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed
 
 
 def test_distinct_hypotheses_get_distinct_durable_identities_and_cleanup() -> None:
     script = _Script(_response(), _response())
-    host = _host(script)
+    run = _host(script)
 
     async def scenario() -> None:
-        worker = SingleAgentWorker(host, _search())
+        worker = SingleAgentWorker(run, _search())
         try:
-            await worker.turn(_request(host.workspaces.root, _plan("H-01")))
-            await worker.turn(_request(host.workspaces.root, _plan("H-02")))
-            assert len(host.agents.sessions) == 2
-            identities = [session.member_id for session in host.agents.sessions]
+            await worker.turn(_request(run.workspaces.root, _plan("H-01")))
+            await worker.turn(_request(run.workspaces.root, _plan("H-02")))
+            assert len(run.agents.sessions) == 2
+            identities = [session.member_id for session in run.agents.sessions]
             assert identities == ["H-01", "H-02"]
             assert [len(history) for _role, history, _message, _type in script.calls] == [0, 0]
         finally:
             await worker.close()
             await worker.close()
-            await host.close()
+            await run.close()
 
         with pytest.raises(RuntimeError, match="closed"):
-            await worker.turn(_request(host.workspaces.root, _plan("H-03")))
+            await worker.turn(_request(run.workspaces.root, _plan("H-03")))
 
     asyncio.run(scenario())
-    assert all(session.closed for session in host.agents.sessions)
+    assert all(session.closed for session in run.agents.sessions)
 
 
 def test_plan_recommendations_and_returned_skill_updates_are_resolved() -> None:
@@ -203,20 +203,20 @@ def test_plan_recommendations_and_returned_skill_updates_are_resolved() -> None:
         purpose="Check behavior.",
     )
     script = _Script(_response(skill_context_updates=[new]))
-    host = _host(script)
-    host.skills.installed_resources = {
+    run = _host(script)
+    run.skills.installed_resources = {
         "profiling": ("SKILL.md", "references/start.md"),
         "testing": ("SKILL.md", "references/checks.md"),
     }
     plan = _plan("H-01", skills=[initial])
 
     async def scenario() -> SingleAgentRoundResponse:
-        worker = SingleAgentWorker(host, _search())
+        worker = SingleAgentWorker(run, _search())
         try:
-            return await worker.turn(_request(host.workspaces.root, plan))
+            return await worker.turn(_request(run.workspaces.root, plan))
         finally:
             await worker.close()
-            await host.close()
+            await run.close()
 
     response = asyncio.run(scenario())
     assert plan.recommended_skills == [
@@ -228,7 +228,7 @@ def test_plan_recommendations_and_returned_skill_updates_are_resolved() -> None:
         new,
     ]
     assert response.skill_context_updates == [new]
-    assert any("missing.md" in message for message in host.logs)
+    assert any("missing.md" in call.message for call in run.observations.calls)
 
 
 def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None:
@@ -262,14 +262,14 @@ def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None
             candidate_metrics={"ops_per_sec": 80, "latency_ms": 70},
         )
     )
-    host = _host(script)
+    run = _host(script)
 
     async def scenario() -> SingleAgentRoundResponse:
-        worker = SingleAgentWorker(host, _search())
+        worker = SingleAgentWorker(run, _search())
         try:
             return await worker.turn(
                 _request(
-                    host.workspaces.root,
+                    run.workspaces.root,
                     _plan("H-01"),
                     records=(previous,),
                     attempt=AttemptState(
@@ -279,7 +279,7 @@ def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None
             )
         finally:
             await worker.close()
-            await host.close()
+            await run.close()
 
     response = asyncio.run(scenario())
     assert response.verdict is Verdict.FAIL
@@ -290,34 +290,34 @@ def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None
 
 def test_unparseable_turn_yields_failure_and_session_is_cleaned_up() -> None:
     script = _Script(StructuredResponseError("implementer", SingleAgentRoundResponse))
-    host = _host(script)
+    run = _host(script)
 
     async def scenario() -> SingleAgentRoundResponse:
-        worker = SingleAgentWorker(host, _search())
+        worker = SingleAgentWorker(run, _search())
         try:
-            return await worker.turn(_request(host.workspaces.root, _plan("H-01")))
+            return await worker.turn(_request(run.workspaces.root, _plan("H-01")))
         finally:
             await worker.close()
-            await host.close()
+            await run.close()
 
     response = asyncio.run(scenario())
     assert response.verdict is Verdict.FAIL
     assert "No structured response" in response.feedback
-    assert host.agents.sessions[0].closed
+    assert run.agents.sessions[0].closed
 
 
 def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -> None:
     script = _Script(AgentTurnTimeoutError(12.5), _response())
-    host = _host(script)
+    run = _host(script)
 
     async def scenario() -> tuple[SingleAgentRoundResponse, SingleAgentRoundResponse]:
-        worker = SingleAgentWorker(host, _search())
+        worker = SingleAgentWorker(run, _search())
         try:
             plan = _plan("H-01")
-            first = await worker.turn(_request(host.workspaces.root, plan))
+            first = await worker.turn(_request(run.workspaces.root, plan))
             second = await worker.turn(
                 _request(
-                    host.workspaces.root,
+                    run.workspaces.root,
                     plan,
                     attempt=AttemptState(
                         agent_run_state=HypothesisState(),
@@ -329,7 +329,7 @@ def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -
             return first, second
         finally:
             await worker.close()
-            await host.close()
+            await run.close()
 
     first, second = asyncio.run(scenario())
     assert first.verdict is Verdict.FAIL
@@ -338,12 +338,12 @@ def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -
         first.feedback == "Inspect retained evidence and return a schema-valid response on retry."
     )
     assert second.verdict is Verdict.PASS
-    assert len(host.agents.sessions) == 1
-    assert host.agents.sessions[0].closed
+    assert len(run.agents.sessions) == 1
+    assert run.agents.sessions[0].closed
 
 
 def test_rejects_missing_hypothesis_identity_before_opening_session() -> None:
-    host = _host(_Script())
+    run = _host(_Script())
     with pytest.raises(ValueError, match="hypothesis_id"):
-        _request(host.workspaces.root, _plan(""))
-    assert host.agents.sessions == ()
+        _request(run.workspaces.root, _plan(""))
+    assert run.agents.sessions == ()

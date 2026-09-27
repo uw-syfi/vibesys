@@ -51,7 +51,7 @@ from vibesys.orchestration.single.models import (
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
-    RunHost,
+    Run,
     RunStatus,
     Workspace,
 )
@@ -96,10 +96,10 @@ def _benchmark_objectives(options: SingleRunOptions) -> tuple[BenchmarkObjective
 class _SingleRun:
     """One plain or profile-guided run's control state and owned resources."""
 
-    def __init__(self, host: RunHost, options: SingleRunOptions) -> None:
-        self.host = host
+    def __init__(self, run: Run, options: SingleRunOptions) -> None:
+        self.run = run
         self.options = options
-        self.workspace = host.workspaces.root
+        self.workspace = run.workspaces.root
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -108,7 +108,7 @@ class _SingleRun:
                 max_retries_per_round=options.max_retries_per_round,
             )
         )
-        self.worker = SingleAgentWorker(host, self.search)
+        self.worker = SingleAgentWorker(run, self.search)
         self.files = SingleFiles.open(self.workspace.path)
         self.state = SingleState()
         self.carry: CarryOver
@@ -128,7 +128,7 @@ class _SingleRun:
 
     async def initialize(self) -> None:
         """Recover plugin state and durably initialize policy-owned files."""
-        loaded = await self.host.state.load(SingleState)
+        loaded = await self.run.state.load(SingleState)
         aggregate = loaded or SingleState()
         resumed = self.search.resume(aggregate.search, self.options.metric_space)
         self.state = aggregate.model_copy(update={"search": resumed}, deep=True)
@@ -140,13 +140,13 @@ class _SingleRun:
             label=f"{self.label_prefix}: initialize policy state",
         )
 
-    async def run(self) -> RunStatus:
+    async def execute(self) -> RunStatus:
         """Run every remaining round, then select a trusted final workspace."""
         try:
             await self.initialize()
             while self.round_number <= self.options.max_rounds:
-                await self.host.control.checkpoint()
-                self.host.log(f"round {self.round_number}/{self.options.max_rounds}")
+                await self.run.control.checkpoint()
+                self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
                     self.search.archive_summary(self.records, space=self.state.search.metrics)
                 )
@@ -169,7 +169,7 @@ class _SingleRun:
         workspace: Workspace | None = None,
         label: str | None = None,
     ) -> None:
-        await self.host.state.commit(self.state, workspace=workspace, label=label)
+        await self.run.state.commit(self.state, workspace=workspace, label=label)
 
     async def _mark_paid(
         self,
@@ -208,7 +208,7 @@ class _SingleRun:
         if isinstance(decision, NewHypothesis):
             guidance = await self._prepare_profile_guidance()
             plan = await request_plan(
-                self.host,
+                self.run,
                 self.search,
                 DesignerPlanRequest(
                     round_number=self.round_number,
@@ -244,7 +244,7 @@ class _SingleRun:
                 hypothesis.hypothesis_id,
                 hypothesis.next_step or plan.task,
             )
-            self.host.log(
+            self.run.observations.note(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
             )
         official_reason = self.search.official_due(
@@ -275,10 +275,10 @@ class _SingleRun:
         rollback: RollbackTarget,
     ) -> Hypothesis:
         if not rollback.resolved or rollback.commit is None:
-            self.host.log("cannot revert: requested round has no retained revision")
+            self.run.observations.warning("cannot revert: requested round has no retained revision")
             return hypothesis
         if not await self.workspace.try_restore(rollback.commit, clean=True):
-            self.host.log(f"cannot restore requested revision {rollback.commit}")
+            self.run.observations.warning(f"cannot restore requested revision {rollback.commit}")
             return hypothesis
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback.commit
@@ -372,12 +372,12 @@ class _SingleRun:
         )
         receipt = self.state.accuracy_receipt
         reuse = receipt if receipt is not None and receipt.revision == revision else None
-        accuracy = await self.host.evaluation.accuracy(self.workspace, reuse=reuse)
+        accuracy = await self.run.evaluation.accuracy(self.workspace, reuse=reuse)
         self.state = self.state.model_copy(update={"accuracy_receipt": accuracy.receipt}, deep=True)
         if not accuracy.passed:
             await self._evaluation_failed(selected, accuracy.feedback or "accuracy failed")
             return False
-        benchmark = await self.host.evaluation.benchmark(
+        benchmark = await self.run.evaluation.benchmark(
             self.workspace,
             objectives=_benchmark_objectives(self.options),
         )
@@ -455,8 +455,8 @@ class _SingleRun:
                 attempt=attempt,
                 projection=projection,
                 reviewed=True,
-                framework_benchmark_configured=self.host.facts.benchmark_configured,
-                accuracy_configured=self.host.facts.accuracy_configured,
+                framework_benchmark_configured=self.run.facts.benchmark_configured,
+                accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
                 backend_name=binding.backend,
                 driver_name=binding.driver,
@@ -518,7 +518,7 @@ class _SingleRun:
                 raise RuntimeError(message)
             await self.workspace.restore(baseline, clean=True)
             await self.workspace.snapshot(f"{self.label_prefix}: restore trusted input baseline")
-            self.host.log("no trusted winner; restored the input baseline")
+            self.run.observations.note("no trusted winner; restored the input baseline")
             return
         if winner.commit is None:
             message = "selected single-agent winner has no workspace revision"
@@ -529,10 +529,10 @@ class _SingleRun:
         )
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"{self.label_prefix}: select round {winner.round_number}")
-        self.host.log(f"selected trusted winner from round {winner.round_number}")
+        self.run.observations.note(f"selected trusted winner from round {winner.round_number}")
 
     def _domain_context(self) -> dict[str, object]:
-        facts = self.host.facts
+        facts = self.run.facts
         return {
             "modality": self.options.modality,
             "interface": self.options.interface,
@@ -549,7 +549,7 @@ class _SingleRun:
         context: PlanningContext,
         guidance: FocusView | None,
     ) -> PlanContext:
-        facts = self.host.facts
+        facts = self.run.facts
         domain = resolve_domain(DomainName(facts.domain_id))
         last = self.state.last_response
         summary = (
@@ -615,7 +615,7 @@ class _SingleRun:
         if profile is None or self.profile_focus is None:
             return None
         attribution = await run_attribution(
-            self.host,
+            self.run,
             profile,
             workspace=self.workspace,
         )
@@ -633,7 +633,7 @@ class _SingleRun:
         return self.profile_focus.focus(focused)
 
     def _combined_context(self, selected: _SelectedRound) -> SingleAgentRoundContext:
-        facts = self.host.facts
+        facts = self.run.facts
         domain = resolve_domain(DomainName(facts.domain_id))
         profiler_kind = ProfilerKind(facts.profiler_id)
         profiler = (
@@ -669,16 +669,16 @@ class _SingleRun:
         )
 
 
-async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
+async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run the plain single-agent policy against the explicit runtime API."""
     options = SingleOptions.model_validate(raw_options)
-    return await _SingleRun(host, options).run()
+    return await _SingleRun(run, options).execute()
 
 
-async def orchestrate_profile_guided(host: RunHost, raw_options: BaseModel) -> RunStatus:
+async def orchestrate_profile_guided(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run profile-guided single-agent search against the explicit runtime API."""
     options = ProfileGuidedSingleOptions.model_validate(raw_options)
-    return await _SingleRun(host, options).run()
+    return await _SingleRun(run, options).execute()
 
 
 __all__ = ["orchestrate", "orchestrate_profile_guided"]

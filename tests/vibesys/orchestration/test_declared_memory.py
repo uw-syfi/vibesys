@@ -1,9 +1,9 @@
-"""Plugin-declared memory paths are preserved automatically by the host.
+"""Plugin-declared memory paths are preserved automatically by the run.
 
 A strategy used to pass ``preserve_paths=self._memory_paths()`` on every
 ``workspace.restore()`` call (rollback, isolation revert, final-candidate
 selection). It now declares its memory paths once on its plugin, and the
-host (``_Workspaces._with_declared_memory``) merges them into every
+run (``_Workspaces._with_declared_memory``) merges them into every
 ``adopt``/``restore`` call automatically, whether or not the
 caller names them explicitly.
 
@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.plugin import capability_plugin
+from vibesys.run.host import open_product_run_host
 
 from vibesys.api import (
     ComputeBackend,
@@ -29,7 +30,6 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ def _request(project_root: Path) -> RunRequest:
 
 
 def _run_restore(request: RunRequest, code: str, memory: str) -> None:
-    """Exercise declared-memory restore through a real product-composed host."""
+    """Exercise declared-memory restore through a real product-composed run."""
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
@@ -77,8 +77,8 @@ def _run_restore(request: RunRequest, code: str, memory: str) -> None:
             request,
             integration,
             plugin=_PLUGIN,
-        ) as host:
-            root = host.workspaces.root
+        ) as run:
+            root = run.workspaces.root
             (root.path / "code.py").write_text("VALUE = 1\n")
             (root.path / "progress.md").write_text("round 1: baseline\n")
             baseline = await root.snapshot("baseline")

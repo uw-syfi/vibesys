@@ -49,7 +49,7 @@ from vs_runtime.api import (
     OrchestrationResumeDecision,
     PluginProjection,
     ProjectedRound,
-    RunHost,
+    Run,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
 
@@ -70,7 +70,7 @@ class _TeamOptions(BaseModel):
 _team_calls: list[str] = []
 
 
-async def _run_team(host: RunHost, options: BaseModel) -> PluginRunStatus:
+async def _run_team(host: Run, options: BaseModel) -> PluginRunStatus:
     _TeamOptions.model_validate(options)
     _team_calls.append(host.run_id)
     return PluginRunStatus.SUCCEEDED
@@ -93,7 +93,7 @@ class _PluginState(BaseModel):
     completed_rounds: int
 
 
-async def _run_plugin(host: RunHost, options: BaseModel) -> PluginRunStatus:
+async def _run_plugin(host: Run, options: BaseModel) -> PluginRunStatus:
     parsed = _PluginOptions.model_validate(options)
     for completed_rounds in range(1, parsed.max_rounds + 1):
         await host.state.commit(_PluginState(completed_rounds=completed_rounds))
@@ -489,7 +489,7 @@ class _Evidence(BaseModel):
     revision: int
 
 
-async def _run_evidence(host: RunHost, options: BaseModel) -> PluginRunStatus:
+async def _run_evidence(host: Run, options: BaseModel) -> PluginRunStatus:
     _TeamOptions.model_validate(options)
     await host.state.commit(_Evidence(revision=4))
     return PluginRunStatus.SUCCEEDED

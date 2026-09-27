@@ -24,7 +24,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.integration import RunResources
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
-from vs_runtime.api import OrchestrationPlugin, RunHost
+from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
@@ -113,7 +113,7 @@ class _StubOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-async def _run_stub(host: RunHost, options: BaseModel) -> PluginRunStatus:
+async def _run_stub(host: Run, options: BaseModel) -> PluginRunStatus:
     del host, options
     return PluginRunStatus.SUCCEEDED
 

@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime.contracts import Run
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
         Commands,
         Control,
         Evaluation,
+        Observations,
         RunFacts,
         Skills,
         State,
@@ -117,7 +120,7 @@ class RunHostComponents:
     control: Control
     commands: Commands
     skills: Skills
-    log: Callable[[str], None]
+    observations: Observations
     blocking: BlockingOperations
     resources: RunHostResourceOwner
 
@@ -126,23 +129,23 @@ class RuntimeRunHost:
     """Concrete run host owning capability and resource teardown."""
 
     def __init__(self, components: RunHostComponents) -> None:
-        self.run_id = components.run_id
-        self.facts = components.facts
-        self.agents = components.agents
-        self.workspaces = components.workspaces
-        self.evaluation = components.evaluation
-        self.state = components.state
-        self.control = components.control
-        self.commands = components.commands
-        self.skills = components.skills
-        self._log = components.log
+        """Bind the fixed public value to its private lifecycle owner."""
+        self._workspaces = components.workspaces
+        self.run = Run(
+            run_id=components.run_id,
+            facts=components.facts,
+            agents=components.agents,
+            workspaces=components.workspaces,
+            evaluation=components.evaluation,
+            state=components.state,
+            control=components.control,
+            commands=components.commands,
+            skills=components.skills,
+            observations=components.observations,
+        )
         self._blocking = components.blocking
         self._resources = components.resources
         self._close_task: asyncio.Task[None] | None = None
-
-    def log(self, message: str) -> None:
-        """Record one presentation-neutral run log message."""
-        self._log(message)
 
     async def close(self) -> None:
         """Release all run-owned resources exactly once."""
@@ -152,10 +155,10 @@ class RuntimeRunHost:
 
     async def _close_once(self) -> None:
         self._blocking.begin_close()
-        self.workspaces.begin_close()
+        self._workspaces.begin_close()
         errors = await self._blocking.drain()
         try:
-            await self.workspaces.close()
+            await self._workspaces.close()
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948002 [BLE001]; cleanup must continue through independently owned resources.
             errors.append(error)
         try:

@@ -2,7 +2,7 @@
 
 These agents support product surfaces such as experiment chat.  They are not
 the orchestration API: plugins declare :class:`vs_runtime.api.AgentRole` values
-and create sessions through ``RunHost.agents`` instead.
+and create sessions through ``Run.agents`` instead.
 """
 
 from __future__ import annotations

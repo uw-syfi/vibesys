@@ -15,6 +15,7 @@ from vs_runtime.api.testing import (
     FakeCommands,
     FakeControl,
     FakeEvaluation,
+    FakeObservations,
     FakeSkills,
     FakeState,
     FakeWorkspace,
@@ -143,7 +144,7 @@ def _components(  # noqa: PLR0913  # lint-waiver: LW-948021 [PLR0913]; lifecycle
             control=FakeControl(),
             commands=FakeCommands(),
             skills=FakeSkills(),
-            log=lambda message: events.append(f"log:{message}"),
+            observations=FakeObservations(),
             blocking=blocking,
             resources=owner,
         ),
@@ -158,14 +159,17 @@ def test_host_exposes_capabilities_and_closes_once_in_dependency_order(tmp_path:
 
     async def exercise() -> None:
         async with open_run_host(lambda: components) as host:
-            assert host.run_id == "run-1"
-            assert host.facts.objective == "Test the host."
-            host.log("hello")
+            assert host.run.run_id == "run-1"
+            assert host.run.facts.objective == "Test the host."
+            assert not hasattr(host.run, "log")
+            assert not hasattr(host.run, "close")
+            host.run.observations.note("hello")
 
     asyncio.run(exercise())
 
+    assert isinstance(components.observations, FakeObservations)
+    assert components.observations.calls[0].message == "hello"
     assert events == [
-        "log:hello",
         "agents-begin-close",
         "agents-close",
         "workspaces-close",

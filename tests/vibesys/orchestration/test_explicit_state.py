@@ -1,4 +1,4 @@
-"""Plugin-bound typed state behavior over the production run host."""
+"""Plugin-bound typed state behavior over the production runtime."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
+from vibesys.run.host import open_product_run_host
 
 from vibesys.api import RunStopped, create_session
 from vibesys.config import Config
@@ -15,14 +16,13 @@ from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
-from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     OrchestrationPlugin,
     PluginProjection,
     ProfileExecution,
-    RunHost,
+    Run,
     RunStatus,
     RuntimeContractError,
     StateModelError,
@@ -53,7 +53,7 @@ class _ChildState(_State):
     pass
 
 
-async def _orchestrate(run: RunHost, _options: BaseModel) -> RunStatus:
+async def _orchestrate(run: Run, _options: BaseModel) -> RunStatus:
     await run.state.commit(_State(values=[7]), label="plugin entrypoint")
     return RunStatus.SUCCEEDED
 

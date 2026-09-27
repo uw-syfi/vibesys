@@ -33,7 +33,7 @@ from vs_issue_tracker.api import (
     ProgressLog,
     open_issue_tracker_session,
 )
-from vs_runtime.api import AgentSession, RunHost, RunStatus
+from vs_runtime.api import AgentSession, Run, RunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,10 +70,10 @@ class _Sessions:
 class _IssueQueueRun:
     """One run's strict state, policy artifacts, and long-lived sessions."""
 
-    def __init__(self, host: RunHost, options: IssueQueueOptions) -> None:
-        self.host = host
+    def __init__(self, run: Run, options: IssueQueueOptions) -> None:
+        self.run = run
         self.options = options
-        self.workspace = host.workspaces.root
+        self.workspace = run.workspaces.root
         self.root = self.workspace.path
         self._tracker_session: IssueTrackerSession | None = None
         self.state = IssueQueueState()
@@ -82,20 +82,20 @@ class _IssueQueueRun:
 
     async def initialize(self) -> None:
         """Acquire all sessions before creating or changing policy artifacts."""
-        loaded = await self.host.state.load(IssueQueueState)
+        loaded = await self.run.state.load(IssueQueueState)
         self.resuming = loaded is not None
         self.state = loaded or IssueQueueState()
-        implementer = await self.host.agents.create_session(
+        implementer = await self.run.agents.create_session(
             IMPLEMENTER,
             workspace=self.workspace,
             member_id="issue-queue-implementer",
         )
-        judge = await self.host.agents.create_session(
+        judge = await self.run.agents.create_session(
             JUDGE,
             workspace=self.workspace,
             member_id="issue-queue-judge",
         )
-        performance = await self.host.agents.create_session(
+        performance = await self.run.agents.create_session(
             PERF_EVALUATOR,
             workspace=self.workspace,
             member_id="issue-queue-perf-evaluator",
@@ -106,7 +106,7 @@ class _IssueQueueRun:
             self.options.tracker,
             local_store_path=self.root / _ISSUES_FILE,
             local_progress_path=self.root / _PROGRESS_FILE,
-            run_id=self.host.run_id,
+            run_id=self.run.run_id,
             view_sink=lambda issues: render_all(self.root / _ISSUES_DIRECTORY, issues),
         )
         self.tracker_session.refresh()
@@ -115,7 +115,7 @@ class _IssueQueueRun:
             self.board.create(
                 type=IssueType.FEATURE,
                 title="Build inference server for the reference model",
-                description=bootstrap_description(self.host.facts),
+                description=bootstrap_description(self.run.facts),
                 created_by="loop:bootstrap",
                 iteration=max(self.state.round_idx + 1, 1),
             )
@@ -129,11 +129,11 @@ class _IssueQueueRun:
             )
             if reopened:
                 issue_ids = ", ".join(f"#{issue_id}" for issue_id in reopened)
-                self.host.log(f"[resume] reopened blocked issues: {issue_ids}")
+                self.run.observations.note(f"[resume] reopened blocked issues: {issue_ids}")
                 await self.commit("issue_queue: reopen blocked issues")
 
     async def close(self) -> None:
-        """Release the plugin-owned handles; the run host remains the final owner."""
+        """Release plugin-owned handles; the runtime remains their final owner."""
         if self.sessions is not None:
             await self.sessions.close()
 
@@ -166,7 +166,7 @@ class _IssueQueueRun:
     async def commit(self, label: str) -> None:
         """Persist the aggregate and its policy artifacts with the root workspace."""
         self.tracker_session.refresh()
-        await self.host.state.commit(self.state, workspace=self.workspace, label=label)
+        await self.run.state.commit(self.state, workspace=self.workspace, label=label)
 
     async def transition(
         self,
@@ -206,7 +206,7 @@ def _resume_point(run: _IssueQueueRun) -> tuple[int, IssueQueuePhase, int | None
 
 async def _implement(run: _IssueQueueRun, issue: Issue, iteration: int) -> Issue:
     response = await run.active_sessions.implementer.turn(
-        implementer_message(issue, run.host.facts, latest_judge_review(issue)),
+        implementer_message(issue, run.run.facts, latest_judge_review(issue)),
         response=IssueImplementerResponse,
     )
     response = response.model_copy(update={"issue_id": issue.id})
@@ -231,7 +231,7 @@ async def _judge(run: _IssueQueueRun, issue: Issue, iteration: int) -> IssueJudg
         )
     )
     response = await run.active_sessions.judge.turn(
-        judge_message(issue, run.host.facts),
+        judge_message(issue, run.run.facts),
         response=IssueJudgeResponse,
     )
     response = response.model_copy(update={"issue_id": issue.id})
@@ -328,7 +328,7 @@ async def _drain(
 async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> bool | None:
     remaining = [issue for issue in run.board.list() if issue.status is not IssueStatus.CLOSED]
     if remaining and all(issue.status is IssueStatus.BLOCKED for issue in remaining):
-        run.host.log(f"[stop] all {len(remaining)} remaining issues are blocked")
+        run.run.observations.note(f"[stop] all {len(remaining)} remaining issues are blocked")
         await run.transition(
             round_idx=round_idx,
             phase="perf_eval",
@@ -356,7 +356,7 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
         response = await run.active_sessions.performance.turn(
             performance_message(
                 iteration=iteration,
-                facts=run.host.facts,
+                facts=run.run.facts,
                 options=run.options,
                 state=run.state,
             ),
@@ -391,33 +391,33 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
     return None
 
 
-async def orchestrate(host: RunHost, raw_options: object) -> RunStatus:
+async def orchestrate(run: Run, raw_options: object) -> RunStatus:
     """Drain the issue queue and benchmark after each bounded pass."""
     options = IssueQueueOptions.model_validate(raw_options)
-    run = _IssueQueueRun(host, options)
+    loop = _IssueQueueRun(run, options)
     try:
-        await run.initialize()
-        round_idx, next_phase, pending_issue_id = _resume_point(run)
+        await loop.initialize()
+        round_idx, next_phase, pending_issue_id = _resume_point(loop)
         while round_idx < options.max_rounds:
-            await host.control.checkpoint()
+            await run.control.checkpoint()
             iteration = round_idx + 1
-            host.log(f"round {iteration}/{options.max_rounds}")
+            run.observations.note(f"round {iteration}/{options.max_rounds}")
             await _drain(
-                run,
+                loop,
                 round_idx=round_idx,
                 iteration=iteration,
                 next_phase=next_phase,
                 pending_issue_id=pending_issue_id,
             )
-            result = await _performance(run, round_idx, iteration)
+            result = await _performance(loop, round_idx, iteration)
             if result is not None:
                 return RunStatus.SUCCEEDED if result else RunStatus.FAILED
             round_idx += 1
             next_phase, pending_issue_id = "implementer", None
-        host.log("run completed: round budget exhausted")
+        run.observations.note("run completed: round budget exhausted")
         return RunStatus.FAILED
     finally:
-        await run.close()
+        await loop.close()
 
 
 __all__ = ["orchestrate"]

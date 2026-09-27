@@ -43,7 +43,7 @@ from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
-    RunHost,
+    Run,
     RunStatus,
     Workspace,
 )
@@ -165,10 +165,10 @@ class _TerminalPolicy:
 class _MultiRun:
     """One plain or profile-guided multi-role run."""
 
-    def __init__(self, host: RunHost, options: MultiRunOptions) -> None:
-        self.host = host
+    def __init__(self, run: Run, options: MultiRunOptions) -> None:
+        self.run = run
         self.options = options
-        self.workspace = host.workspaces.root
+        self.workspace = run.workspaces.root
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -178,7 +178,7 @@ class _MultiRun:
             )
         )
         self.files = MultiFiles.open(self.workspace.path)
-        self.turns = MultiAgentTurns(host, options, self.search, self.files)
+        self.turns = MultiAgentTurns(run, options, self.search, self.files)
         self.terminal = _TerminalPolicy(self.search.config)
         self.state = MultiState()
         self.carry: CarryOver
@@ -206,10 +206,10 @@ class _MultiRun:
         workspace: Workspace | None = None,
         label: str | None = None,
     ) -> None:
-        await self.host.state.commit(self.state, workspace=workspace, label=label)
+        await self.run.state.commit(self.state, workspace=workspace, label=label)
 
     async def initialize(self) -> None:
-        loaded = await self.host.state.load(MultiState)
+        loaded = await self.run.state.load(MultiState)
         aggregate = loaded or MultiState()
         resumed = self.search.resume(aggregate.search, self.options.metric_space)
         self.state = aggregate.model_copy(update={"search": resumed}, deep=True)
@@ -223,12 +223,12 @@ class _MultiRun:
             label=f"{self.label_prefix}: initialize policy state",
         )
 
-    async def run(self) -> RunStatus:
+    async def execute(self) -> RunStatus:
         try:
             await self.initialize()
             while self.round_number <= self.options.max_rounds:
-                await self.host.control.checkpoint()
-                self.host.log(f"round {self.round_number}/{self.options.max_rounds}")
+                await self.run.control.checkpoint()
+                self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
                     self.search.archive_summary(self.records, space=self.state.search.metrics)
                 )
@@ -301,7 +301,7 @@ class _MultiRun:
                 plan.hypothesis_id,
                 hypothesis.next_step or plan.task,
             )
-            self.host.log(
+            self.run.observations.note(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
             )
             guidance = None
@@ -336,10 +336,10 @@ class _MultiRun:
         rollback: RollbackTarget,
     ) -> Hypothesis:
         if not rollback.resolved or rollback.commit is None:
-            self.host.log("cannot revert: requested round has no retained revision")
+            self.run.observations.warning("cannot revert: requested round has no retained revision")
             return hypothesis
         if not await self.workspace.try_restore(rollback.commit, clean=True):
-            self.host.log(f"cannot restore requested revision {rollback.commit}")
+            self.run.observations.warning(f"cannot restore requested revision {rollback.commit}")
             return hypothesis
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback.commit
@@ -395,7 +395,7 @@ class _MultiRun:
             attempt.implementation = response
             if synthesized:
                 attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
-                self.host.log(
+                self.run.observations.warning(
                     f"[implementer] attempt {retry} returned no parseable response; retrying"
                 )
                 continue
@@ -435,7 +435,7 @@ class _MultiRun:
                 self.round_number,
                 implementation.hypothesis_outcome.value,
             )
-            self.host.log("[judge] deferred by sparse-review policy")
+            self.run.observations.note("[judge] deferred by sparse-review policy")
             return AttemptDecision.FINISH
         state.review_started = True
         state.revalidation_required = False
@@ -494,7 +494,7 @@ class _MultiRun:
             self.round_number,
             selected.attempt.retry,
         )
-        result = await self.host.evaluation.validate_local(
+        result = await self.run.evaluation.validate_local(
             self.workspace,
             recipe_artifact=artifact,
             report_location=report_location,
@@ -563,12 +563,12 @@ class _MultiRun:
         )
         receipt = self.state.accuracy_receipt
         reuse = receipt if receipt is not None and receipt.revision == revision else None
-        accuracy = await self.host.evaluation.accuracy(self.workspace, reuse=reuse)
+        accuracy = await self.run.evaluation.accuracy(self.workspace, reuse=reuse)
         self.state = self.state.model_copy(update={"accuracy_receipt": accuracy.receipt}, deep=True)
         if not accuracy.passed:
             await self._evaluation_failed(selected, accuracy.feedback or "accuracy failed")
             return False
-        benchmark = await self.host.evaluation.benchmark(
+        benchmark = await self.run.evaluation.benchmark(
             self.workspace,
             objectives=_benchmark_objectives(self.options),
         )
@@ -629,8 +629,8 @@ class _MultiRun:
                 attempt=attempt,
                 projection=projection,
                 reviewed=self.terminal.reviewed(attempt),
-                framework_benchmark_configured=self.host.facts.benchmark_configured,
-                accuracy_configured=self.host.facts.accuracy_configured,
+                framework_benchmark_configured=self.run.facts.benchmark_configured,
+                accuracy_configured=self.run.facts.accuracy_configured,
                 candidate_commit=candidate_revision,
                 backend_name=binding.backend,
                 driver_name=binding.driver,
@@ -702,7 +702,7 @@ class _MultiRun:
                 raise RuntimeError(message)
             await self.workspace.restore(baseline, clean=True)
             await self.workspace.snapshot(f"{self.label_prefix}: restore trusted input baseline")
-            self.host.log("no trusted winner; restored the input baseline")
+            self.run.observations.note("no trusted winner; restored the input baseline")
             return
         if winner.commit is None:
             message = "selected multi-agent winner has no workspace revision"
@@ -713,7 +713,7 @@ class _MultiRun:
         )
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"{self.label_prefix}: select round {winner.round_number}")
-        self.host.log(f"selected trusted winner from round {winner.round_number}")
+        self.run.observations.note(f"selected trusted winner from round {winner.round_number}")
 
     def _focus_state(self) -> ProfileFocusState | None:
         if self.profile_focus is None:
@@ -731,7 +731,7 @@ class _MultiRun:
         profile = self.options.profile_guided
         if profile is None or self.profile_focus is None:
             return None
-        attribution = await run_attribution(self.host, profile, workspace=self.workspace)
+        attribution = await run_attribution(self.run, profile, workspace=self.workspace)
         focused = self.profile_focus.observe(
             self._require_focus_state(),
             round_number=self.round_number,
@@ -746,16 +746,16 @@ class _MultiRun:
         return self.profile_focus.focus(focused)
 
 
-async def orchestrate(host: RunHost, raw_options: BaseModel) -> RunStatus:
+async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run the plain multi-agent policy against the explicit runtime API."""
     options = MultiOptions.model_validate(raw_options)
-    return await _MultiRun(host, options).run()
+    return await _MultiRun(run, options).execute()
 
 
-async def orchestrate_profile_guided(host: RunHost, raw_options: BaseModel) -> RunStatus:
+async def orchestrate_profile_guided(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run profile-guided multi-agent search against the explicit runtime API."""
     options = ProfileGuidedMultiOptions.model_validate(raw_options)
-    return await _MultiRun(host, options).run()
+    return await _MultiRun(run, options).execute()
 
 
 __all__ = ["orchestrate", "orchestrate_profile_guided"]

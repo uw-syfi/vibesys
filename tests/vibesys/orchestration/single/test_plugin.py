@@ -19,7 +19,7 @@ from vibesys.orchestration.single.models import (
     SingleState,
 )
 from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, RunFacts, RunStatus
-from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
+from vs_runtime.api.testing import FakeRun, FakeWorkspace
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,22 +101,22 @@ def _run(
     *,
     options: BaseModel | None = None,
     facts: RunFacts | None = None,
-    configure: Callable[[FakeRunHost], None] | None = None,
-) -> tuple[RunStatus, FakeRunHost]:
-    async def scenario() -> tuple[RunStatus, FakeRunHost]:
-        host = FakeRunHost(
+    configure: Callable[[FakeRun], None] | None = None,
+) -> tuple[RunStatus, FakeRun]:
+    async def scenario() -> tuple[RunStatus, FakeRun]:
+        run = FakeRun(
             PLUGIN,
             project_root=path,
             facts=facts,
             responder=script.respond,
         )
         if configure is not None:
-            configure(host)
+            configure(run)
         try:
-            status = await PLUGIN.orchestrate(host, options or _options())
-            return status, host
+            status = await PLUGIN.orchestrate(run, options or _options())
+            return status, run
         finally:
-            await host.close()
+            await run.close()
 
     return asyncio.run(scenario())
 
@@ -140,18 +140,18 @@ def test_plugin_declares_production_options_and_rejects_wrong_preset_polarity() 
 def test_multi_round_search_checkpoints_paid_turns_and_policy_files(tmp_path: Path) -> None:
     script = _Script(_plan("H-01"), _response(), _plan("H-02"), _response())
 
-    status, host = _run(tmp_path, script)
+    status, run = _run(tmp_path, script)
 
     assert status is RunStatus.SUCCEEDED
-    assert host.control.checkpoints == 2
-    state = asyncio.run(host.state.load(SingleState))
+    assert run.control.checkpoints == 2
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     assert [record.hypothesis_id for record in state.search.rounds] == ["H-01", "H-02"]
     assert state.last_paid_attempt is None
     assert state.last_response == _response()
     recorded_markers = [
         commit.value.last_paid_attempt
-        for commit in host.state.commits
+        for commit in run.state.commits
         if isinstance(commit.value, SingleState) and commit.value.last_paid_attempt is not None
     ]
     markers = [
@@ -197,8 +197,8 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
         benchmark_command="measure-throughput",
     )
 
-    def configure(host: FakeRunHost) -> None:
-        host.evaluation.script_benchmark(
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -209,7 +209,7 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
             )
         )
 
-    status, host = _run(
+    status, run = _run(
         tmp_path,
         script,
         options=_options(
@@ -222,16 +222,16 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
     )
 
     assert status is RunStatus.SUCCEEDED
-    state = asyncio.run(host.state.load(SingleState))
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     record = state.search.rounds[0]
     assert record.official_evaluation
     assert record.perf_metric == 120.0
     assert record.perf_provenance == "framework"
     assert record.implementer_driver == "fake"
-    assert host.evaluation.accuracy_calls
-    assert host.evaluation.benchmark_calls[0].objectives[0].name == "throughput"
-    workspace = host.workspaces.root
+    assert run.evaluation.accuracy_calls
+    assert run.evaluation.benchmark_calls[0].objectives[0].name == "throughput"
+    workspace = run.workspaces.root
     assert isinstance(workspace, FakeWorkspace)
     assert workspace.retained == {"selected-round-0001": record.commit}
 
@@ -243,14 +243,14 @@ def test_failed_review_retries_in_one_named_session(tmp_path: Path) -> None:
         _response(),
     )
 
-    status, host = _run(tmp_path, script, options=_options(max_rounds=1))
+    status, run = _run(tmp_path, script, options=_options(max_rounds=1))
 
     assert status is RunStatus.SUCCEEDED
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "accuracy regressed" in implementer_calls[1][2]
     implementer_sessions = [
-        session for session in host.agents.sessions if session.role.id == IMPLEMENTER.id
+        session for session in run.agents.sessions if session.role.id == IMPLEMENTER.id
     ]
     assert len(implementer_sessions) == 1
     assert implementer_sessions[0].member_id == "H-01"
@@ -259,16 +259,16 @@ def test_failed_review_retries_in_one_named_session(tmp_path: Path) -> None:
 def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None:
     script = _Script(_plan("H-01"), _response(), _response())
 
-    def configure(host: FakeRunHost) -> None:
-        host.evaluation.script_accuracy(
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_accuracy(
             AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
             AccuracyEvaluation(executed=True),
         )
-        host.evaluation.script_benchmark(
+        run.evaluation.script_benchmark(
             BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0)
         )
 
-    status, host = _run(
+    status, run = _run(
         tmp_path,
         script,
         options=_options(max_rounds=1, official_eval_every=1),
@@ -282,26 +282,26 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
     )
 
     assert status is RunStatus.SUCCEEDED
-    assert len(host.evaluation.accuracy_calls) == 2
-    assert len(host.evaluation.benchmark_calls) == 1
+    assert len(run.evaluation.accuracy_calls) == 2
+    assert len(run.evaluation.benchmark_calls) == 1
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "accuracy regressed" in implementer_calls[1][2]
-    state = asyncio.run(host.state.load(SingleState))
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     assert state.search.rounds[0].official_evaluation
     assert state.search.rounds[0].perf_provenance == "framework"
 
 
 def test_paid_attempt_is_not_repeated_after_interrupted_turn(tmp_path: Path) -> None:
-    async def scenario() -> tuple[FakeRunHost, _Script]:
+    async def scenario() -> tuple[FakeRun, _Script]:
         script = _Script(_plan("H-01"), RuntimeError("agent disconnected"), _response())
-        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=script.respond)
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=script.respond)
         try:
             with pytest.raises(RuntimeError, match="agent disconnected"):
-                await PLUGIN.orchestrate(host, _options(max_rounds=1))
-            assert all(session.closed for session in host.agents.sessions)
-            interrupted = await host.state.load(SingleState)
+                await PLUGIN.orchestrate(run, _options(max_rounds=1))
+            assert all(session.closed for session in run.agents.sessions)
+            interrupted = await run.state.load(SingleState)
             assert interrupted is not None
             assert interrupted.last_paid_attempt == PaidAttempt(
                 round_number=1,
@@ -309,22 +309,22 @@ def test_paid_attempt_is_not_repeated_after_interrupted_turn(tmp_path: Path) -> 
                 member_id="H-01",
                 turn_number=1,
             )
-            assert await PLUGIN.orchestrate(host, _options(max_rounds=1)) is RunStatus.SUCCEEDED
-            assert all(session.closed for session in host.agents.sessions)
-            return host, script
+            assert await PLUGIN.orchestrate(run, _options(max_rounds=1)) is RunStatus.SUCCEEDED
+            assert all(session.closed for session in run.agents.sessions)
+            return run, script
         finally:
-            await host.close()
+            await run.close()
 
-    host, script = asyncio.run(scenario())
+    run, script = asyncio.run(scenario())
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
         IMPLEMENTER.id,
         IMPLEMENTER.id,
     ]
-    sessions = [session for session in host.agents.sessions if session.role.id == IMPLEMENTER.id]
+    sessions = [session for session in run.agents.sessions if session.role.id == IMPLEMENTER.id]
     assert [session.member_id for session in sessions] == ["H-01", "H-01"]
-    assert all(session.closed for session in host.agents.sessions)
-    state = asyncio.run(host.state.load(SingleState))
+    assert all(session.closed for session in run.agents.sessions)
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     assert state.last_paid_attempt is None
     assert len(state.search.rounds) == 1
@@ -338,10 +338,10 @@ def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> Non
         _response(),
     )
 
-    status, host = _run(tmp_path, script)
+    status, run = _run(tmp_path, script)
 
     assert status is RunStatus.SUCCEEDED
-    state = asyncio.run(host.state.load(SingleState))
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     first, _second = state.search.rounds
     hypothesis = state.search.by_id("H-02")
@@ -349,20 +349,22 @@ def test_rollback_uses_recorded_parent_and_sessions_close(tmp_path: Path) -> Non
     assert hypothesis.revert_applied
     assert hypothesis.revert_commit == first.commit
     assert hypothesis.parent_commit == first.commit
-    assert all(session.closed for session in host.agents.sessions)
+    assert all(session.closed for session in run.agents.sessions)
 
 
 def test_no_trusted_winner_restores_baseline(tmp_path: Path) -> None:
     script = _Script(_plan("H-01"), _response(verdict=Verdict.FAIL, feedback="broken"))
 
-    status, host = _run(tmp_path, script, options=_options(max_rounds=1, max_retries_per_round=1))
+    status, run = _run(tmp_path, script, options=_options(max_rounds=1, max_retries_per_round=1))
 
     assert status is RunStatus.SUCCEEDED
-    workspace = host.workspaces.root
+    workspace = run.workspaces.root
     assert isinstance(workspace, FakeWorkspace)
     assert workspace.retained == {}
-    assert "no trusted winner; restored the input baseline" in host.logs
-    state = asyncio.run(host.state.load(SingleState))
+    assert "no trusted winner; restored the input baseline" in [
+        call.message for call in run.observations.calls
+    ]
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     assert not state.search.rounds[0].passed
 
@@ -373,7 +375,7 @@ def test_selected_profiler_support_name_and_agent_metric_provenance(tmp_path: Pa
         _response(perf_metric=90.0, perf_unit="throughput"),
     )
 
-    status, host = _run(
+    status, run = _run(
         tmp_path,
         script,
         options=_options(max_rounds=1, official_eval_every=1),
@@ -389,7 +391,7 @@ def test_selected_profiler_support_name_and_agent_metric_provenance(tmp_path: Pa
         message for role, _history, message in script.calls if role == IMPLEMENTER.id
     )
     assert "linux_cpu_profiler" in implementer_prompt
-    state = asyncio.run(host.state.load(SingleState))
+    state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     assert state.search.rounds[0].perf_provenance == "implementer"
 

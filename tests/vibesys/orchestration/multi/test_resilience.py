@@ -19,7 +19,7 @@ from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import RunStatus, StructuredResponseError
-from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
+from vs_runtime.api.testing import FakeRun, FakeWorkspace
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -103,14 +103,14 @@ class _Script:
         return reply
 
 
-def _run(path: Path, script: _Script, *, options: BaseModel | None = None) -> FakeRunHost:
-    async def scenario() -> FakeRunHost:
-        host = FakeRunHost(PLUGIN, project_root=path, responder=script.respond)
+def _run(path: Path, script: _Script, *, options: BaseModel | None = None) -> FakeRun:
+    async def scenario() -> FakeRun:
+        run = FakeRun(PLUGIN, project_root=path, responder=script.respond)
         try:
-            assert await PLUGIN.orchestrate(host, options or _options()) is RunStatus.SUCCEEDED
-            return host
+            assert await PLUGIN.orchestrate(run, options or _options()) is RunStatus.SUCCEEDED
+            return run
         finally:
-            await host.close()
+            await run.close()
 
     return asyncio.run(scenario())
 
@@ -128,7 +128,7 @@ def test_sparse_review_skips_judge_until_final_continuation_round(tmp_path: Path
         _judge(),
     )
 
-    host = _run(
+    run = _run(
         tmp_path,
         script,
         options=_options(max_rounds=2, judge_every=2),
@@ -141,7 +141,7 @@ def test_sparse_review_skips_judge_until_final_continuation_round(tmp_path: Path
         IMPLEMENTER.id,
         JUDGE.id,
     ]
-    state = asyncio.run(host.state.load(MultiState))
+    state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     assert state.search.rounds[0].judge_verdict == "deferred"
     assert state.search.rounds[1].judge_verdict == "pass"
@@ -156,7 +156,7 @@ def test_malformed_implementer_response_retries_before_judge(tmp_path: Path) -> 
         _judge(),
     )
 
-    host = _run(tmp_path, script)
+    run = _run(tmp_path, script)
 
     assert [role for role, _history, _message in script.calls] == [
         DESIGNER.id,
@@ -167,7 +167,7 @@ def test_malformed_implementer_response_retries_before_judge(tmp_path: Path) -> 
     ]
     implementer = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer] == [0, 0]
-    state = asyncio.run(host.state.load(MultiState))
+    state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     assert state.search.rounds[0].attempts == 2
 
@@ -175,14 +175,14 @@ def test_malformed_implementer_response_retries_before_judge(tmp_path: Path) -> 
 def test_explicit_plugin_pass_trajectory_matches_golden(tmp_path: Path) -> None:
     script = _Script(_pre_round(), _plan(), _implementation(), _judge())
 
-    host = _run(tmp_path, script)
-    state = asyncio.run(host.state.load(MultiState))
+    run = _run(tmp_path, script)
+    state = asyncio.run(run.state.load(MultiState))
     assert state is not None
-    workspace = host.workspaces.root
+    workspace = run.workspaces.root
     assert isinstance(workspace, FakeWorkspace)
     observed = {
         "roles": [role for role, _history, _message in script.calls],
-        "member_ids": [session.member_id for session in host.agents.sessions],
+        "member_ids": [session.member_id for session in run.agents.sessions],
         "rounds": [
             {
                 "number": record.round_number,

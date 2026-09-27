@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext, resolve_agent_specs
 from vibesys.context import _StateBinding, open_run_resources
+from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import _EvaluationAdapter
@@ -33,10 +34,11 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.context import _PreparedRun
+    from vibesys.events import CoreEventWriter
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
-    from vs_runtime.api import AgentRole, OrchestrationPlugin, RunHost, Workspace
+    from vs_runtime.api import AgentRole, OrchestrationPlugin, Run, Workspace
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         WorkspaceRuntime,
@@ -45,6 +47,26 @@ if TYPE_CHECKING:
 
 
 type _AgentToolResolver = Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class _ProductObservations:
+    """Project plugin-authored observations onto VibeSys logs and events."""
+
+    log: Callable[[str], None]
+    events: CoreEventWriter
+
+    def note(self, message: str) -> None:
+        """Write one informational note to the durable diagnostic log."""
+        self.log(message)
+
+    def warning(self, message: str) -> None:
+        """Write and publish one non-fatal orchestration warning."""
+        self.log(message)
+        self.events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(summary=message, source=FrameworkSource.LOOP),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +188,7 @@ class _ProductHostFactory:
             control=control,
             commands=commands,
             skills=skills,
-            log=logger.lprint,
+            observations=_ProductObservations(logger.lprint, self.integration.events),
             blocking=blocking,
             resources=resources,
         )
@@ -238,7 +260,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
-) -> AsyncIterator[RunHost]:
+) -> AsyncIterator[Run]:
     """Open one product-composed host under the reusable runtime lifecycle."""
     factory = _ProductHostFactory(
         request=request,
@@ -251,7 +273,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         plugin=plugin,
     )
     async with open_run_host(factory.prepare) as host:
-        yield host
+        yield host.run
 
 
 __all__ = ["open_product_run_host"]

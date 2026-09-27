@@ -24,7 +24,7 @@ from vibesys.orchestration.issue_queue.prompts import (
 )
 from vs_issue_tracker.api import IssueBoard, IssueStatus, IssueTrackerConfig, IssueType
 from vs_runtime.api import RunFacts, RunStatus
-from vs_runtime.api.testing import FakeRunHost
+from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -110,23 +110,23 @@ def _run(
     script: _Script,
     *,
     options: BaseModel | None = None,
-    prepare: Callable[[FakeRunHost], Awaitable[None]] | None = None,
-) -> tuple[RunStatus, FakeRunHost]:
-    async def scenario() -> tuple[RunStatus, FakeRunHost]:
-        host = _fake_host(path, script)
+    prepare: Callable[[FakeRun], Awaitable[None]] | None = None,
+) -> tuple[RunStatus, FakeRun]:
+    async def scenario() -> tuple[RunStatus, FakeRun]:
+        run = _fake_host(path, script)
         if prepare is not None:
-            await prepare(host)
+            await prepare(run)
         try:
-            status = await PLUGIN.orchestrate(host, options or _options())
-            return status, host
+            status = await PLUGIN.orchestrate(run, options or _options())
+            return status, run
         finally:
-            await host.close()
+            await run.close()
 
     return asyncio.run(scenario())
 
 
-def _fake_host(path: Path, script: _Script) -> FakeRunHost:
-    return FakeRunHost(
+def _fake_host(path: Path, script: _Script) -> FakeRun:
+    return FakeRun(
         PLUGIN,
         project_root=path,
         facts=RunFacts(
@@ -178,18 +178,18 @@ def test_tracker_selection_is_strict_plugin_configuration() -> None:
 def test_success_reuses_three_named_sessions_and_writes_policy_artifacts(tmp_path: Path) -> None:
     script = _Script(_implementation(), _review(passed=True), _performance())
 
-    status, host = _run(tmp_path, script)
+    status, run = _run(tmp_path, script)
 
     assert status is RunStatus.SUCCEEDED
-    assert host.control.checkpoints == 1
+    assert run.control.checkpoints == 1
     assert [call[0] for call in script.calls] == ["implementer", "judge", "perf_eval"]
-    assert [session.member_id for session in host.agents.sessions] == [
+    assert [session.member_id for session in run.agents.sessions] == [
         "issue-queue-implementer",
         "issue-queue-judge",
         "issue-queue-perf-evaluator",
     ]
-    assert all(session.closed for session in host.agents.sessions)
-    state = asyncio.run(host.state.load(IssueQueueState))
+    assert all(session.closed for session in run.agents.sessions)
+    state = asyncio.run(run.state.load(IssueQueueState))
     assert state is not None
     assert state.round_idx == 1
     assert state.phase == "implementer"
@@ -238,7 +238,7 @@ def test_failed_review_continues_both_role_conversations(tmp_path: Path) -> None
 def test_attempt_gate_blocks_queue_without_paying_for_performance(tmp_path: Path) -> None:
     script = _Script(_implementation(), _review(passed=False))
 
-    status, host = _run(
+    status, run = _run(
         tmp_path,
         script,
         options=_options(max_attempts_per_issue=1),
@@ -248,7 +248,7 @@ def test_attempt_gate_blocks_queue_without_paying_for_performance(tmp_path: Path
     assert [call[0] for call in script.calls] == ["implementer", "judge"]
     board = IssueBoard(tmp_path / "issues.json")
     assert board.list()[0].status is IssueStatus.BLOCKED
-    assert host.agents.sessions[2].history == ()
+    assert run.agents.sessions[2].history == ()
 
 
 def test_resume_at_judge_does_not_repeat_implementer_turn(tmp_path: Path) -> None:
@@ -268,7 +268,7 @@ def test_resume_at_judge_does_not_repeat_implementer_turn(tmp_path: Path) -> Non
     )
     board.increment_attempts(issue.id, actor="implementer", iteration=1)
 
-    async def prepare(host: FakeRunHost) -> None:
+    async def prepare(run: FakeRun) -> None:
         state = IssueQueueState.model_validate(
             {
                 "round_idx": 0,
@@ -277,7 +277,7 @@ def test_resume_at_judge_does_not_repeat_implementer_turn(tmp_path: Path) -> Non
                 "bootstrap_done": True,
             }
         )
-        await host.state.commit(state, workspace=host.workspaces.root, label="interrupted")
+        await run.state.commit(state, workspace=run.workspaces.root, label="interrupted")
 
     script = _Script(_review(passed=True), _performance())
 
@@ -305,15 +305,15 @@ def test_resume_ignores_stale_closed_issue_and_drains_open_work(tmp_path: Path) 
         iteration=1,
     )
 
-    async def prepare(host: FakeRunHost) -> None:
-        await host.state.commit(
+    async def prepare(run: FakeRun) -> None:
+        await run.state.commit(
             IssueQueueState(
                 round_idx=0,
                 phase="judge",
                 current_issue_id=stale.id,
                 bootstrap_done=True,
             ),
-            workspace=host.workspaces.root,
+            workspace=run.workspaces.root,
             label="stale cursor",
         )
 
@@ -343,7 +343,7 @@ def test_completed_performance_record_is_not_repeated_on_resume(tmp_path: Path) 
     )
     board.update_status(issue.id, IssueStatus.CLOSED, actor="judge", iteration=1)
 
-    async def prepare(host: FakeRunHost) -> None:
+    async def prepare(run: FakeRun) -> None:
         state = IssueQueueState.model_validate(
             {
                 "round_idx": 0,
@@ -360,15 +360,15 @@ def test_completed_performance_record_is_not_repeated_on_resume(tmp_path: Path) 
                 ),
             }
         )
-        await host.state.commit(state, workspace=host.workspaces.root, label="measured")
+        await run.state.commit(state, workspace=run.workspaces.root, label="measured")
 
     script = _Script()
 
-    status, host = _run(tmp_path, script, prepare=prepare)
+    status, run = _run(tmp_path, script, prepare=prepare)
 
     assert status is RunStatus.SUCCEEDED
     assert script.calls == []
-    assert all(session.history == () for session in host.agents.sessions)
+    assert all(session.history == () for session in run.agents.sessions)
 
 
 def test_bootstrap_is_idempotent_across_repeated_plugin_invocation(tmp_path: Path) -> None:
@@ -379,16 +379,16 @@ def test_bootstrap_is_idempotent_across_repeated_plugin_invocation(tmp_path: Pat
         _performance(),
     )
 
-    async def scenario() -> tuple[RunStatus, RunStatus, FakeRunHost]:
-        host = _fake_host(tmp_path, script)
+    async def scenario() -> tuple[RunStatus, RunStatus, FakeRun]:
+        run = _fake_host(tmp_path, script)
         try:
-            first = await PLUGIN.orchestrate(host, _options(max_rounds=1))
-            second = await PLUGIN.orchestrate(host, _options(max_rounds=2))
-            return first, second, host
+            first = await PLUGIN.orchestrate(run, _options(max_rounds=1))
+            second = await PLUGIN.orchestrate(run, _options(max_rounds=2))
+            return first, second, run
         finally:
-            await host.close()
+            await run.close()
 
-    first, second, host = asyncio.run(scenario())
+    first, second, run = asyncio.run(scenario())
 
     assert (first, second) == (RunStatus.SUCCEEDED, RunStatus.SUCCEEDED)
     assert [call[0] for call in script.calls] == [
@@ -401,7 +401,7 @@ def test_bootstrap_is_idempotent_across_repeated_plugin_invocation(tmp_path: Pat
     assert len(issues) == 1
     assert issues[0].created_by == "loop:bootstrap"
     assert len([event for event in issues[0].history if event.action == "create"]) == 1
-    state = asyncio.run(host.state.load(IssueQueueState))
+    state = asyncio.run(run.state.load(IssueQueueState))
     assert state is not None
     assert [record.iteration for record in state.performance] == [1, 2]
 
@@ -424,23 +424,23 @@ def test_blocked_issue_reopens_after_total_round_budget_increases(tmp_path: Path
     )
     script = _Script(_implementation(), _review(passed=True), _performance())
 
-    async def scenario() -> tuple[RunStatus, RunStatus, FakeRunHost]:
-        host = _fake_host(tmp_path, script)
-        await host.state.commit(
+    async def scenario() -> tuple[RunStatus, RunStatus, FakeRun]:
+        run = _fake_host(tmp_path, script)
+        await run.state.commit(
             IssueQueueState(
                 round_idx=1,
                 phase="implementer",
                 bootstrap_done=True,
             ),
-            workspace=host.workspaces.root,
+            workspace=run.workspaces.root,
             label="budget exhausted",
         )
         try:
-            unchanged = await PLUGIN.orchestrate(host, _options(max_rounds=1))
-            increased = await PLUGIN.orchestrate(host, _options(max_rounds=2))
-            return unchanged, increased, host
+            unchanged = await PLUGIN.orchestrate(run, _options(max_rounds=1))
+            increased = await PLUGIN.orchestrate(run, _options(max_rounds=2))
+            return unchanged, increased, run
         finally:
-            await host.close()
+            await run.close()
 
     unchanged, increased, _host = asyncio.run(scenario())
 
@@ -516,13 +516,13 @@ def test_performance_follow_on_issue_survives_round_budget_expiry(tmp_path: Path
         effect=file_follow_on,
     )
 
-    status, host = _run(tmp_path, script, options=_options(max_rounds=1))
+    status, run = _run(tmp_path, script, options=_options(max_rounds=1))
 
     assert status is RunStatus.FAILED
     follow_on = IssueBoard(tmp_path / "issues.json").get(2)
     assert follow_on is not None
     assert follow_on.status is IssueStatus.OPEN
-    state = asyncio.run(host.state.load(IssueQueueState))
+    state = asyncio.run(run.state.load(IssueQueueState))
     assert state is not None
     assert (state.round_idx, state.phase) == (1, "implementer")
 
@@ -536,9 +536,9 @@ def test_retry_trajectory_matches_golden_policy_snapshot(tmp_path: Path) -> None
         _performance(),
     )
 
-    status, host = _run(tmp_path, script, options=_options(max_rounds=1))
+    status, run = _run(tmp_path, script, options=_options(max_rounds=1))
 
-    state = asyncio.run(host.state.load(IssueQueueState))
+    state = asyncio.run(run.state.load(IssueQueueState))
     assert state is not None
     board = IssueBoard(tmp_path / "issues.json")
     snapshot = {
@@ -560,7 +560,7 @@ def test_retry_trajectory_matches_golden_policy_snapshot(tmp_path: Path) -> None
                 "current_issue_id": commit.value.current_issue_id,
                 "performance_records": len(commit.value.performance),
             }
-            for commit in host.state.commits
+            for commit in run.state.commits
             if isinstance(commit.value, IssueQueueState)
         ],
         "issues": [
@@ -585,7 +585,7 @@ def test_retry_trajectory_matches_golden_policy_snapshot(tmp_path: Path) -> None
             }
             for item in board.list()
         ],
-        "logs": list(host.logs),
+        "logs": [call.message for call in run.observations.calls],
         "progress_headings": [
             line.removeprefix("## ")
             for line in (tmp_path / "progress.md").read_text(encoding="utf-8").splitlines()
@@ -602,8 +602,8 @@ def test_retry_trajectory_matches_golden_policy_snapshot(tmp_path: Path) -> None
 def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path: Path) -> None:
     script = _Script(RuntimeError("provider unavailable"))
 
-    async def scenario() -> FakeRunHost:
-        host = FakeRunHost(
+    async def scenario() -> FakeRun:
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Build the candidate."),
@@ -611,19 +611,19 @@ def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path:
         )
         try:
             with pytest.raises(RuntimeError, match="provider unavailable"):
-                await PLUGIN.orchestrate(host, _options())
-            return host
+                await PLUGIN.orchestrate(run, _options())
+            return run
         finally:
-            await host.close()
+            await run.close()
 
-    host = asyncio.run(scenario())
+    run = asyncio.run(scenario())
 
-    state = asyncio.run(host.state.load(IssueQueueState))
+    state = asyncio.run(run.state.load(IssueQueueState))
     assert state is not None
     assert (state.round_idx, state.phase, state.current_issue_id) == (0, "implementer", 1)
     board = IssueBoard(tmp_path / "issues.json")
     assert board.list()[0].status is IssueStatus.IN_PROGRESS
-    assert all(session.closed for session in host.agents.sessions)
+    assert all(session.closed for session in run.agents.sessions)
 
 
 def test_judge_crash_reopens_without_repeating_paid_implementation(tmp_path: Path) -> None:
@@ -638,7 +638,7 @@ def test_judge_crash_reopens_without_repeating_paid_implementation(tmp_path: Pat
     interrupted_script = _Script(_implementation(), RuntimeError("judge disconnected"))
     resumed_script = _Script(_review(passed=True), _performance())
 
-    async def crash_and_reopen() -> tuple[RunStatus, FakeRunHost, FakeRunHost]:
+    async def crash_and_reopen() -> tuple[RunStatus, FakeRun, FakeRun]:
         project_root = tmp_path / "reopened"
         interrupted = _fake_host(project_root, interrupted_script)
         try:
@@ -700,27 +700,27 @@ def test_session_construction_failure_leaves_no_policy_artifacts(
     failed_role: str,
     opened_sessions: int,
 ) -> None:
-    async def scenario() -> tuple[FakeRunHost, RuntimeError]:
-        host = FakeRunHost(
+    async def scenario() -> tuple[FakeRun, RuntimeError]:
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Build the candidate."),
         )
-        host.agents.script_creation(*creation_script)
+        run.agents.script_creation(*creation_script)
         try:
             with pytest.raises(RuntimeError, match=f"{failed_role} unavailable") as raised:
-                await PLUGIN.orchestrate(host, _options())
-            return host, raised.value
+                await PLUGIN.orchestrate(run, _options())
+            return run, raised.value
         finally:
-            await host.close()
+            await run.close()
 
-    host, error = asyncio.run(scenario())
+    run, error = asyncio.run(scenario())
 
     assert error.args == (f"{failed_role} unavailable",)
-    assert len(host.agents.sessions) == opened_sessions
-    assert all(session.closed for session in host.agents.sessions)
+    assert len(run.agents.sessions) == opened_sessions
+    assert all(session.closed for session in run.agents.sessions)
     assert list(tmp_path.iterdir()) == []
-    assert host.state.commits == ()
+    assert run.state.commits == ()
 
 
 def test_registered_system_prompts_match_reviewed_golden() -> None:

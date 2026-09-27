@@ -50,7 +50,7 @@ The main framework boundaries are:
   `<package>.api` surface, for example `vs_agent.api` or `vs_project.api`.
   Each library exposes its owned fakes through `<package>.api.testing` where
   applicable. Orchestration policy normally uses
-  `vs_runtime.api.testing.FakeRunHost`. Tach rejects imports of root-level
+  `vs_runtime.api.testing.FakeRun`. Tach rejects imports of root-level
   exports and internal modules.
 - `src/vibesys/orchestration/domains/` owns domain-specific prompt policy.
   Generic execution mechanisms belong in `libs/vs-runtime/`; agent harnesses,
