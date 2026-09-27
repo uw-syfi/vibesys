@@ -18,14 +18,14 @@ bundles, and the TUI.
 ## Repository layout
 
 ```text
-src/vibesys/             Headless optimization core and loop implementation
+src/vibesys/             Orchestration policy and thin product API/composition
 src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
 clients/backend-client/  TypeScript server protocol and transport
 clients/core-state/      Pure backend-event projection
 clients/tui/             TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
-examples/                Candidate repositories, tasks, and legacy input bundles
+examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
 resources/skills/        Bundled Agent Skills and reference material
 resources/profilers/     Profiler MCP servers and support packages
@@ -39,15 +39,25 @@ The main framework boundaries are:
   `libs/`.
 - `src/server/` owns serving and frontend-specific behavior. It may depend on
   `src/vibesys/`, but the headless core does not depend on it.
-- `src/vibesys/loops/` owns the outer-loop policies and shared loop helpers.
+- `src/vibesys/orchestration/` owns built-in orchestration plugins: agent
+  roles, prompts, reply schemas, search and selection policy, evaluation
+  cadence, and policy state. See
+  [Orchestration plugins and runtime](orchestration-runtime.md).
+- `src/vibesys/api/`, `src/vibesys/run/`, `src/vibesys/context.py`, and
+  `src/vibesys/composition.py` form the thin product facade and composition
+  layer over the reusable runtime libraries.
 - `libs/` owns reusable libraries. Import each library through its public
   `<package>.api` surface, for example `vs_agent.api` or `vs_project.api`.
-  `vs_agent.api.testing` provides the library-owned fake. Tach rejects imports
-  of root-level exports and internal modules.
-- `src/vibesys/domains/` owns domain-specific prompt context and hooks.
-- `src/vibesys/backends/` owns compute and execution backends.
+  Each library exposes its owned fakes through `<package>.api.testing` where
+  applicable. Orchestration policy normally uses
+  `vs_runtime.api.testing.FakeRunHost`. Tach rejects imports of root-level
+  exports and internal modules.
+- `src/vibesys/orchestration/domains/` owns domain-specific prompt policy.
+  Generic execution mechanisms belong in `libs/vs-runtime/`; agent harnesses,
+  compute isolation, and project persistence belong in `libs/vs-agent/`,
+  `libs/vs-sandbox/`, and `libs/vs-project/`, respectively.
 - Candidate repositories own target-specific tasks and candidate contracts
-  below `.vibesys/tasks/`. Legacy input bundles remain under `examples/`.
+  below `.vibesys/tasks/`. Input bundles remain under `examples/`.
 - `resources/evaluators/` owns reusable versioned evaluator packages.
 
 ## Local development
