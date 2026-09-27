@@ -2,22 +2,60 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
+import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.run_execution import run_execution_record
 
-from vibesys.api import OrchestrationRegistry
+from vibesys.api import OrchestrationRegistry, open_run_store
 from vibesys.api.contracts import RunStatus
-from vibesys.api.store import open_run_store, portable_history_snapshots
+from vibesys.api.store import portable_history_snapshots
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.issue_queue import IssueQueueState
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import (
+    OrchestrationDescriptor,
+    Project,
+    ProjectStateError,
+    RunEnvironmentRecord,
+)
 from vs_runtime.api import OrchestrationPlugin, RunHost
 from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.mark.parametrize("schema_version", [1, 2, 3, 4])
+def test_public_run_store_rejects_pre_v5_manifests_explicitly(
+    tmp_path: Path,
+    schema_version: int,
+) -> None:
+    project = Project.open(tmp_path)
+    project.state.create_project("legacy run project")
+    manifest = project.state.new_run_manifest(
+        "legacy run",
+        run_id=f"v{schema_version}-run",
+        branch=f"vibesys-runs/v{schema_version}-run",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
+        trusted_input_baseline="0" * 40,
+    )
+    project.state.create_run(manifest)
+    manifest_path = tmp_path / ".vibesys" / "state" / "runs" / manifest.run_id / "run.json"
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    raw["schema_version"] = schema_version
+    manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    store = open_run_store(project)
+    with pytest.raises(
+        ProjectStateError,
+        match=rf"unsupported run schema version {schema_version}.*requires version 5",
+    ):
+        store.get_run(manifest.run_id)
 
 
 def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
