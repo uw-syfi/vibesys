@@ -149,7 +149,7 @@ async def _execute_recipe(
             output=output[-GATE_RECORD_TAIL_CHARS:],
             error=None if execution.exit_code == 0 else "command exited nonzero",
         )
-    except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020039 [BLE001]; execution failures are evaluation feedback, not host failures.
+    except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920433 [BLE001]; execution failures are evaluation feedback, not host failures.
         result = FrameworkValidationResult(
             recipe=recipe,
             input_digest=input_digest,

@@ -4,7 +4,7 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 """
 
 # Capabilities in this module share one private owner for resource lifetime.
-# lint-waiver: LW-040111 [SLF001]; capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-920434 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations

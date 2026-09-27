@@ -411,7 +411,7 @@ production path cannot be measured safely.
                 )
             except StructuredResponseError:
                 summary = _fallback_profiler()
-        except Exception as error:  # noqa: BLE001  # lint-waiver: profiling is advisory; a failed specialist must not abort the policy round.
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920440 [BLE001]; profiling is advisory; a failed specialist must not abort the policy round.
             self.host.log(f"[profiler] failed: {error}")
             return None
         finally:

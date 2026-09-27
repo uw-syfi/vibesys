@@ -39,6 +39,7 @@ DEFAULT_EXCLUDED_DIRS = frozenset(
         ".tox",
         ".venv",
         "__pycache__",
+        "build",
         "node_modules",
     }
 )

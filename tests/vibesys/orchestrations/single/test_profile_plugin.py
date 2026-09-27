@@ -79,7 +79,7 @@ def _plan(hypothesis_id: str) -> OrchestratorPlan:
         hypothesis="Batching removes per-request launch overhead.",
         title="Batch prefill",
         task="Batch prefill requests.",
-        pass_criteria="Throughput improves without an accuracy regression.",  # noqa: S106  # lint-waiver: fixture text is not a credential.
+        pass_criteria="Throughput improves without an accuracy regression.",  # noqa: S106  # lint-waiver: LW-920450 [S106]; fixture text is not a credential.
         reasoning="The trace shows repeated launch overhead.",
     )
 

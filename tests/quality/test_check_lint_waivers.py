@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from scripts.check_lint_waivers import audit, scan_source_file
+from scripts.check_lint_waivers import audit, discover_ruff_files, scan_source_file
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -15,6 +15,19 @@ def write_source(root: Path, source: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
     return path
+
+
+def test_discovery_excludes_generated_build_copies(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nextend-exclude = []\n", encoding="utf-8")
+    source = write_source(tmp_path, "value = 1\n")
+    generated = tmp_path / "build" / "lib" / "sample.py"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("value = 1\n", encoding="utf-8")
+
+    files, error = discover_ruff_files(tmp_path)
+
+    assert error is None
+    assert files == [source.resolve()]
 
 
 def test_accepts_a_suppression_with_a_colocated_reason(tmp_path: Path) -> None:

@@ -527,7 +527,7 @@ def test_candidate_discard_invalidates_its_public_sessions(tmp_path: Path) -> No
     role = AgentRole(id="worker", system_prompt="Work in the candidate.")
 
     async def body(ctx: RunContext) -> None:
-        ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-040118 [SLF001]; candidate support is an environment input and this integration seam avoids replacing runtime code.
+        ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-920446 [SLF001]; candidate support is an environment input and this integration seam avoids replacing runtime code.
             ctx.environment.view,
             supports_parallel_candidate_evaluation=True,
         )

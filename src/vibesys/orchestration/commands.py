@@ -1,6 +1,6 @@
 """Production adapter for the plugin-facing sandboxed command capability."""
 
-# lint-waiver: LW-040118 [SLF001]; sibling host capabilities share private run-owned resources while the migration adapter exists.
+# lint-waiver: LW-920432 [SLF001]; sibling host capabilities share private run-owned resources while the migration adapter exists.
 # ruff: noqa: SLF001
 
 from __future__ import annotations

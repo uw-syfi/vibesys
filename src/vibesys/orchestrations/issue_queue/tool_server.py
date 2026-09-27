@@ -74,7 +74,7 @@ def build_server(store_path: Path, policy_path: Path, tracker_config_path: Path)
 
     @server.tool()
     def create_issue(
-        type: str,  # noqa: A002  # lint-waiver: MCP schema uses the domain field name.
+        type: str,  # noqa: A002  # lint-waiver: LW-920438 [A002]; MCP schema uses the domain field name.
         title: str,
         description: str,
     ) -> str:

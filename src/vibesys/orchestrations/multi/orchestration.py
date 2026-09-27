@@ -293,7 +293,7 @@ class _MultiRun:
             if started.rollback is not None:
                 hypothesis = await self._apply_rollback(hypothesis, started.rollback)
         else:
-            assert isinstance(decision, Continue)  # noqa: S101
+            assert isinstance(decision, Continue)  # noqa: S101  # lint-waiver: LW-920439 [S101]; the exhaustive decision branch narrows the closed policy result type.
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
             self.files.note_continuation(

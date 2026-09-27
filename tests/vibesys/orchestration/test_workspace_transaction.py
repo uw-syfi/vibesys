@@ -57,7 +57,7 @@ class _FakeOwner:
         self.restore_calls: list[str] = []
         self.fail_restore_to: str | None = None
 
-    async def _snapshot(self, label: str, scope: Any = None) -> str:  # noqa: ANN401  # LW-040120 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
+    async def _snapshot(self, label: str, scope: Any = None) -> str:  # noqa: ANN401  # LW-920447 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         del label, scope
         self._next_id += 1
         revision = f"r{self._next_id}"

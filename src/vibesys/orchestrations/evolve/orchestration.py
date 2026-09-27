@@ -71,7 +71,7 @@ async def _capture_cleanup(operation: Awaitable[None]) -> BaseException | None:
     """Complete one cleanup operation without preventing later cleanup."""
     try:
         await operation
-    except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-920407 [BLE001]; cleanup must include cancellation and continue through every owned session/workspace, so catching narrower exception families would leak later resources.
+    except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-920436 [BLE001]; cleanup must include cancellation and continue through every owned session/workspace, so catching narrower exception families would leak later resources.
         return error
     return None
 
@@ -541,7 +541,7 @@ class _EvolveRun:
             )
         except StructuredResponseError:
             return _fallback_profiler()
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920408 [BLE001]; profiling is advisory and provider failures are not normalized to one stable runtime exception yet; restricting this catch would make an optional profile abort accepted candidates.
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920437 [BLE001]; profiling is advisory and provider failures are not normalized to one stable runtime exception yet; restricting this catch would make an optional profile abort accepted candidates.
             self.host.log(f"profiler failed: {error}")
             return None
 

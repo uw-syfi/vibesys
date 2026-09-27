@@ -63,7 +63,8 @@ _ATTRIBUTION_OUTPUT = (
 class _ProfileAttributionBackend(FakeComputeBackend):
     """Provide one deterministic captured profile result to the real adapter."""
 
-    def make_sandbox(  # lint-waiver: LW-040201 [PLR0913]; this FakeComputeBackend override must match its real backend seam's independent setup inputs.
+    # This FakeComputeBackend override matches its real backend seam's setup inputs.
+    def make_sandbox(
         self,
         kind: SandboxKind,
         **kwargs: Any,  # noqa: ANN401  # LW-040202 [ANN401]; the production factory's extensible keyword boundary is intentionally open.

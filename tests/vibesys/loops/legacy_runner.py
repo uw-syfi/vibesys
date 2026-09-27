@@ -36,7 +36,7 @@ class LegacyOrchestrator(Protocol):
     async def run(self, ctx: RunContext) -> bool: ...
 
 
-async def run_orchestration(  # noqa: PLR0913  # test-isolation: temporary legacy golden/resume harness retains independent fake seams.
+async def run_orchestration(  # noqa: PLR0913  # lint-waiver: LW-920442 [PLR0913]; temporary legacy golden/resume harness retains independent fake seams.
     request: RunRequest,
     integration: LocalRunIntegration,
     orchestrator: LegacyOrchestrator,
