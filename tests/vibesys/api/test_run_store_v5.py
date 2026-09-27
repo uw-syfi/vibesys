@@ -12,8 +12,6 @@ from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.issue_queue import IssueQueueState
-from vibesys.search.population.models import PopulationConfig
-from vibesys.search.population.search import PopulationSearch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import OrchestrationPlugin, RunHost
 from vs_runtime.api import RunStatus as PluginRunStatus
@@ -80,7 +78,7 @@ def test_evolve_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
-    state = EvolveState(population=PopulationSearch(PopulationConfig(seed=0)).initial())
+    state = EvolveState.model_validate({"population": {"rng_state": (3, (), None)}})
     project.state.portable_namespace(manifest.run_id, "evolve").slot(
         "state.json", EvolveState
     ).save(state)

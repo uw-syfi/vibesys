@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, cast
 from openevolve.config import DatabaseConfig
 from openevolve.database import Program, ProgramDatabase
 
-from vibesys.search.population.models import (
+from vibesys.orchestration.evolve.population.models import (
     Individual,
     OpenEvolveSelectorConfig,
     OpenEvolveSelectorState,

@@ -40,7 +40,7 @@ _ALLOWED_AGENT_RUN_REEXPORTS: set[str] = set()
 _FORBIDDEN_CLOCK_OR_IO_MODULES = ("os", "subprocess", "pathlib", "time", "datetime")
 
 # Process-global RNG accessors upstream OpenEvolve code itself reads/writes.
-# ``_upstream_random`` (search/population/openevolve_selector.py) is the one
+# ``_upstream_random`` (orchestration/evolve/population/openevolve_selector.py) is the one
 # place search/ may call these directly: it swaps the global singleton's
 # state for an explicit, state-derived ``random.Random`` around a call into
 # upstream code that only knows the global RNG, then restores the process's

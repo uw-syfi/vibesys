@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.orchestration.evolve.models import MutatorContext
-from vibesys.search.population.models import Individual
+from vibesys.orchestration.evolve.population.models import Individual
 
 
 def test_mutator_context_rejects_non_cold_start_without_parent() -> None:

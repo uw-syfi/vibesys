@@ -24,13 +24,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.search.population import openevolve_selector
-from vibesys.search.population.models import (
+from vibesys.orchestration.evolve.population import openevolve_selector
+from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
     OpenEvolveSelectorConfig,
     PopulationConfig,
 )
-from vibesys.search.population.search import PopulationSearch
+from vibesys.orchestration.evolve.population.search import PopulationSearch
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

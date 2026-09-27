@@ -18,9 +18,9 @@ from vibesys.orchestration.evolve.models import (
     CandidateProfilerContext,
     MutatorContext,
 )
+from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.search.population import Individual
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 _ROLES = ("mutator", "judge", "profiler")

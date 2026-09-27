@@ -19,7 +19,7 @@ import math
 from typing import TYPE_CHECKING
 
 from vibesys.evaluators.metrics import Measurement, MetricSpace, Objective
-from vibesys.search.population.models import Individual, Proposal
+from vibesys.orchestration.evolve.population.models import Individual, Proposal
 
 if TYPE_CHECKING:
     import random

@@ -11,7 +11,11 @@ from pydantic import ValidationError
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.plugin import PLUGIN
-from vibesys.search.population import CandidateOutcome, PopulationConfig, PopulationSearch
+from vibesys.orchestration.evolve.population import (
+    CandidateOutcome,
+    PopulationConfig,
+    PopulationSearch,
+)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentRole,

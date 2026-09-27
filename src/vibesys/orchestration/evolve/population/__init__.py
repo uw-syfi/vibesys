@@ -9,7 +9,7 @@ orchestration in ``vibesys.orchestration.evolve`` owns persisting
 
 from __future__ import annotations
 
-from vibesys.search.population.models import (
+from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
     Individual,
     OpenEvolveSelectorConfig,
@@ -19,7 +19,7 @@ from vibesys.search.population.models import (
     Proposal,
     RandomState,
 )
-from vibesys.search.population.search import PopulationSearch, candidate_fitness
+from vibesys.orchestration.evolve.population.search import PopulationSearch, candidate_fitness
 
 __all__ = [
     "CandidateOutcome",

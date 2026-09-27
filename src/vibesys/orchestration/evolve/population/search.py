@@ -13,8 +13,8 @@ from __future__ import annotations
 import random
 from typing import TYPE_CHECKING, cast
 
-from vibesys.search.population import openevolve_selector, vibesys_selector
-from vibesys.search.population.models import (
+from vibesys.orchestration.evolve.population import openevolve_selector, vibesys_selector
+from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
     Individual,
     OpenEvolveSelectorConfig,

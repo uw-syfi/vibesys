@@ -22,10 +22,7 @@ from vibesys.orchestration.evolve.models import (
     MutatorContext,
     MutatorResponse,
 )
-from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
-from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.schemas import Verdict
-from vibesys.search.population import (
+from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
     Individual,
     PopulationConfig,
@@ -33,6 +30,9 @@ from vibesys.search.population import (
     PopulationState,
     Proposal,
 )
+from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
+from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.schemas import Verdict
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,

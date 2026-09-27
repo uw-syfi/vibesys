@@ -34,8 +34,8 @@ RandomState = tuple[int, tuple[int, ...], float | None]
 class Individual(BaseModel):
     """One candidate program in the population.
 
-    ``commit`` is a git SHA in the workspace repo, set by orchestration once a
-    candidate is materialized on disk; search/population never reads or
+    ``commit`` is a git SHA in the workspace repo, set by the evolve orchestrator once a
+    candidate is materialized on disk; population policy never reads or
     writes the filesystem. Failed offspring are retained (``passed=False``,
     ``commit=None``) so ``failure_lessons`` can surface their feedback.
     """
@@ -60,9 +60,9 @@ class Individual(BaseModel):
 class CandidateOutcome(BaseModel):
     """One evaluated candidate, before a population id is assigned.
 
-    ``code`` is the candidate's canonical multi-file patch; orchestration
+    ``code`` is the candidate's canonical multi-file patch; the evolve orchestrator
     supplies it only when ``PopulationSearch.needs_code`` is true (the
-    OpenEvolve selector) since search/population cannot read git itself.
+    OpenEvolve selector) since population policy cannot read git itself.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)

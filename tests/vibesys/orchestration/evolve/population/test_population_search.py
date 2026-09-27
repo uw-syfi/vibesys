@@ -1,4 +1,4 @@
-"""Behavioral and property tests for ``vibesys.search.population``.
+"""Behavioral and property tests for evolve's population policy.
 
 These exercise the pure ``PopulationSearch`` state machine directly (no
 ``RunContext``, no filesystem, no agents): determinism, resume-equivalence
@@ -15,7 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.search.population import (
+from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
     OpenEvolveSelectorConfig,
     PopulationConfig,
