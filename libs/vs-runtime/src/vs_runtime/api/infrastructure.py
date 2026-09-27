@@ -96,6 +96,12 @@ from vs_runtime._managed_conversation import (
     ManagedConversationSpec,
     create_managed_conversation,
 )
+from vs_runtime._model_artifacts import (
+    ModelArtifactDownloader,
+    ModelArtifactRequest,
+    PreparedModelArtifacts,
+    prepare_model_artifacts,
+)
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._project_materialization import (
@@ -413,6 +419,8 @@ __all__ = [
     "ManagedConversation",
     "ManagedConversationSpec",
     "ModalEnvironmentFacts",
+    "ModelArtifactDownloader",
+    "ModelArtifactRequest",
     "ModelRequestError",
     "ModelRequestReconciler",
     "ModelVolumeProvisioner",
@@ -421,6 +429,7 @@ __all__ = [
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
     "OwnedWorkspaces",
+    "PreparedModelArtifacts",
     "ProjectMaterializationEffects",
     "ProjectMaterializationStep",
     "ProjectMaterializer",
@@ -489,6 +498,7 @@ __all__ = [
     "parse_profile_command",
     "preflight_native_cpu_profiler",
     "prepare_docker_evaluator_resources",
+    "prepare_model_artifacts",
     "prepare_trusted_evaluation_plan",
     "relative_sdk_source",
     "remote_evaluator_setup_command",

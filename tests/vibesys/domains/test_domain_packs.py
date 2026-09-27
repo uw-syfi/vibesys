@@ -14,8 +14,6 @@ import pytest
 
 from vibesys.constants import DomainName
 from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.domains.environment import NoopEnvironmentHooks
-from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.domains.registry import (
     DOMAINS,
     registered_domains,
@@ -34,7 +32,6 @@ def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
     return DomainDefinition(
         name=DomainName.GENERIC,
         prompt_dir=prompt_dir,
-        environment_hooks=NoopEnvironmentHooks(),
     )
 
 
@@ -82,13 +79,6 @@ def test_resolve_path_is_not_supported(tmp_path: Path) -> None:
     # deliberately: a path string must not resolve as a domain.
     with pytest.raises(TypeError, match="DomainName"):
         resolve_domain(cast("DomainName", str(f)))
-
-
-def test_registered_domains_carry_environment_hooks() -> None:
-    assert isinstance(DOMAINS[DomainName.LLM_SERVING].environment_hooks, LLMServingEnvironmentHooks)
-    assert isinstance(DOMAINS[DomainName.GENERIC].environment_hooks, NoopEnvironmentHooks)
-    assert isinstance(DOMAINS[DomainName.MICROSERVICES].environment_hooks, NoopEnvironmentHooks)
-    assert isinstance(DOMAINS[DomainName.DATABASE].environment_hooks, NoopEnvironmentHooks)
 
 
 def test_domains_declare_torch_profiler_compatibility() -> None:

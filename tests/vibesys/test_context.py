@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import TypedDict, Unpack
 from unittest.mock import patch
 
@@ -18,13 +17,6 @@ from vibesys.context import (
     create_workspace_resources,
     open_run_resources,
 )
-from vibesys.domains.environment import (
-    EnvironmentContext,
-    EnvironmentHooks,
-    EnvironmentPatch,
-    NoopEnvironmentHooks,
-)
-from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators import (
     EvaluatorPackageRequirement,
@@ -57,21 +49,6 @@ from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.testing import FakeComputeBackend
 
 
-class _RecordingHooks:
-    def __init__(self) -> None:
-        self.prepared = 0
-        self.torn_down = 0
-
-    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:
-        del ctx
-        self.prepared += 1
-        return EnvironmentPatch()
-
-    def teardown(self, ctx: EnvironmentContext) -> None:
-        del ctx
-        self.torn_down += 1
-
-
 class _PortableStateProbe(BaseModel):
     """Strict value used to exercise generic portable-state replacement."""
 
@@ -95,7 +72,6 @@ class _CreateContextOptions(TypedDict, total=False):
     task_name: str | None
     task_root: Path | None
     remote_repo: str | None
-    hooks: EnvironmentHooks | None
     integration: LocalRunIntegration | None
 
 
@@ -218,18 +194,12 @@ def _create_context(
         remote_repo=options.get("remote_repo"),
     )
     plugin = built_in_orchestrations().resolve(descriptor.id).plugin
-    with patch(
-        "vibesys.context.resolve_domain",
-        return_value=SimpleNamespace(
-            environment_hooks=options.get("hooks") or NoopEnvironmentHooks()
-        ),
-    ):
-        return open_run_resources(
-            request,
-            options.get("integration") or LocalRunIntegration(),
-            resume_policy=plugin.resume_policy,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
-        )
+    return open_run_resources(
+        request,
+        options.get("integration") or LocalRunIntegration(),
+        resume_policy=plugin.resume_policy,
+        backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+    )
 
 
 def _git(project: Path, *args: str) -> str:
@@ -479,7 +449,6 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             runs_dir=runs_dir,
             task_name="latency",
             task_root=task,
-            hooks=LLMServingEnvironmentHooks(),
         ) as ctx:
             runtime_model = runs_dir / ".cache" / "llm-serving" / ctx.run_id / "model"
             copied_reference = ctx.project_root / ".vibesys" / "tasks" / "latency" / "reference"
@@ -506,7 +475,6 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
             evaluator=evaluator,
             task_name="latency",
             task_root=task,
-            hooks=LLMServingEnvironmentHooks(),
         ) as ctx:
             runtime_model = ctx.project.state.model_cache_directory("llm-serving") / "model"
 
@@ -789,36 +757,17 @@ def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> N
         assert not candidate_root.exists()
 
 
-def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path: Path) -> None:
+def test_construction_failure_removes_new_copy(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
-    hooks = _RecordingHooks()
-
     with (
         patch("vibesys.context.RunState", side_effect=RuntimeError("state failed")),
         pytest.raises(RuntimeError, match="state failed"),
     ):
-        _create_context(source, runs_dir=runs_dir, evaluator=evaluator, hooks=hooks)
+        _create_context(source, runs_dir=runs_dir, evaluator=evaluator)
 
-    assert hooks.prepared == 1
-    assert hooks.torn_down == 1
     assert not runs_dir.exists() or not list(runs_dir.iterdir())
-
-
-def test_hook_teardown_runs_when_provisioning_fails(tmp_path: Path) -> None:
-    source = tmp_path / "input"
-    evaluator = _write_project(source)
-    hooks = _RecordingHooks()
-
-    with (
-        patch("vibesys.context.provision_project", side_effect=RuntimeError("copy failed")),
-        pytest.raises(RuntimeError, match="copy failed"),
-    ):
-        _create_context(source, runs_dir=tmp_path / "runs", evaluator=evaluator, hooks=hooks)
-
-    assert hooks.prepared == 1
-    assert hooks.torn_down == 1
 
 
 def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:

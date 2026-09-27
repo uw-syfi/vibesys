@@ -13,7 +13,6 @@ import pytest
 from tests.support import provider_profiles as fake_profiles
 
 from vibesys.constants import ComputeBackend
-from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.evaluators import (
     EvaluatorPackageRequirement,
     EvaluatorToolLifecycleHooks,
@@ -52,6 +51,7 @@ from vs_runtime.api.infrastructure import (
     run_environment_record,
 )
 from vs_sandbox.api import (
+    EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,

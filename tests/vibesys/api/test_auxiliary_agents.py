@@ -15,14 +15,13 @@ from vibesys.api.session import (
 )
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.run.integration import RunResources
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import OrchestrationPlugin, RunHost
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
-from vs_sandbox.api import ProjectPathPolicy
+from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path

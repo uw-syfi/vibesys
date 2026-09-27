@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Protocol, cast
 from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent, RunReady
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
-from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
 from vibesys.orchestration.contracts import project_run
@@ -29,7 +28,7 @@ from vs_agent.api import (
 )
 from vs_project.api import Project, RunLogger
 from vs_runtime.api.infrastructure import ManagedConversationSpec, create_managed_conversation
-from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_sandbox.api import EnvironmentBindMount, HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

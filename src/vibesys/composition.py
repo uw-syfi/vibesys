@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from vibesys.constants import DomainName
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
@@ -14,6 +15,11 @@ from vs_agent.api import (
     StdioServerDescriptor,
     ToolServerDescriptor,
     expose_as_tools,
+)
+from vs_runtime.api.infrastructure import (
+    ModelArtifactRequest,
+    PreparedModelArtifacts,
+    prepare_model_artifacts,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -29,6 +35,23 @@ class AgentToolContext:
     """Product facts available while binding one declared agent tool."""
 
     profiler_id: str
+
+
+def prepare_domain_model_artifacts(
+    domain: DomainName,
+    request: ModelArtifactRequest,
+    *,
+    isolated: bool,
+    materialize_local_weights: bool,
+) -> PreparedModelArtifacts:
+    """Bind the closed LLM-serving domain to runtime model preparation."""
+    if domain is not DomainName.LLM_SERVING:
+        return PreparedModelArtifacts()
+    return prepare_model_artifacts(
+        request,
+        isolated=isolated,
+        materialize_local_weights=materialize_local_weights,
+    )
 
 
 def _vibesys_runtime_host_resource() -> HostResource:

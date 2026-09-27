@@ -247,7 +247,7 @@ depends_on = [ "vibesys.orchestration.memory", "vs_runtime"]
 [[modules]]
 path = "vibesys.context"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.inputs", "vibesys.run", "vs_project", "vs_sandbox", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.evaluators", "vibesys.inputs", "vibesys.run", "vs_project", "vs_sandbox", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]
 
 [[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
@@ -288,7 +288,7 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runti
 [[modules]]
 path = "vibesys.domains"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vibesys.prompts", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.prompts"]
 
 [[modules]]
 path = "vibesys.evaluators"

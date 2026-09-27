@@ -8,13 +8,14 @@ from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import TextIO, cast, overload
+from typing import TextIO, overload
 
 from pydantic import BaseModel
 
 from vibesys.composition import (
     _vibesys_runtime_host_resource,
     agent_spec_from_config,
+    prepare_domain_model_artifacts,
     resolve_agent_driver,
 )
 from vibesys.config import BUNDLED_RESOURCES, Config, as_config
@@ -23,14 +24,6 @@ from vibesys.constants import (
     ComputeBackend,
     DomainName,
 )
-from vibesys.domains.environment import (
-    EnvironmentBindMount,
-    EnvironmentContext,
-    EnvironmentHooks,
-    EnvironmentPatch,
-    NoopEnvironmentHooks,
-)
-from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import tool_install_root
 from vibesys.events import (
@@ -89,6 +82,7 @@ from vs_project.api import (
 )
 from vs_runtime.api import OrchestrationResumeDecision, boot_trace
 from vs_runtime.api.infrastructure import (
+    ModelArtifactRequest,
     MultiSlotRoundTransactionCoordinator,
     NativeCpuProfilerKind,
     ProjectMaterializer,
@@ -113,6 +107,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import (
     ComputeBackendImpl,
+    EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
     ProjectPathPolicy,
@@ -425,7 +420,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     agent_backend = request.agent_backend
     cli_provider = request.cli_provider
     backend = request.backend
-    environment_hooks = resolve_domain(bundle.domain).environment_hooks
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
     round_transaction_factory = _round_transaction_for_state(state_binding)
@@ -589,17 +583,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
             input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
-            hooks = environment_hooks or NoopEnvironmentHooks()
-            hook_log: list[Callable[[str], None]] = [buffered_logs.append]
-            environment_context: EnvironmentContext | None = None
-            environment_patch: EnvironmentPatch | None = None
-
-            def _teardown_environment_hooks() -> None:
-                context = cast("EnvironmentContext", environment_context)
-                try:
-                    hooks.teardown(context)
-                except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008205 [BLE001]; hook teardown is best effort and logs arbitrary hook failures without masking run cleanup.
-                    hook_log[0](f"[warn] environment hook teardown failed: {exc}")
+            model_artifacts = None
 
             workspace_files = create_project_materializer(
                 project_root,
@@ -616,21 +600,21 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
                 teardown_stack.callback(_remove_incomplete_project)
                 source_reference = (task_root or input_dir) / "reference"
-                environment_context = EnvironmentContext(
-                    reference_path=source_reference,
-                    workspace=project_root,
-                    run_environment=environment,
-                    project_root=PROJECT_ROOT,
-                    model_cache_dir=collection_root / ".cache" / "huggingface",
-                    runtime_artifact_dir=(
-                        source_reference
-                        if task_name is None
-                        else collection_root / ".cache" / "llm-serving" / run_id
+                model_artifacts = prepare_domain_model_artifacts(
+                    bundle.domain,
+                    ModelArtifactRequest(
+                        reference_dir=source_reference,
+                        model_cache_dir=collection_root / ".cache" / "huggingface",
+                        runtime_artifact_dir=(
+                            source_reference
+                            if task_name is None
+                            else collection_root / ".cache" / "llm-serving" / run_id
+                        ),
+                        log=buffered_logs.append,
                     ),
-                    log=buffered_logs.append,
+                    isolated=environment.isolated,
+                    materialize_local_weights=environment.materialize_local_model_weights,
                 )
-                environment_patch = hooks.prepare(environment_context)
-                teardown_stack.callback(_teardown_environment_hooks)
                 provision_project(
                     input_dir,
                     project_root,
@@ -640,7 +624,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                         evaluator_source=evaluator_source,
                         task_name=task_name,
                         input_project_dir=input_project_dir,
-                        input_excludes=environment_patch.copy_excludes,
+                        input_excludes=model_artifacts.copy_excludes,
                     ),
                 )
                 if evaluator_source is not None:
@@ -682,7 +666,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             integration.attach(log_dir)
             logger = RunLogger(log_dir, emit=_run_log_emitter(integration.agent_events))
             teardown_stack.callback(logger.close)
-            hook_log[0] = logger.lprint
             for message in buffered_logs:
                 logger.lprint(message)
 
@@ -843,19 +826,18 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             else:
                 ref_name = "."
 
-            if environment_context is None:
-                environment_context = EnvironmentContext(
-                    reference_path=project_ref_dir,
-                    workspace=project_root,
-                    run_environment=environment,
-                    project_root=PROJECT_ROOT,
-                    model_cache_dir=project_state.model_cache_directory("huggingface"),
-                    runtime_artifact_dir=project_state.model_cache_directory("llm-serving"),
-                    log=logger.lprint,
+            if model_artifacts is None:
+                model_artifacts = prepare_domain_model_artifacts(
+                    bundle.domain,
+                    ModelArtifactRequest(
+                        reference_dir=project_ref_dir,
+                        model_cache_dir=project_state.model_cache_directory("huggingface"),
+                        runtime_artifact_dir=project_state.model_cache_directory("llm-serving"),
+                        log=logger.lprint,
+                    ),
+                    isolated=environment.isolated,
+                    materialize_local_weights=environment.materialize_local_model_weights,
                 )
-                environment_patch = hooks.prepare(environment_context)
-                teardown_stack.callback(_teardown_environment_hooks)
-            environment_patch = cast("EnvironmentPatch", environment_patch)
 
             plan = build_workspace_materialization_plan(
                 project_root,
@@ -868,7 +850,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_name=profiler_support_name,
                 skill_excluded_relative_paths=platform_skill_excluded_paths(backend),
                 workspace_sources=(),
-                extra_input_excludes=environment_patch.copy_excludes,
+                extra_input_excludes=model_artifacts.copy_excludes,
                 profiler_support_extra=profiler_support_extra,
             )
             workspace_files.materialize(plan, existing=True)
@@ -963,7 +945,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_name=profiler_support_name,
                 profiler_support_extra=profiler_support_extra,
                 git_history_root=git.history_root,
-                environment_bind_mounts=environment_patch.bind_mounts,
+                environment_bind_mounts=model_artifacts.bind_mounts,
                 log=logger.lprint,
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
@@ -1018,9 +1000,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             profiler_support_extra=profiler_support_extra,
             skill_source_paths=skill_source_paths,
             ref_name=ref_name,
-            environment_hooks=hooks,
-            environment_context=environment_context,
-            environment_patch=environment_patch,
+            environment_bind_mounts=model_artifacts.bind_mounts,
             workspace_files=workspace_files,
             git=git,
             trusted_evaluation_plan=_trusted_evaluation_plan(bundle, session),
@@ -1278,7 +1258,7 @@ def _assemble_workspace_resources(
         profiler_support_name=parent.profiler_support_name,
         profiler_support_extra=parent.profiler_support_extra,
         git_history_root=parent.git.history_root,
-        environment_bind_mounts=parent.environment_patch.bind_mounts,
+        environment_bind_mounts=parent.environment_bind_mounts,
         log=logger.lprint,
         framework_root=PROJECT_ROOT,
         project_path_policy=project_path_policy,
@@ -1312,9 +1292,7 @@ def _assemble_workspace_resources(
         profiler_support_extra=parent.profiler_support_extra,
         skill_source_paths=parent.skill_source_paths,
         ref_name=parent.ref_name,
-        environment_hooks=parent.environment_hooks,
-        environment_context=parent.environment_context,
-        environment_patch=parent.environment_patch,
+        environment_bind_mounts=parent.environment_bind_mounts,
         workspace_files=workspace_files,
         git=git,
         trusted_evaluation_plan=parent.trusted_evaluation_plan.model_copy(
@@ -1374,9 +1352,7 @@ class _RunResources:
         profiler_support_extra: tuple[tuple[str, str], ...],
         skill_source_paths: list[Path],
         ref_name: str,
-        environment_hooks: EnvironmentHooks,
-        environment_context: EnvironmentContext,
-        environment_patch: EnvironmentPatch,
+        environment_bind_mounts: tuple[EnvironmentBindMount, ...],
         workspace_files: ProjectMaterializer,
         git: GitTracker,
         trusted_evaluation_plan: TrustedEvaluationPlan,
@@ -1421,9 +1397,7 @@ class _RunResources:
         self._skill_source_paths = skill_source_paths
         self.skills_for_agents = [src.name for src in skill_source_paths]
         self.ref_name = ref_name
-        self.environment_hooks = environment_hooks
-        self.environment_context = environment_context
-        self.environment_patch = environment_patch
+        self.environment_bind_mounts = environment_bind_mounts
         self.workspace_files = workspace_files
         self.EXCLUDED_WORKSPACE_DIRS = workspace_files.excluded_dirs
         self.git = git
