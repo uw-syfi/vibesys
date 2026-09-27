@@ -16,9 +16,16 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import Protocol
 
-    from vibesys.sandbox.run_environment import RunEnvironmentView
-    from vs_sandbox.api import ComputeBackendImpl, ContentionMonitor, GpuInfo
+    from vs_sandbox.compute_backends import ComputeBackendImpl, ContentionMonitor
+    from vs_sandbox.gpu_monitor import GpuInfo
+
+    class _ReselectionView(Protocol):
+        """The single environment capability device reselection consumes."""
+
+        @property
+        def host_device_reselect(self) -> bool: ...
 
 
 class DeviceLease:
@@ -29,7 +36,7 @@ class DeviceLease:
         backend: ComputeBackendImpl,
         *,
         log_dir: Path,
-        run_environment_view: RunEnvironmentView | None = None,
+        run_environment_view: _ReselectionView | None = None,
     ) -> None:
         """Bind the selected backend to run-specific device monitoring state."""
         self._backend = backend

@@ -8,11 +8,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
-from vibesys.run import (
-    DeviceLease,
-)
 from vs_sandbox.api import (
     CudaBackend,
+    DeviceLease,
     DockerSandbox,
     GpuContentionMonitor,
     GpuInfo,
