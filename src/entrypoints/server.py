@@ -110,7 +110,10 @@ def _web_instance_from_argv(argv: list[str]) -> Path:
 
 def _read_only_log_from_argv(argv: list[str]) -> Path | None:
     value = cli._option_from_argv(argv, "--web-reopen")  # noqa: SLF001  # lint-waiver: LW-101043 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
-    return Path(value).expanduser().resolve() if value is not None else None
+    if value is None:
+        return None
+    path = Path(value).expanduser().resolve()
+    return path.parent if path.name == "run-events.jsonl" else path
 
 
 def _headless_argv(argv: list[str]) -> list[str]:

@@ -24,8 +24,7 @@ _LIVE_PORT = 8765
 _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
-_DEMO_PROJECT = Path("examples/data-structures/repositories/queue-rs")
-_DEMO_TASK = "spsc"
+_DEMO_LOG = Path("clients/tui/dev/fixtures/framework-events.jsonl")
 
 
 def _repository_root() -> Path:
@@ -54,13 +53,14 @@ def _parser() -> argparse.ArgumentParser:
     dev.add_argument("--port", type=_port, default=_DEV_PORT)
 
     live = commands.add_parser("live", help="launch a live gateway and print its browser URL")
-    live.add_argument("--project", type=Path, default=None)
+    source = live.add_mutually_exclusive_group()
+    source.add_argument("--project", type=Path, default=None)
+    source.add_argument("--demo", action="store_true")
     live.add_argument("--task", default=None)
     live.add_argument("--port", type=_port, default=_LIVE_PORT)
     live.add_argument("--instance", type=Path, default=None)
     live.add_argument("--ssh-target", default=None, metavar="USER@HOST")
     live.add_argument("--browser-origin", action="append", default=[])
-    live.add_argument("--demo", action="store_true")
     live.add_argument("--no-build", action="store_true")
     live.add_argument("--open", action="store_true", help="ask the host to open a browser")
     live.add_argument(
@@ -106,23 +106,13 @@ def _run_dev(args: argparse.Namespace, root: Path) -> int:
     ).returncode
 
 
-def _demo_project(source: Path) -> Path:
-    source = source.resolve()
-    if not source.is_dir():
-        raise SystemExit(f"vibesys web: demo project does not exist: {source}")  # noqa: TRY003  # lint-waiver: LW-101076 [TRY003]; report an invalid demo source before copying it
-    target_root = Path(tempfile.mkdtemp(prefix="vibesys-web-demo-"))
-    target = target_root / source.name
-    shutil.copytree(source, target, ignore=shutil.ignore_patterns(".git"))
-    return target
-
-
 def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep independent live-launch options explicit at this composition boundary
     *,
-    project: Path,
+    project: Path | None,
+    replay_log: Path | None,
     task: str | None,
     port: int,
     instance: Path,
-    demo: bool,
     run_args: Sequence[str],
     browser_origins: Sequence[str],
 ) -> list[str]:
@@ -136,27 +126,21 @@ def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep in
         str(port),
         "--web-instance",
         str(instance),
-        "--project",
-        str(project),
     ]
-    if task is not None:
-        command.extend(("--task", task))
+    if replay_log is not None:
+        if project is not None:
+            raise AssertionError
+        command.extend(("--web-reopen", str(replay_log)))
+    elif project is not None:
+        command.extend(("--project", str(project)))
+        if task is not None:
+            command.extend(("--task", task))
+    else:
+        raise AssertionError
     for origin in browser_origins:
         command.extend(("--web-origin", origin))
-    if demo:
-        command.extend(
-            (
-                "--stub-agent",
-                "--local",
-                "--run-environment",
-                "local",
-                "--outer-loop",
-                "agent",
-                "--max-rounds",
-                "1",
-            )
-        )
-    command.extend(run_args[1:] if run_args and run_args[0] == "--" else run_args)
+    if replay_log is None:
+        command.extend(run_args[1:] if run_args and run_args[0] == "--" else run_args)
     return command
 
 
@@ -171,18 +155,26 @@ def _wait_for_record(path: Path) -> WebInstanceRecord:
 
 
 def _run_live(args: argparse.Namespace, root: Path) -> int:
-    source_project = (args.project or root / _DEMO_PROJECT).expanduser().resolve()
-    project = _demo_project(source_project) if args.demo else source_project
-    task = args.task or _DEMO_TASK if args.demo and args.project is None else args.task
-    if not project.is_dir():
-        raise SystemExit(f"vibesys web: project does not exist: {project}")  # noqa: TRY003  # lint-waiver: LW-101079 [TRY003]; report an invalid live project before launching the server
+    if args.demo and (args.task is not None or args.run_args):
+        raise SystemExit("vibesys web live: --demo does not accept run arguments")  # noqa: TRY003  # lint-waiver: LW-101103 [TRY003]; keep the deterministic replay demo separate from operator-owned runs
     if not args.demo and args.project is None:
         raise SystemExit("vibesys web live: pass --project or use --demo")  # noqa: TRY003  # lint-waiver: LW-101080 [TRY003]; require an explicit project for non-demo live mode
-    instance = (
-        (args.instance or Project.open(project).configuration_path() / "web-gateway.json")
-        .expanduser()
-        .resolve()
-    )
+    if args.demo:
+        replay_source = (root / _DEMO_LOG).resolve()
+        if not replay_source.is_file():
+            raise SystemExit(f"vibesys web: demo event log does not exist: {replay_source}")  # noqa: TRY003  # lint-waiver: LW-101104 [TRY003]; report an incomplete source checkout before gateway startup
+        demo_dir = Path(tempfile.mkdtemp(prefix="vibesys-web-demo-"))
+        replay_log = demo_dir / "run-events.jsonl"
+        shutil.copy2(replay_source, replay_log)
+        project = None
+        default_instance = demo_dir / "web-gateway.json"
+    else:
+        replay_log = None
+        project = args.project.expanduser().resolve()
+        if not project.is_dir():
+            raise SystemExit(f"vibesys web: project does not exist: {project}")  # noqa: TRY003  # lint-waiver: LW-101079 [TRY003]; report an invalid live project before launching the server
+        default_instance = Project.open(project).configuration_path() / "web-gateway.json"
+    instance = (args.instance or default_instance).expanduser().resolve()
     if not args.no_build:
         subprocess.run(  # noqa: S603  # lint-waiver: LW-101081 [S603]; run the repository's fixed web bundle build command
             [_pnpm(), "build"],
@@ -194,10 +186,10 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         environment["BROWSER"] = "true"
     command = _live_command(
         project=project,
-        task=task,
+        replay_log=replay_log,
+        task=args.task,
         port=args.port,
         instance=instance,
-        demo=args.demo,
         run_args=args.run_args,
         browser_origins=args.browser_origin,
     )

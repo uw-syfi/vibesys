@@ -4,12 +4,31 @@ The web UI has two supported local workflows. Use replay mode when working on
 React presentation and use live mode when checking the browser transport,
 server gateway, and shared state projection.
 
+## One-command local browser demo
+
+From the repository root, run:
+
+```bash
+./scripts/run-web-ui.sh
+```
+
+This is the browser-only source-checkout launcher. It installs the locked
+JavaScript workspace, builds `clients/web`, starts a detached live gateway on
+`127.0.0.1:8765`, replays a recorded run through the real WebSocket protocol,
+and asks the host to open the capability URL in its default browser. If the
+browser cannot be opened automatically, open the `VibeSys web UI ready` URL
+printed in the terminal.
+
+The script directly invokes `entrypoints.web`; it does not invoke the
+`vibesys` launcher or start OpenTUI. The `vibesys` executable remains the
+interactive TUI launcher by default.
+
 ## Replay mode
 
 From a VibeSys source checkout:
 
 ```bash
-uv run vibesys web dev
+uv run python -m entrypoints.web dev
 ```
 
 Open `http://127.0.0.1:5173`. This mode serves the deterministic event fixture
@@ -18,32 +37,33 @@ server or a WebSocket connection until a capability URL is submitted.
 
 ## Live demo mode
 
-The demo uses the repository's queue example and a deterministic local agent:
+The demo serves the repository's deterministic recorded run through the real
+HTTP and WebSocket gateway:
 
 ```bash
-uv run vibesys web live --demo
+uv run python -m entrypoints.web live --demo --open
 ```
 
 The command builds `clients/web`, starts a detached loopback gateway on port
 8765, and prints a capability-bearing URL. Open that URL in a browser. The
-gateway remains available after the one-round demo finishes, so the browser
-can inspect the completed state.
+gateway remains available until explicitly stopped, so the browser can inspect
+the completed state without an agent CLI or credentials.
 
 Use `status` and `stop` with the instance path printed by the command when the
-gateway needs to be inspected or stopped. For `--demo`, the project is copied
-to a temporary directory, so use the printed `Instance record` path rather
-than a path under the repository checkout:
+gateway needs to be inspected or stopped. For `--demo`, the instance record is
+created in a temporary directory, so use the printed `Instance record` path
+rather than a path under the repository checkout:
 
 ```bash
-uv run vibesys web status --instance /path/from/Instance-record-output.json
-uv run vibesys web stop --instance /path/from/Instance-record-output.json
+uv run python -m entrypoints.web status --instance /path/from/Instance-record-output.json
+uv run python -m entrypoints.web stop --instance /path/from/Instance-record-output.json
 ```
 
 Pass a real project and task for an operator-owned run. Additional VibeSys run
 arguments follow `--`:
 
 ```bash
-uv run vibesys web live --project /path/to/project --task TASK -- --outer-loop agent --local
+uv run python -m entrypoints.web live --project /path/to/project --task TASK --open -- --outer-loop agent --local
 ```
 
 ## Remote host and local laptop
@@ -52,21 +72,21 @@ The gateway intentionally binds only to loopback. Start it on the remote host
 with a fixed port and the SSH target that you will use from your laptop:
 
 ```bash
-uv run vibesys web live --demo --port 8765 --ssh-target USER@chelan3
+uv run python -m entrypoints.web live --demo --port 8765 --ssh-target USER@chelan3
 ```
 
 On the laptop, start the browser harness and run the printed tunnel command in
 separate terminals:
 
 ```bash
-uv run vibesys web dev --port 5173
+uv run python -m entrypoints.web dev --port 5173
 ssh -N -L 8765:127.0.0.1:8765 USER@chelan3
 ```
 
 The remote command must allow the browser harness origin:
 
 ```bash
-uv run vibesys web live --demo --port 8765 --browser-origin http://127.0.0.1:5173 --ssh-target USER@chelan3
+uv run python -m entrypoints.web live --demo --port 8765 --browser-origin http://127.0.0.1:5173 --ssh-target USER@chelan3
 ```
 
 Open the `Browser harness URL` printed by the remote command after starting
@@ -76,7 +96,7 @@ is forwarded to the remote gateway.
 The tunnel helper is equivalent when the capability URL is already available:
 
 ```bash
-uv run vibesys web tunnel --host USER@chelan3 --url 'http://127.0.0.1:8765/?token=TOKEN'
+uv run python -m entrypoints.web tunnel --host USER@chelan3 --url 'http://127.0.0.1:8765/?token=TOKEN'
 ```
 
 Open the `Open locally` URL printed by the helper. The local and remote ports

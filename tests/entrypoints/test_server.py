@@ -14,6 +14,7 @@ import server.runtime as runtime_module
 from entrypoints.server import (
     _control_socket_from_argv,
     _headless_argv,
+    _read_only_log_from_argv,
     _web_assets_from_argv,
     _web_instance_from_argv,
     _web_origins_from_argv,
@@ -63,6 +64,15 @@ def test_web_port_and_asset_parsers_cover_invalid_and_explicit_values(tmp_path: 
         _web_port_from_argv(["--web-port", "not-a-port"])
     asset_dir = tmp_path / "dist"
     assert _web_assets_from_argv(["--web-assets", str(asset_dir)]) == asset_dir.resolve()
+
+
+def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -> None:
+    log_dir = tmp_path / "run"
+    events = log_dir / "run-events.jsonl"
+
+    assert _read_only_log_from_argv([]) is None
+    assert _read_only_log_from_argv(["--web-reopen", str(log_dir)]) == log_dir
+    assert _read_only_log_from_argv(["--web-reopen", str(events)]) == log_dir
 
 
 def test_web_origins_accept_repeated_explicit_origins() -> None:

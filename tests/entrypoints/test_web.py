@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from entrypoints import web
 from entrypoints.web import (
-    _DEMO_PROJECT,
+    _DEMO_LOG,
     _browser_url,
-    _demo_project,
     _live_command,
     _local_url,
     _parser,
@@ -44,36 +43,29 @@ def _record() -> web.WebInstanceRecord:
 
 
 def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path: Path) -> None:
+    replay_log = tmp_path / "framework-events.jsonl"
     command = _live_command(
-        project=tmp_path / "project",
-        task="spsc",
+        project=None,
+        replay_log=replay_log,
+        task=None,
         port=8765,
         instance=tmp_path / "web-gateway.json",
-        demo=True,
         run_args=(),
         browser_origins=(),
     )
 
-    assert command[-8:] == [
-        "--stub-agent",
-        "--local",
-        "--run-environment",
-        "local",
-        "--outer-loop",
-        "agent",
-        "--max-rounds",
-        "1",
-    ]
+    assert command[-2:] == ["--web-reopen", str(replay_log)]
+    assert "--stub-agent" not in command
     assert command[1:4] == ["-m", "entrypoints.server", "--web"]
 
 
 def test_live_command_preserves_arguments_after_separator(tmp_path: Path) -> None:
     command = _live_command(
         project=tmp_path / "project",
+        replay_log=None,
         task=None,
         port=8765,
         instance=tmp_path / "web-gateway.json",
-        demo=False,
         run_args=("--", "--outer-loop", "plain", "--local"),
         browser_origins=("http://127.0.0.1:5173",),
     )
@@ -116,24 +108,6 @@ def test_parser_builds_each_browser_workflow() -> None:
 
     assert _parser().parse_args(["status", "--instance", "record.json"]).command == "status"
     assert _parser().parse_args(["stop", "--instance", "record.json"]).command == "stop"
-
-
-def test_demo_project_copies_source_without_git_metadata(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    (source / ".git").mkdir(parents=True)
-    (source / ".git" / "private").write_text("ignored", encoding="utf-8")
-    (source / "README").write_text("demo", encoding="utf-8")
-
-    copied = _demo_project(source)
-
-    assert copied != source
-    assert (copied / "README").read_text(encoding="utf-8") == "demo"
-    assert not (copied / ".git").exists()
-
-
-def test_demo_project_rejects_missing_source(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="demo project does not exist"):
-        _demo_project(tmp_path / "missing")
 
 
 def test_tool_lookup_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,9 +230,70 @@ def test_run_live_rejects_missing_project_for_non_demo_mode(tmp_path: Path) -> N
         open=False,
         run_args=(),
     )
-    (tmp_path / _DEMO_PROJECT).mkdir(parents=True)
-
     with pytest.raises(SystemExit, match="pass --project"):
+        _run_live(args, tmp_path)
+
+
+def test_run_live_demo_stages_replay_log_for_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replay_source = tmp_path / _DEMO_LOG
+    replay_source.parent.mkdir(parents=True)
+    replay_source.write_text('{"type":"run_finished"}\n')
+    captured: dict[str, object] = {}
+
+    def live_command(**kwargs: object) -> list[str]:
+        captured.update(kwargs)
+        return ["gateway"]
+
+    # test-isolation: inspect gateway composition without starting a subprocess.
+    monkeypatch.setattr(web, "_live_command", live_command)
+    # test-isolation: isolate the helper from a detached server process.
+    monkeypatch.setattr(
+        web.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
+    )
+    # test-isolation: return the record a real gateway publishes after startup.
+    monkeypatch.setattr(web, "_wait_for_record", lambda _path: _record())
+    args = argparse.Namespace(
+        project=None,
+        task=None,
+        port=8765,
+        instance=None,
+        ssh_target=None,
+        browser_origin=[],
+        demo=True,
+        no_build=True,
+        open=False,
+        run_args=(),
+    )
+
+    assert _run_live(args, tmp_path) == 0
+    replay_log = cast("Path", captured["replay_log"])
+    assert replay_log.name == "run-events.jsonl"
+    assert replay_log.read_text() == replay_source.read_text()
+    assert captured["project"] is None
+    assert captured["task"] is None
+
+
+def test_run_live_demo_rejects_operator_run_arguments(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        project=None,
+        task="spsc",
+        port=8765,
+        instance=None,
+        ssh_target=None,
+        browser_origin=[],
+        demo=True,
+        no_build=True,
+        open=False,
+        run_args=(),
+    )
+    (tmp_path / _DEMO_LOG).parent.mkdir(parents=True)
+    (tmp_path / _DEMO_LOG).write_text("{}\n")
+
+    with pytest.raises(SystemExit, match="does not accept run arguments"):
         _run_live(args, tmp_path)
 
 
