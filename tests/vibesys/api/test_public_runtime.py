@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from collections.abc import Callable, Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import (
     ComputeBackend,
@@ -18,19 +19,64 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.api.session import _OpenedAgentEnvironment
 from vibesys.context import RunSetup, borrow_run_agent_environment
-from vibesys.orchestration.runtime import RunContext
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.sandbox.run_environment import LocalEnvironment, SkyPilotEnvironment
-from vs_agent.api.testing import FakeAgentClient
-from vs_runtime.api import AgentRole, WorkspaceAccess
+from vibesys.sandbox.run_environment import SkyPilotEnvironment
+from vs_agent.api import ToolServerDescriptor
+from vs_runtime.api import Workspace
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
-    from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
+
+
+_PLUGIN = capability_plugin("three-agent-rounds")
+
+
+class _LifecycleMonitor:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class _LifecycleBackend(FakeComputeBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.monitor = _LifecycleMonitor()
+
+    def make_monitor(self, log_dir: Path) -> _LifecycleMonitor:
+        del log_dir
+        return self.monitor
+
+
+class _ToolBindingAssemblyError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("tool binding assembly failed")
+
+
+class _FailingToolBindings(
+    Mapping[str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]]
+):
+    def __len__(self) -> int:
+        return 1
+
+    def __iter__(self) -> Iterator[str]:
+        raise _ToolBindingAssemblyError
+
+    def __getitem__(
+        self,
+        key: str,
+    ) -> Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]:
+        raise KeyError(key)
 
 
 def _write_project(root: Path) -> None:
@@ -59,29 +105,6 @@ def _request(project_root: Path) -> RunRequest:
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-
-
-def _capture_environments(
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[list[RunEnvironmentRequest], list[str]]:
-    requests: list[RunEnvironmentRequest] = []
-    closed: list[str] = []
-    original_open = LocalEnvironment.open
-    original_close = _OpenedAgentEnvironment.close
-
-    def open_environment(
-        self: LocalEnvironment, request: RunEnvironmentRequest
-    ) -> RunEnvironmentSession:
-        requests.append(request)
-        return original_open(self, request)
-
-    def close_environment(self: _OpenedAgentEnvironment) -> None:
-        closed.append(self.run_id)
-        original_close(self)
-
-    monkeypatch.setattr(LocalEnvironment, "open", open_environment)
-    monkeypatch.setattr(_OpenedAgentEnvironment, "close", close_environment)
-    return requests, closed
 
 
 def test_skypilot_agents_borrow_the_workspace_session() -> None:
@@ -118,7 +141,9 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
+        async with open_product_run_host(
+            _request(project_root), integration, plugin=_PLUGIN, setup=RunSetup()
+        ) as ctx:
             root = ctx.workspaces.root
             original = root.revision
             assert original is not None
@@ -141,104 +166,31 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
         integration.close()
 
 
-def test_root_environment_and_trusted_evaluator_capabilities(tmp_path: Path) -> None:
+def test_product_host_closes_resources_when_capability_assembly_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()
+    backend = _LifecycleBackend()
+
+    def backend_factory(*_args: object, **_kwargs: object) -> _LifecycleBackend:
+        return backend
 
     async def exercise() -> None:
-        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
-            assert ctx.environment.view.env_kind == "local"
-            assert ctx.environment.view_for() is ctx.environment.view
-            assert ctx.environment.reference_path
-            assert ctx.environment.model_name == "gpt-test"
-            assert ctx.environment.profiler_kind is ProfilerKind.NONE
-            assert ctx.environment.workspace_sources == ()
-            assert isinstance(ctx.environment.skill_source_paths, tuple)
-            assert ctx.environment.run_log_path.parent == ctx.environment.log_dir
-            assert ctx.environment.candidate_runtime(1, 1) is not None
-            await ctx.control.boundary()
-            await ctx.control.debug_step("host probe")
-            ctx.switch_log("host-probe")
-            ctx.log("host capability probe")
-            await ctx.environment.reselect_device()
-            await ctx.environment.teardown_deployment("unused")
-            execution = await ctx.environment.execute("printf host-ok")
-            assert execution.exit_code == 0
-            assert "host-ok" in execution.output
-
-            accuracy = await ctx.evaluation.accuracy(ctx.workspaces.root)
-            assert accuracy.passed
-            assert accuracy.receipt is None
-            benchmark = await ctx.evaluation.benchmark(ctx.workspaces.root)
-            assert not benchmark.executed
+        with pytest.raises(RuntimeError, match="tool binding assembly failed"):
+            async with open_product_run_host(
+                _request(project_root),
+                integration,
+                plugin=_PLUGIN,
+                setup=RunSetup(),
+                backend_factory=backend_factory,
+                agent_tool_bindings=_FailingToolBindings(),
+            ):
+                pytest.fail("failed product assembly yielded a host")
 
     try:
         asyncio.run(exercise())
     finally:
         integration.close()
 
-
-def test_scoped_workspace_adopts_candidate_and_closes_its_session(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    integration = LocalRunIntegration()
-    client = FakeAgentClient(model="scope").enqueue_text("worker", "scoped response")
-    role = AgentRole(
-        id="worker",
-        system_prompt="work in the candidate",
-        workspace_access=WorkspaceAccess.READ_WRITE,
-    )
-
-    async def exercise() -> None:
-        unclosed_candidate = None
-        async with RunContext.open(
-            _request(project_root),
-            integration,
-            setup=RunSetup(),
-            agent_roles=(role,),
-            agent_client_factory=lambda **_kwargs: client,
-        ) as ctx:
-            # Local worktrees provide a cheap substrate for the generic parallel capability.
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-030003; This test reads one private attribute to check internal wiring that has no public accessor.
-                ctx.environment.view, supports_parallel_candidate_evaluation=True
-            )
-            assert ctx.workspaces.supports_parallel_candidates
-            parent_revision = ctx.workspaces.root.revision
-            assert parent_revision is not None
-            scoped = await ctx.workspaces.create_candidate(parent_revision)
-            assert scoped.id is not None
-            assert scoped.path != ctx.workspaces.root.path
-            assert ctx.environment.view_for(scoped).env_kind == "local"
-            session = await ctx.agents.create_session(role, workspace=scoped)
-            assert session.binding.backend == "fake"
-            assert session.binding.driver == "fake"
-            assert session.binding.provider == "fake"
-            assert session.binding.model == "scope"
-            assert await session.turn("work in the fork") == "scoped response"
-            (scoped.path / "queue.py").write_text("VALUE = 3\n")
-            assert "queue.py" in await scoped.pending_changes()
-            revision = await scoped.snapshot("scoped candidate")
-            assert scoped.revision == revision
-            assert "VALUE = 3" in await ctx.workspaces.export_patch(revision)
-            await scoped.restore(parent_revision)
-            assert (scoped.path / "queue.py").read_text() == "VALUE = 1\n"
-            await scoped.restore(revision)
-            assert (scoped.path / "queue.py").read_text() == "VALUE = 3\n"
-            assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 1\n"
-            await scoped.discard()
-            await scoped.discard()
-            assert client.closed
-            with pytest.raises(ValueError, match="closed"):
-                _ = scoped.path
-            await ctx.workspaces.adopt(revision)
-            assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 3\n"
-            unclosed_candidate = await ctx.workspaces.create_candidate(revision)
-        assert unclosed_candidate is not None
-        with pytest.raises(ValueError, match="closed"):
-            _ = unclosed_candidate.path
-
-    try:
-        asyncio.run(exercise())
-    finally:
-        integration.close()
+    assert backend.monitor.started
+    assert backend.monitor.stopped

@@ -1,21 +1,17 @@
 """Product projection derived after runtime commits opaque plugin state."""
 
-# The observer translates a durable runtime transition through its temporary host.
-# lint-waiver: LW-920434 [SLF001]; this thin composition adapter is removed with RunContext.
-# ruff: noqa: SLF001
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.events import CoreEventType, EventStatus, ExperimentsChangedData, RoundFinishedData
-from vibesys.orchestration import progress_log
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from vibesys.events import CoreEventData
-    from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.view import RoundSummary, RunView
 
 
@@ -30,29 +26,45 @@ class _EventSink(Protocol):
     ) -> object: ...
 
 
+class _CommittedStateProjector(Protocol):
+    def project_committed(
+        self,
+        namespace: str,
+        state: BaseModel,
+        *,
+        run_id: str,
+    ) -> RunView | None: ...
+
+
 class _StateCommitObserver:
     """Publish semantic product projections after runtime durability succeeds."""
 
-    def __init__(self, host: HostResources, namespace: str) -> None:
-        self._host = host
+    def __init__(
+        self,
+        publish_committed_state: Callable[[str, BaseModel], None],
+        run_id: str,
+        events: _EventSink,
+        projector: _CommittedStateProjector | None,
+        namespace: str,
+    ) -> None:
+        self._publish_committed_state = publish_committed_state
+        self._run_id = run_id
+        self._events = events
+        self._projector = projector
         self._namespace = namespace
 
     def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
-        self._host._resources.publish_committed_state(self._namespace, current)
-        _emit_commit_events(self._host.events, self._project(previous), self._project(current))
-        progress = self._host.progress
-        if progress.path is not None:
-            for block in progress.drain():
-                progress_log.write(progress.path, block)
+        self._publish_committed_state(self._namespace, current)
+        _emit_commit_events(self._events, self._project(previous), self._project(current))
 
     def _project(self, value: BaseModel | None) -> RunView | None:
-        projector = self._host._projector
+        projector = self._projector
         if projector is None or value is None:
             return None
         return projector.project_committed(
             self._namespace,
             value,
-            run_id=self._host._resources.run_id,
+            run_id=self._run_id,
         )
 
 

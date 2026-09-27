@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.legacy_runner import LegacyOrchestrator, run_orchestration
+from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import (
     ComputeBackend,
@@ -30,6 +30,7 @@ from vibesys.api import (
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
 if TYPE_CHECKING:
@@ -37,7 +38,8 @@ if TYPE_CHECKING:
 
     import pytest
 
-    from vibesys.orchestration.runtime import RunContext
+
+_PLUGIN = capability_plugin("memory-preserving")
 
 
 def _write_project(root: Path) -> None:
@@ -67,37 +69,32 @@ def _request(project_root: Path) -> RunRequest:
     )
 
 
-class _RestorePolicy:
-    """Rollback shape: a bare ``workspace.restore()`` with no explicit preserve_paths."""
-
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        assert descriptor.id == "memory-preserving"
-        self.setup = RunSetup(memory_paths=("progress.md",))
-
-    async def run(self, ctx: RunContext) -> bool:
-        root = ctx.workspaces.root
-        (root.path / "code.py").write_text("VALUE = 1\n")
-        (root.path / "progress.md").write_text("round 1: baseline\n")
-        baseline = await root.snapshot("baseline")
-
-        (root.path / "code.py").write_text("VALUE = 2\n")
-        (root.path / "progress.md").write_text("round 2: tried a thing\n")
-        await root.snapshot("round-2")
-
-        # Roll back to baseline without naming progress.md explicitly: the
-        # host must preserve it because RunSetup declared it.
-        await root.restore(baseline, clean=True)
-
-        assert (root.path / "code.py").read_text() == "VALUE = 1\n"
-        assert (root.path / "progress.md").read_text() == "round 2: tried a thing\n"
-        return True
-
-
-def _run_legacy(request: RunRequest, policy: LegacyOrchestrator) -> bool:
-    """Exercise host-owned memory behavior without cataloging old policies."""
+def _run_restore(request: RunRequest, code: str, memory: str) -> None:
+    """Exercise declared-memory restore through a real product-composed host."""
     integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with open_product_run_host(
+            request,
+            integration,
+            plugin=_PLUGIN,
+            setup=RunSetup(memory_paths=("progress.md",)),
+        ) as host:
+            root = host.workspaces.root
+            (root.path / "code.py").write_text("VALUE = 1\n")
+            (root.path / "progress.md").write_text("round 1: baseline\n")
+            baseline = await root.snapshot("baseline")
+
+            (root.path / "code.py").write_text(code)
+            (root.path / "progress.md").write_text(memory)
+            await root.snapshot("round-2")
+            await root.restore(baseline, clean=True)
+
+            assert (root.path / "code.py").read_text() == "VALUE = 1\n"
+            assert (root.path / "progress.md").read_text() == memory
+
     try:
-        return asyncio.run(run_orchestration(request, integration, policy))
+        asyncio.run(exercise())
     finally:
         integration.close()
 
@@ -106,7 +103,7 @@ def test_rollback_style_restore_preserves_declared_memory(tmp_path: Path) -> Non
     project_root = tmp_path / "project"
     _write_project(project_root)
     request = _request(project_root)
-    assert _run_legacy(request, _RestorePolicy(request.orchestration))
+    _run_restore(request, "VALUE = 2\n", "round 2: tried a thing\n")
 
 
 # ---------------------------------------------------------------------------
@@ -116,32 +113,6 @@ def test_rollback_style_restore_preserves_declared_memory(tmp_path: Path) -> Non
 _ascii_text = st.text(
     alphabet=st.characters(min_codepoint=97, max_codepoint=122), min_size=1, max_size=8
 )
-
-
-class _RollbackPolicy:
-    """Restore arbitrary candidate content while preserving declared memory."""
-
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        assert descriptor.id == "memory-preserving"
-        options = descriptor.options
-        self.round2_code = str(options["round2_code"])
-        self.round2_memory = str(options["round2_memory"])
-        self.setup = RunSetup(memory_paths=("progress.md",))
-
-    async def run(self, ctx: RunContext) -> bool:
-        root = ctx.workspaces.root
-        (root.path / "code.py").write_text("VALUE = 1\n")
-        (root.path / "progress.md").write_text("round 1: baseline\n")
-        baseline = await root.snapshot("baseline")
-
-        (root.path / "code.py").write_text(self.round2_code)
-        (root.path / "progress.md").write_text(self.round2_memory)
-        await root.snapshot("round-2")
-        await root.restore(baseline, clean=True)
-
-        assert (root.path / "code.py").read_text() == "VALUE = 1\n"
-        assert (root.path / "progress.md").read_text() == self.round2_memory
-        return True
 
 
 @given(
@@ -159,16 +130,4 @@ def test_declared_memory_survives_any_rollback(
     project_root = tmp_path / "project"
     _write_project(project_root)
     request = _request(project_root)
-    request = request.model_copy(
-        update={
-            "orchestration": OrchestrationDescriptor(
-                id="memory-preserving",
-                config_version=1,
-                options={
-                    "round2_code": round2_code,
-                    "round2_memory": round2_memory,
-                },
-            )
-        }
-    )
-    assert _run_legacy(request, _RollbackPolicy(request.orchestration))
+    _run_restore(request, round2_code, round2_memory)

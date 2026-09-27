@@ -92,6 +92,13 @@ from vs_runtime._run_control import (
     RunStopped,
     RuntimeRunControlChannel,
 )
+from vs_runtime._run_host import (
+    BlockingOperations,
+    RunHostComponents,
+    RunHostResourceOwner,
+    RuntimeRunHost,
+    open_run_host,
+)
 from vs_runtime._run_state import RunState
 from vs_runtime._sdk_paths import (
     InputProjectError,
@@ -343,6 +350,7 @@ __all__ = [
     "AgentMessageRouter",
     "AgentSessionRuntime",
     "AgentToolResolver",
+    "BlockingOperations",
     "CommittedStateObserver",
     "CompletedRound",
     "FrameworkValidationResult",
@@ -384,8 +392,11 @@ __all__ = [
     "RunControlEventSink",
     "RunControlTransition",
     "RunControlTransitionKind",
+    "RunHostComponents",
+    "RunHostResourceOwner",
     "RunState",
     "RunStopped",
+    "RuntimeRunHost",
     "SDKRoots",
     "ScalarBenchmarkContract",
     "SkillCatalogEntry",
@@ -414,6 +425,7 @@ __all__ = [
     "discover_skill_dirs",
     "load_skill_frontmatter",
     "materialize_input_project",
+    "open_run_host",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
     "relative_sdk_source",

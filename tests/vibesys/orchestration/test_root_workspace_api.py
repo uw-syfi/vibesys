@@ -6,20 +6,24 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import WorkspaceRestoreError
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+_PLUGIN = capability_plugin("workspace")
 
 
 def _write_project(root: Path) -> None:
@@ -53,9 +57,10 @@ def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) 
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root),
             integration,
+            plugin=_PLUGIN,
             setup=RunSetup(),
         ) as ctx:
             assert ctx.facts.objective == "Improve the queue."

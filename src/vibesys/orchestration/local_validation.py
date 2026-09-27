@@ -16,15 +16,15 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration._host import HostResources
-    from vs_runtime.api import Workspace
+    from vibesys.run.event_journal import EventJournal
+    from vs_runtime.api import Commands, Workspace
 
 
 class _GateEvents:
     """Translate policy-neutral recipe observations to VibeSys gate events."""
 
-    def __init__(self, host: HostResources) -> None:
-        self._events = host.events
+    def __init__(self, events: EventJournal) -> None:
+        self._events = events
 
     def started(self, recipe: ValidationRecipe) -> None:
         emit_gate_started(
@@ -49,7 +49,8 @@ class _GateEvents:
 
 
 async def validate_local(
-    host: HostResources,
+    commands: Commands,
+    events: EventJournal,
     workspace: Workspace,
     *,
     recipe_artifact: str,
@@ -58,11 +59,11 @@ async def validate_local(
     """Run the mechanism and map its detailed outcome to product feedback."""
     try:
         results = await run_local_validation(
-            host.commands,
+            commands,
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
-            events=_GateEvents(host),
+            events=_GateEvents(events),
         )
     except LocalValidationRecipeError as error:
         if error.kind is LocalValidationRecipeErrorKind.DUPLICATE_NAMES:

@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
 from vibesys.composition import AGENT_TOOL_BINDINGS
@@ -20,9 +21,9 @@ from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.orchestration.single import PLUGIN
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import (
     AgentCapabilities,
@@ -137,7 +138,7 @@ def _request(
 def _run_with_clients(
     tmp_path: Path,
     clients: list[_RecordingClient | FakeAgentClient],
-    body: Callable[[RunContext], Awaitable[_Result]],
+    body: Callable[[RunHost], Awaitable[_Result]],
     *,
     declaration: tuple[AgentRole, ...] | OrchestrationPlugin,
     configuration: _RunConfiguration | None = None,
@@ -152,19 +153,21 @@ def _run_with_clients(
         return available.popleft()
 
     async def exercise() -> _Result:
-        plugin = declaration if isinstance(declaration, OrchestrationPlugin) else None
-        roles = () if plugin is not None else cast("tuple[AgentRole, ...]", declaration)
-        async with RunContext.open(
+        plugin = (
+            declaration
+            if isinstance(declaration, OrchestrationPlugin)
+            else capability_plugin("explicit-sessions", agents=declaration)
+        )
+        async with open_product_run_host(
             _request(
                 project_root,
-                orchestration_id=plugin.id if plugin else "explicit-sessions",
+                orchestration_id=plugin.id,
                 profiler_kind=configuration.profiler_kind,
                 agent_backend=configuration.agent_backend,
             ),
             integration,
             setup=RunSetup(),
             agent_client_factory=configuration.client_factory or create_client,
-            agent_roles=roles,
             agent_tool_bindings=configuration.tool_bindings,
             plugin=plugin,
         ) as ctx:
@@ -186,7 +189,7 @@ def test_sessions_fix_configuration_and_preserve_distinct_conversations(tmp_path
     second = FakeAgentClient(session_reuse=True).enqueue_text("worker", "fresh")
     role = AgentRole(id="worker", system_prompt="Work carefully.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         assert ctx.run_id
         one = await ctx.agents.create_session(
             role, workspace=ctx.workspaces.root, member_id="candidate-1"
@@ -224,7 +227,7 @@ def test_named_session_identity_is_durable_and_binding_is_visible(tmp_path: Path
     second = FakeAgentClient(capabilities=capabilities).enqueue_text("worker", "two")
     role = AgentRole(id="worker", system_prompt="Work carefully.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         one = await ctx.agents.create_session(
             role,
             workspace=ctx.workspaces.root,
@@ -259,7 +262,7 @@ def test_named_session_requires_cross_process_resume_support(tmp_path: Path) -> 
     client = FakeAgentClient(session_reuse=True)
     role = AgentRole(id="worker", system_prompt="Work carefully.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         with pytest.raises(RuntimeContractError, match="provider_session_resume"):
             await ctx.agents.create_session(
                 role,
@@ -276,7 +279,7 @@ def test_typed_parse_failure_is_not_replaced_by_a_fallback(tmp_path: Path) -> No
     client.enqueue("judge", _Reply(value=3)).enqueue_parse_failure("judge")
     role = AgentRole(id="judge", system_prompt="Return JSON.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         assert await session.turn("valid", response=_Reply) == _Reply(value=3)
         with pytest.raises(StructuredResponseError, match="valid _Reply response"):
@@ -307,7 +310,7 @@ def test_plugin_policy_receives_only_the_runtime_timeout_contract(tmp_path: Path
         orchestrate=orchestrate,
     )
 
-    async def body(ctx: RunContext) -> RunStatus:
+    async def body(ctx: RunHost) -> RunStatus:
         return await plugin.orchestrate(ctx, _Options())
 
     status = _run_with_clients(tmp_path, [client], body, declaration=plugin)
@@ -338,7 +341,7 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
     )
     client = FakeAgentClient(session_reuse=True)
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         with pytest.raises(UnknownAgentRoleError, match="worker"):
             await ctx.agents.create_session(altered, workspace=ctx.workspaces.root)
         with pytest.raises(RuntimeContractError, match="unsupported agent tools"):
@@ -364,7 +367,7 @@ def test_session_rejects_unknown_tool_before_spawning(tmp_path: Path) -> None:
         tools=(AgentTool(id="unknown"),),
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         with pytest.raises(RuntimeContractError, match="unsupported agent tools: unknown"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
@@ -378,7 +381,7 @@ def test_direct_host_has_no_implicit_profiler_tool_binding(tmp_path: Path) -> No
         tools=(AgentTool(id="profiler"),),
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         with pytest.raises(RuntimeContractError, match="unsupported agent tools: profiler"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
@@ -431,7 +434,7 @@ def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
         tools=(AgentTool(id="profiler"),),
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         with pytest.raises(RuntimeContractError, match="tool_servers"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
@@ -464,7 +467,7 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
         tools=(AgentTool(id="profiler"),),
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         assert await session.turn("inspect") == "analysis"
         assert await session.turn("summarize", response=_Reply) == _Reply(value=4)
@@ -505,7 +508,7 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
         resolved_workspaces.append(workspace)
         return (StdioServerDescriptor(name="workspace-tool", command="tool-server"),)
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         assert resolved_workspaces == [ctx.workspaces.root]
         await session.close()
@@ -521,37 +524,6 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     assert client.closed
 
 
-def test_candidate_discard_invalidates_its_public_sessions(tmp_path: Path) -> None:
-    candidate_clients = (FakeAgentClient(session_reuse=True), FakeAgentClient(session_reuse=True))
-    root_client = FakeAgentClient(session_reuse=True)
-    role = AgentRole(id="worker", system_prompt="Work in the candidate.")
-
-    async def body(ctx: RunContext) -> None:
-        ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-920446 [SLF001]; candidate support is an environment input and this integration seam avoids replacing runtime code.
-            ctx.environment.view,
-            supports_parallel_candidate_evaluation=True,
-        )
-        candidate = await ctx.workspaces.create_candidate()
-        candidate_sessions = (
-            await ctx.agents.create_session(role, workspace=candidate),
-            await ctx.agents.create_session(role, workspace=candidate),
-        )
-        root_session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
-
-        await candidate.discard()
-        await candidate.discard()
-
-        assert not root_session.closed
-        for session in candidate_sessions:
-            assert session.closed
-            with pytest.raises(SessionClosedError):
-                await session.turn("too late")
-
-    clients = [*candidate_clients, root_client]
-    _run_with_clients(tmp_path, clients, body, declaration=(role,))
-    assert all(client.closed for client in clients)
-
-
 def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) -> None:
     client = FakeAgentClient(
         capabilities=AgentCapabilities(session_reuse=True, tool_servers=True)
@@ -562,7 +534,7 @@ def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) 
         tools=(AgentTool(id="issue-board"),),
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         assert await session.turn("review") == "reviewed"
 
@@ -596,7 +568,7 @@ def test_issue_queue_plugin_can_create_all_declared_sessions(tmp_path: Path) -> 
     )
     clients = [FakeAgentClient(capabilities=capabilities) for _role in ISSUE_QUEUE_PLUGIN.agents]
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         sessions = [
             await ctx.agents.create_session(
                 role,
@@ -625,7 +597,7 @@ def test_intrinsic_shell_tool_does_not_bind_an_mcp_server(tmp_path: Path) -> Non
         tools=(AgentTool(id="shell"),),
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         assert await session.turn("work") == "done"
 
@@ -650,7 +622,7 @@ def test_read_only_session_restores_writes_and_early_close_is_idempotent(
         workspace_access=WorkspaceAccess.READ_ONLY,
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         assert await session.turn("review") == "done"
         assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 1\n"
@@ -681,7 +653,7 @@ def test_limited_session_preserves_granted_directory_and_reverts_other_writes(
         workspace_access=WorkspaceAccess.LIMITED,
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(
             role,
             workspace=ctx.workspaces.root,
@@ -713,7 +685,7 @@ def test_limited_file_grant_does_not_authorize_sibling_files(tmp_path: Path) -> 
         workspace_access=WorkspaceAccess.LIMITED,
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         session = await ctx.agents.create_session(
             role,
             workspace=ctx.workspaces.root,
@@ -733,7 +705,7 @@ def test_run_cleanup_closes_sessions_in_reverse_creation_order(tmp_path: Path) -
     role = AgentRole(id="worker", system_prompt="Work.")
     sessions: list[AgentSession] = []
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         sessions.append(await ctx.agents.create_session(role, workspace=ctx.workspaces.root))
         sessions.append(await ctx.agents.create_session(role, workspace=ctx.workspaces.root))
 
@@ -753,7 +725,7 @@ def test_canceled_session_construction_closes_the_opened_agent(tmp_path: Path) -
         factory_release.wait()
         return client
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         creation = asyncio.create_task(
             ctx.agents.create_session(role, workspace=ctx.workspaces.root)
         )
@@ -803,7 +775,7 @@ def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
         },
     )
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         status = await PLUGIN.orchestrate(
             ctx,
             PLUGIN.options.model_validate(
@@ -832,7 +804,7 @@ def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
 def test_plugin_command_execution_quotes_argv_and_scopes_to_workspace(tmp_path: Path) -> None:
     role = AgentRole(id="unused", system_prompt="Unused.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         result = await ctx.commands.run(
             (
                 "python",
@@ -854,7 +826,7 @@ def test_plugin_command_execution_quotes_argv_and_scopes_to_workspace(tmp_path: 
 def test_plugin_command_capture_owns_bounded_output_file_lifecycle(tmp_path: Path) -> None:
     role = AgentRole(id="unused", system_prompt="Unused.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         result = await ctx.commands.capture_output(
             (
                 "python",
@@ -945,7 +917,7 @@ def test_plugin_command_capture_owns_bounded_output_file_lifecycle(tmp_path: Pat
 def test_plugin_command_capture_reports_cleanup_failure(tmp_path: Path) -> None:
     role = AgentRole(id="unused", system_prompt="Unused.")
 
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         with pytest.raises(
             RuntimeContractError,
             match="without a readable captured output file",

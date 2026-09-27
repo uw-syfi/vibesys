@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from vibesys.profilers import tool_server as profiler_tool_server
 from vs_agent.api import ToolServerDescriptor, expose_as_tools
@@ -14,24 +15,17 @@ if TYPE_CHECKING:
     from vs_runtime.api import Workspace
 
 
-class _ProfilerEnvironment(Protocol):
-    @property
-    def profiler_kind(self) -> ProfilerKind:
-        """Return the profiler selected after runtime preflight."""
-        ...
+@dataclass(frozen=True, slots=True)
+class AgentToolContext:
+    """Product facts available while binding one declared agent tool."""
+
+    profiler_kind: ProfilerKind
 
 
-class _ProfilerToolHost(Protocol):
-    @property
-    def environment(self) -> _ProfilerEnvironment:
-        """Return the resolved run environment facts."""
-        ...
-
-
-def _profiler_tool(host: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
+def _profiler_tool(context: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
     """Bind the selected profiler's analysis server to one agent session."""
-    resolved = cast("_ProfilerToolHost", host)
-    spec = profiler_tool_server(resolved.environment.profiler_kind)
+    resolved = cast("AgentToolContext", context)
+    spec = profiler_tool_server(resolved.profiler_kind)
     return () if spec is None else (spec,)
 
 

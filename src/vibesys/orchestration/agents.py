@@ -1,8 +1,5 @@
 """VibeSys composition for runtime-owned explicit agent sessions."""
 
-# lint-waiver: LW-837214 [SLF001]; session composition shares one private RunContext owner with sibling capabilities.
-# ruff: noqa: SLF001
-
 from __future__ import annotations
 
 from functools import partial
@@ -28,10 +25,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.context import _RunResources
-    from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.environment import AgentEnvironment
-    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
-    from vs_runtime.api import AgentSession
+    from vibesys.orchestration.request import RunRequest
+    from vibesys.run.event_journal import EventJournal
+    from vs_agent.api import AgentClientProtocol, DurableSessionStore, ToolServerDescriptor
+    from vs_runtime.api import AgentSession, Workspaces
     from vs_runtime.api.infrastructure import RunControlChannel
 
 type _AgentToolResolver = Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
@@ -42,7 +40,12 @@ class _Agents:
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-837215 [PLR0913]; composition fixes independent runtime effects once; plugins see only create_session.
         self,
-        host: HostResources,
+        request: RunRequest,
+        workspaces: Workspaces,
+        session_store: DurableSessionStore,
+        events: EventJournal,
+        log: Callable[[str], None],
+        tool_context: object,
         roles: tuple[AgentRole, ...],
         tool_bindings: Mapping[str, _AgentToolResolver] | None,
         *,
@@ -51,23 +54,24 @@ class _Agents:
         open_agent_environment: Callable[..., AgentEnvironment] | None,
         client_factory: Callable[..., AgentClientProtocol] | None,
     ) -> None:
-        self._host = host
+        self._request = request
+        self._workspaces = workspaces
         self._open_agent_environment = open_agent_environment
         self._explicit = create_agent_session_runtime(
             roles,
             resolve_execution=self._resolve_execution,
             resolve_workspace=self._resolve_workspace,
-            session_store=lambda: host._session_store,
+            session_store=lambda: session_store,
             control=control,
             lifecycle_events=lifecycle_events,
-            agent_events=CoreAgentEventSink(host.events.record),
+            agent_events=CoreAgentEventSink(events.record),
             route_message=splice_steering,
             client_factory=client_factory or build_agent_client,
             tool_bindings={
-                tool_id: partial(resolver, host)
+                tool_id: partial(resolver, tool_context)
                 for tool_id, resolver in dict(tool_bindings or {}).items()
             },
-            log=host.log,
+            log=log,
         )
 
     async def create_session(
@@ -87,7 +91,7 @@ class _Agents:
         )
 
     def _resolve_workspace(self, workspace: Workspace) -> ManagedAgentWorkspace:
-        resources_for(self._host.workspaces, workspace)
+        resources_for(self._workspaces, workspace)
         return cast("ManagedAgentWorkspace", workspace)
 
     def _resolve_execution(
@@ -96,8 +100,8 @@ class _Agents:
         workspace: Workspace,
     ) -> tuple[AgentExecutionConfiguration, AgentExecutionScope]:
         managed = self._resolve_workspace(workspace)
-        resources = resources_for(self._host.workspaces, managed)
-        request = self._host.request
+        resources = resources_for(self._workspaces, managed)
+        request = self._request
         spec = agent_spec_from_config(
             request.config,
             backend=request.agent_backend,
@@ -114,7 +118,7 @@ class _Agents:
             open_environment=partial(
                 self._open_environment,
                 resources,
-                root=managed is self._host.workspaces.root,
+                root=managed is self._workspaces.root,
             ),
             current_log_file=lambda: resources.run_log_file,
             environment_variables=resources.device.gpu_env,
@@ -156,7 +160,7 @@ class _Agents:
         """Close explicit sessions in reverse creation order."""
         await self._explicit.close()
 
-    def _mark_closed(self) -> None:
+    def begin_close(self) -> None:
         """Reject new sessions and turns before run-owned teardown starts."""
         self._explicit.begin_close()
 

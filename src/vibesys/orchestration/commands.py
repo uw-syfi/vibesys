@@ -1,8 +1,5 @@
 """Production adapter for the plugin-facing sandboxed command capability."""
 
-# lint-waiver: LW-920432 [SLF001]; sibling host capabilities share private run-owned resources while the migration adapter exists.
-# ruff: noqa: SLF001
-
 from __future__ import annotations
 
 import shlex
@@ -18,15 +15,17 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration._host import HostResources
+    from vs_runtime.api import Workspaces
+    from vs_runtime.api.infrastructure import BlockingOperations
     from vs_sandbox.api import Sandbox, SandboxExecutionResult
 
 
 class _Commands:
     """Execute immutable argv requests through a run-owned workspace sandbox."""
 
-    def __init__(self, host: HostResources) -> None:
-        self._host = host
+    def __init__(self, workspaces: Workspaces, blocking: BlockingOperations) -> None:
+        self._workspaces = workspaces
+        self._blocking = blocking
 
     async def run(
         self,
@@ -37,8 +36,8 @@ class _Commands:
     ) -> CommandResult:
         """Run one safely quoted argv in the selected workspace environment."""
         validate_command(argv, timeout_seconds)
-        context = resources_for(self._host.workspaces, workspace)
-        result = await self._host._run_blocking(
+        context = resources_for(self._workspaces, workspace)
+        result = await self._blocking.run(
             context.run_environment_session.sandbox.execute,
             shlex.join(argv),
             timeout=timeout_seconds,
@@ -60,9 +59,9 @@ class _Commands:
         """Capture a command's runtime-managed output artifact and remove it."""
         validate_command(argv, timeout_seconds)
         validate_command((output_argument,), None)
-        context = resources_for(self._host.workspaces, workspace)
+        context = resources_for(self._workspaces, workspace)
         sandbox = context.run_environment_session.sandbox
-        temporary = await self._host._run_blocking(
+        temporary = await self._blocking.run(
             sandbox.execute,
             "mktemp",
         )
@@ -72,7 +71,7 @@ class _Commands:
         output_path = temporary.stdout.strip()
         primary_error: BaseException | None = None
         try:
-            result = await self._host._run_blocking(
+            result = await self._blocking.run(
                 sandbox.execute,
                 shlex.join((*argv, output_argument, output_path)),
                 timeout=timeout_seconds,
@@ -83,7 +82,7 @@ class _Commands:
                     exit_code=result.exit_code,
                     truncated=result.truncated,
                 )
-            captured = await self._host._run_blocking(
+            captured = await self._blocking.run(
                 sandbox.execute,
                 shlex.join(("cat", output_path)),
             )
@@ -107,8 +106,8 @@ class _Commands:
     ) -> CommandResult:
         """Run an independently audited recipe through the workspace shell."""
         validate_trusted_shell_command(command, timeout_seconds)
-        context = resources_for(self._host.workspaces, workspace)
-        result = await self._host._run_blocking(
+        context = resources_for(self._workspaces, workspace)
+        result = await self._blocking.run(
             context.run_environment_session.sandbox.execute,
             command,
             timeout=timeout_seconds,
@@ -125,7 +124,7 @@ class _Commands:
         output_path: str,
     ) -> RuntimeContractError | None:
         try:
-            cleanup = await self._host._run_blocking(
+            cleanup = await self._blocking.run(
                 sandbox.execute,
                 shlex.join(("rm", "-f", output_path)),
             )

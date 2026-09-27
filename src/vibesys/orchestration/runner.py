@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.runtime import RunContext
+from vibesys.run.host import open_product_run_host
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -37,7 +37,7 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
 ) -> RunStatus:
     """Open the runtime adapter and invoke one prepared plugin."""
     plugin = prepared.plugin
-    async with RunContext.open(
+    async with open_product_run_host(
         request,
         integration,
         setup=prepared.setup,

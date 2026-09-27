@@ -1,28 +1,16 @@
-"""Runtime environment protocol shared with orchestration policies, and ``ctx.environment``."""
-
-# ``_Environment`` shares one private owner for resource lifetime with the rest of
-# the host capabilities split out of runtime.py.
-# lint-waiver: LW-040099 [SLF001]; capabilities in this module share one private owner for resource lifetime.
-# ruff: noqa: SLF001
+"""Agent-environment contract used by product composition."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.orchestration.workspace_resources import resources_for
-
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.config import Config
-    from vibesys.evaluators.input_manifest import WorkspaceSource
-    from vibesys.orchestration._host import HostResources
-    from vibesys.profilers import ProfilerKind
-    from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentView
     from vibesys.skills import SkillSelection
     from vs_agent.api import ToolServerDescriptor
-    from vs_runtime.api import Workspace
-    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox, SandboxExecutionResult
+    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
 
 class AgentEnvironment(Protocol):
@@ -102,96 +90,4 @@ class AgentEnvironment(Protocol):
         ...
 
 
-class _Environment:
-    """Generic execution facts and candidate deployment lifecycle."""
-
-    def __init__(self, host: HostResources) -> None:
-        self._host = host
-
-    @property
-    def view(self) -> RunEnvironmentView:
-        """Return the resolved root environment's policy-neutral facts."""
-        return self.view_for()
-
-    def view_for(self, scope: Workspace | None = None) -> RunEnvironmentView:
-        """Return environment facts for one live workspace."""
-        return self._resources(scope).run_environment_view
-
-    @property
-    def reference_path(self) -> str:
-        """Return the prompt-visible reference path."""
-        return self._host._resources.ref_name
-
-    @property
-    def workspace_sources(self) -> tuple[WorkspaceSource, ...]:
-        """Return materialized workspace sources for prompt context."""
-        return self._host._resources.workspace_sources
-
-    @property
-    def skill_source_paths(self) -> tuple[Path, ...]:
-        """Return the resolved skill source directories for this run."""
-        return tuple(self._host._resources.skill_source_paths)
-
-    @property
-    def profiler_kind(self) -> ProfilerKind:
-        """Return the profiler selected after environment preflight."""
-        return self._host._resources.profiler_kind
-
-    @property
-    def model_name(self) -> str:
-        """Return the resolved default model name."""
-        return self._host._resources.model_name
-
-    @property
-    def run_log_path(self) -> Path:
-        """Return the current run log file path."""
-        return self._host._resources.run_log_path
-
-    @property
-    def log_dir(self) -> Path:
-        """Return this run's machine-local log directory."""
-        return self._host._resources.log_dir
-
-    def candidate_runtime(
-        self,
-        generation: int,
-        child_idx: int,
-        *,
-        scope: Workspace | None = None,
-    ) -> CandidateRuntime:
-        """Resolve candidate prompt notes and deployment identity."""
-        context = self._resources(scope)
-        return context.run_environment.candidate_runtime(
-            context.run_environment_view, generation, child_idx
-        )
-
-    async def teardown_deployment(self, name: str) -> None:
-        """Release a candidate deployment through the selected environment."""
-        context = self._host._resources
-        await self._host._run_blocking(
-            context.run_environment.teardown_deployment, name, log=context.lprint
-        )
-
-    async def reselect_device(self, *, scope: Workspace | None = None) -> None:
-        """Rebalance the device assigned to a workspace before a paid turn."""
-        context = self._resources(scope)
-        await self._host._run_blocking(context.reselect_gpu)
-
-    async def execute(
-        self,
-        command: str,
-        *,
-        timeout_seconds: int | None = None,
-        scope: Workspace | None = None,
-    ) -> SandboxExecutionResult:
-        """Execute a policy-selected command in the selected run environment."""
-        context = self._resources(scope)
-        return await self._host._run_blocking(
-            context.run_environment_session.sandbox.execute, command, timeout=timeout_seconds
-        )
-
-    def _resources(self, workspace: Workspace | None):  # noqa: ANN202  # lint-waiver: LW-228414 [ANN202]; the private product resource type is intentionally confined to the composition adapter.
-        return resources_for(
-            self._host.workspaces,
-            workspace or self._host.workspaces.root,
-        )
+__all__ = ["AgentEnvironment"]

@@ -1,22 +1,20 @@
 """Product composition for runtime-owned workspace resources."""
 
-# This adapter intentionally binds sibling host-owned product resources.
-# lint-waiver: LW-228415 [SLF001]; composition must translate the temporary private RunContext owner until that owner is deleted.
-# ruff: noqa: SLF001
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
-from vibesys.events import FrameworkSource
+from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vs_runtime.api.infrastructure import resolve_workspace_resource
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from vibesys.context import _RunResources
-    from vibesys.orchestration._host import HostResources
+    from vibesys.orchestration.request import RunRequest
+    from vibesys.run.event_journal import EventJournal
     from vs_runtime.api import Workspace, Workspaces
     from vs_runtime.api.infrastructure import WorkspaceResource
 
@@ -26,13 +24,17 @@ class _WorkspaceResource:
 
     def __init__(
         self,
-        host: HostResources,
+        parent: _RunResources,
         context: _RunResources,
         workspace_id: str | None,
+        memory_paths: tuple[str, ...],
+        events: EventJournal,
     ) -> None:
-        self._host = host
+        self._parent = parent
         self.context = context
         self._id = workspace_id
+        self._memory_paths = memory_paths
+        self._events = events
         self._revision = context.git.current_sha()
         self._closed = False
 
@@ -62,7 +64,7 @@ class _WorkspaceResource:
             raise RuntimeError(message)
         self._revision = revision
         if self._id is not None:
-            self._host._resources.git.retain_candidate(self._id, revision)
+            self._parent.git.retain_candidate(self._id, revision)
         return revision
 
     def restore(
@@ -74,9 +76,7 @@ class _WorkspaceResource:
         preserve_memory: bool = True,
     ) -> bool:
         if preserve_memory:
-            preserve_paths = tuple(
-                dict.fromkeys((*preserve_paths, *self._host._setup.memory_paths))
-            )
+            preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self.context.git.checkout_tree(
             revision,
             clean=clean,
@@ -89,16 +89,21 @@ class _WorkspaceResource:
     def try_restore(self, revision: str, *, clean: bool) -> bool:
         restored = self.restore(revision, clean=clean)
         if not restored:
-            self._host.warning(
-                f"could not restore workspace to revision {revision[:8]}; "
-                "will retry on a later round",
-                source=FrameworkSource.GIT_TRACKING,
-                source_label="rollback",
+            self._events.emit(
+                CoreEventType.FRAMEWORK_WARNING,
+                data=FrameworkWarningData(
+                    summary=(
+                        f"could not restore workspace to revision {revision[:8]}; "
+                        "will retry on a later round"
+                    ),
+                    source=FrameworkSource.GIT_TRACKING,
+                    source_label="rollback",
+                ),
             )
         return restored
 
     def retain(self, revision: str, reference: str) -> None:
-        self._host._resources.git.retain_candidate(reference, revision)
+        self._parent.git.retain_candidate(reference, revision)
 
     def pending_changes(self) -> list[str]:
         return self.context.git.pending_changes()
@@ -122,41 +127,63 @@ class _WorkspaceResource:
 class WorkspaceResourceProvider:
     """Create product environments while runtime owns their collection lifetime."""
 
-    def __init__(self, host: HostResources) -> None:
-        """Bind the temporary product host without opening resources eagerly."""
-        self._host = host
+    def __init__(
+        self,
+        resources: _RunResources,
+        request: RunRequest,
+        memory_paths: tuple[str, ...],
+        events: EventJournal,
+        close_sessions: Callable[[Workspace], Awaitable[None]],
+    ) -> None:
+        """Bind product effects without exposing them through the run host."""
+        self._resources = resources
+        self._request = request
+        self._memory_paths = memory_paths
+        self._events = events
+        self._close_sessions = close_sessions
         self._root: _WorkspaceResource | None = None
 
     @property
     def root(self) -> WorkspaceResource:
         """Return the root resource after the product host is prepared."""
         if self._root is None:
-            self._root = _WorkspaceResource(self._host, self._host._resources, None)
+            self._root = _WorkspaceResource(
+                self._resources,
+                self._resources,
+                None,
+                self._memory_paths,
+                self._events,
+            )
         return self._root
 
     @property
     def supports_parallel_candidates(self) -> bool:
         """Return the selected environment's fixed isolation capability."""
-        return self._host._resources.run_environment_view.supports_parallel_candidate_evaluation
+        return self._resources.run_environment_view.supports_parallel_candidate_evaluation
 
     def create_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
         """Open one isolated product environment at a retained revision."""
-        request = self._host.request
         context = create_workspace_resources(
-            self._host._resources,
+            self._resources,
             WorkspaceResourceSpec(
                 scope_id=workspace_id,
                 revision=revision,
-                config=request.config,
-                agent_backend=request.agent_backend,
-                cli_provider=request.cli_provider,
+                config=self._request.config,
+                agent_backend=self._request.agent_backend,
+                cli_provider=self._request.cli_provider,
             ),
         )
-        return _WorkspaceResource(self._host, context, workspace_id)
+        return _WorkspaceResource(
+            self._resources,
+            context,
+            workspace_id,
+            self._memory_paths,
+            self._events,
+        )
 
     async def close_sessions(self, workspace: Workspace) -> None:
         """Close sessions before runtime tears down the workspace resource."""
-        await self._host.agents.close_workspace(workspace)
+        await self._close_sessions(workspace)
 
 
 def resources_for(workspaces: Workspaces, workspace: Workspace) -> _RunResources:

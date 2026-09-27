@@ -1,4 +1,4 @@
-"""Production ``RunContext.skills`` adapter over the installed skill catalog."""
+"""Production ``RunHost.skills`` adapter over the installed skill catalog."""
 
 from __future__ import annotations
 
@@ -6,21 +6,25 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import SkillCatalogError, SkillResolution, SkillResourceRequest
+from vs_runtime.api import RunHost, SkillCatalogError, SkillResolution, SkillResourceRequest
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
+
+
+_PLUGIN = capability_plugin("skills-test")
 
 
 def _write_project(root: Path, skill_root: Path) -> None:
@@ -56,7 +60,7 @@ def _request(project_root: Path, skill_root: Path) -> RunRequest:
 
 def _run[T](
     tmp_path: Path,
-    body: Callable[[RunContext], Awaitable[T]],
+    body: Callable[[RunHost], Awaitable[T]],
 ) -> T:
     project_root = tmp_path / "project"
     skill_root = tmp_path / "skill-sources"
@@ -64,9 +68,10 @@ def _run[T](
     integration = LocalRunIntegration()
 
     async def exercise() -> T:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root, skill_root),
             integration,
+            plugin=_PLUGIN,
             setup=RunSetup(),
         ) as ctx:
             return await body(ctx)
@@ -80,7 +85,7 @@ def _run[T](
 def test_skills_resolve_uses_installed_catalog_and_preserves_partial_success(
     tmp_path: Path,
 ) -> None:
-    async def body(ctx: RunContext) -> SkillResolution:
+    async def body(ctx: RunHost) -> SkillResolution:
         return await ctx.skills.resolve(
             (
                 SkillResourceRequest(
@@ -106,7 +111,7 @@ def test_skills_resolve_uses_installed_catalog_and_preserves_partial_success(
 
 
 def test_skills_invalid_catalog_has_a_typed_failure(tmp_path: Path) -> None:
-    async def body(ctx: RunContext) -> None:
+    async def body(ctx: RunHost) -> None:
         skill_md = tmp_path / "skill-sources" / "profiling" / "SKILL.md"
         skill_md.write_text("missing frontmatter\n")
         with pytest.raises(SkillCatalogError, match="SkillMetadataError:"):

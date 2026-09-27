@@ -38,29 +38,42 @@ from vs_runtime.api.infrastructure import (
 
 if TYPE_CHECKING:
     from vibesys.context import _RunResources
-    from vibesys.orchestration._host import HostResources
+    from vibesys.orchestration.request import RunRequest
+    from vibesys.run.event_journal import EventJournal
+    from vs_runtime.api import Commands, Workspaces
 
 
 class _EvaluationAdapter:
     """Apply VibeSys receipt, snapshot, metric, and event policy."""
 
-    def __init__(self, host: HostResources) -> None:
-        self._host = host
+    def __init__(
+        self,
+        run_id: str,
+        request: RunRequest,
+        workspaces: Workspaces,
+        events: EventJournal,
+        commands: Commands,
+    ) -> None:
+        self._run_id = run_id
+        self._request = request
+        self._workspaces = workspaces
+        self._events = events
+        self._commands = commands
         self._identifiers = count(1)
 
     def _live_workspace(self, workspace: Workspace) -> Workspace:
-        resources_for(self._host.workspaces, workspace)
+        resources_for(self._workspaces, workspace)
         return workspace
 
     def _receipt(self, workspace: Workspace, revision: str) -> AccuracyReceipt:
         return AccuracyReceipt(
-            run_id=self._host.run_id,
+            run_id=self._run_id,
             workspace_id=workspace.id,
             revision=revision,
         )
 
     def _validate_receipt_owner(self, workspace: Workspace, receipt: AccuracyReceipt) -> None:
-        if receipt.run_id != self._host.run_id:
+        if receipt.run_id != self._run_id:
             message = "accuracy receipt belongs to another run"
             raise RuntimeContractError(message)
         if receipt.workspace_id != workspace.id:
@@ -74,7 +87,7 @@ class _EvaluationAdapter:
             raise RuntimeContractError(message)
         if receipt.revision == current_revision:
             return
-        git = resources_for(self._host.workspaces, workspace).git
+        git = resources_for(self._workspaces, workspace).git
         try:
             same_candidate = git.candidate_patch(receipt.revision) == git.candidate_patch(
                 current_revision
@@ -94,25 +107,25 @@ class _EvaluationAdapter:
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
-        resources = resources_for(self._host.workspaces, live)
+        resources = resources_for(self._workspaces, live)
         if reuse is not None:
             self._validate_receipt_owner(live, reuse)
             await live.snapshot("framework-accuracy-reuse-input")
             self._validate_receipt_revision(live, reuse)
             command = resources.trusted_evaluation_plan.accuracy_command
-            emit_gate_started(self._host.events, GateKind.ACCURACY, command=command)
+            emit_gate_started(self._events, GateKind.ACCURACY, command=command)
             emit_gate_finished(
-                self._host.events,
+                self._events,
                 GateFinishedData(gate=GateKind.ACCURACY, reused=True),
                 passed=True,
             )
             return AccuracyEvaluation(executed=False, receipt=reuse)
-        if self._host.request.agent_backend == "stub":
+        if self._request.agent_backend == "stub":
             return AccuracyEvaluation(executed=False)
 
         candidate_revision = await live.snapshot("framework-accuracy-input")
         view = resources.run_environment_view
-        bundle = self._host.request.input_bundle
+        bundle = self._request.input_bundle
         release = (
             bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
         ) or not view.paths.benchmark_command
@@ -122,7 +135,7 @@ class _EvaluationAdapter:
             view.deployment_release_env_var if release else None,
         )
         result = await run_workspace_exclusive(
-            self._host.workspaces,
+            self._workspaces,
             live,
             lambda: resources.trusted_evaluation.accuracy(command_override=execution),
         )
@@ -146,9 +159,9 @@ class _EvaluationAdapter:
         """Run the benchmark and apply policy-selected headline semantics."""
         self._validate_objectives(objectives)
         live = self._live_workspace(workspace)
-        if self._host.request.agent_backend == "stub":
+        if self._request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
-        resources = resources_for(self._host.workspaces, live)
+        resources = resources_for(self._workspaces, live)
         candidate_revision = await live.snapshot("framework-benchmark-input")
         view = resources.run_environment_view
         execution = self._command(
@@ -157,7 +170,7 @@ class _EvaluationAdapter:
             view.deployment_release_env_var,
         )
         result = await run_workspace_exclusive(
-            self._host.workspaces,
+            self._workspaces,
             live,
             lambda: resources.trusted_evaluation.benchmark(
                 command_override=execution,
@@ -193,7 +206,8 @@ class _EvaluationAdapter:
         )
         live = self._live_workspace(workspace)
         return await validate_local(
-            self._host,
+            self._commands,
+            self._events,
             live,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
@@ -205,10 +219,10 @@ class _EvaluationAdapter:
         )
         if result.command is None or (not result.executed and provisioning_failure):
             return
-        emit_gate_started(self._host.events, GateKind.ACCURACY, command=result.command)
+        emit_gate_started(self._events, GateKind.ACCURACY, command=result.command)
         self._publish_streams(result.stdout, result.stderr, process_id, "accuracy_checker")
         emit_gate_finished(
-            self._host.events,
+            self._events,
             GateFinishedData(
                 gate=GateKind.ACCURACY,
                 output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
@@ -225,10 +239,10 @@ class _EvaluationAdapter:
     ) -> None:
         if not result.executed or result.command is None:
             return
-        emit_gate_started(self._host.events, GateKind.BENCHMARK, command=result.command)
+        emit_gate_started(self._events, GateKind.BENCHMARK, command=result.command)
         self._publish_streams(result.stdout, result.stderr, process_id, "benchmark")
         emit_gate_finished(
-            self._host.events,
+            self._events,
             GateFinishedData(
                 gate=GateKind.BENCHMARK,
                 metric=evaluation.metric_name if result.passed else None,
@@ -250,7 +264,7 @@ class _EvaluationAdapter:
     ) -> None:
         for stream, content in (("stdout", stdout), ("stderr", stderr)):
             if content:
-                self._host.events.emit(
+                self._events.emit(
                     CoreEventType.SUBPROCESS_OUTPUT,
                     data=SubprocessOutputData(
                         process_id=process_id,

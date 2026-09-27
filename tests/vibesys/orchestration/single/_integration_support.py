@@ -1,6 +1,6 @@
 """Production-host fixture for explicit single-plugin persistence tests.
 
-This fixture is intentionally the only test module that imports ``RunContext``.
+This fixture is intentionally the only test module that imports ``RunHost``.
 Remove it once ``create_session`` exposes injectable agent/backend factories.
 """
 
@@ -16,11 +16,11 @@ from vibesys.constants import ComputeBackend
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleState
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_sandbox.api import SandboxExecutionResult
@@ -199,7 +199,7 @@ def execute(
             else None
         )
         try:
-            async with RunContext.open(
+            async with open_product_run_host(
                 request,
                 integration,
                 setup=prepared.setup,

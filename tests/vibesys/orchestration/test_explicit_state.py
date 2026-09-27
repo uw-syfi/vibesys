@@ -15,8 +15,8 @@ from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.events import CoreEvent
+    from vibesys.orchestration.view import RunStatus as ViewRunStatus
+    from vibesys.orchestration.view import RunView
 
 
 class _State(BaseModel):
@@ -106,7 +108,7 @@ def test_plugin_state_is_deep_copied_persisted_and_published(tmp_path: Path) -> 
     )
 
     async def exercise() -> str:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             assert await run.state.load(_State) is None
@@ -142,6 +144,17 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
             super().__init__("projection failed")
 
     class _FailingProjector:
+        def view(
+            self,
+            project: Project,
+            run_id: str,
+            *,
+            status: ViewRunStatus,
+            loop: str,
+        ) -> RunView:
+            del project, run_id, status, loop
+            raise _ProjectionError
+
         def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> None:
             del namespace, state, run_id
             raise _ProjectionError
@@ -149,7 +162,7 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
     async def first_commit() -> str:
         integration = LocalRunIntegration()
         try:
-            async with RunContext.open(
+            async with open_product_run_host(
                 _request(project_root),
                 integration,
                 setup=RunSetup(),
@@ -169,7 +182,7 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
             update={"resume": ResumeRef(run_id=run_id), "exp_name": None}
         )
         try:
-            async with RunContext.open(
+            async with open_product_run_host(
                 request, integration, setup=RunSetup(), plugin=PLUGIN
             ) as run:
                 assert await run.state.load(_State) == _State(values=[1])
@@ -209,7 +222,7 @@ def test_state_only_excludes_candidate_edits_and_workspace_commit_includes_them(
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             root = run.workspaces.root
@@ -233,7 +246,7 @@ def test_workspace_restore_leaves_candidate_checkpoint_index_clean(tmp_path: Pat
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             root = run.workspaces.root
@@ -270,7 +283,7 @@ def test_real_state_adapter_rejects_wrong_models_and_non_root_workspaces(tmp_pat
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
@@ -303,7 +316,7 @@ def test_run_context_rejects_a_plugin_other_than_the_selected_orchestration(
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(request, integration, setup=RunSetup(), plugin=PLUGIN):
+        async with open_product_run_host(request, integration, setup=RunSetup(), plugin=PLUGIN):
             pytest.fail("mismatched plugin was accepted")
 
     try:
@@ -319,7 +332,7 @@ def test_real_control_checkpoint_lands_a_pending_stop(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             await run.control.checkpoint()
@@ -339,7 +352,7 @@ def test_real_run_facts_map_prepared_input_and_environment_once(tmp_path: Path) 
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
         ) as run:
             facts = run.facts

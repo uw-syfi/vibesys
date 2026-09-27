@@ -24,10 +24,10 @@ from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.orchestration.state import _emit_commit_events
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import OrchestrationPlugin, RunHost
@@ -112,7 +112,7 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
     integration.events.subscribe(lambda event: captured.append((event.type, event.data)))
 
     async def exercise() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root),
             integration,
             setup=RunSetup(),
@@ -154,14 +154,14 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
 
 
 def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None:
-    """A fresh `RunContext` on a resumed run only emits events for new work."""
+    """A fresh `RunHost` on a resumed run only emits events for new work."""
     project_root = tmp_path / "project"
     _write_project(project_root)
 
     async def commit_round_one() -> str:
         integration = LocalRunIntegration()
         try:
-            async with RunContext.open(
+            async with open_product_run_host(
                 _request(project_root),
                 integration,
                 setup=RunSetup(),
@@ -169,7 +169,7 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
                 plugin=_PLUGIN,
             ) as ctx:
                 await ctx.state.commit(_FakeAgentState(round_numbers=(1,), experiment_revision=1))
-                return ctx._resources.run_id  # noqa: SLF001  # LW-040114 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
+                return ctx.run_id
         finally:
             integration.close()
 
@@ -180,7 +180,7 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
     resumed_integration.events.subscribe(lambda event: captured.append((event.type, event.data)))
 
     async def resume_and_commit_round_two() -> None:
-        async with RunContext.open(
+        async with open_product_run_host(
             _request(project_root, resume=ResumeRef(run_id=run_id)),
             resumed_integration,
             setup=RunSetup(),
@@ -238,7 +238,7 @@ def test_commit_events_property_no_double_emission_and_revision_iff_changed(
     each commit's effect on the durable state. ``resume_at`` simulates a
     process restart partway through: the "previous view" the host diffs
     against is recomputed from the last-committed state (exactly what
-    ``RunContext.state`` does when it re-reads durable state after a
+    ``RunHost.state`` does when it re-reads durable state after a
     process restart), which must be indistinguishable from an in-memory
     cache for the invariants below to hold.
     """

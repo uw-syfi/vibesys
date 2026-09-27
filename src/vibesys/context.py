@@ -1333,9 +1333,10 @@ def _assemble_workspace_resources(
 class _RunResources:
     """Private owner of one workspace's assembled resources and teardown stack.
 
-    ``RunContext`` exposes focused policy capabilities. This object keeps the
-    Git tracker, environment session, logger, state namespace, and device lease
-    together so setup failure and run closure unwind them in construction order.
+    Product composition exposes focused policy capabilities. This object keeps
+    the Git tracker, environment session, logger, state namespace, and device
+    lease together so setup failure and run closure unwind them in construction
+    order.
     """
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-008208 [PLR0913]; `_RunResources` receives already-owned runtime resources explicitly, without a second mutable parameter container.
@@ -1475,6 +1476,11 @@ class _RunResources:
     def skill_source_paths(self) -> list[Path]:
         """Skill source directories copied into the workspace for agents."""
         return self._skill_source_paths
+
+    @property
+    def round_transaction_coordinator(self) -> MultiSlotRoundTransactionCoordinator | None:
+        """Return the checkpoint coordinator prepared for plugin state."""
+        return self._round_transaction_coordinator
 
     def lprint(self, text: str) -> None:
         self.logger.lprint(text)

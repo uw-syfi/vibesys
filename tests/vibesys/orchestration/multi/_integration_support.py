@@ -1,6 +1,6 @@
 """Production-host fixture for explicit multi-plugin persistence and isolation tests.
 
-This is the only multi-plugin test helper that imports ``RunContext``. The
+This is the only multi-plugin test helper that imports ``RunHost``. The
 behavior tests stay on the public plugin/runtime contracts and use this seam
 only when process-persisted state or real workspace restoration matters.
 """
@@ -17,9 +17,9 @@ from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runtime import RunContext
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -111,7 +111,7 @@ def execute(
     async def run() -> tuple[RunStatus, str, Path]:
         integration = LocalRunIntegration()
         try:
-            async with RunContext.open(
+            async with open_product_run_host(
                 request,
                 integration,
                 setup=prepared.setup,

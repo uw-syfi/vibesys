@@ -413,6 +413,7 @@ class FakeAgentSessions:
         }
         self._sessions: list[FakeAgentSession] = []
         self._creation_results: list[BaseException | None] = []
+        self._closing = False
         self._closed = False
 
     @property
@@ -433,7 +434,7 @@ class FakeAgentSessions:
         writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
         """Validate the declared role and create an independent conversation."""
-        if self._closed:
+        if self._closing:
             raise SessionClosedError
         if self._creation_results:
             failure = self._creation_results.pop(0)
@@ -460,9 +461,14 @@ class FakeAgentSessions:
         """Close all sessions in reverse creation order, once."""
         if self._closed:
             return
+        self._closing = True
         self._closed = True
         for session in reversed(self._sessions):
             await session.close()
+
+    def begin_close(self) -> None:
+        """Reject new sessions before asynchronous teardown starts."""
+        self._closing = True
 
     async def close_workspace_sessions(self, workspace: Workspace) -> None:
         """Invalidate every public session bound to a discarded workspace."""
