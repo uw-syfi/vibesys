@@ -30,7 +30,7 @@ def test_web_ui_script_bypasses_tui_launcher_and_bootstraps_clients(
     uv_marker = tmp_path / "uv.txt"
     _recording_executable(fake_bin / "pnpm", "PNPM_MARKER")
     _recording_executable(fake_bin / "uv", "UV_MARKER")
-    environment = {
+    environment: dict[str, str] = {
         **os.environ,
         "PATH": os.pathsep.join((str(fake_bin), os.defpath)),
         "PNPM_MARKER": str(pnpm_marker),
