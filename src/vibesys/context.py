@@ -1,6 +1,5 @@
 """Shared lifecycle context for one canonical VibeSys project run."""
 
-import asyncio
 import shutil
 import time
 from collections.abc import Callable
@@ -36,7 +35,6 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import tool_install_root
 from vibesys.events import (
     CoreEventType,
-    EventStatus,
     ExperimentsChangedData,
 )
 from vibesys.inputs import InputBundle, WorkspaceSource
@@ -202,16 +200,6 @@ def _native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
         capability.diagnostics,
         capability.details,
     )
-
-
-def _execution_status(error: BaseException | None) -> EventStatus:
-    if error is None:
-        return EventStatus.COMPLETED
-    if isinstance(error, asyncio.CancelledError) or type(error).__name__ == "CancelledError":
-        return EventStatus.CANCELLED
-    if isinstance(error, (KeyboardInterrupt, SystemExit)):
-        return EventStatus.INTERRUPTED
-    return EventStatus.FAILED
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
