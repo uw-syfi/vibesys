@@ -43,7 +43,7 @@ The main framework boundaries are:
   roles, prompts, reply schemas, search and selection policy, evaluation
   cadence, and policy state. See
   [Orchestration plugins and runtime](orchestration-runtime.md).
-- `src/vibesys/api/`, `src/vibesys/run/`, `src/vibesys/context.py`, and
+- `src/vibesys/api/`, `src/vibesys/run/`, and
   `src/vibesys/composition.py` form the thin product facade and composition
   layer over the reusable runtime libraries.
 - `libs/` owns reusable libraries. Import each library through its public

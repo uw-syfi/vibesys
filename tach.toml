@@ -9,16 +9,15 @@
 #
 # Modeling: `vibesys` is a module whose children (`vibesys.agents`, ...) are
 # also modules. tach assigns each file to its deepest module, so `vibesys` means
-# the top-level vibesys/*.py files (config, context, schemas, ...). `server` is
+# the top-level vibesys/*.py files (config, schemas, ...). `server` is
 # modeled the same way: `server.api`, `server.runtime`, ... are modules, and
 # bare `server` is its package `__init__`.
 #
 # Cycles are forbidden (`forbid_circular_dependencies = true`). The `vibesys`
 # core modules are ordered by their explicit edges, bottom to top: `vibesys`
 # (top-level vibesys/*.py: config, schemas, ...); then backends, evaluators,
-# prompts, render, skypilot; then domains; then sandbox; then run; then
-# `vibesys.context` (per-run lifecycle context, imported only by loops and
-# entrypoints); then loops; `vibesys.api` is the facade on top. Do not add an
+# prompts, render, skypilot; then domains; then sandbox; then run composition;
+# then loops; `vibesys.api` is the facade on top. Do not add an
 # upward edge; move the shared code down instead.
 #
 # Tach `layers` are not used. Every edge is listed, including those of
@@ -248,11 +247,6 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-path = "vibesys.context"
-layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.environment", "vibesys.run.skills", "vs_project", "vs_sandbox", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
-
-[[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.orchestration.hypothesis"
 layer = "roles_search"
@@ -271,7 +265,7 @@ depends_on = ["vs_loop_state"]
 [[modules]]
 path = "vibesys.orchestration.profilers"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.errors", "vibesys.run.contracts", "vs_agent", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.review"
@@ -281,7 +275,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project"]
+depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.run.contracts"
@@ -291,7 +285,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.skills", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.resources", "vibesys.run.skills", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -301,7 +295,12 @@ depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.evaluation"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_runtime", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.inputs", "vs_runtime", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.run.resources"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vibesys.run.evaluation", "vibesys.run.skills", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.run.skills"
@@ -413,6 +412,10 @@ from = ["vs_runtime"]
 [[interfaces]]
 expose = ["ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
 from = ["vibesys.run.contracts"]
+
+[[interfaces]]
+expose = ["_PreparedRun", "_StateBinding", "open_run_resources"]
+from = ["vibesys.run.resources"]
 
 [[interfaces]]
 expose = ["resolve_openevolve_options"]

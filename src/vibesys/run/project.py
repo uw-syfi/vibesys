@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import ValidationError
 
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import (
     MANIFEST_NAME,
     EvaluatorInput,
@@ -17,17 +20,151 @@ from vibesys.inputs import (
     render_input_manifest,
 )
 from vibesys.run.workspace_policy import materialization_source
-from vs_project.api import Project, is_project_state_path
+from vs_project.api import (
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
+    Project,
+    RunExecutionRecord,
+    is_project_state_path,
+)
+from vs_runtime.api import OrchestrationResumeDecision
 from vs_runtime.api.infrastructure import (
     FreshProjectError,
     FreshProjectErrorKind,
     InputProjectMaterialization,
     ProjectMaterializationStep,
     ProjectMaterializer,
+    ProjectRunBaselineMissingError,
+    ProjectRunDirtyResumeError,
+    ProjectRunMismatchError,
+    ProjectRunMismatchKind,
     ProjectTreeCopy,
+    RunEnvironmentSpec,
+    run_environment_record,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
 _PRIVATE_PROJECT_ENTRY_NAMES = frozenset({".git", "agent.toml"})
+
+
+def installed_vibesys_version() -> str:
+    """Return the installed distribution version for portable run metadata."""
+    try:
+        return distribution_version("vibesys")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+def validate_agent_role_catalog(
+    recorded: Mapping[str, object],
+    selected: Mapping[str, object],
+) -> None:
+    """Reject persisted role IDs that differ from the selected plugin."""
+    missing_roles = sorted(selected.keys() - recorded.keys())
+    unknown_roles = sorted(recorded.keys() - selected.keys())
+    if not missing_roles and not unknown_roles:
+        return
+    details = []
+    if missing_roles:
+        details.append(f"missing recorded roles: {', '.join(missing_roles)}")
+    if unknown_roles:
+        details.append(f"unknown recorded roles: {', '.join(unknown_roles)}")
+    raise ConfigurationError(
+        ConfigurationDiagnostic(
+            code="project_resume_configuration_invalid",
+            stage="resume_resolution",
+            message=(
+                "recorded agent roles do not match the selected orchestration: "
+                + "; ".join(details)
+            ),
+        )
+    )
+
+
+def exact_resume_descriptor(
+    recorded: OrchestrationDescriptor,
+    requested: OrchestrationDescriptor,
+) -> OrchestrationResumeDecision:
+    """Require an unchanged orchestration descriptor when no plugin policy exists."""
+    if recorded != requested:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=f"resuming orchestration {recorded.id!r} cannot change its descriptor",
+            )
+        )
+    return OrchestrationResumeDecision(descriptor=None)
+
+
+def resume_orchestration_decision(
+    recorded: OrchestrationRunManifest,
+    requested: OrchestrationDescriptor,
+    environment: RunEnvironmentSpec,
+    execution: RunExecutionRecord,
+    resume_policy: Callable[
+        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
+    ],
+) -> OrchestrationResumeDecision:
+    """Validate persisted run identity before invoking plugin resume policy."""
+    if recorded.run_environment != run_environment_record(environment):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message="resuming a run cannot change its recorded run_environment",
+            )
+        )
+    validate_agent_role_catalog(recorded.execution.agent_roles, execution.agent_roles)
+    if recorded.execution != execution:
+        changed = ", ".join(
+            name
+            for name in RunExecutionRecord.model_fields
+            if getattr(recorded.execution, name) != getattr(execution, name)
+        )
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=f"resuming a run cannot change its recorded execution fields: {changed}",
+            )
+        )
+    if (recorded.orchestration.id, recorded.orchestration.config_version) != (
+        requested.id,
+        requested.config_version,
+    ):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=(
+                    f"run uses orchestration {recorded.orchestration.id!r} version "
+                    f"{recorded.orchestration.config_version}, not {requested.id!r} "
+                    f"version {requested.config_version}"
+                ),
+            )
+        )
+    return resume_policy(recorded.orchestration, requested)
+
+
+def project_run_configuration_error(
+    error: ProjectRunBaselineMissingError | ProjectRunMismatchError | ProjectRunDirtyResumeError,
+) -> ConfigurationError:
+    """Translate runtime project failures into stable product diagnostics."""
+    if isinstance(error, ProjectRunBaselineMissingError):
+        code, stage = "project_trusted_baseline_missing", "workspace_setup"
+    elif isinstance(error, ProjectRunDirtyResumeError):
+        code, stage = "project_resume_configuration_dirty", "resume_resolution"
+    else:
+        code = {
+            ProjectRunMismatchKind.TRUSTED_INPUT_BASELINE: "project_trusted_baseline_mismatch",
+            ProjectRunMismatchKind.BRANCH: "project_state_mismatch",
+            ProjectRunMismatchKind.TASK: "project_task_mismatch",
+        }[error.kind]
+        stage = "resume_resolution"
+    return ConfigurationError(ConfigurationDiagnostic(code=code, stage=stage, message=str(error)))
 
 
 class ProjectProvisioningError(ValueError):

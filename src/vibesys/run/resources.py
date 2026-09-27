@@ -1,17 +1,14 @@
-"""Shared lifecycle context for one canonical VibeSys project run."""
+"""Explicit product composition for one canonical VibeSys run."""
 
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import TextIO, overload
+from typing import overload
 
 from vibesys.composition import (
     _vibesys_runtime_host_resource,
-    agent_spec_from_config,
     prepare_domain_model_artifacts,
     resolve_agent_driver,
 )
@@ -26,41 +23,42 @@ from vibesys.events import (
     CoreEventType,
     ExperimentsChangedData,
 )
-from vibesys.inputs import InputBundle
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
-    PROFILERS_COMMON_STAGED_NAME,
-    ProfilerDefinition,
     ProfilerKind,
-    ProfilerPreflightResult,
-    default_profiler_for_backend,
-    preflight_profiler_kind,
     profiler_definition,
-    resolve_profiler_kind,
+    resolve_run_profiler,
 )
-from vibesys.run import (
-    ExperimentRepository,
-    ProjectProvisioningSpec,
-    provision_project,
+from vibesys.orchestration.profilers import (
+    profiler_support_extra as resolve_profiler_support_extra,
 )
 from vibesys.run.contracts import RunRequest
 from vibesys.run.environment import open_run_environment
+from vibesys.run.evaluation import trusted_evaluation_plan
+from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
-from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
+from vibesys.run.project import (
+    ProjectProvisioningSpec,
+    exact_resume_descriptor,
+    installed_vibesys_version,
+    project_run_configuration_error,
+    provision_project,
+    resume_orchestration_decision,
+    validate_agent_role_catalog,
+)
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
-from vibesys.run.skills import platform_skill_excluded_paths
+from vibesys.run.skills import platform_skill_excluded_paths, resolve_skill_source_paths
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     create_project_materializer,
 )
 from vs_agent.api import (
     AgentBackend,
-    AgentEventSink,
     AgentSpec,
-    agent_driver_supports_tool_servers,
     task_agent_host_resources,
 )
 from vs_project.api import (
@@ -80,27 +78,20 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
-    NativeCpuProfilerKind,
     ProjectRunBaselineMissingError,
     ProjectRunDirtyResumeError,
     ProjectRunEffects,
     ProjectRunMismatchError,
-    ProjectRunMismatchKind,
     ProjectRunRequest,
     ProjectRunResources,
     ProjectStateDeclaration,
-    ProtocolBenchmarkContract,
     RunEnvironmentRequest,
     RunEnvironmentResources,
-    RunEnvironmentSession,
-    RunEnvironmentSpec,
-    ScalarBenchmarkContract,
     TrustedEvaluationPlan,
     build_run_environment,
     make_run_environment_spec,
     open_project_run_resources,
     open_run_environment_resources,
-    preflight_native_cpu_profiler,
     prepare_trusted_evaluator,
     run_environment_record,
 )
@@ -114,77 +105,7 @@ _RUNTIME_STATE_NAMESPACE = "runtime"
 _SKYPILOT_STATE_NAMESPACE = "skypilot"
 
 
-def _run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
-    """Write run-log text and publish the same diagnostic on its run stream."""
-
-    def emit(text: str, log_file: TextIO) -> None:
-        events.agent_output(text + "\n", channel="diagnostic")
-        log_file.write(text + "\n")
-        log_file.flush()
-
-    return emit
-
-
-def _trusted_evaluation_plan(
-    bundle: InputBundle,
-    session: RunEnvironmentSession,
-) -> TrustedEvaluationPlan:
-    """Lower task and environment configuration into runtime execution facts."""
-    scalar = bundle.benchmark_result
-    contract = (
-        ScalarBenchmarkContract(
-            output_argument=scalar.json_argument,
-            metric=scalar.metric,
-        )
-        if scalar is not None
-        else (ProtocolBenchmarkContract() if bundle.benchmark_result_protocol is not None else None)
-    )
-    return TrustedEvaluationPlan(
-        accuracy_command=session.view.paths.accuracy_command,
-        accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-        benchmark_command=session.view.paths.benchmark_command,
-        benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
-        benchmark_contract=contract,
-    )
-
-
 _StateBinding = ProjectStateDeclaration
-
-
-def _profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, str], ...]:
-    """Directories staged as siblings of an active profiler's support dir.
-
-    Always includes the shared ``capture_runtime`` support package (staged
-    as ``profilers_common``), plus each of the definition's declared
-    ``extra_support_kinds`` (staged under their own ``support_name``, e.g.
-    ``torch_profiler`` alongside ``rocprof_profiler``).
-    """
-    extra: list[tuple[str, str]] = []
-    common_dir = BUNDLED_RESOURCES.directory("profilers", "_common")
-    if common_dir is not None:
-        extra.append((str(common_dir), PROFILERS_COMMON_STAGED_NAME))
-    for extra_kind in sorted(definition.extra_support_kinds):
-        extra_definition = profiler_definition(extra_kind)
-        extra_dir = BUNDLED_RESOURCES.directory("profilers", extra_kind.value)
-        if extra_dir is not None:
-            extra.append((str(extra_dir), extra_definition.support_name))
-    return tuple(extra)
-
-
-def _native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
-    """Adapt runtime-native host checks into profiler policy results."""
-    native_kind = {
-        ProfilerKind.LINUX_CPU: NativeCpuProfilerKind.LINUX,
-        ProfilerKind.MACOS_CPU: NativeCpuProfilerKind.MACOS,
-    }[kind]
-    capability = preflight_native_cpu_profiler(native_kind)
-    return ProfilerPreflightResult(
-        kind,
-        capability.usable,
-        capability.diagnostics,
-        capability.details,
-    )
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -200,91 +121,6 @@ def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
     return p
 
 
-def _installed_vibesys_version() -> str:
-    """Return the installed distribution version for portable run metadata."""
-    try:
-        return distribution_version("vibesys")
-    except PackageNotFoundError:
-        return "0+unknown"
-
-
-def _resume_orchestration_decision(
-    recorded: OrchestrationRunManifest,
-    requested: OrchestrationDescriptor,
-    environment: RunEnvironmentSpec,
-    execution: RunExecutionRecord,
-    resume_policy: Callable[
-        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
-    ],
-) -> OrchestrationResumeDecision:
-    """Check the current manifest identity and delegate option policy to its owner."""
-    if recorded.run_environment != run_environment_record(environment):
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message="resuming a run cannot change its recorded run_environment",
-            )
-        )
-    _validate_agent_role_catalog(recorded.execution.agent_roles, execution.agent_roles)
-    if recorded.execution != execution:
-        changed = ", ".join(
-            name
-            for name in RunExecutionRecord.model_fields
-            if getattr(recorded.execution, name) != getattr(execution, name)
-        )
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message=f"resuming a run cannot change its recorded execution fields: {changed}",
-            )
-        )
-    if (recorded.orchestration.id, recorded.orchestration.config_version) != (
-        requested.id,
-        requested.config_version,
-    ):
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message=(
-                    f"run uses orchestration {recorded.orchestration.id!r} version "
-                    f"{recorded.orchestration.config_version}, not {requested.id!r} "
-                    f"version {requested.config_version}"
-                ),
-            )
-        )
-    return resume_policy(recorded.orchestration, requested)
-
-
-def _validate_agent_role_catalog(
-    recorded: Mapping[str, object],
-    selected: Mapping[str, object],
-) -> None:
-    """Reject role-catalog drift using only authoritative mapping keys."""
-    recorded_roles = recorded.keys()
-    selected_roles = selected.keys()
-    missing_roles = sorted(selected_roles - recorded_roles)
-    unknown_roles = sorted(recorded_roles - selected_roles)
-    if missing_roles or unknown_roles:
-        details = []
-        if missing_roles:
-            details.append(f"missing recorded roles: {', '.join(missing_roles)}")
-        if unknown_roles:
-            details.append(f"unknown recorded roles: {', '.join(unknown_roles)}")
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_invalid",
-                stage="resume_resolution",
-                message=(
-                    "recorded agent roles do not match the selected orchestration: "
-                    + "; ".join(details)
-                ),
-            )
-        )
-
-
 @overload
 def _coerce_dir_path(raw: str, label: str) -> str: ...
 
@@ -296,57 +132,6 @@ def _coerce_dir_path(raw: None, label: str) -> None: ...
 def _coerce_dir_path(raw: str | None, label: str) -> str | None:
     path = _coerce_dir(raw, label)
     return str(path) if path is not None else None
-
-
-def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
-    if not raw_dirs:
-        return []
-    result: list[Path] = []
-    for raw in raw_dirs:
-        p = Path(raw).expanduser()
-        if not p.is_absolute():
-            p = PROJECT_ROOT / p
-        p = p.resolve()
-        if not p.exists():
-            message = f"--skills-dir path does not exist: {raw}"
-            raise ValueError(message)
-        if not p.is_dir():
-            message = f"--skills-dir path is not a directory: {raw}"
-            raise ValueError(message)
-        result.append(p)
-    return result
-
-
-def _exact_resume_descriptor(
-    recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
-) -> OrchestrationResumeDecision:
-    if recorded != requested:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message=f"resuming orchestration {recorded.id!r} cannot change its descriptor",
-            )
-        )
-    return OrchestrationResumeDecision(descriptor=None)
-
-
-def _project_run_configuration_error(
-    error: ProjectRunBaselineMissingError | ProjectRunMismatchError | ProjectRunDirtyResumeError,
-) -> ConfigurationError:
-    """Translate policy-neutral runtime failures into stable product diagnostics."""
-    if isinstance(error, ProjectRunBaselineMissingError):
-        code, stage = "project_trusted_baseline_missing", "workspace_setup"
-    elif isinstance(error, ProjectRunDirtyResumeError):
-        code, stage = "project_resume_configuration_dirty", "resume_resolution"
-    else:
-        code = {
-            ProjectRunMismatchKind.TRUSTED_INPUT_BASELINE: "project_trusted_baseline_mismatch",
-            ProjectRunMismatchKind.BRANCH: "project_state_mismatch",
-            ProjectRunMismatchKind.TASK: "project_task_mismatch",
-        }[error.kind]
-        stage = "resume_resolution"
-    return ConfigurationError(ConfigurationDiagnostic(code=code, stage=stage, message=str(error)))
 
 
 def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; private run composition receives independent policy bindings and effect factories explicitly instead of hiding them in a service container.
@@ -426,13 +211,10 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     objective = request.objective or bundle.objective
     existing = request.resume is not None
     orchestration_descriptor = request.orchestration
-    orchestration_resume = resume_policy or _exact_resume_descriptor
-    profiler_kind = request.profiler_kind
+    orchestration_resume = resume_policy or exact_resume_descriptor
     profiler_domain = bundle.domain
     skills_dirs = request.skills_dirs
     run_environment = request.run_environment
-    agent_backend = request.agent_backend
-    cli_provider = request.cli_provider
     backend = request.backend
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
@@ -498,7 +280,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
             if existing:
                 recorded_run = Project.open(project_root).state.load_run(run_id)
-                _validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
+                validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
 
         with boot_trace.span("backend_and_model"):
             backend_get = backend_factory or create_compute_backend
@@ -508,59 +290,14 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log=buffered_logs.append,
                 image=environment.backend_image,
             )
-            resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
-            resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
             model_name = config.model.name
         with boot_trace.span("profiler_preflight"):
-            resolved_profiler_kind = resolve_profiler_kind(
-                profiler_kind,
-                domain=profiler_domain,
-                backend_profiler_kind=default_profiler_for_backend(backend),
-                environment_default_profiler_kind=ProfilerKind(environment.default_profiler_id),
-                environment_supported_profiler_kinds=(
-                    None
-                    if environment.supported_profiler_ids is None
-                    else frozenset(
-                        ProfilerKind(profiler_id)
-                        for profiler_id in environment.supported_profiler_ids
-                    )
-                ),
+            resolved_profiler_kind = resolve_run_profiler(request, environment)
+            skill_source_paths = resolve_skill_source_paths(skills_dirs)
+            resolved_backend = str(
+                request.agent_backend or config.agent.backend or AgentBackend.CLI
             )
-            if resolved_profiler_kind in ACTIVE_PROFILER_KINDS:
-                agent_spec = agent_spec_from_config(
-                    config,
-                    backend=agent_backend,
-                    provider=cli_provider,
-                    model=model_name,
-                )
-                if not agent_driver_supports_tool_servers(agent_spec):
-                    driver_name = resolve_agent_driver(config)
-                    definition = profiler_definition(resolved_profiler_kind)
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="agent_profiler_incompatible",
-                            stage="agent_capability_validation",
-                            message=(
-                                f"Profiler {resolved_profiler_kind.value!r} requires agent tool server "
-                                f"{definition.mcp_name!r}, but agent driver {driver_name.value!r} does not "
-                                "support agent tool servers. Select agent.driver='agentshim' or "
-                                "disable profiling with --profiler none."
-                            ),
-                        )
-                    )
-            profiler_preflight = preflight_profiler_kind(
-                resolved_profiler_kind,
-                native_preflight=_native_profiler_preflight,
-            )
-            if not profiler_preflight.usable:
-                raise ConfigurationError(
-                    ConfigurationDiagnostic(
-                        code="profiler_preflight_failed",
-                        stage="profiler_preflight",
-                        message=profiler_preflight.error_message(),
-                    )
-                )
-            skill_source_paths = _coerce_skills_dirs(skills_dirs)
+            resolved_cli_provider = request.cli_provider or config.agent.cli_provider or "codex"
             execution_record = RunExecutionRecord(
                 model=config.model.name,
                 agent_backend=resolved_backend,
@@ -570,7 +307,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 cli_provider=resolved_cli_provider,
                 cli_timeout=config.agent.cli_timeout,
                 compute_backend=backend.value,
-                requested_profiler=profiler_kind.value,
+                requested_profiler=request.profiler_kind.value,
                 resolved_profiler=resolved_profiler_kind.value,
                 default_reasoning_effort=config.thinking.level,
                 thinking_budget=config.thinking.budget,
@@ -594,7 +331,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 default_support = BUNDLED_RESOURCES.directory("profilers", definition.kind.value)
                 if default_support is not None:
                     profiler_support_path = str(default_support)
-                profiler_support_extra = _profiler_support_extra(definition)
+                profiler_support_extra = resolve_profiler_support_extra(definition)
 
             input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
@@ -651,7 +388,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         def resolve_recorded_run(
             recorded: OrchestrationRunManifest,
         ) -> OrchestrationResumeDecision:
-            return _resume_orchestration_decision(
+            return resume_orchestration_decision(
                 recorded,
                 orchestration_descriptor,
                 run_environment_spec,
@@ -667,7 +404,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     display_name=exp_name,
                     task_name=task_name,
                     existing=existing,
-                    framework_version=_installed_vibesys_version(),
+                    framework_version=installed_vibesys_version(),
                     run_environment=run_environment_record(run_environment_spec),
                     execution=execution_record,
                     orchestration=orchestration_descriptor,
@@ -688,7 +425,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 ),
                 effects=ProjectRunEffects(
                     git_events=CoreGitTrackerEvents(integration.events),
-                    log_emit=_run_log_emitter(integration.agent_events),
+                    log_emit=run_log_emitter(integration.agent_events),
                     on_log_ready=integration.attach,
                 ),
                 buffered_logs=buffered_logs,
@@ -699,7 +436,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             ProjectRunMismatchError,
             ProjectRunDirtyResumeError,
         ) as error:
-            raise _project_run_configuration_error(error) from error
+            raise project_run_configuration_error(error) from error
         teardown_stack.callback(project_resources.close)
         project = project_resources.project
         project_state = project.state
@@ -840,7 +577,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_kind=resolved_profiler_kind,
             ),
             skill_source_paths=tuple(skill_source_paths),
-            evaluation_plan=_trusted_evaluation_plan(bundle, session),
+            evaluation_plan=trusted_evaluation_plan(bundle, session),
             _teardown_stack=teardown_stack,
             environment_resources=environment_resources,
             project_resources=project_resources,

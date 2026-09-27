@@ -43,6 +43,24 @@ def foreign_platform_names(compute_backend: ComputeBackend | None) -> frozenset[
     return frozenset(b.value for b in ComputeBackend if b is not compute_backend)
 
 
+def resolve_skill_source_paths(raw_dirs: list[str] | None) -> list[Path]:
+    """Resolve configured skill directories against the product checkout."""
+    result: list[Path] = []
+    for raw in raw_dirs or ():
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        path = path.resolve()
+        if not path.exists():
+            message = f"--skills-dir path does not exist: {raw}"
+            raise ValueError(message)
+        if not path.is_dir():
+            message = f"--skills-dir path is not a directory: {raw}"
+            raise ValueError(message)
+        result.append(path)
+    return result
+
+
 def is_platforms_parent(directory: Path | str) -> bool:
     """True when *directory* is the ``references/platforms`` dir of a skill.
 

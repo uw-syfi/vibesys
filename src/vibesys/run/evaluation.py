@@ -28,24 +28,54 @@ from vs_runtime.api.infrastructure import (
     FrameworkValidationResult,
     LocalValidationRecipeError,
     LocalValidationRecipeErrorKind,
+    ProtocolBenchmarkContract,
     RuntimeWorkspaceEvaluation,
     ScalarBenchmarkContract,
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
     TrustedBenchmarkResult,
+    TrustedEvaluationPlan,
     ValidationRecipe,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vibesys.inputs import InputBundle
     from vibesys.run.contracts import RunRequest
     from vs_runtime.api import Workspace
-    from vs_runtime.api.infrastructure import WorkspaceRuntime
+    from vs_runtime.api.infrastructure import (
+        RunEnvironmentSession,
+        WorkspaceRuntime,
+    )
 
 
 GATE_LOG_TAIL_CHARS = 1000
 GATE_FEEDBACK_TAIL_CHARS = 4000
+
+
+def trusted_evaluation_plan(
+    bundle: InputBundle,
+    session: RunEnvironmentSession,
+) -> TrustedEvaluationPlan:
+    """Lower task and environment configuration into runtime execution facts."""
+    scalar = bundle.benchmark_result
+    contract = (
+        ScalarBenchmarkContract(
+            output_argument=scalar.json_argument,
+            metric=scalar.metric,
+        )
+        if scalar is not None
+        else (ProtocolBenchmarkContract() if bundle.benchmark_result_protocol is not None else None)
+    )
+    return TrustedEvaluationPlan(
+        accuracy_command=session.view.paths.accuracy_command,
+        accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
+        benchmark_command=session.view.paths.benchmark_command,
+        benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
+        framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        benchmark_contract=contract,
+    )
 
 
 def emit_gate_started(

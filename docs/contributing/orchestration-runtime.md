@@ -11,7 +11,7 @@ The boundary is deliberate:
 |---|---|
 | `src/vibesys/orchestration/` | Agent roles, prompts, reply schemas, search and selection policy, evaluation cadence and interpretation, policy state, and plugin declarations |
 | `src/vibesys/plugin_catalog.py` | The product catalog of in-repository plugins and their read projections |
-| `src/vibesys/run/`, `src/vibesys/context.py`, `src/vibesys/composition.py` | Thin VibeSys composition: bind product config to roles, translate semantic events, and connect a selected plugin to the runtime |
+| `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: bind product config to roles, translate semantic events, and connect a selected plugin to the runtime |
 | `libs/vs-runtime/` | Reusable session, workspace, state, evaluation, control, command, skill, and cleanup mechanics |
 | `libs/vs-agent/`, `libs/vs-sandbox/`, `libs/vs-project/` | Agent harnesses, isolated execution, and project persistence |
 

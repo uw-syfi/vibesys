@@ -97,7 +97,7 @@ if the backend does not answer in time. `--theme` skips the query and reaches th
 Boot timings are always recorded and never narrated. The backend times its boot in spans
 (`src/vibesys/boot_trace.py`): the dispatch preamble in `src/entrypoints/headless.py`, then
 run-context assembly in
-`context.py`. Every span lands in the run's `run-*.log` as
+`run/resources.py`. Every span lands in the run's `run-*.log` as
 `boot span <qualified.name>: <ms>ms`, with the preamble's spans ahead of assembly's and each
 enclosing span reporting its region's total after its children.
 

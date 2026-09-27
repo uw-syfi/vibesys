@@ -36,18 +36,30 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-    from typing import Literal
+    from typing import Literal, TextIO
 
     from pydantic import BaseModel
 
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
+    from vs_agent.api import AgentEventSink
     from vs_project.api import Project
     from vs_runtime.api.infrastructure import (
         ProjectRunResources,
         RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
+
+
+def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
+    """Write run-log text and publish the same diagnostic on its run stream."""
+
+    def emit(text: str, log_file: TextIO) -> None:
+        events.agent_output(text + "\n", channel="diagnostic")
+        log_file.write(text + "\n")
+        log_file.flush()
+
+    return emit
 
 
 @dataclass(frozen=True, slots=True)

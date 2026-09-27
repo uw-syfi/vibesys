@@ -1,3 +1,5 @@
+"""Product run-resource composition through its internal module API."""
+
 import sys
 from pathlib import Path
 from typing import Literal, TypedDict, Unpack
@@ -10,11 +12,6 @@ from tests.support import run_test_command
 from vibesys.api import open_run_store
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
-from vibesys.context import (
-    _PreparedRun,
-    _profiler_support_extra,
-    open_run_resources,
-)
 from vibesys.errors import ConfigurationError
 from vibesys.events import CoreEventType
 from vibesys.inputs import (
@@ -29,12 +26,16 @@ from vibesys.orchestration.agent_options import (
 from vibesys.orchestration.profilers import (
     PROFILERS_COMMON_STAGED_NAME,
     ProfilerKind,
-    ProfilerPreflightResult,
     profiler_definition,
+    profiler_support_extra,
 )
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vibesys.run.contracts import ResumeRef, RunRequest
+from vibesys.run.resources import (
+    _PreparedRun,
+    open_run_resources,
+)
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
@@ -82,14 +83,6 @@ class _CreateContextOptions(TypedDict, total=False):
     integration: LocalRunIntegration | None
     agent_roles: tuple[AgentRole, ...]
     backend_factory: _RecordingBackendFactory
-
-
-@pytest.fixture(autouse=True)
-def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "vibesys.context.preflight_profiler_kind",
-        lambda kind, **_kwargs: ProfilerPreflightResult(kind, usable=True),
-    )
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -696,7 +689,7 @@ def test_direct_resume_republishes_an_already_published_run(tmp_path: Path) -> N
     )
 
     with (
-        patch("vibesys.context.ExperimentRepository.push") as push,
+        patch("vibesys.run.resources.ExperimentRepository.push") as push,
         _create_context(
             project,
             evaluator=evaluator,
@@ -723,7 +716,7 @@ def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path: Pat
     _git(project, "remote", "add", "origin", str(remote))
 
     with (
-        patch("vibesys.context.ExperimentRepository.push") as push,
+        patch("vibesys.run.resources.ExperimentRepository.push") as push,
         _create_context(
             project,
             evaluator=evaluator,
@@ -782,12 +775,16 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path: Path) -> N
 def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
+    manifest = project / "vibesys.input.toml"
+    manifest.write_text(
+        manifest.read_text().replace('domain = "generic"', 'domain = "microservices"')
+    )
     configuration = _options().model_copy(
         update={
             "agent_backend": "cli",
             "agent_driver": "omnigent",
             "cli_provider": "codex",
-            "profiler": "macos_cpu",
+            "profiler": "otel",
         }
     )
 
@@ -801,10 +798,10 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
                 "agent": {"backend": "cli", "driver": "omnigent", "cli_provider": "codex"},
             }
         ),
-        profiler_kind=ProfilerKind.MACOS_CPU,
+        profiler_kind=ProfilerKind.OTEL,
         agent_backend=None,
     ) as context:
-        assert context.facts.profiler_id == ProfilerKind.MACOS_CPU.value
+        assert context.facts.profiler_id == ProfilerKind.OTEL.value
 
 
 def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> None:
@@ -849,7 +846,7 @@ def test_profiler_support_extra_includes_shared_runtime_and_declared_extras() ->
     """rocprof declares torch as an extra plugin dir; profilers_common is universal."""
     definition = profiler_definition(ProfilerKind.ROCPROF)
 
-    extra = _profiler_support_extra(definition)
+    extra = profiler_support_extra(definition)
     names = [name for _path, name in extra]
 
     assert names[0] == PROFILERS_COMMON_STAGED_NAME
@@ -861,6 +858,6 @@ def test_profiler_support_extra_includes_shared_runtime_and_declared_extras() ->
 def test_profiler_support_extra_without_declared_extras_is_just_the_shared_runtime() -> None:
     definition = profiler_definition(ProfilerKind.NSYS)
 
-    extra = _profiler_support_extra(definition)
+    extra = profiler_support_extra(definition)
 
     assert [name for _path, name in extra] == [PROFILERS_COMMON_STAGED_NAME]
