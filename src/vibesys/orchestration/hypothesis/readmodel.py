@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.hypothesis import HypothesisSearch, derive_hypothesis_title
-from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import RoundSummary, RunStatus, RunView
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,

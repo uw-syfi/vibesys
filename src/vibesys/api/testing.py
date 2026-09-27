@@ -22,8 +22,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.api.contracts import EventSink, RunView
-    from vibesys.orchestration.contracts import OrchestrationRegistry
-    from vibesys.orchestration.request import RunRequest
+    from vibesys.plugin_catalog import OrchestrationRegistry
+    from vibesys.run.contracts import RunRequest
     from vs_agent.api import AgentClientProtocol
     from vs_sandbox.api import ComputeBackendImpl
 

@@ -16,9 +16,9 @@ from vibesys.constants import ComputeBackend
 from vibesys.inputs import ProfileGuidedInput, load_input_bundle
 from vibesys.orchestration.metrics import MetricSpace
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleState
+from vibesys.run.contracts import ResumeRef, RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project

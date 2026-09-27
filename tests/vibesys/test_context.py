@@ -32,9 +32,9 @@ from vibesys.orchestration.profilers import (
     ProfilerPreflightResult,
     profiler_definition,
 )
-from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
+from vibesys.run.contracts import ResumeRef, RunRequest
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import (

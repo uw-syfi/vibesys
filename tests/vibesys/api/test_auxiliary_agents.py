@@ -21,7 +21,7 @@ from vibesys.api.session import (
 )
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.orchestration.contracts import OrchestrationRegistry
+from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.integration import RunResources
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import OrchestrationPlugin, RunHost
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api.contracts import EventSink
-    from vibesys.orchestration.request import RunRequest
+    from vibesys.run.contracts import RunRequest
 
 
 @dataclass(frozen=True)

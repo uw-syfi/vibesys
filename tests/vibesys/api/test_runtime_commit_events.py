@@ -22,8 +22,7 @@ from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_se
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import ResumeRef, RoundSummary, RunRequest, RunStatus, RunView
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor

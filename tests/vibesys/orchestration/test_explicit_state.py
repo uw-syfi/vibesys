@@ -12,9 +12,9 @@ from vibesys.api import RunStopped, create_session
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle
-from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.orchestration.request import ResumeRef, RunRequest
+from vibesys.plugin_catalog import OrchestrationRegistry
+from vibesys.run.contracts import ResumeRef, RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.request import RunRequest
+    from vibesys.run.contracts import RunRequest
 
 
 def resolved_run_id(request: RunRequest) -> str:

@@ -131,14 +131,18 @@ class _RunProjection(Protocol):
     def experiment_revision(self) -> int | None: ...
 
 
-class _CommittedStateProjector(Protocol):
+class CommittedStateProjector(Protocol):
+    """Project just-committed plugin state into product run facts."""
+
     def project_committed(
         self,
         namespace: str,
         state: BaseModel,
         *,
         run_id: str,
-    ) -> _RunProjection | None: ...
+    ) -> _RunProjection | None:
+        """Return the product projection for this namespace and state."""
+        ...
 
 
 class _StateCommitObserver:
@@ -148,7 +152,7 @@ class _StateCommitObserver:
         self,
         integration: LocalRunIntegration,
         run_id: str,
-        projector: _CommittedStateProjector | None,
+        projector: CommittedStateProjector | None,
         namespace: str,
     ) -> None:
         self._integration = integration
@@ -344,7 +348,7 @@ class LocalRunIntegration:
     def state_commit_observer(
         self,
         run_id: str,
-        projector: _CommittedStateProjector | None,
+        projector: CommittedStateProjector | None,
         namespace: str,
     ) -> _StateCommitObserver:
         """Bind durable plugin state to product hints and semantic events."""

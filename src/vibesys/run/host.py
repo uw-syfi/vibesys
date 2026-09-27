@@ -34,9 +34,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.context import _RunResources
-    from vibesys.orchestration.contracts import OrchestrationProjector
-    from vibesys.orchestration.request import RunRequest
-    from vibesys.run.integration import LocalRunIntegration
+    from vibesys.run.contracts import RunRequest
+    from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
     from vs_runtime.api import AgentRole, OrchestrationPlugin, RunHost, Workspace
     from vs_runtime.api.infrastructure import (
@@ -54,7 +53,7 @@ class _ProductHostFactory:
     request: RunRequest
     integration: LocalRunIntegration
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None
-    projector: OrchestrationProjector | None
+    projector: CommittedStateProjector | None
     agent_client_factory: Callable[..., AgentClientProtocol] | None
     backend_factory: Callable[..., ComputeBackendImpl] | None
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None
@@ -255,7 +254,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     *,
     plugin: OrchestrationPlugin,
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
-    projector: OrchestrationProjector | None = None,
+    projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,

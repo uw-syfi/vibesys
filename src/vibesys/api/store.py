@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict
 
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.memory import framework_memory_paths
+from vibesys.plugin_catalog import project_run
 from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vibesys.api.contracts import RunView
-    from vibesys.orchestration.contracts import (
+    from vibesys.plugin_catalog import (
         OrchestrationRegistration,
         OrchestrationRegistry,
     )
@@ -232,7 +232,11 @@ class _LocalRunRecord:
     def history_documents(self) -> tuple[RunDocument, ...]:
         manifest = self._manifest()
         registration = self._registration(manifest)
-        namespaces = registration.portable_namespaces if registration is not None else ()
+        namespaces = (
+            (registration.plugin.id,)
+            if registration is not None and registration.plugin.state is not None
+            else ()
+        )
         return tuple(
             RunDocument(relative_path=item.relative_path, contents=item.contents)
             for namespace in namespaces

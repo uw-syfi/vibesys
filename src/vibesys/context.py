@@ -39,13 +39,13 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.skills import platform_skill_excluded_paths
 from vibesys.run import (
     ExperimentRepository,
     ProjectProvisioningSpec,
     provision_project,
 )
+from vibesys.run.contracts import RunRequest
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.project_policy import (

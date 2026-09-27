@@ -160,7 +160,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vs_project", "vs_sandbox", "vibesys.api.agent", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.environment", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.orchestration.contracts", "vibesys.orchestration.memory", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vs_project", "vs_sandbox", "vibesys.api.agent", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.environment", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.orchestration.memory", "vibesys.orchestration.evolve", "vibesys.orchestration.profilers", "vibesys.orchestration.skills", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api.agent"
@@ -168,7 +168,7 @@ depends_on = ["vibesys.plugin_catalog", "vs_project", "vs_loop_state", "vibesys.
 
 [[modules]]
 path = "vibesys.api.contracts"
-depends_on = ["vs_agent", "vibesys", "vs_project", "vs_loop_state", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.errors", "vibesys.orchestration.metrics"]
+depends_on = ["vs_agent", "vibesys", "vs_project", "vs_loop_state", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration"
@@ -183,7 +183,7 @@ depends_on = ["vibesys.inputs", "vibesys.orchestration.metrics"]
 [[modules]]
 path = "vibesys.orchestration.hypothesis.readmodel"
 layer = "loops"
-depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vibesys.orchestration.view", "vs_runtime"]
+depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.single"
@@ -206,19 +206,9 @@ layer = "loops"
 depends_on = ["vs_runtime", "vs_issue_tracker", "vibesys.orchestration.resume"]
 
 [[modules]]
-path = "vibesys.orchestration.request"
-layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.inputs", "vs_runtime", "vs_project", "vibesys.orchestration.profilers"]
-
-[[modules]]
 path = "vibesys.orchestration.environment"
 layer = "orchestration_host"
 depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
-
-[[modules]]
-path = "vibesys.orchestration.view"
-layer = "orchestration_host"
-depends_on = []
 
 [[modules]]
 # Host-owned agent memory (roadmap, progress log, Pareto archive): pure path
@@ -231,7 +221,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.context"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vs_project", "vs_sandbox", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.orchestration.skills"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vs_project", "vs_sandbox", "vibesys.orchestration.environment", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.orchestration.skills", "vibesys.run.contracts"]
 
 [[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
@@ -265,9 +255,14 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
+path = "vibesys.run.contracts"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.inputs", "vibesys.orchestration.profilers", "vs_project", "vs_runtime"]
+
+[[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.contracts", "vibesys.orchestration.gates", "vibesys.orchestration.request", "vibesys.orchestration.skills", "vibesys.orchestration.steering"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.gates", "vibesys.orchestration.skills", "vibesys.orchestration.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.domains"
@@ -372,6 +367,10 @@ expose = ["api", "api\\..*"]
 from = ["vs_runtime"]
 
 [[interfaces]]
+expose = ["ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+from = ["vibesys.run.contracts"]
+
+[[interfaces]]
 expose = ["agent_options", "evolve", "evolve\\..*", "gates", "hypothesis", "hypothesis\\..*", "issue_queue", "issue_queue\\..*", "metrics", "multi", "multi\\..*", "profile_focus", "profile_focus\\..*", "profilers", "review", "single", "single\\..*"]
 from = ["vibesys.orchestration"]
 
@@ -393,11 +392,6 @@ layer = "orchestration_host"
 depends_on = ["vs_project", "vibesys.errors", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.contracts"
-layer = "orchestration_host"
-depends_on = [ "vs_project", "vs_runtime", "vibesys.orchestration.view"]
-
-[[modules]]
 path = "vibesys.orchestration.skills"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vs_runtime"]
@@ -410,15 +404,15 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.gates"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vs_runtime", "vibesys.orchestration.request"]
+depends_on = ["vibesys", "vs_runtime", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration._common"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.request"]
+depends_on = ["vibesys.run.contracts"]
 
 [[modules]]
 # Thin product composition: in-repository plugins plus the temporary private
 # RunSetup adapter.
 path = "vibesys.plugin_catalog"
-depends_on = [ "vibesys.orchestration.contracts", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi"]
+depends_on = [ "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi", "vs_runtime", "vs_project", "vibesys.run.contracts"]

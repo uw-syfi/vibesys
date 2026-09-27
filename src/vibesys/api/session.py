@@ -22,9 +22,9 @@ from vibesys.api.store import open_run_store
 from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
-from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.environment import open_run_environment
 from vibesys.orchestration.skills import platform_skill_selection
+from vibesys.plugin_catalog import project_run
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vs_agent.api import (
@@ -47,8 +47,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api.contracts import EventSink, RunView
-    from vibesys.orchestration.contracts import OrchestrationProjector, OrchestrationRegistry
-    from vibesys.orchestration.request import RunRequest
+    from vibesys.plugin_catalog import OrchestrationProjector, OrchestrationRegistry
+    from vibesys.run.contracts import RunRequest
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import OrchestrationPlugin, Workspace
     from vs_runtime.api import RunStatus as PluginRunStatus
@@ -379,7 +379,7 @@ class _LocalRunSession:
                 CoreEventType.RUN_STARTED,
                 status=EventStatus.ACTIVE,
                 data=RunStartedData(
-                    outer_loop=request.orchestration_id,
+                    outer_loop=request.orchestration.id,
                     input=str(request.input_bundle.root),
                     max_rounds=max_rounds,
                     expected_roles=tuple(role.id for role in plugin.agents),
@@ -413,7 +413,7 @@ class _LocalRunSession:
             )
             return RunResult(
                 run_id=self._run_id(),
-                loop=request.orchestration_id,
+                loop=request.orchestration.id,
                 succeeded=succeeded,
             )
         finally:
@@ -434,7 +434,7 @@ class _LocalRunSession:
             Project.open(self._request.project_root),
             run_id=self._run_id(),
             status=self._status,
-            loop=self._request.orchestration_id,
+            loop=self._request.orchestration.id,
         )
 
     def steer(self, text: str) -> None:

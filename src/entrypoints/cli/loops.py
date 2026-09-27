@@ -352,9 +352,9 @@ def _run_request(args: argparse.Namespace) -> None:
     request = _build_run_request(args)
     result = _execute_run_request(request)
     if result.succeeded:
-        sys.stdout.write(f"\n{request.orchestration_id} run completed.\n")
+        sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:
-        sys.stdout.write(f"\n{request.orchestration_id} run stopped early.\n")
+        sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
         sys.exit(1)
 
 

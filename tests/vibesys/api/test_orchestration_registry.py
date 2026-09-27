@@ -201,7 +201,6 @@ def test_builtin_catalog_selects_only_plugins() -> None:
         registration = registry.resolve(kind)
         assert registration.plugin is plugin
         assert registration.projector is not None
-        assert registration.portable_namespaces == (kind,)
 
 
 def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Path) -> None:
@@ -660,7 +659,7 @@ def test_registered_plugin_derives_roles_from_declaration() -> None:
     assert tuple(role.id for role in registration.plugin.agents) == ("worker",)
 
 
-def test_plugin_registration_derives_projection_and_portable_state_only_when_declared() -> None:
+def test_plugin_registration_derives_projection_only_when_declared() -> None:
     state_only = OrchestrationPlugin(
         id="state-only",
         agents=(),
@@ -681,7 +680,7 @@ def test_plugin_registration_derives_projection_and_portable_state_only_when_dec
 
     state_registration = registry.resolve(state_only.id)
     assert state_registration.projector is None
-    assert state_registration.portable_namespaces == (state_only.id,)
+    assert state_registration.plugin.state is _PluginState
     stateless_registration = registry.resolve(stateless.id)
     assert stateless_registration.projector is None
-    assert stateless_registration.portable_namespaces == ()
+    assert stateless_registration.plugin.state is None

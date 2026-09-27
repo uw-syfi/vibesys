@@ -14,7 +14,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.events import CoreEventType, EventStatus, GateFinishedData, GateStartedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.orchestration.request import RunRequest
+from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor

@@ -39,7 +39,7 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.orchestration.request import RunRequest
+    from vibesys.run.contracts import RunRequest
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import WorkspaceRuntime
 

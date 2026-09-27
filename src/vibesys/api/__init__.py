@@ -80,9 +80,9 @@ from vibesys.events import (
     ToolResultPayload,
     WorkspaceSnapshotData,
 )
-from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.orchestration.evolve.models import resolve_openevolve_options
 from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
 from vs_agent.api import AgentBackend, AgentSpec
