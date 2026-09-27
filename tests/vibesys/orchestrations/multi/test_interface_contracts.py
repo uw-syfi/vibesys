@@ -19,6 +19,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError, UnsupportedProfilerError
+from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.profilers import (
     ProfilerDefinition,
@@ -26,11 +27,11 @@ from vibesys.profilers import (
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_TEMPLATE_DIR = MULTI_PROMPT_DIR
 _CRITERION_TEXT = "PC"
 
 

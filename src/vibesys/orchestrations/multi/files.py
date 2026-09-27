@@ -14,10 +14,12 @@ from vs_runtime.api import ValidationRecipeArtifact
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.roles.implementer import ImplementerResponse
-    from vibesys.roles.judge import JudgeResponse
-    from vibesys.roles.pre_round import PreRoundDecision
-    from vibesys.roles.profiler import ProfilerSummary
+    from vibesys.evaluators.perf_reply import ProfilerSummary
+    from vibesys.orchestrations.multi.contracts import (
+        ImplementerResponse,
+        JudgeResponse,
+        PreRoundDecision,
+    )
     from vibesys.search.hypothesis import OrchestratorPlan
     from vibesys.search.hypothesis.attempts import ImplementerReply
 

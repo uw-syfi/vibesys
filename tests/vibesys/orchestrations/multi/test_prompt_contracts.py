@@ -18,18 +18,21 @@ from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerResponse,
+    JudgeResponse,
+    PreRoundDecision,
+)
+from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestrations.single.models import SingleAgentRoundResponse
 from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.prompts import render_template
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_TEMPLATE_DIR = MULTI_PROMPT_DIR
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 
 _ROLES = ("implementer", "implementer_continuation", "judge", "single_agent", "orchestrator")

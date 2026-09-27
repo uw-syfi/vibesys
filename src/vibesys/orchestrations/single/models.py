@@ -9,8 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from vibesys.evaluators import input_manifest
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
-from vibesys.roles.common import SkillResourceSelection, Verdict
-from vibesys.schemas import CandidateDisposition
+from vibesys.schemas import CandidateDisposition, SkillResourceSelection, Verdict
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_runtime.api import AccuracyReceipt
 

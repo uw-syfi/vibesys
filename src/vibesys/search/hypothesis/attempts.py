@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 class CandidateReply(Protocol):
     """The candidate-checkpoint fields shared by both attempt reply shapes.
 
-    Structural, not nominal: search must never import ``vibesys.roles``
-    (roles depends on search, not the reverse), so this describes the shared
-    shape of ``roles.implementer.ImplementerResponse`` and
+    Structural, not nominal: search must never import an orchestration policy
+    (policies depend on search, not the reverse), so this describes the shared
+    shape of a policy-owned implementer response and
     ``orchestrations.single.models.SingleAgentRoundResponse`` without importing it.
     """
 
@@ -35,7 +35,7 @@ class CandidateReply(Protocol):
 
 
 class ImplementerReply(CandidateReply, Protocol):
-    """The ``roles.implementer.ImplementerResponse`` fields attempt policies read."""
+    """The multi implementer-response fields attempt policies read."""
 
     hypothesis_outcome: HypothesisOutcome
     next_step: str
@@ -70,8 +70,7 @@ class JudgeReviewed:
 
     ``verdict`` carries the persisted pass/fail vocabulary
     (``vs_loop_state.JudgeVerdict``, minus its ``"deferred"`` member), not
-    ``vibesys.roles.common.Verdict``: search must never import roles. A
-    caller in ``loops/`` translates a role reply's ``Verdict`` to this string
+    ``vibesys.schemas.Verdict``. A policy caller translates its reply verdict to this string
     at the turn boundary.
     """
 

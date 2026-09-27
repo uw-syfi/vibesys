@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.orchestrations.multi import PLUGIN
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerResponse,
+    JudgeResponse,
+    PreRoundDecision,
+)
 from vibesys.orchestrations.multi.models import MultiState
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
-from vibesys.schemas import HypothesisOutcome
+from vibesys.schemas import HypothesisOutcome, Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_runtime.api import RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace

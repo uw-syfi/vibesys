@@ -2,7 +2,7 @@
 
 The orchestrate loop's profiler-gating behavior is covered in
 ``tests/vibesys/loops/multi/test_orchestrate.py``; this module keeps the lower-level
-ProfilerResponse / parser / nsys-toolkit tests.
+ProfilerSummary / parser / nsys-toolkit tests.
 
 The ``resources.profilers.nsys.analyze_nsys`` imports below resolve at
 runtime because pytest's ``pythonpath = ["."]`` setting (pyproject.toml)
@@ -24,16 +24,16 @@ from resources.profilers.nsys.analyze_nsys import (
     analyze_memory_ops,
 )
 
-from vibesys.roles.profiler import ProfilerResponse
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vs_agent.runner import parse_typed_response_text
 
 # ---------------------------------------------------------------------------
-# ProfilerResponse model tests
+# ProfilerSummary model tests
 # ---------------------------------------------------------------------------
 
 
 def test_profiler_response_creation() -> None:
-    resp = ProfilerResponse(
+    resp = ProfilerSummary(
         analysis="GPU is 85% busy, attention kernels dominate.",
         bottlenecks="1. flash_fwd_kernel (45% GPU time)\n2. rmsnorm_kernel (8%, 60 launches)",
         suggestions="Fuse RMSNorm kernels using FlashInfer ops.",
@@ -49,19 +49,19 @@ def test_profiler_response_from_dict() -> None:
         "bottlenecks": "Launch-bound: CPU/GPU ratio 1.7x",
         "suggestions": "Enable CUDA graphs for decode step.",
     }
-    resp = ProfilerResponse.model_validate(data)
+    resp = ProfilerSummary.model_validate(data)
     assert resp.analysis == data["analysis"]
 
 
 def test_profiler_response_serialization() -> None:
-    resp = ProfilerResponse(
+    resp = ProfilerSummary(
         analysis="Analysis.",
         bottlenecks="Bottlenecks.",
         suggestions="Suggestions.",
     )
     dumped = resp.model_dump()
     assert dumped["analysis"] == "Analysis."
-    restored = ProfilerResponse.model_validate(dumped)
+    restored = ProfilerSummary.model_validate(dumped)
     assert restored == resp
 
 
@@ -82,31 +82,31 @@ def _profiler_json(**overrides: object) -> str:
 
 def test_parse_profiler_response_raw_json() -> None:
     text = _profiler_json()
-    resp = parse_typed_response_text(text, ProfilerResponse)
+    resp = parse_typed_response_text(text, ProfilerSummary)
     assert resp is not None
     assert resp.analysis == "Kernel analysis here."
 
 
 def test_parse_profiler_response_fenced_json() -> None:
     text = f"```json\n{_profiler_json()}\n```"
-    resp = parse_typed_response_text(text, ProfilerResponse)
+    resp = parse_typed_response_text(text, ProfilerSummary)
     assert resp is not None
     assert "attention" in resp.bottlenecks
 
 
 def test_parse_profiler_response_with_surrounding_text() -> None:
     text = f"Here is the analysis:\n{_profiler_json()}\nDone."
-    resp = parse_typed_response_text(text, ProfilerResponse)
+    resp = parse_typed_response_text(text, ProfilerSummary)
     assert resp is not None
 
 
 def test_parse_profiler_response_empty() -> None:
-    assert parse_typed_response_text("", ProfilerResponse) is None
-    assert parse_typed_response_text("no json here", ProfilerResponse) is None
+    assert parse_typed_response_text("", ProfilerSummary) is None
+    assert parse_typed_response_text("no json here", ProfilerSummary) is None
 
 
 def test_parse_profiler_response_invalid_json() -> None:
-    assert parse_typed_response_text("{invalid json}", ProfilerResponse) is None
+    assert parse_typed_response_text("{invalid json}", ProfilerSummary) is None
 
 
 # ---------------------------------------------------------------------------

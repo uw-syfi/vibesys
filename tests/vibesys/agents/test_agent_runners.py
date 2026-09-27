@@ -14,9 +14,9 @@ if TYPE_CHECKING:
     from headless.render import HeadlessRenderer
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
+from vibesys.orchestrations.multi.contracts import JudgeResponse
 from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
-from vibesys.roles.common import Verdict
-from vibesys.roles.judge import JudgeResponse
+from vibesys.schemas import Verdict
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
 from vs_sandbox.api import ProjectPathPolicy

@@ -224,7 +224,7 @@ class Prompt:
     ----------
     template_dir:
         Per-loop directory the renderer searches first.
-        For example, ``prompts/loops/multi/`` falls back to the shared
+        For example, a plugin-local prompt directory falls back to the shared
         ``vibesys/prompts/`` root, where backend fragments
         live.
     backend:

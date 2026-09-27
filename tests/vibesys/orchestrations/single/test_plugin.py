@@ -16,7 +16,7 @@ from vibesys.orchestrations.single.models import (
     SingleAgentRoundResponse,
     SingleState,
 )
-from vibesys.roles.common import Verdict
+from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace

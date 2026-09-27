@@ -36,12 +36,13 @@ file for the exact backend/environment evidence).
 
 from __future__ import annotations
 
+from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.renderer import _build_env
 from vs_prompts.api import filter_skip_marked
 
 _PROFILERS_DIR = PROMPTS_DIR / "shared" / "profilers"
-_AGENT_LOOP_ROOT = PROMPTS_DIR / "loops" / "multi"
+_AGENT_LOOP_ROOT = MULTI_PROMPT_DIR
 
 # Exactly the kwargs passed by the multi plugin's profiler turn.
 # passes to whichever profiler template profiler_kind resolves to. Keep this

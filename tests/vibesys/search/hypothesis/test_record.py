@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.roles.implementer import ImplementerResponse
+from vibesys.orchestrations.multi.contracts import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,

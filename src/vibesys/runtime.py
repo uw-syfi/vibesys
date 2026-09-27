@@ -150,8 +150,8 @@ class Keyed:
 class Role:
     """One agent role: its prompt, reply contract, and turn policy.
 
-    Declared once per role family in ``vibesys.roles``; strategies invoke it
-    through ``ctx.agents.turn(role, ...)`` and never hand-roll rendering,
+    Legacy strategies invoke it through ``ctx.agents.turn(role, ...)`` and
+    never hand-roll rendering,
     isolation, timeout fallback, or correction retries themselves.
 
     ``check`` validates the reply in isolation (no external state): it is a
@@ -169,7 +169,7 @@ class Role:
     """The pydantic model this role's template renders from. ``ctx.agents.turn``
     accepts any ``Mapping | BaseModel`` as ``context``, but every role
     declares one so a contract test can assert its fields match the
-    template's free variables (see ``tests/vibesys/roles/test_prompt_contracts.py``)."""
+    template's free variables."""
     access: ReadOnly | Writes = field(default_factory=Writes)
     session: Fresh | Keyed | Reuse = field(default_factory=Fresh)
     paid: bool = False
@@ -180,7 +180,7 @@ class Role:
     timeout_fallback: Callable[[float], BaseModel] | None = None
     """Optional distinct reply for an agent-turn timeout, given the
     configured timeout in seconds. Defaults to ``fallback()`` (called with no
-    arguments) when unset, so existing roles are unaffected."""
+    arguments) when unset, so existing callers are unaffected."""
 
 
 class RoleIsolationError(RuntimeError):

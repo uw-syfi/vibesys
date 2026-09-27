@@ -12,6 +12,17 @@ from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import InvalidPlanError, UnsupportedProfilerError
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.multi.agents import DESIGNER, IMPLEMENTER, JUDGE, PROFILER
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerContext,
+    ImplementerContinuationContext,
+    ImplementerResponse,
+    JudgeContext,
+    JudgeResponse,
+    PlanContext,
+    PreRoundContext,
+    PreRoundDecision,
+    ProfilerContext,
+)
 from vibesys.orchestrations.multi.prompts import (
     render_continuation_prompt,
     render_implementer_prompt,
@@ -21,17 +32,7 @@ from vibesys.orchestrations.multi.prompts import (
     render_profiler_prompt,
 )
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.roles.common import Verdict
-from vibesys.roles.designer import PlanContext
-from vibesys.roles.implementer import (
-    ImplementerContext,
-    ImplementerContinuationContext,
-    ImplementerResponse,
-)
-from vibesys.roles.judge import JudgeContext, JudgeResponse
-from vibesys.roles.pre_round import PreRoundContext, PreRoundDecision
-from vibesys.roles.profiler import ProfilerContext
-from vibesys.schemas import SkillResourceSelection, normalize_hypothesis_title
+from vibesys.schemas import SkillResourceSelection, Verdict, normalize_hypothesis_title
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.skills import ResolvedSkillSelection
 from vs_runtime.api import (

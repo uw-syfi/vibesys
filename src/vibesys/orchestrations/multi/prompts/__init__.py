@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
-    from vibesys.roles.designer import PlanContext
-    from vibesys.roles.implementer import ImplementerContext, ImplementerContinuationContext
-    from vibesys.roles.judge import JudgeContext
-    from vibesys.roles.pre_round import PreRoundContext
-    from vibesys.roles.profiler import ProfilerContext
+    from vibesys.orchestrations.multi.contracts import (
+        ImplementerContext,
+        ImplementerContinuationContext,
+        JudgeContext,
+        PlanContext,
+        PreRoundContext,
+        ProfilerContext,
+    )
 
-_PROMPT_DIR = PROMPTS_DIR / "loops" / "multi"
-# The shared execution and modality fragments remain common policy assets until
-# the final namespace consolidation moves them beside this temporary plugin.
+PROMPT_DIR = Path(__file__).parent
 _RENDERER = TemplateRenderer(
-    _PROMPT_DIR,
+    PROMPT_DIR,
     fallback_roots=(PROMPTS_DIR / "shared", PROMPTS_DIR),
 )
 
@@ -54,6 +56,7 @@ def render_judge_prompt(context: JudgeContext) -> str:
 
 
 __all__ = [
+    "PROMPT_DIR",
     "render_continuation_prompt",
     "render_implementer_prompt",
     "render_judge_prompt",

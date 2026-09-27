@@ -17,7 +17,7 @@ from tests.vibesys.orchestrations.evolve._integration_support import (
 )
 
 from vibesys.orchestrations.evolve.models import JudgeResponse, MutatorResponse
-from vibesys.roles.common import Verdict
+from vibesys.schemas import Verdict
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project

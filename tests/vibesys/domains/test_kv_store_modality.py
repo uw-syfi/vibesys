@@ -6,10 +6,11 @@ from pathlib import Path
 
 from entrypoints.cli import _MODALITIES
 from vibesys.evaluators.input_manifest import load_project_task
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.prompts import render_template
 from vs_project.api import Project
 
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_TEMPLATE_DIR = MULTI_PROMPT_DIR
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 

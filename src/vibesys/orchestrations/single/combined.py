@@ -11,8 +11,7 @@ from vibesys.orchestrations.single.models import (
     SingleAgentRoundResponse,
 )
 from vibesys.orchestrations.single.prompts import render_single_agent_prompt
-from vibesys.roles.common import Verdict
-from vibesys.schemas import SkillResourceSelection
+from vibesys.schemas import SkillResourceSelection, Verdict
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     RunHost,

@@ -13,11 +13,13 @@ from pydantic import ValidationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestrations.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerResponse,
+    JudgeResponse,
+    PreRoundDecision,
+)
 from vibesys.orchestrations.multi.models import MultiState
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus

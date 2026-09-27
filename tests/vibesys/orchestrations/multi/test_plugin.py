@@ -13,11 +13,13 @@ from vibesys.errors import InvalidPlanError
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.multi import PLUGIN
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerResponse,
+    JudgeResponse,
+    PreRoundDecision,
+)
 from vibesys.orchestrations.multi.models import MultiState, PaidAttempt
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_runtime.api import (
     BenchmarkEvaluation,

@@ -10,16 +10,15 @@ from server.api.protocol import PerformanceRound
 from vibesys.evaluators.perf_reply import (
     LatencyStats,
     LoadLevelMetrics,
+    ProfilerSummary,
     ThroughputStats,
 )
+from vibesys.orchestrations.multi.contracts import ImplementerResponse, JudgeResponse
 from vibesys.orchestrations.single.models import SingleAgentRoundResponse
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.profiler import ProfilerSummary
 from vibesys.schemas import (
     HYPOTHESIS_TITLE_MAX_LEN,
     SkillResourceSelection,
+    Verdict,
     derive_hypothesis_title,
     normalize_hypothesis_title,
 )

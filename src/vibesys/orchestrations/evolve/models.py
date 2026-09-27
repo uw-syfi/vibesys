@@ -7,7 +7,7 @@ from typing import Annotated, Literal, Self, TypedDict
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.roles.common import Verdict
+from vibesys.schemas import Verdict
 from vibesys.search.population import Individual, OpenEvolveSelectorConfig, PopulationState
 
 

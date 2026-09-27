@@ -3,10 +3,12 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerResponse,
+    JudgeResponse,
+    PreRoundDecision,
+)
+from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient

@@ -24,7 +24,7 @@ from vibesys.orchestrations.evolve.models import (
 )
 from vibesys.orchestrations.evolve.prompts import render_judge, render_mutator, render_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
-from vibesys.roles.common import Verdict
+from vibesys.schemas import Verdict
 from vibesys.search.population import (
     CandidateOutcome,
     Individual,

@@ -18,10 +18,12 @@ from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.orchestrations.multi.contracts import (
+    ImplementerResponse,
+    JudgeResponse,
+    PreRoundDecision,
+)
+from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_runtime.api import (
     AccuracyEvaluation,

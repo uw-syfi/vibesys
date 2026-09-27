@@ -1,20 +1,18 @@
 """Pydantic schemas shared by the agent-loop reply and search-plan layers.
 
-This module used to hold every structured agent-reply schema; those moved to
-``vibesys.roles.<family>`` (reply schemas next to their ``Role``) and
-``vibesys.evaluators`` (measurement records: perf stats, validation recipes).
+This module used to hold every structured agent-reply schema; those now live
+with their orchestration policy or in ``vibesys.evaluators`` (measurement
+records: perf stats, validation recipes).
 ``OrchestratorPlan`` and ``HypothesisStrategyUpdate`` moved to
 ``vibesys.search.hypothesis.plan`` (the designer reply type IS the search plan
-type). What remains here -- ``PerfTrend`` and ``SkillResourceSelection`` --
+type). What remains here -- ``PerfTrend``, ``Verdict``, and
+``SkillResourceSelection`` --
 does not: ``PerfTrend`` is a runtime dependency of ``vibesys.evaluators``
 (perf-eval reply schemas), and ``search`` already depends on
 ``vibesys.evaluators`` for ``MetricSpace``; moving ``PerfTrend`` into
 ``search.hypothesis`` would make that a dependency cycle, so it stays in this
-dependency-free module instead (deviation from the design brief, which lists
-``PerfTrend`` alongside ``OrchestratorPlan``). ``SkillResourceSelection``
-stays here for the same reason ``OrchestratorPlan`` needed it here before its
-move: it is shared by both ``search.hypothesis.plan`` and
-``vibesys.roles.common``, and ``search`` must never depend on ``vibesys.roles``.
+dependency-free module instead. ``SkillResourceSelection`` and ``Verdict``
+are shared by otherwise independent orchestration policies.
 
 This module has no local imports besides the dependency-free ``vs_loop_state``
 leaf lib, so templates and tests can pull schemas in without dragging in the
@@ -43,6 +41,13 @@ class PerfTrend(StrEnum):
     IMPROVED = "improved"
     REGRESSED = "regressed"
     MIXED = "mixed"
+
+
+class Verdict(StrEnum):
+    """Binary outcome returned by a policy review or validation stage."""
+
+    PASS = "pass"  # noqa: S105  # lint-waiver: LW-010203 [S105]; this is a public result enum value, not a credential.
+    FAIL = "fail"
 
 
 class SkillResourceSelection(BaseModel):

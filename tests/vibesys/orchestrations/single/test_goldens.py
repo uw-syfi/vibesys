@@ -19,7 +19,7 @@ from tests.vibesys.orchestrations.single._integration_support import (
 )
 
 from vibesys.orchestrations.single.models import SingleAgentRoundResponse
-from vibesys.roles.common import Verdict
+from vibesys.schemas import Verdict
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities, AgentTurnTimeoutError
 from vs_agent.api.testing import FakeAgentClient

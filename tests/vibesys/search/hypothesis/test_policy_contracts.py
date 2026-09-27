@@ -10,16 +10,13 @@ import pytest
 from tests.support import make_orchestrator_plan
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.orchestration import artifacts, memory, progress_log
+from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.orchestration import artifacts, memory
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.orchestrations.multi.contracts import ImplementerResponse, PreRoundDecision
+from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestrations.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.contexts import display_path
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import ImplementerResponse
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.pre_round import PreRoundDecision
-from vibesys.roles.profiler import ProfilerSummary
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -845,24 +842,6 @@ def test_profiler_summary_perf_metric_optional() -> None:
     assert p2.perf_unit == "tok/s"
 
 
-def test_progress_writes_orchestrator_plan(tmp_path: Path) -> None:
-    progress = tmp_path / "progress.md"
-    plan = make_orchestrator_plan(
-        task="Build FastAPI server",
-        criteria="/health returns 200",
-        reasoning="Round 1 cold start",
-        expected_effect="Forecast 1.3x to 1.6x throughput",
-        minimum_acceptance_criteria="Retain at >=1.15x with no latency regression",
-    )
-    progress_log.write(progress, progress_log.render_orchestrator_plan(1, plan))
-    text = progress.read_text()
-    assert "Round 1 — Orchestrator (plan)" in text
-    assert "Build FastAPI server" in text
-    assert "/health returns 200" in text
-    assert "Forecast 1.3x to 1.6x throughput" in text
-    assert "Retain at >=1.15x with no latency regression" in text
-
-
 @pytest.mark.parametrize(
     ("progress_name", "artifact_root"),
     [("progress", "progress"), ("progress.md", "progress-artifacts")],
@@ -956,191 +935,6 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path: Path) -
     assert display_path(artifact, workspace) == "progress/plans/round-0012.json"
 
 
-def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path: Path) -> None:
-    progress = tmp_path / "progress"
-    progress_log.write(
-        progress,
-        progress_log.render_pre_round_decision(
-            7,
-            PreRoundDecision(
-                need_profile=True,
-                profile_focus="stale focus",
-                reasoning="stale decision",
-            ),
-        ),
-    )
-    progress_log.write(
-        progress,
-        progress_log.render_orchestrator_plan(
-            7,
-            make_orchestrator_plan(
-                task="Keep this plan",
-                criteria="plan remains",
-                reasoning="retained plan",
-            ),
-        ),
-    )
-
-    progress_log.write(
-        progress,
-        progress_log.render_pre_round_decision(
-            7,
-            PreRoundDecision(
-                need_profile=False,
-                profile_focus="",
-                reasoning="resumed decision",
-            ),
-        ),
-    )
-
-    text = (progress / "round-0007.md").read_text()
-    assert text.count("## Round 7 — Orchestrator (pre-round)") == 1
-    assert "resumed decision" in text
-    assert "stale decision" not in text
-    assert text.count("## Round 7 — Orchestrator (plan)") == 1
-    assert "Keep this plan" in text
-
-
-def test_progress_replacement_preserves_operator_recovery_section(tmp_path: Path) -> None:
-    progress = tmp_path / "progress"
-    progress_log.write(
-        progress,
-        progress_log.render_hypothesis_continuation(
-            7,
-            plan=make_orchestrator_plan(
-                hypothesis_id="transport",
-                hypothesis="remove queue fanout",
-                task="stale initial implementation task",
-                criteria="source is recoverable",
-                reasoning="continue interrupted work",
-            ),
-            started_round=6,
-            continuation_step="recover exact source",
-        ),
-    )
-    round_file = progress / "round-0007.md"
-    with round_file.open("a") as document:
-        document.write(
-            "## Operator recovery evidence\n"
-            "Exact measured bytes are retained at `recovery/source.py`.\n\n"
-        )
-
-    progress_log.write(
-        progress,
-        progress_log.render_hypothesis_continuation(
-            7,
-            plan=make_orchestrator_plan(
-                hypothesis_id="transport",
-                hypothesis="remove queue fanout",
-                task="stale initial implementation task",
-                criteria="source is recoverable",
-                reasoning="resume interrupted work",
-            ),
-            started_round=6,
-            continuation_step="verify recovered source",
-        ),
-    )
-
-    text = round_file.read_text()
-    assert text.count("## Round 7 — Active hypothesis continuation") == 1
-    assert "### Current continuation delta" in text
-    assert "verify recovered source" in text
-    assert "recover exact source" not in text
-    assert "stale initial implementation task" not in text
-    assert text.count("## Operator recovery evidence") == 1
-    assert "Exact measured bytes are retained" in text
-
-
-def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path: Path) -> None:
-    progress = tmp_path / "progress.md"
-    progress_log.write(
-        progress,
-        progress_log.render_implementer(
-            3, 1, ImplementerResponse(summary="interrupted", expected_behavior="old")
-        ),
-    )
-    progress_log.write(
-        progress,
-        progress_log.render_implementer(
-            3, 1, ImplementerResponse(summary="resumed", expected_behavior="new")
-        ),
-    )
-    progress_log.write(
-        progress,
-        progress_log.render_implementer(
-            3, 2, ImplementerResponse(summary="retry", expected_behavior="newer")
-        ),
-    )
-
-    text = progress.read_text()
-    assert text.count("## Round 3 — Implementer (attempt 1)") == 1
-    assert text.count("## Round 3 — Implementer (attempt 2)") == 1
-    assert "interrupted" not in text
-    assert "resumed" in text
-    assert "retry" in text
-
-
-def test_progress_writes_profiler_summary_with_perf(tmp_path: Path) -> None:
-    progress = tmp_path / "progress.md"
-    summary = ProfilerSummary(
-        analysis="launch-bound",
-        bottlenecks="attention kernel 40%",
-        suggestions="swap to flashinfer",
-        perf_metric=8.2,
-        perf_unit="req/s",
-    )
-    progress_log.write(progress, progress_log.render_profiler_summary(2, summary))
-    text = progress.read_text()
-    assert "Round 2 — Profiler" in text
-    assert "perf_metric**: 8.2 req/s" in text
-    assert "flashinfer" in text
-
-
-def test_progress_append_implementer_and_judge(tmp_path: Path) -> None:
-    progress = tmp_path / "progress.md"
-    progress_log.write(
-        progress,
-        progress_log.render_implementer(
-            3, 1, ImplementerResponse(summary="added cuda graph", expected_behavior="replay works")
-        ),
-    )
-    progress_log.write(
-        progress,
-        progress_log.render_judge(
-            3, 1, JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS)
-        ),
-    )
-    text = progress.read_text()
-    assert "Round 3 — Implementer (attempt 1)" in text
-    assert "Round 3 — Judge (attempt 1)" in text
-    assert "verdict**: pass" in text
-
-
-def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path: Path) -> None:
-    roadmap, progress = memory.resolve_paths(tmp_path, "directories")
-    memory.ensure_roadmap_file(roadmap)
-    for round_number in range(1, 16):
-        progress_log.write(
-            progress,
-            progress_log.render_pre_round_decision(
-                round_number,
-                PreRoundDecision(
-                    need_profile=False,
-                    profile_focus="",
-                    reasoning=f"decision-{round_number}",
-                ),
-            ),
-        )
-
-    assert (roadmap / "index.md").exists()
-    assert (progress / "round-0001.md").exists()
-    assert (progress / "round-0015.md").exists()
-    recent = memory.read_progress(progress)
-    assert "## Round 11 —" not in recent
-    assert "## Round 12 —" in recent
-    assert "## Round 15 —" in recent
-
-
 def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
@@ -1178,7 +972,7 @@ def test_read_roadmap_missing_returns_empty(tmp_path: Path) -> None:
 
 
 def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
-    template_dir = PROMPTS_DIR / "loops" / "multi"
+    template_dir = MULTI_PROMPT_DIR
     plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
     pre_prompt = (template_dir / "orchestrator_pre_round_prompt.j2").read_text()
 

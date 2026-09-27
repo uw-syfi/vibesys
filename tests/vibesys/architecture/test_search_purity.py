@@ -1,7 +1,7 @@
 """``vibesys.search`` stays pure: deterministic state transitions, no effects.
 
 Rules (see the orchestration-simplify design brief):
-  - No imports of vibesys.orchestration, vibesys.loops, vibesys.roles,
+  - No imports of vibesys.orchestration, vibesys.loops, vibesys.orchestrations,
     vibesys.prompts (search answers questions and returns new state; it never
     drives agents, renders prompts, or touches RunContext).
   - No os / subprocess / pathlib / time / datetime imports (search must do no
@@ -26,10 +26,15 @@ from pathlib import Path
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _SEARCH = _SRC / "search"
 
-_FORBIDDEN_PACKAGES = ("vibesys.orchestration", "vibesys.loops", "vibesys.roles", "vibesys.prompts")
+_FORBIDDEN_PACKAGES = (
+    "vibesys.orchestration",
+    "vibesys.loops",
+    "vibesys.orchestrations",
+    "vibesys.prompts",
+)
 
-# vibesys.agent_run has fully dissolved into search/hypothesis, roles/,
-# loops/, and vibesys.orchestration.{memory,artifacts}. No search/ module
+# vibesys.agent_run has fully dissolved into search/hypothesis, policy packages,
+# and vibesys.orchestration.{memory,artifacts}. No search/ module
 # re-exports from it any more.
 _ALLOWED_AGENT_RUN_REEXPORTS: set[str] = set()
 
@@ -73,7 +78,7 @@ def _is_type_checking_guard(node: ast.AST) -> bool:
     return False
 
 
-def test_search_imports_nothing_from_orchestration_loops_roles_or_prompts() -> None:
+def test_search_imports_nothing_from_orchestration_policy_or_prompts() -> None:
     violations: list[str] = []
     for path in _SEARCH.rglob("*.py"):
         for node, module_name in _module_level_import_nodes(path):

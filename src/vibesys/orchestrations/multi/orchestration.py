@@ -15,8 +15,7 @@ from vibesys.orchestrations.multi.models import (
     ProfileGuidedMultiOptions,
 )
 from vibesys.orchestrations.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
-from vibesys.roles.common import Verdict
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome, Verdict
 from vibesys.search.hypothesis import (
     AttemptDecision,
     AttemptState,

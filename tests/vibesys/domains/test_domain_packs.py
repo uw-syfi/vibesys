@@ -22,11 +22,12 @@ from vibesys.domains.registry import (
     resolve_domain,
 )
 from vibesys.domains.rendering import render_domain_section
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.orchestrations.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
+from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_TEMPLATE_DIR = MULTI_PROMPT_DIR
 
 
 def _temporary_domain(prompt_dir: Path) -> DomainDefinition:
