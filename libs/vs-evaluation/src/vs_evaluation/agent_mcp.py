@@ -10,8 +10,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, TypeAdapter
 
-from vibesys.evaluation_agent.evidence import EvidenceKind
-from vibesys.evaluation_agent.models import (
+from vs_agent.api import ToolServerDescriptor, ToolSpec, expose_as_tools, serve_stdio
+from vs_evaluation.agent_evidence import EvidenceKind
+from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
     AgentEvaluationReply,
     AvailabilityCall,
@@ -21,6 +22,7 @@ from vibesys.evaluation_agent.models import (
     CancelProfilerCall,
     DispatchProfilerCall,
     EvaluationAgentRole,
+    EvaluationGrant,
     EvidenceCall,
     ProfilerOperationsCall,
     ProfilerStatusCall,
@@ -30,16 +32,30 @@ from vibesys.evaluation_agent.models import (
     StatusCall,
     SubmitCall,
 )
-from vibesys.evaluation_agent.profiler_models import (
+from vs_evaluation.profiler_models import (
     MAX_PROFILER_REQUEST_CHARS,
     ProfilerWorkKey,
 )
-from vs_agent.api import ToolSpec, serve_stdio
 
 _REPLY = TypeAdapter(SocketReply)
 _TOOL_REPLY = TypeAdapter(AgentEvaluationReply)
 _DEFAULT_TIMEOUT_S = 30.0
 _MAX_REPLY_BYTES = 1_048_576
+
+
+def evaluation_mcp_descriptor(grant: EvaluationGrant, socket_path: str) -> ToolServerDescriptor:
+    """Describe the thin MCP process for a host-issued role capability."""
+    return expose_as_tools(
+        name="vs-evaluation",
+        entrypoint_module="vs_evaluation.agent_mcp",
+        env={
+            "VS_EVALUATION_SOCKET": socket_path,
+            "VS_EVALUATION_TOKEN": grant.token,
+            "VS_EVALUATION_ROLE": grant.role.value,
+            "VS_EVALUATION_PROFILER_AVAILABLE": "1" if grant.profiler_available else "0",
+            "VS_EVALUATION_RUN_OBSERVER": "1" if grant.run_observer else "0",
+        },
+    )
 
 
 class EvaluationServiceClientError(RuntimeError):
@@ -337,7 +353,7 @@ def build_evaluation_tools(
         tools.append(
             ToolSpec(
                 name="accepted_evidence",
-                description="Read only results accepted by the VibeSys trust boundary for this candidate.",
+                description="Read only results accepted by the host trust boundary for this candidate.",
                 input_schema=_Kinds,
                 handler=lambda args: client.call(
                     EvidenceCall(token=token, evidence_kinds=args.evidence_kinds)
@@ -369,11 +385,11 @@ def evaluation_tool_names(
 
 def main() -> None:
     """Serve the role-specific tools over stdio from injected grant environment."""
-    socket_path = Path(os.environ["VIBESYS_EVALUATION_SOCKET"])
-    token = os.environ["VIBESYS_EVALUATION_TOKEN"]
-    role = EvaluationAgentRole(os.environ["VIBESYS_EVALUATION_ROLE"])
-    profiler_available = os.environ.get("VIBESYS_PROFILER_AVAILABLE") == "1"
-    run_observer = os.environ.get("VIBESYS_RUN_OBSERVER") == "1"
+    socket_path = Path(os.environ["VS_EVALUATION_SOCKET"])
+    token = os.environ["VS_EVALUATION_TOKEN"]
+    role = EvaluationAgentRole(os.environ["VS_EVALUATION_ROLE"])
+    profiler_available = os.environ.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1"
+    run_observer = os.environ.get("VS_EVALUATION_RUN_OBSERVER") == "1"
     serve_stdio(
         build_evaluation_tools(
             socket_path=socket_path,
@@ -382,7 +398,7 @@ def main() -> None:
             profiler_available=profiler_available,
             run_observer=run_observer,
         ),
-        server_name="vibesys-evaluation",
+        server_name="vs-evaluation",
     )
 
 
@@ -390,4 +406,9 @@ if __name__ == "__main__":
     main()
 
 
-__all__ = ["build_evaluation_tools", "evaluation_tool_names", "main"]
+__all__ = [
+    "build_evaluation_tools",
+    "evaluation_mcp_descriptor",
+    "evaluation_tool_names",
+    "main",
+]

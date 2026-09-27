@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.evaluation_agent.api import (
+from vs_async_ops.api import OperationPolicy
+from vs_async_ops.api.testing import TimeoutOnceWaiter
+from vs_evaluation.api import (
     MAX_PROFILER_NARRATIVE_CHARS,
     MAX_PROFILER_REQUEST_CHARS,
     PROFILER_TERMINAL_RETENTION,
@@ -18,7 +20,6 @@ from vibesys.evaluation_agent.api import (
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
-    FakeProfilerTurnProvision,
     ProfilerAgentAccessError,
     ProfilerAgentResult,
     ProfilerAgentService,
@@ -31,9 +32,14 @@ from vibesys.evaluation_agent.api import (
     ProfilerWorkPurpose,
     TrustedEvidence,
 )
-from vs_async_ops.api import OperationPolicy
-from vs_async_ops.api.testing import TimeoutOnceWaiter
-from vs_project.api import StateNamespace
+from vs_evaluation.api.testing import FakeProfilerTurnProvision
+from vs_project.api import (
+    OrchestrationDescriptor,
+    Project,
+    RunEnvironmentRecord,
+    RunExecutionRecord,
+    StateNamespace,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -97,9 +103,31 @@ def _trusted_evidence(kind: EvidenceKind = EvidenceKind.PROFILE) -> TrustedEvide
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
-    root = tmp_path / ".vibesys" / "state" / "profiler-agent"
-    root.mkdir(parents=True, exist_ok=True)
-    return StateNamespace(project_root=tmp_path, root=root, portable=False)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    project = Project.open(tmp_path)
+    project.state.create_project("test")
+    run_id = "profiler-agent-test"
+    if project.state.current_run_id() == run_id:
+        return project.state.local_namespace(run_id, "profiler-agent")
+    manifest = project.state.new_run_manifest(
+        "Profiler agent test",
+        run_id=run_id,
+        trusted_input_baseline="a" * 40,
+        branch="test/profiler-agent",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=RunExecutionRecord(
+            model="test-model",
+            agent_backend="stub",
+            compute_backend="cpu",
+            requested_profiler="none",
+            resolved_profiler="none",
+            agent_roles={},
+        ),
+        orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+    )
+    project.state.create_run(manifest)
+    return project.state.local_namespace(manifest.run_id, "profiler-agent")
 
 
 def test_profiler_payloads_have_explicit_size_bounds() -> None:
@@ -430,7 +458,12 @@ async def test_terminal_retention_compacts_old_operation_files(tmp_path: Path) -
         )
         assert completed.operation.state is ProfilerOperationState.COMPLETED
 
-    operation_dir = tmp_path / ".vibesys" / "state" / "profiler-agent" / "profiler-agent-operations"
+    operation_dir = (
+        Project.open(tmp_path)
+        .state.local_namespace("profiler-agent-test", "profiler-agent")
+        .external_directory()
+        / "profiler-agent-operations"
+    )
     operation_files = {path.stem for path in operation_dir.glob("*.json")} - {"index"}
     assert len(operation_files) == PROFILER_TERMINAL_RETENTION
     assert operation_ids[0] not in operation_files

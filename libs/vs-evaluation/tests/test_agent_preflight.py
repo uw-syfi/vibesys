@@ -5,21 +5,19 @@ from __future__ import annotations
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.evaluation_agent.api import (
+from vs_evaluation.api import (
+    AvailabilitySnapshot,
+    AvailabilityState,
     ContentDigest,
+    CostClass,
     EvaluationAgentRole,
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
     EvidencePreflightResolution,
+    ReuseStatus,
     TrustedEvidence,
     decide_evidence_preflight,
-)
-from vs_evaluation.api import (
-    AvailabilitySnapshot,
-    AvailabilityState,
-    CostClass,
-    ReuseStatus,
 )
 
 

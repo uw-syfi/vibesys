@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from vibesys.evaluation_agent.profiler_models import ProfilerAgentResult, ProfilerResultOutcome
+from vs_evaluation.profiler_models import ProfilerAgentResult, ProfilerResultOutcome
 
 
 @dataclass(frozen=True, slots=True)

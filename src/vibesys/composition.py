@@ -9,12 +9,6 @@ from typing import TYPE_CHECKING, cast
 
 from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.evaluation_agent.api import (
-    EvaluationAgentRole,
-    EvaluationAgentService,
-    SemanticEvaluationBackend,
-    evaluation_mcp_descriptor,
-)
 from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
@@ -24,6 +18,11 @@ from vs_agent.api import (
     ToolServerDescriptor,
     expose_as_tools,
 )
+from vs_evaluation.api import (
+    EvaluationAgentRole,
+    EvaluationAgentService,
+)
+from vs_evaluation.api.tools import evaluation_mcp_descriptor
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
     PreparedModelArtifacts,
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.config import Config
+    from vibesys.run.evaluation_backend import SemanticEvaluationBackend
     from vs_runtime.api import AgentRole, AgentToolBindingContext
 
 

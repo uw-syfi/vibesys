@@ -147,7 +147,7 @@ depends_on = ["vibesys.api"]
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.evaluation_agent"]
+depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_backend"]
 
 [[modules]]
 # Typed product configuration failures shared by public transports. No
@@ -239,11 +239,6 @@ layer = "loops"
 depends_on = ["vibesys.orchestration.agent_options", "vibesys.orchestration.hypothesis", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.evaluation_agent"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_async_ops.api", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm"]
-
-[[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
 depends_on = [ "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
@@ -281,6 +276,11 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.run.contracts"]
 
 [[modules]]
+path = "vibesys.orchestration.profiler_agent"
+layer = "orchestration_host"
+depends_on = ["vs_evaluation.api", "vs_runtime"]
+
+[[modules]]
 path = "vibesys.orchestration.skill_selection"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent"]
@@ -296,6 +296,16 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
+path = "vibesys.run.evaluation_backend"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.api", "vs_project", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.slurm_evaluation"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm"]
+
+[[modules]]
 path = "vibesys.run.contracts"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
@@ -303,7 +313,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.evaluation_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.orchestration.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.orchestration.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -430,12 +440,37 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.coordinator", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service"]
+
+[[modules]]
+path = "vs_evaluation.api.tools"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_mcp"]
 
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.testing"]
+depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing"]
+
+[[modules]]
+path = "vs_evaluation.agent_evidence"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.agent_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
+
+[[modules]]
+path = "vs_evaluation.agent_models"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evaluation.profiler_models"]
+
+[[modules]]
+path = "vs_evaluation.agent_service"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_project"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"
@@ -456,6 +491,21 @@ depends_on = []
 path = "vs_evaluation.ports"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.models"]
+
+[[modules]]
+path = "vs_evaluation.profiler_models"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence"]
+
+[[modules]]
+path = "vs_evaluation.profiler_service"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.api", "vs_evaluation.agent_evidence", "vs_evaluation.profiler_models", "vs_project"]
+
+[[modules]]
+path = "vs_evaluation.profiler_testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.profiler_models"]
 
 [[modules]]
 path = "vs_evaluation.testing"
@@ -565,8 +615,16 @@ expose = ["PLUGIN", "REGISTRATION"]
 from = ["vibesys.orchestration.dynamic"]
 
 [[interfaces]]
-expose = ["api", "api\\..*"]
-from = ["vibesys.evaluation_agent"]
+expose = ["RuntimeProfilerTurnProvision"]
+from = ["vibesys.orchestration.profiler_agent"]
+
+[[interfaces]]
+expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage"]
+from = ["vibesys.run.evaluation_backend"]
+
+[[interfaces]]
+expose = ["SlurmSemanticEvaluationExecutor"]
+from = ["vibesys.run.slurm_evaluation"]
 
 [[interfaces]]
 expose = ["PLUGIN", "REGISTRATION", "resolve_openevolve_options"]

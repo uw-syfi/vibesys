@@ -6,21 +6,24 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.evaluation_agent.api import (
+from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vibesys.run.evaluation_backend import (
+    EvidenceReusingEvaluation,
+    SemanticEvaluationBackend,
+    SemanticEvaluationIdentity,
+)
+from vs_evaluation.api import (
     AwaitCall,
     ContentDigest,
     EvaluationAgentRole,
     EvaluationAgentService,
+    EvaluationLifecycleEvent,
+    EvaluationState,
     EvidenceKind,
-    EvidenceReusingEvaluation,
-    SemanticEvaluationBackend,
-    SemanticEvaluationIdentity,
     SubmitCall,
     SubmittedReply,
 )
-from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER
-from vs_evaluation.api import EvaluationLifecycleEvent, EvaluationState
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
     AccuracyEvaluation,

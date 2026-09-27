@@ -7,7 +7,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.evaluation_agent.profiler_models import ProfilerAgentResult
+from vs_evaluation.api import ProfilerAgentResult
 
 if TYPE_CHECKING:
     from vs_runtime.api import (

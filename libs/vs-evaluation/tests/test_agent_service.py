@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.evaluation_agent.api import (
+from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
     AvailabilityCall,
     AvailabilityReply,
+    AvailabilitySnapshot,
+    AvailabilityState,
     AwaitCall,
     AwaitProfilerCall,
     AwaitReply,
@@ -19,12 +21,19 @@ from vibesys.evaluation_agent.api import (
     CanceledReply,
     CancelProfilerCall,
     ContentDigest,
+    CostClass,
     DispatchProfilerCall,
     EvaluationAgentAccessError,
     EvaluationAgentRole,
     EvaluationAgentService,
     EvaluationAgentSocketError,
+    EvaluationAwaitResult,
+    EvaluationCoordinator,
     EvaluationOperationSnapshot,
+    EvaluationRequest,
+    EvaluationState,
+    EvaluationStep,
+    EvaluationTimedOut,
     EvidenceCall,
     EvidenceFingerprints,
     EvidenceKind,
@@ -32,37 +41,30 @@ from vibesys.evaluation_agent.api import (
     ProfilerStatusCall,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
+    ResourceRequirements,
+    ReuseStatus,
     RunOperationsCall,
     RunOperationsReply,
     StatusCall,
+    StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
-    build_evaluation_tools,
-    evaluation_mcp_descriptor,
-    evaluation_prompt_guidance,
-)
-from vs_evaluation.api import (
-    AvailabilitySnapshot,
-    AvailabilityState,
-    CostClass,
-    EvaluationAwaitResult,
-    EvaluationCoordinator,
-    EvaluationRequest,
-    EvaluationState,
-    EvaluationStep,
-    EvaluationTimedOut,
-    ResourceRequirements,
-    ReuseStatus,
-    StoredEvaluation,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
-from vs_project.api import StateNamespace
+from vs_evaluation.api.tools import build_evaluation_tools, evaluation_mcp_descriptor
+from vs_project.api import (
+    OrchestrationDescriptor,
+    Project,
+    RunEnvironmentRecord,
+    RunExecutionRecord,
+    StateNamespace,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -162,9 +164,31 @@ def _fingerprints(seed: bytes = b"candidate") -> EvidenceFingerprints:
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
-    root = tmp_path / ".vibesys" / "state" / "evaluation-agent"
-    root.mkdir(parents=True, exist_ok=True)
-    return StateNamespace(project_root=tmp_path, root=root, portable=False)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    project = Project.open(tmp_path)
+    project.state.create_project("test")
+    run_id = "evaluation-agent-test"
+    if project.state.current_run_id() == run_id:
+        return project.state.local_namespace(run_id, "evaluation-agent")
+    manifest = project.state.new_run_manifest(
+        "Evaluation agent test",
+        run_id=run_id,
+        trusted_input_baseline="a" * 40,
+        branch="test/evaluation-agent",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=RunExecutionRecord(
+            model="test-model",
+            agent_backend="stub",
+            compute_backend="cpu",
+            requested_profiler="none",
+            resolved_profiler="none",
+            agent_roles={},
+        ),
+        orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+    )
+    project.state.create_run(manifest)
+    return project.state.local_namespace(manifest.run_id, "evaluation-agent")
 
 
 def _service(
@@ -315,15 +339,12 @@ async def test_orchestrator_observes_profile_availability_without_submit_authori
 
     assert isinstance(available, AvailabilityReply)
     assert available.snapshot.supported_evidence_kinds == (EvidenceKind.PROFILE.value,)
-    guidance = evaluation_prompt_guidance(EvaluationAgentRole.ORCHESTRATOR)
     tools = build_evaluation_tools(
         socket_path=tmp_path / "service.sock",
         token=orchestrator.token,
         role=EvaluationAgentRole.ORCHESTRATOR,
     )
     availability_tool = next(tool for tool in tools if tool.name == "evaluation_availability")
-    assert "including profile capacity" in guidance
-    assert "submission remains limited to accuracy and benchmark" in guidance
     assert "kinds this role may not submit" in availability_tool.description
     with pytest.raises(EvaluationAgentAccessError, match="role cannot request evidence kind"):
         await service.dispatch(
@@ -404,20 +425,7 @@ async def test_run_observer_reads_all_evaluations_without_widening_other_roles(
             await service.dispatch(call)
 
 
-def test_implementer_guidance_owns_async_measured_candidate_loop(tmp_path: Path) -> None:
-    guidance = evaluation_prompt_guidance(EvaluationAgentRole.IMPLEMENTER, profiler_available=True)
-
-    assert "submit that candidate-scoped evidence directly before nomination" in guidance
-    assert "Request accuracy and benchmark together" in guidance
-    assert "bounded await" in guidance
-    assert "read `accepted_evidence`" in guidance
-    assert "timeout does not cancel the work" in guidance
-    assert "nominate it with an empty `next_step`" in guidance
-    assert "inactive selector is not a measured candidate" in guidance
-    assert "Do not put a framework evaluation request in `next_step`" in guidance
-    assert "consumes an exact accepted result instead of rerunning it" in guidance
-    assert "failed profiler operation is terminal" in guidance
-
+def test_implementer_profiler_tool_discourages_duplicate_work(tmp_path: Path) -> None:
     tools = build_evaluation_tools(
         socket_path=tmp_path / "unused.sock",
         token="x" * 32,
@@ -502,11 +510,11 @@ def test_mcp_descriptor_carries_only_private_service_grant(tmp_path: Path) -> No
 
     descriptor = evaluation_mcp_descriptor(grant, str(service.socket_path))
 
-    assert descriptor.args == ("-m", "vibesys.evaluation_agent.mcp")
+    assert descriptor.args == ("-m", "vs_evaluation.agent_mcp")
     environment = dict(descriptor.env)
-    assert environment["VIBESYS_EVALUATION_ROLE"] == "implementer"
-    assert environment["VIBESYS_EVALUATION_TOKEN"] == grant.token
-    assert environment["VIBESYS_PROFILER_AVAILABLE"] == "0"
+    assert environment["VS_EVALUATION_ROLE"] == "implementer"
+    assert environment["VS_EVALUATION_TOKEN"] == grant.token
+    assert environment["VS_EVALUATION_PROFILER_AVAILABLE"] == "0"
     assert "slurm" not in repr(descriptor).lower()
 
 
@@ -601,8 +609,6 @@ def test_implementer_profiler_surface_is_absent_without_a_provision(tmp_path: Pa
     assert not names.intersection(
         {"dispatch_profiler", "profiler_status", "await_profiler", "cancel_profiler"}
     )
-    guidance = evaluation_prompt_guidance(EvaluationAgentRole.IMPLEMENTER, profiler_available=False)
-    assert "profiler agent" not in guidance
 
 
 @pytest.mark.asyncio

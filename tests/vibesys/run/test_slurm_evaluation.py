@@ -8,21 +8,19 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vibesys.evaluation_agent.api import (
-    ContentDigest,
-    EvidenceFingerprints,
-    EvidenceKind,
-    SemanticEvaluationStage,
-    SlurmSemanticEvaluationExecutor,
-    TrustedEvidence,
-)
 from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
+    ContentDigest,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    EvidenceFingerprints,
+    EvidenceKind,
     ExecutorObservation,
     ResourceRequirements,
+    TrustedEvidence,
 )
 from vs_project.api import StateNamespace
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan

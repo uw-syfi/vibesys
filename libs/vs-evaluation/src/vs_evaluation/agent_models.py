@@ -7,8 +7,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
 
-from vibesys.evaluation_agent.evidence import EvidenceFingerprints, EvidenceKind, TrustedEvidence
-from vibesys.evaluation_agent.profiler_models import (
+from vs_evaluation.agent_evidence import EvidenceFingerprints, EvidenceKind, TrustedEvidence
+from vs_evaluation.models import (
+    AvailabilitySnapshot,
+    EvaluationAwaitResult,
+    EvaluationState,
+)
+from vs_evaluation.profiler_models import (
     MAX_AGENT_AWAIT_S,
     AwaitProfilerCall,
     CancelProfilerCall,
@@ -21,11 +26,6 @@ from vibesys.evaluation_agent.profiler_models import (
     ProfilerRunObservation,
     ProfilerStatusCall,
     ProfilerStatusReply,
-)
-from vs_evaluation.api import (
-    AvailabilitySnapshot,
-    EvaluationAwaitResult,
-    EvaluationState,
 )
 
 

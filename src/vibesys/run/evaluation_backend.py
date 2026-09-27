@@ -11,33 +11,32 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
-from vibesys.evaluation_agent.evidence import (
-    ContentDigest,
-    EvidenceFingerprints,
-    EvidenceKind,
-    EvidenceMetric,
-    EvidenceOutcome,
-    TrustedEvidence,
-)
-from vibesys.evaluation_agent.models import EvaluationOperationSnapshot, SubmittedSemanticEvaluation
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     AvailabilityState,
+    ContentDigest,
     CostClass,
     EvaluationAwaitResult,
     EvaluationCoordinator,
     EvaluationExecutor,
     EvaluationLifecycleEvent,
+    EvaluationOperationSnapshot,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
+    EvidenceFingerprints,
+    EvidenceKind,
+    EvidenceMetric,
+    EvidenceOutcome,
     ExecutorObservation,
     ResourceRequirements,
     ReuseStatus,
     RevisionConflictError,
     StageState,
     StoredEvaluation,
+    SubmittedSemanticEvaluation,
+    TrustedEvidence,
     stable_handle_id,
 )
 from vs_runtime.api import (

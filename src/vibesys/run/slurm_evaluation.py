@@ -11,22 +11,20 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from vibesys.evaluation_agent.backend import SemanticEvaluationStage
-from vibesys.evaluation_agent.evidence import (
-    EvidenceKind,
-    EvidenceMetric,
-    EvidenceOutcome,
-    TrustedEvidence,
-)
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
+    EvidenceKind,
+    EvidenceMetric,
+    EvidenceOutcome,
     ExecutorObservation,
     ResourceRequirements,
     StageState,
+    TrustedEvidence,
 )
 from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,

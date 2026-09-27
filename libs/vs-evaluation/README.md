@@ -2,16 +2,18 @@
 
 ## Responsibility
 
-This library coordinates durable, provider-neutral evaluation requests. It
-owns idempotent submission, lifecycle status, cancellation, bounded waiting,
-availability snapshots, and recovery of accepted work after process restart.
-It does not define domain trust rules, evaluator protocols, candidate identity,
-or provider selection.
+This library owns reusable evaluation infrastructure. It coordinates durable,
+provider-neutral requests and exposes a role-limited agent service over a
+private socket. It defines semantic evidence contracts, evaluation and profiler
+operation protocols, authorization, bounded waiting, cancellation, availability,
+and recovery after process restart. Product code supplies trust policy,
+candidate snapshots, evaluator implementations, and profiler turn provision.
 
 ## Public API
 
-Import from vs_evaluation.api. Callers provide ordered named stages and a
-stable key:
+Import lifecycle and agent service contracts from vs_evaluation.api. Import MCP
+tool construction from vs_evaluation.api.tools. Callers provide ordered named
+stages and a stable key:
 
     from vs_evaluation.api import (
         EvaluationCoordinator,
@@ -50,7 +52,8 @@ Executor change notifications must be sticky across the inspect-to-wait gap.
 EvaluationExecutor, EvaluationStore, and Clock are injected protocols.
 FilesystemEvaluationStore is the production store. The public test doubles
 are in vs_evaluation.api.testing and include a manual clock, controllable
-executor, shared remote backend, and in-memory store. The executor can inject
+executor, shared remote backend, in-memory store, and controllable profiler turn
+provision. The executor can inject
 ambiguous acceptance, observation timeouts, stale observations, partial wait
 timeouts, and wait-time transitions without sleeping. Share one
 `FakeEvaluationBackend` across fresh executor clients to exercise restart and

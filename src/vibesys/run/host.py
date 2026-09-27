@@ -11,18 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext, resolve_agent_specs
-from vibesys.evaluation_agent.api import (
-    ContentDigest,
-    EvaluationAgentService,
-    EvidenceReusingEvaluation,
-    ProfilerAgentService,
-    ProfilerAgentServiceHooks,
-    ProfilerLifecycleEvent,
-    RuntimeProfilerTurnProvision,
-    SemanticEvaluationBackend,
-    SemanticEvaluationIdentity,
-    SlurmSemanticEvaluationExecutor,
-)
 from vibesys.events import (
     AsyncOperationKind,
     AsyncOperationLifecycleData,
@@ -31,12 +19,26 @@ from vibesys.events import (
     FrameworkSource,
     FrameworkWarningData,
 )
+from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import create_evaluation
+from vibesys.run.evaluation_backend import (
+    EvidenceReusingEvaluation,
+    SemanticEvaluationBackend,
+    SemanticEvaluationIdentity,
+)
 from vibesys.run.resources import _StateBinding, open_run_resources
+from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionState, DurableSessionStore
+from vs_evaluation.api import (
+    ContentDigest,
+    EvaluationAgentService,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
+    ProfilerLifecycleEvent,
+)
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,

@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter
 
-from vibesys.evaluation_agent.evidence import EvidenceKind, TrustedEvidence
-from vibesys.evaluation_agent.models import (
+from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
+from vs_evaluation.agent_models import (
     AgentEvaluationCall,
     AgentEvaluationReply,
     AvailabilityCall,
@@ -48,20 +48,20 @@ from vibesys.evaluation_agent.models import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
 )
-from vibesys.evaluation_agent.profiler_service import ProfilerAgentUnavailableError
-from vs_evaluation.api import AvailabilitySnapshot, AvailabilityState, ResourceRequirements
+from vs_evaluation.models import AvailabilitySnapshot, AvailabilityState, ResourceRequirements
+from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from vibesys.evaluation_agent.profiler_service import ProfilerAgentService
-    from vs_evaluation.api import (
+    from vs_evaluation.models import (
         EvaluationAwaitResult,
         EvaluationState,
         StoredEvaluation,
     )
+    from vs_evaluation.profiler_service import ProfilerAgentService
     from vs_project.api import StateNamespace
 
 _STATE_PATH = "agent-evaluation-access.json"

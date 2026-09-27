@@ -11,7 +11,16 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, field_validator
 
-from vibesys.evaluation_agent.profiler_models import (
+from vs_async_ops.api import (
+    OperationCompleted,
+    OperationCoordinator,
+    OperationHandle,
+    OperationLifecycleEvent,
+    OperationPolicy,
+    OperationRequest,
+    OperationState,
+)
+from vs_evaluation.profiler_models import (
     MAX_PROFILER_REQUEST_CHARS,
     CompletedProfilerOperation,
     InFlightProfilerOperation,
@@ -31,21 +40,12 @@ from vibesys.evaluation_agent.profiler_models import (
     ProfilerStatusReply,
     ProfilerWorkKey,
 )
-from vs_async_ops.api import (
-    OperationCompleted,
-    OperationCoordinator,
-    OperationHandle,
-    OperationLifecycleEvent,
-    OperationPolicy,
-    OperationRequest,
-    OperationState,
-)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from vibesys.evaluation_agent.evidence import TrustedEvidence
     from vs_async_ops.api import OperationWaiter
+    from vs_evaluation.agent_evidence import TrustedEvidence
     from vs_project.api import StateNamespace
 
 _STATE_DIRECTORY = "profiler-agent-operations"

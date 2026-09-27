@@ -1,9 +1,8 @@
 """Semantic evidence contracts used at the agent evaluation boundary.
 
-The generic ``vs_evaluation`` package owns execution lifecycle only. These
-models identify the optimization facts that VibeSys accepts from completed
-stages. Dynamic orchestration supplies the adapter that validates and stores
-them; this module keeps the private agent protocol independent of that policy.
+These models identify optimization facts accepted from completed stages.
+Product orchestration supplies the adapter that validates and stores them;
+this module keeps the private agent protocol independent of that policy.
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ class ArtifactDigest(BaseModel):
 
 
 class TrustedEvidence(BaseModel):
-    """A stage result already accepted by VibeSys policy."""
+    """A stage result already accepted by the host's trust policy."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

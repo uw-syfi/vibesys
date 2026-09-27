@@ -1,5 +1,6 @@
 """Public test doubles for the evaluation lifecycle API."""
 
+from vs_evaluation.profiler_testing import FakeProfilerTurn, FakeProfilerTurnProvision
 from vs_evaluation.testing import (
     FakeClock,
     FakeDeadlineFactory,
@@ -16,6 +17,8 @@ __all__ = [
     "FakeDeadlineScope",
     "FakeEvaluationBackend",
     "FakeEvaluationExecutor",
+    "FakeProfilerTurn",
+    "FakeProfilerTurnProvision",
     "FakeSubmission",
     "InMemoryEvaluationStore",
 ]

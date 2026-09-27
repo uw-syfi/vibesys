@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
 
-from vibesys.evaluation_agent.evidence import EvidenceKind, TrustedEvidence
+from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
 
 MAX_AGENT_AWAIT_S = 300.0
 MAX_PROFILER_REQUEST_CHARS = 16_384
