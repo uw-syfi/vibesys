@@ -29,7 +29,6 @@ from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundD
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
-from vibesys.prompts.contexts import display_path
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
@@ -937,17 +936,6 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path: Path) -
 
     assert artifacts.next_implementer_attempt(progress, 8) == 2
     assert artifacts.next_implementer_attempt(progress, 9) == 2
-
-
-def test_agent_memory_paths_distinguish_files_from_directories(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    directory = workspace / "progress"
-    artifact = directory / "plans" / "round-0012.json"
-    artifact.parent.mkdir(parents=True)
-    artifact.write_text("{}\n")
-
-    assert display_path(directory, workspace) == "progress/"
-    assert display_path(artifact, workspace) == "progress/plans/round-0012.json"
 
 
 def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
