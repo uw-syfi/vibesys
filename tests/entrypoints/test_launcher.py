@@ -169,7 +169,7 @@ def test_interactive_execs_launcher_with_python_env(
     assert env["BUN_CONFIG_SKIP_INSTALL_PACKAGES"] == "1"
     # Read by clients/tui/src/boot-trace.ts to anchor the client's boot
     # measurements to when the user ran the command, not just when the
-    # frontend process started. cli.main marks it through vibesys.boot_trace.
+    # frontend process started. cli.main marks it through the runtime boot trace.
     launch_start_ms = int(env["VIBESYS_LAUNCH_START_MS"])
     assert abs(launch_start_ms - int(time.time() * 1000)) < 5_000
     # Quiet by default: the frontend traces only when asked to.

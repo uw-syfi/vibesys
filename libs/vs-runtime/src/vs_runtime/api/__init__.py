@@ -1,5 +1,6 @@
 """Public contracts for the reusable VibeSys runtime."""
 
+from vs_runtime.api import boot_trace as boot_trace
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -91,6 +92,7 @@ __all__ = [
     "WorkspaceRestoreError",
     "WorkspaceSourceFact",
     "Workspaces",
+    "boot_trace",
     "validate_command",
     "validate_member_id",
     "validate_workspace_writable_paths",

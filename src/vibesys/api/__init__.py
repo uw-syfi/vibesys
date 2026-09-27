@@ -13,7 +13,6 @@ the resource-handoff seam) so they never import their private home modules.
 
 from __future__ import annotations
 
-from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api.contracts import (
     Config,
@@ -60,6 +59,7 @@ from vibesys.run.integration import RunResourceHandoff
 from vibesys.run.run_control import RunStopped
 from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
 from vs_agent.api import AgentBackend, AgentSpec
+from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 __all__ = [

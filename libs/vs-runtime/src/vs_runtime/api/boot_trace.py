@@ -1,4 +1,4 @@
-"""Boot-stage timing spans for everything that runs before a run log exists.
+"""Runtime boot-stage timing before a run log exists.
 
 Boot spends most of its wall clock in two stretches that cannot log normally
 while they run:

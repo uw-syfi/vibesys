@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from tests.support import run_test_command
 
-from vibesys import boot_trace
 from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.config import Config
@@ -56,6 +55,7 @@ from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationRunManifest, Project
+from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle, SandboxLifecycleHooks
 
 

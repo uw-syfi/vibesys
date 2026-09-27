@@ -167,7 +167,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestrations.hypothesis_readmodel"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestrations.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.agent"
@@ -238,7 +238,7 @@ depends_on = ["vs_agent", "vs_sandbox"]
 [[modules]]
 path = "vibesys.context"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request", "vibesys.errors"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request", "vibesys.errors"]
 
 [[modules]]
 # Pure, deterministic search policy: never RunContext/agents/prompts/I/O.

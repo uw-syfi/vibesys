@@ -13,7 +13,7 @@ from typing import TextIO, cast, overload
 
 from pydantic import BaseModel
 
-from vibesys import backends, boot_trace
+from vibesys import backends
 from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
 from vibesys.backends.base import ComputeBackendImpl
 from vibesys.config import Config, as_config
@@ -101,6 +101,7 @@ from vs_project.api import (
     RunExecutionRecord,
     generate_run_id,
 )
+from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy, Sandbox
 
 

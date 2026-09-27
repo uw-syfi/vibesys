@@ -9,6 +9,9 @@ Policies own those decisions. The runtime owns role configuration binding,
 conversation lifetime, trusted candidate evaluation, run resource lifetime,
 and plugin dispatch.
 
+Runtime composition and launchers share early lifecycle timing through
+`vs_runtime.api.boot_trace`; orchestration plugins do not use that module.
+
 Each `OrchestrationPlugin` is an explicit value with a stable ID, an options
 schema, an authoritative tuple of immutable agent roles, state and projection
 contracts, and its orchestration function. Sessions bind one declared role,

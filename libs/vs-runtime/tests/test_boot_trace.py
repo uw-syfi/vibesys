@@ -1,6 +1,6 @@
-"""Unit tests for the boot-trace span facility.
+"""Public contract tests for the runtime boot-trace facility.
 
-``vibesys.boot_trace`` times the boot stages that run before a ``RunLogger``
+``vs_runtime.api.boot_trace`` times the boot stages that run before a ``RunLogger``
 exists (``main.py``'s dispatch preamble, ``context.py``'s assembly) and
 buffers their lines until a consumer drains them into the run log. See
 ``tests/vibesys/test_context.py`` for the integration test that exercises the drain
@@ -9,7 +9,7 @@ through a real ``open_run_resources`` call.
 
 import pytest
 
-from vibesys import boot_trace
+from vs_runtime.api import boot_trace
 
 
 @pytest.fixture(autouse=True)
