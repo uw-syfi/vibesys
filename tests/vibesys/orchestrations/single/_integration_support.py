@@ -8,42 +8,94 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runtime import RunContext
-from vibesys.orchestrations.single import PLUGIN
+from vibesys.orchestrations.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestrations.single.models import SingleState
 from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
+from vs_sandbox.execution import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
+    from typing import Any
 
     from pydantic import BaseModel
 
+    from vibesys.backends.base import SandboxKind
     from vibesys.events import CoreEvent
     from vs_agent.api import AgentSpec
     from vs_agent.api.testing import FakeAgentClient
-    from vs_runtime.api import RunStatus
+    from vs_runtime.api import OrchestrationPlugin, RunStatus
+    from vs_sandbox.fake_sandbox import FakeSandbox
 
 
 class InterruptedTurnError(RuntimeError):
     """Deterministic simulated process interruption at an agent turn."""
 
 
-def options(*, max_rounds: int = 1) -> BaseModel:
+@dataclass(frozen=True, slots=True)
+class PluginRunOptions:
+    """Pair one explicit plugin with its already-validated test options."""
+
+    plugin: OrchestrationPlugin
+    options: BaseModel
+
+
+_ATTRIBUTION_OUTPUT = (
+    '{"version":1,"cost_unit":"ms","components":['
+    '{"name":"prefill","cost":0.72,"share":0.6,"evidence":["profile.json:12"]},'
+    '{"name":"decode","cost":0.48,"share":0.4,"evidence":["profile.json:18"]}]}'
+)
+
+
+class _ProfileAttributionBackend(FakeComputeBackend):
+    """Provide one deterministic captured profile result to the real adapter."""
+
+    def make_sandbox(  # lint-waiver: LW-040201 [PLR0913]; this FakeComputeBackend override must match its real backend seam's independent setup inputs.
+        self,
+        kind: SandboxKind,
+        **kwargs: Any,  # noqa: ANN401  # LW-040202 [ANN401]; the production factory's extensible keyword boundary is intentionally open.
+    ) -> FakeSandbox:
+        sandbox = cast("FakeSandbox", super().make_sandbox(kind, **kwargs))
+        output_path = "profile-result.json"
+        sandbox.script(
+            "mktemp",
+            SandboxExecutionResult(output=output_path, exit_code=0, stdout=output_path),
+        )
+        sandbox.script(
+            f"profile-tool --vs-output {output_path}",
+            SandboxExecutionResult(output="", exit_code=0),
+        )
+        sandbox.script(
+            f"cat {output_path}",
+            SandboxExecutionResult(
+                output=_ATTRIBUTION_OUTPUT, exit_code=0, stdout=_ATTRIBUTION_OUTPUT
+            ),
+        )
+        sandbox.script(
+            f"rm -f {output_path}",
+            SandboxExecutionResult(output="", exit_code=0),
+        )
+        return sandbox
+
+
+def options(*, max_rounds: int = 1, interface: str = "service") -> BaseModel:
     """Return a small, deterministic single-plugin run configuration."""
     return PLUGIN.options.model_validate(
         {
-            "interface": "service",
+            "interface": interface,
             "max_rounds": max_rounds,
             "max_retries_per_round": 2,
             "judge_every": 1,
@@ -53,13 +105,37 @@ def options(*, max_rounds: int = 1) -> BaseModel:
     )
 
 
-def write_input(root: Path) -> Path:
+def profile_options(*, interface: str = "inprocess") -> PluginRunOptions:
+    """Build the fixed profile-single golden configuration."""
+    return PluginRunOptions(
+        plugin=PROFILE_GUIDED_PLUGIN,
+        options=PROFILE_GUIDED_PLUGIN.options.model_validate(
+            {
+                "interface": interface,
+                "max_rounds": 1,
+                "max_retries_per_round": 2,
+                "judge_every": 1,
+                "official_eval_every": 1,
+                "memory_layout": "files",
+                "metric_space": MetricSpace(),
+                "profile_guided": ProfileGuidedInput(command=("profile-tool",), timeout_seconds=73),
+            }
+        ),
+    )
+
+
+def write_input(
+    root: Path,
+    *,
+    domain: str = "generic",
+    objective: str = "Improve the queue.",
+) -> Path:
     """Create a self-contained project that can be copied and resumed."""
     root.mkdir(parents=True)
-    (root / "OBJECTIVE.md").write_text("Improve the queue.\n", encoding="utf-8")
+    (root / "OBJECTIVE.md").write_text(f"{objective}\n", encoding="utf-8")
     (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "vibesys.input.toml").write_text(
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        f'version = 1\n[agent]\ndomain = "{domain}"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         encoding="utf-8",
     )
@@ -82,18 +158,23 @@ def execute(
     clients: Sequence[FakeAgentClient],
     *,
     resume_run_id: str | None = None,
-    max_rounds: int = 1,
+    options_override: BaseModel | PluginRunOptions | None = None,
     observed_events: list[CoreEvent] | None = None,
 ) -> tuple[RunStatus, str, Path]:
     """Run the explicit plugin through its production host adapter."""
     bundle = load_input_bundle(project_root)
-    configured = options(max_rounds=max_rounds)
+    plugin = PLUGIN
+    if isinstance(options_override, PluginRunOptions):
+        plugin = options_override.plugin
+        configured = options_override.options
+    else:
+        configured = options() if options_override is None else options_override
     descriptor = OrchestrationDescriptor(
-        id=PLUGIN.id,
-        config_version=PLUGIN.config_version,
+        id=plugin.id,
+        config_version=plugin.config_version,
         options=configured.model_dump(mode="json"),
     )
-    prepared = built_in_orchestrations().resolve(PLUGIN.id).prepare_plugin(descriptor)
+    prepared = built_in_orchestrations().resolve(plugin.id).prepare_plugin(descriptor)
     request = RunRequest(
         project_root=project_root,
         orchestration=descriptor,
@@ -122,10 +203,10 @@ def execute(
                 integration,
                 setup=prepared.setup,
                 agent_client_factory=agent_client_factory(clients),
-                backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
-                plugin=PLUGIN,
+                backend_factory=lambda *_args, **_kwargs: _ProfileAttributionBackend(),
+                plugin=plugin,
             ) as host:
-                status = await PLUGIN.orchestrate(host, prepared.options)
+                status = await plugin.orchestrate(host, prepared.options)
                 return status, host.run_id, host.workspaces.root.path
         finally:
             if unsubscribe is not None:

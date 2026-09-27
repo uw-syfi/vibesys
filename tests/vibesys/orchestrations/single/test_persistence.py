@@ -13,6 +13,9 @@ from tests.vibesys.orchestrations.single._integration_support import (
     load_state,
     write_input,
 )
+from tests.vibesys.orchestrations.single._integration_support import (
+    options as single_options,
+)
 
 from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vibesys.orchestrations.single import PLUGIN
@@ -216,7 +219,7 @@ def test_corrupt_rollback_target_warns_and_commits_the_next_round(tmp_path: Path
     status, run_id, workspace = execute(
         input_root,
         [first_designer, _implementer(), second_designer, _implementer()],
-        max_rounds=2,
+        options_override=single_options(max_rounds=2),
         observed_events=events,
     )
 
@@ -270,7 +273,7 @@ def test_successful_rollback_restores_the_selected_revision(tmp_path: Path) -> N
     status, run_id, workspace = execute(
         input_root,
         [first_designer, _implementer(), second_designer, second_implementer],
-        max_rounds=2,
+        options_override=single_options(max_rounds=2),
     )
 
     state = load_state(workspace, run_id)

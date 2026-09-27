@@ -1,0 +1,441 @@
+[
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": "<SHA>",
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: initialize run <RUN_ID>",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "project_attached",
+      "revision": null
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: record effective objective",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: initialize policy state",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "orchestrator-session-turn-1-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "orchestrator is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "orchestrator",
+      "system_prompt": "You design one evidence-driven optimization hypothesis at a time. Keep hypothesis identifiers stable, do not update the hypothesis you are creating, and return only the requested structured response.",
+      "user_prompt": "<text len=7690 sha256=e1552a22147a0c69>"
+    },
+    "round_label": "orchestrator-session-turn-1",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "orchestrator"
+    },
+    "round_label": "orchestrator-session-turn-1",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "You design one evidence-driven optimization hypothesis at a time. Keep hypothesis identifiers stable, do not update the hypothesis you are creating, and return only the requested structured response.",
+      "user_prompt": "<text len=7690 sha256=e1552a22147a0c69>"
+    },
+    "round_label": "orchestrator-session-turn-1",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "activation_evidence": "",
+        "expected_effect": "",
+        "falsification_criteria": "",
+        "hypothesis": "batching the prefill step removes per-request launch overhead",
+        "hypothesis_id": "H-01",
+        "hypothesis_updates": [],
+        "invariants": "",
+        "minimum_acceptance_criteria": "",
+        "pass_criteria": "throughput improves without regressing accuracy",
+        "reasoning": "scripted golden fixture",
+        "recommended_skills": [],
+        "request_official_evaluation": false,
+        "revert_to_round": null,
+        "task": "batch the prefill step",
+        "title": ""
+      }
+    },
+    "round_label": "orchestrator-session-turn-1",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "activation_evidence": "",
+        "expected_effect": "",
+        "falsification_criteria": "",
+        "hypothesis": "batching the prefill step removes per-request launch overhead",
+        "hypothesis_id": "H-01",
+        "hypothesis_updates": [],
+        "invariants": "",
+        "minimum_acceptance_criteria": "",
+        "pass_criteria": "throughput improves without regressing accuracy",
+        "reasoning": "scripted golden fixture",
+        "recommended_skills": [],
+        "request_official_evaluation": false,
+        "revert_to_round": null,
+        "task": "batch the prefill step",
+        "title": ""
+      }
+    },
+    "round_label": "orchestrator-session-turn-1",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "orchestrator"
+    },
+    "round_label": "orchestrator-session-turn-1",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: start hypothesis H-01",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: start round 1 implementer turn 1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "implementer-session-turn-1-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "implementer is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "implementer",
+      "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
+      "user_prompt": "<text len=6535 sha256=1cccfda6226bb861>"
+    },
+    "round_label": "implementer-session-turn-1",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "implementer-session-turn-1",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
+      "user_prompt": "<text len=6535 sha256=1cccfda6226bb861>"
+    },
+    "round_label": "implementer-session-turn-1",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "bottlenecks": "prefill launch overhead dominates at low batch sizes",
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "expected_behavior": "higher steady-state throughput",
+        "feedback": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_analysis": "ran the local checks",
+        "self_review": "reviewed the diff and the checks",
+        "skill_context_updates": [],
+        "suggestions": "batch decode requests next",
+        "summary": "batched the prefill step",
+        "verdict": "pass"
+      }
+    },
+    "round_label": "implementer-session-turn-1",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "bottlenecks": "prefill launch overhead dominates at low batch sizes",
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "expected_behavior": "higher steady-state throughput",
+        "feedback": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_analysis": "ran the local checks",
+        "self_review": "reviewed the diff and the checks",
+        "skill_context_updates": [],
+        "suggestions": "batch decode requests next",
+        "summary": "batched the prefill step",
+        "verdict": "pass"
+      }
+    },
+    "round_label": "implementer-session-turn-1",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "implementer-session-turn-1",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "implementer-session-turn-1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-attempt-1-evaluation",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-record-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: close round 1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: restore trusted input baseline",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  }
+]

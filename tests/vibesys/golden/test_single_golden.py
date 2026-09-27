@@ -35,8 +35,6 @@ from tests.vibesys.golden.harness import run_scripted
 from tests.vibesys.golden.helpers import (
     assert_board_snapshot,
     assert_events_snapshot,
-    assert_prompt_snapshot,
-    prompt_text,
     read_events,
 )
 
@@ -56,7 +54,6 @@ from vibesys.schemas import (
     CandidateDisposition,
 )
 from vibesys.search.hypothesis import OrchestratorPlan
-from vs_agent.api import AgentTurnTimeoutError
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -106,58 +103,6 @@ def _combined(
         suggestions="batch decode requests next",
         profile_analysis="ran the local checks",
         candidate_disposition=CandidateDisposition.UNASSESSED,
-    )
-
-
-def test_pass_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="stub")
-    runner.enqueue("orchestrator", _plan())
-    runner.enqueue("implementer", _combined())
-
-    descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
-    run = run_scripted(
-        tmp_path,
-        orchestration_id=_ORCHESTRATION_ID,
-        descriptor=descriptor,
-        orchestrator_factory=SingleAgentOrchestrator,
-        runner=runner,
-    )
-
-    assert run.result is True
-    _assert_prompt_calls(runner, scenario="pass", workspace=tmp_path.parent)
-    _assert_board_files(run.workspace, scenario="pass", workspace=tmp_path.parent)
-    assert_events_snapshot(
-        _STRATEGY, "pass", read_events(run.events_path, workspace=tmp_path.parent)
-    )
-
-
-def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
-    runner = FakeAgentClient(backend_name="stub")
-    runner.enqueue("orchestrator", _plan())
-    runner.enqueue(
-        "implementer",
-        _combined(
-            "first attempt: partial batching",
-            verdict=Verdict.FAIL,
-            feedback="batching only covers the prefill path, not decode",
-        ),
-        _combined("second attempt: full batching after self-review feedback"),
-    )
-
-    descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
-    run = run_scripted(
-        tmp_path,
-        orchestration_id=_ORCHESTRATION_ID,
-        descriptor=descriptor,
-        orchestrator_factory=SingleAgentOrchestrator,
-        runner=runner,
-    )
-
-    assert run.result is True
-    _assert_prompt_calls(runner, scenario="retry_then_pass", workspace=tmp_path.parent)
-    _assert_board_files(run.workspace, scenario="retry_then_pass", workspace=tmp_path.parent)
-    assert_events_snapshot(
-        _STRATEGY, "retry_then_pass", read_events(run.events_path, workspace=tmp_path.parent)
     )
 
 
@@ -211,43 +156,6 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
     assert_events_snapshot(
         _STRATEGY, "gate", read_events(run.events_path, workspace=tmp_path.parent)
     )
-
-
-def test_timeout_scenario_golden(tmp_path: Path) -> None:
-    """A timed-out combined turn synthesizes a failing round response."""
-    runner = FakeAgentClient(backend_name="stub")
-    runner.enqueue("orchestrator", _plan())
-    runner.fail("implementer", AgentTurnTimeoutError(30.0), times=1)
-
-    descriptor = descriptor_from_options(
-        _options(max_retries_per_round=1), orchestration_id=_ORCHESTRATION_ID
-    )
-    run = run_scripted(
-        tmp_path,
-        orchestration_id=_ORCHESTRATION_ID,
-        descriptor=descriptor,
-        orchestrator_factory=SingleAgentOrchestrator,
-        runner=runner,
-    )
-
-    assert run.result is True  # the run completes; no hypothesis is retained
-    _assert_prompt_calls(runner, scenario="timeout", workspace=tmp_path.parent)
-    _assert_board_files(run.workspace, scenario="timeout", workspace=tmp_path.parent)
-    assert_events_snapshot(
-        _STRATEGY, "timeout", read_events(run.events_path, workspace=tmp_path.parent)
-    )
-
-
-def _assert_prompt_calls(runner: FakeAgentClient, *, scenario: str, workspace: Path) -> None:
-    for call in runner.calls:
-        role = f"{call.kind}-{call.round_label}"
-        assert_prompt_snapshot(
-            _STRATEGY,
-            role,
-            scenario,
-            prompt_text(call.system_prompt, call.user_prompt),
-            workspace=workspace,
-        )
 
 
 _BOARD_FILES = ("progress.md", "roadmap.md", "pareto-frontier.md")
