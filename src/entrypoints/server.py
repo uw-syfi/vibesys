@@ -73,7 +73,7 @@ def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
         argument = argv[index]
         if argument == "--web-origin":
             if index + 1 >= len(argv):
-                raise ValueError("--web-origin requires an origin")  # noqa: TRY003
+                raise ValueError("--web-origin requires an origin")  # noqa: TRY003  # lint-waiver: LW-101068 [TRY003]; report a missing browser-origin value before gateway startup
             value = argv[index + 1]
             index += 2
         elif argument.startswith("--web-origin="):
@@ -90,7 +90,7 @@ def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError(  # noqa: TRY003
+            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-101069 [TRY003]; reject browser origins that cannot satisfy the exact WebSocket origin policy
                 "--web-origin must be an http:// or https:// origin without a path"
             )
         origin = f"{parsed.scheme}://{parsed.netloc}"

@@ -30,11 +30,13 @@ gateway remains available after the one-round demo finishes, so the browser
 can inspect the completed state.
 
 Use `status` and `stop` with the instance path printed by the command when the
-gateway needs to be inspected or stopped:
+gateway needs to be inspected or stopped. For `--demo`, the project is copied
+to a temporary directory, so use the printed `Instance record` path rather
+than a path under the repository checkout:
 
 ```bash
-uv run vibesys web status --instance examples/data-structures/repositories/queue-rs/.vibesys/web-gateway.json
-uv run vibesys web stop --instance examples/data-structures/repositories/queue-rs/.vibesys/web-gateway.json
+uv run vibesys web status --instance /path/from/Instance-record-output.json
+uv run vibesys web stop --instance /path/from/Instance-record-output.json
 ```
 
 Pass a real project and task for an operator-owned run. Additional VibeSys run

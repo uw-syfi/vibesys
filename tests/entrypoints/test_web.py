@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from entrypoints.web import _browser_url, _live_command, _local_url
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path) -> None:  # noqa: ANN001
+
+def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path: Path) -> None:
     command = _live_command(
         project=tmp_path / "project",
         task="spsc",
@@ -31,7 +36,7 @@ def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path) -> None: 
     assert command[1:4] == ["-m", "entrypoints.server", "--web"]
 
 
-def test_live_command_preserves_arguments_after_separator(tmp_path) -> None:  # noqa: ANN001
+def test_live_command_preserves_arguments_after_separator(tmp_path: Path) -> None:
     command = _live_command(
         project=tmp_path / "project",
         task=None,
