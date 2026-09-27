@@ -7,6 +7,7 @@ tracking) rather than reusable standalone libraries, so they live under
 
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.repository import RepositoryVisibility
+from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.device import DeviceLease
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
@@ -19,6 +20,7 @@ from vibesys.run.project import (
 )
 
 __all__ = [
+    "CoreAgentEventSink",
     "CoreEvent",
     "CoreEventType",
     "DeviceLease",
