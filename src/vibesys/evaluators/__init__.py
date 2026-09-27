@@ -5,7 +5,6 @@ from vibesys.evaluators.packages import (
     PROJECT_ROOT_TOKEN,
     PYTHON_TOKEN,
     TOOL_TOKEN_PREFIX,
-    CargoGitToolSpec,
     EvaluatorPackageError,
     EvaluatorPackageMetadata,
     EvaluatorPackageNotFoundError,
@@ -14,9 +13,9 @@ from vibesys.evaluators.packages import (
     ResolvedEvaluatorPackage,
     load_evaluator_package,
     resolve_evaluator_package,
-    tool_token,
 )
-from vibesys.evaluators.tools import (
+from vs_sandbox.api.evaluator_tools import (
+    CargoGitToolSpec,
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
     cargo_install_argv,
@@ -25,6 +24,7 @@ from vibesys.evaluators.tools import (
     tool_install_root,
     tool_path_replacements,
     tool_spec_digest,
+    tool_token,
 )
 
 __all__ = [

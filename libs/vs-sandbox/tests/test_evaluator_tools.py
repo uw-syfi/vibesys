@@ -9,12 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
-from tests.support import run_test_command
 
-from vibesys.evaluators import (
+from vs_sandbox.api import BeforeReadyContext, SandboxExecutionResult, SandboxLifecycle
+from vs_sandbox.api.evaluator_tools import (
     CargoGitToolSpec,
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
@@ -25,7 +24,7 @@ from vibesys.evaluators import (
     tool_spec_digest,
     tool_token,
 )
-from vs_sandbox.api import BeforeReadyContext, SandboxLifecycle
+from vs_sandbox.api.testing import FakeSandbox
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -100,7 +99,7 @@ def _run_target_command(
     cwd: Path | None = None,
     **environment: str,
 ) -> subprocess.CompletedProcess[str]:
-    return run_test_command(
+    return subprocess.run(  # noqa: S603  # lint-waiver: LW-948006 [S603]; Test executes its generated fixed interpreter argv against a fake Cargo binary.
         shlex.split(command),
         capture_output=True,
         check=False,
@@ -186,17 +185,16 @@ def test_lifecycle_hooks_snapshot_tools_and_execute_target_command(tmp_path: Pat
     install_parent = tmp_path / "tools"
     hooks = EvaluatorToolLifecycleHooks(tools, install_parent)
     tools.clear()
-    sandbox = MagicMock()
-    sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
+    sandbox = FakeSandbox()
 
     lifecycle = SandboxLifecycle([hooks])
     lifecycle.before_ready(sandbox)
     lifecycle.before_ready(sandbox)
 
-    assert sandbox.execute.call_count == 2
-    command = sandbox.execute.call_args_list[0].args[0]
-    assert sandbox.execute.call_args_list[0].kwargs == {"timeout": 660}
-    assert sandbox.execute.call_args_list[1].args[0] == command
+    assert len(sandbox.calls) == 2
+    command = sandbox.calls[0].command
+    assert sandbox.calls[0].timeout == 660
+    assert sandbox.calls[1].command == command
     arguments = shlex.split(command)
     assert arguments[0:2] == ["python3", "-c"]
     assert json.loads(arguments[-2])["tools"] == {"example": _spec().model_dump(mode="json")}
@@ -208,13 +206,16 @@ def test_lifecycle_hooks_reject_target_install_failure(
     tmp_path: Path,
     exit_code: int | None,
 ) -> None:
-    sandbox = MagicMock()
-    sandbox.execute.return_value = MagicMock(
-        exit_code=exit_code,
-        output=(
-            "permission denied\n" + ("unhelpful install progress\n" * 1000) + "root sandbox failure"
-        ),
-        truncated=True,
+    sandbox = FakeSandbox(
+        default_result=SandboxExecutionResult(
+            exit_code=exit_code,
+            output=(
+                "permission denied\n"
+                + ("unhelpful install progress\n" * 1000)
+                + "root sandbox failure"
+            ),
+            truncated=True,
+        )
     )
     lifecycle = SandboxLifecycle(
         [EvaluatorToolLifecycleHooks({"example": _spec()}, tmp_path / "tools")]
@@ -304,7 +305,11 @@ def test_target_install_receipt_is_reused_by_host_installer(tmp_path: Path) -> N
     install_parent = tmp_path / "tools"
     command = evaluator_tools_install_command({"example": _spec()}, install_parent)
     target_result = _run_target_command(command, executable_dir, call_log)
-    host_runner = MagicMock()
+    host_calls: list[tuple[str, ...]] = []
+
+    def host_runner(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        host_calls.append(tuple(arguments))
+        return subprocess.CompletedProcess(arguments, 0, "", "")
 
     replacements = prepare_evaluator_tools(
         {"example": _spec()},
@@ -313,7 +318,7 @@ def test_target_install_receipt_is_reused_by_host_installer(tmp_path: Path) -> N
     )
 
     assert target_result.returncode == 0, target_result.stderr
-    host_runner.assert_not_called()
+    assert host_calls == []
     expected = tool_install_root(install_parent, "example", _spec()) / "bin" / "runner"
     assert replacements[tool_token("example", "runner")] == str(expected)
 
@@ -438,7 +443,7 @@ def test_target_install_command_reports_missing_cargo(tmp_path: Path) -> None:
     (python_only / "python3").symlink_to(sys.executable)
     command = evaluator_tools_install_command({"example": _spec()}, tmp_path / "tools")
 
-    result = run_test_command(
+    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-948007 [S603]; Test executes its generated fixed interpreter argv with an intentionally Cargo-free PATH.
         shlex.split(command),
         capture_output=True,
         check=False,

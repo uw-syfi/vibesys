@@ -12,11 +12,11 @@ import re
 import tomllib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from vibesys.resource_paths import evaluator_packages_dir
+from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,8 +28,6 @@ PYTHON_TOKEN = "${PYTHON}"  # noqa: S105  # lint-waiver: LW-007088 [S105]; Publi
 TOOL_TOKEN_PREFIX = "${TOOL:"  # noqa: S105  # lint-waiver: LW-007089 [S105]; Public argv template token, not a credential.
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
-_CARGO_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
-_GIT_REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _TOOL_TOKEN_PATTERN = re.compile(
     r"^\$\{TOOL:(?P<tool>[a-z0-9]+(?:[.-][a-z0-9]+)*)/"
     r"(?P<binary>[a-z0-9]+(?:[-_][a-z0-9]+)*)\}$"
@@ -100,68 +98,6 @@ class EvaluatorPackageNotFoundError(EvaluatorPackageError):
             "VibeSys evaluator package resources are not available; install a complete "
             "VibeSys distribution or pass packages_root"
         )
-
-
-class CargoGitToolSpec(BaseModel):
-    """One Cargo package installed from an immutable Git revision."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    kind: Literal["cargo-git"]
-    git: str
-    rev: str
-    package: str
-    bins: tuple[str, ...]
-
-    @field_validator("git")
-    @classmethod
-    def _valid_git_url(cls, value: str) -> str:
-        parsed = urlparse(value)
-        if (
-            parsed.scheme != "https"
-            or not parsed.netloc
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-        ):
-            message = "git must be an HTTPS URL without credentials, query, or fragment"
-            raise ValueError(message)
-        return value
-
-    @field_validator("rev")
-    @classmethod
-    def _full_git_revision(cls, value: str) -> str:
-        if not _GIT_REVISION_PATTERN.fullmatch(value):
-            message = "rev must be a full 40-character lowercase Git commit SHA"
-            raise ValueError(message)
-        return value
-
-    @field_validator("package")
-    @classmethod
-    def _valid_package(cls, value: str) -> str:
-        if not _CARGO_IDENTIFIER_PATTERN.fullmatch(value):
-            message = "package must be a canonical Cargo package name"
-            raise ValueError(message)
-        return value
-
-    @field_validator("bins")
-    @classmethod
-    def _valid_bins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if not value:
-            message = "bins must declare at least one binary"
-            raise ValueError(message)
-        if len(value) != len(set(value)):
-            message = "bins must not contain duplicates"
-            raise ValueError(message)
-        invalid = next(
-            (binary for binary in value if not _CARGO_IDENTIFIER_PATTERN.fullmatch(binary)),
-            None,
-        )
-        if invalid is not None:
-            message = f"invalid Cargo binary name: {invalid!r}"
-            raise ValueError(message)
-        return value
 
 
 class EvaluatorPackageRequirement(BaseModel):
@@ -248,11 +184,6 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
         for entrypoint, command in self.entrypoints.items():
             _validate_tool_tokens(self.tools, command, location=f"entrypoint {entrypoint!r}")
         return self
-
-
-def tool_token(tool: str, binary: str) -> str:
-    """Return the semantic argv token for one declared evaluator tool binary."""
-    return f"${{TOOL:{tool}/{binary}}}"
 
 
 def _validate_tool_tokens(

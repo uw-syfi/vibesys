@@ -38,7 +38,6 @@ from vibesys.evaluators.input_manifest import (
     load_input_bundle,
     load_project_task,
 )
-from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
@@ -52,6 +51,7 @@ from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
 from vs_sandbox.api import HostResourceAccess
+from vs_sandbox.api.evaluator_tools import CargoGitToolSpec
 from vs_sandbox.api.testing import FakeComputeBackend
 
 
@@ -298,7 +298,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
 
     with (
         patch(
-            "vibesys.evaluators.tools.evaluator_tools_install_command",
+            "vibesys.sandbox.run_environment.evaluator_tools_install_command",
             side_effect=install_command,
         ),
         _create_context(project, evaluator_package_root=package.root) as ctx,

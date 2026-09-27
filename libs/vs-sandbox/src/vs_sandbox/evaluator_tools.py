@@ -13,11 +13,11 @@ import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from vibesys.evaluators.packages import CargoGitToolSpec, tool_token
-from vs_sandbox.api import BeforeReadyContext, SandboxLifecycleHooks
+from vs_sandbox.lifecycle import BeforeReadyContext, SandboxLifecycleHooks
 
 ToolCommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
@@ -25,6 +25,76 @@ _CARGO_INSTALL_TIMEOUT_SECONDS = 600
 _SANDBOX_INSTALL_TIMEOUT_SECONDS = 660
 _MAX_INSTALL_ERROR_CHARACTERS = 2000
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
+_CARGO_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
+_GIT_REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+class CargoGitToolSpec(BaseModel):
+    """One Cargo package installed from an immutable Git revision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["cargo-git"]
+    git: str
+    rev: str
+    package: str
+    bins: tuple[str, ...]
+
+    @field_validator("git")
+    @classmethod
+    def _valid_git_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            message = "git must be an HTTPS URL without credentials, query, or fragment"
+            raise ValueError(message)
+        return value
+
+    @field_validator("rev")
+    @classmethod
+    def _full_git_revision(cls, value: str) -> str:
+        if not _GIT_REVISION_PATTERN.fullmatch(value):
+            message = "rev must be a full 40-character lowercase Git commit SHA"
+            raise ValueError(message)
+        return value
+
+    @field_validator("package")
+    @classmethod
+    def _valid_package(cls, value: str) -> str:
+        if not _CARGO_IDENTIFIER_PATTERN.fullmatch(value):
+            message = "package must be a canonical Cargo package name"
+            raise ValueError(message)
+        return value
+
+    @field_validator("bins")
+    @classmethod
+    def _valid_bins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            message = "bins must declare at least one binary"
+            raise ValueError(message)
+        if len(value) != len(set(value)):
+            message = "bins must not contain duplicates"
+            raise ValueError(message)
+        invalid = next(
+            (binary for binary in value if not _CARGO_IDENTIFIER_PATTERN.fullmatch(binary)),
+            None,
+        )
+        if invalid is not None:
+            message = f"invalid Cargo binary name: {invalid!r}"
+            raise ValueError(message)
+        return value
+
+
+def tool_token(tool: str, binary: str) -> str:
+    """Return the semantic argv token for one declared evaluator tool binary."""
+    return f"${{TOOL:{tool}/{binary}}}"
+
 
 _TARGET_INSTALL_PROGRAM = r"""
 import hashlib

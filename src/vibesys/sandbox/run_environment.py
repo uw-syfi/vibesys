@@ -45,14 +45,7 @@ from vibesys.constants import PROJECT_ROOT
 from vibesys.evaluators import (
     PROJECT_ROOT_TOKEN,
     PYTHON_TOKEN,
-    CargoGitToolSpec,
-    EvaluatorToolError,
-    EvaluatorToolLifecycleHooks,
-    evaluator_tools_install_command,
     load_evaluator_package,
-    prepare_evaluator_tools,
-    tool_install_root,
-    tool_path_replacements,
 )
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
@@ -77,6 +70,15 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.command_translation import translate_command_arguments
 from vs_sandbox.api.evaluator_helpers import encode_setup_command
+from vs_sandbox.api.evaluator_tools import (
+    CargoGitToolSpec,
+    EvaluatorToolError,
+    EvaluatorToolLifecycleHooks,
+    evaluator_tools_install_command,
+    prepare_evaluator_tools,
+    tool_install_root,
+    tool_path_replacements,
+)
 from vs_sandbox.api.skypilot import (
     SkyPilotBridge,
     SkyPilotJobRunner,

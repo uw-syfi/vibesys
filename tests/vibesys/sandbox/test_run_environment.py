@@ -29,7 +29,6 @@ from vibesys.evaluators.input_manifest import (
     WorkspaceSource,
     load_project_task,
 )
-from vibesys.evaluators.tools import EvaluatorToolError
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
@@ -63,6 +62,7 @@ from vs_sandbox.api import (
     SandboxKind,
     SandboxLifecycle,
 )
+from vs_sandbox.api.evaluator_tools import EvaluatorToolError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
