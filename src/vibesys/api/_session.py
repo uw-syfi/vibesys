@@ -385,7 +385,7 @@ class _LocalRunSession:
         for agent in reversed(agents):
             try:
                 agent.close()
-            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-948025 [BLE001]; session teardown must attempt every owned auxiliary agent even if one cleanup fails.
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-949001 [BLE001]; session teardown must attempt every owned auxiliary agent even if one cleanup fails.
                 first_error = first_error or exc
         if first_error is not None:
             raise first_error

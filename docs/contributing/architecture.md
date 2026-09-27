@@ -233,6 +233,7 @@ graph TD
 ```mermaid
 graph TD
     entrypoints --> headless
+    entrypoints --> server.runtime
     entrypoints --> server.settings
     entrypoints --> vibesys.api
     entrypoints --> vibesys.api.evolve
