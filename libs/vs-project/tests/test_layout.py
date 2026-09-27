@@ -39,6 +39,10 @@ def test_open_requires_an_existing_directory(tmp_path: Path) -> None:
         Project.open(file_path)
 
 
+def test_configuration_path_is_available_before_initialization(tmp_path: Path) -> None:
+    assert Project.open(tmp_path).configuration_path() == tmp_path.resolve() / ".vibesys"
+
+
 def test_project_is_recognized_without_generated_state(tmp_path: Path) -> None:
     project = tmp_path / "project"
     nested = project / "src" / "package"

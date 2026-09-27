@@ -273,6 +273,10 @@ class ProjectLayout:
         """Return the normalized candidate project root."""
         return self._project_root
 
+    def configuration_path(self) -> Path:
+        """Return the canonical configuration path, whether or not it exists."""
+        return self._configuration_path()
+
     def is_initialized(self) -> bool:
         """Return whether authored task configuration exists, independent of state."""
         configuration_path = self._configuration_path()

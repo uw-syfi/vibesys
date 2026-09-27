@@ -18,6 +18,7 @@ from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
+from vs_project.api import Project
 
 _WEB_PORT_MAX = 65_535
 
@@ -69,7 +70,7 @@ def _web_instance_from_argv(argv: list[str]) -> Path:
     return (
         Path(value).expanduser().resolve()
         if value is not None
-        else (Path.cwd() / ".vibesys" / "web-gateway.json").resolve()
+        else (Project.open(Path.cwd()).configuration_path() / "web-gateway.json").resolve()
     )
 
 
