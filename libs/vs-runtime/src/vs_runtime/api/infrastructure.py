@@ -39,6 +39,7 @@ from vs_runtime._checkpoint import (
     RoundRecoveryOutcome,
     RoundTransactionError,
 )
+from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
 from vs_runtime._event_journal import DurableEventJournal, EventCodec
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
@@ -458,6 +459,7 @@ __all__ = [
     "open_run_host",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
+    "prepare_docker_evaluator_resources",
     "prepare_trusted_evaluation_plan",
     "relative_sdk_source",
     "remote_evaluator_setup_command",

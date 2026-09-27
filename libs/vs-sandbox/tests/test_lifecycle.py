@@ -16,7 +16,7 @@ from vs_sandbox.api import (
     start_sandbox,
     stop_sandbox,
 )
-from vs_sandbox.api.testing import FakeSandbox
+from vs_sandbox.api.testing import FakeLifecycleSandbox, FakeSandbox
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import Sandbox
@@ -40,21 +40,6 @@ class _FailingHooks(SandboxLifecycleHooks):
 
 def _sandbox() -> Sandbox:
     return cast("Sandbox", object())
-
-
-class _FakeLifecycleSandbox(FakeSandbox):
-    """In-memory lifecycle capability for the public session contract."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.start_count = 0
-        self.stop_count = 0
-
-    def start(self) -> None:
-        self.start_count += 1
-
-    def stop(self) -> None:
-        self.stop_count += 1
 
 
 def test_base_hooks_are_a_noop() -> None:
@@ -108,7 +93,7 @@ def test_failure_names_hooks_provider_preserves_cause_and_stops_dispatch() -> No
 
 
 def test_owned_session_starts_and_stops_sandbox_once() -> None:
-    sandbox = _FakeLifecycleSandbox()
+    sandbox = FakeLifecycleSandbox()
 
     session = SandboxSession.start(sandbox, {"location": "container"})
 
@@ -124,7 +109,7 @@ def test_owned_session_starts_and_stops_sandbox_once() -> None:
 
 
 def test_owned_session_context_exit_stops_after_an_error() -> None:
-    sandbox = _FakeLifecycleSandbox()
+    sandbox = FakeLifecycleSandbox()
     failure_message = "failed inside session"
 
     with (
@@ -138,7 +123,7 @@ def test_owned_session_context_exit_stops_after_an_error() -> None:
 
 
 def test_borrowed_session_never_stops_sandbox() -> None:
-    sandbox = _FakeLifecycleSandbox()
+    sandbox = FakeLifecycleSandbox()
 
     with SandboxSession.borrowed(sandbox, "host") as session:
         assert session.view == "host"

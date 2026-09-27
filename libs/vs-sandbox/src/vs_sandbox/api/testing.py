@@ -6,9 +6,18 @@ internal modules directly.
 
 from __future__ import annotations
 
-from vs_sandbox.fake_compute_backend import FakeAcceleratorDiscovery, FakeComputeBackend
+from vs_sandbox.fake_compute_backend import (
+    FakeAcceleratorDiscovery,
+    FakeComputeBackend,
+    FakeSandboxCreation,
+)
 from vs_sandbox.fake_docker_command import DockerCommandCall, FakeDockerCommandRunner
-from vs_sandbox.fake_sandbox import DEFAULT_RESULT, FakeExecution, FakeSandbox
+from vs_sandbox.fake_sandbox import (
+    DEFAULT_RESULT,
+    FakeExecution,
+    FakeLifecycleSandbox,
+    FakeSandbox,
+)
 
 __all__ = [
     "DEFAULT_RESULT",
@@ -17,5 +26,7 @@ __all__ = [
     "FakeComputeBackend",
     "FakeDockerCommandRunner",
     "FakeExecution",
+    "FakeLifecycleSandbox",
     "FakeSandbox",
+    "FakeSandboxCreation",
 ]

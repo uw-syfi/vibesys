@@ -61,3 +61,25 @@ class FakeSandbox:
             return _INVALID_COMMAND_RESULT
         self.calls.append(FakeExecution(command=command, timeout=timeout))
         return self._scripted.get(command, self.default_result)
+
+
+@dataclass(slots=True)
+class FakeLifecycleSandbox(FakeSandbox):
+    """In-memory sandbox with an explicit start/stop lifecycle."""
+
+    start_count: int = 0
+    stop_count: int = 0
+    start_error: Exception | None = None
+    stop_error: Exception | None = None
+
+    def start(self) -> None:
+        """Record one lifecycle start attempt and raise a scripted error."""
+        self.start_count += 1
+        if self.start_error is not None:
+            raise self.start_error
+
+    def stop(self) -> None:
+        """Record one lifecycle stop attempt and raise a scripted error."""
+        self.stop_count += 1
+        if self.stop_error is not None:
+            raise self.stop_error

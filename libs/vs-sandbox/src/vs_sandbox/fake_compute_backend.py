@@ -10,6 +10,7 @@ contention monitor.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_sandbox.accelerator_discovery import AcceleratorInventory
@@ -49,6 +50,24 @@ class FakeAcceleratorDiscovery:
         return self._rocm
 
 
+@dataclass(frozen=True, slots=True)
+class FakeSandboxCreation:
+    """One sandbox construction observed by :class:`FakeComputeBackend`."""
+
+    kind: SandboxKind
+    host_workspace: str
+    log_path: Path | str | None
+    bind_mounts: tuple[tuple[str, str, bool], ...]
+    extra_env: dict[str, str]
+    extra_init_commands: tuple[str, ...]
+    lifecycle_hooks: tuple[SandboxLifecycleHooks, ...]
+    attach_accelerator: bool
+    ephemeral: bool
+    container_image: str | None
+    auth_files: tuple[tuple[str, str], ...]
+    resources: tuple[HostResource, ...]
+
+
 class FakeComputeBackend:
     """Configurable in-memory double for :class:`ComputeBackendImpl`."""
 
@@ -64,6 +83,16 @@ class FakeComputeBackend:
         """Accept the same construction shape as a real backend factory."""
         del log_dir, log, image
         self.sandboxes: dict[str, FakeSandbox] = {}
+        self.creations: list[FakeSandboxCreation] = []
+
+    def script_sandbox(
+        self,
+        kind: SandboxKind,
+        host_workspace: str,
+        sandbox: FakeSandbox,
+    ) -> None:
+        """Use *sandbox* for the exact kind/workspace construction key."""
+        self.sandboxes[f"{kind.value}:{host_workspace}"] = sandbox
 
     def make_sandbox(  # noqa: PLR0913  # LW-040001 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
@@ -82,16 +111,21 @@ class FakeComputeBackend:
         resources: Sequence[HostResource] = (),
     ) -> Sandbox:
         """Return a fresh :class:`FakeSandbox` keyed by *kind* and *host_workspace*."""
-        del (
-            log_path,
-            bind_mounts,
-            extra_env,
-            extra_init_commands,
-            attach_accelerator,
-            ephemeral,
-            container_image,
-            auth_files,
-            resources,
+        self.creations.append(
+            FakeSandboxCreation(
+                kind=kind,
+                host_workspace=host_workspace,
+                log_path=log_path,
+                bind_mounts=tuple(bind_mounts or ()),
+                extra_env=dict(extra_env or {}),
+                extra_init_commands=tuple(extra_init_commands or ()),
+                lifecycle_hooks=tuple(lifecycle_hooks or ()),
+                attach_accelerator=attach_accelerator,
+                ephemeral=ephemeral,
+                container_image=container_image,
+                auth_files=tuple(auth_files or ()),
+                resources=tuple(resources),
+            )
         )
         key = f"{kind.value}:{host_workspace}"
         sandbox = self.sandboxes.get(key)

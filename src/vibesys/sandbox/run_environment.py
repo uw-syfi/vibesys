@@ -29,7 +29,6 @@ import json
 import os
 import shlex
 import sys
-import tempfile
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
@@ -58,9 +57,8 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationCommandPaths,
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
-    docker_evaluator_tools_root,
     evaluator_agent_toolchains,
-    evaluator_container_setup,
+    prepare_docker_evaluator_resources,
     prepare_trusted_evaluation_plan,
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
@@ -86,9 +84,6 @@ from vs_sandbox.api.evaluator_helpers import encode_setup_command
 from vs_sandbox.api.evaluator_tools import (
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
-    prepare_evaluator_tools,
-    resolve_docker_image_id,
-    tool_install_root,
 )
 from vs_sandbox.api.skypilot import (
     SkyPilotBridge,
@@ -121,7 +116,6 @@ declares for the materialized objective document. Every environment's
 container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Callable, Sequence
 
     from vibesys.domains.environment import EnvironmentBindMount
@@ -392,13 +386,14 @@ class DockerEnvironment:
             toolchains=evaluator_agent_toolchains(requirements),
         )
         resources, docker_symlinks = _container_mount_plan(request)
-        resources = resources + _resources_for_mounts(
-            _docker_evaluator_tool_mounts(
-                request,
+        resources += list(
+            prepare_docker_evaluator_resources(
                 requirements,
+                request.workspace,
+                backend=request.backend,
+                log_dir=request.log_dir,
                 container_image=container_image,
-            ),
-            purpose="evaluator tool",
+            )
         )
         resolved_cli = _cli_container_env(request)
         cli_provider_env: dict[str, str] = {}
@@ -1487,95 +1482,6 @@ def _ensure_pushed_for_remote_backend(
         return ensure_pushed(image_id)
     except image_push_error as exc:
         raise image_push_error.run_environment_push_failed(image_id, backend_label, exc) from exc
-
-
-class _EvaluatorToolBuildRequiredError(RuntimeError):
-    pass
-
-
-def _docker_evaluator_tool_mounts(
-    request: RunEnvironmentRequest,
-    requirements: TrustedEvaluatorRequirements,
-    *,
-    container_image: str | None = None,
-) -> list[tuple[str, str, bool]]:
-    """Build tools in the target image, then mount verified roots read-only."""
-    tools = requirements.tools
-    if not tools:
-        return []
-    resolved_image = container_image or resolve_docker_image_id(_docker_backend_image(request))
-    host_parent = docker_evaluator_tools_root(
-        requirements,
-        request.workspace,
-        image_identity=resolved_image,
-    )
-
-    def require_builder(_arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        raise _EvaluatorToolBuildRequiredError
-
-    try:
-        prepare_evaluator_tools(tools, host_parent, command_runner=require_builder)
-    except _EvaluatorToolBuildRequiredError:
-        for name in tools:
-            (host_parent / name).mkdir(parents=True, exist_ok=True)
-        builder_workspace = request.log_dir / "evaluator-tool-builder-workspace"
-        builder_workspace.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(prefix=".host-owner-", dir=host_parent) as marker:
-            container_marker = str(SANDBOX_EVALUATOR_TOOLS_ROOT / Path(marker.name).name)
-            builder = request.backend.make_sandbox(
-                SandboxKind.DOCKER,
-                host_workspace=str(builder_workspace),
-                log_path=request.log_dir / "evaluator-tool-builder.log",
-                bind_mounts=[
-                    (str(host_parent), str(SANDBOX_EVALUATOR_TOOLS_ROOT), False),
-                ],
-                extra_env={},
-                extra_init_commands=evaluator_container_setup(requirements),
-                lifecycle_hooks=[EvaluatorToolLifecycleHooks(tools, SANDBOX_EVALUATOR_TOOLS_ROOT)],
-                attach_accelerator=False,
-                ephemeral=True,
-                container_image=resolved_image,
-            )
-            try:
-                start_sandbox(builder)
-                container_roots = [
-                    str(tool_install_root(SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec))
-                    for name, spec in tools.items()
-                ]
-                ownership_script = (
-                    'owner=$(stat -c "%u:%g" -- "$1") && shift && chown -R "$owner" -- "$@"'
-                )
-                ownership = builder.execute(
-                    shlex.join(
-                        (
-                            "sh",
-                            "-c",
-                            ownership_script,
-                            "vibesys-chown",
-                            container_marker,
-                            *container_roots,
-                        )
-                    ),
-                    timeout=120,
-                )
-                if ownership.exit_code != 0:
-                    detail = (ownership.output or "chown failed").strip()
-                    raise EvaluatorToolError.cache_ownership_failed(detail[:500])
-            finally:
-                stop_sandbox(builder)
-        try:
-            prepare_evaluator_tools(tools, host_parent, command_runner=require_builder)
-        except _EvaluatorToolBuildRequiredError as exc:
-            raise EvaluatorToolError.builder_incomplete() from exc
-
-    return [
-        (
-            str(tool_install_root(host_parent, name, spec)),
-            str(tool_install_root(SANDBOX_EVALUATOR_TOOLS_ROOT, name, spec)),
-            True,
-        )
-        for name, spec in tools.items()
-    ]
 
 
 def _docker_backend_image(request: RunEnvironmentRequest) -> str:
