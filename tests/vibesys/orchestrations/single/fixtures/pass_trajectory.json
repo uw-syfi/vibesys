@@ -1,0 +1,19 @@
+{
+  "status": "succeeded",
+  "rounds": [
+    {
+      "hypothesis_id": "H-01",
+      "claim": "Batching removes per-request overhead.",
+      "passed": true
+    }
+  ],
+  "last_response_summary": "Implemented batching.",
+  "workspace_files": {
+    "queue.py": "VALUE = 1\n"
+  },
+  "artifacts": [
+    "progress-artifacts/plans/round-0001.json",
+    "progress.md",
+    "roadmap.md"
+  ]
+}
