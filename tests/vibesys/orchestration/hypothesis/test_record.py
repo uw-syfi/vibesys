@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from vibesys.orchestration.gates import FrameworkBenchmarkOutcome
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.attempts import (
     AttemptState,
@@ -13,7 +12,7 @@ from vibesys.orchestration.hypothesis.attempts import (
 )
 from vibesys.orchestration.hypothesis.record import RecordInput, build_round_record
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 

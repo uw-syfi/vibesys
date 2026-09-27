@@ -26,7 +26,7 @@ from vibesys.orchestration.evolve.population.models import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.gates import FrameworkBenchmarkOutcome
+    from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
     from vibesys.orchestration.profilers import ProfilerSummary
 
 __all__ = ["PopulationSearch", "candidate_fitness"]

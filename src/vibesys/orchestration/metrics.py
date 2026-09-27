@@ -21,6 +21,7 @@ must not import loop code.
 
 from __future__ import annotations
 
+from dataclasses import dataclass as standard_dataclass
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
@@ -32,7 +33,25 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
 
-__all__ = ["Measurement", "MetricComparison", "MetricSpace", "Objective"]
+__all__ = [
+    "FrameworkBenchmarkOutcome",
+    "Measurement",
+    "MetricComparison",
+    "MetricSpace",
+    "Objective",
+]
+
+
+@standard_dataclass(frozen=True, slots=True)
+class FrameworkBenchmarkOutcome:
+    """Policy-interpreted benchmark headline and full measured row."""
+
+    feedback: str | None = None
+    metric_name: str | None = None
+    metric_value: float | None = None
+    metric_direction: Literal["max", "min"] | None = None
+    metric_unit: str | None = None
+    row: Mapping[str, float] | None = None
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))

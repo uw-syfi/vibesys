@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-from dataclasses import dataclass
 from itertools import count
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from vibesys.events import (
     CoreEventType,
@@ -44,8 +43,6 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from vibesys.context import _RunResources
     from vibesys.orchestration.request import RunRequest
     from vs_runtime.api import Commands, Workspace, Workspaces
@@ -86,18 +83,6 @@ def emit_gate_finished(
         status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
         round_label=round_label,
     )
-
-
-@dataclass(frozen=True, slots=True)
-class FrameworkBenchmarkOutcome:
-    """Policy-interpreted benchmark headline and full measured row."""
-
-    feedback: str | None = None
-    metric_name: str | None = None
-    metric_value: float | None = None
-    metric_direction: Literal["max", "min"] | None = None
-    metric_unit: str | None = None
-    row: Mapping[str, float] | None = None
 
 
 class _LocalValidationEvents:

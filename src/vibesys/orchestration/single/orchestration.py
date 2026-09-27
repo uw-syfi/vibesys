@@ -10,7 +10,6 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import UnsupportedProfilerError
-from vibesys.orchestration.gates import FrameworkBenchmarkOutcome
 from vibesys.orchestration.hypothesis import (
     AttemptState,
     Continue,
@@ -23,6 +22,7 @@ from vibesys.orchestration.hypothesis import (
     RecordInput,
     build_round_record,
 )
+from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.profile_focus import (
     FocusView,
     ProfileFocus,

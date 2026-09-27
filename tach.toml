@@ -188,12 +188,12 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vibesys.orch
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.evaluators", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.prompts", "vibesys.errors", "vibesys.orchestration.profile_focus", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.gates", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
+depends_on = ["vibesys", "vibesys.evaluators", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.prompts", "vibesys.errors", "vibesys.orchestration.profile_focus", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.evaluators", "vibesys.prompts", "vibesys", "vibesys.errors", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.orchestration.gates", "vibesys.orchestration.skills"]
+depends_on = ["vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.evaluators", "vibesys.prompts", "vibesys", "vibesys.errors", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.orchestration.skills"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -248,7 +248,7 @@ depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.e
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.orchestration.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics", "vibesys.orchestration.gates"]
+depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics"]
 
 [[modules]]
 path = "vibesys.orchestration.profile_focus"
@@ -298,7 +298,7 @@ depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_sandbox"]
 [[modules]]
 path = "vibesys.orchestration.evolve.population"
 layer = "roles_search"
-depends_on = [ "vibesys.orchestration.metrics", "vibesys.orchestration.gates", "vibesys.orchestration.profilers"]
+depends_on = [ "vibesys.orchestration.metrics", "vibesys.orchestration.profilers"]
 
 [[modules]]
 path = "vibesys.prompts"
