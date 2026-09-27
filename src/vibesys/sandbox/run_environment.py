@@ -57,10 +57,6 @@ from vibesys.evaluators import (
 )
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.sandbox._command_translation import (
-    _reject_semantic_tokens_in_source,
-    _translate_command_argument,
-)
 from vs_agent.api import (
     DOCKER_PROVIDER_ENV,
     AgentBackend,
@@ -78,6 +74,7 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
     SandboxLifecycleHooks,
 )
+from vs_sandbox.api.command_translation import translate_command_arguments
 from vs_sandbox.api.evaluator_helpers import (
     MODAL_EVALUATOR_HELPER,
     SKYPILOT_EVALUATOR_HELPER,
@@ -1428,9 +1425,7 @@ def _environment_command(
     if tools:
         tools_root = paths.evaluator_tools_root or _required_evaluator_tools_root(request)
         replacements.extend(tool_path_replacements(tools, tools_root).items())
-    _reject_semantic_tokens_in_source(arguments, replacements)
-    arguments = [_translate_command_argument(argument, replacements) for argument in arguments]
-    return shlex.join(arguments)
+    return shlex.join(translate_command_arguments(arguments, replacements))
 
 
 def _remote_evaluator_command(
@@ -1452,7 +1447,7 @@ def _remote_evaluator_command(
         ("/opt/vibesys-evaluator-package", ".vibesys-evaluator-package"),
         ("/workspace", "."),
     ]
-    return tuple(_translate_command_argument(argument, replacements) for argument in arguments)
+    return translate_command_arguments(arguments, replacements)
 
 
 def _docker_workspace_run(

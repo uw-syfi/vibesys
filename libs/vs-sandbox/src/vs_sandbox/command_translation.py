@@ -4,8 +4,31 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _SHELL_COMMAND_ARG_COUNT = 3
+
+
+def translate_command_arguments(
+    arguments: Sequence[str],
+    replacements: Sequence[tuple[str, str]],
+) -> tuple[str, ...]:
+    """Translate semantic tokens in argv without rewriting executable source.
+
+    Serialized nested argv values are translated structurally. A token inside
+    shell, Python, Node, or ``env -S`` source is rejected because textual
+    substitution there can change program semantics.
+    """
+    normalized_arguments = list(arguments)
+    normalized_replacements = list(replacements)
+    _reject_semantic_tokens_in_source(normalized_arguments, normalized_replacements)
+    return tuple(
+        _translate_command_argument(argument, normalized_replacements)
+        for argument in normalized_arguments
+    )
 
 
 def _translate_command_argument(

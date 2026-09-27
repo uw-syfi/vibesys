@@ -6,11 +6,7 @@ import json
 
 import pytest
 
-from vibesys.sandbox._command_translation import (
-    _classify_env_argument,
-    _executable_source_index,
-    _translate_command_argument,
-)
+from vs_sandbox.api.command_translation import translate_command_arguments
 
 _REPLACEMENTS = [("${ROOT}", "/work")]
 
@@ -27,7 +23,7 @@ _REPLACEMENTS = [("${ROOT}", "/work")]
     ],
 )
 def test_translate_command_argument_rewrites_tokens(argument: str, expected: str) -> None:
-    assert _translate_command_argument(argument, _REPLACEMENTS) == expected
+    assert translate_command_arguments((argument,), _REPLACEMENTS) == (expected,)
 
 
 @pytest.mark.parametrize(
@@ -42,13 +38,13 @@ def test_translate_command_argument_rewrites_tokens(argument: str, expected: str
 )
 def test_translate_rejects_tokens_inside_executable_source(argv: list[str]) -> None:
     with pytest.raises(ValueError, match="unsafe; pass them as positional arguments"):
-        _translate_command_argument(json.dumps(argv), _REPLACEMENTS)
+        translate_command_arguments((json.dumps(argv),), _REPLACEMENTS)
 
 
 def test_translate_allows_tokens_after_shell_source() -> None:
     argv = ["bash", "-c", 'cat "$1"', "arg0", "${ROOT}/f"]
 
-    translated = _translate_command_argument(json.dumps(argv), _REPLACEMENTS)
+    (translated,) = translate_command_arguments((json.dumps(argv),), _REPLACEMENTS)
 
     assert json.loads(translated) == ["bash", "-c", 'cat "$1"', "arg0", "/work/f"]
 
@@ -84,25 +80,16 @@ def test_translate_allows_tokens_after_shell_source() -> None:
         (["ruby", "-e", "src"], None),
     ],
 )
-def test_executable_source_index(argv: list[str], expected: int | None) -> None:
-    assert _executable_source_index(argv) == expected
+def test_source_detection_controls_translation(argv: list[str], expected: int | None) -> None:
+    with_token = list(argv)
+    target = expected if expected is not None else len(with_token) - 1
+    with_token[target] = f"{with_token[target]} ${{ROOT}}"
+    serialized = json.dumps(with_token)
 
-
-@pytest.mark.parametrize(
-    ("argument", "expected"),
-    [
-        ("--", ("end-options", 1)),
-        ("-S", ("split-string", 2)),
-        ("--split-string", ("split-string", 2)),
-        ("--split-string=x", ("split-string", 1)),
-        ("-Sx", ("split-string", 1)),
-        ("-u", ("option", 2)),
-        ("--chdir", ("option", 2)),
-        ("-i", ("option", 1)),
-        ("FOO=bar", ("assignment", 1)),
-        ("=x", ("command", 0)),
-        ("python", ("command", 0)),
-    ],
-)
-def test_classify_env_argument(argument: str, expected: tuple[str, int]) -> None:
-    assert _classify_env_argument(argument) == expected
+    if expected is not None:
+        with pytest.raises(ValueError, match="unsafe; pass them as positional arguments"):
+            translate_command_arguments((serialized,), _REPLACEMENTS)
+    else:
+        (translated,) = translate_command_arguments((serialized,), _REPLACEMENTS)
+        assert "${ROOT}" not in translated
+        assert "/work" in translated
