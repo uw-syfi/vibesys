@@ -23,7 +23,13 @@ from server.transport.websocket import (
 )
 
 if TYPE_CHECKING:
+    from websockets.asyncio.server import ServerConnection
+    from websockets.http11 import Request
     from websockets.typing import Origin
+
+
+def _http_request(path: str) -> Request:
+    return cast("Request", SimpleNamespace(path=path, headers={}))
 
 
 def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -> None:
@@ -91,32 +97,32 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
             gateway.start()
         response = asyncio.run(
             gateway._process_request(  # noqa: SLF001  # lint-waiver: LW-101024 [SLF001]; exercise HTTP routing without another network client
-                None,  # type: ignore[arg-type]
-                SimpleNamespace(path="/assets/app.js?token=ignored", headers={}),
+                cast("ServerConnection", None),
+                _http_request("/assets/app.js?token=ignored"),
             )
         )
         assert response is not None
         assert response.status_code == 200
         missing = asyncio.run(
             gateway._process_request(  # noqa: SLF001  # lint-waiver: LW-101025 [SLF001]; exercise missing-asset handling directly
-                None,  # type: ignore[arg-type]
-                SimpleNamespace(path="/assets/missing.js", headers={}),
+                cast("ServerConnection", None),
+                _http_request("/assets/missing.js"),
             )
         )
         assert missing is not None
         assert missing.status_code == 404
         forbidden = asyncio.run(
             gateway._process_request(  # noqa: SLF001  # lint-waiver: LW-101026 [SLF001]; exercise traversal rejection directly
-                None,  # type: ignore[arg-type]
-                SimpleNamespace(path="/assets/../secret", headers={}),
+                cast("ServerConnection", None),
+                _http_request("/assets/../secret"),
             )
         )
         assert forbidden is not None
         assert forbidden.status_code == 404
         not_found = asyncio.run(
             gateway._process_request(  # noqa: SLF001  # lint-waiver: LW-101027 [SLF001]; exercise unknown-route handling directly
-                None,  # type: ignore[arg-type]
-                SimpleNamespace(path=f"/other?token={gateway.token}", headers={}),
+                cast("ServerConnection", None),
+                _http_request(f"/other?token={gateway.token}"),
             )
         )
         assert not_found is not None
@@ -128,8 +134,8 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
     no_assets = WebSocketGateway(parts.api)
     missing_root = asyncio.run(
         no_assets._process_request(  # noqa: SLF001  # lint-waiver: LW-101028 [SLF001]; exercise the missing-assets response directly
-            None,  # type: ignore[arg-type]
-            SimpleNamespace(path=f"/?token={no_assets.token}", headers={}),
+            cast("ServerConnection", None),
+            _http_request(f"/?token={no_assets.token}"),
         )
     )
     assert missing_root is not None
@@ -162,11 +168,22 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
             self.state = "CLOSED"
 
     binary = FakeConnection([b"binary"])
-    asyncio.run(gateway._handle_connection(binary))  # noqa: SLF001  # lint-waiver: LW-101029 [SLF001]; drive the transport boundary with a binary frame
+    asyncio.run(
+        gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101029 [SLF001]; drive the transport boundary with a binary frame
+            cast("ServerConnection", binary)
+        )
+    )
     assert json.loads(binary.sent[0])["code"] == "invalid_frame"
 
     malformed = FakeConnection([])
-    assert asyncio.run(gateway._handle_request(malformed, "{")) is False  # noqa: SLF001  # lint-waiver: LW-101030 [SLF001]; drive malformed-frame handling without a network client
+    assert (
+        asyncio.run(
+            gateway._handle_request(  # noqa: SLF001  # lint-waiver: LW-101030 [SLF001]; drive malformed-frame handling without a network client
+                cast("ServerConnection", malformed), "{"
+            )
+        )
+        is False
+    )
     assert json.loads(malformed.sent[0])["ok"] is False
     assert _request_id("not-json") == "unknown"
     assert _request_id("[]") == "unknown"

@@ -149,7 +149,9 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
             observed["request"] = driven_request
 
     monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
-    monkeypatch.setattr(server_entrypoint.cli, "parse_cli_invocation", Mock(return_value=invocation))
+    monkeypatch.setattr(
+        server_entrypoint.cli, "parse_cli_invocation", Mock(return_value=invocation)
+    )
     monkeypatch.setattr(server_entrypoint.cli, "build_run_request", Mock(return_value=request))
 
     main(["--web", "--web-port", "4312", "--web-assets", str(tmp_path), "--local"])
