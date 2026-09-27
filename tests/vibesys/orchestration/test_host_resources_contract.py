@@ -64,6 +64,7 @@ def test_host_resources_declares_a_nonempty_surface() -> None:
         "run_id",
         "request",
         "workspaces",
+        "commands",
         "environment",
         "gates",
         "progress",

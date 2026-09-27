@@ -25,13 +25,19 @@ def _judge_fallback() -> JudgeResponse:
     return JudgeResponse(analysis="fallback", feedback="fallback-feedback", verdict=Verdict.FAIL)
 
 
+def _agents() -> _Agents:
+    """Build the legacy progress owner with its required logging port."""
+    host = SimpleNamespace(log=lambda _message: None)
+    return _Agents(cast("Any", host))
+
+
 def test_progress_rendering_is_loop_owned() -> None:
     assert RoundProgress(3, 24).label() == "Round 3/24"
     assert CandidateProgress(2, 8, 1, 4).label() == "Round 2/8 Cand 1/4"
 
 
 def test_agent_progress_scope_restores_previous() -> None:
-    agents = _Agents(cast("Any", object()))
+    agents = _agents()
     outer = RoundProgress(1, 3)
     inner = CandidateProgress(2, 3, 1, 2)
 
@@ -56,7 +62,7 @@ def test_agent_turn_captures_current_progress(tmp_path: Path) -> None:
         ),
     )
     progress = RoundProgress(2, 5)
-    agents = _Agents(cast("Any", object()))
+    agents = _agents()
 
     async def invoke() -> None:
         handle = _LocalAgentHandle(
