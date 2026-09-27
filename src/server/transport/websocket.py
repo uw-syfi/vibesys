@@ -76,27 +76,27 @@ class WebSocketGateway:
     def url(self) -> str:
         """Return the capability-bearing page URL after startup."""
         if self._bound_port is None:
-            raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003
+            raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101007 [TRY003]; property misuse is a programmer error during gateway lifecycle
         return f"http://127.0.0.1:{self._bound_port}/?token={self.token}"
 
     @property
     def websocket_url(self) -> str:
         """Return the capability-bearing WebSocket endpoint after startup."""
         if self._bound_port is None:
-            raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003
+            raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101008 [TRY003]; property misuse is a programmer error during gateway lifecycle
         return f"ws://127.0.0.1:{self._bound_port}{_WEB_SOCKET_PATH}?token={self.token}"
 
     @property
     def bound_port(self) -> int:
         """Return the actual listening port after startup."""
         if self._bound_port is None:
-            raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003
+            raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101009 [TRY003]; property misuse is a programmer error during gateway lifecycle
         return self._bound_port
 
     def start(self) -> None:
         """Bind loopback and wait until the port is accepting connections."""
         if self._thread is not None:
-            raise RuntimeError("WebSocket gateway is already running")  # noqa: TRY003
+            raise RuntimeError("WebSocket gateway is already running")  # noqa: TRY003  # lint-waiver: LW-101010 [TRY003]; reject a second start before it can race the event loop
         self._thread = threading.Thread(
             target=self._run,
             name="vibesys-server-websocket",
@@ -105,9 +105,9 @@ class WebSocketGateway:
         self._thread.start()
         self._ready.wait(timeout=10)
         if not self._ready.is_set():
-            raise RuntimeError("Timed out starting WebSocket gateway")  # noqa: TRY003
+            raise RuntimeError("Timed out starting WebSocket gateway")  # noqa: TRY003  # lint-waiver: LW-101011 [TRY003]; convert a startup synchronization timeout into a clear lifecycle error
         if self._startup_error is not None:
-            raise RuntimeError("Unable to start WebSocket gateway") from self._startup_error  # noqa: TRY003
+            raise RuntimeError("Unable to start WebSocket gateway") from self._startup_error  # noqa: TRY003  # lint-waiver: LW-101012 [TRY003]; preserve the gateway startup failure as a lifecycle error
 
     def close(self) -> None:
         """Stop the gateway and join its event-loop thread."""
@@ -137,7 +137,7 @@ class WebSocketGateway:
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self._serve_until_stopped())
-        except BaseException as error:  # noqa: BLE001
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-101013 [BLE001]; propagate any event-loop startup failure through the owning thread
             self._startup_error = error
             self._ready.set()
         finally:
@@ -145,9 +145,11 @@ class WebSocketGateway:
 
     async def _serve_until_stopped(self) -> None:
         try:
-            from websockets.asyncio.server import serve  # noqa: PLC0415
+            from websockets.asyncio.server import (  # noqa: PLC0415  # lint-waiver: LW-101022 [PLC0415]; defer the optional websocket dependency until gateway startup
+                serve,
+            )
         except ImportError as error:  # pragma: no cover - packaging failure
-            raise RuntimeError(  # noqa: TRY003
+            raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-101014 [TRY003]; give an actionable dependency error at gateway startup
                 "The WebSocket gateway requires the websockets package"
             ) from error
 
@@ -165,7 +167,7 @@ class WebSocketGateway:
             self._server = server
             sockets = server.sockets
             if not sockets:
-                raise RuntimeError(  # noqa: TRY003
+                raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-101015 [TRY003]; fail startup if the websocket library did not bind a socket
                     "WebSocket gateway did not expose a listening socket"
                 )
             self._bound_port = int(next(iter(sockets)).getsockname()[1])
@@ -237,7 +239,7 @@ class WebSocketGateway:
                     continue
                 if await self._handle_request(websocket, raw):
                     return
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101016 [BLE001]; a disconnected browser is normal at the transport boundary
             # The websocket library owns close frames. A peer disappearing
             # while the API is writing is therefore a normal stream teardown.
             with suppress(Exception):
@@ -253,7 +255,7 @@ class WebSocketGateway:
                     await self._stream(websocket, request)
                 return True
             response = self.api.execute(request)
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101017 [BLE001]; convert malformed browser frames into protocol responses
             response = Response.from_exception(request_id, error, operation="Request")
         await websocket.send(response.model_dump_json())
         return False
@@ -263,7 +265,7 @@ class WebSocketGateway:
             bootstrap = self.api.subscription_bootstrap(
                 request.after_sequence, request.tail, store_id=request.store_id
             )
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101018 [BLE001]; convert API failures into protocol responses at the transport boundary
             await websocket.send(
                 ProtocolErrorMessage.from_exception(
                     error,
@@ -364,8 +366,12 @@ def _respond(_connection: ServerConnection, status: HTTPStatus, text: str) -> Ht
 
 
 def _response(status: HTTPStatus, text: str, content_type: str) -> HttpResponse:
-    from websockets.datastructures import Headers  # noqa: PLC0415
-    from websockets.http11 import Response as HttpResponse  # noqa: PLC0415
+    from websockets.datastructures import (  # noqa: PLC0415  # lint-waiver: LW-101019 [PLC0415]; defer optional websocket imports until an HTTP response is needed
+        Headers,
+    )
+    from websockets.http11 import (  # noqa: PLC0415  # lint-waiver: LW-101020 [PLC0415]; defer optional websocket imports until an HTTP response is needed
+        Response as HttpResponse,
+    )
 
     body = text.encode("utf-8")
     return HttpResponse(

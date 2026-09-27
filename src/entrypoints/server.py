@@ -34,20 +34,20 @@ def _web_requested(argv: list[str]) -> bool:
 
 
 def _web_port_from_argv(argv: list[str]) -> int:
-    value = cli._option_from_argv(argv, "--web-port")  # noqa: SLF001
+    value = cli._option_from_argv(argv, "--web-port")  # noqa: SLF001  # lint-waiver: LW-101001 [SLF001]; reuse the CLI's private option scanner before full argument parsing
     if value is None:
         return 0
     try:
         port = int(value)
     except ValueError:
-        raise ValueError("--web-port must be an integer") from None  # noqa: TRY003
+        raise ValueError("--web-port must be an integer") from None  # noqa: TRY003  # lint-waiver: LW-101002 [TRY003]; report malformed launcher flags as user-facing configuration errors
     if not 0 <= port <= _WEB_PORT_MAX:
-        raise ValueError("--web-port must be between 0 and 65535")  # noqa: TRY003
+        raise ValueError("--web-port must be between 0 and 65535")  # noqa: TRY003  # lint-waiver: LW-101003 [TRY003]; report malformed launcher flags as user-facing configuration errors
     return port
 
 
 def _web_assets_from_argv(argv: list[str]) -> Path | None:
-    value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001
+    value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001  # lint-waiver: LW-101004 [SLF001]; reuse the CLI's private option scanner before full argument parsing
     if value is not None:
         return Path(value).expanduser().resolve()
     source_root = Path(__file__).resolve().parents[2]
@@ -179,7 +179,7 @@ def _missing_control_socket() -> NoReturn:
     )
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: C901
+def main(argv: list[str] | None = None) -> None:  # noqa: C901  # lint-waiver: LW-101005 [C901]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
     """Run the frontend server and headless engine in one process."""
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "tui-defaults":

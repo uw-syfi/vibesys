@@ -165,7 +165,7 @@ class ServerRuntime:
                     else None
                 )
                 if web_transport is not None:
-                    print(f"VibeSys web UI: {web_transport.url}", flush=True)  # noqa: T201
+                    print(f"VibeSys web UI: {web_transport.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101006 [T201]; expose the capability URL to the interactive launcher user
                 self._wait_for_subscriber(transport)
                 return self._execute_run(transport, run)
         except BaseException as exc:

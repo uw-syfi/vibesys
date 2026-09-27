@@ -28,7 +28,7 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
     (assets / "index.html").write_text("<!doctype html><title>VibeSys</title>")
 
     with WebSocketGateway(parts.api, assets_dir=assets) as gateway:
-        with urlopen(gateway.url, timeout=2) as response:  # noqa: S310
+        with urlopen(gateway.url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101021 [S310]; connect only to the loopback URL produced by the gateway under test
             assert response.status == 200
             assert response.read() == b"<!doctype html><title>VibeSys</title>"
 
