@@ -18,10 +18,9 @@ from vibesys.orchestration.skill_selection import (
     discover_sidecar_rules,
     effective_skill_metadata,
     load_sidecar_rules,
-    resolve_skill_source_dirs,
     validate_platform_layout,
-    validate_skill_tree,
 )
+from vibesys.run.skill_sources import resolve_skill_source_dirs, validate_skill_tree
 from vs_runtime.api import SkillResourceRequest
 from vs_runtime.api.infrastructure import (
     SkillMetadataError as RuntimeSkillMetadataError,

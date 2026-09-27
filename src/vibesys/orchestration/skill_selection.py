@@ -9,12 +9,6 @@ from pathlib import Path
 import vs_agent.api as _agent_api
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vs_agent.api import SkillSelection
-from vs_runtime.api.infrastructure import (
-    discover_skill_dirs as _discover_skill_dirs,
-)
-from vs_runtime.api.infrastructure import (
-    load_skill_frontmatter as _load_skill_frontmatter,
-)
 
 NULL_SKILL_SELECTION = _agent_api.NULL_SKILL_SELECTION
 
@@ -305,11 +299,7 @@ def coerce_skill_root(raw: str | Path, *, project_root: Path = PROJECT_ROOT) -> 
 
 
 def effective_skill_metadata(skill_dir: Path, rules: list[SkillRule]) -> SkillMetadata:
-    """Resolve winning VibeSys metadata for one skill directory."""
-    # Validate standard Agent Skill frontmatter even though VibeSys routing is
-    # stored out-of-band in sidecar files.
-    _load_skill_frontmatter(skill_dir)
-
+    """Resolve winning VibeSys routing metadata for one validated skill directory."""
     matches = [rule for rule in rules if rule.applies_to(skill_dir)]
     if not matches:
         return SkillMetadata(skill_dir=skill_dir, backends=None, domains=None)
@@ -331,34 +321,6 @@ def effective_skill_metadata(skill_dir: Path, rules: list[SkillRule]) -> SkillMe
         domains=winner.domains,
         rule=winner,
     )
-
-
-def resolve_skill_source_dirs(
-    raw_dirs: list[str | Path] | None,
-    *,
-    backend: ComputeBackend,
-    domain: DomainName,
-    project_root: Path = PROJECT_ROOT,
-) -> list[str]:
-    """Resolve configured skill roots to compatible skill directories.
-
-    ``raw_dirs`` defines the candidate roots. Each discovered ``SKILL.md`` is
-    validated, then included only if the effective VibeSys sidecar metadata
-    supports the selected backend and domain. Skills with no matching rule are
-    globally eligible and load for every backend and domain.
-    """
-    if not raw_dirs:
-        return []
-
-    resolved: dict[Path, None] = {}
-    for raw in raw_dirs:
-        root = coerce_skill_root(raw, project_root=project_root)
-        rules = discover_sidecar_rules(root)
-        for skill_dir in _discover_skill_dirs(root):
-            metadata = effective_skill_metadata(skill_dir, rules)
-            if metadata.supports_backend(backend) and metadata.supports_domain(domain):
-                resolved[skill_dir.resolve()] = None
-    return [str(path) for path in resolved]
 
 
 def validate_platform_layout(skill_dir: Path) -> None:
@@ -398,16 +360,6 @@ def validate_platform_layout(skill_dir: Path) -> None:
             )
 
 
-def validate_skill_tree(root: Path) -> list[SkillMetadata]:
-    """Validate every skill and VibeSys sidecar under *root*."""
-    rules = discover_sidecar_rules(root)
-    metadata = []
-    for skill_dir in _discover_skill_dirs(root):
-        validate_platform_layout(skill_dir)
-        metadata.append(effective_skill_metadata(skill_dir, rules))
-    return metadata
-
-
 __all__ = [
     "NULL_SKILL_SELECTION",
     "PLATFORMS_PARENT",
@@ -425,8 +377,6 @@ __all__ = [
     "load_sidecar_rules",
     "platform_skill_excluded_paths",
     "platform_skill_selection",
-    "resolve_skill_source_dirs",
     "resolve_skill_source_paths",
     "validate_platform_layout",
-    "validate_skill_tree",
 ]

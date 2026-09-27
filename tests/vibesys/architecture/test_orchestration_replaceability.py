@@ -20,7 +20,7 @@ from pathlib import Path
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
-_ALLOWED_EXTERNAL_POLICY_IMPORTS = {"api/evolve.py", "plugin_catalog.py"}
+_ALLOWED_EXTERNAL_POLICY_IMPORTS = {"api/evolve.py", "plugin_builtins.py"}
 _INFRASTRUCTURE_LIBRARIES = (
     "vs_agent",
     "vs_evaluator_protocol",
@@ -83,6 +83,20 @@ def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> No
     ]
     assert not violations, (
         "strategy package bypasses vs_runtime.api for infrastructure: " + "; ".join(violations)
+    )
+
+
+def test_orchestration_policy_never_imports_composition_only_runtime_api() -> None:
+    """Keep concrete runtime construction below every orchestration policy module."""
+    forbidden = "vs_runtime.api.infrastructure"
+    violations = [
+        f"{path.relative_to(_SRC)} imports {module_name}"
+        for path in _ORCHESTRATION.rglob("*.py")
+        for module_name in _imported_module_names(path)
+        if module_name == forbidden or module_name.startswith(f"{forbidden}.")
+    ]
+    assert not violations, (
+        "orchestration policy imports composition-only runtime API: " + "; ".join(violations)
     )
 
 

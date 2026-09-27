@@ -33,7 +33,7 @@ _POLICY_ROOTS = (
 _FORBIDDEN_PACKAGES = (
     "vibesys.loops",
     "vibesys.orchestration.agents",
-    "vibesys.orchestration.evaluation",
+    "vibesys.run.evaluation",
     "vibesys.orchestration.single",
     "vibesys.orchestration.multi",
     "vibesys.orchestration.prompts",

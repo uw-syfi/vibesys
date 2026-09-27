@@ -9,15 +9,16 @@ The boundary is deliberate:
 
 | Owner | Holds |
 |---|---|
-| `src/vibesys/orchestration/` | Agent roles, prompts, reply schemas, search and selection policy, evaluation cadence and interpretation, policy state, and plugin declarations |
-| `src/vibesys/plugin_catalog.py` | The product catalog of in-repository plugins and their read projections |
-| `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: bind product config to roles, translate semantic events, and connect a selected plugin to the runtime |
+| `src/vibesys/orchestration/` | Agent roles, prompts, reply schemas, search and selection policy, evaluation cadence, policy state, and plugin declarations |
+| `src/vibesys/plugin_catalog.py` | The product registry for declared plugin registrations |
+| `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: bind product config to roles, adapt trusted evaluation and host profiler/skill effects, translate semantic events, and connect a selected plugin to the runtime |
 | `libs/vs-runtime/` | Reusable session, workspace, state, evaluation, control, command, skill, and cleanup mechanics |
 | `libs/vs-agent/`, `libs/vs-sandbox/`, `libs/vs-project/` | Agent harnesses, isolated execution, and project persistence |
 
-Policy imports public contracts from `vs_runtime.api`. It does not construct
-agent clients, sandboxes, worktrees, or product run resources. Runtime libraries
-do not import VibeSys policy. [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml)
+Policy imports public contracts from `vs_runtime.api`, never the composition-only
+`vs_runtime.api.infrastructure` surface. It does not construct agent clients,
+sandboxes, worktrees, or product run resources. Runtime libraries do not import
+VibeSys policy. [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml)
 enforces the dependency direction.
 
 ## Plugin declaration

@@ -23,12 +23,10 @@ from vibesys.events import (
     CoreEventType,
     ExperimentsChangedData,
 )
-from vibesys.orchestration.evaluation import trusted_evaluation_plan
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
     profiler_definition,
-    resolve_run_profiler,
 )
 from vibesys.orchestration.profilers import (
     profiler_support_extra as resolve_profiler_support_extra,
@@ -39,9 +37,11 @@ from vibesys.orchestration.skill_selection import (
 )
 from vibesys.run.contracts import RunRequest
 from vibesys.run.environment import open_run_environment
+from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
+from vibesys.run.profilers import resolve_run_profiler
 from vibesys.run.project import (
     ProjectProvisioningSpec,
     exact_resume_descriptor,
