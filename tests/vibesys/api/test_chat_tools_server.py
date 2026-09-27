@@ -21,6 +21,7 @@ from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.orchestrations.multi.models import MultiState
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vs_agent.api import register_tool
@@ -111,9 +112,9 @@ def _hypothesis() -> Hypothesis:
 
 
 def _seed_agent_state(project: Project, run_id: str) -> None:
-    portable = project.state.portable_namespace(run_id, "multi")
-    portable.slot("state.json", HypothesisState).save(
-        HypothesisState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01")
+    portable = project.state.portable_namespace(run_id, "multi-agent")
+    portable.slot("state.json", MultiState).save(
+        MultiState(search=HypothesisState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01"))
     )
 
 
@@ -269,7 +270,7 @@ class TestEndToEnd:
         out = asyncio.run(_call(server, "list_state_files"))
 
         assert "run.json" in out
-        assert "multi/state.json" in out
+        assert "multi-agent/state.json" in out
 
     def test_read_state_file_returns_the_run_manifest_contents(self, tmp_path: Path) -> None:
         tools, run_id = _tools(tmp_path)

@@ -8,6 +8,7 @@ from tests.support.run_execution import run_execution_record
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
+from vibesys.orchestrations.single.models import SingleState
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
@@ -35,33 +36,35 @@ def _project_run(root: Path) -> tuple[Project, str]:
 
 def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
-        HypothesisState(
-            hypotheses=[
-                Hypothesis(
-                    hypothesis_id="H-01",
-                    plan=OrchestratorPlan(
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(
+            search=HypothesisState(
+                hypotheses=[
+                    Hypothesis(
                         hypothesis_id="H-01",
-                        hypothesis="Improve the queue",
-                        task="Tune the queue",
-                        pass_criteria="",
-                        reasoning="",
-                    ),
-                    started_round=1,
-                    rounds=[
-                        RoundRecord(
-                            round_number=1,
+                        plan=OrchestratorPlan(
                             hypothesis_id="H-01",
-                            commit="1" * 40,
-                            perf_metric=1100.0,
-                            perf_unit="total_ops_per_sec",
-                            passed=False,
-                            profile_skipped=False,
-                            official_evaluation_reason="Judge FAIL: latency regressed",
-                        )
-                    ],
-                )
-            ]
+                            hypothesis="Improve the queue",
+                            task="Tune the queue",
+                            pass_criteria="",
+                            reasoning="",
+                        ),
+                        started_round=1,
+                        rounds=[
+                            RoundRecord(
+                                round_number=1,
+                                hypothesis_id="H-01",
+                                commit="1" * 40,
+                                perf_metric=1100.0,
+                                perf_unit="total_ops_per_sec",
+                                passed=False,
+                                profile_skipped=False,
+                                official_evaluation_reason="Judge FAIL: latency regressed",
+                            )
+                        ],
+                    )
+                ]
+            )
         ),
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)

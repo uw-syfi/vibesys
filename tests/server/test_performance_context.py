@@ -12,6 +12,7 @@ from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestrations.hypothesis_readmodel import project_run_view
+from vibesys.orchestrations.single.models import SingleState
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import (
     Hypothesis,
@@ -137,8 +138,8 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
-    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
-        state
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(search=state)
     )
     response = _service(project, run_id).execute(PerformanceQuery())
 
@@ -157,8 +158,8 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState).save(
-        HypothesisState()
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(search=HypothesisState())
     )
 
     response = _service(project, run_id).execute(PerformanceQuery())

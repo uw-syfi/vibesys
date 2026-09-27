@@ -23,6 +23,7 @@ from vibesys.orchestrations.hypothesis_readmodel import (
     project_committed_run_view,
     project_run_view,
 )
+from vibesys.orchestrations.single.models import SingleState
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -35,12 +36,11 @@ from vibesys.search.hypothesis.state import (
     HypothesisResolution,
     HypothesisReview,
     HypothesisState,
-    HypothesisStateStore,
     HypothesisStrategy,
 )
 from vibesys.search.hypothesis.transitions import reproject_run_evidence
 from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StateSlot
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -647,16 +647,21 @@ def _project_run(
     return vibesys_project, manifest.run_id
 
 
+def _single_state_slot(project: Project, run_id: str) -> StateSlot[SingleState]:
+    return project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState)
+
+
 def test_service_reads_only_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    portable = project.state.portable_namespace(run_id, "single")
-    portable.slot("state.json", HypothesisState).save(
-        HypothesisState(
-            active_hypothesis_id="H-02",
-            hypotheses=[
-                _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01")]),
-                _hypothesis("H-02", 2),
-            ],
+    _single_state_slot(project, run_id).save(
+        SingleState(
+            search=HypothesisState(
+                active_hypothesis_id="H-02",
+                hypotheses=[
+                    _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01")]),
+                    _hypothesis("H-02", 2),
+                ],
+            )
         )
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
@@ -672,7 +677,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState)
+    store = _single_state_slot(project, run_id)
     initial = HypothesisState(
         experiment_revision=1,
         hypotheses=[
@@ -680,7 +685,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
             _hypothesis("H-02", 2, last_experiment_revision=1),
         ],
     )
-    store.save(initial)
+    store.save(SingleState(search=initial))
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     full = parts.api.execute(ExperimentQuery())
     assert full.experiment_update is not None
@@ -689,7 +694,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
     changed.experiment_revision = 2
     changed.hypotheses[1].last_experiment_revision = 2
     changed.hypotheses[1].plan.task = "project this row only"
-    store.save(changed)
+    store.save(SingleState(search=changed))
     parts.publish_committed_view(
         project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
         changed_keys=("H-02",),
@@ -699,7 +704,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
         data=ExperimentsChangedData(reason="round_persisted", revision=2),
     )
     monkeypatch.setattr(
-        HypothesisStateStore,
+        StateSlot,
         "load_optional",
         lambda _self: (_ for _ in ()).throw(AssertionError("unexpected state reload")),
     )
@@ -725,19 +730,19 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = project.state.portable_namespace(run_id, "single").slot("state.json", HypothesisState)
+    store = _single_state_slot(project, run_id)
     initial = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
-    store.save(initial)
+    store.save(SingleState(search=initial))
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     loaded = Event()
     release = Event()
-    original_load = HypothesisStateStore.load_optional
+    original_load = StateSlot.load_optional
     load_count = 0
 
-    def delayed_load(current_store: HypothesisStateStore) -> HypothesisState | None:
+    def delayed_load(current_store: StateSlot[SingleState]) -> SingleState | None:
         nonlocal load_count
         load_count += 1
         state = original_load(current_store)
@@ -745,7 +750,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         assert release.wait(timeout=5)
         return state
 
-    monkeypatch.setattr(HypothesisStateStore, "load_optional", delayed_load)
+    monkeypatch.setattr(StateSlot, "load_optional", delayed_load)
     with ThreadPoolExecutor(max_workers=1) as executor:
         response_future = executor.submit(parts.api.execute, ExperimentQuery())
         assert loaded.wait(timeout=5)
@@ -753,7 +758,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         changed.experiment_revision = 2
         changed.hypotheses[0].last_experiment_revision = 2
         changed.hypotheses[0].plan.task = "new committed contents"
-        store.save(changed)
+        store.save(SingleState(search=changed))
         parts.publish_committed_view(
             project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
             changed_keys=("H-01",),
@@ -779,9 +784,7 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-first", 1, last_experiment_revision=1)],
     )
-    first_project.state.portable_namespace(run_id, "single").slot(
-        "state.json", HypothesisState
-    ).save(first_state)
+    _single_state_slot(first_project, run_id).save(SingleState(search=first_state))
     parts = build_server_parts(
         first_project.state.log_directory(run_id),
         project=first_project,
@@ -795,9 +798,7 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-second", 1, last_experiment_revision=1)],
     )
-    second_project.state.portable_namespace(run_id, "single").slot(
-        "state.json", HypothesisState
-    ).save(second_state)
+    _single_state_slot(second_project, run_id).save(SingleState(search=second_state))
     parts.attach(
         second_project.state.log_directory(run_id),
         project=second_project,
@@ -840,24 +841,25 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
 
 def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    portable = project.state.portable_namespace(run_id, "single")
-    portable.slot("state.json", HypothesisState).save(
-        HypothesisState(
-            hypotheses=[
-                _hypothesis(
-                    "H-01",
-                    1,
-                    rounds=[
-                        _round(
-                            1,
-                            hypothesis_id="H-01",
-                            perf_metric=42.0,
-                            perf_unit="ops_s",
-                            passed=True,
-                        )
-                    ],
-                )
-            ]
+    _single_state_slot(project, run_id).save(
+        SingleState(
+            search=HypothesisState(
+                hypotheses=[
+                    _hypothesis(
+                        "H-01",
+                        1,
+                        rounds=[
+                            _round(
+                                1,
+                                hypothesis_id="H-01",
+                                perf_metric=42.0,
+                                perf_unit="ops_s",
+                                passed=True,
+                            )
+                        ],
+                    )
+                ]
+            )
         )
     )
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
@@ -876,7 +878,6 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
         metric_space=MetricSpace(objectives=(Objective("ops_s", "max"),))
     )
     project, run_id = _project_run(tmp_path / "project", configuration)
-    portable = project.state.portable_namespace(run_id, "single")
     state = reproject_run_evidence(
         HypothesisState(
             metrics=MetricSpace(
@@ -928,7 +929,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
             ],
         )
     )
-    portable.slot("state.json", HypothesisState).save(state)
+    _single_state_slot(project, run_id).save(SingleState(search=state))
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     entries = parts.api.execute(ExperimentQuery()).experiments
 
