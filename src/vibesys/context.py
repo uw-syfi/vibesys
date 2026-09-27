@@ -208,7 +208,7 @@ def _resume_orchestration_decision(
         [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
     ],
 ) -> OrchestrationResumeDecision:
-    """Check the generic v4 identity and delegate option policy to its owner."""
+    """Check the current manifest identity and delegate option policy to its owner."""
     if recorded.run_environment != run_environment_record(environment):
         raise ConfigurationError(
             ConfigurationDiagnostic(

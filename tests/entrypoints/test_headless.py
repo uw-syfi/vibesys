@@ -1394,7 +1394,7 @@ def test_agent_resume_restores_its_configuration(
 
 
 @pytest.mark.parametrize("loop_kind", ["agent", "profile-guided"])
-def test_v4_agent_resume_restores_config_constraints_and_budget(
+def test_v5_agent_resume_restores_config_constraints_and_budget(
     loop_kind: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1403,7 +1403,7 @@ def test_v4_agent_resume_restores_config_constraints_and_budget(
     if loop_kind == "profile-guided":
         with (project / "vibesys.input.toml").open("a") as input_manifest:
             input_manifest.write('\n[profile_guided]\ncommand = ["python", "profile.py"]\n')
-    run_id = f"20260811-120000-11111111-{loop_kind}-v4"
+    run_id = f"20260811-120000-11111111-{loop_kind}-v5"
     configuration = _agent_configuration(
         orchestration_id=(
             "profile-guided-single-agent" if loop_kind == "profile-guided" else "single-agent"
@@ -1477,12 +1477,12 @@ def test_plain_resume_restores_its_configuration(
     assert args.profiler is ProfilerKind.NONE
 
 
-def test_v4_plain_resume_restores_options_and_budget(
+def test_v5_plain_resume_restores_options_and_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _write_input_project(tmp_path)
-    run_id = "20260811-120000-11111111-plain-v4"
+    run_id = "20260811-120000-11111111-plain-v5"
     configuration = _plain_configuration()
     store = Project.open(project).state
     store.create_project(project.name)
@@ -1553,12 +1553,12 @@ def test_evolve_resume_restores_its_configuration(
     ]
 
 
-def test_v4_evolve_resume_restores_openevolve_settings_and_budget(
+def test_v5_evolve_resume_restores_openevolve_settings_and_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _write_input_project(tmp_path)
-    run_id = "20260811-120000-11111111-evolve-v4"
+    run_id = "20260811-120000-11111111-evolve-v5"
     configuration = _evolve_configuration()
     store = Project.open(project).state
     store.create_project(project.name)
@@ -1680,10 +1680,10 @@ def test_resume_rejects_changes_to_immutable_configuration(
 
 
 def _write_unsupported_schema_run(project: Path, run_id: str) -> None:
-    """Rewrite a v4 manifest with an unsupported schema version."""
+    """Rewrite a v5 manifest with an unsupported schema version."""
     path = project / ".vibesys" / "state" / "runs" / run_id / "run.json"
     raw = json.loads(path.read_text())
-    raw["schema_version"] = 3
+    raw["schema_version"] = 4
     path.write_text(json.dumps(raw, indent=2, sort_keys=True))
 
 
@@ -1789,7 +1789,7 @@ def test_resume_rejects_an_unsupported_run_schema(
         parse_cli_invocation(["--resume", run_id])
 
     assert exc.value.diagnostic.code == "unsupported_run_schema"
-    assert "requires version 4" in exc.value.diagnostic.message
+    assert "requires version 5" in exc.value.diagnostic.message
     assert run_id in exc.value.diagnostic.message
 
 

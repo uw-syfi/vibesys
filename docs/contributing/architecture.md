@@ -23,7 +23,7 @@ plugins. Tach records each policy dependency. Orchestration-specific logic,
 including agent configuration and resume policy, belongs in `vibesys`, not
 `vs_project`. `vs_project` owns generic project layout and persistence
 operations.
-The v4 manifest separates policy-specific descriptor options from the generic
+The v5 manifest separates policy-specific descriptor options from the generic
 `execution` record. The latter is derived from `RunRequest` and resolved host
 settings, including the concrete profiler. Resume checks it before setup.
 Trusted gates and metric contracts live in `vibesys.evaluators`; policies call

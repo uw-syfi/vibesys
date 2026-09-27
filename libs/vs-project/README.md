@@ -12,7 +12,7 @@ interpretation belong in the owning `src/vibesys/loops/<strategy>` package or
 `src/vibesys/orchestration`, not in `vs_project`. Run manifests use a
 versioned `OrchestrationDescriptor`; this package validates its portable JSON
 envelope, while the owning orchestration validates the options and decides
-whether a resumed run may change them. Version 4 is the only supported run
+whether a resumed run may change them. Version 5 is the only supported run
 manifest format; older schemas fail explicitly.
 
 ## Usage

@@ -3,9 +3,9 @@
 Every run starts from one frozen `RunRequest`. Its `orchestration` descriptor
 carries a stable ID, `config_version`, and JSON policy options; `RunRequest`
 itself owns host execution settings (model, agent/compute backends,
-provider, profiler selection, feature flags, skill directories) that a
+provider, profiler selection, and skill directories) that a
 policy reads through `ctx.request` rather than duplicating as descriptor
-options. Only v4 run manifests are supported.
+options. Only v5 run manifests are supported.
 
 `src/vibesys` splits into five layers. Dependency direction is strict: a
 layer imports only the ones below it.

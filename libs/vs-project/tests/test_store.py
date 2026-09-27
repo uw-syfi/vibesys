@@ -102,7 +102,7 @@ def _run(store: Project, *, minute: int = 0) -> OrchestrationRunManifest:
     return manifest
 
 
-def test_version_4_run_manifest_round_trips_without_loop_configuration(tmp_path: Path) -> None:
+def test_version_5_run_manifest_round_trips_without_loop_configuration(tmp_path: Path) -> None:
     store = _store(tmp_path)
     new_run = _run(store)
 
@@ -131,7 +131,7 @@ def test_orchestration_descriptor_rejects_invalid_envelope(field: str, value: ob
         OrchestrationDescriptor.model_validate(payload, strict=True)
 
 
-def test_version_4_run_rejects_unknown_keys_on_load(tmp_path: Path) -> None:
+def test_version_5_run_rejects_unknown_keys_on_load(tmp_path: Path) -> None:
     store = _store(tmp_path)
     run = _run(store)
     path = _run_manifest_path(store, run.run_id)
@@ -143,7 +143,7 @@ def test_version_4_run_rejects_unknown_keys_on_load(tmp_path: Path) -> None:
         store.state.load_run(run.run_id)
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 99])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 99])
 def test_loading_unknown_run_schema_fails_explicitly(tmp_path: Path, version: int) -> None:
     store = _store(tmp_path)
     run = _run(store)
@@ -153,6 +153,18 @@ def test_loading_unknown_run_schema_fails_explicitly(tmp_path: Path, version: in
     path.write_text(json.dumps(raw), encoding="utf-8")
 
     with pytest.raises(ProjectStateError, match=f"unsupported run schema version {version}"):
+        store.state.load_run(run.run_id)
+
+
+def test_version_5_run_rejects_removed_feature_flags_field(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _run(store)
+    path = _run_manifest_path(store, run.run_id)
+    raw = json.loads(path.read_text())
+    raw["execution"]["feature_flags"] = {"example": True}
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ProjectStateError, match="feature_flags"):
         store.state.load_run(run.run_id)
 
 

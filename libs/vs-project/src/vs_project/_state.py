@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 PROJECT_SCHEMA_VERSION: Literal[1] = 1
-RUN_SCHEMA_VERSION: Literal[4] = 4
+RUN_SCHEMA_VERSION: Literal[5] = 5
 _CONFIG_DIRECTORY_NAME = project_paths.CONFIGURATION_DIRECTORY_NAME
 _STATE_DIRECTORY_PARTS = project_paths.STATE_DIRECTORY_PARTS
 _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
@@ -1061,7 +1061,7 @@ class ProjectState:
         run_id: str,
         orchestration: OrchestrationDescriptor,
     ) -> None:
-        """Update version 4 options without changing orchestration identity or version.
+        """Update current options without changing orchestration identity or version.
 
         The orchestration owns option validation and resume compatibility.
         """

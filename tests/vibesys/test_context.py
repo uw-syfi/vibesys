@@ -564,7 +564,7 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Pa
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
+def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:

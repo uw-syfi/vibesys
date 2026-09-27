@@ -1,4 +1,4 @@
-"""Restore one v4 descriptor-backed run before building its request."""
+"""Restore one current-generation run before building its request."""
 
 from __future__ import annotations
 
@@ -329,7 +329,7 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
         )
     if not isinstance(manifest, OrchestrationRunManifest):
         _configuration_error(
-            f"Run {run_id!r} uses an unsupported run schema; only v4 runs can resume",
+            f"Run {run_id!r} uses an unsupported run schema; only v5 runs can resume",
             code="unsupported_run_schema",
             stage="resume_resolution",
         )

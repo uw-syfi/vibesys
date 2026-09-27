@@ -200,7 +200,7 @@ class HypothesisState(BaseModel):
 
 
 class HypothesisStateStore:
-    """Persist hypothesis search state in the run's portable v4 namespace."""
+    """Persist hypothesis search state in the run's portable namespace."""
 
     def __init__(self, namespace: StateNamespace) -> None:
         """Bind the single typed state slot in the supplied namespace."""

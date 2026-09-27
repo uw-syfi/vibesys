@@ -355,7 +355,7 @@ SkyPilot profile selection, profiles-file path, and executable are machine-local
 launch policy. Supply them again on resume when they are not available from the
 current CLI/config file.
 
-Only v4 descriptor-backed runs can be resumed. Earlier run schemas are not
+Only v5 descriptor-backed runs can be resumed. Earlier run schemas are not
 supported by this CLI.
 
 ## Profiler

@@ -110,14 +110,13 @@ class RunExecutionRecord(_CommittedManifest):
     inner_model: PortableText | None = None
     inner_reasoning_effort: PortableText | None = None
     perf_eval_load_levels: list[dict[str, int]] | None = None
-    feature_flags: dict[str, bool] = Field(default_factory=dict)
     skills_dirs: list[str] = Field(default_factory=list)
 
 
 class OrchestrationRunManifest(_CommittedManifest):
-    """Version 4 run manifest independent of orchestration implementation."""
+    """Version 5 run manifest independent of orchestration implementation."""
 
-    schema_version: Literal[4]
+    schema_version: Literal[5]
     run_id: Identifier
     project_id: Identifier
     task_name: Identifier | None = None

@@ -479,7 +479,7 @@ def test_session_executes_registered_policy_with_canonical_request(tmp_path: Pat
     started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
     assert isinstance(started.data, RunStartedData)
     assert started.data.outer_loop == "team-search"
-    assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 4
+    assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 5
 
 
 class _Evidence(BaseModel):

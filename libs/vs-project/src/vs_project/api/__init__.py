@@ -4,7 +4,7 @@
 errors describe its configuration, run state, Git integration, and task paths.
 ``strip_ansi`` is also public for consumers of ``RunLogger`` output.
 
-Runs use one version 4 manifest containing an ``OrchestrationDescriptor``.
+Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 """
 
 from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents

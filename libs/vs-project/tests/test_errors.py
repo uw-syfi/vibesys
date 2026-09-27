@@ -231,9 +231,9 @@ _CASES: list[tuple[str, tuple[object, ...], str]] = [
     ("state_entry_symlink", (_P,), "VibeSys state must not contain symlinks: /proj/x"),
     (
         "unsupported_run_schema",
-        (_P, 1, 4),
-        "Run metadata at /proj/x records unsupported run schema version 1; "
-        "this VibeSys requires version 4",
+        (_P, 4, 5),
+        "Run metadata at /proj/x records unsupported run schema version 4; "
+        "this VibeSys requires version 5",
     ),
     (
         "orchestration_identity_change",
