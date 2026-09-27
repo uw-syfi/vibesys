@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints import cli
+from server.runtime import WebInstanceRecord
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
-from server.transport.discovery import WebInstanceRecord
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
