@@ -12,7 +12,7 @@ layer imports only the ones below it.
 
 | Layer | Holds | Must not hold |
 |---|---|---|
-| `loops/<strategy>/` | orchestration: which roles run, in what order, with which workspace and search tools | effects outside `RunContext`; imports of another strategy |
+| `orchestrations/<strategy>/` | orchestration policy: which roles run, in what order, with which workspace and search tools | effects outside `RunHost`; imports of another strategy |
 | `roles/` | `Role` declarations, typed prompt context models, reply schemas (data only) | turn execution, sequencing, state transitions |
 | `search/` | pure, deterministic guidance: `hypothesis/`, `profile_focus/`, `population/` | `RunContext`, agents, prompts, filesystem, clocks, global RNG |
 | `prompts/` | every Jinja template, under `roles/<role>/`, `loops/<strategy>/`, and a `shared/` fallback root | Python policy |
@@ -25,26 +25,16 @@ mechanics libraries below it). A module in a layer may depend only on
 modules in the same or a strictly lower layer; `uv run tach check` fails a
 PR that adds an upward edge.
 
-## loops/: strategy replaceability
+## orchestrations/: policy replaceability
 
-A strategy is its folder + one registry line + its own prompt folder. Four
-strategy folders are registered today, each a peer of the others: `multi-agent`
-(`loops/multi/`), `single-agent` (`loops/single/`), `plain`
-(`loops/issue_queue/`), and `evolve` (`loops/evolve/`). `loops/registry.py`
-is the only module that imports every strategy; peers never import each
-other and nothing outside `loops/` imports a strategy package directly
-(`vibesys.loops.registry.built_in_orchestrations()` is the only doorway in).
+A policy package declares an `OrchestrationPlugin` and its prompt folder.
+Built-in policies live in `orchestrations/{multi,single,issue_queue,evolve}`;
+the product `vibesys.plugin_catalog` composes them. Policy packages never
+import each other.
 
-Profiling is an option of `multi` and `single`
-(`AgentOrchestrationOptions.profile_guided`), not a separate strategy
-folder: when set, a strategy composes `roles/` with `search/hypothesis` and
-`search/profile_focus` directly. `profile-guided-multi-agent` and
-`profile-guided-single-agent` stay registered as presets, each a peer
-registry entry that requires `profile_guided` and keeps its own
-orchestration ID and state namespace (`profile_multi`, `profile_single`) so
-existing runs and option files keep working unchanged; they run the same
-`Orchestrator` subclass and prompts as `multi`/`single`, not a separate
-folder.
+Profiling has explicit preset plugins for multi and single. Each preset uses
+its own option contract and stable orchestration ID while sharing its base
+policy's state model and role definitions.
 
 ## roles/: declarations, not execution
 
@@ -221,24 +211,18 @@ construction happens, so no strategy hand-builds an `MCPServerSpec`.
 
 ## Adding a strategy
 
-First check whether this is really a new strategy or a variant of an
-existing one. If it runs the same round control and prompts as an existing
-strategy with one policy toggle on (as `profile-guided-multi-agent` does
-for `multi`), add an option plus a registered preset instead: extend
-`AgentOrchestrationOptions`, branch on it inside the existing strategy
-folder, and register a second `registry.register(...)` line with its own
-orchestration ID, state namespace, and projector, pointing at an
-`Orchestrator` subclass in the *same* folder. Do not start a new
-`loops/<strategy>/` folder for a variant; that only earns its own folder
-when its round control or prompts genuinely diverge.
+First check whether this is really a new strategy or a variant of an existing
+one. A variant should be an explicit `OrchestrationPlugin` preset with its own
+options and stable ID, sharing policy modules only where behavior is actually
+common.
 
 For a genuinely new strategy:
 
-1. Create `loops/<strategy>/` with an `Orchestrator` implementing
-   `run(ctx) -> bool` and (if it has durable state) a projector.
+1. Create `orchestrations/<strategy>/` with the options, state, and
+   `OrchestrationPlugin` declaration.
 2. Create `prompts/loops/<strategy>/` for any templates not already covered
    by `prompts/shared/`.
-3. Register it in `loops/registry.py`: one call to `registry.register(...)`.
+3. Register it in `vibesys.plugin_catalog`.
 4. Reuse existing `roles/` and `search/` where the strategy's steps match an
    existing role family or search style; add a new role/search module only
    for genuinely new behavior.
@@ -264,9 +248,9 @@ scans (no import of the scanned packages required):
 
 | Test | Checks |
 |---|---|
-| `test_loops_replaceability.py` | no strategy package imports another; nothing outside `loops/` imports a strategy directly |
+| `test_orchestrations_replaceability.py` | no policy package imports another; only the plugin catalog imports policy packages |
 | `test_prompt_folder_registry_parity.py` | every registered strategy has a `prompts/loops/<strategy>/` folder, and vice versa |
-| `test_roles_boundaries.py` | `roles/` never imports `vibesys.orchestration`/`vibesys.loops`; the role catalog has no dead entries |
+| `test_roles_boundaries.py` | `roles/` never imports orchestration policy; the role catalog has no dead entries |
 | `test_search_purity.py` | `search/` never imports `orchestration`/`loops`/`roles`/`prompts`, does no I/O, and never reads or mutates global RNG state |
 
 ## Testing

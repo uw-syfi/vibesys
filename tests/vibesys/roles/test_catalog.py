@@ -9,7 +9,6 @@ from vibesys import roles
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.runtime import Role
 
-_LOOPS_SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys" / "loops"
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -46,27 +45,12 @@ def _role_search_names() -> dict[int, str]:
     return by_id
 
 
-def test_every_role_in_the_catalog_is_used_by_a_registered_strategy() -> None:
-    """Every ``Role`` any strategy uses lives in ``roles/``; the converse:
-    every ``Role`` declared in ``roles/`` is reachable from a registered
-    strategy's ``loops/`` folder, so the catalog carries no dead roles.
-    """
+def test_every_role_in_the_catalog_has_a_discoverable_declaration() -> None:
+    """Every role in the role catalog has a module-level declaration."""
     search_names = _role_search_names()
     assert {id(role) for role in roles.ALL_ROLES} <= search_names.keys(), (
         "a Role in roles.ALL_ROLES has no discoverable module-level name"
     )
-
-    loops_source = "\n".join(
-        path.read_text() for path in _LOOPS_SRC.rglob("*.py") if "roles" not in path.parts
-    )
-    unused = sorted(
-        {
-            search_names[id(role)]
-            for role in roles.ALL_ROLES
-            if not re.search(rf"\b{re.escape(search_names[id(role)])}\b", loops_source)
-        }
-    )
-    assert not unused, f"roles declared but never referenced from loops/: {unused}"
 
 
 def test_every_role_has_a_real_template_file() -> None:

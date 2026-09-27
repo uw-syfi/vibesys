@@ -5,7 +5,7 @@ instances that share a conceptual job (planning, implementing, judging,
 profiling, ...) across strategies, naming a template, a pydantic reply type,
 a fallback, workspace-access policy, and session policy. No turn execution,
 sequencing, or state transitions live here -- those stay in ``ctx.agents.turn``
-(``vibesys.orchestration.runtime``) and in each strategy's ``loops/<strategy>/``
+(``vibesys.orchestration.runtime``) and in each strategy's ``orchestrations/<strategy>/``
 folder.
 
 Different prompts or reply types are always different roles, even when two

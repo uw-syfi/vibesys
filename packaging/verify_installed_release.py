@@ -22,9 +22,9 @@ from typing import Never, cast
 from entrypoints.launcher import bundled_tui
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.input_project import materialize_input_project
-from vibesys.loops.registry import built_in_orchestrations
 from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.view import RunStatus
+from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.resource_paths import (
     default_skill_roots,

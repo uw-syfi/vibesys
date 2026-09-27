@@ -17,8 +17,7 @@ module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
 `vibesys.orchestration` owns the internal contract, runner, runtime, and generic
 run projections. Explicit orchestration plugins, including the issue queue,
-live under `vibesys.orchestrations`; remaining legacy implementations live
-under sibling `vibesys.loops` packages. `vibesys.plugin_catalog` registers the
+live under `vibesys.orchestrations`. `vibesys.plugin_catalog` registers the
 plugins. Tach records each policy dependency. Orchestration-specific logic,
 including agent configuration and resume policy, belongs in `vibesys`, not
 `vs_project`. `vs_project` owns generic project layout and persistence
@@ -114,24 +113,6 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.evaluators --> vibesys.render
-    vibesys.loops.registry --> vibesys.plugin_catalog
-    vibesys.loops.single --> vibesys
-    vibesys.loops.single --> vibesys.context
-    vibesys.loops.single --> vibesys.domains
-    vibesys.loops.single --> vibesys.errors
-    vibesys.loops.single --> vibesys.evaluators
-    vibesys.loops.single --> vibesys.orchestration.artifacts
-    vibesys.loops.single --> vibesys.orchestration.memory
-    vibesys.loops.single --> vibesys.orchestration.progress_log
-    vibesys.loops.single --> vibesys.orchestration.runtime
-    vibesys.loops.single --> vibesys.orchestration.view
-    vibesys.loops.single --> vibesys.orchestrations.agent_options
-    vibesys.loops.single --> vibesys.orchestrations.hypothesis_readmodel
-    vibesys.loops.single --> vibesys.prompts
-    vibesys.loops.single --> vibesys.roles
-    vibesys.loops.single --> vibesys.runtime
-    vibesys.loops.single --> vibesys.search.hypothesis
-    vibesys.loops.single --> vibesys.search.profile_focus
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration._host --> vibesys
@@ -415,27 +396,6 @@ graph TD
     vibesys.evaluators --> vs_loop_state
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
-    vibesys.loops.registry --> vibesys.plugin_catalog
-    vibesys.loops.single --> vibesys
-    vibesys.loops.single --> vibesys.context
-    vibesys.loops.single --> vibesys.domains
-    vibesys.loops.single --> vibesys.errors
-    vibesys.loops.single --> vibesys.evaluators
-    vibesys.loops.single --> vibesys.orchestration.artifacts
-    vibesys.loops.single --> vibesys.orchestration.memory
-    vibesys.loops.single --> vibesys.orchestration.progress_log
-    vibesys.loops.single --> vibesys.orchestration.runtime
-    vibesys.loops.single --> vibesys.orchestration.view
-    vibesys.loops.single --> vibesys.orchestrations.agent_options
-    vibesys.loops.single --> vibesys.orchestrations.hypothesis_readmodel
-    vibesys.loops.single --> vibesys.prompts
-    vibesys.loops.single --> vibesys.roles
-    vibesys.loops.single --> vibesys.runtime
-    vibesys.loops.single --> vibesys.search.hypothesis
-    vibesys.loops.single --> vibesys.search.profile_focus
-    vibesys.loops.single --> vs_agent
-    vibesys.loops.single --> vs_loop_state
-    vibesys.loops.single --> vs_project
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration._host --> vibesys

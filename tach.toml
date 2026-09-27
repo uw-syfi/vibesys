@@ -266,16 +266,6 @@ layer = "roles_search"
 depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population", "vibesys.search.hypothesis"]
 
 [[modules]]
-path = "vibesys.loops"
-layer = "loops"
-depends_on = []
-
-[[modules]]
-path = "vibesys.loops.single"
-layer = "loops"
-depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.evaluators", "vibesys.orchestrations.agent_options", "vibesys.orchestrations.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory", "vibesys.orchestration.artifacts"]
-
-[[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
@@ -533,11 +523,6 @@ depends_on = ["vibesys", "vibesys.errors", "vibesys.evaluators", "vibesys.orches
 path = "vibesys.orchestrations.hypothesis_readmodel"
 layer = "loops"
 depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state", "vs_runtime"]
-
-[[modules]]
-path = "vibesys.loops.registry"
-layer = "loops"
-depends_on = ["vibesys.plugin_catalog"]
 
 [[modules]]
 # Thin product composition: in-repository plugins plus the temporary private

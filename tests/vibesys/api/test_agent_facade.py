@@ -12,9 +12,9 @@ from vibesys.api import agent as agent_api
 def test_generic_api_import_does_not_load_builtin_policies() -> None:
     script = (
         "import sys, vibesys.api; "
-        "assert 'vibesys.loops.registry' not in sys.modules; "
-        "assert not any(name.startswith(('vibesys.loops.multi', "
-        "'vibesys.loops.single')) for name in sys.modules)"
+        "assert 'vibesys.plugin_catalog' not in sys.modules; "
+        "assert not any(name.startswith(('vibesys.orchestrations.multi', "
+        "'vibesys.orchestrations.single')) for name in sys.modules)"
     )
     subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; The subprocess runs the current interpreter on a fixed script literal.
 

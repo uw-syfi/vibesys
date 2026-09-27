@@ -1,10 +1,9 @@
 """Shared plumbing for golden snapshots of agent-facing prompts, progress-board
 files, and core events.
 
-These snapshots exist to prove behavior preservation across the
-``orchestration-simplify`` refactor: capture exactly what an agent reads and
-exactly what the workspace/event stream look like after a scripted round,
-before the loops/ layers move, then diff the same capture after each phase.
+These snapshots capture exactly what an agent reads and what the workspace
+and event stream look like after a scripted round. They guard agent-visible
+policy behavior across implementation changes.
 
 Every snapshot is keyed by ``(strategy, role_or_file, scenario)``, never by an
 internal function or class name, so the fixture survives the refactor.

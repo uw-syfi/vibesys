@@ -1,1 +1,3 @@
 examples/** -linguist-documentation
+# Golden text fixtures preserve exact agent-visible trailing newlines.
+tests/vibesys/golden/snapshots/** whitespace=-blank-at-eof

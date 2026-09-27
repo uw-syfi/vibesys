@@ -220,6 +220,29 @@ def test_plain_timeout_golden_through_explicit_plugin(tmp_path: Path) -> None:
     )
 
 
+def test_plain_gate_golden_through_explicit_plugin(tmp_path: Path) -> None:
+    input_root = _golden_input(tmp_path / "input")
+    designer = _client(backend_name="claude")
+    designer.enqueue("orchestrator", _plan())
+    implementer = _client(backend_name="claude")
+    implementer.enqueue("implementer", _combined())
+
+    status, run_id, workspace = execute(
+        input_root,
+        [designer, implementer],
+        options_override=options(max_rounds=1, interface="inprocess"),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    _assert_golden(
+        strategy=_STRATEGY,
+        scenario="gate",
+        calls=(designer, implementer),
+        run_id=run_id,
+        workspace=workspace,
+    )
+
+
 def test_profile_single_pass_golden_through_explicit_plugin(tmp_path: Path) -> None:
     input_root = _golden_input(tmp_path / "input")
     designer = _client()
@@ -268,6 +291,53 @@ def test_profile_single_retry_golden_through_explicit_plugin(tmp_path: Path) -> 
     _assert_golden(
         strategy="profile_single_plugin",
         scenario="retry_then_pass",
+        calls=(designer, implementer),
+        run_id=run_id,
+        workspace=workspace,
+    )
+
+
+def test_profile_single_gate_golden_through_explicit_plugin(tmp_path: Path) -> None:
+    input_root = _golden_input(tmp_path / "input")
+    designer = _client(backend_name="claude")
+    designer.enqueue("orchestrator", _plan())
+    implementer = _client(backend_name="claude")
+    implementer.enqueue("implementer", _combined())
+
+    status, run_id, workspace = execute(
+        input_root,
+        [designer, implementer],
+        options_override=profile_options(),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    _assert_golden(
+        strategy="profile_single_plugin",
+        scenario="gate",
+        calls=(designer, implementer),
+        run_id=run_id,
+        workspace=workspace,
+    )
+
+
+def test_profile_single_timeout_golden_through_explicit_plugin(tmp_path: Path) -> None:
+    input_root = _golden_input(tmp_path / "input")
+    designer = _client()
+    designer.enqueue("orchestrator", _plan())
+    implementer = _client()
+    implementer.fail("implementer", AgentTurnTimeoutError(30.0), times=1)
+    implementer.enqueue("implementer", _combined())
+
+    status, run_id, workspace = execute(
+        input_root,
+        [designer, implementer],
+        options_override=profile_options(),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    _assert_golden(
+        strategy="profile_single_plugin",
+        scenario="timeout",
         calls=(designer, implementer),
         run_id=run_id,
         workspace=workspace,

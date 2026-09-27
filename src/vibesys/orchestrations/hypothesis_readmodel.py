@@ -2,10 +2,8 @@
 
 The boundary models copy recorded facts without inferring resolutions. Lives
 directly under :mod:`vibesys.orchestrations`, not inside any one strategy
-folder, because every hypothesis-driven strategy's registered projector
-(``MultiProjector``, ``SingleProjector``, ``ProfileMultiProjector``,
-``ProfileSingleProjector``) shares it; strategies never import each other, so
-shared read-model logic cannot live inside one strategy's package.
+folder, because hypothesis-driven plugins share it; policy packages never
+import each other, so shared read-model logic cannot live inside one package.
 """
 
 from __future__ import annotations
