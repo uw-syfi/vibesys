@@ -5,7 +5,7 @@ Replaces the old file-materialization evidence path
 run's portable state and raw logs into the chat agent's sandbox for `rg`/
 `tail`/`jq`, this subprocess opens the run's own read-model
 (`vibesys.api.open_run_store`) and serves it as a handful of read-only MCP
-tools. A chat agent driver launches `python -m vibesys.api.chat_tools_server
+tools. A chat agent driver launches `python -m entrypoints.chat_tools_server
 --run-id <id> --project-root <path>` per `vibesys.api.session
 ._OpenedAgentEnvironment.investigation_tools`; this module rebuilds its own
 tool list from those two primitives as a standalone agent tool server.
@@ -34,17 +34,14 @@ Tool set:
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from vibesys.api.store import open_run_store
-from vibesys.orchestration.hypothesis.readmodel import agent_projection
+from vibesys.api import RunStore, open_run_store
+from vibesys.api.agent import agent_projection
 from vs_agent.api import ToolSpec, serve_stdio
 from vs_project.api import Project
-
-if TYPE_CHECKING:
-    from vibesys.api.store import RunStore
 
 
 class _NoArgs(BaseModel):

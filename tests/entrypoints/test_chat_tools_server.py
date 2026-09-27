@@ -1,4 +1,4 @@
-"""Direct unit tests for `vibesys.api.chat_tools_server`'s read-only MCP tools.
+"""Direct tests for the experiment-chat read-only MCP entrypoint.
 
 Build the tool list, register it on a bare `FastMCP` via
 `vs_agent.mcp_server.register_tool`, and call tools through
@@ -16,8 +16,8 @@ from uuid import UUID
 import pytest
 from mcp.server.fastmcp import FastMCP
 
+from entrypoints.chat_tools_server import build_parser, build_tools
 from vibesys.api import RunStatus, RunView
-from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis import OrchestratorPlan

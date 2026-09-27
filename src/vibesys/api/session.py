@@ -569,14 +569,14 @@ class _OpenedAgentEnvironment:
     def investigation_tools(self) -> tuple[ToolServerDescriptor, ...]:
         """Build the read-only tool server for investigating this run's history.
 
-        Launches `vibesys.api.chat_tools_server` with the project root
+        Launches `entrypoints.chat_tools_server` with the project root
         translated into this environment's own sandbox path
         (`self.agent_path`), so the subprocess -- which the agent's own
         driver spawns inside that sandbox -- can resolve it.
         """
         descriptor = expose_as_tools(
             name="vibesys-run",
-            entrypoint_module="vibesys.api.chat_tools_server",
+            entrypoint_module="entrypoints.chat_tools_server",
             entrypoint_args=(
                 "--run-id",
                 self.run_id,
