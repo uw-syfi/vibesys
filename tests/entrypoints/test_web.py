@@ -271,8 +271,10 @@ def test_run_live_demo_stages_replay_log_for_gateway(
 
     assert _run_live(args, tmp_path) == 0
     replay_log = cast("Path", captured["replay_log"])
-    assert replay_log.name == "run-events.jsonl"
+    runtime_dir = tmp_path / "clients" / "web" / ".vibesys-demo"
+    assert replay_log == runtime_dir / "run-events.jsonl"
     assert replay_log.read_text() == replay_source.read_text()
+    assert captured["instance"] == runtime_dir / "web-gateway.json"
     assert captured["project"] is None
     assert captured["task"] is None
 

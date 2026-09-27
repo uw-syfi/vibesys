@@ -8,7 +8,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +24,7 @@ _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
 _DEMO_LOG = Path("clients/tui/dev/fixtures/framework-events.jsonl")
+_DEMO_RUNTIME = Path("clients/web/.vibesys-demo")
 
 
 def _repository_root() -> Path:
@@ -163,7 +163,8 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         replay_source = (root / _DEMO_LOG).resolve()
         if not replay_source.is_file():
             raise SystemExit(f"vibesys web: demo event log does not exist: {replay_source}")  # noqa: TRY003  # lint-waiver: LW-101104 [TRY003]; report an incomplete source checkout before gateway startup
-        demo_dir = Path(tempfile.mkdtemp(prefix="vibesys-web-demo-"))
+        demo_dir = (root / _DEMO_RUNTIME).resolve()
+        demo_dir.mkdir(parents=True, exist_ok=True)
         replay_log = demo_dir / "run-events.jsonl"
         shutil.copy2(replay_source, replay_log)
         project = None

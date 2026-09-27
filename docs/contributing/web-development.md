@@ -47,16 +47,16 @@ uv run python -m entrypoints.web live --demo --open
 The command builds `clients/web`, starts a detached loopback gateway on port
 8765, and prints a capability-bearing URL. Open that URL in a browser. The
 gateway remains available until explicitly stopped, so the browser can inspect
-the completed state without an agent CLI or credentials.
+the completed state without an agent CLI or credentials. A second invocation
+from the same checkout reuses that gateway instead of competing for port 8765.
 
 Use `status` and `stop` with the instance path printed by the command when the
-gateway needs to be inspected or stopped. For `--demo`, the instance record is
-created in a temporary directory, so use the printed `Instance record` path
-rather than a path under the repository checkout:
+gateway needs to be inspected or stopped. For `--demo`, the ignored runtime
+directory is stable within the source checkout:
 
 ```bash
-uv run python -m entrypoints.web status --instance /path/from/Instance-record-output.json
-uv run python -m entrypoints.web stop --instance /path/from/Instance-record-output.json
+uv run python -m entrypoints.web status --instance clients/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
 ```
 
 Pass a real project and task for an operator-owned run. Additional VibeSys run

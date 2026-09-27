@@ -260,6 +260,7 @@ sandbox-*/
 # TypeScript client build/install output
 node_modules/
 clients/tui/dist/
+clients/web/.vibesys-demo/
 
 # TUI bundle staged into the package by setup.py's build_py step
 src/vibesys/_tui/

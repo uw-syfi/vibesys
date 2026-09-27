@@ -14,11 +14,12 @@ in its default browser. If the browser cannot be opened automatically, open the
 `VibeSys web UI ready` URL printed in the terminal.
 
 This command invokes the browser entrypoint directly. It does not start the
-OpenTUI client. The replay gateway remains detached until explicitly stopped;
-use the printed instance-record path to stop it:
+OpenTUI client. Re-running the command reuses the same live demo gateway. The
+gateway remains detached until explicitly stopped; its stable instance record
+is `clients/web/.vibesys-demo/web-gateway.json`:
 
 ```bash
-uv run python -m entrypoints.web stop --instance /path/from/output.json
+uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
 ```
 
 See [Web UI development](../../docs/contributing/web-development.md) for replay,
