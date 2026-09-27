@@ -20,6 +20,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     OrchestrationPlugin,
+    PluginProjection,
     ProfileExecution,
     RunHost,
     RunStatus,
@@ -32,8 +33,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.events import CoreEvent
-    from vibesys.orchestration.view import RunStatus as ViewRunStatus
-    from vibesys.orchestration.view import RunView
 
 
 class _State(BaseModel):
@@ -59,12 +58,18 @@ async def _orchestrate(run: RunHost, _options: BaseModel) -> RunStatus:
     return RunStatus.SUCCEEDED
 
 
+def _project_state(state: BaseModel) -> PluginProjection:
+    typed = _State.model_validate(state)
+    return PluginProjection(payload={"values": typed.values})
+
+
 PLUGIN = OrchestrationPlugin(
     id="state-probe",
     agents=(),
     options=_Options,
     orchestrate=_orchestrate,
     state=_State,
+    project=_project_state,
 )
 
 
@@ -135,57 +140,48 @@ def test_plugin_state_is_deep_copied_persisted_and_published(tmp_path: Path) -> 
 def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
+    registry = OrchestrationRegistry()
+    registry.register_plugin(PLUGIN)
 
     class _ProjectionError(RuntimeError):
         def __init__(self) -> None:
             super().__init__("projection failed")
 
-    class _FailingProjector:
-        def view(
-            self,
-            project: Project,
-            run_id: str,
-            *,
-            status: ViewRunStatus,
-            loop: str,
-        ) -> RunView:
-            del project, run_id, status, loop
-            raise _ProjectionError
-
-        def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> None:
-            del namespace, state, run_id
-            raise _ProjectionError
+    def fail_observer(_view: object, _changed: tuple[str, ...] | None) -> None:
+        raise _ProjectionError
 
     async def first_commit() -> str:
-        integration = LocalRunIntegration()
+        session = create_session(_request(project_root), sink=_discard_event, registry=registry)
+        session.on_committed_view(fail_observer)
+        session.start()
         try:
-            async with open_product_run_host(
-                _request(project_root),
-                integration,
-                plugin=PLUGIN,
-                projector=_FailingProjector(),
-            ) as run:
-                run_id = run.run_id
-                with pytest.raises(_ProjectionError, match="projection failed"):
-                    await run.state.commit(_State(values=[1]))
-                return run_id
+            with pytest.raises(_ProjectionError, match="projection failed"):
+                await session.await_result()
+            return session.view().run_id
         finally:
-            integration.close()
+            session.close()
 
     async def resume_and_commit(run_id: str) -> None:
-        integration = LocalRunIntegration()
         request = _request(project_root).model_copy(
             update={"resume": ResumeRef(run_id=run_id), "exp_name": None}
         )
+        session = create_session(request, sink=_discard_event, registry=registry)
+        session.start()
         try:
-            async with open_product_run_host(request, integration, plugin=PLUGIN) as run:
-                assert await run.state.load(_State) == _State(values=[1])
-                await run.state.commit(_State(values=[2]))
-                assert await run.state.load(_State) == _State(values=[2])
+            result = await session.await_result()
+            assert result.succeeded
         finally:
-            integration.close()
+            session.close()
 
-    asyncio.run(resume_and_commit(asyncio.run(first_commit())))
+    run_id = asyncio.run(first_commit())
+    stored = (
+        Project.open(project_root)
+        .state.portable_namespace(run_id, PLUGIN.id)
+        .slot("state.json", _State)
+        .load_optional()
+    )
+    assert stored == _State(values=[7])
+    asyncio.run(resume_and_commit(run_id))
 
 
 def test_public_session_composes_a_registered_plugin_with_typed_state(tmp_path: Path) -> None:

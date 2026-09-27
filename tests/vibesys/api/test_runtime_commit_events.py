@@ -18,8 +18,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vibesys.config import Config
-from vibesys.constants import ComputeBackend
+from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, create_session
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.orchestration.request import ResumeRef, RunRequest
@@ -29,7 +28,7 @@ from vibesys.profilers import ProfilerKind
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime.api import OrchestrationPlugin, RunHost
+from vs_runtime.api import OrchestrationPlugin, PluginProjection, ProjectedRound, RunHost
 from vs_runtime.api import RunStatus as PluginRunStatus
 
 if TYPE_CHECKING:
@@ -49,8 +48,29 @@ class _Options(BaseModel):
 
 
 async def _orchestrate(run: RunHost, options: BaseModel) -> PluginRunStatus:
-    del run, options
+    _Options.model_validate(options)
+    previous = await run.state.load(_FakeAgentState)
+    round_numbers = previous.round_numbers if previous is not None else ()
+    revision = previous.experiment_revision if previous is not None else 0
+    await run.state.commit(
+        _FakeAgentState(
+            round_numbers=(*round_numbers, len(round_numbers) + 1),
+            experiment_revision=revision + 1,
+        )
+    )
     return PluginRunStatus.SUCCEEDED
+
+
+def _project_state(state: BaseModel) -> PluginProjection:
+    typed = _FakeAgentState.model_validate(state)
+    return PluginProjection(
+        payload=None,
+        rounds=tuple(
+            ProjectedRound(number=number, status="completed", attempts=1, judge_verdict="pass")
+            for number in typed.round_numbers
+        ),
+        experiment_revision=typed.experiment_revision,
+    )
 
 
 _PLUGIN = OrchestrationPlugin(
@@ -59,6 +79,7 @@ _PLUGIN = OrchestrationPlugin(
     options=_Options,
     orchestrate=_orchestrate,
     state=_FakeAgentState,
+    project=_project_state,
 )
 
 
@@ -82,6 +103,10 @@ def _write_project(root: Path) -> None:
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
     )
+
+
+def _discard_event(event: object) -> None:
+    del event
 
 
 def _request(
@@ -152,43 +177,41 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
 
 
 def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None:
-    """A fresh `RunHost` on a resumed run only emits events for new work."""
+    """A fresh public session on a resumed run only emits events for new work."""
     project_root = tmp_path / "project"
     _write_project(project_root)
+    registry = OrchestrationRegistry()
+    registry.register_plugin(_PLUGIN)
 
     async def commit_round_one() -> str:
-        integration = LocalRunIntegration()
+        session = create_session(
+            _request(project_root), sink=_discard_event, registry=registry
+        )
+        session.start()
         try:
-            async with open_product_run_host(
-                _request(project_root),
-                integration,
-                projector=_FakeProjector(),
-                plugin=_PLUGIN,
-            ) as ctx:
-                await ctx.state.commit(_FakeAgentState(round_numbers=(1,), experiment_revision=1))
-                return ctx.run_id
+            result = await session.await_result()
+            return result.run_id
         finally:
-            integration.close()
+            session.close()
 
     run_id = asyncio.run(commit_round_one())
 
-    resumed_integration = LocalRunIntegration()
     captured: list[tuple[CoreEventType, object]] = []
-    resumed_integration.events.subscribe(lambda event: captured.append((event.type, event.data)))
 
     async def resume_and_commit_round_two() -> None:
-        async with open_product_run_host(
+        session = create_session(
             _request(project_root, resume=ResumeRef(run_id=run_id)),
-            resumed_integration,
-            projector=_FakeProjector(),
-            plugin=_PLUGIN,
-        ) as ctx:
-            await ctx.state.commit(_FakeAgentState(round_numbers=(1, 2), experiment_revision=2))
+            sink=lambda event: captured.append((event.type, event.data)),
+            registry=registry,
+        )
+        session.start()
+        try:
+            result = await session.await_result()
+            assert result.succeeded
+        finally:
+            session.close()
 
-    try:
-        asyncio.run(resume_and_commit_round_two())
-    finally:
-        resumed_integration.close()
+    asyncio.run(resume_and_commit_round_two())
 
     round_finished_events = [d for k, d in captured if k is CoreEventType.ROUND_FINISHED]
     assert len(round_finished_events) == 1  # only round 2 -- round 1 is not replayed

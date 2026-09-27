@@ -6,14 +6,20 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
-from vibesys.api import ComputeBackend, Config, OrchestrationDescriptor, ResumeRef, RunRequest
-from vibesys.composition import AGENT_TOOL_BINDINGS
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    OrchestrationDescriptor,
+    OrchestrationRegistry,
+    ResumeRef,
+    RunRequest,
+)
+from vibesys.api.testing import create_session
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueState
-from vibesys.orchestration.runner import run_plugin
 from vibesys.profilers import ProfilerKind
-from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import Project
+from vs_runtime.api import RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -22,9 +28,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vibesys.events import CoreEvent
     from vs_agent.api import AgentSpec
     from vs_agent.api.testing import FakeAgentClient
-    from vs_runtime.api import RunStatus
 
 
 class InterruptedTurnError(RuntimeError):
@@ -69,6 +75,10 @@ def agent_client_factory(
     return create
 
 
+def _discard_event(event: CoreEvent) -> None:
+    del event
+
+
 def execute(
     project_root: Path,
     clients: Sequence[FakeAgentClient],
@@ -100,22 +110,23 @@ def execute(
     )
 
     async def run() -> tuple[RunStatus, str, Path]:
-        integration = LocalRunIntegration()
+        registry = OrchestrationRegistry()
+        registry.register_plugin(PLUGIN)
+        session = create_session(
+            request,
+            sink=_discard_event,
+            registry=registry,
+            agent_client_factory=agent_client_factory(clients),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+        )
+        session.start()
         try:
-            status = await run_plugin(
-                request,
-                integration,
-                PLUGIN,
-                selected,
-                agent_client_factory=agent_client_factory(clients),
-                backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
-                agent_tool_bindings=AGENT_TOOL_BINDINGS,
-            )
-            workspace = _workspace_for(project_root, resume_run_id=resume_run_id)
-            run_id = Project.open(workspace).state.resolve_run().run_id
-            return status, run_id, workspace
+            result = await session.await_result()
         finally:
-            integration.close()
+            session.close()
+        workspace = _workspace_for(project_root, resume_run_id=resume_run_id)
+        status = RunStatus.SUCCEEDED if result.succeeded else RunStatus.FAILED
+        return status, result.run_id, workspace
 
     return asyncio.run(run())
 

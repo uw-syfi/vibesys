@@ -1,8 +1,4 @@
-"""Production-host fixture for explicit evolve persistence tests.
-
-This is the only evolve-plugin test helper that imports ``RunHost``. Remove
-it once ``create_session`` exposes injectable agent and compute factories.
-"""
+"""Public-session fixture for explicit evolve persistence tests."""
 
 from __future__ import annotations
 
@@ -10,16 +6,15 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
-from vibesys.config import Config
-from vibesys.constants import ComputeBackend
+from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
+from vibesys.api.testing import create_session
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.evolve import PLUGIN
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind
-from vibesys.run.host import open_product_run_host
-from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
+from vs_runtime.api import RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
@@ -28,9 +23,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vibesys.events import CoreEvent
     from vs_agent.api import AgentSpec
     from vs_agent.api.testing import FakeAgentClient
-    from vs_runtime.api import RunStatus
 
 
 class InterruptedTurnError(RuntimeError):
@@ -82,6 +77,10 @@ def agent_client_factory(
     return create
 
 
+def _discard_event(event: CoreEvent) -> None:
+    del event
+
+
 def execute(
     project_root: Path,
     clients: Sequence[FakeAgentClient],
@@ -113,19 +112,22 @@ def execute(
     )
 
     async def run() -> tuple[RunStatus, str, Path]:
-        integration = LocalRunIntegration()
+        registry = OrchestrationRegistry()
+        registry.register_plugin(PLUGIN)
+        session = create_session(
+            request,
+            sink=_discard_event,
+            registry=registry,
+            agent_client_factory=agent_client_factory(clients),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+        )
+        session.start()
         try:
-            async with open_product_run_host(
-                request,
-                integration,
-                agent_client_factory=agent_client_factory(clients),
-                backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
-                plugin=PLUGIN,
-            ) as host:
-                status = await PLUGIN.orchestrate(host, selected)
-                return status, host.run_id, host.workspaces.root.path
+            result = await session.await_result()
         finally:
-            integration.close()
+            session.close()
+        status = RunStatus.SUCCEEDED if result.succeeded else RunStatus.FAILED
+        return status, result.run_id, _workspace_for(project_root, resume_run_id=resume_run_id)
 
     return asyncio.run(run())
 
@@ -138,6 +140,14 @@ def load_state(project_root: Path, run_id: str) -> EvolveState | None:
         .slot("state.json", EvolveState)
         .load_optional()
     )
+
+
+def _workspace_for(project_root: Path, *, resume_run_id: str | None) -> Path:
+    if resume_run_id is not None:
+        return project_root
+    projects = list((project_root.parent / f"{project_root.name}-runs").iterdir())
+    assert len(projects) == 1
+    return projects[0]
 
 
 __all__ = ["InterruptedTurnError", "execute", "load_state", "options", "write_input"]

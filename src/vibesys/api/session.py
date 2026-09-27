@@ -44,7 +44,8 @@ if TYPE_CHECKING:
     from vibesys.orchestration.request import RunRequest
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
-    from vs_sandbox.api import ProjectPathPolicy, Sandbox
+    from vs_agent.api import AgentClientProtocol
+    from vs_sandbox.api import ComputeBackendImpl, ProjectPathPolicy, Sandbox
 
 
 class RunQuery(Protocol):
@@ -128,7 +129,25 @@ def create_session(
     object. Pass a registry to execute a custom
     orchestration ID; otherwise the built-in registry is used.
     """
-    return _LocalRunSession(request, sink=sink, registry=registry)
+    return _create_session(request, sink=sink, registry=registry)
+
+
+def _create_session(
+    request: RunRequest,
+    *,
+    sink: EventSink,
+    registry: OrchestrationRegistry | None = None,
+    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+) -> RunSession:
+    """Compose the product session with optional test-owned effect factories."""
+    return _LocalRunSession(
+        request,
+        sink=sink,
+        registry=registry,
+        agent_client_factory=agent_client_factory,
+        backend_factory=backend_factory,
+    )
 
 
 class _LocalRunSession:
@@ -145,6 +164,8 @@ class _LocalRunSession:
         *,
         sink: EventSink,
         registry: OrchestrationRegistry | None,
+        agent_client_factory: Callable[..., AgentClientProtocol] | None,
+        backend_factory: Callable[..., ComputeBackendImpl] | None,
     ) -> None:
         self._request = request
         self._sink = sink
@@ -162,11 +183,12 @@ class _LocalRunSession:
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
-        self._agent_client_factory = (
-            partial(build_agent_client, stub_response_factory=response_factory)
-            if response_factory is not None
-            else None
-        )
+        self._agent_client_factory = agent_client_factory
+        if self._agent_client_factory is None and response_factory is not None:
+            self._agent_client_factory = partial(
+                build_agent_client, stub_response_factory=response_factory
+            )
+        self._backend_factory = backend_factory
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -401,6 +423,7 @@ class _LocalRunSession:
                 open_agent_environment=self._open_agent_environment,
                 projector=self._registration.projector,
                 agent_client_factory=self._agent_client_factory,
+                backend_factory=self._backend_factory,
                 agent_tool_bindings=AGENT_TOOL_BINDINGS,
             )
             succeeded = outcome.value == "succeeded"
