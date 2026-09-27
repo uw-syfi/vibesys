@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
 from vibesys.api.testing import create_session
 from vibesys.inputs import load_input_bundle
-from vibesys.orchestration.evolve import PLUGIN
+from vibesys.orchestration.evolve import PLUGIN, REGISTRATION
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import ResumeRef, RunRequest
@@ -113,7 +113,7 @@ def execute(
 
     async def run() -> tuple[RunStatus, str, Path]:
         registry = OrchestrationRegistry()
-        registry.register_plugin(PLUGIN)
+        registry.register(REGISTRATION)
         session = create_session(
             request,
             sink=_discard_event,

@@ -19,7 +19,12 @@ from vibesys.api.testing import create_session
 from vibesys.inputs import ProfileGuidedInput, load_input_bundle
 from vibesys.orchestration.metrics import MetricSpace
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
+from vibesys.orchestration.single import (
+    PLUGIN,
+    PROFILE_GUIDED_PLUGIN,
+    PROFILE_GUIDED_REGISTRATION,
+    REGISTRATION,
+)
 from vibesys.orchestration.single.models import SingleState
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
@@ -162,12 +167,13 @@ def execute(
 ) -> tuple[RunStatus, str, Path]:
     """Run the explicit plugin through the public product session."""
     bundle = load_input_bundle(project_root)
-    plugin = PLUGIN
+    registration = REGISTRATION
     if isinstance(options_override, PluginRunOptions):
-        plugin = options_override.plugin
+        registration = PROFILE_GUIDED_REGISTRATION
         configured = options_override.options
     else:
         configured = options() if options_override is None else options_override
+    plugin = registration.plugin
     descriptor = OrchestrationDescriptor(
         id=plugin.id,
         config_version=plugin.config_version,
@@ -194,7 +200,7 @@ def execute(
                 observed_events.append(event)
 
         registry = OrchestrationRegistry()
-        registry.register_plugin(plugin)
+        registry.register(registration)
         session = create_session(
             request,
             sink=emit,
