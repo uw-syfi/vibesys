@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.vibesys.orchestration.plugin import capability_plugin
-from vibesys.run.host import open_product_run_host
 
 from vibesys.api import (
     ComputeBackend,
@@ -24,6 +23,7 @@ from vibesys.events import (
     FrameworkSource,
     FrameworkWarningData,
 )
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import ToolServerDescriptor
 from vs_runtime.api import Workspace

@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.plugin import capability_plugin
-from vibesys.run.host import open_product_run_host
 
 from vibesys.api import (
     ComputeBackend,
@@ -30,6 +29,7 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
 if TYPE_CHECKING:

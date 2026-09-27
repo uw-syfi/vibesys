@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.vibesys.orchestration.plugin import capability_plugin
-from vibesys.run.host import open_product_run_host
 
 import vibesys
 from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
@@ -24,6 +23,7 @@ from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.single import PLUGIN
 from vibesys.run.contracts import RunRequest
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import (
     AgentCapabilities,
