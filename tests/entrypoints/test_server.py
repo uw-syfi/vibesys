@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -18,6 +21,7 @@ from entrypoints.server import (
     _headless_argv,
     _read_only_log_from_argv,
     _spawn_detached,
+    _stop_detached,
     _web_assets_from_argv,
     _web_instance_from_argv,
     _web_origins_from_argv,
@@ -55,11 +59,18 @@ class RecordingDetachedProcess:
 
 
 class RecordingDetachedEffects(_DetachedLaunchEffects):
-    def __init__(self, process: RecordingDetachedProcess, times: list[float]) -> None:
+    def __init__(
+        self,
+        process: RecordingDetachedProcess,
+        times: list[float],
+        record: WebInstanceRecord | None = None,
+    ) -> None:
         self.process = process
         self.times = iter(times)
+        self.record = record
         self.command: list[str] = []
         self.environment: dict[str, str] = {}
+        self.sleeps: list[float] = []
 
     def spawn(
         self,
@@ -73,14 +84,15 @@ class RecordingDetachedEffects(_DetachedLaunchEffects):
         output.flush()
         return self.process
 
-    def discover(self, instance_path: Path) -> None:
+    def discover(self, instance_path: Path) -> WebInstanceRecord | None:
         assert instance_path.name == "web-gateway.json"
+        return self.record
 
     def monotonic(self) -> float:
         return next(self.times)
 
     def sleep(self, seconds: float) -> None:
-        pytest.fail(f"unexpected sleep for {seconds}s")
+        self.sleeps.append(seconds)
 
 
 def test_control_socket_argument_forms() -> None:
@@ -215,15 +227,78 @@ def test_detached_startup_surfaces_early_child_failure(tmp_path: Path) -> None:
     assert process.terminated is False
 
 
+def test_detached_startup_reports_a_published_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    process = RecordingDetachedProcess(status=None)
+    record = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token="capability",  # noqa: S106  # lint-waiver: LW-101106 [S106]; use a fixed capability token in a detached-startup fixture
+        url="http://127.0.0.1:43211/?token=capability",
+        project_root=str(tmp_path),
+        started_at=1.0,
+    )
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0], record=record)
+    opened: list[str] = []
+    # test-isolation: keep the startup test headless while verifying the published URL.
+    monkeypatch.setattr(server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url))
+
+    _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
+
+    assert capsys.readouterr().out == f"VibeSys web UI: {record.url}\n"
+    assert opened == [record.url]
+    assert process.terminated is False
+
+
 def test_detached_startup_terminates_a_child_that_never_becomes_ready(tmp_path: Path) -> None:
     process = RecordingDetachedProcess(status=None)
-    effects = RecordingDetachedEffects(process, times=[0.0, 11.0])
+    effects = RecordingDetachedEffects(process, times=[0.0, 0.0, 11.0])
 
     with pytest.raises(RuntimeError, match=r"(?s)did not become ready.*Address already in use"):
         _spawn_detached(["--web", "--detach"], tmp_path / "web-gateway.json", effects)
 
     assert process.terminated is True
     assert process.killed is False
+    assert effects.sleeps == [0.05]
+
+
+def test_detached_stop_escalates_only_when_the_child_ignores_termination() -> None:
+    stopped = RecordingDetachedProcess(status=0)
+    _stop_detached(stopped)
+    assert stopped.terminated is False
+
+    class StubbornProcess(RecordingDetachedProcess):
+        def wait(self, timeout: float | None = None) -> int:
+            assert timeout == 2.0
+            if not self.killed:
+                raise subprocess.TimeoutExpired("detached-child", 2.0)
+            return -9
+
+    stubborn = StubbornProcess(status=None)
+    _stop_detached(stubborn)
+    assert stubborn.terminated is True
+    assert stubborn.killed is True
+
+
+def test_detached_launch_effects_capture_a_real_child_and_use_discovery(tmp_path: Path) -> None:
+    effects = _DetachedLaunchEffects()
+    output_path = tmp_path / "child.log"
+    with output_path.open("w+b") as output:
+        process = effects.spawn(
+            [sys.executable, "-c", "print('captured child output')"],
+            dict(os.environ),
+            output,
+        )
+        assert process.wait(timeout=2) == 0
+
+    assert output_path.read_text() == "captured child output\n"
+    assert effects.discover(tmp_path / "missing.json") is None
+    before = effects.monotonic()
+    effects.sleep(0)
+    assert effects.monotonic() >= before
 
 
 def test_discover_web_instance_waits_for_a_claimed_gateway(
