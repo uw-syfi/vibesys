@@ -490,18 +490,11 @@ class _Workspaces:
                     await self._close_sessions(workspace)
                 except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020031 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
-            async with (
-                self._host.gates._lock_for(scope),
-                self._scope_lock(scope),
-                self._host._parent_mutation_lock,
-            ):
+            async with self._scope_lock(scope), self._host._parent_mutation_lock:
                 try:
                     await self._host._run_blocking(self._discard, scope)
                 except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020032 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
-                finally:
-                    if scope.id not in self._scopes:
-                        self._host.gates._forget(scope)
             if errors:
                 message = "scoped agent cleanup failed"
                 raise BaseExceptionGroup(message, errors)
@@ -516,6 +509,13 @@ class _Workspaces:
     def _scope_lock(self, scope: WorkspaceScope) -> asyncio.Lock:
         current = self._require_scope(scope)
         return self._scope_locks.setdefault(current.id, asyncio.Lock())
+
+    def _mutation_lock(self, scope: WorkspaceScope | WorkspaceHandle | None) -> asyncio.Lock:
+        """Return the lock shared by mutations and trusted evaluation."""
+        resolved = self._scope_of(scope)
+        if resolved is None:
+            return self._host._parent_mutation_lock
+        return self._scope_lock(resolved)
 
     def _require_scope(self, scope: WorkspaceScope | WorkspaceHandle) -> WorkspaceScope:
         resolved = self._scope_of(scope)
@@ -541,11 +541,7 @@ class _Workspaces:
         errors: list[BaseException] = []
         for scope in reversed(tuple(self._scopes.values())):
             try:
-                async with (
-                    self._host.gates._lock_for(scope),
-                    self._scope_lock(scope),
-                    self._host._parent_mutation_lock,
-                ):
+                async with self._scope_lock(scope), self._host._parent_mutation_lock:
                     await asyncio.to_thread(self._discard, scope)
             except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020033 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)

@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from vibesys.context import RunSetup
     from vibesys.orchestration.contracts import OrchestrationProjector
     from vibesys.orchestration.environment import AgentEnvironment
-    from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
@@ -45,7 +44,6 @@ async def run_orchestration(  # noqa: PLR0913  # lint-waiver: LW-920442 [PLR0913
     projector: OrchestrationProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    gate_executor: GateExecutor | None = None,
 ) -> bool:
     """Drive one historical policy without restoring production dispatch."""
     async with RunContext.open(
@@ -56,6 +54,5 @@ async def run_orchestration(  # noqa: PLR0913  # lint-waiver: LW-920442 [PLR0913
         projector=projector,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
-        gate_executor=gate_executor,
     ) as ctx:
         return await orchestrator.run(ctx)

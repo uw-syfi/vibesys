@@ -17,7 +17,6 @@ import re
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
-from tests.vibesys.orchestration.harness import run_with_context
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -27,7 +26,6 @@ from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
-from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
@@ -108,29 +106,3 @@ def test_commit_flushes_noted_entries_in_order(tmp_path: Path) -> None:
     )
     assert alpha < beta < gamma
     assert len(_HEADING.findall(text)) == 3
-
-
-def test_gates_run_flushes_pending_entries_before_its_own(tmp_path: Path) -> None:
-    """`ctx.gates.run` drains `ctx.progress` first, then records its own outcome."""
-    progress_path = tmp_path / "board" / "progress.md"
-
-    async def body(ctx: RunContext) -> str:
-        ctx.progress.declare(progress_path)
-        ctx.progress.note("## Round 1 — Pending\n- **info**: queued\n")
-
-        await ctx.gates.run(
-            round_number=1,
-            retry=1,
-            commit=None,
-            objectives=(),
-            agent_backend_name=None,
-        )
-        # The buffer was drained by `gates.run`; nothing is left pending.
-        assert ctx.progress.drain() == []
-        return progress_path.read_text(encoding="utf-8")
-
-    text = run_with_context(tmp_path, FakeAgentClient(backend_name="cli"), body)
-
-    pending_index = text.index("Round 1 — Pending")
-    accuracy_index = text.index("Round 1 — Framework accuracy gate")
-    assert pending_index < accuracy_index

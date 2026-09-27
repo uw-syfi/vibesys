@@ -103,6 +103,10 @@ class _WorkspacesLike(Protocol):
         """Normalize a scope or workspace handle to a plain ``WorkspaceScope``."""
         ...
 
+    def _mutation_lock(self, scope: Any) -> asyncio.Lock:  # noqa: ANN401  # lint-waiver: LW-837219 [ANN401]; the private concrete workspace handle cannot be named here without a sibling-module cycle.
+        """Return the lock shared by workspace mutation and evaluation."""
+        ...
+
 
 class _EnvironmentLike(Protocol):
     """What other capabilities need from ``ctx.environment``."""
@@ -117,15 +121,6 @@ class _EnvironmentLike(Protocol):
         """Return the run's configured skill source directories."""
         ...
 
-    async def reconcile_model_requests(
-        self,
-        *,
-        # lint-waiver: LW-040116 [ANN401]; naming the concrete WorkspaceHandle here creates a sibling-module cycle, while object would violate method contravariance.
-        scope: Any = None,  # noqa: ANN401
-    ) -> str | None:
-        """Stage candidate-declared model weights; return a rejection reason."""
-        ...
-
     async def execute(
         self,
         command: str,
@@ -135,18 +130,6 @@ class _EnvironmentLike(Protocol):
         scope: Any = None,  # noqa: ANN401
     ) -> _ExecutionResultLike:
         """Execute one trusted validation command in the selected workspace."""
-        ...
-
-
-class _EvaluatorLike(Protocol):
-    """What ``workspaces.py`` needs from ``ctx.gates``."""
-
-    def _lock_for(self, scope: WorkspaceScope | None) -> asyncio.Lock:
-        """Return the lock guarding a scope's gates and adopt/checkpoint."""
-        ...
-
-    def _forget(self, scope: WorkspaceScope) -> None:
-        """Release a discarded scope's synchronization state."""
         ...
 
 
@@ -160,41 +143,6 @@ class _ProgressLike(Protocol):
 
     def drain(self) -> list[str]:
         """Take and clear the pending framework-log blocks, in order."""
-        ...
-
-
-class _GateExecutorLike(Protocol):
-    """Structurally identical to ``gates.py``'s own ``GateExecutor``.
-
-    Declared again here (rather than imported) for the same reason as
-    ``_CommittedStateProjectorLike``: this module must stay at the base of
-    the graph, below ``gates.py``.
-    """
-
-    def run_accuracy(
-        self,
-        ctx: Any,  # noqa: ANN401  # LW-040088 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        *,
-        process_id: str,
-        timeout_seconds: int | None = None,
-        execution_command: str | None = None,
-        round_label: str | None = None,
-    ) -> Any:  # noqa: ANN401  # LW-040089 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        """Run the trusted accuracy command for one candidate."""
-        ...
-
-    def run_benchmark(  # noqa: PLR0913  # LW-040090 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
-        self,
-        ctx: Any,  # noqa: ANN401  # LW-040091 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        *,
-        contract: Any,  # noqa: ANN401  # LW-040092 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        space: Any,  # noqa: ANN401  # LW-040093 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        process_id: str,
-        output_slug: str,
-        execution_base: str | None = None,
-        round_label: str | None = None,
-    ) -> Any:  # noqa: ANN401  # LW-040094 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
-        """Run the trusted benchmark result contract for one candidate."""
         ...
 
 
@@ -240,11 +188,6 @@ class HostResources(Protocol):
         ...
 
     @property
-    def gates(self) -> _EvaluatorLike:
-        """Return this run's trusted-gate capability."""
-        ...
-
-    @property
     def progress(self) -> _ProgressLike:
         """Return this run's progress-board buffer/declaration capability."""
         ...
@@ -261,7 +204,6 @@ class HostResources(Protocol):
 
     _setup: RunSetup
     _projector: _CommittedStateProjectorLike | None
-    _gate_executor: _GateExecutorLike | None
     _parent_mutation_lock: asyncio.Lock
     _workspace_lifecycle_lock: asyncio.Lock
     _session_store: DurableSessionStore | None

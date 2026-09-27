@@ -30,7 +30,7 @@ from vibesys.domains.environment import (
 from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import load_evaluator_package, tool_install_root
-from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import InputBundle, WorkspaceSource
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -47,7 +47,6 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
-from vibesys.render.run_log import RunLogRenderer
 from vibesys.resource_paths import (
     PROFILERS_COMMON_STAGED_NAME,
     profiler_support_common_dir,
@@ -63,6 +62,7 @@ from vibesys.run import (
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
+from vibesys.run.log_projection import RunLogRenderer
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
@@ -100,8 +100,14 @@ from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import (
     MultiSlotRoundTransactionCoordinator,
     ProjectMaterializer,
+    ProtocolBenchmarkContract,
     RoundRecoveryOutcome,
     RunState,
+    ScalarBenchmarkContract,
+    TrustedEvaluationExecutor,
+    TrustedEvaluationPlan,
+    create_model_request_reconciler,
+    create_trusted_evaluation_executor,
 )
 from vs_sandbox.api import (
     ComputeBackendImpl,
@@ -122,6 +128,30 @@ def _run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
         log_file.flush()
 
     return emit
+
+
+def _trusted_evaluation_plan(
+    bundle: InputBundle,
+    session: RunEnvironmentSession,
+) -> TrustedEvaluationPlan:
+    """Lower task and environment configuration into runtime execution facts."""
+    scalar = bundle.benchmark_result
+    contract = (
+        ScalarBenchmarkContract(
+            output_argument=scalar.json_argument,
+            metric=scalar.metric,
+        )
+        if scalar is not None
+        else (ProtocolBenchmarkContract() if bundle.benchmark_result_protocol is not None else None)
+    )
+    return TrustedEvaluationPlan(
+        accuracy_command=session.view.paths.accuracy_command,
+        accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
+        benchmark_command=session.view.paths.benchmark_command,
+        benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
+        framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        benchmark_contract=contract,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -988,6 +1018,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
             environment_patch=environment_patch,
             workspace_files=workspace_files,
             git=git,
+            trusted_evaluation_plan=_trusted_evaluation_plan(bundle, session),
             experiment_repository=tracked_experiment_repository,
             teardown_stack=teardown_stack,
             environment_request=run_environment_request,
@@ -1282,6 +1313,13 @@ def _assemble_workspace_resources(
         environment_patch=parent.environment_patch,
         workspace_files=workspace_files,
         git=git,
+        trusted_evaluation_plan=parent.trusted_evaluation_plan.model_copy(
+            update={
+                "accuracy_command": session.view.paths.accuracy_command,
+                "benchmark_command": session.view.paths.benchmark_command,
+                "framework_setup_timeout_seconds": (session.view.framework_setup_timeout_seconds),
+            }
+        ),
         # Candidate worktrees share the parent repository and may run in
         # parallel. Only the parent context owns remote synchronization.
         experiment_repository=None,
@@ -1336,6 +1374,7 @@ class _RunResources:
         environment_patch: EnvironmentPatch,
         workspace_files: ProjectMaterializer,
         git: GitTracker,
+        trusted_evaluation_plan: TrustedEvaluationPlan,
         experiment_repository: ExperimentRepository | None,
         teardown_stack: ExitStack,
         environment_request: RunEnvironmentRequest,
@@ -1383,6 +1422,18 @@ class _RunResources:
         self.workspace_files = workspace_files
         self.EXCLUDED_WORKSPACE_DIRS = workspace_files.excluded_dirs
         self.git = git
+        self.trusted_evaluation_plan = trusted_evaluation_plan
+        self.trusted_evaluation: TrustedEvaluationExecutor = create_trusted_evaluation_executor(
+            trusted_evaluation_plan,
+            workspace=project_root,
+            sandbox=run_environment_session.sandbox,
+            git=git,
+            model_requests=(
+                create_model_request_reconciler()
+                if run_environment_session.view.env_kind == "modal"
+                else None
+            ),
+        )
         self.project = project
         self.state = state
         self.run_id = run_id

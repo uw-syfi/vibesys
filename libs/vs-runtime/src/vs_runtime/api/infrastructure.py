@@ -107,6 +107,17 @@ from vs_runtime._skills import (
     load_skill_frontmatter,
     resolve_skill_resources,
 )
+from vs_runtime._trusted_evaluation import (
+    ProtocolBenchmarkContract,
+    ScalarBenchmarkContract,
+    TrustedAccuracyResult,
+    TrustedBenchmarkContract,
+    TrustedBenchmarkResult,
+    TrustedEvaluationExecutor,
+    TrustedEvaluationPlan,
+    TrustedMetricDeclaration,
+    create_trusted_evaluation_executor,
+)
 from vs_runtime.contracts import AgentSessions, Workspace
 
 if TYPE_CHECKING:
@@ -355,6 +366,7 @@ __all__ = [
     "ProjectMaterializationStep",
     "ProjectMaterializer",
     "ProjectTreeCopy",
+    "ProtocolBenchmarkContract",
     "RoundRecoveryOutcome",
     "RoundTransactionError",
     "RunControlChannel",
@@ -364,8 +376,15 @@ __all__ = [
     "RunState",
     "RunStopped",
     "SDKRoots",
+    "ScalarBenchmarkContract",
     "SkillCatalogEntry",
     "SkillMetadataError",
+    "TrustedAccuracyResult",
+    "TrustedBenchmarkContract",
+    "TrustedBenchmarkResult",
+    "TrustedEvaluationExecutor",
+    "TrustedEvaluationPlan",
+    "TrustedMetricDeclaration",
     "ValidationRecipe",
     "WorkspaceSourceValue",
     "build_skill_catalog",
@@ -374,6 +393,7 @@ __all__ = [
     "create_agent_session_runtime",
     "create_model_request_reconciler",
     "create_run_control_channel",
+    "create_trusted_evaluation_executor",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",

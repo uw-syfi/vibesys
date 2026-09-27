@@ -1,36 +1,24 @@
-"""``ctx.gates``: trusted accuracy/benchmark checks in the run workspace.
+"""VibeSys evaluation policy over runtime-owned trusted execution."""
 
-Split from ``runtime.py`` by capability; see that module's docstring.
-"""
-
-# Capabilities in this module share one private owner for resource lifetime.
-# lint-waiver: LW-040101 [SLF001]; capabilities in this module share one private owner for resource lifetime.
+# This policy adapter consumes the private workspace/resource owner until that
+# owner moves to vs_runtime.
+# lint-waiver: LW-040101 [SLF001]; the adapter and workspace manager share one run-owned resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
 
-import asyncio
 import shlex
 import subprocess
-from dataclasses import dataclass
 from itertools import count
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from vibesys.evaluators.gates import (
-    GATE_RECORD_TAIL_CHARS,
-    AccuracyGateResult,
-    BenchmarkContract,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
+    GATE_FEEDBACK_TAIL_CHARS,
+    GATE_LOG_TAIL_CHARS,
     emit_gate_finished,
     emit_gate_started,
-    framework_command_timeout,
-    run_accuracy_gate,
-    run_benchmark_gate,
 )
-from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.events import GateFinishedData, GateKind
-from vibesys.orchestration import progress_log
+from vibesys.events import CoreEventType, GateFinishedData, GateKind, SubprocessOutputData
 from vibesys.orchestration.local_validation import validate_local
 from vibesys.orchestration.workspaces import WorkspaceHandle
 from vs_runtime.api import (
@@ -39,462 +27,29 @@ from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     LocalValidationEvaluation,
+    MetricDirection,
     RuntimeContractError,
     Workspace,
     WorkspaceAccess,
     validate_workspace_writable_paths,
 )
+from vs_runtime.api.infrastructure import (
+    ScalarBenchmarkContract,
+    TrustedAccuracyResult,
+    TrustedBenchmarkContract,
+    TrustedBenchmarkResult,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from pathlib import Path
-
     from vibesys.context import _RunResources
     from vibesys.orchestration._host import HostResources
-    from vibesys.run.event_journal import EventJournal
-    from vibesys.runtime import WorkspaceScope
-    from vibesys.sandbox.run_environment import RunEnvironmentView
-    from vs_project.api import GitTracker
-    from vs_sandbox.api import Sandbox
-
-
-class GateExecutor(Protocol):
-    """The two trusted gate operations ``ctx.gates`` runs off-thread.
-
-    Injected on :class:`~vibesys.orchestration.runtime.RunContext` (default:
-    the real trusted-command gates, ``_RealGateExecutor`` below) the same way
-    ``agent_client_factory``/``backend_factory`` are: a test passes a fake in
-    place of monkeypatching the module-level ``run_accuracy_gate``/
-    ``run_benchmark_gate`` functions this protocol's real implementation
-    wraps.
-    """
-
-    def run_accuracy(
-        self,
-        ctx: _GateInputs,
-        *,
-        process_id: str,
-        timeout_seconds: int | None = None,
-        execution_command: str | None = None,
-        round_label: str | None = None,
-    ) -> AccuracyGateResult:
-        """Run the trusted accuracy command for one candidate."""
-        ...
-
-    def run_benchmark(  # noqa: PLR0913  # LW-040102 [PLR0913]; mirrors run_benchmark_gate's own field count.
-        self,
-        ctx: _GateInputs,
-        *,
-        contract: BenchmarkContract,
-        space: MetricSpace,
-        process_id: str,
-        output_slug: str,
-        execution_base: str | None = None,
-        round_label: str | None = None,
-    ) -> BenchmarkGateResult:
-        """Run the trusted benchmark result contract for one candidate."""
-        ...
-
-
-class _RealGateExecutor:
-    """Default `GateExecutor`: the real trusted accuracy/benchmark commands."""
-
-    def run_accuracy(
-        self,
-        ctx: _GateInputs,
-        *,
-        process_id: str,
-        timeout_seconds: int | None = None,
-        execution_command: str | None = None,
-        round_label: str | None = None,
-    ) -> AccuracyGateResult:
-        """Delegate to the module-level trusted accuracy gate."""
-        return run_accuracy_gate(
-            ctx,
-            process_id=process_id,
-            timeout_seconds=timeout_seconds,
-            execution_command=execution_command,
-            round_label=round_label,
-        )
-
-    def run_benchmark(  # noqa: PLR0913  # LW-040103 [PLR0913]; mirrors run_benchmark_gate's own field count.
-        self,
-        ctx: _GateInputs,
-        *,
-        contract: BenchmarkContract,
-        space: MetricSpace,
-        process_id: str,
-        output_slug: str,
-        execution_base: str | None = None,
-        round_label: str | None = None,
-    ) -> BenchmarkGateResult:
-        """Delegate to the module-level trusted benchmark gate."""
-        return run_benchmark_gate(
-            ctx,
-            contract=contract,
-            space=space,
-            process_id=process_id,
-            output_slug=output_slug,
-            execution_base=execution_base,
-            round_label=round_label,
-        )
-
-
-_REAL_GATE_EXECUTOR = _RealGateExecutor()
-
-
-@dataclass(frozen=True, slots=True)
-class MeasurementOptions:
-    """Policy-selected metric axes, event label, and command override."""
-
-    objectives: Sequence[Objective] = ()
-    label: str | None = None
-    execution_base: str | None = None
-
-
-_DEFAULT_MEASUREMENT_OPTIONS = MeasurementOptions()
-
-
-@dataclass(frozen=True)
-class _GateInputs:
-    """Bind trusted gate inputs from one workspace's owned resources."""
-
-    events: EventJournal
-    judge_backend: Sandbox
-    judge_accuracy_command: str | None
-    judge_benchmark_command: str | None
-    run_environment_view: RunEnvironmentView
-    git: GitTracker
-
-    @classmethod
-    def from_resources(cls, context: _RunResources) -> _GateInputs:
-        """Read the selected environment's immutable command paths."""
-        return cls(
-            events=context.events,
-            judge_backend=context.run_environment_session.sandbox,
-            judge_accuracy_command=context.run_environment_view.paths.accuracy_command,
-            judge_benchmark_command=context.run_environment_view.paths.benchmark_command,
-            run_environment_view=context.run_environment_view,
-            git=context.git,
-        )
-
-    def trusted_input_changes(self) -> list[str]:
-        """Detect edits to evaluator-owned project inputs."""
-        return self.git.trusted_input_changes()
-
-
-@dataclass(frozen=True, slots=True)
-class GateRunResult:
-    """Combined accuracy+benchmark outcome from one `_Evaluator.run` call.
-
-    `feedback` is the first gate's rejection message, or `None` if both
-    passed (or gates were skipped, e.g. a stub backend). `accuracy_passed`
-    tells the caller whether it may reuse this outcome for a later retry of
-    the exact same candidate commit (see `reuse_accuracy`).
-    """
-
-    feedback: str | None
-    benchmark: FrameworkBenchmarkOutcome
-    accuracy_passed: bool
-
-
-class _Evaluator:
-    """Trusted checks and measurements in the parent run workspace."""
-
-    def __init__(self, host: HostResources) -> None:
-        self._host = host
-        self._locks: dict[str, asyncio.Lock] = {}
-
-    def _lock_for(self, scope: WorkspaceScope | WorkspaceHandle | None) -> asyncio.Lock:
-        """Serialize gates with the workspace they inspect.
-
-        The parent tree (``scope is None``, or an isolation-free
-        ``WorkspaceHandle``) shares ``_parent_mutation_lock`` with
-        ``adopt``/``checkpoint`` so a gate on the parent tree and an
-        adopt/checkpoint can never interleave (R6). Isolated scopes keep
-        their own lock, independent of the parent lock and of each other.
-        """
-        key = scope.id if scope is not None else None
-        if key is None:
-            return self._host._parent_mutation_lock
-        lock = self._locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._locks[key] = lock
-        return lock
-
-    def _forget(self, scope: WorkspaceScope) -> None:
-        """Release a discarded scope's synchronization state."""
-        self._locks.pop(scope.id, None)
-
-    async def check(
-        self,
-        process_id: str,
-        *,
-        label: str | None = None,
-        execution_command: str | None = None,
-        scope: WorkspaceScope | WorkspaceHandle | None = None,
-    ) -> AccuracyGateResult:
-        """Run the bundle's trusted accuracy command and reject input tampering."""
-        async with self._lock_for(scope):
-            context = _GateInputs.from_resources(self._host.workspaces._resources_for(scope))
-            timeout = framework_command_timeout(
-                context, self._host.request.input_bundle.manifest.accuracy.timeout_seconds
-            )
-            executor = self._host._gate_executor or _REAL_GATE_EXECUTOR
-            return await self._host._run_blocking(
-                executor.run_accuracy,
-                context,
-                process_id=process_id,
-                timeout_seconds=timeout,
-                execution_command=execution_command,
-                round_label=label,
-            )
-
-    async def reuse_accuracy(self, *, label: str | None = None) -> AccuracyGateResult:
-        """Publish a paired accuracy PASS reused for an exact candidate revision."""
-        return await self._host._run_blocking(self._reuse_accuracy, label)
-
-    def _reuse_accuracy(self, label: str | None) -> AccuracyGateResult:
-        command = self._host.environment.view.paths.accuracy_command
-        emit_gate_started(self._host.events, GateKind.ACCURACY, command=command, round_label=label)
-        emit_gate_finished(
-            self._host.events,
-            GateFinishedData(gate=GateKind.ACCURACY, reused=True),
-            passed=True,
-            round_label=label,
-        )
-        return AccuracyGateResult(
-            command=command,
-            passed=True,
-            output="Reused the prior framework-owned PASS for this exact candidate commit",
-            feedback=None,
-            executed=False,
-        )
-
-    async def measure(
-        self,
-        output_slug: str,
-        *,
-        scope: WorkspaceScope | WorkspaceHandle | None = None,
-        options: MeasurementOptions = _DEFAULT_MEASUREMENT_OPTIONS,
-    ) -> BenchmarkGateResult:
-        """Run and parse the bundle's declared trusted benchmark contract."""
-        async with self._lock_for(scope):
-            context = _GateInputs.from_resources(self._host.workspaces._resources_for(scope))
-            bundle = self._host.request.input_bundle
-            timeout = framework_command_timeout(context, bundle.manifest.benchmark.timeout_seconds)
-            executor = self._host._gate_executor or _REAL_GATE_EXECUTOR
-            return await self._host._run_blocking(
-                executor.run_benchmark,
-                context,
-                contract=BenchmarkContract(
-                    result_spec=bundle.benchmark_result,
-                    result_protocol=bundle.benchmark_result_protocol,
-                    timeout_seconds=timeout,
-                ),
-                space=MetricSpace(objectives=tuple(options.objectives)),
-                process_id=output_slug,
-                output_slug=output_slug,
-                execution_base=options.execution_base,
-                round_label=options.label,
-            )
-
-    @staticmethod
-    def _write_accuracy_gate(  # noqa: PLR0913  # LW-040104 [PLR0913]; mirrors render_framework_accuracy_gate's own field count.
-        progress_path: Path | None,
-        round_number: int,
-        retry: int,
-        *,
-        command: str,
-        passed: bool,
-        output: str,
-    ) -> None:
-        """Write one accuracy-gate outcome, if this run declared a progress path.
-
-        ``ctx.gates.run`` writes gate entries itself (synchronously, ahead of
-        the snapshot it already takes right after) rather than handing a
-        recorder back to the caller: a strategy declares its progress path
-        via ``ctx.progress.declare`` and never renders or writes anything
-        for gates itself.
-        """
-        if progress_path is None:
-            return
-        progress_log.write(
-            progress_path,
-            progress_log.render_framework_accuracy_gate(
-                round_number, retry, command=command, passed=passed, output=output
-            ),
-        )
-
-    async def run(  # noqa: PLR0913  # LW-040105 [PLR0913]; one call replaces four strategies' hand-rolled sequencing.
-        self,
-        *,
-        round_number: int,
-        retry: int,
-        commit: str | None,
-        objectives: Sequence[Objective],
-        reuse_accuracy: bool = False,
-        agent_backend_name: str | None = None,
-    ) -> GateRunResult:
-        """Run the accuracy then benchmark gate, recording each outcome once.
-
-        This is the one place the "official gates are due" mechanics live
-        (reuse-accuracy, command composition with the candidate revision and
-        release env var, accuracy-then-benchmark sequencing, the stub-backend
-        skip). *When* to call it (retry/review policy) stays with the
-        strategy. A stub `agent_backend_name` (tests, fast local runs) skips
-        both gates and reports a pass with no feedback and an empty outcome,
-        matching every strategy's prior hand-rolled check.
-
-        This is often the next write to `ctx.progress`'s declared path after
-        blocks became available (see `vibesys.orchestration.progress`), so
-        this flushes that pending buffer first, in order, before this gate's
-        own outcome -- keeping the file's section order the same as when
-        every write happened synchronously.
-        """
-        progress_path = self._host.progress.path
-        pending = self._host.progress.drain()
-        if progress_path is not None:
-            for block in pending:
-                progress_log.write(progress_path, block)
-        if agent_backend_name == "stub":
-            return GateRunResult(
-                feedback=None, benchmark=FrameworkBenchmarkOutcome(), accuracy_passed=False
-            )
-        resource_feedback = await self._host.environment.reconcile_model_requests()
-        if resource_feedback is not None:
-            return GateRunResult(
-                feedback=resource_feedback,
-                benchmark=FrameworkBenchmarkOutcome(),
-                accuracy_passed=False,
-            )
-        accuracy = await self._run_accuracy_gate(
-            round_number, retry, commit, reuse=reuse_accuracy, progress_path=progress_path
-        )
-        if accuracy.feedback is not None:
-            return GateRunResult(
-                feedback=accuracy.feedback,
-                benchmark=FrameworkBenchmarkOutcome(),
-                accuracy_passed=False,
-            )
-        benchmark = await self._run_benchmark_gate(
-            round_number, retry, commit, objectives, progress_path=progress_path
-        )
-        return GateRunResult(feedback=benchmark.feedback, benchmark=benchmark, accuracy_passed=True)
-
-    async def _run_accuracy_gate(
-        self,
-        round_number: int,
-        retry: int,
-        commit: str | None,
-        *,
-        reuse: bool,
-        progress_path: Path | None,
-    ) -> AccuracyGateResult:
-        view = self._host.environment.view
-        command = view.paths.accuracy_command
-        if reuse:
-            self._write_accuracy_gate(
-                progress_path,
-                round_number,
-                retry,
-                command=command or "(not configured)",
-                passed=True,
-                output=(
-                    "Reused the prior framework-owned PASS for this exact candidate commit; "
-                    "a later gate, not accuracy, caused the retry."
-                ),
-            )
-            return await self.reuse_accuracy(label=f"round-{round_number}")
-        bundle = self._host.request.input_bundle
-        release = (
-            bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
-        ) or not view.paths.benchmark_command
-        execution = self._command(
-            command, commit, view.deployment_release_env_var if release else None
-        )
-        result = await self.check(
-            f"accuracy-{round_number}-{retry}",
-            label=f"round-{round_number}",
-            execution_command=execution,
-        )
-        if result.passed and not result.executed:
-            return result
-        self._write_accuracy_gate(
-            progress_path,
-            round_number,
-            retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
-        )
-        await self._host.workspaces.root.snapshot(
-            f"round-{round_number}-retry-{retry}-framework-accuracy"
-        )
-        return result
-
-    async def _run_benchmark_gate(
-        self,
-        round_number: int,
-        retry: int,
-        commit: str | None,
-        objectives: Sequence[Objective],
-        *,
-        progress_path: Path | None,
-    ) -> FrameworkBenchmarkOutcome:
-        view = self._host.environment.view
-        execution = self._command(
-            view.paths.benchmark_command, commit, view.deployment_release_env_var
-        )
-        result = await self.measure(
-            f"{round_number}-{retry}",
-            options=MeasurementOptions(
-                objectives=tuple(objectives),
-                label=f"round-{round_number}",
-                execution_base=execution,
-            ),
-        )
-        if not result.executed:
-            return result.outcome
-        spec = self._host.request.input_bundle.benchmark_result
-        if progress_path is not None:
-            progress_log.write(
-                progress_path,
-                progress_log.render_framework_benchmark(
-                    round_number,
-                    retry,
-                    command=result.command or "(not configured)",
-                    passed=result.passed,
-                    metric_name=result.outcome.metric_name or (spec.metric if spec else None),
-                    metric_value=result.outcome.metric_value,
-                    output=result.output[-GATE_RECORD_TAIL_CHARS:],
-                ),
-            )
-        await self._host.workspaces.root.snapshot(
-            f"round-{round_number}-retry-{retry}-framework-benchmark"
-        )
-        return result.outcome
-
-    @staticmethod
-    def _command(command: str | None, revision: str | None, release_env: str | None) -> str | None:
-        """Compose a trusted gate command with the candidate revision/release env."""
-        if command is None:
-            return None
-        variables = []
-        if revision:
-            variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
-        if release_env:
-            variables.append(f"{release_env}=1")
-        return f"env {' '.join(variables)} {command}" if variables else command
 
 
 class _EvaluationAdapter:
-    """Translate public semantic evaluations to the existing trusted gates."""
+    """Apply VibeSys receipt, snapshot, metric, and event policy."""
 
-    def __init__(self, host: HostResources, evaluator: _Evaluator) -> None:
+    def __init__(self, host: HostResources) -> None:
         self._host = host
-        self._evaluator = evaluator
         self._identifiers = count(1)
 
     @staticmethod
@@ -546,43 +101,45 @@ class _EvaluationAdapter:
         *,
         reuse: AccuracyReceipt | None = None,
     ) -> AccuracyEvaluation:
-        """Run or explicitly reuse the trusted accuracy result."""
+        """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
+        resources = self._host.workspaces._resources_for(live)
         if reuse is not None:
             self._validate_receipt_owner(live, reuse)
             await live.snapshot("framework-accuracy-reuse-input")
             self._validate_receipt_revision(live, reuse)
-            await self._evaluator.reuse_accuracy()
+            command = resources.trusted_evaluation_plan.accuracy_command
+            emit_gate_started(self._host.events, GateKind.ACCURACY, command=command)
+            emit_gate_finished(
+                self._host.events,
+                GateFinishedData(gate=GateKind.ACCURACY, reused=True),
+                passed=True,
+            )
             return AccuracyEvaluation(executed=False, receipt=reuse)
         if self._host.request.agent_backend == "stub":
             return AccuracyEvaluation(executed=False)
+
         candidate_revision = await live.snapshot("framework-accuracy-input")
-        if resource_feedback := await self._host.environment.reconcile_model_requests(scope=live):
-            return AccuracyEvaluation(executed=False, feedback=resource_feedback)
-        view = self._host.environment.view
+        view = resources.run_environment_view
         bundle = self._host.request.input_bundle
         release = (
             bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
         ) or not view.paths.benchmark_command
-        execution = self._evaluator._command(
+        execution = self._command(
             view.paths.accuracy_command,
             candidate_revision,
             view.deployment_release_env_var if release else None,
         )
-        result = await self._evaluator.check(
-            f"evaluation-accuracy-{next(self._identifiers)}",
-            scope=live,
-            execution_command=execution,
-        )
-        feedback = result.feedback
-        if not result.passed and feedback is None:
-            feedback = "accuracy evaluation failed"
+        async with self._host.workspaces._mutation_lock(live):
+            result = await resources.trusted_evaluation.accuracy(command_override=execution)
+        self._log_provisioning(resources, result.provisioned_volumes, result.failure)
+        self._publish_accuracy(result, process_id=f"evaluation-accuracy-{next(self._identifiers)}")
         if result.executed:
             await live.snapshot("framework-accuracy-evaluation")
         receipt = self._receipt(live, candidate_revision) if result.passed else None
         return AccuracyEvaluation(
             executed=result.executed,
-            feedback=feedback,
+            feedback=self._accuracy_feedback(result),
             receipt=receipt,
         )
 
@@ -592,44 +149,38 @@ class _EvaluationAdapter:
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> BenchmarkEvaluation:
-        """Run the declared benchmark contract in one workspace."""
+        """Run the benchmark and apply policy-selected headline semantics."""
+        self._validate_objectives(objectives)
         live = self._live_workspace(workspace)
-        legacy_objectives = tuple(
-            Objective(name=item.name, direction=item.direction.value) for item in objectives
-        )
-        _ = MetricSpace(objectives=legacy_objectives)
         if self._host.request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
+        resources = self._host.workspaces._resources_for(live)
         candidate_revision = await live.snapshot("framework-benchmark-input")
-        if resource_feedback := await self._host.environment.reconcile_model_requests(scope=live):
-            return BenchmarkEvaluation(executed=False, feedback=resource_feedback)
-        identifier = f"evaluation-benchmark-{next(self._identifiers)}"
-        view = self._host.environment.view
-        execution = self._evaluator._command(
+        view = resources.run_environment_view
+        execution = self._command(
             view.paths.benchmark_command,
             candidate_revision,
             view.deployment_release_env_var,
         )
-        result = await self._evaluator.measure(
-            identifier,
-            scope=live,
-            options=MeasurementOptions(
-                objectives=legacy_objectives,
-                execution_base=execution,
-            ),
+        async with self._host.workspaces._mutation_lock(live):
+            result = await resources.trusted_evaluation.benchmark(
+                command_override=execution,
+                required_metrics=frozenset(item.name for item in objectives),
+            )
+        self._log_provisioning(resources, result.provisioned_volumes, result.failure)
+        evaluation = self._interpret_benchmark(
+            result,
+            objectives,
+            resources.trusted_evaluation_plan.benchmark_contract,
+        )
+        self._publish_benchmark(
+            result,
+            evaluation,
+            process_id=f"evaluation-benchmark-{next(self._identifiers)}",
         )
         if result.executed:
             await live.snapshot("framework-benchmark-evaluation")
-        outcome = result.outcome
-        return BenchmarkEvaluation(
-            executed=result.executed,
-            feedback=outcome.feedback,
-            metric_name=outcome.metric_name,
-            metric_value=outcome.metric_value,
-            metric_direction=outcome.metric_direction,
-            metric_unit=outcome.metric_unit,
-            row=outcome.row,
-        )
+        return evaluation
 
     async def validate_local(
         self,
@@ -638,7 +189,7 @@ class _EvaluationAdapter:
         recipe_artifact: str,
         report_location: str,
     ) -> LocalValidationEvaluation:
-        """Run candidate-authored recipes while isolating their workspace effects."""
+        """Run candidate-authored recipes while isolating workspace effects."""
         validate_workspace_writable_paths(
             WorkspaceAccess.LIMITED,
             (recipe_artifact, report_location),
@@ -650,3 +201,162 @@ class _EvaluationAdapter:
             recipe_artifact=recipe_artifact,
             report_location=report_location,
         )
+
+    def _publish_accuracy(self, result: TrustedAccuracyResult, *, process_id: str) -> None:
+        provisioning_failure = result.failure is not None and result.failure.startswith(
+            "Model-weight request"
+        )
+        if result.command is None or (not result.executed and provisioning_failure):
+            return
+        emit_gate_started(self._host.events, GateKind.ACCURACY, command=result.command)
+        self._publish_streams(result.stdout, result.stderr, process_id, "accuracy_checker")
+        emit_gate_finished(
+            self._host.events,
+            GateFinishedData(
+                gate=GateKind.ACCURACY,
+                output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
+            ),
+            passed=result.passed,
+        )
+
+    def _publish_benchmark(
+        self,
+        result: TrustedBenchmarkResult,
+        evaluation: BenchmarkEvaluation,
+        *,
+        process_id: str,
+    ) -> None:
+        if not result.executed or result.command is None:
+            return
+        emit_gate_started(self._host.events, GateKind.BENCHMARK, command=result.command)
+        self._publish_streams(result.stdout, result.stderr, process_id, "benchmark")
+        emit_gate_finished(
+            self._host.events,
+            GateFinishedData(
+                gate=GateKind.BENCHMARK,
+                metric=evaluation.metric_name if result.passed else None,
+                value=evaluation.metric_value if result.passed else None,
+                unit=(evaluation.metric_unit or evaluation.metric_name)
+                if result.passed and evaluation.metric_name is not None
+                else None,
+                output_tail=(result.output[-GATE_LOG_TAIL_CHARS:] if not result.passed else None),
+            ),
+            passed=result.passed,
+        )
+
+    def _publish_streams(
+        self,
+        stdout: str,
+        stderr: str,
+        process_id: str,
+        process_kind: str,
+    ) -> None:
+        for stream, content in (("stdout", stdout), ("stderr", stderr)):
+            if content:
+                self._host.events.emit(
+                    CoreEventType.SUBPROCESS_OUTPUT,
+                    data=SubprocessOutputData(
+                        process_id=process_id,
+                        process_kind=process_kind,
+                        stream=stream,
+                        content=content,
+                    ),
+                )
+
+    @staticmethod
+    def _accuracy_feedback(result: TrustedAccuracyResult) -> str | None:
+        if result.passed:
+            return None
+        if result.failure is not None and result.failure.startswith("Model-weight request"):
+            return result.failure
+        return f"Framework accuracy gate failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+
+    @staticmethod
+    def _interpret_benchmark(
+        result: TrustedBenchmarkResult,
+        objectives: tuple[BenchmarkObjective, ...],
+        contract: TrustedBenchmarkContract | None,
+    ) -> BenchmarkEvaluation:
+        if not result.passed:
+            provisioning_failure = result.failure is not None and result.failure.startswith(
+                "Model-weight request"
+            )
+            feedback = (
+                result.failure
+                if not result.executed or provisioning_failure
+                else (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
+            )
+            return BenchmarkEvaluation(executed=result.executed, feedback=feedback)
+        if result.row is None:
+            return BenchmarkEvaluation(executed=result.executed)
+        if objectives:
+            name = objectives[0].name
+        elif len(result.row) == 1:
+            name = next(iter(result.row))
+        else:
+            names = ", ".join(sorted(result.row))
+            feedback = (
+                f"benchmark evaluator reported metrics {names} but the task configures no "
+                "objectives, so no headline metric is defined; declare the optimized metrics "
+                "in objectives.toml"
+            )
+            return BenchmarkEvaluation(
+                executed=result.executed,
+                feedback=feedback,
+                row=result.row,
+            )
+        objective = next((item for item in objectives if item.name == name), None)
+        declaration = result.metrics.get(name)
+        direction = (
+            objective.direction
+            if objective is not None
+            else (
+                MetricDirection(declaration.direction)
+                if declaration is not None and declaration.direction is not None
+                else (
+                    MetricDirection.MAXIMIZE
+                    if isinstance(contract, ScalarBenchmarkContract)
+                    else None
+                )
+            )
+        )
+        return BenchmarkEvaluation(
+            executed=result.executed,
+            metric_name=name,
+            metric_value=result.row[name],
+            metric_direction=direction,
+            metric_unit=declaration.unit if declaration is not None else None,
+            row=result.row,
+        )
+
+    @staticmethod
+    def _validate_objectives(objectives: tuple[BenchmarkObjective, ...]) -> None:
+        names = [item.name for item in objectives]
+        if len(names) != len(set(names)):
+            message = "objective names must be unique"
+            raise ValueError(message)
+
+    @staticmethod
+    def _command(command: str | None, revision: str | None, release_env: str | None) -> str | None:
+        if command is None:
+            return None
+        variables = []
+        if revision:
+            variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
+        if release_env:
+            variables.append(f"{release_env}=1")
+        return f"env {' '.join(variables)} {command}" if variables else command
+
+    @staticmethod
+    def _log_provisioning(
+        resources: _RunResources,
+        volumes: tuple[str, ...],
+        failure: str | None,
+    ) -> None:
+        prefix = "Model-weight request could not be satisfied: "
+        if failure is not None and failure.startswith(prefix):
+            resources.lprint(f"[model-request] rejected: {failure.removeprefix(prefix)}")
+        if volumes:
+            resources.lprint(
+                f"[model-request] staged {len(volumes)} model volume(s): " + ", ".join(volumes)
+            )

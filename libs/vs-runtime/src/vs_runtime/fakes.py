@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, TypeAlias, TypeVar, overload
 from pydantic import BaseModel
 
 from vs_agent.api import NULL_SKILL_SELECTION
+from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -89,6 +90,59 @@ class FakeAgentExecutionLifecycleSink:
     def __call__(self, event: AgentExecutionLifecycleEvent) -> None:
         """Record one semantic lifecycle event."""
         self.events.append(event)
+
+
+@dataclass(frozen=True, slots=True)
+class FakeTrustedAccuracyCall:
+    """One trusted accuracy invocation observed by the Fake."""
+
+    command_override: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FakeTrustedBenchmarkCall:
+    """One trusted benchmark invocation observed by the Fake."""
+
+    command_override: str | None
+    required_metrics: frozenset[str]
+
+
+class FakeTrustedEvaluationExecutor:
+    """Scripted in-memory trusted evaluation mechanism."""
+
+    def __init__(self) -> None:
+        """Create an executor with passing, unexecuted defaults."""
+        self.accuracy_calls: list[FakeTrustedAccuracyCall] = []
+        self.benchmark_calls: list[FakeTrustedBenchmarkCall] = []
+        self._accuracy_results: list[TrustedAccuracyResult] = []
+        self._benchmark_results: list[TrustedBenchmarkResult] = []
+
+    def script_accuracy(self, *results: TrustedAccuracyResult) -> None:
+        """Replace queued accuracy outcomes."""
+        self._accuracy_results = list(results)
+
+    def script_benchmark(self, *results: TrustedBenchmarkResult) -> None:
+        """Replace queued benchmark outcomes."""
+        self._benchmark_results = list(results)
+
+    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
+        """Record one call and return the next scripted outcome."""
+        self.accuracy_calls.append(FakeTrustedAccuracyCall(command_override))
+        if self._accuracy_results:
+            return self._accuracy_results.pop(0)
+        return TrustedAccuracyResult(executed=False, passed=True)
+
+    async def benchmark(
+        self,
+        *,
+        command_override: str | None = None,
+        required_metrics: frozenset[str] = frozenset(),
+    ) -> TrustedBenchmarkResult:
+        """Record one call and return the next scripted outcome."""
+        self.benchmark_calls.append(FakeTrustedBenchmarkCall(command_override, required_metrics))
+        if self._benchmark_results:
+            return self._benchmark_results.pop(0)
+        return TrustedBenchmarkResult(executed=False, passed=True)
 
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)

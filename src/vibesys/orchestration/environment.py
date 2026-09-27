@@ -9,17 +9,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vs_runtime.api.infrastructure import (
-    ModelRequestError,
-    ModelRequestReconciler,
-    create_model_request_reconciler,
-)
-
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.config import Config
-    from vibesys.context import _RunResources
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
@@ -111,13 +104,8 @@ class AgentEnvironment(Protocol):
 class _Environment:
     """Generic execution facts and candidate deployment lifecycle."""
 
-    def __init__(
-        self,
-        host: HostResources,
-        model_requests: ModelRequestReconciler | None = None,
-    ) -> None:
+    def __init__(self, host: HostResources) -> None:
         self._host = host
-        self._model_requests = model_requests or create_model_request_reconciler()
 
     @property
     def view(self) -> RunEnvironmentView:
@@ -182,27 +170,6 @@ class _Environment:
         await self._host._run_blocking(
             context.run_environment.teardown_deployment, name, log=context.lprint
         )
-
-    async def reconcile_model_requests(
-        self, *, scope: WorkspaceScope | WorkspaceHandle | None = None
-    ) -> str | None:
-        """Stage candidate-declared Modal model weights before trusted gates."""
-        context = self._host.workspaces._resources_for(scope)
-        if context.run_environment_view.env_kind != "modal":
-            return None
-        return await self._host._run_blocking(self._stage_model_requests, context)
-
-    def _stage_model_requests(self, context: _RunResources) -> str | None:
-        try:
-            volumes = self._model_requests.reconcile(context.workspace, log=context.lprint)
-        except ModelRequestError as exc:
-            context.lprint(f"[model-request] rejected: {exc}")
-            return f"Model-weight request could not be satisfied: {exc}"
-        if volumes:
-            context.lprint(
-                f"[model-request] staged {len(volumes)} model volume(s): " + ", ".join(volumes)
-            )
-        return None
 
     async def reselect_device(
         self, *, scope: WorkspaceScope | WorkspaceHandle | None = None

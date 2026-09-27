@@ -2,7 +2,6 @@
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "mock", "count": 4}
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "patch", "count": 1}
 {"path": "libs/vs-issue-tracker/tests/test_issue_board_core.py", "rule": "sleep", "count": 2}
-{"path": "libs/vs-issue-tracker/tests/test_mcp.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-issue-tracker/tests/test_policy_and_format.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-project/tests/test_errors.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-project/tests/test_git_tracker_guards.py", "rule": "patch", "count": 4}
@@ -87,7 +86,6 @@
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "mock", "count": 71}
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "sleep", "count": 11}
-{"path": "tests/vibesys/loops/test_gates.py", "rule": "mock", "count": 10}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 32}

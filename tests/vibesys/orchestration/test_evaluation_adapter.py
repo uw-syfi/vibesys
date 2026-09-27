@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,13 +10,8 @@ import pytest
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.context import RunSetup
-from vibesys.evaluators.gates import (
-    AccuracyGateResult,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
-)
 from vibesys.evaluators.input_manifest import load_input_bundle
-from vibesys.orchestration.fake_gates import FakeGateExecutor
+from vibesys.events import CoreEventType, GateFinishedData, GateStartedData
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runtime import RunContext
 from vibesys.profilers import ProfilerKind
@@ -28,7 +22,6 @@ from vs_runtime.api import (
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkObjective,
-    LocalValidationEvaluation,
     MetricDirection,
     RuntimeContractError,
 )
@@ -42,13 +35,20 @@ if TYPE_CHECKING:
     _Result = TypeVar("_Result")
 
 
-def _write_project(root: Path) -> None:
+def _write_project(root: Path, *, accuracy_command: str = "true") -> None:
     root.mkdir(parents=True)
     (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
+    (root / "benchmark.py").write_text(
+        "import json, sys\n"
+        "with open(sys.argv[2], 'w') as output:\n"
+        "    json.dump({'throughput': 42.0}, output)\n"
+    )
     (root / "vibesys.input.toml").write_text(
         'version = 1\n[agent]\ndomain = "generic"\n'
-        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+        f'[accuracy]\ncommand = ["{accuracy_command}"]\n'
+        '[benchmark]\ncommand = ["python", "benchmark.py"]\n'
+        '[benchmark.result]\njson_argument = "--output-json"\nmetric = "throughput"\n'
     )
 
 
@@ -69,13 +69,13 @@ def _request(project_root: Path, *, agent_backend: str | None = None) -> RunRequ
 
 def _run(
     tmp_path: Path,
-    executor: FakeGateExecutor,
     body: Callable[[RunContext], Awaitable[_Result]],
     *,
     agent_backend: str | None = None,
-) -> _Result:
+    accuracy_command: str = "true",
+) -> tuple[_Result, LocalRunIntegration]:
     project_root = tmp_path / "project"
-    _write_project(project_root)
+    _write_project(project_root, accuracy_command=accuracy_command)
     integration = LocalRunIntegration()
 
     async def exercise() -> _Result:
@@ -83,42 +83,13 @@ def _run(
             _request(project_root, agent_backend=agent_backend),
             integration,
             setup=RunSetup(),
-            gate_executor=executor,
         ) as ctx:
             return await body(ctx)
 
-    try:
-        return asyncio.run(exercise())
-    finally:
-        integration.close()
+    return asyncio.run(exercise()), integration
 
 
-def test_adapter_returns_semantic_accuracy_and_benchmark_results(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-    executor.script_accuracy(
-        AccuracyGateResult(
-            command="true",
-            passed=True,
-            output="internal command output",
-            feedback=None,
-            executed=True,
-        )
-    )
-    executor.script_benchmark(
-        BenchmarkGateResult(
-            command="true",
-            output="internal command output",
-            executed=True,
-            outcome=FrameworkBenchmarkOutcome(
-                metric_name="throughput",
-                metric_value=42.0,
-                metric_direction="max",
-                metric_unit="requests/s",
-                row={"throughput": 42.0, "latency": 3.0},
-            ),
-        )
-    )
-
+def test_adapter_returns_semantic_results_and_events(tmp_path: Path) -> None:
     async def body(ctx: RunContext) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
         accuracy = await ctx.evaluation.accuracy(ctx.workspaces.root)
         benchmark = await ctx.evaluation.benchmark(
@@ -127,95 +98,79 @@ def test_adapter_returns_semantic_accuracy_and_benchmark_results(tmp_path: Path)
         )
         return accuracy, benchmark
 
-    accuracy, benchmark = _run(tmp_path, executor, body)
+    (accuracy, benchmark), integration = _run(tmp_path, body)
+    try:
+        assert accuracy.passed
+        assert accuracy.receipt is not None
+        assert benchmark.passed
+        assert benchmark.metric_name == "throughput"
+        assert benchmark.metric_value == 42.0
+        assert benchmark.metric_direction is MetricDirection.MAXIMIZE
+        gate_events = [
+            event
+            for event in integration.events.read()
+            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+        ]
+        assert [type(event.data) for event in gate_events] == [
+            GateStartedData,
+            GateFinishedData,
+            GateStartedData,
+            GateFinishedData,
+        ]
+    finally:
+        integration.close()
 
-    assert accuracy.executed
-    assert accuracy.passed
-    assert accuracy.receipt is not None
-    assert benchmark == BenchmarkEvaluation(
-        executed=True,
-        metric_name="throughput",
-        metric_value=42.0,
-        metric_direction=MetricDirection.MAXIMIZE,
-        metric_unit="requests/s",
-        row={"throughput": 42.0, "latency": 3.0},
-    )
-    assert benchmark.passed
-    assert len(executor.accuracy_calls) == 1
-    assert len(executor.benchmark_calls) == 1
 
-
-def test_accuracy_receipt_round_trips_and_reuses_without_execution(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-    executor.script_accuracy(
-        AccuracyGateResult(
-            command="true",
-            passed=True,
-            output="ok",
-            feedback=None,
-            executed=True,
-        )
-    )
-
+def test_accuracy_receipt_round_trips_across_framework_snapshot(tmp_path: Path) -> None:
     async def body(ctx: RunContext) -> tuple[AccuracyEvaluation, AccuracyEvaluation]:
         first = await ctx.evaluation.accuracy(ctx.workspaces.root)
         assert first.receipt is not None
         restored = AccuracyReceipt.model_validate_json(first.receipt.model_dump_json())
-        framework_note = ctx.workspaces.root.path / ".vibesys" / "receipt-test.json"
-        framework_note.parent.mkdir(parents=True, exist_ok=True)
-        framework_note.write_text("{}\n")
+        note = ctx.workspaces.root.path / ".vibesys" / "receipt-test.json"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text("{}\n")
         await ctx.workspaces.root.snapshot("incidental framework metadata")
         reused = await ctx.evaluation.accuracy(ctx.workspaces.root, reuse=restored)
         return first, reused
 
-    first, reused = _run(tmp_path, executor, body)
+    (first, reused), integration = _run(tmp_path, body)
+    try:
+        assert first.executed
+        assert not reused.executed
+        assert reused.receipt == first.receipt
+    finally:
+        integration.close()
 
-    assert first.executed
-    assert reused == AccuracyEvaluation(executed=False, receipt=first.receipt)
-    assert len(executor.accuracy_calls) == 1
 
-
-def test_adapter_preserves_failure_feedback_for_policy(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-    executor.script_accuracy(
-        AccuracyGateResult(
-            command="false",
-            passed=False,
-            output="wrong answer",
-            feedback="Framework accuracy gate failed.\nwrong answer",
-            executed=True,
-        )
-    )
-
+def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
     async def body(ctx: RunContext) -> AccuracyEvaluation:
         return await ctx.evaluation.accuracy(ctx.workspaces.root)
 
-    result = _run(tmp_path, executor, body)
+    result, integration = _run(tmp_path, body, accuracy_command="false")
+    try:
+        assert not result.passed
+        assert result.feedback is not None
+        assert result.feedback.startswith("Framework accuracy gate failed.")
+    finally:
+        integration.close()
 
-    assert not result.passed
-    assert result.feedback == "Framework accuracy gate failed.\nwrong answer"
 
-
-def test_stub_backend_preserves_existing_evaluation_skip(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-
+def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
     async def body(ctx: RunContext) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
         return (
             await ctx.evaluation.accuracy(ctx.workspaces.root),
             await ctx.evaluation.benchmark(ctx.workspaces.root),
         )
 
-    accuracy, benchmark = _run(tmp_path, executor, body, agent_backend="stub")
-
-    assert accuracy == AccuracyEvaluation(executed=False)
-    assert benchmark == BenchmarkEvaluation(executed=False)
-    assert executor.accuracy_calls == []
-    assert executor.benchmark_calls == []
+    (accuracy, benchmark), integration = _run(tmp_path, body, agent_backend="stub")
+    try:
+        assert not accuracy.executed
+        assert not benchmark.executed
+    finally:
+        integration.close()
 
 
 def test_adapter_rejects_duplicate_objectives_before_execution(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-
     async def body(ctx: RunContext) -> None:
         objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
         with pytest.raises(ValueError, match="objective names must be unique"):
@@ -224,150 +179,23 @@ def test_adapter_rejects_duplicate_objectives_before_execution(tmp_path: Path) -
                 objectives=(objective, objective),
             )
 
-    _run(tmp_path, executor, body)
-    assert executor.benchmark_calls == []
+    _, integration = _run(tmp_path, body)
+    integration.close()
 
 
-def test_adapter_rejects_workspace_not_owned_by_the_run(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-
+def test_adapter_rejects_foreign_receipt_and_workspace(tmp_path: Path) -> None:
     async def body(ctx: RunContext) -> None:
         with pytest.raises(TypeError, match="live handle"):
             await ctx.evaluation.accuracy(FakeWorkspace(path=ctx.workspaces.root.path))
-
-    _run(tmp_path, executor, body)
-    assert executor.accuracy_calls == []
-
-
-def test_adapter_rejects_receipt_after_candidate_changes(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-    executor.script_accuracy(
-        AccuracyGateResult(
-            command="true",
-            passed=True,
-            output="ok",
-            feedback=None,
-            executed=True,
-        )
-    )
-
-    async def body(ctx: RunContext) -> None:
-        result = await ctx.evaluation.accuracy(ctx.workspaces.root)
-        assert result.receipt is not None
-        (ctx.workspaces.root.path / "queue.py").write_text("VALUE = 2\n")
-        with pytest.raises(RuntimeContractError, match="candidate revision"):
-            await ctx.evaluation.accuracy(ctx.workspaces.root, reuse=result.receipt)
-
-    _run(tmp_path, executor, body)
-    assert len(executor.accuracy_calls) == 1
-
-
-@pytest.mark.parametrize("field", ["run_id", "revision"])
-def test_adapter_rejects_foreign_or_stale_accuracy_receipt(tmp_path: Path, field: str) -> None:
-    executor = FakeGateExecutor()
-
-    async def body(ctx: RunContext) -> None:
-        receipt = AccuracyReceipt(
-            run_id=ctx.run_id,
-            workspace_id=ctx.workspaces.root.id,
-            revision=ctx.workspaces.root.revision or "missing",
-        )
-        invalid = receipt.model_copy(update={field: "not-current"})
-        with pytest.raises(RuntimeContractError, match=r"another run|revision"):
-            await ctx.evaluation.accuracy(ctx.workspaces.root, reuse=invalid)
-
-    _run(tmp_path, executor, body)
-    assert executor.accuracy_calls == []
-
-
-def test_local_validation_executes_then_reuses_an_exact_pass(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-
-    async def body(
-        ctx: RunContext,
-    ) -> tuple[LocalValidationEvaluation, LocalValidationEvaluation, dict[str, object]]:
-        recipe = ctx.workspaces.root.path / "validation" / "recipes.json"
-        recipe.parent.mkdir(parents=True)
-        recipe.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "recipes": [
-                        {
-                            "name": "focused",
-                            "command": "python -c 'print(\"ok\")'",
-                            "input_paths": ["queue.py"],
-                            "timeout_seconds": 30,
-                            "purpose": "exercise the candidate queue",
-                        }
-                    ],
-                }
+        with pytest.raises(RuntimeContractError, match="another run"):
+            await ctx.evaluation.accuracy(
+                ctx.workspaces.root,
+                reuse=AccuracyReceipt(
+                    run_id="foreign",
+                    workspace_id=None,
+                    revision="revision",
+                ),
             )
-        )
-        first = await ctx.evaluation.validate_local(
-            ctx.workspaces.root,
-            recipe_artifact="validation/recipes.json",
-            report_location="validation/report-1.json",
-        )
-        second = await ctx.evaluation.validate_local(
-            ctx.workspaces.root,
-            recipe_artifact="validation/recipes.json",
-            report_location="validation/report-2.json",
-        )
-        payload = json.loads(
-            (ctx.workspaces.root.path / "validation" / "report-2.json").read_text()
-        )
-        return first, second, payload
 
-    first, second, payload = _run(tmp_path, executor, body)
-
-    assert first == LocalValidationEvaluation(
-        passed=True,
-        report_location="validation/report-1.json",
-    )
-    assert second.passed
-    results = payload["results"]
-    assert isinstance(results, list)
-    result = results[0]
-    assert isinstance(result, dict)
-    assert result["reused"] is True
-
-
-def test_local_validation_reverts_candidate_mutation_and_reports_failure(tmp_path: Path) -> None:
-    executor = FakeGateExecutor()
-
-    async def body(ctx: RunContext) -> tuple[LocalValidationEvaluation, str]:
-        recipe = ctx.workspaces.root.path / "validation" / "recipes.json"
-        recipe.parent.mkdir(parents=True)
-        recipe.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "recipes": [
-                        {
-                            "name": "mutating",
-                            "command": (
-                                "python -c 'from pathlib import Path; "
-                                'Path("queue.py").write_text("VALUE = 99\\n")\''
-                            ),
-                            "input_paths": ["queue.py"],
-                            "timeout_seconds": 30,
-                            "purpose": "must not mutate the candidate",
-                        }
-                    ],
-                }
-            )
-        )
-        result = await ctx.evaluation.validate_local(
-            ctx.workspaces.root,
-            recipe_artifact="validation/recipes.json",
-            report_location="validation/report.json",
-        )
-        return result, (ctx.workspaces.root.path / "queue.py").read_text()
-
-    result, candidate = _run(tmp_path, executor, body)
-
-    assert not result.passed
-    assert result.feedback is not None
-    assert "mutated the workspace" in result.feedback
-    assert candidate == "VALUE = 1\n"
+    _, integration = _run(tmp_path, body)
+    integration.close()

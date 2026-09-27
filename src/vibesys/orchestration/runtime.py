@@ -8,7 +8,7 @@ capability live in a sibling module, split out of this one by what they own:
 - `workspaces.py`: `ctx.workspaces` (root/isolated worktrees, snapshots,
   transactions, adoption).
 - `state.py`: `ctx.state` (checkpoint/commit and the events they derive).
-- `gates.py`: `ctx.gates` (trusted accuracy/benchmark checks).
+- `gates.py`: policy over runtime-owned trusted evaluation.
 - `control.py`: `ctx.control` (the stop/pause/debug boundary).
 - `environment.py`: `ctx.environment` (execution facts, candidate deployment).
 
@@ -47,13 +47,7 @@ from vibesys.orchestration.agents import (
 from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.environment import _Environment
-from vibesys.orchestration.gates import (
-    GateExecutor,
-    GateRunResult,
-    MeasurementOptions,
-    _EvaluationAdapter,
-    _Evaluator,
-)
+from vibesys.orchestration.gates import _EvaluationAdapter
 from vibesys.orchestration.progress import _Progress
 from vibesys.orchestration.skills import _Skills
 from vibesys.orchestration.state import _RunState
@@ -83,9 +77,6 @@ if TYPE_CHECKING:
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
 __all__ = [
-    "GateExecutor",
-    "GateRunResult",
-    "MeasurementOptions",
     "RunContext",
     "WorkspaceHandle",
     "WorkspaceRestoreError",
@@ -149,7 +140,6 @@ class RunContext:
         projector: _CommittedStateProjector | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-        gate_executor: GateExecutor | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
         agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
         plugin: OrchestrationPlugin | None = None,
@@ -165,10 +155,6 @@ class RunContext:
         own (still independently patchable) ``build_agent_client`` global when
         no override is given.
 
-        ``gate_executor`` is the same kind of seam for ``ctx.gates``: a test
-        passes a fake in place of monkeypatching the module-level
-        ``run_accuracy_gate``/``run_benchmark_gate`` functions the real
-        implementation wraps. Defaults to the real trusted-command gates.
         """
         if plugin is not None:
             if request.orchestration.id != plugin.id:
@@ -193,7 +179,6 @@ class RunContext:
         self._integration = integration
         self._projector = projector
         self._backend_factory = backend_factory
-        self._gate_executor = gate_executor
         self._resource_owner: _RunResources | None = None
         self._facts: RunFacts | None = None
         self._session_store: DurableSessionStore | None = None
@@ -210,8 +195,7 @@ class RunContext:
             plugin.state if plugin is not None else None,
             plugin_bound=plugin is not None,
         )
-        self.gates = _Evaluator(self)
-        self.evaluation = _EvaluationAdapter(self, self.gates)
+        self.evaluation = _EvaluationAdapter(self)
         self.agents = _Agents(
             self,
             agent_roles,
@@ -330,7 +314,6 @@ class RunContext:
         projector: _CommittedStateProjector | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-        gate_executor: GateExecutor | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
         agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
         plugin: OrchestrationPlugin | None = None,
@@ -349,7 +332,6 @@ class RunContext:
             projector=projector,
             agent_client_factory=agent_client_factory,
             backend_factory=backend_factory,
-            gate_executor=gate_executor,
             agent_roles=agent_roles,
             agent_tool_bindings=agent_tool_bindings,
             plugin=plugin,

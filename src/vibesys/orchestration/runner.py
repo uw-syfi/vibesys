@@ -14,7 +14,6 @@ if TYPE_CHECKING:
         PreparedPlugin,
     )
     from vibesys.orchestration.environment import AgentEnvironment
-    from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
@@ -31,7 +30,6 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
     projector: OrchestrationProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    gate_executor: GateExecutor | None = None,
     agent_tool_bindings: Mapping[
         str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
     ]
@@ -47,7 +45,6 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
         projector=projector,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
-        gate_executor=gate_executor,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
     ) as ctx:

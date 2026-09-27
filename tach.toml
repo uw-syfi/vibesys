@@ -163,7 +163,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestrations.hypothesis_readmodel"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestrations.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.agent"
@@ -224,7 +224,7 @@ depends_on = ["vs_agent", "vs_sandbox"]
 [[modules]]
 path = "vibesys.context"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request", "vibesys.errors"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request", "vibesys.errors"]
 
 [[modules]]
 # Pure, deterministic search policy: never RunContext/agents/prompts/I/O.
@@ -260,11 +260,6 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vs_project", "vs_sandbox"]
 
 [[modules]]
-path = "vibesys.render"
-layer = "prompts_and_lower_libs"
-depends_on = ["vibesys"]
-
-[[modules]]
 path = "vibesys.evaluators"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_evaluator_protocol", "vs_loop_state", "vs_project", "vs_sandbox"]
@@ -292,7 +287,7 @@ depends_on = ["vs_project"]
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_project", "vs_sandbox"]
+depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vs_agent"
@@ -438,7 +433,7 @@ depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.hypothesis", "vs_
 [[modules]]
 path = "vibesys.orchestration.gates"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log", "vibesys.orchestration.local_validation"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.local_validation"]
 
 [[modules]]
 # Runtime-owned execution, reuse, mutation isolation, and reporting for
@@ -446,14 +441,6 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runti
 path = "vibesys.orchestration.local_validation"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.evaluators", "vibesys.orchestration._host", "vibesys.orchestration.workspaces", "vs_runtime"]
-
-[[modules]]
-# In-memory `GateExecutor` test double; see the module docstring. Split from
-# `gates.py` so production code depending on `vibesys.orchestration.gates`
-# never pulls in the fake.
-path = "vibesys.orchestration.fake_gates"
-layer = "orchestration_host"
-depends_on = ["vibesys.evaluators"]
 
 [[modules]]
 # ``ctx.progress``: the host-owned pending framework-log buffer (see that
