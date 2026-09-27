@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vs_agent.api import (
@@ -25,6 +27,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
+    AgentSession,
     AgentTool,
     AgentTurnTimeoutError,
     RuntimeContractError,
@@ -45,7 +48,9 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import (
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
+    FakeAgentSessions,
     FakeRunControlEventSink,
+    FakeWorkspace,
 )
 from vs_sandbox.api import ProjectPathPolicy
 
@@ -69,6 +74,7 @@ class _Workspace:
         self.committed_changes: list[tuple[str, ...]] = []
         self.directories: set[str] = set()
         self.snapshots: list[str] = []
+        self.agent_restores: list[tuple[str, tuple[str, ...]]] = []
 
     async def snapshot(self, label: str) -> str:
         self.snapshots.append(label)
@@ -98,6 +104,7 @@ class _Workspace:
         *,
         preserve_paths: tuple[str, ...],
     ) -> None:
+        self.agent_restores.append((revision, preserve_paths))
         self.revision = revision
         self.changes = [
             path
@@ -107,6 +114,39 @@ class _Workspace:
 
     def is_directory(self, path: str) -> bool:
         return path in self.directories
+
+
+class _SnapshotGate:
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def enter(self) -> None:
+        self.calls += 1
+        if self.calls == 1:
+            self.entered.set()
+            await self.release.wait()
+
+
+class _BlockedRuntimeWorkspace(_Workspace):
+    def __init__(self, workspace_id: str) -> None:
+        super().__init__(workspace_id)
+        self.gate = _SnapshotGate()
+
+    async def snapshot(self, label: str) -> str:
+        await self.gate.enter()
+        return await super().snapshot(label)
+
+
+class _BlockedFakeWorkspace(FakeWorkspace):
+    def __init__(self, workspace_id: str) -> None:
+        super().__init__(workspace_id=workspace_id, path=Path(f"/{workspace_id}"))
+        self.gate = _SnapshotGate()
+
+    async def snapshot(self, label: str) -> str:
+        await self.gate.enter()
+        return await super().snapshot(label)
 
 
 class _ClientFactory:
@@ -197,6 +237,69 @@ def _environment() -> FakeAgentExecutionEnvironment:
     )
 
 
+class _OpenedSessionContract:
+    def __init__(
+        self,
+        owner: AgentSessionRuntime | FakeAgentSessions,
+        sessions: tuple[AgentSession, ...],
+    ) -> None:
+        self.owner = owner
+        self.sessions = sessions
+
+    async def close(self) -> None:
+        await self.owner.close()
+
+
+async def _open_session_contract(
+    implementation: str,
+    role: AgentRole,
+    workspaces: tuple[_Workspace | FakeWorkspace, ...],
+    *,
+    effects: tuple[Callable[[], None] | None, ...] = (),
+    writable_paths: tuple[str, ...] = (),
+) -> _OpenedSessionContract:
+    selected_effects = effects or (None,) * len(workspaces)
+    if implementation == "fake":
+        pending_effects = deque(selected_effects)
+
+        def respond(
+            _role: AgentRole,
+            _history: tuple[str, ...],
+            message: str,
+            _response: type[BaseModel] | None,
+        ) -> object:
+            effect = pending_effects.popleft() if pending_effects else None
+            if effect is not None:
+                effect()
+            return message
+
+        owner = FakeAgentSessions((role,), responder=respond)
+    else:
+        clients = []
+        for index, effect in enumerate(selected_effects):
+            client = _client(responses=tuple(f"reply-{index}-{turn}" for turn in range(4)))
+            if effect is not None:
+                client.on_invoke(lambda _call, selected=effect: selected())
+            clients.append(client)
+        owner = _runtime(
+            role,
+            _ClientFactory(*clients),
+            _EnvironmentOpener(*(_environment() for _workspace_value in workspaces)),
+            FakeAgentExecutionLifecycleSink(),
+        )
+    sessions = tuple(
+        [
+            await owner.create_session(
+                role,
+                workspace=workspace,
+                writable_paths=writable_paths,
+            )
+            for workspace in workspaces
+        ]
+    )
+    return _OpenedSessionContract(owner, sessions)
+
+
 def test_session_fixes_role_binding_and_continues_provider_context() -> None:
     role = AgentRole(id="worker", system_prompt="Work carefully.")
     client = _client(responses=("first",)).enqueue("worker", {"value": 2})
@@ -243,6 +346,235 @@ def test_session_fixes_role_binding_and_continues_provider_context() -> None:
         for event in lifecycle.events
         if isinstance(event, AgentExecutionFinished)
     )
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_same_session_turns_are_serialized(implementation: str) -> None:
+    async def scenario() -> None:
+        role = AgentRole(id="worker", system_prompt="Work carefully.")
+        workspace = (
+            _BlockedFakeWorkspace("root")
+            if implementation == "fake"
+            else _BlockedRuntimeWorkspace("root")
+        )
+        opened = await _open_session_contract(implementation, role, (workspace,))
+        session = opened.sessions[0]
+        first = asyncio.create_task(session.turn("first"))
+        await workspace.gate.entered.wait()
+
+        queued = asyncio.Event()
+
+        async def second_turn() -> str:
+            queued.set()
+            return await session.turn("second")
+
+        second = asyncio.create_task(second_turn())
+        await queued.wait()
+        assert workspace.gate.calls == 1
+
+        workspace.gate.release.set()
+        assert await first
+        assert await second
+        await opened.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_different_sessions_can_turn_concurrently(implementation: str) -> None:
+    async def scenario() -> None:
+        role = AgentRole(id="worker", system_prompt="Work carefully.")
+        workspace_type = (
+            _BlockedFakeWorkspace if implementation == "fake" else _BlockedRuntimeWorkspace
+        )
+        first_workspace = workspace_type("first")
+        second_workspace = workspace_type("second")
+        opened = await _open_session_contract(
+            implementation,
+            role,
+            (first_workspace, second_workspace),
+        )
+        first = asyncio.create_task(opened.sessions[0].turn("first"))
+        second = asyncio.create_task(opened.sessions[1].turn("second"))
+        await first_workspace.gate.entered.wait()
+        await second_workspace.gate.entered.wait()
+
+        first_workspace.gate.release.set()
+        second_workspace.gate.release.set()
+        await asyncio.gather(first, second)
+        await opened.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_close_waits_for_active_turn_and_rejects_queued_and_new_turns(
+    implementation: str,
+) -> None:
+    async def scenario() -> None:
+        role = AgentRole(id="worker", system_prompt="Work carefully.")
+        workspace = (
+            _BlockedFakeWorkspace("root")
+            if implementation == "fake"
+            else _BlockedRuntimeWorkspace("root")
+        )
+        opened = await _open_session_contract(implementation, role, (workspace,))
+        session = opened.sessions[0]
+        active = asyncio.create_task(session.turn("active"))
+        await workspace.gate.entered.wait()
+
+        queued_started = asyncio.Event()
+
+        async def queued_turn() -> str:
+            queued_started.set()
+            return await session.turn("queued")
+
+        queued = asyncio.create_task(queued_turn())
+        await queued_started.wait()
+        close_started = asyncio.Event()
+
+        async def close_session() -> None:
+            close_started.set()
+            await session.close()
+
+        closing = asyncio.create_task(close_session())
+        await close_started.wait()
+        assert session.closed
+        assert not closing.done()
+        with pytest.raises(SessionClosedError):
+            await session.turn("new")
+
+        workspace.gate.release.set()
+        assert await active
+        with pytest.raises(SessionClosedError):
+            await queued
+        await closing
+        await opened.close()
+
+    asyncio.run(scenario())
+
+
+_workspace_change_specs = st.lists(
+    st.tuples(st.booleans(), st.booleans()),
+    min_size=1,
+    max_size=6,
+)
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("access", [WorkspaceAccess.READ_ONLY, WorkspaceAccess.LIMITED])
+@given(specs=_workspace_change_specs)
+def test_session_reverts_every_unauthorized_workspace_change(
+    implementation: str,
+    access: WorkspaceAccess,
+    specs: list[tuple[bool, bool]],
+) -> None:
+    async def scenario() -> None:
+        role = AgentRole(id="worker", system_prompt="Work carefully.", workspace_access=access)
+        workspace: _Workspace | FakeWorkspace
+        workspace = (
+            FakeWorkspace(workspace_id="root", path=Path("/root"))
+            if implementation == "fake"
+            else _Workspace()
+        )
+        changes: list[str] = []
+        grants: list[str] = []
+        directories: list[str] = []
+        allowed_changes: list[str] = []
+        for index, (directory, allowed) in enumerate(specs):
+            grant = f"memory-{index}" if directory else f"evidence-{index}.json"
+            changed = f"{grant}/report.json" if directory else grant
+            changes.append(changed)
+            if allowed and access is WorkspaceAccess.LIMITED:
+                grants.append(grant)
+                allowed_changes.append(changed)
+                if directory:
+                    directories.append(grant)
+
+        if access is WorkspaceAccess.LIMITED and not grants:
+            grants.append("always-allowed.json")
+        if isinstance(workspace, FakeWorkspace):
+            workspace.declare_directories(*directories)
+
+            def mutate() -> None:
+                workspace.script_pending_changes(changes, allowed_changes)
+
+        else:
+            workspace.directories.update(directories)
+
+            def mutate() -> None:
+                workspace.changes.extend(changes)
+
+        opened = await _open_session_contract(
+            implementation,
+            role,
+            (workspace,),
+            effects=(mutate,),
+            writable_paths=tuple(grants),
+        )
+        session = opened.sessions[0]
+        await session.turn("write")
+        assert session.writable_paths == tuple(grants)
+        if isinstance(workspace, FakeWorkspace):
+            expected_restores = 1 if set(changes) - set(allowed_changes) else 0
+            assert len(workspace.agent_restore_calls) == expected_restores
+            expected_revision = "root-revision-2" if allowed_changes else "root-revision-1"
+            assert workspace.revision == expected_revision
+        else:
+            assert workspace.changes == []
+            expected_restores = 1 if set(changes) - set(allowed_changes) else 0
+            assert len(workspace.agent_restores) == expected_restores
+            expected_commit = tuple(allowed_changes) if allowed_changes else ()
+            assert workspace.committed_changes[-1] == expected_commit
+        await opened.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_unrevertable_unauthorized_change_fails_the_turn(implementation: str) -> None:
+    class _UnrevertableWorkspace(_Workspace):
+        async def restore_for_agent(
+            self,
+            revision: str,
+            *,
+            preserve_paths: tuple[str, ...],
+        ) -> None:
+            self.agent_restores.append((revision, preserve_paths))
+
+    async def scenario() -> None:
+        role = AgentRole(
+            id="worker",
+            system_prompt="Inspect without writing.",
+            workspace_access=WorkspaceAccess.READ_ONLY,
+        )
+        workspace: _UnrevertableWorkspace | FakeWorkspace
+        workspace = (
+            FakeWorkspace(workspace_id="root", path=Path("/root"))
+            if implementation == "fake"
+            else _UnrevertableWorkspace()
+        )
+        if isinstance(workspace, FakeWorkspace):
+
+            def mutate() -> None:
+                workspace.script_pending_changes(["unauthorized.txt"], ["unauthorized.txt"])
+
+        else:
+
+            def mutate() -> None:
+                workspace.changes.append("unauthorized.txt")
+
+        opened = await _open_session_contract(
+            implementation,
+            role,
+            (workspace,),
+            effects=(mutate,),
+        )
+        with pytest.raises(RuntimeContractError, match=r"unauthorized[.]txt"):
+            await opened.sessions[0].turn("inspect")
+        await opened.close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_execution import RuntimeAgentExecution
+from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
@@ -63,20 +64,6 @@ def _supports_required_capability(
     if capability is AgentCapability.MCP_SERVERS:
         return capabilities.tool_servers
     return bool(getattr(capabilities, capability.value))
-
-
-def _unauthorized_paths(
-    changes: list[str],
-    allowed: tuple[str, ...],
-    *,
-    directories: tuple[str, ...] = (),
-) -> list[str]:
-    return [
-        path
-        for path in changes
-        if not any(path == item for item in allowed)
-        and not any(path == item or path.startswith(f"{item}/") for item in directories)
-    ]
 
 
 class RuntimeAgentSession:
@@ -208,7 +195,7 @@ class RuntimeAgentSession:
             if self._role.workspace_access is WorkspaceAccess.LIMITED
             else ()
         )
-        unauthorized = _unauthorized_paths(
+        unauthorized = unauthorized_paths(
             await self._workspace.pending_changes(),
             allowed,
             directories=directories,
@@ -219,7 +206,7 @@ class RuntimeAgentSession:
             revision,
             preserve_paths=allowed,
         )
-        remaining = _unauthorized_paths(
+        remaining = unauthorized_paths(
             await self._workspace.pending_changes(),
             allowed,
             directories=directories,

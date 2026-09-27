@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -283,6 +285,7 @@ class _FakeSessionConfig:
 
     member_id: str | None
     writable_paths: tuple[str, ...]
+    writable_directory_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -311,7 +314,7 @@ class FakeAgentSession:
     def __init__(
         self,
         role: AgentRole,
-        workspace: Workspace,
+        workspace: FakeWorkspace,
         binding: AgentBinding,
         responder: TurnResponder,
         config: _FakeSessionConfig,
@@ -321,11 +324,14 @@ class FakeAgentSession:
         self._workspace = workspace
         self._member_id = config.member_id
         self._writable_paths = config.writable_paths
+        self._writable_directory_paths = config.writable_directory_paths
         self._binding = binding
         self._responder = responder
         self._history: list[str] = []
         self._turn_number = 0
+        self._turn_lock = asyncio.Lock()
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
 
     @property
     def role(self) -> AgentRole:
@@ -371,27 +377,80 @@ class FakeAgentSession:
     async def turn(
         self, message: str, *, response: type[ResponseT] | None = None
     ) -> str | ResponseT:
-        """Respond from prior completed turns, then append this message."""
+        """Serialize turns, respond from completed history, and enforce access."""
         if self._closed:
             raise SessionClosedError
+        async with self._turn_lock:
+            if self._closed:
+                raise SessionClosedError
+            return await self._turn_once(message, response=response)
+
+    async def _turn_once(
+        self,
+        message: str,
+        *,
+        response: type[ResponseT] | None,
+    ) -> str | ResponseT:
         self._turn_number += 1
         label = f"{self._role.id}-session-turn-{self._turn_number}"
-        await self._workspace.snapshot(f"{label}-input")
-        value = self._responder(self._role, tuple(self._history), message, response)
-        if response is None:
-            if not isinstance(value, str):
-                message = "text turn responder must return str"
-                raise TypeError(message)
-            result: str | ResponseT = value
-        else:
-            result = response.model_validate(value)
+        revision = await self._workspace.snapshot(f"{label}-input")
+        try:
+            value = self._responder(self._role, tuple(self._history), message, response)
+            if response is None:
+                if not isinstance(value, str):
+                    error = "text turn responder must return str"
+                    raise TypeError(error)
+                result: str | ResponseT = value
+            else:
+                result = response.model_validate(value)
+        finally:
+            remaining_changes = await self._enforce_workspace_access(revision)
         self._history.append(message)
-        if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
+        if self._role.workspace_access is WorkspaceAccess.READ_WRITE or remaining_changes:
             await self._workspace.snapshot(label)
         return result
 
+    async def _enforce_workspace_access(self, revision: str) -> list[str]:
+        if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
+            return await self._workspace.pending_changes()
+        allowed = (
+            self._writable_paths if self._role.workspace_access is WorkspaceAccess.LIMITED else ()
+        )
+        directories = (
+            self._writable_directory_paths
+            if self._role.workspace_access is WorkspaceAccess.LIMITED
+            else ()
+        )
+        changes = await self._workspace.pending_changes()
+        unauthorized = unauthorized_paths(changes, allowed, directories=directories)
+        if not unauthorized:
+            return changes
+        await self._workspace.restore_for_agent(revision, preserve_paths=allowed)
+        remaining = await self._workspace.pending_changes()
+        still_unauthorized = unauthorized_paths(
+            remaining,
+            allowed,
+            directories=directories,
+        )
+        if still_unauthorized:
+            detail = ", ".join(still_unauthorized)
+            message = f"role {self._role.id!r} left unauthorized workspace changes: {detail}"
+            raise RuntimeContractError(message)
+        return remaining
+
     async def close(self) -> None:
-        """End the fake conversation idempotently."""
+        """Reject more work and wait for the active turn before closing."""
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close_once())
+        await asyncio.shield(self._close_task)
+
+    async def _close_once(self) -> None:
+        async with self._turn_lock:
+            return
+
+    def mark_closed(self) -> None:
+        """Reject new and already-queued turns before owner cleanup starts."""
         self._closed = True
 
 
@@ -447,12 +506,19 @@ class FakeAgentSessions:
             role.workspace_access,
             writable_paths,
         )
+        if not isinstance(workspace, FakeWorkspace):
+            message = "workspace is not owned by this fake runtime"
+            raise TypeError(message)
         session = FakeAgentSession(
             role,
             workspace,
             self._bindings[role.id],
             self._responder,
-            _FakeSessionConfig(member_id, validated_paths),
+            _FakeSessionConfig(
+                member_id,
+                validated_paths,
+                tuple(path for path in validated_paths if workspace.is_directory(path)),
+            ),
         )
         self._sessions.append(session)
         return session
@@ -463,18 +529,24 @@ class FakeAgentSessions:
             return
         self._closing = True
         self._closed = True
+        for session in self._sessions:
+            session.mark_closed()
         for session in reversed(self._sessions):
             await session.close()
 
     def begin_close(self) -> None:
         """Reject new sessions before asynchronous teardown starts."""
         self._closing = True
+        for session in self._sessions:
+            session.mark_closed()
 
     async def close_workspace_sessions(self, workspace: Workspace) -> None:
         """Invalidate every public session bound to a discarded workspace."""
-        for session in self._sessions:
-            if session.workspace is workspace:
-                await session.close()
+        sessions = [session for session in self._sessions if session.workspace is workspace]
+        for session in sessions:
+            session.mark_closed()
+        for session in reversed(sessions):
+            await session.close()
 
 
 class FakeWorkspaces:
@@ -781,7 +853,9 @@ class FakeWorkspace:
         self._snapshot_count = 0
         self._retained: dict[str, str] = {}
         self._pending_changes: list[list[str]] = []
+        self._directories: set[str] = set()
         self.restore_calls: list[tuple[str, bool]] = []
+        self.agent_restore_calls: list[tuple[str, tuple[str, ...]]] = []
 
     @property
     def id(self) -> str | None:
@@ -835,6 +909,26 @@ class FakeWorkspace:
         if self._pending_changes:
             return self._pending_changes.pop(0)
         return []
+
+    async def restore_for_agent(
+        self,
+        revision: str,
+        *,
+        preserve_paths: tuple[str, ...],
+    ) -> None:
+        """Record an isolation restore while preserving only explicit grants."""
+        if revision not in self._known_revisions:
+            raise WorkspaceRestoreError(revision)
+        self._tree_revision = revision
+        self.agent_restore_calls.append((revision, preserve_paths))
+
+    def declare_directories(self, *paths: str) -> None:
+        """Declare which validated writable paths represent directories."""
+        self._directories.update(paths)
+
+    def is_directory(self, path: str) -> bool:
+        """Return whether a writable grant covers descendants of *path*."""
+        return path in self._directories
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
         """Return whether a known tree could be materialized."""
