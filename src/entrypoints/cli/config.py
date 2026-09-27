@@ -55,14 +55,14 @@ def _restore_project_config(
         (
             ("agent", "backend"),
             recorded.agent_backend,
-            frozenset({"agent_backend", "stub_agent"}),
+            frozenset({"agent_backend"}),
             "agent_backend",
         ),
         (("agent", "driver"), recorded.agent_driver, frozenset(), "agent_driver"),
         (
             ("agent", "cli_provider"),
             recorded.cli_provider,
-            frozenset({"cli_provider", "stub_agent"}),
+            frozenset({"cli_provider"}),
             "cli_provider",
         ),
         (("agent", "cli_timeout"), recorded.cli_timeout, frozenset(), "cli_timeout"),
@@ -110,7 +110,7 @@ def _restore_project_config(
     )
     agent = config.agent.model_copy(
         update={
-            "backend": None if recorded.agent_backend == "stub" else recorded.agent_backend,
+            "backend": recorded.agent_backend,
             "driver": recorded.agent_driver,
             "cli_provider": recorded.cli_provider,
             "cli_timeout": recorded.cli_timeout,
@@ -182,10 +182,7 @@ def load_config_and_skills(
 def _load_effective_config(args: argparse.Namespace) -> Config:
     """Load configuration and restore persisted settings for project resumes."""
     try:
-        config = _load_config_or_stub_default(
-            args.config,
-            stub_agent=getattr(args, "stub_agent", False),
-        )
+        config = _load_config_or_default(args.config)
     except (ValueError, FileNotFoundError) as e:
         _configuration_error(str(e), code="config_load_failed", stage="config_loading")
 
@@ -209,18 +206,13 @@ def _resolve_repository_owner(config: Config) -> str:
         )
 
 
-def _load_config_or_stub_default(
-    config_path: Path | None,
-    *,
-    stub_agent: bool,
-) -> Config:
+def _load_config_or_default(config_path: Path | None) -> Config:
     """Load explicit or launch-directory config, then use safe built-in defaults."""
     if config_path is not None:
         return load_config(config_path, ignored_sections=_IGNORED_CONFIG_SECTIONS)
     selected_path = Path.cwd() / "agent.toml"
     if selected_path.is_file():
         return load_config(selected_path, ignored_sections=_IGNORED_CONFIG_SECTIONS)
-    del stub_agent
     return Config.model_validate(tomllib.loads(_DEFAULT_CONFIG_TEXT))
 
 
@@ -244,8 +236,3 @@ def _prepare_experiment_repository(args: argparse.Namespace, config: Config) -> 
     if args.repo is None:
         owner = _resolve_repository_owner(config)
         args.repo = f"{owner}/{repository_name_from_experiment(args.exp_name)}"
-
-
-def _prepare_stub_agent_smoke_defaults(argv: list[str]) -> list[str]:
-    """Keep stub invocations on the same cwd-input path as real users."""
-    return argv

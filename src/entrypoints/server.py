@@ -54,10 +54,9 @@ def _suggest_repository_owner(config: Config) -> str | None:
         return None
 
 
-def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913]; This private resolver maps the parser's seven independent setup flags to derived defaults; a Namespace loses field types and a new input DTO would duplicate the parser.
+def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913]; This private resolver maps the parser's six independent setup flags to derived defaults; a Namespace loses field types and a new input DTO would duplicate the parser.
     *,
     config_path: Path | None = None,
-    stub_agent: bool = False,
     input_path: Path | None = None,
     runs_dir: Path | None = None,
     experiment_name: str | None = None,
@@ -65,10 +64,7 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913];
     directory_only: bool = False,
 ) -> InteractiveSetupDefaults:
     """Resolve launcher-facing defaults from local configuration."""
-    config = cli.load_config_or_stub_default(
-        config_path,
-        stub_agent=stub_agent,
-    )
+    config = cli.load_config_or_default(config_path)
     launch_config_path = config_path
     if launch_config_path is None:
         directory_config = Path.cwd() / "agent.toml"
@@ -91,12 +87,10 @@ def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDef
     """Build the lazy defaults provider exposed over the control socket."""
     config = cli.option_from_argv(argv, "--config")
     theme = cli.option_from_argv(argv, "--theme")
-    stub_agent = "--stub-agent" in argv
 
     def provide() -> InteractiveSetupDefaults:
         return _resolve_tui_defaults(
             config_path=Path(config) if config is not None else None,
-            stub_agent=stub_agent,
             theme=TuiTheme(theme) if theme is not None else None,
             directory_only=True,
         )
@@ -114,7 +108,6 @@ def _build_tui_defaults_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs-dir", type=cli.parse_runs_dir, default=None)
     parser.add_argument("--exp-name", default=None)
     parser.add_argument("--theme", type=TuiTheme, choices=list(TuiTheme), default=None)
-    parser.add_argument("--stub-agent", action="store_true")
     parser.add_argument("--directory-only", action="store_true")
     return parser
 
@@ -124,7 +117,6 @@ def _run_tui_defaults(argv: list[str]) -> None:
     try:
         defaults = _resolve_tui_defaults(
             config_path=args.config,
-            stub_agent=args.stub_agent,
             input_path=args.input,
             runs_dir=args.runs_dir,
             experiment_name=args.exp_name,

@@ -184,9 +184,7 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
     registry.register_plugin(_PLUGIN)
 
     async def commit_round_one() -> str:
-        session = create_session(
-            _request(project_root), sink=_discard_event, registry=registry
-        )
+        session = create_session(_request(project_root), sink=_discard_event, registry=registry)
         session.start()
         try:
             result = await session.await_result()

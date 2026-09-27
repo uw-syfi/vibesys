@@ -1456,7 +1456,7 @@ def test_v5_agent_resume_restores_config_constraints_and_budget(
         parse_cli_invocation(
             ["--outer-loop", loop_kind, "--resume", run_id, "--constraint", "Change the ABI."]
         )
-    with pytest.raises(ConfigurationError, match="agent_backend"):
+    with pytest.raises(ConfigurationError, match="unrecognized arguments: --stub-agent"):
         parse_cli_invocation(["--outer-loop", loop_kind, "--resume", run_id, "--stub-agent"])
 
 

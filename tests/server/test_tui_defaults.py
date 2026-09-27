@@ -79,7 +79,7 @@ def test_provider_resolves_theme_from_launch_directory(
     )
     monkeypatch.chdir(tmp_path)
 
-    defaults = _tui_defaults_from_argv(["--stub-agent", "--headless"])()
+    defaults = _tui_defaults_from_argv(["--headless"])()
 
     assert defaults.theme == TuiTheme.CATPPUCCIN_MOCHA
     assert defaults.repository_owner is None

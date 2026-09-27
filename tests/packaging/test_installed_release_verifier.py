@@ -6,7 +6,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import verify_installed_release as verifier
@@ -108,7 +107,7 @@ def test_required_system_tools_reject_missing_git(
         verifier.verify_installed_release()
 
 
-def test_tui_verification_checks_controller_startup_and_completed_headless_run(
+def test_tui_verification_checks_installed_self_test_and_controller_startup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -132,33 +131,24 @@ import tomllib
 from pathlib import Path
 
 arguments = sys.argv[1:]
-headless = "--headless" in arguments
-if headless:
-    input_root = Path.cwd()
-    (input_root / ".git").mkdir()
-else:
-    input_index = arguments.index("--input")
-    input_root = Path(arguments[input_index + 1])
-    runs_index = arguments.index("--runs-dir")
-    runs_root = Path(arguments[runs_index + 1])
-    marker = Path(os.environ["VIBESYS_RELEASE_SMOKE_MARKER"])
-    marker.write_text("renderer initialized; control protocol exchanged\\n")
+input_index = arguments.index("--input")
+input_root = Path(arguments[input_index + 1])
+runs_index = arguments.index("--runs-dir")
+runs_root = Path(arguments[runs_index + 1])
+marker = Path(os.environ["VIBESYS_RELEASE_SMOKE_MARKER"])
+marker.write_text("renderer initialized; control protocol exchanged\\n")
 normalized_arguments = list(arguments)
-if not headless:
-    normalized_arguments[input_index + 1] = "<temporary-input>"
-    normalized_arguments[runs_index + 1] = "<temporary-runs>"
+normalized_arguments[input_index + 1] = "<temporary-input>"
+normalized_arguments[runs_index + 1] = "<temporary-runs>"
 manifest = tomllib.loads((input_root / "vibesys.input.toml").read_text())
 record = {
     "normalized_argv": normalized_arguments,
     "configless": not (input_root / "agent.toml").exists(),
     "manifest_commands": [manifest["accuracy"]["command"], manifest["benchmark"]["command"]],
 }
-if headless:
-    record["launched_from_input"] = input_root == Path.cwd()
-else:
-    record["runs_share_smoke_root"] = runs_root.parent == input_root.parent
-    record["input_files"] = sorted(path.name for path in input_root.iterdir())
-    record["ttys"] = [os.isatty(fd) for fd in (0, 1, 2)]
+record["runs_share_smoke_root"] = runs_root.parent == input_root.parent
+record["input_files"] = sorted(path.name for path in input_root.iterdir())
+record["ttys"] = [os.isatty(fd) for fd in (0, 1, 2)]
 observed_path = Path(os.environ["VIBESYS_TEST_OBSERVED"])
 observed = json.loads(observed_path.read_text()) if observed_path.exists() else []
 observed.append(record)
@@ -174,7 +164,6 @@ observed_path.write_text(json.dumps(observed))
     monkeypatch.setattr(verifier, "_RUNTIME_ROOT", tmp_path)
     monkeypatch.setenv("PATH", str(fake_bin))
     monkeypatch.setenv("VIBESYS_TEST_OBSERVED", str(observed))
-    monkeypatch.setattr(verifier, "_verify_project_state", lambda _root: None)
     monkeypatch.setattr(verifier, "_verify_isolated_interpreter", lambda: None)
     monkeypatch.setattr(verifier, "_verify_framework_imports", lambda: None)
     monkeypatch.setattr(verifier, "verify_console_entry_point", lambda: None)
@@ -185,7 +174,6 @@ observed_path.write_text(json.dumps(observed))
     verifier.verify_installed_release()
 
     common_arguments = [
-        "--stub-agent",
         "--input",
         "<temporary-input>",
         "--exp-name",
@@ -214,26 +202,6 @@ observed_path.write_text(json.dumps(observed))
             "manifest_commands": valid_commands,
             "ttys": [True, True, True],
         },
-        {
-            "normalized_argv": [
-                "--headless",
-                "--stub-agent",
-                "--agent-backend",
-                "cli",
-                "--exp-name",
-                "installed-release-smoke",
-                "--max-rounds",
-                "1",
-                "--no-skills",
-                "--backend",
-                "cpu",
-                "--profiler",
-                "none",
-            ],
-            "configless": True,
-            "launched_from_input": True,
-            "manifest_commands": valid_commands,
-        },
     ]
 
 
@@ -248,125 +216,3 @@ def test_interactive_smoke_rejects_clean_exit_before_protocol_exchange(tmp_path:
             runtime_root=tmp_path,
             timeout=5,
         )
-
-
-def test_headless_smoke_rejects_mutable_run_tree_under_sys_prefix(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    prefix = tmp_path / "isolated-prefix"
-    prefix.mkdir()
-    fake_cli = tmp_path / "fake_installed_cli.py"
-    fake_cli.write_text(
-        """\
-import os
-from pathlib import Path
-
-prefix = Path(os.environ["VIBESYS_TEST_PREFIX"])
-(prefix / "lib" / "exp_env" / "unexpected-run").mkdir(parents=True)
-arguments = os.sys.argv[1:]
-"""
-    )
-    monkeypatch.setattr(verifier.sys, "prefix", str(prefix))
-    environment = {**os.environ, "VIBESYS_TEST_PREFIX": str(prefix)}
-    monkeypatch.setattr(verifier, "_verify_project_state", lambda _root: None)
-
-    with pytest.raises(verifier.InstalledReleaseError, match="installation prefix"):
-        verifier.run_headless_stub_smoke(
-            [sys.executable, str(fake_cli)],
-            env=environment,
-            runtime_root=tmp_path,
-            timeout=5,
-        )
-
-
-def test_project_smoke_requires_exactly_one_run(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _StateWithoutRuns:
-        def load_project(self) -> object:
-            return object()
-
-        def list_runs(self) -> list[object]:
-            return []
-
-    class _ProjectWithoutRuns:
-        state = _StateWithoutRuns()
-
-        @classmethod
-        def open(cls, _root: Path) -> _ProjectWithoutRuns:
-            return cls()
-
-    monkeypatch.setattr(verifier, "Project", _ProjectWithoutRuns)
-    with pytest.raises(verifier.InstalledReleaseError, match="exactly one run"):
-        _verify_project_state_in_isolation(tmp_path)
-
-
-def _verify_project_state_in_isolation(project_root: Path) -> None:
-    # lint-waiver: LW-010042 [SLF001]; focused installed-release tests call this internal verifier directly to isolate persisted-project-state checks from the subprocess smoke test.
-    verifier._verify_project_state(project_root)  # noqa: SLF001
-
-
-def test_project_smoke_reads_rounds_from_authoritative_agent_state(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The installed smoke reads round state through the registered
-    projector, the same path the server uses (``registry.resolve(loop)``
-    then ``projector.view(...)``), rather than a strategy-specific store.
-    """
-    run_id = "test-installed-release-smoke"
-    orchestration_id = "multi-agent"
-    log_directory = tmp_path / "logs"
-    log_directory.mkdir()
-    (tmp_path / ".git").mkdir()
-
-    class _State:
-        def load_project(self) -> object:
-            return object()
-
-        def list_runs(self) -> list[object]:
-            return [SimpleNamespace(run_id=run_id)]
-
-        def load_run(self, actual_run_id: str) -> object:
-            assert actual_run_id == run_id
-            return SimpleNamespace(orchestration=SimpleNamespace(id=orchestration_id))
-
-        def current_run_id(self) -> str:
-            return run_id
-
-        def log_directory(self, actual_run_id: str) -> Path:
-            assert actual_run_id == run_id
-            return log_directory
-
-    class _Project:
-        state = _State()
-
-        @classmethod
-        def open(cls, _root: Path) -> _Project:
-            return cls()
-
-    class _FakeProjector:
-        def view(self, project: object, actual_run_id: str, *, status: object, loop: str) -> object:
-            del status
-            assert isinstance(project, _Project)
-            assert actual_run_id == run_id
-            assert loop == orchestration_id
-            return SimpleNamespace(rounds=[SimpleNamespace(number=1)])
-
-    class _FakeRegistration:
-        projector = _FakeProjector()
-
-    class _FakeRegistry:
-        def resolve(self, kind: str) -> object:
-            assert kind == orchestration_id
-            return _FakeRegistration()
-
-    def _fake_registry() -> _FakeRegistry:
-        return _FakeRegistry()
-
-    monkeypatch.setattr(verifier, "Project", _Project)
-    monkeypatch.setattr(verifier, "built_in_orchestrations", _fake_registry)
-
-    _verify_project_state_in_isolation(tmp_path)

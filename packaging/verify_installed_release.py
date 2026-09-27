@@ -23,11 +23,7 @@ from entrypoints.launcher import bundled_tui
 from vibesys.api.request import default_skill_roots
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
-from vibesys.orchestration.contracts import project_run
-from vibesys.orchestration.view import RunStatus
-from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ACTIVE_PROFILER_KINDS
-from vs_project.api import Project, ProjectError
 from vs_runtime.api.infrastructure import (
     SDKRoots,
     materialize_input_project,
@@ -316,15 +312,9 @@ def _verify_tui() -> None:
         runtime_root=_RUNTIME_ROOT,
         timeout=60,
     )
-    run_headless_stub_smoke(
-        [executable],
-        env=environment,
-        runtime_root=_RUNTIME_ROOT,
-        timeout=60,
-    )
 
 
-def _write_stub_input(input_root: Path) -> None:
+def _write_smoke_input(input_root: Path) -> None:
     input_root.mkdir()
     (input_root / "OBJECTIVE.md").write_text("Verify the installed release.\n")
     (input_root / "candidate.py").write_text("VALUE = 1\n")
@@ -342,17 +332,14 @@ def _write_stub_input(input_root: Path) -> None:
     )
 
 
-def _copied_project_stub_smoke_command(
+def _copied_project_smoke_command(
     command_prefix: list[str],
     *,
     input_root: Path,
     runs_root: Path,
-    headless: bool,
 ) -> list[str]:
     return [
         *command_prefix,
-        *(["--headless"] if headless else []),
-        "--stub-agent",
         "--input",
         str(input_root),
         "--exp-name",
@@ -370,25 +357,6 @@ def _copied_project_stub_smoke_command(
     ]
 
 
-def _direct_project_stub_smoke_command(command_prefix: list[str]) -> list[str]:
-    return [
-        *command_prefix,
-        "--headless",
-        "--stub-agent",
-        "--agent-backend",
-        "cli",
-        "--exp-name",
-        "installed-release-smoke",
-        "--max-rounds",
-        "1",
-        "--no-skills",
-        "--backend",
-        "cpu",
-        "--profiler",
-        "none",
-    ]
-
-
 def run_interactive_tui_smoke(
     command_prefix: list[str],
     *,
@@ -400,96 +368,18 @@ def run_interactive_tui_smoke(
     with tempfile.TemporaryDirectory(prefix="vibesys-tui-smoke-", dir=runtime_root) as temporary:
         smoke_root = Path(temporary)
         input_root = smoke_root / "input"
-        _write_stub_input(input_root)
+        _write_smoke_input(input_root)
         marker = smoke_root / "controller-started"
         runs_root = smoke_root / "runs"
         smoke_environment = {**env, TUI_SMOKE_MARKER_ENV: str(marker)}
-        command = _copied_project_stub_smoke_command(
+        command = _copied_project_smoke_command(
             command_prefix,
             input_root=input_root,
             runs_root=runs_root,
-            headless=False,
         )
         _run_in_pty(command, env=smoke_environment, timeout=timeout)
         if not marker.is_file() or marker.read_text() != TUI_SMOKE_MARKER_CONTENT:
             _fail("Interactive TUI did not write its control-protocol marker")
-
-
-def run_headless_stub_smoke(
-    command_prefix: list[str],
-    *,
-    env: dict[str, str],
-    runtime_root: Path,
-    timeout: int,
-) -> None:
-    """Run a configless installed loop from a complete project working directory."""
-    mutable_prefix_paths_before = _mutable_install_paths(Path(sys.prefix))
-    with tempfile.TemporaryDirectory(
-        prefix="vibesys-headless-smoke-", dir=runtime_root
-    ) as temporary:
-        smoke_root = Path(temporary)
-        project_root = smoke_root / "project"
-        _write_stub_input(project_root)
-        command = _direct_project_stub_smoke_command(command_prefix)
-        _run(command, env=env, cwd=project_root, timeout=timeout)
-        _verify_project_state(project_root)
-    added_prefix_paths = _mutable_install_paths(Path(sys.prefix)) - mutable_prefix_paths_before
-    if added_prefix_paths:
-        _fail(
-            "Headless smoke created a mutable run tree or cache beneath the Python "
-            f"installation prefix: {sorted(added_prefix_paths)}"
-        )
-
-
-def _verify_project_state(project_root: Path) -> None:
-    if (project_root / "agent.toml").exists():
-        _fail("Configless headless smoke unexpectedly created agent.toml")
-    try:
-        project = Project.open(project_root)
-        store = project.state
-        store.load_project()
-        runs = store.list_runs()
-    except ProjectError as exc:
-        _fail(f"Project smoke did not create valid project state: {exc}")
-    if len(runs) != 1 or not runs[0].run_id.endswith("-installed-release-smoke"):
-        _fail(f"Project smoke did not create exactly one run: {runs}")
-    run = runs[0]
-    manifest = store.load_run(run.run_id)
-    loop = manifest.orchestration.id
-    registry = built_in_orchestrations()
-    try:
-        registration = registry.resolve(loop)
-    except ValueError:
-        registration = None
-    view = project_run(
-        registration, project, run_id=run.run_id, status=RunStatus.UNKNOWN, loop=loop
-    )
-    if len(view.rounds) != 1 or view.rounds[0].number != 1:
-        _fail("Project smoke did not persist exactly one completed round")
-    if store.current_run_id() != run.run_id:
-        _fail("Project smoke did not persist its local current-run pointer")
-    if not store.log_directory(run.run_id).is_dir():
-        _fail("Project smoke did not create its machine-local log directory")
-    if not (project_root / ".git").is_dir():
-        _fail("Project smoke did not initialize Git in the project directory")
-
-
-def _mutable_install_paths(prefix: Path) -> set[Path]:
-    if not prefix.is_dir():
-        return set()
-    mutable_paths: set[Path] = set()
-    for path in prefix.rglob("*"):
-        parts = path.relative_to(prefix).parts
-        if (
-            "exp_env" in parts
-            or ".hf_cache" in parts
-            or any(
-                parts[index : index + 2] == (".cache", "huggingface")
-                for index in range(len(parts) - 1)
-            )
-        ):
-            mutable_paths.add(path.resolve())
-    return mutable_paths
 
 
 def _run_in_pty(command: list[str], *, env: dict[str, str], timeout: int) -> None:

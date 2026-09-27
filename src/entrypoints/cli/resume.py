@@ -152,11 +152,7 @@ def _normalized_resume_cli_value(destination: str, value: object) -> object:
 
 
 def _set_resume_cli_value(args: argparse.Namespace, destination: str, value: object) -> None:
-    if destination == "agent_backend":
-        is_stub = value == "stub"
-        args.stub_agent = is_stub
-        value = None if is_stub else value
-    elif destination == "objective":
+    if destination == "objective":
         value = [_parse_cli_objective(item) for item in cast("list[str]", value)]
     elif destination == "constraint":
         value = list(cast("list[str]", value))
@@ -196,15 +192,9 @@ def _restore_cli_fields(
         destination = _OPTION_TO_CLI.get(field, field)
         if not hasattr(args, destination):
             continue
-        is_explicit = destination in explicit or (
-            destination == "agent_backend" and "stub_agent" in explicit
-        )
+        is_explicit = destination in explicit
         if is_explicit:
-            requested = (
-                "stub"
-                if destination == "agent_backend" and getattr(args, "stub_agent", False)
-                else _normalized_resume_cli_value(destination, getattr(args, destination))
-            )
+            requested = _normalized_resume_cli_value(destination, getattr(args, destination))
             if requested != (tuple(expected) if isinstance(expected, list) else expected):
                 changed.append(field)
         else:

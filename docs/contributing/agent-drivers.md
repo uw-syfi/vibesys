@@ -348,11 +348,11 @@ an explicit `turn=[...]` (or `turns=[[...], ...]` for a sequence of distinct
 turns) built from its event-builder functions: `assistant_text`, `thinking`,
 `tool_call`, `tool_result`, `todo_write`, and `usage`.
 
-Structured turns are answered from `vs_agent.scripted_rounds`, which the
-stub agent client shares, so a scripted run completes loop rounds on the happy
-path. A response schema with no scripted artifact raises rather than being
-faked. The mock is not offered through the client protocol: driver choice
-stays an implementation detail.
+Tests that need typed policy replies compose `FakeAgentClient` through the
+public test session factory. The mock driver is limited to the provider-driver
+adapter path, and a response schema with no scripted artifact raises rather
+than being fabricated. The mock is not offered through the client protocol:
+driver choice stays an implementation detail.
 
 ## Omnigent constraints
 

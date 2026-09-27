@@ -342,7 +342,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             profiler_kind=args.profiler,
             skills_dirs=skills,
             run_environment=run_environment,
-            agent_backend="stub" if getattr(args, "stub_agent", False) else args.agent_backend,
+            agent_backend=args.agent_backend,
             cli_provider=args.cli_provider,
             backend=backend,
             remote_repo=args.repo,

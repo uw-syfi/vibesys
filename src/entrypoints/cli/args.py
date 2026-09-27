@@ -547,11 +547,6 @@ def _build_agent_parser() -> argparse.ArgumentParser:
             "roadmap/index.md + progress/round-NNNN.md (directories)."
         ),
     )
-    parser.add_argument(
-        "--stub-agent",
-        action="store_true",
-        help="Use deterministic local agent responses for fast TUI smoke tests.",
-    )
     parser.add_argument("--modality", default=None, choices=_MODALITIES)
     parser.add_argument(
         "--interface",
