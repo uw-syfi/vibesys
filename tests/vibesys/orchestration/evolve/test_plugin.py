@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
+from vibesys.api import PluginProjection
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.plugin import PLUGIN
 from vibesys.orchestration.evolve.population import (
@@ -542,6 +543,7 @@ def test_projection_exposes_committed_population_and_metric_space() -> None:
 
     assert PLUGIN.project is not None
     projection = PLUGIN.project(state)
+    assert isinstance(projection, PluginProjection)
     assert projection.payload is not None
     assert projection.payload["generation"] == 0
     assert projection.payload["metric_space"] == space.model_dump(mode="json")

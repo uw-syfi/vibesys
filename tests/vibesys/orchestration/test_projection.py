@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
+from vibesys.api import PluginProjection
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.readmodel import AgentRunProjection
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
@@ -102,6 +103,7 @@ def test_plugin_projects_aggregate_state_without_mutating_it(
     projection = project(state)
 
     assert state.model_dump_json() == before
+    assert isinstance(projection, PluginProjection)
     assert projection.experiment_revision == 7
     assert projection.payload is not None
     payload = AgentRunProjection.model_validate(projection.payload)
