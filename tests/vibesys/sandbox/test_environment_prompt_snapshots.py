@@ -96,22 +96,6 @@ def test_modal_prompt_notes_snapshot() -> None:
     _assert_matches_snapshot("modal", "pointer", "prompt_notes", rendered)
 
 
-def test_modal_candidate_override_snapshot() -> None:
-    base_prompt_notes = render_template(
-        "modal/prompt_notes.j2",
-        template_dir=_ENVIRONMENTS_DIR,
-        runtime_container_path="/opt/vibesys-runtime/environment.md",
-    )
-    rendered = render_template(
-        "modal/candidate_override.j2",
-        template_dir=_ENVIRONMENTS_DIR,
-        prompt_notes=base_prompt_notes,
-        base_name="run-9f2a3b",
-        candidate_name="run-9f2a3b-g2c5",
-    )
-    _assert_matches_snapshot("modal", "candidate_override", "candidate_override", rendered)
-
-
 _DOCKER_PROMPT_NOTES_CASES = {
     "no_history": {"history_root": None},
     "with_history": {"history_root": Path("/opt/vibesys-history")},
@@ -143,14 +127,6 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
         (
             "modal/prompt_notes.j2",
             {"runtime_container_path": "/opt/vibesys-runtime/environment.md"},
-        ),
-        (
-            "modal/candidate_override.j2",
-            {
-                "prompt_notes": "Runtime instructions are at `x`.",
-                "base_name": "run-9f2a3b",
-                "candidate_name": "run-9f2a3b-g2c5",
-            },
         ),
         ("docker/prompt_notes.j2", {"history_root": Path("/opt/vibesys-history")}),
     ]

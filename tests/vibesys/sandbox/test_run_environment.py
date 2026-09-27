@@ -6,9 +6,8 @@ import os
 import shlex
 import subprocess
 import sys
-import sys as _sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Never, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -1413,26 +1412,9 @@ def test_modal_environment_uses_local_docker_for_editing(
     assert backend.calls[0][1]["container_image"] == _PUSHED_DIGEST
     assert session.view.cli_sandboxed is True
     assert session.view.profile_execution == "remote"
-    assert session.view.deployment_namespace is not None
     assert session.view.supports_parallel_candidate_evaluation is True
     assert session.view.deployment_release_env_var == "VIBESYS_RELEASE_MODAL_DEPLOYMENT"
     backend.sandbox.start.assert_called_once()
-
-
-def test_modal_environment_owns_candidate_runtime_naming(tmp_path: Path) -> None:
-    backend = FakeBackend()
-    env = build_run_environment(RunEnvironmentSpec("modal"))
-    session = env.open(_request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
-
-    runtime = env.candidate_runtime(session.view, generation=12, child_idx=7)
-
-    assert runtime.deployment_name is not None
-    assert runtime.deployment_name.endswith("-g12c7")
-    assert len(runtime.deployment_name) <= 63
-    assert session.view.deployment_namespace is not None
-    assert session.view.deployment_namespace in runtime.prompt_notes
-    assert "Candidate-specific namespace override" in runtime.prompt_notes
-    assert runtime.deployment_name in runtime.prompt_notes
 
 
 def test_modal_environment_wraps_service_evaluators_with_remote_dispatch(tmp_path: Path) -> None:
@@ -1938,75 +1920,6 @@ remote_artifact_root = "/remote/vibesys"
     session.close()
 
 
-def test_modal_teardown_deployment_stops_app_via_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    env = build_run_environment(RunEnvironmentSpec("modal"))
-    calls = []
-    logs = []
-
-    def fake_run(cmd: object, **_kwargs: object) -> object:
-        calls.append(cmd)
-        result = MagicMock()
-        result.returncode = 0
-        result.stderr = ""
-        return result
-
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
-
-    env.teardown_deployment("vibesys-run-g1c2", log=logs.append)
-
-    assert calls == [[_sys.executable, "-m", "modal", "app", "stop", "vibesys-run-g1c2", "--yes"]]
-    assert any("stopped candidate app vibesys-run-g1c2" in line for line in logs)
-
-
-def test_modal_teardown_deployment_is_best_effort_on_nonzero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    env = build_run_environment(RunEnvironmentSpec("modal"))
-    logs = []
-
-    def fake_run(_cmd: object, **_kwargs: object) -> object:
-        result = MagicMock()
-        result.returncode = 1
-        result.stderr = "boom"
-        return result
-
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
-
-    # Must not raise.
-    env.teardown_deployment("vibesys-run-g1c2", log=logs.append)
-    assert any("failed" in line for line in logs)
-
-
-def test_modal_teardown_deployment_is_best_effort_on_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    env = build_run_environment(RunEnvironmentSpec("modal"))
-    logs = []
-
-    def fake_run(_cmd: object, **_kwargs: object) -> Never:
-        raise TimeoutError("stuck")
-
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fake_run)
-
-    env.teardown_deployment("vibesys-run-g1c2", log=logs.append)
-    assert any("raised" in line for line in logs)
-
-
-@pytest.mark.parametrize("name", ["local", "docker"])
-def test_non_modal_teardown_deployment_is_noop(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    env = build_run_environment(RunEnvironmentSpec(name))
-
-    def fail_run(*_args: object, **_kwargs: object) -> Never:
-        _failure_message = "subprocess.run should not be called for non-Modal envs"
-        raise AssertionError(_failure_message)
-
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", fail_run)
-
-    # No deployment to stop — must be a silent no-op.
-    env.teardown_deployment("vibesys-run-g1c2", log=lambda _: None)
-
-
 def test_modal_environment_prompt_notes_cover_seeded_checkouts(tmp_path: Path) -> None:
     """Seeded starting-point checkouts live only in the editor container, so
     the runtime notes must tell the agent to bake them into the Modal image;
@@ -2183,16 +2096,6 @@ def test_docker_repair_workspace_logs_launch_failures(
     assert len(logs) == 1
     assert logs[0].startswith(f"[warn] chown failed for {tmp_path}:")
     assert "docker" in logs[0]
-
-
-def test_docker_candidate_runtime_reuses_the_session_namespace(tmp_path: Path) -> None:
-    env = build_run_environment(RunEnvironmentSpec("docker"))
-    session = env.open(_request(tmp_path, FakeBackend()))
-
-    runtime = env.candidate_runtime(session.view, generation=3, child_idx=1)
-
-    assert runtime.prompt_notes == session.view.prompt_notes
-    assert runtime.deployment_name == session.view.deployment_namespace
 
 
 def test_skypilot_options_require_a_cluster_profile() -> None:

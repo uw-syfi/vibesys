@@ -198,10 +198,6 @@ class RunEnvironmentView:
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
     profile_execution: Literal["local", "remote"] = "local"
-    # Optional namespace for environments that isolate each candidate in a
-    # named deployment. The selected environment owns the concrete naming
-    # rules; loops consume only the namespace capability.
-    deployment_namespace: str | None = None
     supports_parallel_candidate_evaluation: bool = False
     # Optional environment variable understood by the environment-owned
     # evaluator wrapper when the final trusted command should release its
@@ -210,14 +206,6 @@ class RunEnvironmentView:
     # Extra wall-clock budget for environment-owned setup that wraps a trusted
     # command, such as deploying a fresh service and waiting for readiness.
     framework_setup_timeout_seconds: int = 0
-
-
-@dataclass(frozen=True)
-class CandidateRuntime:
-    """Environment-owned prompt and lifecycle identity for one candidate."""
-
-    prompt_notes: str
-    deployment_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -310,21 +298,6 @@ class RunEnvironment(Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
-    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
-        """Tear down a per-evaluation deployment such as a candidate service.
-
-        Environments that dispatch each evaluation to its own named remote
-        deployment implement this to release it once the evaluation is done;
-        environments that run everything in-process are a no-op.
-        """
-        ...
-
-    def candidate_runtime(
-        self, view: RunEnvironmentView, generation: int, child_idx: int
-    ) -> CandidateRuntime:
-        """Return adapter-owned instructions and identity for one candidate."""
-        ...
-
 
 class _NoopWorkspaceRecovery:
     def repair_workspace(
@@ -345,18 +318,6 @@ class _NoopWorkspaceRecovery:
     ) -> bool:
         del workspace, rel_path, backend
         return False
-
-    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
-        del name, log
-
-    def candidate_runtime(
-        self,
-        view: RunEnvironmentView,
-        generation: int,
-        child_idx: int,
-    ) -> CandidateRuntime:
-        del generation, child_idx
-        return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
 class LocalEnvironment(_NoopWorkspaceRecovery):
@@ -519,21 +480,6 @@ class DockerEnvironment:
             rel_path,
             image=getattr(backend, "image", "ubuntu:latest"),
         )
-
-    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
-        """Leave deployment teardown to the owning Docker session."""
-        # The editor container is torn down by the session; nothing per-candidate.
-        del name, log
-
-    def candidate_runtime(
-        self,
-        view: RunEnvironmentView,
-        generation: int,
-        child_idx: int,
-    ) -> CandidateRuntime:
-        """Return candidate prompt/runtime settings for Docker evaluation."""
-        del generation, child_idx
-        return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
 #: The Modal client a candidate's ``modal run`` needs inside the editor
@@ -986,7 +932,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 host_device_reselect=False,
                 env_kind="modal",
                 profile_execution="remote",
-                deployment_namespace=app_name,
                 supports_parallel_candidate_evaluation=True,
                 deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                 framework_setup_timeout_seconds=setup_timeout_seconds,
@@ -1054,55 +999,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             revision=draft_meta.get("revision"),
             local_path=local_path,
             log=request.log or print,
-        )
-
-    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
-        """Stop an idle candidate app so deployed apps don't accumulate.
-
-        Each candidate deploys its GPU server to its own ``vibesys-…-g<g>c<c>``
-        Modal app; Modal scales the *containers* to zero after
-        ``scaledown_window`` (no ongoing GPU cost), but the app objects and
-        their web endpoints linger until stopped. We stop it on the host via
-        the Modal CLI — the stable public interface, authenticated by the same
-        ``~/.modal.toml`` the SDK path uses. Best-effort: a failed stop just
-        leaves an idle app behind and must never fail a run.
-        """
-        try:
-            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009088 [S603]; Modal teardown passes fixed argv directly with no shell.
-                [sys.executable, "-m", "modal", "app", "stop", name, "--yes"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            log(f"[warn] modal app stop {name} raised: {exc}")
-            return
-        if result.returncode != 0:
-            log(
-                f"[warn] modal app stop {name} failed "
-                f"(exit {result.returncode}): {result.stderr.strip()[:200]}"
-            )
-        else:
-            log(f"[modal] stopped candidate app {name}")
-
-    def candidate_runtime(
-        self, view: RunEnvironmentView, generation: int, child_idx: int
-    ) -> CandidateRuntime:
-        """Render candidate-specific Modal deployment details and prompt notes."""
-        base_name = view.deployment_namespace
-        if not base_name:
-            return CandidateRuntime(view.prompt_notes)
-        candidate_name = candidate_modal_app_name(base_name, generation, child_idx)
-        return CandidateRuntime(
-            prompt_notes=render_template(
-                "modal/candidate_override.j2",
-                template_dir=_ENVIRONMENTS_TEMPLATE_DIR,
-                prompt_notes=view.prompt_notes,
-                base_name=base_name,
-                candidate_name=candidate_name,
-            ),
-            deployment_name=candidate_name,
         )
 
 
@@ -1229,23 +1125,6 @@ def _modal_app_name(run_id: str, fallback: str) -> str:
     sanitized = "-".join(part for part in sanitized.split("-") if part)
     name = f"vibesys-{sanitized}" if sanitized else "vibesys"
     return name[:63].rstrip("-") or "vibesys"
-
-
-def candidate_modal_app_name(base_app_name: str, generation: int, child_idx: int) -> str:
-    """Derive a per-candidate Modal app name from the per-run base name.
-
-    Every candidate in a run must deploy to its *own* Modal app: Modal app
-    logs are cumulative per app name, so if all candidates share one name the
-    judge reads the first (often broken) deploy's crash for every later
-    candidate and fails them identically.  We append a ``-g<gen>c<child>``
-    suffix, truncating the base to keep the whole name within Modal's 63-char
-    limit.  The leading timestamp+uuid in the base keeps it unique per run
-    even after truncation.
-    """
-    suffix = f"-g{generation}c{child_idx}"
-    keep = 63 - len(suffix)
-    trimmed = base_app_name[:keep].rstrip("-")
-    return f"{trimmed}{suffix}"
 
 
 def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | None:
