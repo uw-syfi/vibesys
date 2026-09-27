@@ -39,6 +39,7 @@ from vs_runtime._checkpoint import (
     RoundRecoveryOutcome,
     RoundTransactionError,
 )
+from vs_runtime._event_journal import DurableEventJournal, EventCodec
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -353,6 +354,8 @@ __all__ = [
     "BlockingOperations",
     "CommittedStateObserver",
     "CompletedRound",
+    "DurableEventJournal",
+    "EventCodec",
     "FrameworkValidationResult",
     "GitSourceMaterialization",
     "InputDependency",

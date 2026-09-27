@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.evaluators.gates import GATE_LOG_TAIL_CHARS, emit_gate_finished, emit_gate_started
-from vibesys.events import GateFinishedData, GateKind
+from vibesys.events import CoreEventWriter, GateFinishedData, GateKind
 from vs_runtime.api import LocalValidationEvaluation
 from vs_runtime.api.infrastructure import (
     FrameworkValidationResult,
@@ -16,14 +16,13 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.run.event_journal import EventJournal
     from vs_runtime.api import Commands, Workspace
 
 
 class _GateEvents:
     """Translate policy-neutral recipe observations to VibeSys gate events."""
 
-    def __init__(self, events: EventJournal) -> None:
+    def __init__(self, events: CoreEventWriter) -> None:
         self._events = events
 
     def started(self, recipe: ValidationRecipe) -> None:
@@ -50,7 +49,7 @@ class _GateEvents:
 
 async def validate_local(
     commands: Commands,
-    events: EventJournal,
+    events: CoreEventWriter,
     workspace: Workspace,
     *,
     recipe_artifact: str,

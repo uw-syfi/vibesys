@@ -13,7 +13,13 @@ from vibesys.evaluators.gates import (
     emit_gate_finished,
     emit_gate_started,
 )
-from vibesys.events import CoreEventType, GateFinishedData, GateKind, SubprocessOutputData
+from vibesys.events import (
+    CoreEventType,
+    CoreEventWriter,
+    GateFinishedData,
+    GateKind,
+    SubprocessOutputData,
+)
 from vibesys.orchestration.local_validation import validate_local
 from vibesys.orchestration.workspace_resources import resources_for
 from vs_runtime.api import (
@@ -39,7 +45,6 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from vibesys.context import _RunResources
     from vibesys.orchestration.request import RunRequest
-    from vibesys.run.event_journal import EventJournal
     from vs_runtime.api import Commands, Workspaces
 
 
@@ -51,7 +56,7 @@ class _EvaluationAdapter:
         run_id: str,
         request: RunRequest,
         workspaces: Workspaces,
-        events: EventJournal,
+        events: CoreEventWriter,
         commands: Commands,
     ) -> None:
         self._run_id = run_id

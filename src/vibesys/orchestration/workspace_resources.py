@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
-from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
+from vibesys.events import (
+    CoreEventType,
+    CoreEventWriter,
+    FrameworkSource,
+    FrameworkWarningData,
+)
 from vs_runtime.api.infrastructure import resolve_workspace_resource
 
 if TYPE_CHECKING:
@@ -14,7 +19,6 @@ if TYPE_CHECKING:
 
     from vibesys.context import _RunResources
     from vibesys.orchestration.request import RunRequest
-    from vibesys.run.event_journal import EventJournal
     from vs_runtime.api import Workspace, Workspaces
     from vs_runtime.api.infrastructure import WorkspaceResource
 
@@ -28,7 +32,7 @@ class _WorkspaceResource:
         context: _RunResources,
         workspace_id: str | None,
         memory_paths: tuple[str, ...],
-        events: EventJournal,
+        events: CoreEventWriter,
     ) -> None:
         self._parent = parent
         self.context = context
@@ -132,7 +136,7 @@ class WorkspaceResourceProvider:
         resources: _RunResources,
         request: RunRequest,
         memory_paths: tuple[str, ...],
-        events: EventJournal,
+        events: CoreEventWriter,
         close_sessions: Callable[[Workspace], Awaitable[None]],
     ) -> None:
         """Bind product effects without exposing them through the run host."""

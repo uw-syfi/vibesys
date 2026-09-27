@@ -8,18 +8,14 @@ owning run's semantic event stream, which ``vs_project`` cannot depend on.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from vibesys.events import (
     CoreEventType,
+    CoreEventWriter,
     FrameworkSource,
     FrameworkWarningData,
     WorkspaceSnapshotData,
 )
 from vs_project.api import GitTrackerEvents, NullGitTrackerEvents
-
-if TYPE_CHECKING:
-    from vibesys.run.event_journal import EventJournal
 
 __all__ = [
     "CoreGitTrackerEvents",
@@ -31,7 +27,7 @@ __all__ = [
 class CoreGitTrackerEvents:
     """Publish tracker observations on one run's semantic event stream."""
 
-    def __init__(self, events: EventJournal) -> None:
+    def __init__(self, events: CoreEventWriter) -> None:
         """Route tracker observations into ``events``."""
         self._events = events
 

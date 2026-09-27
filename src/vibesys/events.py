@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
@@ -390,6 +390,25 @@ CoreEventData = Annotated[
     | FrameworkWarningData,
     Field(discriminator="kind"),
 ]
+
+
+class CoreEventWriter(Protocol):
+    """Product event surface independent of storage and subscription mechanics."""
+
+    def emit(
+        self,
+        event_type: CoreEventType,
+        text: str = "",
+        *,
+        data: CoreEventData | None = None,
+        **fields: object,
+    ) -> CoreEvent:
+        """Create and publish one semantic event."""
+        ...
+
+    def record(self, event: CoreEvent) -> CoreEvent:
+        """Publish one already-created semantic event."""
+        ...
 
 
 class CoreEvent(BaseModel):

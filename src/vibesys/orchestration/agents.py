@@ -25,9 +25,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.context import _RunResources
+    from vibesys.events import CoreEventWriter
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
-    from vibesys.run.event_journal import EventJournal
     from vs_agent.api import AgentClientProtocol, DurableSessionStore, ToolServerDescriptor
     from vs_runtime.api import AgentSession, Workspaces
     from vs_runtime.api.infrastructure import RunControlChannel
@@ -43,7 +43,7 @@ class _Agents:
         request: RunRequest,
         workspaces: Workspaces,
         session_store: DurableSessionStore,
-        events: EventJournal,
+        events: CoreEventWriter,
         log: Callable[[str], None],
         tool_context: object,
         roles: tuple[AgentRole, ...],
