@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
+from vibesys.errors import InvalidPlanError
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestrations.multi import PLUGIN
@@ -245,6 +246,41 @@ def test_invalid_plan_correction_continues_in_planning_session(tmp_path: Path) -
     ]
     assert len(designer_sessions) == 2
     assert len(designer_sessions[1].history) == 2
+
+
+def test_invalid_plan_correction_exhaustion_fails_without_more_agent_work(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> tuple[FakeRunHost, _Script]:
+        script = _Script(
+            _pre_round(),
+            _plan("H-01"),
+            _implementation(),
+            _judge(),
+            _pre_round(),
+            _plan("H-01"),
+            _plan("H-01"),
+        )
+        host = FakeRunHost(PLUGIN, project_root=tmp_path, responder=script.respond)
+        try:
+            with pytest.raises(InvalidPlanError):
+                await PLUGIN.orchestrate(host, _options(max_rounds=2))
+            return host, script
+        finally:
+            await host.close()
+
+    host, script = asyncio.run(scenario())
+
+    assert [role for role, _history, _message in script.calls] == [
+        DESIGNER.id,
+        DESIGNER.id,
+        IMPLEMENTER.id,
+        JUDGE.id,
+        DESIGNER.id,
+        DESIGNER.id,
+        DESIGNER.id,
+    ]
+    assert all(session.closed for session in host.agents.sessions)
 
 
 def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) -> None:

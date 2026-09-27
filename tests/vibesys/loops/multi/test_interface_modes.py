@@ -19,8 +19,6 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError, UnsupportedProfilerError
-from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
-from vibesys.orchestrations.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -100,23 +98,6 @@ def test_cli_rejects_unknown_interface(interface: str, tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     with pytest.raises(ConfigurationError, match="invalid choice"):
         parse_cli_invocation(["--input", str(project), "--interface", interface])
-
-
-def test_loop_rejects_unknown_interface() -> None:
-    with pytest.raises(ValueError, match="interface"):
-        MultiAgentOrchestrator(
-            descriptor_from_options(
-                AgentOrchestrationOptions(
-                    interface="native",
-                    max_rounds=1,
-                    max_retries_per_round=1,
-                    judge_every=1,
-                    official_eval_every=1,
-                    memory_layout="files",
-                ),
-                orchestration_id="multi-agent",
-            )
-        )
 
 
 def test_torch_profiler_honors_resolved_environment_capability() -> None:

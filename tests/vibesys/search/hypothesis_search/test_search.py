@@ -21,7 +21,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.loops.multi.session import _TerminalPolicy
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vibesys.search.hypothesis import (
@@ -36,6 +35,7 @@ from vibesys.search.hypothesis import (
     NewHypothesis,
     OrchestratorPlan,
 )
+from vibesys.search.hypothesis import cadence as hypothesis_cadence
 from vibesys.search.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
@@ -486,8 +486,12 @@ def test_close_round_is_deterministic_and_bounds_the_lease(
         judge_verdict=("pass" if passed else "fail") if reviewed else "deferred",
     )
 
-    policy = _TerminalPolicy(search.config)
-    keeps_active = policy.keeps_hypothesis_active(attempt, continuation_rounds)
+    keeps_active = hypothesis_cadence.keeps_hypothesis_active(
+        outcome=outcome,
+        next_step=next_step,
+        continuation_rounds=continuation_rounds,
+        max_continuation_rounds=search.config.max_continuation_rounds,
+    )
     requests_continuation = bool(
         outcome
         in {
@@ -497,8 +501,10 @@ def test_close_round_is_deterministic_and_bounds_the_lease(
         }
         and next_step.strip()
     )
-    terminal_needs_parent_choice = policy.terminal_success_needs_parent_choice(
-        attempt, continuation_rounds
+    terminal_needs_parent_choice = (
+        attempt.implementation is not None
+        and not keeps_active
+        and outcome is not HypothesisOutcome.NOMINATED
     )
 
     def close() -> ClosedRound:
