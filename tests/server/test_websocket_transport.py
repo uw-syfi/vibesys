@@ -217,6 +217,7 @@ def test_gateway_reports_subscription_bootstrap_failure(
         del args, kwargs
         raise RuntimeError("boom")
 
+    # test-isolation: force bootstrap failure to exercise the protocol error response
     monkeypatch.setattr(
         parts.api,
         "subscription_bootstrap",

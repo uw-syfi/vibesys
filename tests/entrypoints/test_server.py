@@ -137,6 +137,13 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     invocation = object()
     request = object()
 
+    class ReturnValue:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def __call__(self, *_args: object, **_kwargs: object) -> object:
+            return self.value
+
     class FakeRuntime:
         def __init__(self, *, socket_path: Path, **options: object) -> None:
             observed["socket_path"] = socket_path
@@ -148,11 +155,12 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
         def drive(self, driven_request: object) -> None:
             observed["request"] = driven_request
 
+    # test-isolation: replace the dynamic runtime import with a local fake to test web wiring
     monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
-    monkeypatch.setattr(
-        server_entrypoint.cli, "parse_cli_invocation", Mock(return_value=invocation)
-    )
-    monkeypatch.setattr(server_entrypoint.cli, "build_run_request", Mock(return_value=request))
+    # test-isolation: replace CLI parsing with a deterministic return-value fake
+    monkeypatch.setattr(server_entrypoint.cli, "parse_cli_invocation", ReturnValue(invocation))
+    # test-isolation: replace request construction with a deterministic return-value fake
+    monkeypatch.setattr(server_entrypoint.cli, "build_run_request", ReturnValue(request))
 
     main(["--web", "--web-port", "4312", "--web-assets", str(tmp_path), "--local"])
 
