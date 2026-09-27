@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 import unicodedata
 from collections.abc import Mapping
@@ -23,6 +24,16 @@ if TYPE_CHECKING:
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
+
+
+def _is_concrete_model_class(value: object) -> bool:
+    """Return whether a plugin schema is an instantiable Pydantic model class."""
+    return (
+        isinstance(value, type)
+        and value is not BaseModel
+        and issubclass(value, BaseModel)
+        and not inspect.isabstract(value)
+    )
 
 
 class RuntimeContractError(RuntimeError):
@@ -707,8 +718,11 @@ class OrchestrationPlugin:
         if self.config_version < 1:
             message = "orchestration plugin config version must be positive"
             raise ValueError(message)
-        if self.options is BaseModel:
+        if not _is_concrete_model_class(self.options):
             message = "orchestration plugin options must be a concrete BaseModel subclass"
+            raise ValueError(message)
+        if self.state is not None and not _is_concrete_model_class(self.state):
+            message = "orchestration plugin state must be a concrete BaseModel subclass"
             raise ValueError(message)
         if self.project is not None and self.state is None:
             message = "orchestration plugin projection requires a declared state model"

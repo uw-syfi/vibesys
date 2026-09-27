@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
@@ -63,6 +64,12 @@ class _OtherState(BaseModel):
 
 class _JsonState(BaseModel):
     value: Json[Any]
+
+
+class _AbstractModel(BaseModel, ABC):
+    @abstractmethod
+    def apply(self) -> None:
+        """Apply model-specific behavior."""
 
 
 def _role(role_id: str = "implementer") -> AgentRole:
@@ -620,6 +627,29 @@ def test_plugin_rejects_invalid_id() -> None:
             agents=(_role(),),
             options=_Options,
             orchestrate=_orchestrate,
+        )
+
+
+@pytest.mark.parametrize("invalid_options", [int, _Options(), BaseModel, _AbstractModel])
+def test_plugin_requires_concrete_options_model(invalid_options: object) -> None:
+    with pytest.raises(ValueError, match="options must be a concrete BaseModel subclass"):
+        OrchestrationPlugin(
+            id="invalid-options",
+            agents=(),
+            options=cast("Any", invalid_options),
+            orchestrate=_orchestrate,
+        )
+
+
+@pytest.mark.parametrize("invalid_state", [int, _State(), BaseModel, _AbstractModel])
+def test_plugin_requires_concrete_state_model(invalid_state: object) -> None:
+    with pytest.raises(ValueError, match="state must be a concrete BaseModel subclass"):
+        OrchestrationPlugin(
+            id="invalid-state",
+            agents=(),
+            options=_Options,
+            orchestrate=_orchestrate,
+            state=cast("Any", invalid_state),
         )
 
 
