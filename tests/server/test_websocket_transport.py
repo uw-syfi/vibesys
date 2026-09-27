@@ -47,7 +47,7 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
             assert response.status == 200
             assert response.read() == b"<!doctype html><title>VibeSys</title>"
         asset_url = f"http://127.0.0.1:{gateway.bound_port}/assets/logo.png"
-        with urlopen(asset_url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101061 [S310]; connect only to the loopback URL produced by the gateway under test
+        with urlopen(asset_url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101105 [S310]; connect only to the loopback URL produced by the gateway under test
             assert response.status == 200
             assert response.headers["Content-Type"] == "image/png"
             assert response.read() == image
