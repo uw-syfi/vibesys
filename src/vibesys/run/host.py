@@ -30,6 +30,7 @@ from vs_runtime.api.infrastructure_skills import create_installed_skills
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
+    from contextlib import ExitStack
 
     from pydantic import BaseModel
 
@@ -94,7 +95,7 @@ class _ProductHostFactory:
         | None
     )
 
-    def prepare(self) -> RunHostComponents:
+    def prepare(self, ownership: ExitStack) -> RunHostComponents:
         """Open product resources and bind focused runtime capabilities."""
         plugin = self.plugin
         if self.request.orchestration.id != plugin.id:
@@ -113,6 +114,7 @@ class _ProductHostFactory:
         resources = open_run_resources(
             self.request,
             self.integration,
+            ownership=ownership,
             agent_specs=agent_specs,
             resume_policy=self.resume_policy,
             state_binding=(
@@ -122,17 +124,7 @@ class _ProductHostFactory:
             ),
             backend_factory=self.backend_factory,
         )
-        try:
-            return self._components(resources, state_namespace, plugin.state)
-        except BaseException as construction_error:
-            try:
-                resources.close()
-            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-948022 [BLE001]; product construction preserves its root failure while still reporting resource-cleanup failure.
-                construction_error.add_note(
-                    "Additional error while cleaning up host construction: "
-                    f"{type(cleanup_error).__name__}: {cleanup_error}"
-                )
-            raise
+        return self._components(resources, state_namespace, plugin.state)
 
     def _components(
         self,
@@ -204,7 +196,6 @@ class _ProductHostFactory:
             skills=skills,
             observations=_ProductObservations(logger.lprint, self.integration.events),
             blocking=blocking,
-            resources=resources,
         )
 
     def _root_agent_environment_opener(

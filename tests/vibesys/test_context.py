@@ -1,6 +1,8 @@
 """Product run-resource composition through its internal module API."""
 
 import sys
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from pathlib import Path
 from typing import Literal, TypedDict, Unpack
 from unittest.mock import patch
@@ -152,7 +154,7 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
 def _create_context(
     project: Path,
     **options: Unpack[_CreateContextOptions],
-) -> _PreparedRun:
+) -> AbstractContextManager[_PreparedRun]:
     task_root = options.get("task_root")
     evaluator = options.get("evaluator")
     evaluator_package_root = options.get("evaluator_package_root")
@@ -197,18 +199,38 @@ def _create_context(
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
-    return open_run_resources(
-        request,
-        options.get("integration") or LocalRunIntegration(),
-        agent_specs=resolve_agent_specs(
-            request.config,
-            agent_roles,
-            backend=request.agent_backend,
-            provider=request.cli_provider,
-        ),
-        resume_policy=registration.resume_policy,
-        backend_factory=options.get("backend_factory") or _RecordingBackendFactory(),
-    )
+    ownership = ExitStack()
+    try:
+        prepared = open_run_resources(
+            request,
+            options.get("integration") or LocalRunIntegration(),
+            ownership=ownership,
+            agent_specs=resolve_agent_specs(
+                request.config,
+                agent_roles,
+                backend=request.agent_backend,
+                provider=request.cli_provider,
+            ),
+            resume_policy=registration.resume_policy,
+            backend_factory=options.get("backend_factory") or _RecordingBackendFactory(),
+        )
+    except BaseException as construction_error:
+        try:
+            ownership.close()
+        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-606130 [BLE001]; catching Exception would leak resources on cancellation or SystemExit, while ExitStack.__exit__ could replace the construction failure.
+            construction_error.add_note(f"test resource cleanup also failed: {cleanup_error}")
+        raise
+    return _owned_prepared_run(prepared, ownership)
+
+
+@contextmanager
+def _owned_prepared_run(
+    prepared: _PreparedRun,
+    ownership: ExitStack,
+) -> Iterator[_PreparedRun]:
+    """Close resources opened by the direct composition helper."""
+    with ownership:
+        yield prepared
 
 
 def _git(project: Path, *args: str) -> str:

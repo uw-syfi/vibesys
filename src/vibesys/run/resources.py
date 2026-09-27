@@ -3,7 +3,7 @@
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import overload
 
@@ -137,6 +137,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     request: RunRequest,
     integration: LocalRunIntegration,
     *,
+    ownership: ExitStack,
     agent_specs: Mapping[str, AgentSpec],
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
@@ -145,45 +146,31 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_PreparedRun":
-    """Open the one project context from a canonical request.
+    """Open one project context and register its resources with ``ownership``.
+
+    The caller owns the stack and must close it after use or construction
+    failure. Product composition chooses every resource; the runtime host owns
+    their common lifetime.
 
     ``backend_factory`` overrides how the compute backend is constructed
     (default: ``vs_sandbox.api.create_compute_backend``); a test injects
     ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of monkeypatching
     the registry or a backend's internal sandbox constructor.
     """
-    teardown_stack = ExitStack()
-    try:
-        return _assemble_run_resources(
-            teardown_stack=teardown_stack,
-            request=request,
-            integration=integration,
-            agent_specs=agent_specs,
-            resume_policy=resume_policy,
-            state_binding=state_binding,
-            backend_factory=backend_factory,
-        )
-    except BaseException as construction_error:
-        _close_after_construction_failure(teardown_stack, construction_error)
-        raise
+    return _assemble_run_resources(
+        ownership=ownership,
+        request=request,
+        integration=integration,
+        agent_specs=agent_specs,
+        resume_policy=resume_policy,
+        state_binding=state_binding,
+        backend_factory=backend_factory,
+    )
 
 
-def _close_after_construction_failure(
-    teardown_stack: ExitStack, construction_error: BaseException
-) -> None:
-    """Unwind partial resource construction without replacing its root cause."""
-    try:
-        teardown_stack.close()
-    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-008203 [BLE001]; cleanup must annotate the original construction failure even if teardown raises a BaseException.
-        construction_error.add_note(
-            "Additional error while cleaning up partial resource construction: "
-            f"{type(cleanup_error).__name__}: {cleanup_error}"
-        )
-
-
-def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
+def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
     *,
-    teardown_stack: ExitStack,
+    ownership: ExitStack,
     request: RunRequest,
     integration: LocalRunIntegration,
     agent_specs: Mapping[str, AgentSpec],
@@ -436,7 +423,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             ProjectRunDirtyResumeError,
         ) as error:
             raise project_run_configuration_error(error) from error
-        teardown_stack.callback(project_resources.close)
+        ownership.callback(project_resources.close)
         project = project_resources.project
         project_state = project.state
         log_dir = project_resources.logger.log_dir
@@ -519,7 +506,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 existing_run=existing,
                 collection_project=collection_root is not None,
             )
-            teardown_stack.callback(experiment_repository.close)
+            ownership.callback(experiment_repository.close)
 
             run_environment_request = RunEnvironmentRequest(
                 log_dir=log_dir,
@@ -550,7 +537,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_environment_request,
             lambda request: open_run_environment(environment, request),
         )
-        teardown_stack.callback(environment_resources.close)
+        ownership.callback(environment_resources.close)
         session = environment_resources.session
 
         # A microservice candidate is a container topology, so its local agent needs
@@ -577,7 +564,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             ),
             skill_source_paths=tuple(skill_source_paths),
             evaluation_plan=trusted_evaluation_plan(bundle, session),
-            _teardown_stack=teardown_stack,
             environment_resources=environment_resources,
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
@@ -643,7 +629,7 @@ def _run_facts(
 
 @dataclass(slots=True)
 class _PreparedRun:
-    """Own lower run resources and their one ordered teardown stack."""
+    """Typed product values backed by resources in the caller's ownership stack."""
 
     project_resources: ProjectRunResources
     environment_resources: RunEnvironmentResources
@@ -653,19 +639,3 @@ class _PreparedRun:
     skill_source_paths: tuple[Path, ...]
     evaluation_plan: TrustedEvaluationPlan
     agent_host_resources: tuple[HostResource, ...]
-    _teardown_stack: ExitStack = field(repr=False)
-    _closed: bool = field(init=False, default=False, repr=False)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        # Unwinds in reverse construction order: device monitor stop,
-        # environment teardown, run-environment exit, and log closure.
-        self._teardown_stack.close()
-
-    def __enter__(self) -> "_PreparedRun":
-        return self
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        self.close()

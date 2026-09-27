@@ -23,6 +23,7 @@ from vs_runtime.api.testing import (
 )
 
 if TYPE_CHECKING:
+    from contextlib import ExitStack
     from pathlib import Path
 
 
@@ -146,11 +147,19 @@ def _components(  # noqa: PLR0913  # lint-waiver: LW-948021 [PLR0913]; lifecycle
             skills=FakeSkills(),
             observations=FakeObservations(),
             blocking=blocking,
-            resources=owner,
         ),
         blocking,
         owner,
     )
+
+
+def _prepare(
+    ownership: ExitStack,
+    components: RunHostComponents,
+    resources: _Resources,
+) -> RunHostComponents:
+    ownership.callback(resources.close)
+    return components
 
 
 def test_host_exposes_capabilities_and_closes_once_in_dependency_order(tmp_path: Path) -> None:
@@ -158,7 +167,9 @@ def test_host_exposes_capabilities_and_closes_once_in_dependency_order(tmp_path:
     components, _blocking, resources = _components(tmp_path, events)
 
     async def exercise() -> None:
-        async with open_run_host(lambda: components) as host:
+        async with open_run_host(
+            lambda ownership: _prepare(ownership, components, resources)
+        ) as host:
             assert host.run.run_id == "run-1"
             assert host.run.facts.objective == "Test the host."
             assert not hasattr(host.run, "log")
@@ -183,7 +194,9 @@ def test_concurrent_close_is_idempotent(tmp_path: Path) -> None:
     components, _blocking, resources = _components(tmp_path, events)
 
     async def exercise() -> None:
-        async with open_run_host(lambda: components) as host:
+        async with open_run_host(
+            lambda ownership: _prepare(ownership, components, resources)
+        ) as host:
             await asyncio.gather(host.close(), host.close(), host.close())
 
     asyncio.run(exercise())
@@ -205,7 +218,7 @@ def test_cleanup_attempts_every_owner_and_aggregates_failures(tmp_path: Path) ->
     )
 
     async def exercise() -> None:
-        async with open_run_host(lambda: components):
+        async with open_run_host(lambda ownership: _prepare(ownership, components, resources)):
             pass
 
     with pytest.raises(BaseExceptionGroup) as caught:
@@ -230,7 +243,7 @@ def test_body_failure_remains_primary_when_cleanup_fails(tmp_path: Path) -> None
     )
 
     async def exercise() -> None:
-        async with open_run_host(lambda: components):
+        async with open_run_host(lambda ownership: _prepare(ownership, components, _resources)):
             raise _BodyFailureError
 
     with pytest.raises(ValueError, match="body failed") as caught:
@@ -245,7 +258,8 @@ def test_cancellation_during_prepare_closes_the_prepared_host(tmp_path: Path) ->
     started = threading.Event()
     release = threading.Event()
 
-    def prepare() -> RunHostComponents:
+    def prepare(ownership: ExitStack) -> RunHostComponents:
+        ownership.callback(resources.close)
         started.set()
         release.wait()
         return components
@@ -266,12 +280,13 @@ def test_cancellation_during_prepare_closes_the_prepared_host(tmp_path: Path) ->
     assert resources.close_count == 1
 
 
-def test_prepare_failure_during_cancellation_keeps_cancellation_primary(tmp_path: Path) -> None:
-    del tmp_path
+def test_prepare_failure_during_cancellation_keeps_cancellation_primary() -> None:
+    resources = _Resources([])
     started = threading.Event()
     release = threading.Event()
 
-    def prepare() -> RunHostComponents:
+    def prepare(ownership: ExitStack) -> RunHostComponents:
+        ownership.callback(resources.close)
         started.set()
         release.wait()
         raise _PreparationFailureError
@@ -291,6 +306,30 @@ def test_prepare_failure_during_cancellation_keeps_cancellation_primary(tmp_path
         assert any("runtime preparation also failed" in note for note in caught.value.__notes__)
 
     asyncio.run(exercise())
+    assert resources.close_count == 1
+
+
+def test_prepare_failure_closes_partial_resources_without_replacing_error() -> None:
+    events: list[str] = []
+    resources = _Resources(events, failure=OSError("resource close"))
+
+    def prepare(ownership: ExitStack) -> RunHostComponents:
+        ownership.callback(resources.close)
+        raise _PreparationFailureError
+
+    async def exercise() -> None:
+        async with open_run_host(prepare):
+            pytest.fail("failed preparation yielded a host")
+
+    with pytest.raises(_PreparationFailureError, match="prepare failed") as caught:
+        asyncio.run(exercise())
+
+    assert resources.close_count == 1
+    assert events == ["resources-close"]
+    assert any(
+        "runtime preparation cleanup also failed: resource close" in note
+        for note in caught.value.__notes__
+    )
 
 
 def test_cancellation_during_close_waits_for_cleanup_then_propagates(tmp_path: Path) -> None:
@@ -306,7 +345,7 @@ def test_cancellation_during_close_waits_for_cleanup_then_propagates(tmp_path: P
 
     async def exercise() -> None:
         async def use_host() -> None:
-            async with open_run_host(lambda: components):
+            async with open_run_host(lambda ownership: _prepare(ownership, components, resources)):
                 pass
 
         task = asyncio.create_task(use_host())
@@ -338,7 +377,9 @@ def test_close_drains_blocking_work_before_capabilities_and_resources(tmp_path: 
             events,
             begin_close_started=close_started,
         )
-        async with open_run_host(lambda: components) as host:
+        async with open_run_host(
+            lambda ownership: _prepare(ownership, components, resources)
+        ) as host:
             operation_task = asyncio.create_task(blocking.run(operation))
             await asyncio.to_thread(operation_started.wait)
             close_task = asyncio.create_task(host.close())

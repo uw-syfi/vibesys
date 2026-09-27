@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from vs_runtime.contracts import Run
 
@@ -25,14 +25,6 @@ if TYPE_CHECKING:
         Skills,
         State,
     )
-
-
-class RunHostResourceOwner(Protocol):
-    """Composition-owned synchronous resources released after runtime effects."""
-
-    def close(self) -> None:
-        """Release the product resources exactly once."""
-        ...
 
 
 def _runtime_closed_error() -> RuntimeError:
@@ -109,7 +101,7 @@ def create_runtime_control(
 
 @dataclass(frozen=True, slots=True)
 class RunHostComponents:
-    """Prepared capabilities and resource owners for one runtime host."""
+    """Prepared capabilities for one runtime host."""
 
     run_id: str
     facts: RunFacts
@@ -122,13 +114,12 @@ class RunHostComponents:
     skills: Skills
     observations: Observations
     blocking: BlockingOperations
-    resources: RunHostResourceOwner
 
 
 class RuntimeRunHost:
     """Concrete run host owning capability and resource teardown."""
 
-    def __init__(self, components: RunHostComponents) -> None:
+    def __init__(self, components: RunHostComponents, ownership: ExitStack) -> None:
         """Bind the fixed public value to its private lifecycle owner."""
         self._workspaces = components.workspaces
         self.run = Run(
@@ -144,7 +135,7 @@ class RuntimeRunHost:
             observations=components.observations,
         )
         self._blocking = components.blocking
-        self._resources = components.resources
+        self._ownership = ownership
         self._close_task: asyncio.Task[None] | None = None
 
     async def close(self) -> None:
@@ -162,7 +153,7 @@ class RuntimeRunHost:
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948002 [BLE001]; cleanup must continue through independently owned resources.
             errors.append(error)
         try:
-            await asyncio.to_thread(self._resources.close)
+            await asyncio.to_thread(self._ownership.close)
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948003 [BLE001]; all cleanup outcomes are reported together after every owner runs.
             errors.append(error)
         if errors:
@@ -206,14 +197,44 @@ async def _close_runtime(host: RuntimeRunHost, error: BaseException | None) -> N
         raise asyncio.CancelledError
 
 
+async def _close_preparation_resources(
+    ownership: ExitStack,
+    error: BaseException | None,
+) -> None:
+    """Close partially prepared resources without replacing the root failure."""
+    cancelled = False
+    cleanup = asyncio.create_task(asyncio.to_thread(ownership.close))
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-948025 [BLE001]; the completed cleanup outcome is handled below.
+            break
+    try:
+        cleanup.result()
+    except BaseException as cleanup_error:
+        if error is not None:
+            error.add_note(f"runtime preparation cleanup also failed: {cleanup_error}")
+            return
+        if cancelled and not isinstance(cleanup_error, asyncio.CancelledError):
+            cancellation = asyncio.CancelledError()
+            cancellation.add_note(f"runtime preparation cleanup also failed: {cleanup_error}")
+            raise cancellation from cleanup_error
+        raise
+    if cancelled and error is None:
+        raise asyncio.CancelledError
+
+
 @asynccontextmanager
 async def open_run_host(
-    prepare: Callable[[], RunHostComponents],
+    prepare: Callable[[ExitStack], RunHostComponents],
 ) -> AsyncIterator[RuntimeRunHost]:
     """Prepare and close one host, including on cancellation or setup failure."""
+    ownership = ExitStack()
     host: RuntimeRunHost | None = None
     try:
-        preparation = asyncio.create_task(asyncio.to_thread(prepare))
+        preparation = asyncio.create_task(asyncio.to_thread(prepare, ownership))
         try:
             components = await asyncio.shield(preparation)
         except asyncio.CancelledError as cancellation:
@@ -226,19 +247,20 @@ async def open_run_host(
                     f"{type(preparation_error).__name__}: {preparation_error}"
                 )
                 raise cancellation from preparation_error
-            host = RuntimeRunHost(components)
+            host = RuntimeRunHost(components, ownership)
             raise
-        host = RuntimeRunHost(components)
+        host = RuntimeRunHost(components, ownership)
         yield host
     finally:
         if host is not None:
             await _close_runtime(host, sys.exception())
+        else:
+            await _close_preparation_resources(ownership, sys.exception())
 
 
 __all__ = [
     "BlockingOperations",
     "RunHostComponents",
-    "RunHostResourceOwner",
     "RuntimeRunHost",
     "create_runtime_control",
     "open_run_host",

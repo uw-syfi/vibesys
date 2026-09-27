@@ -163,7 +163,6 @@ from vs_runtime._run_environment import (
 from vs_runtime._run_host import (
     BlockingOperations,
     RunHostComponents,
-    RunHostResourceOwner,
     RuntimeRunHost,
     create_runtime_control,
     open_run_host,
@@ -489,7 +488,6 @@ __all__ = [
     "RunEnvironmentSpec",
     "RunEnvironmentView",
     "RunHostComponents",
-    "RunHostResourceOwner",
     "RunState",
     "RunStopped",
     "RuntimeAccuracyRun",
