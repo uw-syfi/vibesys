@@ -179,14 +179,19 @@ from vs_runtime._trusted_evaluation_preparation import (
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
+from vs_runtime._workspace_runtime import (
+    CommandExecutionResult,
+    RuntimeCommands,
+    RuntimeWorkspaceEvaluation,
+    WorkspaceEvaluationSpec,
+    WorkspaceRuntime,
+)
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
     RuntimeWorkspaces,
     WorkspaceResource,
-    resolve_workspace_resource,
-    run_workspace_exclusive,
 )
-from vs_runtime.contracts import AgentSessions, Workspace
+from vs_runtime.contracts import Workspace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -200,37 +205,28 @@ def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel
     return RuntimeRunControlChannel(events)
 
 
-type AgentExecutionResolver = Callable[
-    [AgentRole, Workspace], tuple[AgentExecutionConfiguration, AgentExecutionScope]
-]
+type AgentConfigurationResolver = Callable[[AgentRole], AgentExecutionConfiguration]
 type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
 type CandidateWorkspaceResourceFactory = Callable[[str, str], WorkspaceResource]
 
 
-@dataclass(frozen=True, slots=True)
-class AgentWorkspaceRuntime:
-    """Joint runtime ownership of agent sessions and workspace resources."""
-
-    agents: AgentSessions
-    workspaces: OwnedWorkspaces
-
-
-def create_agent_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution and workspace effects behind the two plugin-facing capabilities.
+def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR0913]; composition fixes independent execution and workspace effects behind focused plugin-facing capabilities.
     roles: tuple[AgentRole, ...],
     *,
     root_resource: WorkspaceResource,
     supports_parallel_candidates: bool,
     create_candidate_resource: CandidateWorkspaceResourceFactory,
-    resolve_execution: AgentExecutionResolver,
+    resolve_configuration: AgentConfigurationResolver,
     session_store: Callable[[], SessionStore | None],
     control: RunControlChannel,
     lifecycle_events: AgentExecutionLifecycleSink,
     agent_events: AgentEventSink,
     route_message: AgentMessageRouter,
+    blocking: BlockingOperations,
     client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
-) -> AgentWorkspaceRuntime:
+) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
     workspaces = RuntimeWorkspaces(
         root_resource,
@@ -240,7 +236,7 @@ def create_agent_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [
     agents = RuntimeAgentSessions(
         roles,
         workspaces=workspaces,
-        resolve_execution=resolve_execution,
+        resolve_configuration=resolve_configuration,
         session_store=session_store,
         control=control,
         lifecycle_events=lifecycle_events,
@@ -251,7 +247,12 @@ def create_agent_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [
         log=log,
     )
     workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837216 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
-    return AgentWorkspaceRuntime(agents=agents, workspaces=workspaces)
+    return WorkspaceRuntime(
+        agents=agents,
+        workspaces=workspaces,
+        commands=RuntimeCommands(workspaces, blocking),
+        evaluation=RuntimeWorkspaceEvaluation(workspaces),
+    )
 
 
 class ModelVolumeProvisioner(Protocol):
@@ -365,21 +366,21 @@ __all__ = [
     "REMOTE_EVALUATOR_TOOLS_ROOT",
     "SANDBOX_EVALUATOR_TOOLS_ROOT",
     "TOOL_TOKEN_PREFIX",
+    "AgentConfigurationResolver",
     "AgentExecutionConfiguration",
     "AgentExecutionEnvironment",
     "AgentExecutionFinished",
     "AgentExecutionLifecycleEvent",
     "AgentExecutionLifecycleSink",
-    "AgentExecutionResolver",
     "AgentExecutionScope",
     "AgentExecutionStarted",
     "AgentExecutionStatus",
     "AgentMessageRouter",
     "AgentPaths",
     "AgentToolResolver",
-    "AgentWorkspaceRuntime",
     "BlockingOperations",
     "BundledResources",
+    "CommandExecutionResult",
     "CommittedStateObserver",
     "CompletedRound",
     "DockerEnvironmentFacts",
@@ -443,6 +444,7 @@ __all__ = [
     "RunState",
     "RunStopped",
     "RuntimeRunHost",
+    "RuntimeWorkspaceEvaluation",
     "SDKRoots",
     "ScalarBenchmarkContract",
     "SkillCatalogEntry",
@@ -458,18 +460,20 @@ __all__ = [
     "TrustedEvaluatorRequirements",
     "TrustedMetricDeclaration",
     "ValidationRecipe",
+    "WorkspaceEvaluationSpec",
     "WorkspaceResource",
+    "WorkspaceRuntime",
     "WorkspaceSourceValue",
     "build_run_environment",
     "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",
-    "create_agent_workspace_runtime",
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
     "create_state",
     "create_trusted_evaluation_executor",
+    "create_workspace_runtime",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",
@@ -494,9 +498,7 @@ __all__ = [
     "resolve_packaged_tree",
     "resolve_sdk_source",
     "resolve_skill_resources",
-    "resolve_workspace_resource",
     "run_environment_record",
     "run_local_validation",
-    "run_workspace_exclusive",
     "summarize_linux_profile",
 ]

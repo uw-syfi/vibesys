@@ -120,7 +120,6 @@ graph TD
     vibesys.orchestration.agents --> vibesys.orchestration.workspace_resources
     vibesys.orchestration.agents --> vibesys.run
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
-    vibesys.orchestration.commands --> vibesys.orchestration.workspace_resources
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.evolve --> vibesys
@@ -198,7 +197,6 @@ graph TD
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.context
     vibesys.run.host --> vibesys.orchestration.agents
-    vibesys.run.host --> vibesys.orchestration.commands
     vibesys.run.host --> vibesys.orchestration.contracts
     vibesys.run.host --> vibesys.orchestration.control
     vibesys.run.host --> vibesys.orchestration.gates
@@ -358,9 +356,6 @@ graph TD
     vibesys.orchestration.agents --> vs_runtime
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.artifacts --> vs_runtime
-    vibesys.orchestration.commands --> vibesys.orchestration.workspace_resources
-    vibesys.orchestration.commands --> vs_runtime
-    vibesys.orchestration.commands --> vs_sandbox
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vs_project
     vibesys.orchestration.contracts --> vs_runtime
@@ -469,7 +464,6 @@ graph TD
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.context
     vibesys.run.host --> vibesys.orchestration.agents
-    vibesys.run.host --> vibesys.orchestration.commands
     vibesys.run.host --> vibesys.orchestration.contracts
     vibesys.run.host --> vibesys.orchestration.control
     vibesys.run.host --> vibesys.orchestration.gates

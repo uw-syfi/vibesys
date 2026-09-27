@@ -48,9 +48,13 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionScope,
     AgentExecutionStarted,
     AgentExecutionStatus,
-    AgentWorkspaceRuntime,
-    create_agent_workspace_runtime,
+    BlockingOperations,
+    TrustedAccuracyResult,
+    TrustedBenchmarkResult,
+    WorkspaceEvaluationSpec,
+    WorkspaceRuntime,
     create_run_control_channel,
+    create_workspace_runtime,
 )
 from vs_runtime.api.testing import (
     FakeAgentExecutionEnvironment,
@@ -59,7 +63,7 @@ from vs_runtime.api.testing import (
     FakeRunControlEventSink,
     FakeWorkspace,
 )
-from vs_sandbox.api import ProjectPathPolicy
+from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -89,6 +93,7 @@ class _WorkspaceResource:
         self.agent_restores: list[tuple[str, tuple[str, ...]]] = []
         self.closed = False
         self._close_events = close_events
+        self.scope_factory: Callable[[], AgentExecutionScope] | None = None
 
     def snapshot(self, label: str) -> str:
         self.snapshots.append(label)
@@ -126,6 +131,37 @@ class _WorkspaceResource:
 
     def is_directory(self, path: str) -> bool:
         return path in self.directories
+
+    def execute(self, command: str, timeout_seconds: int | None) -> SandboxExecutionResult:
+        del command, timeout_seconds
+        return SandboxExecutionResult("", 0)
+
+    def agent_scope(self) -> AgentExecutionScope:
+        assert self.scope_factory is not None
+        return self.scope_factory()
+
+    @property
+    def evaluation_spec(self) -> WorkspaceEvaluationSpec:
+        return WorkspaceEvaluationSpec(None, None, None, None)
+
+    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+        return TrustedAccuracyResult(
+            command=command_override,
+            executed=False,
+            passed=True,
+        )
+
+    async def trusted_benchmark(
+        self,
+        command_override: str | None,
+        required_metrics: frozenset[str],
+    ) -> TrustedBenchmarkResult:
+        del required_metrics
+        return TrustedBenchmarkResult(
+            command=command_override,
+            executed=False,
+            passed=True,
+        )
 
     def candidate_patch(self, revision: str) -> str:
         return revision
@@ -250,35 +286,37 @@ def _runtime(
     *,
     root_resource: _WorkspaceResource | None = None,
     candidate_resources: tuple[_WorkspaceResource, ...] = (),
-) -> AgentWorkspaceRuntime:
+) -> WorkspaceRuntime:
     candidates = deque(candidate_resources)
     selected_root = root_resource or _WorkspaceResource()
     selected_root.id = None
+    selected_root.scope_factory = lambda: _scope(
+        cast("Workspace", selected_root), effects.environments
+    )
 
     def create_candidate(workspace_id: str, revision: str) -> _WorkspaceResource:
         resource = candidates.popleft() if candidates else _WorkspaceResource()
         resource.id = workspace_id
         resource.revision = revision
+        resource.scope_factory = lambda: _scope(cast("Workspace", resource), effects.environments)
         return resource
 
-    return create_agent_workspace_runtime(
+    return create_workspace_runtime(
         (role,),
         root_resource=selected_root,
         supports_parallel_candidates=True,
         create_candidate_resource=create_candidate,
-        resolve_execution=lambda selected_role, workspace: (
-            AgentExecutionConfiguration(
-                agent_id=selected_role.id,
-                spec=AgentSpec(backend=AgentBackend.STUB),
-                reasoning_effort="high",
-            ),
-            _scope(workspace, effects.environments),
+        resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
+            agent_id=selected_role.id,
+            spec=AgentSpec(backend=AgentBackend.STUB),
+            reasoning_effort="high",
         ),
         session_store=lambda: None,
         control=create_run_control_channel(FakeRunControlEventSink()),
         lifecycle_events=effects.lifecycle,
         agent_events=NULL_AGENT_EVENT_SINK,
         route_message=lambda message, steering: message + "".join(steering),
+        blocking=BlockingOperations(),
         client_factory=effects.clients,
         tool_bindings=effects.tool_bindings,
         log=lambda _message: None,
@@ -307,7 +345,7 @@ class _OpenedSessionContract:
         self,
         owner: AgentSessions,
         sessions: tuple[AgentSession, ...],
-        runtime: AgentWorkspaceRuntime | None = None,
+        runtime: WorkspaceRuntime | None = None,
     ) -> None:
         self.owner = owner
         self.sessions = sessions
@@ -477,24 +515,24 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
             return client
 
         environments = _EnvironmentOpener(_environment())
-        runtime = create_agent_workspace_runtime(
+        root_resource = _WorkspaceResource()
+        root_resource.scope_factory = lambda: _scope(cast("Workspace", root_resource), environments)
+        runtime = create_workspace_runtime(
             (role,),
-            root_resource=_WorkspaceResource(),
+            root_resource=root_resource,
             supports_parallel_candidates=True,
             create_candidate_resource=_candidate_resource,
-            resolve_execution=lambda selected_role, workspace: (
-                AgentExecutionConfiguration(
-                    agent_id=selected_role.id,
-                    spec=AgentSpec(backend=AgentBackend.STUB),
-                    reasoning_effort="high",
-                ),
-                _scope(workspace, environments),
+            resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
+                agent_id=selected_role.id,
+                spec=AgentSpec(backend=AgentBackend.STUB),
+                reasoning_effort="high",
             ),
             session_store=lambda: DurableSessionStore(slot),
             control=create_run_control_channel(FakeRunControlEventSink()),
             lifecycle_events=FakeAgentExecutionLifecycleSink(),
             agent_events=NULL_AGENT_EVENT_SINK,
             route_message=lambda message, steering: message + "".join(steering),
+            blocking=BlockingOperations(),
             client_factory=record_client,
             log=lambda _message: None,
         )
@@ -1022,29 +1060,29 @@ def test_environment_client_turn_and_cleanup_share_one_worker_thread() -> None:
     )
 
     async def scenario() -> None:
-        runtime = create_agent_workspace_runtime(
+        root_resource = _WorkspaceResource()
+        root_resource.scope_factory = lambda: AgentExecutionScope(
+            workspace_path=root_resource.path,
+            log_directory=Path("/logs"),
+            open_environment=open_environment,
+            current_log_file=StringIO,
+            environment_variables=dict,
+        )
+        runtime = create_workspace_runtime(
             (role,),
-            root_resource=_WorkspaceResource(),
+            root_resource=root_resource,
             supports_parallel_candidates=True,
             create_candidate_resource=_candidate_resource,
-            resolve_execution=lambda selected_role, workspace: (
-                AgentExecutionConfiguration(
-                    agent_id=selected_role.id,
-                    spec=AgentSpec(backend=AgentBackend.STUB),
-                ),
-                AgentExecutionScope(
-                    workspace_path=workspace.path,
-                    log_directory=Path("/logs"),
-                    open_environment=open_environment,
-                    current_log_file=StringIO,
-                    environment_variables=dict,
-                ),
+            resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
+                agent_id=selected_role.id,
+                spec=AgentSpec(backend=AgentBackend.STUB),
             ),
             session_store=lambda: None,
             control=create_run_control_channel(FakeRunControlEventSink()),
             lifecycle_events=FakeAgentExecutionLifecycleSink(),
             agent_events=NULL_AGENT_EVENT_SINK,
             route_message=lambda message, _steering: message,
+            blocking=BlockingOperations(),
             client_factory=_ClientFactory(client),
             log=lambda _message: None,
         )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -16,7 +15,6 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vibesys.orchestration.workspace_resources import resources_for
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -39,13 +37,14 @@ from vs_runtime.api.infrastructure import (
     TrustedBenchmarkResult,
     ValidationRecipe,
     run_local_validation,
-    run_workspace_exclusive,
 )
 
 if TYPE_CHECKING:
-    from vibesys.context import _RunResources
+    from collections.abc import Callable
+
     from vibesys.orchestration.request import RunRequest
-    from vs_runtime.api import Commands, Workspace, Workspaces
+    from vs_runtime.api import Commands, Workspace
+    from vs_runtime.api.infrastructure import WorkspaceRuntime
 
 
 GATE_LOG_TAIL_CHARS = 1000
@@ -158,19 +157,20 @@ class _EvaluationAdapter:
         self,
         run_id: str,
         request: RunRequest,
-        workspaces: Workspaces,
+        runtime: WorkspaceRuntime,
         events: CoreEventWriter,
-        commands: Commands,
+        log: Callable[[str], None],
     ) -> None:
         self._run_id = run_id
         self._request = request
-        self._workspaces = workspaces
+        self._runtime_evaluation = runtime.evaluation
         self._events = events
-        self._commands = commands
+        self._commands = runtime.commands
+        self._log = log
         self._identifiers = count(1)
 
     def _live_workspace(self, workspace: Workspace) -> Workspace:
-        resources_for(self._workspaces, workspace)
+        self._runtime_evaluation.spec(workspace)
         return workspace
 
     def _receipt(self, workspace: Workspace, revision: str) -> AccuracyReceipt:
@@ -188,21 +188,22 @@ class _EvaluationAdapter:
             message = "accuracy receipt belongs to another workspace"
             raise RuntimeContractError(message)
 
-    def _validate_receipt_revision(self, workspace: Workspace, receipt: AccuracyReceipt) -> None:
+    async def _validate_receipt_revision(
+        self,
+        workspace: Workspace,
+        receipt: AccuracyReceipt,
+    ) -> None:
         current_revision = workspace.revision
         if current_revision is None:
             message = "accuracy receipt does not match the current workspace revision"
             raise RuntimeContractError(message)
         if receipt.revision == current_revision:
             return
-        git = resources_for(self._workspaces, workspace).git
-        try:
-            same_candidate = git.candidate_patch(receipt.revision) == git.candidate_patch(
-                current_revision
-            )
-        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-            message = "accuracy receipt revision is unavailable in this workspace"
-            raise RuntimeContractError(message) from error
+        same_candidate = await self._runtime_evaluation.revisions_equivalent(
+            workspace,
+            receipt.revision,
+            current_revision,
+        )
         if not same_candidate:
             message = "accuracy receipt does not match the current candidate revision"
             raise RuntimeContractError(message)
@@ -215,12 +216,12 @@ class _EvaluationAdapter:
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
-        resources = resources_for(self._workspaces, live)
+        spec = self._runtime_evaluation.spec(live)
         if reuse is not None:
             self._validate_receipt_owner(live, reuse)
             await live.snapshot("framework-accuracy-reuse-input")
-            self._validate_receipt_revision(live, reuse)
-            command = resources.trusted_evaluation_plan.accuracy_command
+            await self._validate_receipt_revision(live, reuse)
+            command = spec.accuracy_command
             emit_gate_started(self._events, GateKind.ACCURACY, command=command)
             emit_gate_finished(
                 self._events,
@@ -232,22 +233,20 @@ class _EvaluationAdapter:
             return AccuracyEvaluation(executed=False)
 
         candidate_revision = await live.snapshot("framework-accuracy-input")
-        view = resources.run_environment_view
         bundle = self._request.input_bundle
         release = (
             bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
-        ) or not view.paths.benchmark_command
+        ) or not spec.benchmark_command
         execution = self._command(
-            view.paths.accuracy_command,
+            spec.accuracy_command,
             candidate_revision,
-            view.deployment_release_env_var if release else None,
+            spec.deployment_release_env_var if release else None,
         )
-        result = await run_workspace_exclusive(
-            self._workspaces,
+        result = await self._runtime_evaluation.accuracy(
             live,
-            lambda: resources.trusted_evaluation.accuracy(command_override=execution),
+            command_override=execution,
         )
-        self._log_provisioning(resources, result.provisioned_volumes, result.failure)
+        self._log_provisioning(result.provisioned_volumes, result.failure)
         self._publish_accuracy(result, process_id=f"evaluation-accuracy-{next(self._identifiers)}")
         if result.executed:
             await live.snapshot("framework-accuracy-evaluation")
@@ -269,27 +268,23 @@ class _EvaluationAdapter:
         live = self._live_workspace(workspace)
         if self._request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
-        resources = resources_for(self._workspaces, live)
+        spec = self._runtime_evaluation.spec(live)
         candidate_revision = await live.snapshot("framework-benchmark-input")
-        view = resources.run_environment_view
         execution = self._command(
-            view.paths.benchmark_command,
+            spec.benchmark_command,
             candidate_revision,
-            view.deployment_release_env_var,
+            spec.deployment_release_env_var,
         )
-        result = await run_workspace_exclusive(
-            self._workspaces,
+        result = await self._runtime_evaluation.benchmark(
             live,
-            lambda: resources.trusted_evaluation.benchmark(
-                command_override=execution,
-                required_metrics=frozenset(item.name for item in objectives),
-            ),
+            command_override=execution,
+            required_metrics=frozenset(item.name for item in objectives),
         )
-        self._log_provisioning(resources, result.provisioned_volumes, result.failure)
+        self._log_provisioning(result.provisioned_volumes, result.failure)
         evaluation = self._interpret_benchmark(
             result,
             objectives,
-            resources.trusted_evaluation_plan.benchmark_contract,
+            spec.benchmark_contract,
         )
         self._publish_benchmark(
             result,
@@ -466,16 +461,15 @@ class _EvaluationAdapter:
             variables.append(f"{release_env}=1")
         return f"env {' '.join(variables)} {command}" if variables else command
 
-    @staticmethod
     def _log_provisioning(
-        resources: _RunResources,
+        self,
         volumes: tuple[str, ...],
         failure: str | None,
     ) -> None:
         prefix = "Model-weight request could not be satisfied: "
         if failure is not None and failure.startswith(prefix):
-            resources.lprint(f"[model-request] rejected: {failure.removeprefix(prefix)}")
+            self._log(f"[model-request] rejected: {failure.removeprefix(prefix)}")
         if volumes:
-            resources.lprint(
+            self._log(
                 f"[model-request] staged {len(volumes)} model volume(s): " + ", ".join(volumes)
             )

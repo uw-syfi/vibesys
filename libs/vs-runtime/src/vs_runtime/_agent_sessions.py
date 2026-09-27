@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.api.infrastructure import (
-        AgentExecutionResolver,
+        AgentConfigurationResolver,
         AgentToolResolver,
     )
 
@@ -243,7 +243,7 @@ class RuntimeAgentSessions:
         roles: tuple[AgentRole, ...],
         *,
         workspaces: RuntimeWorkspaces,
-        resolve_execution: AgentExecutionResolver,
+        resolve_configuration: AgentConfigurationResolver,
         session_store: Callable[[], SessionStore | None],
         control: RunControlChannel,
         lifecycle_events: AgentExecutionLifecycleSink,
@@ -255,7 +255,7 @@ class RuntimeAgentSessions:
     ) -> None:
         self._roles = {role.id: role for role in roles}
         self._workspaces = workspaces
-        self._resolve_execution = resolve_execution
+        self._resolve_configuration = resolve_configuration
         self._session_store = session_store
         self._control = control
         self._lifecycle_events = lifecycle_events
@@ -297,42 +297,44 @@ class RuntimeAgentSessions:
                 raise RuntimeContractError(message)
 
             managed_workspace = self._workspaces.workspace_for(workspace)
-            tool_servers = tuple(
-                spec
-                for tool_id in bound_tool_ids
-                for spec in self._tool_bindings[tool_id](managed_workspace)
-            )
-            session_id = uuid.uuid4().hex
-            configuration, scope = self._resolve_execution(role, managed_workspace)
-            execution = await RuntimeAgentExecution.open(
-                configuration,
-                scope,
-                session_store=self._session_store(),
-                control=self._control,
-                lifecycle=self._lifecycle_events,
-                agent_events=self._agent_events,
-                route_message=self._route_message,
-                client_factory=self._client_factory,
-            )
-            try:
-                session = self._complete_session(
-                    execution,
-                    role,
-                    managed_workspace,
-                    member_id,
-                    validated_paths,
-                    bound_tool_ids,
-                    tool_servers,
-                    session_id=session_id,
+            async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837217 [SLF001]; session construction holds the owning workspace alive through execution binding.
+                tool_servers = tuple(
+                    spec
+                    for tool_id in bound_tool_ids
+                    for spec in self._tool_bindings[tool_id](managed_workspace)
                 )
-            except BaseException as error:
+                session_id = uuid.uuid4().hex
+                configuration = self._resolve_configuration(role)
+                scope = self._workspaces.resource_for(managed_workspace).agent_scope()
+                execution = await RuntimeAgentExecution.open(
+                    configuration,
+                    scope,
+                    session_store=self._session_store(),
+                    control=self._control,
+                    lifecycle=self._lifecycle_events,
+                    agent_events=self._agent_events,
+                    route_message=self._route_message,
+                    client_factory=self._client_factory,
+                )
                 try:
-                    await execution.close()
-                except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-837202 [BLE001]; preserve the construction failure while reporting cleanup failure.
-                    error.add_note(f"agent execution cleanup also failed: {cleanup_error}")
-                raise
-            self._sessions.append(session)
-            return session
+                    session = self._complete_session(
+                        execution,
+                        role,
+                        managed_workspace,
+                        member_id,
+                        validated_paths,
+                        bound_tool_ids,
+                        tool_servers,
+                        session_id=session_id,
+                    )
+                except BaseException as error:
+                    try:
+                        await execution.close()
+                    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-837202 [BLE001]; preserve the construction failure while reporting cleanup failure.
+                        error.add_note(f"agent execution cleanup also failed: {cleanup_error}")
+                    raise
+                self._sessions.append(session)
+                return session
 
     def _complete_session(  # noqa: PLR0913  # lint-waiver: LW-837203 [PLR0913]; the helper validates the independently fixed session declaration before transferring ownership.
         self,

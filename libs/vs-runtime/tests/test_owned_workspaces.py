@@ -4,29 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections import deque
 from typing import TYPE_CHECKING
 
 import pytest
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK
+from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.infrastructure import (
-    AgentWorkspaceRuntime,
-    create_agent_workspace_runtime,
+    AgentExecutionScope,
+    BlockingOperations,
+    TrustedAccuracyResult,
+    TrustedBenchmarkResult,
+    WorkspaceEvaluationSpec,
+    WorkspaceRuntime,
     create_run_control_channel,
-    resolve_workspace_resource,
+    create_workspace_runtime,
 )
 from vs_runtime.api.testing import (
     FakeAgentExecutionLifecycleSink,
     FakeRunControlEventSink,
     FakeWorkspace,
 )
+from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import AgentRole, Workspace
-    from vs_runtime.api.infrastructure import AgentExecutionConfiguration, AgentExecutionScope
+    from vs_runtime.api import AgentRole
+    from vs_runtime.api.infrastructure import AgentExecutionConfiguration
 
 
 class _Resource:
@@ -36,6 +43,9 @@ class _Resource:
         self.revision: str | None = revision
         self.trusted_input_baseline: str | None = revision
         self.closed = False
+        self.executions: list[tuple[str, int | None]] = []
+        self.scripted: deque[SandboxExecutionResult] = deque()
+        self.unavailable_revisions: set[str] = set()
 
     def snapshot(self, label: str) -> str:
         self.revision = f"{len(label):040x}"
@@ -63,6 +73,8 @@ class _Resource:
         return []
 
     def candidate_patch(self, revision: str) -> str:
+        if revision in self.unavailable_revisions:
+            raise ValueError(revision)
         return revision
 
     def trusted_input_changes(self) -> list[str]:
@@ -70,6 +82,41 @@ class _Resource:
 
     def is_directory(self, path: str) -> bool:
         return (self.path / path).is_dir()
+
+    def execute(self, command: str, timeout_seconds: int | None) -> SandboxExecutionResult:
+        self.executions.append((command, timeout_seconds))
+        return self.scripted.popleft() if self.scripted else SandboxExecutionResult("", 0)
+
+    def agent_scope(self) -> AgentExecutionScope:
+        pytest.fail("workspace-only test requested an agent execution scope")
+
+    @property
+    def evaluation_spec(self) -> WorkspaceEvaluationSpec:
+        return WorkspaceEvaluationSpec(
+            accuracy_command="python accuracy.py",
+            benchmark_command="python benchmark.py",
+            benchmark_contract=None,
+            deployment_release_env_var=None,
+        )
+
+    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+        return TrustedAccuracyResult(
+            command=command_override,
+            executed=True,
+            passed=True,
+        )
+
+    async def trusted_benchmark(
+        self,
+        command_override: str | None,
+        required_metrics: frozenset[str],
+    ) -> TrustedBenchmarkResult:
+        del required_metrics
+        return TrustedBenchmarkResult(
+            command=command_override,
+            executed=True,
+            passed=True,
+        )
 
     def close(self) -> None:
         self.closed = True
@@ -88,27 +135,25 @@ class _Provider:
         return resource
 
 
-def _runtime(provider: _Provider) -> AgentWorkspaceRuntime:
-    def unexpected_execution(
-        _role: AgentRole,
-        _workspace: Workspace,
-    ) -> tuple[AgentExecutionConfiguration, AgentExecutionScope]:
+def _runtime(provider: _Provider) -> WorkspaceRuntime:
+    def unexpected_execution(_role: AgentRole) -> AgentExecutionConfiguration:
         pytest.fail("workspace-only test opened an agent execution")
 
     def unexpected_client(**_kwargs: object) -> AgentClientProtocol:
         pytest.fail("workspace-only test opened an agent client")
 
-    return create_agent_workspace_runtime(
+    return create_workspace_runtime(
         (),
         root_resource=provider.root,
         supports_parallel_candidates=provider.supports_parallel_candidates,
         create_candidate_resource=provider.create_candidate,
-        resolve_execution=unexpected_execution,
+        resolve_configuration=unexpected_execution,
         session_store=lambda: None,
         control=create_run_control_channel(FakeRunControlEventSink()),
         lifecycle_events=FakeAgentExecutionLifecycleSink(),
         agent_events=NULL_AGENT_EVENT_SINK,
         route_message=lambda message, _steering: message,
+        blocking=BlockingOperations(),
         client_factory=unexpected_client,
     )
 
@@ -117,7 +162,8 @@ def test_collection_owns_candidate_cleanup_in_reverse_order(tmp_path: Path) -> N
     provider = _Provider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = _runtime(provider).workspaces
+        runtime = _runtime(provider)
+        workspaces = runtime.workspaces
         first = await workspaces.create_candidate()
         second = await workspaces.create_candidate()
         first_id = first.id
@@ -150,7 +196,8 @@ def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: Path) 
     provider = _FailingProvider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = _runtime(provider).workspaces
+        runtime = _runtime(provider)
+        workspaces = runtime.workspaces
         await workspaces.create_candidate()
         await workspaces.create_candidate()
         with pytest.raises(BaseExceptionGroup) as captured:
@@ -215,17 +262,75 @@ def test_collection_rejects_foreign_handles_and_early_discard_is_idempotent(
     provider = _Provider(tmp_path)
 
     async def exercise() -> None:
-        workspaces = _runtime(provider).workspaces
+        runtime = _runtime(provider)
+        workspaces = runtime.workspaces
         candidate = await workspaces.create_candidate()
         candidate_id = candidate.id
         with pytest.raises(TypeError, match="live handle"):
-            resolve_workspace_resource(workspaces, FakeWorkspace(path=tmp_path))
+            await runtime.commands.run(("true",), workspace=FakeWorkspace(path=tmp_path))
         await candidate.discard()
         await candidate.discard()
         assert candidate_id is not None
         with pytest.raises(ValueError, match="closed"):
-            resolve_workspace_resource(workspaces, candidate)
+            await runtime.commands.run(("true",), workspace=candidate)
         await workspaces.close()
+
+    asyncio.run(exercise())
+
+
+def test_runtime_commands_capture_and_remove_managed_output(tmp_path: Path) -> None:
+    provider = _Provider(tmp_path)
+    provider.root.scripted.extend(
+        (
+            SandboxExecutionResult("runtime-result\n", 0, stdout="runtime-result\n"),
+            SandboxExecutionResult("", 0),
+            SandboxExecutionResult("captured", 0, stdout="captured"),
+            SandboxExecutionResult("", 0),
+        )
+    )
+
+    async def exercise() -> None:
+        runtime = _runtime(provider)
+        result = await runtime.commands.capture_output(
+            ("profiler",),
+            workspace=runtime.workspaces.root,
+            output_argument="--output",
+            timeout_seconds=17,
+        )
+        assert result.output == "captured"
+        assert provider.root.executions == [
+            ("mktemp", None),
+            ("profiler --output runtime-result", 17),
+            ("cat runtime-result", None),
+            ("rm -f runtime-result", None),
+        ]
+        await runtime.workspaces.close()
+
+    asyncio.run(exercise())
+
+
+def test_runtime_evaluation_validates_and_normalizes_unavailable_revisions(
+    tmp_path: Path,
+) -> None:
+    provider = _Provider(tmp_path)
+    provider.root.unavailable_revisions.add("missing")
+
+    async def exercise() -> None:
+        runtime = _runtime(provider)
+        assert await runtime.evaluation.revisions_equivalent(
+            runtime.workspaces.root,
+            "same",
+            "same",
+        )
+        with pytest.raises(RuntimeContractError, match="revision is unavailable"):
+            await runtime.evaluation.revisions_equivalent(
+                runtime.workspaces.root,
+                "missing",
+                "same",
+            )
+        with pytest.raises(TypeError, match="live handle"):
+            runtime.evaluation.spec(FakeWorkspace(path=tmp_path))
+        await runtime.workspaces.close()
 
     asyncio.run(exercise())
 

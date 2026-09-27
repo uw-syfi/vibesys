@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from vibesys.composition import AgentToolContext
 from vibesys.context import _StateBinding, open_run_resources
 from vibesys.orchestration.agents import _AgentToolResolver, create_agents_and_workspaces
-from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.gates import _EvaluationAdapter
 from vibesys.orchestration.state import _StateCommitObserver
@@ -109,6 +108,7 @@ class _ProductHostFactory:
                 resources,
                 self.plugin.memory_paths,
                 self.integration.events,
+                self.open_agent_environment,
             ),
             supports_parallel_candidates=(
                 resources.run_environment_view.supports_parallel_candidate_evaluation
@@ -118,15 +118,16 @@ class _ProductHostFactory:
                 self.request,
                 self.plugin.memory_paths,
                 self.integration.events,
+                self.open_agent_environment,
             ),
             control=self.integration.control,
             lifecycle_events=self.integration.agent_execution_event,
-            agent_environment_opener=self.open_agent_environment,
+            blocking=blocking,
             client_factory=self.agent_client_factory,
         )
         agents = agent_runtime.agents
         workspaces = agent_runtime.workspaces
-        commands = _Commands(workspaces, blocking)
+        commands = agent_runtime.commands
         skills = create_installed_skills(tuple(resources.skill_source_paths), blocking)
         control = _RunControl(self.integration, debug=self.request.debug)
         state = create_state(
@@ -148,9 +149,9 @@ class _ProductHostFactory:
         evaluation = _EvaluationAdapter(
             resources.run_id,
             self.request,
-            workspaces,
+            agent_runtime,
             self.integration.events,
-            commands,
+            resources.lprint,
         )
         return RunHostComponents(
             run_id=resources.run_id,
