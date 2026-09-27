@@ -20,7 +20,7 @@ from pathlib import Path
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
-_ALLOWED_EXTERNAL_POLICY_IMPORTS = {"plugin_catalog.py", "api/evolve.py"}
+_ALLOWED_EXTERNAL_POLICY_IMPORTS = {"api/__init__.py", "plugin_catalog.py"}
 _INFRASTRUCTURE_LIBRARIES = (
     "vs_agent",
     "vs_evaluator_protocol",

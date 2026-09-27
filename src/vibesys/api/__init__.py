@@ -62,6 +62,7 @@ from vibesys.events import (
     WorkspaceSnapshotData,
 )
 from vibesys.orchestration.contracts import OrchestrationRegistry
+from vibesys.orchestration.evolve.models import resolve_openevolve_options
 from vibesys.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
@@ -119,4 +120,5 @@ __all__ = [
     "create_session",
     "load_config",
     "open_run_store",
+    "resolve_openevolve_options",
 ]

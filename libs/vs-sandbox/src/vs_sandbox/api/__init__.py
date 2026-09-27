@@ -44,6 +44,8 @@ if TYPE_CHECKING:
         HostResourceContext,
         HostResourceDeclarer,
         declare_resources,
+        deduplicate_host_resources,
+        host_resource_for_mount,
     )
     from vs_sandbox.host_sandbox import (
         HostSandbox,
@@ -110,7 +112,9 @@ __all__ = [
     "build_host_sandbox",
     "create_compute_backend",
     "declare_resources",
+    "deduplicate_host_resources",
     "ensure_model_volume",
+    "host_resource_for_mount",
     "parse_gpu_process_output",
     "pick_gpu",
     "query_gpu_info",
@@ -151,7 +155,9 @@ _LAZY_EXPORTS = {
     "HostResourceAccess": ("host_resources", "HostResourceAccess"),
     "HostResourceContext": ("host_resources", "HostResourceContext"),
     "HostResourceDeclarer": ("host_resources", "HostResourceDeclarer"),
+    "deduplicate_host_resources": ("host_resources", "deduplicate_host_resources"),
     "declare_resources": ("host_resources", "declare_resources"),
+    "host_resource_for_mount": ("host_resources", "host_resource_for_mount"),
     "HostSandbox": ("host_sandbox", "HostSandbox"),
     "LandlockSandbox": ("host_sandbox", "LandlockSandbox"),
     "LinuxBackend": ("host_sandbox", "LinuxBackend"),

@@ -69,7 +69,7 @@ NESTED_SHELL_PROJECT = Path(__file__).parent / "fixtures" / "nested_shell_projec
 
 
 def _as_mount_tuples(resources: Sequence[HostResource]) -> list[tuple[str, str, bool]]:
-    """Invert ``_resource_for_mount`` for assertions written against the old shape.
+    """Invert resource lowering for assertions written against the old shape.
 
     Lets tests keep comparing against plain ``(host, container, readonly)``
     tuples after ``_container_mount_plan`` moved from raw bind mounts to a

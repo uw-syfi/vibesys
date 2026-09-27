@@ -72,7 +72,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vs_agent", "server.settings", "headless", "vibesys.api.evolve"]
+depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vs_agent", "server.settings", "headless"]
 
 [[modules]]
 path = "headless"
@@ -160,15 +160,11 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.plugin_catalog", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.evolve"]
 
 [[modules]]
 path = "vibesys.api.agent"
 depends_on = ["vibesys.plugin_catalog", "vs_project", "vibesys.orchestration.memory", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.agent_options"]
-
-[[modules]]
-path = "vibesys.api.evolve"
-depends_on = ["vibesys.orchestration.evolve"]
 
 [[modules]]
 path = "vibesys.api.contracts"

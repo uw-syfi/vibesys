@@ -65,12 +65,13 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import (
     HostResource,
-    HostResourceAccess,
     ProjectPathPolicy,
     SandboxKind,
     SandboxLifecycleHooks,
     SandboxSession,
+    deduplicate_host_resources,
     evaluator_helpers,
+    host_resource_for_mount,
     start_sandbox,
     stop_sandbox,
 )
@@ -116,7 +117,7 @@ declares for the materialized objective document. Every environment's
 container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from vibesys.domains.environment import EnvironmentBindMount
     from vibesys.evaluators.input_manifest import WorkspaceSource
@@ -413,7 +414,7 @@ class DockerEnvironment:
         cli_provider_env.setdefault("CARGO_HOME", "/workspace/.cache/cargo")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
-        resources = _dedupe_resources(resources)
+        resources = deduplicate_host_resources(resources)
         lifecycle_hooks = symlink_lifecycle_hooks(docker_symlinks)
 
         sandbox = request.backend.make_sandbox(
@@ -645,12 +646,13 @@ class SkyPilotEnvironment(DockerEnvironment):
             caller_state_path = "/opt/vibesys-skypilot/caller-state"
             caller_state = request.state_namespace.external_directory("caller")
             cli_provider_env["VIBESYS_SKYPILOT_CALLER_STATE"] = caller_state_path
-            resources = resources + _resources_for_mounts(
-                [
+            resources.extend(
+                host_resource_for_mount(host, container, read_only=read_only)
+                for host, container, read_only in (
                     (str(helper_source), helper_path, True),
                     (str(bridge.socket_path), socket_path, False),
                     (str(caller_state), caller_state_path, False),
-                ]
+                )
             )
             runtime_document = request.log_dir / "runtime-environment.md"
             runtime_document.write_text(
@@ -665,14 +667,14 @@ class SkyPilotEnvironment(DockerEnvironment):
             )
             runtime_path = "/opt/vibesys-runtime/environment.md"
             resources.append(
-                _resource_for_mount(str(runtime_document), runtime_path, read_only=True)
+                host_resource_for_mount(str(runtime_document), runtime_path, read_only=True)
             )
             sandbox = request.backend.make_sandbox(
                 SandboxKind.DOCKER,
                 host_workspace=str(request.workspace),
                 log_path=request.log_dir / "docker.log",
                 bind_mounts=[],
-                resources=_dedupe_resources(resources),
+                resources=deduplicate_host_resources(resources),
                 extra_env=cli_provider_env,
                 auth_files=auth_files,
                 lifecycle_hooks=symlink_lifecycle_hooks(docker_symlinks),
@@ -821,12 +823,12 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         )
         runtime_container_path = "/opt/vibesys-runtime/environment.md"
         resources.append(
-            _resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
+            host_resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
         )
         evaluator_helper = evaluator_helpers.MODAL_EVALUATOR_HELPER
         evaluator_container_path = "/opt/vibesys-modal-evaluator.py"
         resources.append(
-            _resource_for_mount(str(evaluator_helper), evaluator_container_path, read_only=True)
+            host_resource_for_mount(str(evaluator_helper), evaluator_container_path, read_only=True)
         )
 
         # Mount host Modal auth so `modal run` inside the container
@@ -839,15 +841,19 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         modal_auth = Path.home() / ".modal.toml"
         if modal_auth.exists():
             resources.append(
-                _resource_for_mount(str(modal_auth), f"{agent_home}/.modal.toml", read_only=True)
+                host_resource_for_mount(
+                    str(modal_auth), f"{agent_home}/.modal.toml", read_only=True
+                )
             )
         modal_config_dir = Path.home() / ".modal"
         if modal_config_dir.is_dir():
             resources.append(
-                _resource_for_mount(str(modal_config_dir), f"{agent_home}/.modal", read_only=True)
+                host_resource_for_mount(
+                    str(modal_config_dir), f"{agent_home}/.modal", read_only=True
+                )
             )
 
-        resources = _dedupe_resources(resources)
+        resources = deduplicate_host_resources(resources)
         lifecycle_hooks = symlink_lifecycle_hooks(docker_symlinks)
 
         sandbox = request.backend.make_sandbox(
@@ -1229,52 +1235,6 @@ def _prepare_evaluation_plan(
     )
 
 
-def _resource_for_mount(
-    host_path: str,
-    container_path: str,
-    *,
-    read_only: bool,
-    purpose: str = "container mount",
-) -> HostResource:
-    """Lower one ``(host, container, readonly)`` mount tuple to a ``HostResource``.
-
-    ``agent_path`` is left unset (identity) only when the container path
-    matches the host path verbatim; every mount built here presents at a
-    dedicated container location, so this is effectively always set.
-    """
-    access = HostResourceAccess.READ_ONLY if read_only else HostResourceAccess.READ_WRITE
-    normalized_host = str(Path(host_path))
-    agent_path = container_path if container_path != normalized_host else None
-    return HostResource(Path(host_path), access, purpose, agent_path)
-
-
-def _resources_for_mounts(
-    mounts: Sequence[tuple[str, str, bool]],
-    *,
-    purpose: str = "container mount",
-) -> list[HostResource]:
-    """Lower a batch of ``(host, container, readonly)`` mounts to resources."""
-    return [
-        _resource_for_mount(host, container, read_only=read_only, purpose=purpose)
-        for host, container, read_only in mounts
-    ]
-
-
-def _dedupe_resources(resources: Sequence[HostResource]) -> list[HostResource]:
-    """Keep one resource per container-visible path, preferring the last declared.
-
-    Mirrors the historical ``bind_mounts`` dedup: a path re-declared later
-    (for example an evaluator-tool mount landing on a path an earlier, coarser
-    grant already covered) wins, while the position of the first declaration
-    is preserved.
-    """
-    seen: dict[str, HostResource] = {}
-    for resource in resources:
-        key = resource.agent_path if resource.agent_path is not None else str(resource.path)
-        seen[key] = resource
-    return list(seen.values())
-
-
 def _container_mount_plan(
     request: RunEnvironmentRequest,
     *,
@@ -1359,7 +1319,10 @@ def _container_mount_plan(
             )
         )
 
-    resources = _resources_for_mounts(bind_mounts)
+    resources = [
+        host_resource_for_mount(host, container, read_only=read_only)
+        for host, container, read_only in bind_mounts
+    ]
     resources.extend(
         docker_project_path_resources(
             request.project_path_policy,
@@ -1373,9 +1336,12 @@ def _container_mount_plan(
         and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
         and request.cli_provider
     ):
-        resources.extend(_resources_for_mounts(auth_bind_mounts(request.cli_provider)))
+        resources.extend(
+            host_resource_for_mount(host, container, read_only=read_only)
+            for host, container, read_only in auth_bind_mounts(request.cli_provider)
+        )
         resources.append(
-            _resource_for_mount(str(request.framework_root), "/opt/vibesys", read_only=True)
+            host_resource_for_mount(str(request.framework_root), "/opt/vibesys", read_only=True)
         )
 
     return resources, symlinks

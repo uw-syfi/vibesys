@@ -26,8 +26,8 @@ from vibesys.api import (
     RunRequest,
     RunResult,
     boot_trace,
+    resolve_openevolve_options,
 )
-from vibesys.api.evolve import resolve_openevolve_options
 from vibesys.api.request import (
     InputBundle,
     validate_descriptor,
