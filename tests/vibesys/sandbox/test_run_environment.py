@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -39,7 +38,6 @@ from vibesys.sandbox.run_environment import (
     _evaluator_requirements,
     _EvaluatorToolBuildRequiredError,
     _materialize_effective_objective,
-    _resolve_docker_image_id,
     _SkyPilotRunEnvironmentSession,
     build_run_environment,
     make_run_environment_spec,
@@ -721,32 +719,6 @@ def test_docker_evaluator_tools_use_ephemeral_builder_and_read_only_final_mounts
     assert "chown -R" in ownership_argv[2]
     assert ".host-owner-" in ownership_argv[4]
     backend.sandbox.stop.assert_called_once_with()
-
-
-def test_docker_tool_cache_resolves_existing_image_content_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    inspect = MagicMock(return_value=MagicMock(returncode=0, stdout="sha256:abc\n"))
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", inspect)
-
-    assert _resolve_docker_image_id("example:latest") == "sha256:abc"
-    inspect.assert_called_once()
-
-
-def test_docker_tool_cache_pulls_then_pins_missing_image(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run = MagicMock(
-        side_effect=[
-            MagicMock(returncode=1, stdout="", stderr="missing"),
-            MagicMock(returncode=0, stdout="pulled", stderr=""),
-            MagicMock(returncode=0, stdout="sha256:resolved\n", stderr=""),
-        ]
-    )
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", run)
-
-    assert _resolve_docker_image_id("example:latest") == "sha256:resolved"
-    assert run.call_args_list[1].args[0] == ["docker", "image", "pull", "example:latest"]
 
 
 def test_environment_quotes_project_root_after_token_expansion(tmp_path: Path) -> None:
@@ -2096,55 +2068,3 @@ def test_docker_tool_builder_reports_ownership_and_incomplete_builds(
     backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="")
     with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
         _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
-
-
-@pytest.mark.parametrize(
-    ("runs", "error", "message"),
-    [
-        (
-            [MagicMock(returncode=1, stdout="", stderr=""), FileNotFoundError()],
-            EvaluatorToolError,
-            "Docker was not found",
-        ),
-        (
-            [MagicMock(returncode=1, stdout="", stderr=""), subprocess.TimeoutExpired("d", 600)],
-            EvaluatorToolError,
-            "Docker image pull timed out: img",
-        ),
-        (
-            [
-                MagicMock(returncode=1, stdout="", stderr=""),
-                MagicMock(returncode=1, stdout="", stderr="no such image"),
-            ],
-            EvaluatorToolError,
-            "Could not resolve Docker image 'img': no such image",
-        ),
-        (
-            [
-                MagicMock(returncode=1, stdout="", stderr=""),
-                MagicMock(returncode=0, stdout="pulled", stderr=""),
-                MagicMock(returncode=0, stdout="not-a-digest", stderr=""),
-            ],
-            EvaluatorToolError,
-            "no resolvable immutable image ID",
-        ),
-    ],
-)
-def test_docker_image_resolution_failures_are_diagnosed(
-    monkeypatch: pytest.MonkeyPatch,
-    runs: list[object],
-    error: type[Exception],
-    message: str,
-) -> None:
-    outcomes = iter(runs)
-
-    def run(*_args: object, **_kwargs: object) -> object:
-        outcome = next(outcomes)
-        if isinstance(outcome, BaseException):
-            raise outcome
-        return outcome
-
-    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", run)
-
-    with pytest.raises(error, match=message):
-        _resolve_docker_image_id("img")

@@ -28,7 +28,6 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import subprocess
 import sys
 import tempfile
 
@@ -87,6 +86,7 @@ from vs_sandbox.api.evaluator_tools import (
     EvaluatorToolError,
     EvaluatorToolLifecycleHooks,
     prepare_evaluator_tools,
+    resolve_docker_image_id,
     tool_install_root,
 )
 from vs_sandbox.api.skypilot import (
@@ -120,6 +120,7 @@ declares for the materialized objective document. Every environment's
 container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Callable, Sequence
 
     from vibesys.domains.environment import EnvironmentBindMount
@@ -1520,7 +1521,7 @@ def _docker_evaluator_tool_mounts(
     tools = requirements.tools
     if not tools:
         return []
-    resolved_image = container_image or _resolve_docker_image_id(_docker_backend_image(request))
+    resolved_image = container_image or resolve_docker_image_id(_docker_backend_image(request))
     host_parent = docker_evaluator_tools_root(
         requirements,
         request.workspace,
@@ -1606,48 +1607,3 @@ def _docker_backend_image(request: RunEnvironmentRequest) -> str:
     if not isinstance(image, str) or not image:
         raise EvaluatorToolError.docker_image_unconfigured()
     return image
-
-
-def _inspect_docker_image_id(image: str) -> str | None:
-    try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009091 [S603]; inspect uses fixed Docker argv and an image value as a single shell-free argument.
-            ["docker", "image", "inspect", "--format={{.Id}}", image],  # noqa: S607  # lint-waiver: LW-009092 [S607]; Docker is intentionally resolved from the operator's configured PATH.
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=30,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        result = None
-    if result is None or result.returncode != 0:
-        return None
-    identity = result.stdout.strip()
-    return (
-        identity
-        if identity.startswith("sha256:") and not any(c.isspace() for c in identity)
-        else None
-    )
-
-
-def _resolve_docker_image_id(image: str) -> str:
-    """Resolve and pin the exact Docker image used for tool build and execution."""
-    if identity := _inspect_docker_image_id(image):
-        return identity
-    try:
-        pull = subprocess.run(  # noqa: S603  # lint-waiver: LW-009093 [S603]; pull uses fixed Docker argv and an image value as a single shell-free argument.
-            ["docker", "image", "pull", image],  # noqa: S607  # lint-waiver: LW-009094 [S607]; Docker is intentionally resolved from the operator's configured PATH.
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=600,
-        )
-    except FileNotFoundError as exc:
-        raise EvaluatorToolError.docker_missing() from exc
-    except subprocess.TimeoutExpired as exc:
-        raise EvaluatorToolError.docker_pull_timed_out(image) from exc
-    if pull.returncode != 0:
-        detail = (pull.stderr or pull.stdout or "docker image pull failed").strip()[:500]
-        raise EvaluatorToolError.docker_image_unresolvable(image, detail)
-    if identity := _inspect_docker_image_id(image):
-        return identity
-    raise EvaluatorToolError.docker_image_id_missing(image)

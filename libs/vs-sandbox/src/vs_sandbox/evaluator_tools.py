@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -20,6 +20,20 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from vs_sandbox.lifecycle import BeforeReadyContext, SandboxLifecycleHooks
 
 ToolCommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+
+
+class _DockerCommandRunner(Protocol):
+    """Execute one shell-free Docker CLI command."""
+
+    def __call__(
+        self,
+        arguments: tuple[str, ...],
+        *,
+        timeout_seconds: int,
+    ) -> subprocess.CompletedProcess[str]:
+        """Return captured text streams or raise an OS/process timeout error."""
+        ...
+
 
 _CARGO_INSTALL_TIMEOUT_SECONDS = 600
 _SANDBOX_INSTALL_TIMEOUT_SECONDS = 660
@@ -401,6 +415,72 @@ class EvaluatorToolError(RuntimeError):
     def install_publish_failed(cls, target: Path) -> EvaluatorToolError:
         """Describe a staged tool installation that could not be published."""
         return cls(f"cannot publish evaluator tool installation: {target}")
+
+
+def resolve_docker_image_id(
+    image: str,
+    *,
+    command_runner: _DockerCommandRunner | None = None,
+) -> str:
+    """Resolve *image* to the immutable ID used for evaluator tool builds.
+
+    A valid cached ID avoids a pull. Otherwise Docker pulls the requested image
+    and the resolver inspects it again, rejecting mutable or malformed output.
+    """
+    run = command_runner or _run_docker_command
+    if identity := _inspect_docker_image_id(image, command_runner=run):
+        return identity
+    try:
+        pull = run(
+            ("docker", "image", "pull", image),
+            timeout_seconds=600,
+        )
+    except FileNotFoundError as exc:
+        raise EvaluatorToolError.docker_missing() from exc
+    except subprocess.TimeoutExpired as exc:
+        raise EvaluatorToolError.docker_pull_timed_out(image) from exc
+    if pull.returncode != 0:
+        detail = (pull.stderr or pull.stdout or "docker image pull failed").strip()[:500]
+        raise EvaluatorToolError.docker_image_unresolvable(image, detail)
+    if identity := _inspect_docker_image_id(image, command_runner=run):
+        return identity
+    raise EvaluatorToolError.docker_image_id_missing(image)
+
+
+def _inspect_docker_image_id(
+    image: str,
+    *,
+    command_runner: _DockerCommandRunner,
+) -> str | None:
+    try:
+        result = command_runner(
+            ("docker", "image", "inspect", "--format={{.Id}}", image),
+            timeout_seconds=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    identity = result.stdout.strip()
+    return (
+        identity
+        if identity.startswith("sha256:") and not any(character.isspace() for character in identity)
+        else None
+    )
+
+
+def _run_docker_command(
+    arguments: tuple[str, ...],
+    *,
+    timeout_seconds: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603  # lint-waiver: LW-009091 [S603]; fixed Docker argv is executed shell-free and the image remains one argument.
+        arguments,
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=timeout_seconds,
+    )
 
 
 class EvaluatorToolLifecycleHooks(SandboxLifecycleHooks):
