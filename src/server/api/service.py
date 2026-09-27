@@ -48,8 +48,8 @@ from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
 from vibesys.api import (
     RunRecordReadError,
+    agent_projection,
 )
-from vibesys.api.agent import agent_projection
 
 if TYPE_CHECKING:
     from collections.abc import Callable

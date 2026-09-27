@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from vs_agent.api import JsonResultPayload, ToolResultPayload
+from vibesys.api import JsonResultPayload, ToolResultPayload
 
 
 def classify_tool_result(content: str) -> ToolResultPayload | None:

@@ -1,4 +1,4 @@
-"""The generic API stays independent of agent policy projection imports."""
+"""The public API exposes frontend facts without exposing agent-policy helpers."""
 
 from __future__ import annotations
 
@@ -51,20 +51,23 @@ def test_generic_api_import_does_not_load_builtin_policies() -> None:
     subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; The subprocess runs the current interpreter on a fixed script literal.
 
 
-def test_agent_projection_names_are_explicitly_owned_by_agent_facade() -> None:
-    expected = {
+def test_frontend_projection_names_are_available_from_the_top_level_facade() -> None:
+    frontend_projection = {
         "AgentRunProjection",
         "HypothesisRoundView",
         "HypothesisView",
-        "RoundView",
         "agent_projection",
+    }
+    policy_helpers = {
+        "RoundView",
         "agent_run_objectives",
         "framework_memory_paths",
         "is_agent_run_manifest",
     }
-    assert expected <= set(agent_api.__all__)
-    assert expected.isdisjoint(generic_api.__all__)
-    for name in expected:
+    assert frontend_projection <= set(generic_api.__all__)
+    assert frontend_projection | policy_helpers <= set(agent_api.__all__)
+    assert policy_helpers.isdisjoint(generic_api.__all__)
+    for name in frontend_projection | policy_helpers:
         assert getattr(agent_api, name) is not None
 
 

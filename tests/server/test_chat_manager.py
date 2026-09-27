@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import auxiliary_agent_drivers, build_server_parts
 
 from server.api.protocol import (
     ChatOptionsQuery,
@@ -217,6 +217,7 @@ def test_chat_options_group_by_provider_and_mark_run_model(tmp_path: Path) -> No
             driver="omnigent",
             provider="codex",
             model="gpt-5.5-run",
+            agent_drivers=auxiliary_agent_drivers(),
             role_models=("gpt-5.6-outer", "gpt-5.5-run"),
         )
     )

@@ -9,11 +9,36 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from vibesys.api.store import RunRecord
+
+AgentDriver = Literal["agentshim", "omnigent"]
+
+
+class AuxiliaryAgentDriver(BaseModel):
+    """One available auxiliary-agent driver and its accepted providers."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    driver: AgentDriver
+    providers: tuple[str, ...]
+
+    @field_validator("providers")
+    @classmethod
+    def _valid_providers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            message = "auxiliary agent driver must support at least one provider"
+            raise ValueError(message)
+        if any(not provider.strip() for provider in value):
+            message = "auxiliary agent providers must not be empty"
+            raise ValueError(message)
+        if len(set(value)) != len(value):
+            message = "auxiliary agent providers must be unique"
+            raise ValueError(message)
+        return value
 
 
 class RunReady(BaseModel):
@@ -31,9 +56,10 @@ class RunReady(BaseModel):
     record: RunRecord
     log_directory: Path
     frontend_state_directory: Path
-    agent_driver: str
+    agent_driver: AgentDriver
     agent_provider: str
     agent_model: str
+    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
     role_models: tuple[str, ...] = ()
 
     @field_validator("log_directory", "frontend_state_directory")
@@ -41,6 +67,24 @@ class RunReady(BaseModel):
     def _absolute_path(cls, value: Path) -> Path:
         """Keep frontend attachment locations absolute and normalized."""
         return value.expanduser().resolve(strict=False)
+
+    @model_validator(mode="after")
+    def _valid_agent_defaults(self) -> Self:
+        drivers = {item.driver: item.providers for item in self.agent_drivers}
+        if len(drivers) != len(self.agent_drivers):
+            message = "auxiliary agent drivers must be unique"
+            raise ValueError(message)
+        providers = drivers.get(self.agent_driver)
+        if providers is None:
+            message = f"default auxiliary agent driver is unavailable: {self.agent_driver!r}"
+            raise ValueError(message)
+        if self.agent_provider not in providers:
+            message = (
+                f"agent driver {self.agent_driver!r} does not support provider "
+                f"{self.agent_provider!r}; supported providers: {', '.join(providers)}"
+            )
+            raise ValueError(message)
+        return self
 
 
 class AuxiliaryReadableInput(BaseModel):
@@ -87,7 +131,7 @@ class AuxiliaryAgentLaunch(BaseModel):
 
     role: str
     member_id: str
-    driver: str
+    driver: AgentDriver
     provider: str
     model: str
     system_prompt: str
@@ -131,4 +175,11 @@ class ManagedAgent(Protocol):
         ...
 
 
-__all__ = ["AuxiliaryAgentLaunch", "AuxiliaryReadableInput", "ManagedAgent", "RunReady"]
+__all__ = [
+    "AgentDriver",
+    "AuxiliaryAgentDriver",
+    "AuxiliaryAgentLaunch",
+    "AuxiliaryReadableInput",
+    "ManagedAgent",
+    "RunReady",
+]

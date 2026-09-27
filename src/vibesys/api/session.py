@@ -11,7 +11,13 @@ from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent, RunReady
+from vibesys.api.auxiliary import (
+    AgentDriver,
+    AuxiliaryAgentDriver,
+    AuxiliaryAgentLaunch,
+    ManagedAgent,
+    RunReady,
+)
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
@@ -24,6 +30,7 @@ from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vs_agent.api import (
     ToolServerDescriptor,
+    agent_catalog,
     build_agent_client,
     expose_as_tools,
 )
@@ -532,9 +539,16 @@ def _run_ready(
         frontend_state_directory=resources.project.state.local_namespace(
             resources.run_id, "server"
         ).external_directory(),
-        agent_driver=resources.driver,
+        agent_driver=cast("AgentDriver", resources.driver),
         agent_provider=resources.provider,
         agent_model=resources.model,
+        agent_drivers=tuple(
+            AuxiliaryAgentDriver(
+                driver=info.driver.value,
+                providers=info.providers,
+            )
+            for info in agent_catalog().values()
+        ),
         role_models=resources.role_models,
     )
 

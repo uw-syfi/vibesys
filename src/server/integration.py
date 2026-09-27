@@ -247,6 +247,7 @@ class RunIntegrationAdapter:
                 model=ready.agent_model,
                 role_models=ready.role_models,
             ),
+            agent_drivers=ready.agent_drivers,
         )
         self._detach_run = self._attach_run(attachment, session)
 

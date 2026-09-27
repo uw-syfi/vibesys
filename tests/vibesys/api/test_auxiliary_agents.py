@@ -10,7 +10,12 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from tests.support.run_execution import run_execution_record
 
-from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput, RunReady
+from vibesys.api import (
+    AuxiliaryAgentDriver,
+    AuxiliaryAgentLaunch,
+    AuxiliaryReadableInput,
+    RunReady,
+)
 from vibesys.api.session import (
     _LocalRunSession,  # test-isolation: compose the real public session over deterministic resource fakes.
 )
@@ -176,6 +181,14 @@ def _launch(readable_path: Path) -> AuxiliaryAgentLaunch:
     )
 
 
+@pytest.mark.parametrize("providers", [(), ("codex", "codex"), ("",)])
+def test_auxiliary_agent_driver_rejects_ambiguous_provider_facts(
+    providers: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValidationError, match="provider"):
+        AuxiliaryAgentDriver(driver="agentshim", providers=providers)
+
+
 def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
     environment = _Environment()
     session = _session()
@@ -192,12 +205,50 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
             agent_driver="agentshim",
             agent_provider="codex",
             agent_model="gpt-test",
+            agent_drivers=(
+                AuxiliaryAgentDriver(
+                    driver="agentshim",
+                    providers=("claude", "codex", "gemini", "opencode"),
+                ),
+                AuxiliaryAgentDriver(
+                    driver="omnigent",
+                    providers=("claude", "codex"),
+                ),
+            ),
             role_models=("gpt-worker",),
         )
     ]
     assert not hasattr(observed[0], "config")
     assert not hasattr(observed[0], "environment")
     assert not hasattr(observed[0], "host_resources")
+
+
+def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) -> None:
+    environment = _Environment()
+    session = _session()
+    observed: list[RunReady] = []
+    session.on_ready(observed.append)
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948027 [SLF001]; exercise the private composition input and validate its public projection contract.
+    payload = observed[0].model_dump()
+
+    with pytest.raises(ValidationError, match="drivers must be unique"):
+        RunReady.model_validate(
+            payload
+            | {
+                "agent_drivers": [
+                    {"driver": "agentshim", "providers": ["codex"]},
+                    {"driver": "agentshim", "providers": ["claude"]},
+                ]
+            }
+        )
+    with pytest.raises(ValidationError, match="default auxiliary agent driver is unavailable"):
+        RunReady.model_validate(
+            payload | {"agent_drivers": [{"driver": "omnigent", "providers": ["claude", "codex"]}]}
+        )
+    with pytest.raises(ValidationError, match="does not support provider"):
+        RunReady.model_validate(
+            payload | {"agent_drivers": [{"driver": "agentshim", "providers": ["claude"]}]}
+        )
 
 
 def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> None:

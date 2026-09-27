@@ -19,10 +19,10 @@ from server.api.protocol import (
 from server.chat.manager import ChatAnswer
 from server.events import EventType
 from server.run_lifecycle import RunStatus
-from server.transport.unix_jsonl import UnixJsonlServer
-from vs_project.api import (
+from server.transport.unix_jsonl import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
+    UnixJsonlServer,
     validate_socket_path,
 )
 

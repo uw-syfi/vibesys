@@ -28,7 +28,7 @@ from server.events import (
     ToolCallData,
     ToolResultData,
 )
-from vs_agent.api import AgentSelection
+from server.run_attachment import AgentSelection
 
 
 def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path: Path) -> None:
@@ -60,22 +60,22 @@ def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path: P
 
 
 @pytest.mark.parametrize(
-    ("identity", "expected"),
+    ("selection", "expected"),
     [
         (
-            {
-                "driver": "agentshim",
-                "provider": "codex",
-                "model": "gpt-5.1-codex-max",
-            },
+            AgentSelection(
+                driver="agentshim",
+                provider="codex",
+                model="gpt-5.1-codex-max",
+            ),
             ("agentshim", "codex", "gpt-5.1-codex-max"),
         ),
-        ({}, (None, None, None)),
+        (None, (None, None, None)),
     ],
 )
 def test_execution_identity_is_recorded_in_events_and_checkpoints(
     tmp_path: Path,
-    identity: dict[str, str],
+    selection: AgentSelection | None,
     expected: tuple[str | None, str | None, str | None],
 ) -> None:
     parts = build_server_parts(tmp_path)
@@ -83,15 +83,7 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
         "implementer",
         "round-1",
         "work",
-        agent_selection=(
-            AgentSelection(
-                driver=identity["driver"],
-                provider=identity["provider"],
-                model=identity["model"],
-            )
-            if identity
-            else None
-        ),
+        agent_selection=selection,
     )
 
     started = next(

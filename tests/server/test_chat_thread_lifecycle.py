@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import ServerParts, auxiliary_agent_drivers, build_server_parts
 
 from server.chat.factory import (
     ChatAgentBuilder,
@@ -334,7 +334,12 @@ def _factory_for_test(
     tmp_path: Path,
     build_agent: ChatAgentBuilder,
 ) -> ExperimentChatFactory:
-    defaults = ChatRunSettings(driver="agentshim", provider="codex", model="gpt-test")
+    defaults = ChatRunSettings(
+        driver="agentshim",
+        provider="codex",
+        model="gpt-test",
+        agent_drivers=auxiliary_agent_drivers(),
+    )
 
     return ExperimentChatFactory(
         manager=parts.chat,
@@ -348,6 +353,7 @@ def _factory_for_test(
                 provider=defaults.provider,
                 model=defaults.model,
             ),
+            agent_drivers=auxiliary_agent_drivers(),
         ),
         build_agent=build_agent,
         fallback=lambda _question: "fallback",

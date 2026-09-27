@@ -10,11 +10,12 @@ worth suggesting under each.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vs_agent.api import Driver, agent_catalog
+if TYPE_CHECKING:
+    from vibesys.api import AgentDriver, AuxiliaryAgentDriver
 
 ChatModelSource = Literal["run", "role", "suggested"]
 
@@ -81,10 +82,19 @@ class ChatRunSettings:
     model its operator already trusts for this workspace.
     """
 
-    driver: str
+    driver: AgentDriver
     provider: str
     model: str
+    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
     role_models: tuple[str, ...] = field(default=())
+
+    def providers_for(self, driver: AgentDriver) -> tuple[str, ...]:
+        """Return the snapshotted providers for one available driver."""
+        choice = next((item for item in self.agent_drivers if item.driver == driver), None)
+        if choice is None:
+            message = f"auxiliary agent driver is unavailable: {driver!r}"
+            raise ValueError(message)
+        return choice.providers
 
 
 def build_chat_options(settings: ChatRunSettings) -> ChatOptions:
@@ -97,7 +107,7 @@ def build_chat_options(settings: ChatRunSettings) -> ChatOptions:
     return ChatOptions(
         providers=[
             ChatProviderOptions(provider=provider, models=_models_for(provider, settings))
-            for provider in agent_catalog()[Driver(settings.driver)].providers
+            for provider in settings.providers_for(settings.driver)
         ]
     )
 

@@ -10,10 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_agent.api import AgentSelection
-
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vibesys.api import AgentDriver, AuxiliaryAgentDriver
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSelection:
+    """Resolved agent choice owned by an optional server surface."""
+
+    driver: AgentDriver
+    provider: str
+    model: str
+    role_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +36,7 @@ class RunAttachment:
 
     chat_state_dir: Path
     agent_defaults: AgentSelection
+    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
 
 
 __all__ = ["AgentSelection", "RunAttachment"]

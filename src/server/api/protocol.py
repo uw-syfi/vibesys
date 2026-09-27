@@ -14,7 +14,8 @@ from server.events import RunEvent
 from server.execution import ActiveAgentExecution
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vs_loop_state.api import (
+from vibesys.api import (
+    AgentDriver,
     CandidateDisposition,
     HypothesisOutcome,
     HypothesisResolution,
@@ -92,7 +93,7 @@ class ChatThreadCreateQuery(Request):
     """
 
     type: Literal["query.chat_thread_create"] = "query.chat_thread_create"
-    driver: Literal["agentshim", "omnigent"] | None = None
+    driver: AgentDriver | None = None
     provider: str | None = None
     model: str | None = None
     # Without a title the server derives one from the thread's first message.

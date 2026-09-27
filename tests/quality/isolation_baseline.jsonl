@@ -5,7 +5,7 @@
 {"path": "libs/vs-issue-tracker/tests/test_policy_and_format.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-project/tests/test_errors.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-project/tests/test_git_tracker_guards.py", "rule": "patch", "count": 4}
-{"path": "libs/vs-project/tests/test_state_guards.py", "rule": "patch", "count": 3}
+{"path": "libs/vs-project/tests/test_state_guards.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-prompts/tests/test_contract.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-prompts/tests/test_fragments.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-prompts/tests/test_renderer.py", "rule": "private_import", "count": 1}
@@ -39,13 +39,11 @@
 {"path": "tests/entrypoints/test_launcher.py", "rule": "patch", "count": 103}
 {"path": "tests/entrypoints/test_server.py", "rule": "mock", "count": 3}
 {"path": "tests/entrypoints/test_server.py", "rule": "patch", "count": 3}
-{"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "patch", "count": 11}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 14}
 {"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_chat_resources.py", "rule": "patch", "count": 1}
-{"path": "tests/server/test_design.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}
 {"path": "tests/server/test_execution_tracker.py", "rule": "patch", "count": 3}
@@ -55,7 +53,6 @@
 {"path": "tests/server/test_runtime.py", "rule": "sleep", "count": 1}
 {"path": "tests/server/test_subscription_tracker.py", "rule": "sleep", "count": 1}
 {"path": "tests/server/test_transport_subscription.py", "rule": "patch", "count": 3}
-{"path": "tests/server/test_workspace_git.py", "rule": "patch", "count": 1}
 {"path": "tests/support/__init__.py", "rule": "mock", "count": 2}
 {"path": "tests/support/provider_profiles.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/agents/drivers/test_agentshim_driver.py", "rule": "patch", "count": 4}
@@ -81,6 +78,7 @@
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "mock", "count": 71}
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "sleep", "count": 11}
+{"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 7}

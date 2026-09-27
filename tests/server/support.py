@@ -13,7 +13,7 @@ from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTr
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
-from vibesys.api import CoreEventType, MetricSpace, open_run_store
+from vibesys.api import AuxiliaryAgentDriver, CoreEventType, MetricSpace, open_run_store
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.chat.factory import ChatAgentBuilder
+    from server.run_attachment import AgentSelection
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
-    from vs_agent.api import AgentSelection
     from vs_project.api import Project
 
 
@@ -92,6 +92,17 @@ def agent_descriptor(
         id="single-agent",
         config_version=1,
         options=options.model_dump(mode="json"),
+    )
+
+
+def auxiliary_agent_drivers() -> tuple[AuxiliaryAgentDriver, ...]:
+    """Return stable driver/provider facts for server composition tests."""
+    return (
+        AuxiliaryAgentDriver(
+            driver="agentshim",
+            providers=("claude", "codex", "gemini", "opencode"),
+        ),
+        AuxiliaryAgentDriver(driver="omnigent", providers=("claude", "codex")),
     )
 
 

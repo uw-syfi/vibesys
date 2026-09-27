@@ -1,6 +1,6 @@
 """Reshape a run's agent projection into experiment-log protocol entries.
 
-`vibesys.api.agent`'s `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
+`vibesys.api`'s `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
 derive every fact this module publishes -- copying authoritative state,
 never grouping rounds, selecting a baseline, or inferring a resolution (see
 `vibesys.orchestration.hypothesis.readmodel`). This module only reshapes those boundary DTOs into
@@ -17,11 +17,10 @@ from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from server.api.protocol import ExperimentCursor, ExperimentUpdate, HypothesisEntry, HypothesisRound
-from vibesys.api.agent import agent_projection
+from vibesys.api import agent_projection
 
 if TYPE_CHECKING:
-    from vibesys.api import RunView
-    from vibesys.api.agent import AgentRunProjection, HypothesisRoundView, HypothesisView
+    from vibesys.api import AgentRunProjection, HypothesisRoundView, HypothesisView, RunView
 
 _StrategyDisposition = Literal["available", "parked", "abandoned"]
 
@@ -49,7 +48,7 @@ def _required_agent_projection(view: RunView) -> AgentRunProjection:
 def _strategy_disposition(value: str) -> _StrategyDisposition:
     """Narrow `HypothesisView.strategy_disposition` back to its closed set.
 
-    `vibesys.api.agent.HypothesisView` widens this to plain `str` at the API
+    `vibesys.api.HypothesisView` widens this to plain `str` at the API
     boundary rather than leaking core's own `HypothesisStrategy` enum (see
     its docstring); the only producer of the value
     (`vibesys.orchestration.hypothesis.readmodel`, from `Hypothesis.strategy.value`) writes

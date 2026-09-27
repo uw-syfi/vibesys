@@ -18,8 +18,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
-from vibesys.api import WorkspaceChange
-from vibesys.api.agent import AgentRunProjection, agent_projection
+from vibesys.api import AgentRunProjection, WorkspaceChange, agent_projection
 
 if TYPE_CHECKING:
     from vibesys.api import RunView

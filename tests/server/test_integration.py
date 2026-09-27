@@ -7,7 +7,13 @@ import uuid
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.server.support import ServerParts, agent_descriptor, build_server_parts, run_record
+from tests.server.support import (
+    ServerParts,
+    agent_descriptor,
+    auxiliary_agent_drivers,
+    build_server_parts,
+    run_record,
+)
 from tests.support.run_execution import run_execution_record
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
@@ -126,6 +132,7 @@ def _attach_test_run(
             agent_driver=defaults.driver,
             agent_provider=defaults.provider,
             agent_model=defaults.model,
+            agent_drivers=auxiliary_agent_drivers(),
             role_models=defaults.role_models,
         ),
     )
@@ -445,6 +452,50 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="does not support provider"):
         parts.api.execute(ChatThreadCreateQuery(provider="not-a-provider", model="gpt-test"))
+    parts.integration.close()
+
+
+def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
+    tmp_path: Path,
+) -> None:
+    project, run_id = _project_run(tmp_path / "project")
+    selections: list[AgentSelection] = []
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            pass
+
+    def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
+        selections.append(request.selection)
+        return FakeManagedAgent()
+
+    parts = build_server_parts(chat_agent_builder=build_agent)
+    _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+
+    response = parts.api.execute(
+        ChatThreadCreateQuery(
+            driver="omnigent",
+            provider="claude",
+            model="future-free-text-model",
+        )
+    )
+
+    assert response.chat_thread is not None
+    assert selections[-1] == AgentSelection(
+        driver="omnigent",
+        provider="claude",
+        model="future-free-text-model",
+    )
     parts.integration.close()
 
 

@@ -23,8 +23,7 @@ from server.chat.session import (
 )
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput
-from vs_agent.api import Driver, agent_catalog
+from vibesys.api import AgentDriver, AuxiliaryAgentLaunch, AuxiliaryReadableInput
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -123,6 +122,7 @@ class ExperimentChatFactory:
             driver=attachment.agent_defaults.driver,
             provider=attachment.agent_defaults.provider,
             model=attachment.agent_defaults.model,
+            agent_drivers=attachment.agent_drivers,
             role_models=attachment.agent_defaults.role_models,
         )
         self._session = session
@@ -212,10 +212,10 @@ class ExperimentChatFactory:
         model: str | None,
     ) -> AgentSelection:
         """Resolve one chat thread's agent choice against the attached run."""
-        resolved_driver = driver or self._defaults.driver
+        resolved_driver = _agent_driver(driver or self._defaults.driver)
         resolved_provider = provider or self._defaults.provider
         resolved_model = model or self._defaults.model
-        supported = agent_catalog()[Driver(resolved_driver)].providers
+        supported = self._defaults.providers_for(resolved_driver)
         if resolved_provider not in supported:
             message = (
                 f"agent driver {resolved_driver!r} does not support provider "
@@ -285,3 +285,11 @@ class ExperimentChatFactory:
 
 def _factory_closed_error() -> RuntimeError:
     return RuntimeError("Experiment chat factory is closed")
+
+
+def _agent_driver(value: str) -> AgentDriver:
+    """Validate a wire-supplied driver against the public closed set."""
+    if value not in ("agentshim", "omnigent"):
+        message = f"auxiliary agent driver is unavailable: {value!r}"
+        raise ValueError(message)
+    return value

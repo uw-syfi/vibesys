@@ -17,6 +17,13 @@ from vibesys.orchestration.hypothesis.readmodel import (
     agent_projection,
 )
 from vibesys.orchestration.memory import framework_memory_paths
+from vs_loop_state.api import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
+    JudgeVerdict,
+    PerfDeltaReason,
+)
 
 if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
@@ -55,8 +62,13 @@ def agent_run_objectives(manifest: OrchestrationRunManifest) -> tuple[str, ...] 
 
 __all__ = [
     "AgentRunProjection",
+    "CandidateDisposition",
+    "HypothesisOutcome",
+    "HypothesisResolution",
     "HypothesisRoundView",
     "HypothesisView",
+    "JudgeVerdict",
+    "PerfDeltaReason",
     "RoundView",
     "agent_projection",
     "agent_run_objectives",
