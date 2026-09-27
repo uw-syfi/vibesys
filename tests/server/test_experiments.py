@@ -19,7 +19,7 @@ from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEnt
 from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.orchestration.hypothesis_readmodel import (
+from vibesys.orchestration.hypothesis.readmodel import (
     project_committed_run_view,
     project_run_view,
 )
@@ -29,8 +29,8 @@ from vibesys.schemas import (
     HypothesisOutcome,
     PerfDeltaReason,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.hypothesis.state import (
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
@@ -38,7 +38,7 @@ from vibesys.search.hypothesis.state import (
     HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.search.hypothesis.transitions import reproject_run_evidence
+from vibesys.orchestration.hypothesis.transitions import reproject_run_evidence
 from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StateSlot
 

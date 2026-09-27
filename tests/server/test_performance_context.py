@@ -11,15 +11,15 @@ from server.api.performance import build_performance_context, summarize_objectiv
 from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.orchestration.hypothesis_readmodel import project_run_view
+from vibesys.orchestration.hypothesis.readmodel import project_run_view
 from vibesys.orchestration.single.models import SingleState
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.hypothesis.state import (
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisState,
 )
-from vibesys.search.hypothesis.transitions import reproject_run_evidence
+from vibesys.orchestration.hypothesis.transitions import reproject_run_evidence
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 

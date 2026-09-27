@@ -3,13 +3,13 @@
 Deterministic logic for the hypothesis-driven strategies (multi, single,
 profile_multi, profile_single): persisted state, round-record construction,
 attempt/review bookkeeping, and the state-transition functions those compose.
-See :class:`~vibesys.search.hypothesis.search.HypothesisSearch` for the
+See :class:`~vibesys.orchestration.hypothesis.search.HypothesisSearch` for the
 public entry point.
 """
 
 from __future__ import annotations
 
-from vibesys.search.hypothesis.attempts import (
+from vibesys.orchestration.hypothesis.attempts import (
     AttemptDecision,
     AttemptState,
     CandidateReply,
@@ -23,18 +23,18 @@ from vibesys.search.hypothesis.attempts import (
     attempt_was_reviewed,
     recorded_judge_verdict,
 )
-from vibesys.search.hypothesis.config import HypothesisConfig
-from vibesys.search.hypothesis.plan import (
+from vibesys.orchestration.hypothesis.config import HypothesisConfig
+from vibesys.orchestration.hypothesis.plan import (
     HypothesisStrategyUpdate,
     OrchestratorPlan,
 )
-from vibesys.search.hypothesis.record import (
+from vibesys.orchestration.hypothesis.record import (
     CandidateEvidence,
     MeasurementEvidence,
     RecordInput,
     build_round_record,
 )
-from vibesys.search.hypothesis.results import (
+from vibesys.orchestration.hypothesis.results import (
     AttemptBudget,
     CarryOver,
     ClosedRound,
@@ -46,8 +46,8 @@ from vibesys.search.hypothesis.results import (
     RollbackTarget,
     StartedHypothesis,
 )
-from vibesys.search.hypothesis.search import HypothesisSearch
-from vibesys.search.hypothesis.state import (
+from vibesys.orchestration.hypothesis.search import HypothesisSearch
+from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,

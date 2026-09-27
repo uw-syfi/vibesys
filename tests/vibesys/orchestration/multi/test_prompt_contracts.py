@@ -28,7 +28,7 @@ from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import render_template
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]

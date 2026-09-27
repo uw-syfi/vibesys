@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from vibesys.orchestration.hypothesis_readmodel import project_hypothesis_state
+from vibesys.orchestration.hypothesis.readmodel import project_hypothesis_state
 from vibesys.orchestration.multi.agents import AGENTS
 from vibesys.orchestration.multi.models import MultiOptions, MultiState, ProfileGuidedMultiOptions
 from vibesys.orchestration.multi.orchestration import orchestrate, orchestrate_profile_guided

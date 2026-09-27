@@ -3,7 +3,7 @@
 Ported from ``ProfileGuidedHypothesisController``, ``ProfileGuidanceOutcome``,
 ``_merge_attribution``, ``_select_component``, and ``_format_ledger`` in
 ``loops/profile_multi/controller.py``. Independent of
-:class:`~vibesys.search.hypothesis.search.HypothesisSearch`; orchestration
+:class:`~vibesys.orchestration.hypothesis.search.HypothesisSearch`; orchestration
 composes the two (profile focus decides *which component* the round targets,
 hypothesis search decides the round's lifecycle).
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.search.profile_focus.results import FocusView
-from vibesys.search.profile_focus.state import (
+from vibesys.orchestration.profile_focus.results import FocusView
+from vibesys.orchestration.profile_focus.state import (
     ProfileAttributionSample,
     ProfileBottleneck,
     ProfileFocusState,
@@ -24,7 +24,7 @@ from vibesys.search.profile_focus.state import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.search.profile_focus.config import ProfileFocusConfig
+    from vibesys.orchestration.profile_focus.config import ProfileFocusConfig
 
 __all__ = ["ProfileFocus"]
 

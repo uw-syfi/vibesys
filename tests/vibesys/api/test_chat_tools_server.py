@@ -21,8 +21,8 @@ from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.models import MultiState
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vs_agent.api import register_tool
 from vs_loop_state.api import RoundRecord
 from vs_project.api import (

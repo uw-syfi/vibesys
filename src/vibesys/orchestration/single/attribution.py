@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.search.profile_focus import ProfileAttributionError, parse_attribution
+from vibesys.orchestration.profile_focus import ProfileAttributionError, parse_attribution
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
-    from vibesys.search.profile_focus import ProfileBottleneck
+    from vibesys.orchestration.profile_focus import ProfileBottleneck
     from vs_runtime.api import CommandResult, RunHost, Workspace
 
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"

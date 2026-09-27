@@ -15,10 +15,10 @@ from pydantic import ValidationError
 
 from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
-from vibesys.orchestration.hypothesis_readmodel import project_run_view as _project_run_view
+from vibesys.orchestration.hypothesis.readmodel import project_run_view as _project_run_view
 from vibesys.schemas import CandidateDisposition, derive_hypothesis_title
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.hypothesis.state import (
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
@@ -26,7 +26,7 @@ from vibesys.search.hypothesis.state import (
     HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.search.hypothesis.transitions import measurement_delta_reason
+from vibesys.orchestration.hypothesis.transitions import measurement_delta_reason
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:

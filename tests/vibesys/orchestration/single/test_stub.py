@@ -3,7 +3,7 @@
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.stub import scripted_response
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 
 
 def test_scripted_single_trajectory_advances_every_two_rounds() -> None:

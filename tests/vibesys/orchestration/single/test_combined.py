@@ -17,7 +17,7 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
 )
 from vibesys.schemas import SkillResourceSelection, Verdict
-from vibesys.search.hypothesis import (
+from vibesys.orchestration.hypothesis import (
     AttemptState,
     HypothesisConfig,
     HypothesisSearch,

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
-    from vibesys.search.hypothesis import OrchestratorPlan
+    from vibesys.orchestration.hypothesis import OrchestratorPlan
 
 
 def _resolve(workspace: Path, name: str, layout: str) -> Path:

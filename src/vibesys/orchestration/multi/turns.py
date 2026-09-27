@@ -33,7 +33,7 @@ from vibesys.orchestration.multi.prompts import (
 )
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.schemas import SkillResourceSelection, Verdict, normalize_hypothesis_title
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.skills import ResolvedSkillSelection
 from vs_runtime.api import (
     AgentTurnTimeoutError,
@@ -48,14 +48,14 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.multi.files import MultiFiles
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
-    from vibesys.search.hypothesis import (
+    from vibesys.orchestration.hypothesis import (
         AttemptState,
         CarryOver,
         HypothesisSearch,
         HypothesisState,
     )
-    from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
-    from vibesys.search.profile_focus import FocusView
+    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.profile_focus import FocusView
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 

@@ -21,8 +21,8 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.search.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
-    from vibesys.search.hypothesis.state import RoundRecord
+    from vibesys.orchestration.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
+    from vibesys.orchestration.hypothesis.state import RoundRecord
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 

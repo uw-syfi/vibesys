@@ -22,7 +22,7 @@ from vibesys.schemas import (
     derive_hypothesis_title,
     normalize_hypothesis_title,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 
 
 def _profiler_summary(

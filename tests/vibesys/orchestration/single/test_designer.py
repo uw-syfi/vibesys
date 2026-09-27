@@ -14,7 +14,7 @@ from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.designer import DesignerPlanRequest, request_plan
 from vibesys.orchestration.single.models import PlanContext
 from vibesys.schemas import SkillResourceSelection
-from vibesys.search.hypothesis import (
+from vibesys.orchestration.hypothesis import (
     Hypothesis,
     HypothesisConfig,
     HypothesisSearch,

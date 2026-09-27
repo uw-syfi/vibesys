@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.search.profile_focus.state import ProfileBottleneck
+from vibesys.orchestration.profile_focus.state import ProfileBottleneck
 
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
 _END = "__VIBESYS_ATTRIBUTION_END__"

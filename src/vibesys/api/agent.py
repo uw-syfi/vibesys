@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.hypothesis_readmodel import (
+from vibesys.orchestration.hypothesis.readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,

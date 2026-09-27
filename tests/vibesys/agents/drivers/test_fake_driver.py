@@ -24,7 +24,7 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentClient
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.drivers.fake import (

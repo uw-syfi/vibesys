@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

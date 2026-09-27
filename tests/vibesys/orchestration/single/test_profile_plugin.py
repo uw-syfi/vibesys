@@ -15,8 +15,8 @@ from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost
 

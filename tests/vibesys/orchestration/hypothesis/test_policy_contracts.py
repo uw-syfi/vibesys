@@ -21,9 +21,9 @@ from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
 )
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
-from vibesys.search.hypothesis import cadence as _cadence
-from vibesys.search.hypothesis.transitions import (
+from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.orchestration.hypothesis import cadence as _cadence
+from vibesys.orchestration.hypothesis.transitions import (
     detect_plateau,
     pareto_archive_conflict,
     pareto_archive_dominators,

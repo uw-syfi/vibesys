@@ -20,8 +20,8 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vs_runtime.api import BenchmarkEvaluation, CommandResult, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost
 

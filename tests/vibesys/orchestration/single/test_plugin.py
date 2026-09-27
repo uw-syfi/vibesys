@@ -17,7 +17,7 @@ from vibesys.orchestration.single.models import (
     SingleState,
 )
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_runtime.api import AccuracyEvaluation, BenchmarkEvaluation, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 

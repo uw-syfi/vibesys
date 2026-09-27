@@ -4,7 +4,7 @@ from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vibesys.orchestration.multi.stub import scripted_response
 from vibesys.schemas import HypothesisOutcome
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 
 
 def test_scripted_multi_trajectory_advances_and_closes_hypotheses() -> None:

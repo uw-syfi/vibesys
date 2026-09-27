@@ -13,13 +13,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
-from vibesys.search.hypothesis.transitions import provisional_candidates_since_official
+from vibesys.orchestration.hypothesis.transitions import provisional_candidates_since_official
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys.search.hypothesis.config import HypothesisConfig
-    from vibesys.search.hypothesis.state import RoundRecord
+    from vibesys.orchestration.hypothesis.config import HypothesisConfig
+    from vibesys.orchestration.hypothesis.state import RoundRecord
 
 _CONTINUATION_OUTCOMES = frozenset(
     {

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.evaluators import input_manifest
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.search.hypothesis.state import HypothesisState
+from vibesys.orchestration.hypothesis.state import HypothesisState
 from vs_runtime.api import AccuracyReceipt
 
 _ProfileGuidedInput = input_manifest.ProfileGuidedInput

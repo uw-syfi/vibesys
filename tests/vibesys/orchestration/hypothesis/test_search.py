@@ -4,7 +4,7 @@ Everything here drives ``HypothesisSearch`` through its public methods
 (``initial``, ``next_round``, ``start``, ``attempts``, ``review_due``,
 ``official_due``, ``close_round``, ``frontier``, ``best``,
 ``pareto_conflict``) and inspects the resulting ``HypothesisState`` /
-``Hypothesis`` values, rather than calling ``vibesys.search.hypothesis.
+``Hypothesis`` values, rather than calling ``vibesys.orchestration.hypothesis.
 transitions`` directly: ``start`` and ``close_round`` already exercise the
 deep per-round evidence projection (baseline selection, resolution,
 retention) that used to be tested by calling ``transitions.start_hypothesis``/
@@ -23,7 +23,7 @@ from hypothesis import strategies as st
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
-from vibesys.search.hypothesis import (
+from vibesys.orchestration.hypothesis import (
     CarryOver,
     ClosedRound,
     Continue,
@@ -35,14 +35,14 @@ from vibesys.search.hypothesis import (
     NewHypothesis,
     OrchestratorPlan,
 )
-from vibesys.search.hypothesis import cadence as hypothesis_cadence
-from vibesys.search.hypothesis.attempts import (
+from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
+from vibesys.orchestration.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
 )
-from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
 
 # --- helpers -----------------------------------------------------------

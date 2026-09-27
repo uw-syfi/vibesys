@@ -3,7 +3,7 @@
 Replaces ``HypothesisEngine`` (+ its ``replace_state``), ``TerminalPolicy`` /
 ``_TerminalPolicy`` / ``transition_round``, and the carrier types from
 ``loops/{multi,profile_multi}/decisions.py``. A strategy holds one
-``HypothesisSearch`` built from its :class:`~vibesys.search.hypothesis.config.HypothesisConfig`
+``HypothesisSearch`` built from its :class:`~vibesys.orchestration.hypothesis.config.HypothesisConfig`
 and calls its methods with plain, explicit facts instead of passing itself
 (or a role-reply object) through a carrier type.
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.search.hypothesis import cadence, transitions
-from vibesys.search.hypothesis.results import (
+from vibesys.orchestration.hypothesis import cadence, transitions
+from vibesys.orchestration.hypothesis.results import (
     AttemptBudget,
     ClosedRound,
     Continue,
@@ -25,8 +25,8 @@ from vibesys.search.hypothesis.results import (
     RollbackTarget,
     StartedHypothesis,
 )
-from vibesys.search.hypothesis.state import HypothesisState
-from vibesys.search.hypothesis.transitions import (
+from vibesys.orchestration.hypothesis.state import HypothesisState
+from vibesys.orchestration.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
 )
@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 
     from vibesys.evaluators.metrics import MetricSpace
     from vibesys.schemas import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
-    from vibesys.search.hypothesis.config import HypothesisConfig
-    from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-    from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.hypothesis.config import HypothesisConfig
+    from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
+    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
 
 __all__ = ["HypothesisSearch"]
 

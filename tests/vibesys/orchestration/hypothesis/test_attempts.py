@@ -7,7 +7,7 @@ from typing import Literal
 
 import pytest
 
-from vibesys.search.hypothesis.attempts import (
+from vibesys.orchestration.hypothesis.attempts import (
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,

@@ -1,4 +1,4 @@
-"""Plain output carrier for :class:`~vibesys.search.profile_focus.focus.ProfileFocus`."""
+"""Plain output carrier for :class:`~vibesys.orchestration.profile_focus.focus.ProfileFocus`."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vibesys.search.profile_focus.state import ProfileBottleneck
+    from vibesys.orchestration.profile_focus.state import ProfileBottleneck
 
 __all__ = ["FocusView"]
 

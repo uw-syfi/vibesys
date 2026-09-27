@@ -18,7 +18,7 @@ from vibesys.schemas import (
     HypothesisOutcome,
     PerfDeltaReason,
 )
-from vibesys.search.hypothesis.state import (
+from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
@@ -30,7 +30,7 @@ from vibesys.search.hypothesis.state import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
+    from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vs_loop_state.api import PerfProvenance, RoundRecord
 
 # ``hypothesis_outcome`` values that mark a hypothesis campaign as failed, for

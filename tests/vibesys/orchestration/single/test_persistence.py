@@ -21,7 +21,7 @@ from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse, SingleState
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project

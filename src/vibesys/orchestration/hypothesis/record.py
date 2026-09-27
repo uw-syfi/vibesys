@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Literal
 
 from vibesys.evaluators.metrics import Measurement
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome
-from vibesys.search.hypothesis.attempts import recorded_judge_verdict
-from vibesys.search.hypothesis.transitions import (
+from vibesys.orchestration.hypothesis.attempts import recorded_judge_verdict
+from vibesys.orchestration.hypothesis.transitions import (
     ResolutionEvidence,
     metric_baseline,
     pareto_archive_dominators,
@@ -21,9 +21,9 @@ from vibesys.search.hypothesis.transitions import (
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
-    from vibesys.search.hypothesis.attempts import AttemptState, PerformanceProjection
-    from vibesys.search.hypothesis.plan import OrchestratorPlan
-    from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
+    from vibesys.orchestration.hypothesis.attempts import AttemptState, PerformanceProjection
+    from vibesys.orchestration.hypothesis.plan import OrchestratorPlan
+    from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
     from vs_loop_state.api import MetricComparison
 
 

@@ -19,7 +19,7 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import Project

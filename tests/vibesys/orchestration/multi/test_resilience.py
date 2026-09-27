@@ -16,7 +16,7 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.schemas import HypothesisOutcome, Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_runtime.api import RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 

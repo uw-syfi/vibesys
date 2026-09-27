@@ -14,7 +14,7 @@ the progress log), one category subdirectory per artifact kind (``plans``,
 (and :func:`write_validation_recipe_schema`, whose payload is a JSON schema
 rather than a model instance) goes through. This module knows nothing about
 *which* pydantic model a plan or an implementer reply is -- those types live
-one layer above the host (``vibesys.search.hypothesis`` and orchestration policies)
+one layer above the host (``vibesys.orchestration.hypothesis`` and orchestration policies)
 -- so it writes any :class:`~pydantic.BaseModel` via :func:`write_model` and
 only computes the destination path; the policy caller supplies the
 typed value.

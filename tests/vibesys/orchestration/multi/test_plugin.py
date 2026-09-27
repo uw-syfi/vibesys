@@ -20,7 +20,7 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState, PaidAttempt
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_runtime.api import (
     BenchmarkEvaluation,
     LocalValidationEvaluation,

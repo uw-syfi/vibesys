@@ -20,8 +20,8 @@ if TYPE_CHECKING:
         JudgeResponse,
         PreRoundDecision,
     )
-    from vibesys.search.hypothesis import OrchestratorPlan
-    from vibesys.search.hypothesis.attempts import ImplementerReply
+    from vibesys.orchestration.hypothesis import OrchestratorPlan
+    from vibesys.orchestration.hypothesis.attempts import ImplementerReply
 
 
 def _resolve(workspace: Path, name: str, layout: str) -> Path:

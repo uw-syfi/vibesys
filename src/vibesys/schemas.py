@@ -4,7 +4,7 @@ This module used to hold every structured agent-reply schema; those now live
 with their orchestration policy or in ``vibesys.evaluators`` (measurement
 records: perf stats, validation recipes).
 ``OrchestratorPlan`` and ``HypothesisStrategyUpdate`` moved to
-``vibesys.search.hypothesis.plan`` (the designer reply type IS the search plan
+``vibesys.orchestration.hypothesis.plan`` (the designer reply type IS the search plan
 type). What remains here -- ``PerfTrend``, ``Verdict``, and
 ``SkillResourceSelection`` --
 does not: ``PerfTrend`` is a runtime dependency of ``vibesys.evaluators``

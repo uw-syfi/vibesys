@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.search.profile_focus import (
+from vibesys.orchestration.profile_focus import (
     ProfileAttributionError,
     ProfileBottleneck,
     ProfileFocus,

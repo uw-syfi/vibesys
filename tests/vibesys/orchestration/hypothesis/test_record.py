@@ -11,14 +11,14 @@ from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
-from vibesys.search.hypothesis.attempts import (
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
     PerformanceProjection,
 )
-from vibesys.search.hypothesis.record import RecordInput, build_round_record
-from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.hypothesis.record import RecordInput, build_round_record
+from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
 
 
@@ -147,7 +147,7 @@ def test_failed_review_does_not_retain_agent_candidate() -> None:
 # These drive the same fallback/fail-closed/renamed-unit/untrusted-provenance
 # paths that ``metric_baseline`` implements, entirely through the record
 # builder's public ``RecordInput``/``build_round_record`` surface: no
-# ``vibesys.search.hypothesis.transitions`` import needed.
+# ``vibesys.orchestration.hypothesis.transitions`` import needed.
 
 
 def _official(number: int, metric: float, *, unit: str = "throughput", provenance="framework"):  # noqa: ANN001, ANN202  # LW-040063 [ANN001, ANN202]; this scripted double mirrors a production signature whose parameters are not annotated here. The helper is private to this test module and its return type is the local closure type.

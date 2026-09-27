@@ -19,12 +19,12 @@ from vibesys.schemas import (
     PerfDeltaReason,
     derive_hypothesis_title,
 )
-from vibesys.search.hypothesis import HypothesisSearch
+from vibesys.orchestration.hypothesis import HypothesisSearch
 from vs_loop_state.api import HypothesisResolution
 from vs_runtime.api import PluginProjection, ProjectedRound
 
 if TYPE_CHECKING:
-    from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
+    from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
     from vs_loop_state.api import JudgeVerdict, RoundRecord
 
 
@@ -60,7 +60,7 @@ class HypothesisView(BaseModel):
     """One hypothesis's full history, matching `server.api.experiments.HypothesisEntry`.
 
     `title`, `resolved_outcome`, `strategy_disposition`, and `perf_delta_reason`
-    are precomputed from `vibesys.search.hypothesis.state.Hypothesis`
+    are precomputed from `vibesys.orchestration.hypothesis.state.Hypothesis`
     (core-private: `plan: OrchestratorPlan`, `strategy: HypothesisStrategy`,
     ...) so this DTO exposes only plain strings and the already-boundary-safe
     `PerfDeltaReason`.

@@ -27,7 +27,7 @@ from vibesys.orchestration.single.models import (
 )
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import (
+from vibesys.orchestration.hypothesis import (
     AttemptState,
     Continue,
     Finished,
@@ -39,7 +39,7 @@ from vibesys.search.hypothesis import (
     RecordInput,
     build_round_record,
 )
-from vibesys.search.profile_focus import (
+from vibesys.orchestration.profile_focus import (
     FocusView,
     ProfileFocus,
     ProfileFocusConfig,
@@ -56,13 +56,13 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.search.hypothesis import (
+    from vibesys.orchestration.hypothesis import (
         CarryOver,
         OrchestratorPlan,
         PlanningContext,
         RollbackTarget,
     )
-    from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
 
 
 @dataclass(slots=True)

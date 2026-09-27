@@ -10,7 +10,7 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.plugin_catalog import stub_response_factory
 from vibesys.schemas import Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient
 
