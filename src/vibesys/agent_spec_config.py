@@ -32,8 +32,7 @@ def agent_spec_from_config(
     """Resolve one :class:`AgentSpec` the way application config always has.
 
     Precedence at every field is override, then ``[agent]`` config, then the
-    VibeSys default: CLI backend, the agentshim driver, the codex provider. The
-    deprecated ``[model].provider`` stays ignored, exactly as it always has.
+    VibeSys default: CLI backend, the agentshim driver, and the codex provider.
     """
     agent_cfg = config.agent
     resolved_backend = AgentBackend(backend or agent_cfg.backend or AgentBackend.CLI)
