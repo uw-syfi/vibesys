@@ -305,7 +305,7 @@ depends_on = [ "vibesys.orchestration.metrics", "vibesys.orchestration.profilers
 [[modules]]
 path = "vibesys.prompts"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
+depends_on = ["vibesys", "vs_prompts"]
 
 [[modules]]
 path = "vs_sandbox"
