@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vibesys.profilers import ProfilerKind
+    from vs_runtime.api import Workspace
 
 
 class _ProfilerEnvironment(Protocol):
@@ -27,14 +28,14 @@ class _ProfilerToolHost(Protocol):
         ...
 
 
-def _profiler_tool(host: object, _workspace: object) -> tuple[ToolServerDescriptor, ...]:
+def _profiler_tool(host: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
     """Bind the selected profiler's analysis server to one agent session."""
     resolved = cast("_ProfilerToolHost", host)
     spec = profiler_tool_server(resolved.environment.profiler_kind)
     return () if spec is None else (spec,)
 
 
-def _issue_board_tool(_host: object, _workspace: object) -> tuple[ToolServerDescriptor, ...]:
+def _issue_board_tool(_host: object, _workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
     """Bind the fixed issue-board server to workspace-relative policy artifacts."""
     return (
         expose_as_tools(
@@ -49,7 +50,9 @@ def _issue_board_tool(_host: object, _workspace: object) -> tuple[ToolServerDesc
     )
 
 
-AGENT_TOOL_BINDINGS: Mapping[str, Callable[[object, object], tuple[ToolServerDescriptor, ...]]] = {
+AGENT_TOOL_BINDINGS: Mapping[
+    str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]
+] = {
     "issue-board": _issue_board_tool,
     "profiler": _profiler_tool,
 }

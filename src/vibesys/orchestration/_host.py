@@ -48,8 +48,8 @@ class _ExecutionResultLike(Protocol):
         ...
 
     @property
-    def exit_code(self) -> int:
-        """Return the process exit status."""
+    def exit_code(self) -> int | None:
+        """Return the process exit status, or ``None`` when unavailable."""
         ...
 
 

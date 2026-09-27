@@ -25,14 +25,18 @@ from vibesys.context import RunSetup, RunStartHints
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.memory import declared_memory_paths
+from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
 from vibesys.orchestrations.evolve import PLUGIN as EVOLVE_PLUGIN
+from vibesys.orchestrations.evolve.models import EvolveOptions
 from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
+from vibesys.orchestrations.issue_queue import IssueQueueOptions
 from vibesys.orchestrations.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
 from vibesys.orchestrations.multi import (
     PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
 )
+from vibesys.orchestrations.multi.models import MultiOptions
 from vibesys.orchestrations.single import (
     PLUGIN as SINGLE_PLUGIN,
 )
@@ -229,7 +233,7 @@ def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Pa
 
 def test_builtin_plugin_setup_is_private_product_wiring() -> None:
     registry = built_in_orchestrations()
-    agent_options = {
+    agent_options: dict[str, JsonValue] = {
         "interface": "service",
         "max_rounds": 4,
         "max_retries_per_round": 2,
@@ -244,6 +248,7 @@ def test_builtin_plugin_setup_is_private_product_wiring() -> None:
     for descriptor in descriptors:
         registration = registry.resolve(descriptor.id)
         prepared = registration.prepare_plugin(descriptor)
+        assert isinstance(prepared.options, AgentOrchestrationOptions)
         assert prepared.plugin.id == descriptor.id
         assert descriptor.options == agent_options
         assert prepared.options.max_rounds == descriptor.options["max_rounds"]
@@ -263,6 +268,7 @@ def test_builtin_plugin_setup_is_private_product_wiring() -> None:
         },
     )
     prepared_plain = registry.resolve("plain").prepare_plugin(plain)
+    assert isinstance(prepared_plain.options, IssueQueueOptions)
     assert plain.options["load_levels"] == [{"rate": 4, "duration": 20, "max_tokens": 64}]
     assert prepared_plain.options.max_rounds == plain.options["max_rounds"]
     assert prepared_plain.setup.start_hints is not None
@@ -336,10 +342,14 @@ def test_builtin_plugin_preparation_preserves_strict_tuples_from_persisted_json(
     prepared = built_in_orchestrations().resolve(descriptor.id).prepare_plugin(descriptor)
 
     if plugin_id == "multi-agent":
+        assert isinstance(prepared.options, MultiOptions)
         observed = prepared.options.operator_constraints
     elif plugin_id == "plain":
+        assert isinstance(prepared.options, IssueQueueOptions)
+        assert prepared.options.load_levels is not None
         observed = tuple(level.rate for level in prepared.options.load_levels)
     else:
+        assert isinstance(prepared.options, EvolveOptions)
         observed = tuple(item.name for item in prepared.options.metric_space.objectives)
     assert observed == expected_tuple
     compare = prepared.setup.resume_policy

@@ -326,7 +326,11 @@ def test_local_validation_executes_then_reuses_an_exact_pass(tmp_path: Path) -> 
         report_location="validation/report-1.json",
     )
     assert second.passed
-    assert payload["results"][0]["reused"] is True
+    results = payload["results"]
+    assert isinstance(results, list)
+    result = results[0]
+    assert isinstance(result, dict)
+    assert result["reused"] is True
 
 
 def test_local_validation_reverts_candidate_mutation_and_reports_failure(tmp_path: Path) -> None:

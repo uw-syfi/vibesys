@@ -310,7 +310,9 @@ def test_public_policy_trajectory_matches_golden(
         )
         try:
             assert await plugin.orchestrate(host, options) is RunStatus.SUCCEEDED
-            state = await host.state.load(plugin.state)
+            state_model = plugin.state
+            assert state_model is not None
+            state = await host.state.load(state_model)
             assert state is not None
             assert plugin.project is not None
             return {

@@ -136,7 +136,7 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
     with pytest.raises(ValidationError):
         RunFacts.model_validate({"domain_id": "generic", "backend": "modal"})
     with pytest.raises(ValidationError):
-        RunFacts(domain_id="generic")
+        RunFacts.model_validate({"domain_id": "generic"})
     with pytest.raises(ValidationError):
         facts.workspace_sources[0].__setattr__("dest", "other")
     with pytest.raises(ValidationError):

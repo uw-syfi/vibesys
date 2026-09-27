@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from vibesys.api import OrchestrationRegistry, create_session
+from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
 from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -29,6 +29,7 @@ from vs_agent.api import (
     AgentSessionKey,
     MCPServerSpec,
     SessionScope,
+    ToolServerDescriptor,
 )
 from vs_agent.api import (
     AgentTurnTimeoutError as DriverAgentTurnTimeoutError,
@@ -69,15 +70,19 @@ class _Options(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+def _discard_event(event: CoreEvent) -> None:
+    del event
+
+
 @dataclass(frozen=True, slots=True)
 class _RunConfiguration:
     client_factory: Callable[..., _RecordingClient | FakeAgentClient] | None = None
     profiler_kind: ProfilerKind = ProfilerKind.NONE
     domain: str = "generic"
     agent_backend: str = "stub"
-    tool_bindings: Mapping[str, Callable[[object, Workspace], tuple[MCPServerSpec, ...]]] | None = (
-        None
-    )
+    tool_bindings: (
+        Mapping[str, Callable[[object, Workspace], tuple[ToolServerDescriptor, ...]]] | None
+    ) = None
 
 
 class _RecordingClient(FakeAgentClient):
@@ -406,7 +411,7 @@ def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -
     registry.register_plugin(plugin)
     session = create_session(
         _request(project_root, orchestration_id=plugin.id),
-        sink=lambda _event: None,
+        sink=_discard_event,
         registry=registry,
     )
 
@@ -427,7 +432,7 @@ def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
     )
 
     async def body(ctx: RunContext) -> None:
-        with pytest.raises(RuntimeContractError, match="mcp_servers"):
+        with pytest.raises(RuntimeContractError, match="tool_servers"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
     _run_with_clients(
@@ -446,6 +451,13 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
 ) -> None:
     client = FakeAgentClient(capabilities=AgentCapabilities(session_reuse=True, mcp_servers=True))
     client.enqueue_text("profiler", "analysis").enqueue("profiler", _Reply(value=4))
+    resolutions = 0
+
+    def bind_profiler(host: object, workspace: Workspace) -> tuple[ToolServerDescriptor, ...]:
+        nonlocal resolutions
+        resolutions += 1
+        return AGENT_TOOL_BINDINGS["profiler"](host, workspace)
+
     role = AgentRole(
         id="profiler",
         system_prompt="Analyze the profile.",
@@ -466,10 +478,11 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
             profiler_kind=ProfilerKind.OTEL,
             domain="microservices",
             agent_backend="cli",
-            tool_bindings=AGENT_TOOL_BINDINGS,
+            tool_bindings={"profiler": bind_profiler},
         ),
     )
-    assert client.calls[0].mcp_servers is client.calls[1].mcp_servers
+    assert resolutions == 1
+    assert client.calls[0].tool_servers == client.calls[1].tool_servers
     assert client.calls[0].mcp_servers == [
         MCPServerSpec(
             name="vibesys-otel-profiler",

@@ -8,7 +8,7 @@ caller-supplied async body, instead of driving a registered plugin.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch  # test-isolation: module seams patched below
 
 from vibesys.api.testing import FakeComputeBackend
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
+    from vs_agent.api import AgentClientProtocol
     from vs_agent.api.testing import FakeAgentClient
 
 
@@ -96,7 +97,9 @@ def run_with_context[R](
                 request,
                 integration,
                 setup=resolved_setup,
-                agent_client_factory=lambda **_kwargs: _SharedFakeClient(runner),
+                agent_client_factory=lambda **_kwargs: cast(
+                    "AgentClientProtocol", _SharedFakeClient(runner)
+                ),
                 backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             ) as ctx:
                 return await body(ctx)

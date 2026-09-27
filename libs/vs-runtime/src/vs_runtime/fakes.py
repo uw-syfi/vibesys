@@ -336,7 +336,7 @@ class FakeWorkspaces:
         self._closed = False
 
     @property
-    def root(self) -> Workspace:
+    def root(self) -> FakeWorkspace:
         """Return the configured fake root workspace."""
         return self._root
 

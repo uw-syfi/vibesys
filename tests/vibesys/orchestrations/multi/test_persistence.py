@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from pydantic import BaseModel
+
 
 _CAPABILITIES = AgentCapabilities(
     session_reuse=True,
@@ -74,10 +76,10 @@ def _judge(verdict: Verdict = Verdict.PASS) -> JudgeResponse:
 
 def _client(
     role: str,
-    response: object | None = None,
+    response: BaseModel | dict[str, object] | None = None,
     *,
     failure: BaseException | None = None,
-    on_invoke: Callable[[FakeInvocation], object] | None = None,
+    on_invoke: Callable[[FakeInvocation], None] | None = None,
 ) -> FakeAgentClient:
     client = FakeAgentClient(backend_name="stub", capabilities=_CAPABILITIES)
     if failure is not None:
