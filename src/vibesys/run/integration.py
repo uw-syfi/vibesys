@@ -6,9 +6,23 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from vibesys.events import CoreEvent, CoreEventType
+from vibesys.events import (
+    AgentExecutionActivityData,
+    AgentExecutionFinishedData,
+    AgentExecutionStartedData,
+    CoreEvent,
+    CoreEventType,
+    EventStatus,
+    InvocationFinishedData,
+    InvocationStartedData,
+    PhaseData,
+    json_value,
+)
 from vibesys.run.event_journal import EventJournal
 from vs_runtime.api.infrastructure import (
+    AgentExecutionLifecycleEvent,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
     RunControlTransition,
     create_run_control_channel,
 )
@@ -117,6 +131,68 @@ class LocalRunIntegration:
             return
         self._closed = True
         self._unsubscribe_output()
+
+    def agent_execution_event(self, event: AgentExecutionLifecycleEvent) -> CoreEvent:
+        """Persist one runtime lifecycle fact in the stable core-event format."""
+        fields = {
+            "agent_kind": event.agent_id,
+            "round_label": event.label,
+            "execution_id": event.execution_id,
+        }
+        if isinstance(event, AgentExecutionStarted):
+            self.events.emit(
+                CoreEventType.AGENT_EXECUTION_STARTED,
+                status=EventStatus.ACTIVE,
+                data=AgentExecutionStartedData(
+                    stage=event.agent_id,
+                    attempt=None,
+                    system_prompt=event.system_prompt,
+                    user_prompt=event.user_prompt,
+                    activity=AgentExecutionActivityData(
+                        mode="thinking", summary=f"{event.agent_id} is working"
+                    ),
+                    driver=event.driver,
+                    provider=event.provider,
+                    model=event.model,
+                ),
+                **fields,
+            )
+            self.events.emit(
+                CoreEventType.PHASE_STARTED,
+                status=EventStatus.ACTIVE,
+                data=PhaseData(phase=event.agent_id, attempt=None),
+                **fields,
+            )
+            return self.events.emit(
+                CoreEventType.INVOCATION_STARTED,
+                status=EventStatus.ACTIVE,
+                data=InvocationStartedData(
+                    system_prompt=event.system_prompt,
+                    user_prompt=event.user_prompt,
+                ),
+                **fields,
+            )
+
+        status = EventStatus(AgentExecutionStatus(event.status).value)
+        result = json_value(event.result)
+        self.events.emit(
+            CoreEventType.AGENT_EXECUTION_FINISHED,
+            status=status,
+            data=AgentExecutionFinishedData(result=result, error=event.error),
+            **fields,
+        )
+        self.events.emit(
+            CoreEventType.INVOCATION_FINISHED,
+            status=status,
+            data=InvocationFinishedData(result=result, error=event.error),
+            **fields,
+        )
+        return self.events.emit(
+            CoreEventType.PHASE_FINISHED,
+            status=status,
+            data=PhaseData(phase=event.agent_id, attempt=None),
+            **fields,
+        )
 
     def add_committed_state_listener(
         self, listener: Callable[[str, BaseModel, tuple[str, ...] | None], None]

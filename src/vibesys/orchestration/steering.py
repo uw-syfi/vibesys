@@ -1,7 +1,9 @@
 """Policy for rendering live operator steering into an agent prompt."""
 
+from collections.abc import Sequence
 
-def splice_steering(user_prompt: str, messages: list[str]) -> str:
+
+def splice_steering(user_prompt: str, messages: Sequence[str]) -> str:
     """Append queued operator steering to *user_prompt*."""
     if not messages:
         return user_prompt

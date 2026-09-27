@@ -2,6 +2,8 @@
 
 from vs_runtime.fakes import (
     FakeAccuracyCall,
+    FakeAgentExecutionEnvironment,
+    FakeAgentExecutionLifecycleSink,
     FakeAgentSession,
     FakeAgentSessions,
     FakeBenchmarkCall,
@@ -28,6 +30,8 @@ from vs_runtime.fakes import (
 
 __all__ = [
     "FakeAccuracyCall",
+    "FakeAgentExecutionEnvironment",
+    "FakeAgentExecutionLifecycleSink",
     "FakeAgentSession",
     "FakeAgentSessions",
     "FakeBenchmarkCall",

@@ -4,8 +4,7 @@
 and exposes them through small, focused capabilities. The mechanics of each
 capability live in a sibling module, split out of this one by what they own:
 
-- `agents.py`: agent creation and `ctx.agents.turn` (rendering, isolation,
-  retries, timeouts).
+- `agents.py`: composition for runtime-owned explicit agent sessions.
 - `workspaces.py`: `ctx.workspaces` (root/isolated worktrees, snapshots,
   transactions, adoption).
 - `state.py`: `ctx.state` (checkpoint/commit and the events they derive).
@@ -27,23 +26,18 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from dataclasses import replace
-from functools import partial
 from typing import TYPE_CHECKING
 
 from vibesys.context import (
     RunSetup,
-    borrow_run_agent_environment,
     open_run_resources,
-    open_scoped_agent_environment,
 )
 from vibesys.events import FrameworkSource, RunConfiguredData
 from vibesys.orchestration.agents import (
     _Agents,
     _AgentToolResolver,
-    _LocalAgentHandle,
 )
 from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
@@ -66,12 +60,7 @@ from vibesys.orchestration.workspaces import (
     _Workspaces,
 )
 from vibesys.render.sink import output_sink
-from vs_agent.api import (
-    AgentExecutionPolicy,
-    AgentSessionState,
-    DurableSessionStore,
-    build_agent_client,
-)
+from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api import ProfileExecution, RunFacts, WorkspaceSourceFact
 
 if TYPE_CHECKING:
@@ -83,7 +72,6 @@ if TYPE_CHECKING:
     from vibesys.orchestration.state import _CommittedStateProjector
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.integration import LocalRunIntegration
-    from vibesys.runtime import AgentDefinition, WorkspaceScope
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import AgentRole, OrchestrationPlugin
     from vs_sandbox.api import ComputeBackendImpl
@@ -105,19 +93,6 @@ __all__ = [
 class _RuntimeClosedError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("runtime is closed")
-
-
-class _AgentRegistrationError(ValueError):
-    def __init__(self, agent_id: str) -> None:
-        super().__init__(f"agent ID {agent_id!r} must be nonempty and unique")
-
-
-class _UnsupportedAgentExecutionPolicyError(ValueError):
-    def __init__(self) -> None:
-        super().__init__(
-            "AgentSpec.execution is not supported by this runtime slice; "
-            "declare host grants in AgentDefinition.resources"
-        )
 
 
 async def _wait_until_done(task: asyncio.Task) -> None:
@@ -212,16 +187,13 @@ class RunContext:
         self.request = request
         self._setup = setup
         self._integration = integration
-        self._open_agent_environment = open_agent_environment
         self._projector = projector
-        self._agent_client_factory = agent_client_factory
         self._backend_factory = backend_factory
         self._gate_executor = gate_executor
         self._resource_owner: _RunResources | None = None
         self._facts: RunFacts | None = None
         self._session_store: DurableSessionStore | None = None
-        self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
-        self._spawn_lock = asyncio.Lock()
+        self._workspace_lifecycle_lock = asyncio.Lock()
         self._parent_mutation_lock = asyncio.Lock()
         self._blocking: set[asyncio.Task] = set()
         self._closed = False
@@ -240,8 +212,12 @@ class RunContext:
             self,
             agent_roles,
             agent_tool_bindings,
+            control=integration.control,
+            lifecycle_events=integration.agent_execution_event,
+            open_agent_environment=open_agent_environment,
+            client_factory=agent_client_factory,
         )
-        self.workspaces = _Workspaces(self, self.agents._mark_workspace_closed)
+        self.workspaces = _Workspaces(self, self.agents.close_workspace)
         self.environment = _Environment(self)
         self.progress = _Progress(self)
 
@@ -311,9 +287,6 @@ class RunContext:
     def switch_log(self, label: int | str) -> None:
         """Select a policy phase log for subsequent output and agent turns."""
         self._resources.switch_log_file(label)
-        writer = self._resources.run_log_file
-        for agent in self._agents.values():
-            agent.set_log_file(writer)
 
     async def _run_blocking[**P, Result](
         self, operation: Callable[P, Result], *args: P.args, **kwargs: P.kwargs
@@ -417,126 +390,6 @@ class RunContext:
             ),
         )
 
-    async def _spawn(
-        self,
-        definition: AgentDefinition,
-        *,
-        scope: WorkspaceScope | None = None,
-        registration_id: str | None = None,
-    ) -> _LocalAgentHandle:
-        """Open one independently configured agent in a live workspace."""
-        async with self._spawn_lock:
-            if self._closed:
-                raise _RuntimeClosedError
-            context = self.workspaces._resources_for(scope)
-            executor = ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix=f"vs-agent-{definition.id}"
-            )
-            opened = asyncio.get_running_loop().run_in_executor(
-                executor,
-                partial(
-                    self._spawn_agent,
-                    definition,
-                    context,
-                    executor,
-                    scope_id=scope.id if scope else None,
-                    registration_id=registration_id,
-                ),
-            )
-            try:
-                return await asyncio.shield(opened)
-            except asyncio.CancelledError as cancelled:
-                while not opened.done():
-                    try:
-                        await asyncio.shield(opened)
-                    except asyncio.CancelledError:
-                        continue
-                if opened.exception() is not None:
-                    await asyncio.to_thread(executor.shutdown, wait=True)
-                else:
-                    handle = opened.result()
-                    cleanup = asyncio.create_task(handle.close())
-                    await _wait_until_done(cleanup)
-                    if error := cleanup.exception():
-                        cancelled.add_note(f"canceled agent construction cleanup failed: {error}")
-                    key = (scope.id if scope else None, registration_id or definition.id)
-                    if self._agents.get(key) is handle:
-                        del self._agents[key]
-                raise
-            except BaseException:
-                await asyncio.to_thread(executor.shutdown, wait=True)
-                raise
-
-    def _spawn_agent(
-        self,
-        definition: AgentDefinition,
-        context: _RunResources,
-        executor: ThreadPoolExecutor,
-        *,
-        scope_id: str | None,
-        registration_id: str | None,
-    ) -> _LocalAgentHandle:
-        """Open one sandbox and one agent client, with requested grants."""
-        if self._closed:
-            raise _RuntimeClosedError
-        key = (scope_id, registration_id or definition.id)
-        if not definition.id or key in self._agents:
-            raise _AgentRegistrationError(definition.id)
-        if definition.spec.execution != AgentExecutionPolicy():
-            raise _UnsupportedAgentExecutionPolicyError
-        with ExitStack() as resources:
-            if context.run_environment_view.share_agent_session:
-                opened = borrow_run_agent_environment(
-                    context,
-                    mounts=definition.resources,
-                    agent_backend=definition.spec.backend.value,
-                    cli_provider=definition.spec.provider,
-                )
-            elif scope_id is None and self._open_agent_environment is not None:
-                opened = self._open_agent_environment(
-                    mounts=definition.resources,
-                    agent_backend=definition.spec.backend.value,
-                    cli_provider=definition.spec.provider,
-                )
-            else:
-                opened = open_scoped_agent_environment(
-                    context,
-                    mounts=definition.resources,
-                    agent_backend=definition.spec.backend.value,
-                    cli_provider=definition.spec.provider,
-                )
-            resources.callback(opened.close)
-            backends = (
-                {definition.id: opened.backends["chat"]} if opened.backends is not None else None
-            )
-            agent_client_factory = self._agent_client_factory or build_agent_client
-            client = agent_client_factory(
-                spec=definition.spec,
-                session_store=self._session_store,
-                backends=backends,
-                skill_source_dirs=list(opened.skill_source_dirs),
-                skill_selection=opened.skill_selection,
-                run_log_file=context.run_log_file,
-                use_docker=opened.use_docker,
-                log_dir=context.log_dir,
-                host_resources=(*opened.host_resources, *definition.resources),
-                project_path_policy=opened.project_path_policy,
-                require_host_sandbox=not opened.use_docker,
-                events=output_sink(),
-            )
-            resources.callback(client.close)
-            handle = _LocalAgentHandle(
-                definition,
-                context,
-                client,
-                resources.pop_all(),
-                executor,
-                scope_id,
-                use_docker=opened.use_docker,
-            )
-        self._agents[key] = handle
-        return handle
-
     def _ensure_resources(self) -> _RunResources:
         if self._closed:
             raise _RuntimeClosedError
@@ -569,16 +422,11 @@ class RunContext:
             await _wait_until_done(operation)
             if error := operation.exception():
                 errors.append(error)
-        async with self._spawn_lock:
+        async with self._workspace_lifecycle_lock:
             try:
                 await self.agents.close()
             except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-040112 [BLE001]; handle cleanup below must continue if explicit-session cleanup fails.
                 errors.append(exc)
-            for agent in reversed(tuple(self._agents.values())):
-                try:
-                    await agent.close()
-                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020034 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
-                    errors.append(exc)
             try:
                 await self.workspaces.close()
             except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020035 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.

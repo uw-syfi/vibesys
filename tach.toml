@@ -174,11 +174,6 @@ path = "vibesys.api.evolve"
 depends_on = ["vibesys.orchestrations"]
 
 [[modules]]
-# The owned fake/test-double surface for core; see the module docstring.
-path = "vibesys.api.testing"
-depends_on = ["vibesys.orchestration.fake_gates"]
-
-[[modules]]
 path = "vibesys.api.contracts"
 depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.evaluators", "vibesys.errors"]
 
@@ -414,7 +409,7 @@ depends_on = ["vibesys", "vibesys.orchestration._host", "vs_runtime"]
 [[modules]]
 path = "vibesys.orchestration.agents"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.steering"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.steering", "vibesys.orchestration.environment"]
 
 [[modules]]
 path = "vibesys.orchestration.steering"
@@ -485,7 +480,7 @@ depends_on = ["vibesys.orchestration.request"]
 # create a cycle back through) agents/workspaces/gates/state/environment.
 path = "vibesys.orchestration._host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_runtime", "vibesys.context", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.run", "vibesys.runtime", "vibesys.sandbox"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.context", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.run", "vibesys.runtime", "vibesys.sandbox"]
 
 [[modules]]
 # Shared strategy-option validation for the four hypothesis-driven

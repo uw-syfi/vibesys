@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel
 
+from vs_agent.api import NULL_SKILL_SELECTION
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -41,7 +42,54 @@ from vs_runtime.contracts import (
 )
 
 if TYPE_CHECKING:
+    from vs_runtime._agent_execution import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlTransition
+    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
+
+
+class FakeAgentExecutionEnvironment:
+    """In-memory scoped environment with observable idempotent cleanup."""
+
+    def __init__(
+        self,
+        *,
+        project_path_policy: ProjectPathPolicy,
+        host_resources: tuple[HostResource, ...] = (),
+        use_docker: bool = False,
+        close_log: list[str] | None = None,
+        name: str = "environment",
+    ) -> None:
+        """Configure environment facts and optional cleanup recording."""
+        self.skill_source_dirs: tuple[Path, ...] = ()
+        self.skill_selection = NULL_SKILL_SELECTION
+        self.project_path_policy = project_path_policy
+        self.host_resources = host_resources
+        self.backends: dict[str, Sandbox] | None = None
+        self.use_docker = use_docker
+        self.closed = False
+        self._close_log = close_log
+        self._name = name
+
+    def close(self) -> None:
+        """Record cleanup exactly once."""
+        if self.closed:
+            return
+        self.closed = True
+        if self._close_log is not None:
+            self._close_log.append(self._name)
+
+
+class FakeAgentExecutionLifecycleSink:
+    """Record semantic execution events in emission order."""
+
+    def __init__(self) -> None:
+        """Create an empty lifecycle log."""
+        self.events: list[AgentExecutionLifecycleEvent] = []
+
+    def __call__(self, event: AgentExecutionLifecycleEvent) -> None:
+        """Record one semantic lifecycle event."""
+        self.events.append(event)
+
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 TurnResponder: TypeAlias = Callable[

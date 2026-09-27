@@ -56,7 +56,6 @@ from vibesys.render.run_log import format_framework_event
 from vibesys.render.sink import output_sink
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.integration import RunResourceHandoff
-from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
@@ -65,9 +64,7 @@ from vs_sandbox.api import HostResource, HostResourceAccess
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
-    "AgentDefinition",
     "AgentExecutionStartedData",
-    "AgentHandle",
     "AgentOutputChunkData",
     "AgentSpec",
     "ComputeBackend",
@@ -101,7 +98,6 @@ __all__ = [
     "TodoUpdateData",
     "ToolCallData",
     "ToolResultData",
-    "VibeSysRuntime",
     "agent_spec_from_config",
     "boot_trace",
     "create_session",

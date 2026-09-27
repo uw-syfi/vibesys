@@ -1,4 +1,4 @@
-"""Minimal ``RunContext`` harness for unit-testing ``ctx.agents.turn`` directly,
+"""Minimal ``RunContext`` harness for focused capability tests,
 without a registered strategy or orchestration policy package.
 
 Opens a bare ``RunContext`` with an empty ``RunSetup`` and hands it to a
@@ -68,7 +68,7 @@ def run_with_context[R](
 
     No orchestrator, no registered strategy ID, no state slots: just the
     host capabilities (``ctx.agents``, ``ctx.workspaces``, ...) a unit test
-    needs to call ``ctx.agents.turn`` directly. *setup* defaults to an empty
+    needs a prepared context directly. *setup* defaults to an empty
     ``RunSetup()``; pass one with ``memory_paths`` set to exercise declared
     agent-memory interactions (e.g. role-isolation reverts inside a memory
     path).

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import Callable
     from pathlib import Path
 
     from pydantic import BaseModel
@@ -34,8 +34,9 @@ if TYPE_CHECKING:
     from vibesys.orchestration.request import RunRequest
     from vibesys.orchestration.view import RunView
     from vibesys.run.event_journal import EventJournal
-    from vibesys.runtime import AgentDefinition, AgentHandle, WorkspaceScope
+    from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
+    from vs_agent.api import DurableSessionStore
     from vs_runtime.api import Commands, Skills
 
 
@@ -50,16 +51,6 @@ class _ExecutionResultLike(Protocol):
     @property
     def exit_code(self) -> int | None:
         """Return the process exit status, or ``None`` when unavailable."""
-        ...
-
-
-class _LocalAgentHandleLike(Protocol):
-    """What ``workspaces.py`` needs from a live spawned agent handle."""
-
-    scope_id: str | None
-
-    async def close(self) -> None:
-        """Release this agent and its sandbox; safe to call more than once."""
         ...
 
 
@@ -272,12 +263,8 @@ class HostResources(Protocol):
     _projector: _CommittedStateProjectorLike | None
     _gate_executor: _GateExecutorLike | None
     _parent_mutation_lock: asyncio.Lock
-    _spawn_lock: asyncio.Lock
-
-    @property
-    def _agents(self) -> Mapping[tuple[str | None, str], _LocalAgentHandleLike]:
-        """Return live spawned agent handles, keyed by (scope id, role id)."""
-        ...
+    _workspace_lifecycle_lock: asyncio.Lock
+    _session_store: DurableSessionStore | None
 
     @property
     def _resources(self) -> _RunResources:
@@ -309,14 +296,4 @@ class HostResources(Protocol):
         self, operation: Callable[P, Result], *args: P.args, **kwargs: P.kwargs
     ) -> Result:
         """Run synchronous policy or host work without racing resource teardown."""
-        ...
-
-    def _spawn(
-        self,
-        definition: AgentDefinition,
-        *,
-        scope: WorkspaceScope | None = None,
-        registration_id: str | None = None,
-    ) -> Awaitable[AgentHandle]:
-        """Open one independently configured agent in a live workspace."""
         ...

@@ -43,7 +43,7 @@ def _declared_members(protocol_cls: type) -> set[str]:
 
     Combines plain annotated attributes (``__annotations__``, e.g.
     ``_setup: RunSetup``) with properties and methods defined directly on the
-    class body (``request``, ``log``, ``_spawn``, ...), excluding dunders and
+    class body (``request``, ``log``, ``_run_blocking``, ...), excluding dunders and
     Protocol/ABC bookkeeping so only members the author actually wrote remain.
     """
     members = set(protocol_cls.__annotations__)
@@ -73,14 +73,13 @@ def test_host_resources_declares_a_nonempty_surface() -> None:
         "_projector",
         "_gate_executor",
         "_parent_mutation_lock",
-        "_spawn_lock",
-        "_agents",
+        "_workspace_lifecycle_lock",
+        "_session_store",
         "_resources",
         "events",
         "log",
         "warning",
         "_run_blocking",
-        "_spawn",
     }
 
 

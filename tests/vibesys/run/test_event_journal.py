@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
-from io import StringIO
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING
 
 from vibesys.events import (
     AgentExecutionStartedData,
@@ -15,20 +8,17 @@ from vibesys.events import (
     CoreEventType,
     EventStatus,
 )
-from vibesys.orchestration.runtime import _LocalAgentHandle
 from vibesys.render import output_sink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.runtime import AgentDefinition
-from vs_agent.api import AgentBackend, AgentSpec
-from vs_agent.api.testing import FakeAgentClient
+from vs_runtime.api.infrastructure import (
+    AgentExecutionFinished,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-class _Answer(BaseModel):
-    value: str
 
 
 def test_journal_flushes_pending_events_and_continues_sequence(tmp_path: Path) -> None:
@@ -104,48 +94,32 @@ def test_journal_separates_valid_final_record_without_newline(tmp_path: Path) ->
     assert [event.sequence for event in resumed.read()] == [1, 2]
 
 
-def test_agent_handle_records_complete_invocation_lifecycle(tmp_path: Path) -> None:
+def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
     try:
         integration.attach(tmp_path, run_id="run-1")
-        client = FakeAgentClient(driver_name="mock", provider="test")
-        client.set_model_for_kind({"implementer": "model-for-implementer"})
-        client.enqueue("implementer", _Answer(value="done"))
-        context = cast(
-            "Any",
-            SimpleNamespace(
-                integration=integration,
-                events=integration.events,
-                workspace=tmp_path,
-                run_log_file=StringIO(),
-            ),
+        integration.agent_execution_event(
+            AgentExecutionStarted(
+                agent_id="implementer",
+                label="round-1",
+                execution_id="invocation-1",
+                system_prompt="system",
+                user_prompt="task",
+                driver="mock",
+                provider="test",
+                model="model-for-implementer",
+            )
+        )
+        integration.agent_execution_event(
+            AgentExecutionFinished(
+                agent_id="implementer",
+                label="round-1",
+                execution_id="invocation-1",
+                status=AgentExecutionStatus.COMPLETED,
+                result={"value": "done"},
+            )
         )
 
-        async def invoke() -> _Answer:
-            handle = _LocalAgentHandle(
-                AgentDefinition("implementer", AgentSpec(backend=AgentBackend.STUB)),
-                context,
-                client,
-                ExitStack(),
-                ThreadPoolExecutor(max_workers=1),
-                None,
-                use_docker=True,
-            )
-            try:
-                return await handle.turn_structured(
-                    "task",
-                    system_prompt="system",
-                    response_cls=_Answer,
-                    fallback_factory=lambda: _Answer(value="fallback"),
-                    label="round-1-retry-2",
-                )
-            finally:
-                await handle.close()
-
-        answer = asyncio.run(invoke())
-
-        assert answer == _Answer(value="done")
-        assert client.calls_for("implementer")[0].invocation_id
         assert [event.type for event in integration.events.read()] == [
             CoreEventType.AGENT_EXECUTION_STARTED,
             CoreEventType.PHASE_STARTED,
@@ -154,10 +128,11 @@ def test_agent_handle_records_complete_invocation_lifecycle(tmp_path: Path) -> N
             CoreEventType.INVOCATION_FINISHED,
             CoreEventType.PHASE_FINISHED,
         ]
-        assert {event.execution_id for event in integration.events.read()} != {None}
+        assert {event.execution_id for event in integration.events.read()} == {"invocation-1"}
         started = integration.events.read()[0]
         assert isinstance(started.data, AgentExecutionStartedData)
-        assert started.data.attempt == 2
+        assert started.data.attempt is None
+        assert started.data.system_prompt == "system"
     finally:
         integration.close()
 

@@ -10,11 +10,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import import_module
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel
-
-from vs_agent.api import AgentCapabilities, AgentSessionKey, ToolServerDescriptor
+from vs_agent.api import (
+    AgentClientProtocol,
+    AgentEventSink,
+    SessionStore,
+    ToolServerDescriptor,
+    build_agent_client,
+)
+from vs_runtime._agent_execution import (
+    AgentExecutionConfiguration,
+    AgentExecutionEnvironment,
+    AgentExecutionFinished,
+    AgentExecutionLifecycleEvent,
+    AgentExecutionLifecycleSink,
+    AgentExecutionScope,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
+    AgentMessageRouter,
+)
 from vs_runtime._agent_sessions import RuntimeAgentSessions
 from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
 from vs_runtime._checkpoint import (
@@ -95,13 +110,10 @@ from vs_runtime._skills import (
 from vs_runtime.contracts import AgentSessions, Workspace
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from vs_runtime.api import AgentRole
-
-
-ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
 def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel:
@@ -143,67 +155,11 @@ class ManagedAgentWorkspace(Workspace, Protocol):
         ...
 
 
-class AgentExecution(Protocol):
-    """Temporary composition port for one already-open agent execution.
-
-    The runtime owns sessions through this port while the concrete client and
-    sandbox opener still lives in VibeSys. The port is removed when those
-    resources move into ``vs_runtime``.
-    """
-
-    @property
-    def capabilities(self) -> AgentCapabilities:
-        """Return execution-system capabilities."""
-        ...
-
-    @property
-    def backend_name(self) -> str:
-        """Return the selected backend name."""
-        ...
-
-    @property
-    def driver_name(self) -> str | None:
-        """Return the selected driver name."""
-        ...
-
-    @property
-    def provider(self) -> str | None:
-        """Return the selected provider."""
-        ...
-
-    @property
-    def model(self) -> str | None:
-        """Return the selected model."""
-        ...
-
-    @property
-    def reasoning_effort(self) -> str | None:
-        """Return the selected reasoning effort."""
-        ...
-
-    async def execute(  # noqa: PLR0913  # lint-waiver: LW-837205 [PLR0913]; temporary port mirrors the independently fixed inputs of the existing execution handle and is deleted when that handle moves into vs_runtime.
-        self,
-        message: str,
-        *,
-        system_prompt: str,
-        response: type[ResponseT] | None,
-        label: str,
-        session_key: AgentSessionKey,
-        tool_servers: tuple[ToolServerDescriptor, ...] | None,
-    ) -> str | ResponseT:
-        """Execute one turn with fixed session configuration."""
-        ...
-
-    async def close(self) -> None:
-        """Release the execution resource idempotently."""
-        ...
-
-
 class AgentSessionRuntime(AgentSessions, Protocol):
     """Composition controls for the run-owned production session manager."""
 
-    def invalidate_workspace(self, workspace: Workspace) -> None:
-        """Reject new turns before a workspace begins teardown."""
+    async def close_workspace(self, workspace: Workspace) -> None:
+        """Close sessions bound to a workspace before its teardown."""
         ...
 
     def begin_close(self) -> None:
@@ -211,24 +167,38 @@ class AgentSessionRuntime(AgentSessions, Protocol):
         ...
 
 
-type AgentExecutionFactory = Callable[[AgentRole, Workspace, str], Awaitable[AgentExecution]]
+type AgentExecutionResolver = Callable[
+    [AgentRole, Workspace], tuple[AgentExecutionConfiguration, AgentExecutionScope]
+]
 type ManagedAgentWorkspaceResolver = Callable[[Workspace], ManagedAgentWorkspace]
 type AgentToolResolver = Callable[[Workspace], tuple[ToolServerDescriptor, ...]]
 
 
-def create_agent_session_runtime(
+def create_agent_session_runtime(  # noqa: PLR0913  # lint-waiver: composition fixes independent execution effects once behind the narrow AgentSessions contract.
     roles: tuple[AgentRole, ...],
     *,
-    open_execution: AgentExecutionFactory,
+    resolve_execution: AgentExecutionResolver,
     resolve_workspace: ManagedAgentWorkspaceResolver,
+    session_store: Callable[[], SessionStore | None],
+    control: RunControlChannel,
+    lifecycle_events: AgentExecutionLifecycleSink,
+    agent_events: AgentEventSink,
+    route_message: AgentMessageRouter,
+    client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
 ) -> AgentSessionRuntime:
     """Create the production owner for explicit orchestration sessions."""
     return RuntimeAgentSessions(
         roles,
-        open_execution=open_execution,
+        resolve_execution=resolve_execution,
         resolve_workspace=resolve_workspace,
+        session_store=session_store,
+        control=control,
+        lifecycle_events=lifecycle_events,
+        agent_events=agent_events,
+        route_message=route_message,
+        client_factory=client_factory,
         tool_bindings=tool_bindings,
         log=log,
     )
@@ -341,8 +311,16 @@ def create_model_request_reconciler(
 
 
 __all__ = [
-    "AgentExecution",
-    "AgentExecutionFactory",
+    "AgentExecutionConfiguration",
+    "AgentExecutionEnvironment",
+    "AgentExecutionFinished",
+    "AgentExecutionLifecycleEvent",
+    "AgentExecutionLifecycleSink",
+    "AgentExecutionResolver",
+    "AgentExecutionScope",
+    "AgentExecutionStarted",
+    "AgentExecutionStatus",
+    "AgentMessageRouter",
     "AgentSessionRuntime",
     "AgentToolResolver",
     "CompletedRound",

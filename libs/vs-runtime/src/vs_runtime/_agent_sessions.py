@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
+from vs_runtime._agent_execution import RuntimeAgentExecution
 from vs_runtime.contracts import (
     AgentBinding,
     AgentRole,
@@ -31,10 +32,19 @@ from vs_runtime.contracts import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vs_agent.api import ToolServerDescriptor
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentEventSink,
+        SessionStore,
+        ToolServerDescriptor,
+    )
+    from vs_runtime._agent_execution import (
+        AgentExecutionLifecycleSink,
+        AgentMessageRouter,
+    )
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime.api.infrastructure import (
-        AgentExecution,
-        AgentExecutionFactory,
+        AgentExecutionResolver,
         AgentToolResolver,
         ManagedAgentWorkspace,
         ManagedAgentWorkspaceResolver,
@@ -62,7 +72,7 @@ class RuntimeAgentSession:
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-837201 [PLR0913]; immutable session configuration and its owned execution resource are independent inputs.
         self,
-        execution: AgentExecution,
+        execution: RuntimeAgentExecution,
         role: AgentRole,
         workspace: ManagedAgentWorkspace,
         member_id: str | None,
@@ -230,18 +240,30 @@ class RuntimeAgentSession:
 class RuntimeAgentSessions:
     """Production factory and reverse-order owner for explicit sessions."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: run composition injects independent lower-layer effects once; session callers see only create_session.
         self,
         roles: tuple[AgentRole, ...],
         *,
-        open_execution: AgentExecutionFactory,
+        resolve_execution: AgentExecutionResolver,
         resolve_workspace: ManagedAgentWorkspaceResolver,
+        session_store: Callable[[], SessionStore | None],
+        control: RunControlChannel,
+        lifecycle_events: AgentExecutionLifecycleSink,
+        agent_events: AgentEventSink,
+        route_message: AgentMessageRouter,
+        client_factory: Callable[..., AgentClientProtocol],
         tool_bindings: Mapping[str, AgentToolResolver] | None,
         log: Callable[[str], None],
     ) -> None:
         self._roles = {role.id: role for role in roles}
-        self._open_execution = open_execution
+        self._resolve_execution = resolve_execution
         self._resolve_workspace = resolve_workspace
+        self._session_store = session_store
+        self._control = control
+        self._lifecycle_events = lifecycle_events
+        self._agent_events = agent_events
+        self._route_message = route_message
+        self._client_factory = client_factory
         self._tool_bindings = dict(tool_bindings or {})
         self._log = log
         self._sessions: list[RuntimeAgentSession] = []
@@ -283,7 +305,17 @@ class RuntimeAgentSessions:
                 for spec in self._tool_bindings[tool_id](workspace)
             )
             session_id = uuid.uuid4().hex
-            execution = await self._open_execution(role, workspace, f"session:{session_id}")
+            configuration, scope = self._resolve_execution(role, workspace)
+            execution = await RuntimeAgentExecution.open(
+                configuration,
+                scope,
+                session_store=self._session_store(),
+                control=self._control,
+                lifecycle=self._lifecycle_events,
+                agent_events=self._agent_events,
+                route_message=self._route_message,
+                client_factory=self._client_factory,
+            )
             try:
                 session = self._complete_session(
                     execution,
@@ -306,7 +338,7 @@ class RuntimeAgentSessions:
 
     def _complete_session(  # noqa: PLR0913  # lint-waiver: LW-837203 [PLR0913]; the helper validates the independently fixed session declaration before transferring ownership.
         self,
-        execution: AgentExecution,
+        execution: RuntimeAgentExecution,
         role: AgentRole,
         workspace: ManagedAgentWorkspace,
         member_id: str | None,
@@ -359,10 +391,21 @@ class RuntimeAgentSessions:
             message = "agent session cleanup failed"
             raise BaseExceptionGroup(message, errors)
 
-    def invalidate_workspace(self, workspace: Workspace) -> None:
-        for session in self._sessions:
-            if session.workspace is workspace:
+    async def close_workspace(self, workspace: Workspace) -> None:
+        """Close matching sessions in reverse order before workspace teardown."""
+        errors: list[BaseException] = []
+        async with self._lifecycle_lock:
+            sessions = [session for session in self._sessions if session.workspace is workspace]
+            for session in sessions:
                 session.mark_closed()
+            for session in reversed(sessions):
+                try:
+                    await session.close()
+                except BaseException as error:  # noqa: BLE001  # lint-waiver: every workspace-bound session must close before grouped failures propagate.
+                    errors.append(error)
+        if errors:
+            message = "workspace agent session cleanup failed"
+            raise BaseExceptionGroup(message, errors)
 
     def begin_close(self) -> None:
         self._closed = True

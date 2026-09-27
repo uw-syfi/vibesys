@@ -21,7 +21,7 @@ from vibesys.runtime import WorkspaceScope
 from vs_runtime.api import WorkspaceRestoreError as RuntimeWorkspaceRestoreError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
     from vibesys.context import _RunResources
@@ -273,10 +273,10 @@ class _Workspaces:
     def __init__(
         self,
         host: HostResources,
-        invalidate_sessions: Callable[[WorkspaceHandle], None],
+        close_sessions: Callable[[WorkspaceHandle], Awaitable[None]],
     ) -> None:
         self._host = host
-        self._invalidate_sessions = invalidate_sessions
+        self._close_sessions = close_sessions
         self._scopes: dict[str, WorkspaceScope] = {}
         self._scoped_resources: dict[str, _RunResources] = {}
         self._scope_locks: dict[str, asyncio.Lock] = {}
@@ -481,17 +481,13 @@ class _Workspaces:
 
     async def _discard_scope(self, scope: WorkspaceScope | WorkspaceHandle) -> None:
         """Drain scoped agents and gates before removing their worktree."""
-        async with self._host._spawn_lock:  # shared lifecycle lock
+        async with self._host._workspace_lifecycle_lock:
             workspace = scope if isinstance(scope, WorkspaceHandle) else None
             scope = self._require_scope(scope)
             errors: list[BaseException] = []
             if workspace is not None:
-                self._invalidate_sessions(workspace)
-            for agent in tuple(self._host._agents.values()):
-                if agent.scope_id != scope.id:
-                    continue
                 try:
-                    await agent.close()
+                    await self._close_sessions(workspace)
                 except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020031 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
             async with (

@@ -101,7 +101,6 @@ graph TD
     vibesys.api.contracts --> vibesys.orchestration.request
     vibesys.api.contracts --> vibesys.orchestration.view
     vibesys.api.evolve --> vibesys.orchestrations
-    vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.context --> vibesys
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.errors
@@ -127,11 +126,10 @@ graph TD
     vibesys.orchestration.agents --> vibesys
     vibesys.orchestration.agents --> vibesys.context
     vibesys.orchestration.agents --> vibesys.orchestration._host
+    vibesys.orchestration.agents --> vibesys.orchestration.environment
     vibesys.orchestration.agents --> vibesys.orchestration.steering
     vibesys.orchestration.agents --> vibesys.orchestration.workspaces
-    vibesys.orchestration.agents --> vibesys.prompts
     vibesys.orchestration.agents --> vibesys.run
-    vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.commands --> vibesys.orchestration._host
@@ -362,7 +360,6 @@ graph TD
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
     vibesys.api.evolve --> vibesys.orchestrations
-    vibesys.api.testing --> vibesys.orchestration.fake_gates
     vibesys.context --> vibesys
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.errors
@@ -393,15 +390,15 @@ graph TD
     vibesys.orchestration._host --> vibesys.run
     vibesys.orchestration._host --> vibesys.runtime
     vibesys.orchestration._host --> vibesys.sandbox
+    vibesys.orchestration._host --> vs_agent
     vibesys.orchestration._host --> vs_runtime
     vibesys.orchestration.agents --> vibesys
     vibesys.orchestration.agents --> vibesys.context
     vibesys.orchestration.agents --> vibesys.orchestration._host
+    vibesys.orchestration.agents --> vibesys.orchestration.environment
     vibesys.orchestration.agents --> vibesys.orchestration.steering
     vibesys.orchestration.agents --> vibesys.orchestration.workspaces
-    vibesys.orchestration.agents --> vibesys.prompts
     vibesys.orchestration.agents --> vibesys.run
-    vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.agents --> vs_agent
     vibesys.orchestration.agents --> vs_runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators

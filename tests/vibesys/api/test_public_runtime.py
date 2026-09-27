@@ -1,4 +1,4 @@
-"""A custom policy uses only public contracts to drive agents and messages."""
+"""Public runtime capability tests."""
 
 from __future__ import annotations
 
@@ -11,155 +11,34 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from tests.vibesys.loops.legacy_runner import LegacyOrchestrator, run_orchestration
 
 from vibesys.api import (
-    AgentBackend,
-    AgentDefinition,
-    AgentSpec,
     ComputeBackend,
     Config,
     ConfigurationError,
-    CoreEvent,
-    HostResource,
-    HostResourceAccess,
     OrchestrationDescriptor,
     ProfilerKind,
     RunRequest,
-    open_run_store,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.api.session import _OpenedAgentEnvironment
 from vibesys.context import RunSetup, borrow_run_agent_environment
-from vibesys.events import AgentExecutionFinishedData, CoreEventType
 from vibesys.orchestration.runtime import RunContext, _Evaluator
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import LocalEnvironment, SkyPilotEnvironment
-from vs_agent.api import AgentExecutionPolicy, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
-from vs_project.api import OrchestrationRunManifest, Project
+from vs_runtime.api import AgentRole, WorkspaceAccess
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
-    from vibesys.orchestration.runtime import WorkspaceHandle, _LocalAgentHandle
+    from vibesys.orchestration.runtime import WorkspaceHandle
     from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
-
-
-class _ThreeAgentPolicy:
-    resource: HostResource
-    workspace: Path | None = None
-
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        self.rounds = descriptor.options["rounds"]
-        self.setup = RunSetup()
-
-    async def run(self, ctx: RunContext) -> bool:
-        rounds = self.rounds
-        assert isinstance(rounds, int)
-        type(self).workspace = ctx.workspaces.root.path
-        planner = await ctx.agents.spawn(
-            AgentDefinition("planner", AgentSpec(backend=AgentBackend.STUB, model="planner-model"))
-        )
-        worker = await ctx.agents.spawn(
-            AgentDefinition(
-                "worker",
-                AgentSpec(backend=AgentBackend.STUB, model="worker-model"),
-                resources=(type(self).resource,),
-            )
-        )
-        reviewer = await ctx.agents.spawn(
-            AgentDefinition(
-                "reviewer", AgentSpec(backend=AgentBackend.STUB, model="reviewer-model")
-            )
-        )
-        feedback = "begin"
-        for round_number in range(1, rounds + 1):
-            label = f"round{round_number:03d}"
-            plan = await planner.turn(feedback, label=label)
-            implementation = await worker.turn(plan, label=label)
-            feedback = await reviewer.turn(implementation, label=label)
-        return feedback == "review 2"
-
-
-class _TypedPlan(BaseModel):
-    task: str
 
 
 class _PolicyState(BaseModel):
     value: int
-
-
-class _TypedPolicy:
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        assert descriptor.id == "three-agent-rounds"
-        self.setup = RunSetup()
-
-    async def run(self, ctx: RunContext) -> bool:
-        planner = await ctx.agents.spawn(
-            AgentDefinition("planner", AgentSpec(backend=AgentBackend.STUB, model="typed"))
-        )
-        plan = await planner.turn_structured(
-            "choose task",
-            response_cls=_TypedPlan,
-            fallback_factory=lambda: _TypedPlan(task="fallback"),
-            system_prompt="plan carefully",
-            label="round-1-plan",
-            session_key=AgentSessionKey(SessionScope.ROLE, "planner"),
-            reuse_session=True,
-        )
-        return plan.task == "implement"
-
-
-class _CleanupError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("agent cleanup failed")
-
-
-class _PolicyError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("policy failed")
-
-
-class _CloseProbe:
-    def __init__(self, name: str, calls: list[str], *, fail: bool = False) -> None:
-        self.name = name
-        self.calls = calls
-        self.fail = fail
-
-    def close(self) -> None:
-        self.calls.append(self.name)
-        if self.fail:
-            raise _CleanupError
-
-
-class _AsyncCloseProbe:
-    def __init__(self, name: str, calls: list[str], *, fail: bool = False) -> None:
-        self._probe = _CloseProbe(name, calls, fail=fail)
-
-    async def close(self) -> None:
-        self._probe.close()
-
-
-class _UnsupportedExecutionPolicy:
-    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
-        assert descriptor.id == "three-agent-rounds"
-        self.setup = RunSetup()
-
-    async def run(self, ctx: RunContext) -> bool:
-        await ctx.agents.spawn(
-            AgentDefinition(
-                "worker",
-                AgentSpec(
-                    backend=AgentBackend.STUB,
-                    execution=AgentExecutionPolicy(
-                        host_resources=(HostResource(ctx.workspaces.root.path),)
-                    ),
-                ),
-            )
-        )
-        return True
 
 
 def _write_project(root: Path) -> None:
@@ -190,31 +69,6 @@ def _request(project_root: Path) -> RunRequest:
     )
 
 
-def _assert_message_handoffs(clients: dict[str, FakeAgentClient]) -> None:
-    assert clients["planner-model"].calls_for("planner")[0].user_prompt == "begin"
-    assert [call.user_prompt for call in clients["worker-model"].calls_for("worker")] == [
-        "plan 1",
-        "plan 2",
-    ]
-    assert [call.user_prompt for call in clients["reviewer-model"].calls_for("reviewer")] == [
-        "impl 1",
-        "impl 2",
-    ]
-    assert clients["planner-model"].calls_for("planner")[1].user_prompt == "review 1"
-
-
-def _run_legacy_policy(
-    request: RunRequest, policy: LegacyOrchestrator, events: list[CoreEvent]
-) -> bool:
-    """Keep old host behavior covered without reintroducing catalog dispatch."""
-    integration = LocalRunIntegration()
-    integration.events.subscribe(events.append)
-    try:
-        return asyncio.run(run_orchestration(request, integration, policy))
-    finally:
-        integration.close()
-
-
 def _capture_environments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[list[RunEnvironmentRequest], list[str]]:
@@ -236,93 +90,6 @@ def _capture_environments(
     monkeypatch.setattr(LocalEnvironment, "open", open_environment)
     monkeypatch.setattr(_OpenedAgentEnvironment, "close", close_environment)
     return requests, closed
-
-
-def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    grant_path = tmp_path / "evidence.txt"
-    grant_path.write_text("read only evidence\n")
-    grant = HostResource(grant_path, HostResourceAccess.READ_ONLY, "worker evidence")
-    _ThreeAgentPolicy.resource = grant
-    _ThreeAgentPolicy.workspace = None
-    clients = {
-        "planner-model": FakeAgentClient().enqueue_text("planner", "plan 1", "plan 2"),
-        "worker-model": FakeAgentClient().enqueue_text("worker", "impl 1", "impl 2"),
-        "reviewer-model": FakeAgentClient().enqueue_text("reviewer", "review 1", "review 2"),
-    }
-    granted: dict[str, tuple[HostResource, ...]] = {}
-
-    def build_client(**kwargs: object) -> FakeAgentClient:
-        spec = kwargs["spec"]
-        assert isinstance(spec, AgentSpec)
-        assert spec.model is not None
-        resources = kwargs["host_resources"]
-        assert isinstance(resources, tuple)
-        granted[spec.model] = resources
-        return clients[spec.model]
-
-    environment_requests, _ = _capture_environments(monkeypatch)
-    monkeypatch.setattr("vibesys.orchestration.runtime.build_agent_client", build_client)
-
-    request = _request(project_root)
-    events: list[CoreEvent] = []
-    assert _run_legacy_policy(request, _ThreeAgentPolicy(request.orchestration), events)
-    run_id = Project.open(project_root).state.resolve_run().run_id
-    assert open_run_store(Project.open(project_root)).get_run(run_id).run_id == run_id
-    assert _ThreeAgentPolicy.workspace == project_root
-    _assert_message_handoffs(clients)
-    assert grant in granted["worker-model"]
-    assert grant not in granted["planner-model"]
-    assert (
-        sum(
-            mount.host_path == grant_path
-            for request in environment_requests
-            for mount in request.environment_bind_mounts
-        )
-        == 1
-    )
-    assert environment_requests[0].cli_provider == "claude"
-    assert all(request.cli_provider == "codex" for request in environment_requests[1:])
-    assert all(request.agent_backend == "stub" for request in environment_requests[1:])
-    assert all(client.closed for client in clients.values())
-    assert (
-        len([event for event in events if event.type is CoreEventType.AGENT_EXECUTION_STARTED]) == 6
-    )
-    manifest = Project.open(project_root).state.load_run(run_id)
-    assert isinstance(manifest, OrchestrationRunManifest)
-    assert manifest.orchestration == request.orchestration
-    assert open_run_store(Project.open(project_root)).get_run(run_id).loop == "three-agent-rounds"
-
-
-def test_structured_turn_preserves_schema_session_and_event_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    client = FakeAgentClient().enqueue("planner", _TypedPlan(task="implement"))
-    monkeypatch.setattr(
-        "vibesys.orchestration.runtime.build_agent_client", lambda **_kwargs: client
-    )
-    request = _request(project_root)
-    events: list[CoreEvent] = []
-    assert _run_legacy_policy(request, _TypedPolicy(request.orchestration), events)
-
-    call = client.calls_for("planner")[0]
-    assert call.method == "invoke"
-    assert call.response_cls is _TypedPlan
-    assert call.session_key == AgentSessionKey(SessionScope.ROLE, "planner")
-    assert call.reuse_session is True
-    assert call.system_prompt == "plan carefully"
-    assert call.user_prompt == "choose task"
-    finished = next(
-        event for event in events if event.type is CoreEventType.AGENT_EXECUTION_FINISHED
-    )
-    assert isinstance(finished.data, AgentExecutionFinishedData)
-    assert finished.data.result == {"task": "implement"}
-    assert finished.round_label == "round-1-plan"
 
 
 def test_skypilot_agents_borrow_the_workspace_session() -> None:
@@ -351,42 +118,6 @@ def test_skypilot_agents_borrow_the_workspace_session() -> None:
     assert not closed
     with pytest.raises(ConfigurationError, match="must use its configured backend"):
         borrow_run_agent_environment(context, cli_provider="codex")
-
-
-def test_agent_spec_execution_policy_is_rejected_explicitly(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    request = _request(project_root)
-    with pytest.raises(ValueError, match=r"AgentSpec\.execution is not supported"):
-        _run_legacy_policy(request, _UnsupportedExecutionPolicy(request.orchestration), [])
-
-
-def test_runtime_closes_all_agents_and_preserves_policy_failure() -> None:
-    integration = LocalRunIntegration()
-    closed: list[str] = []
-
-    class _ProbeRunContext(RunContext):
-        def _prepare(self) -> None:
-            vars(self)["_resource_owner"] = _CloseProbe("context", closed)
-            vars(self)["_agents"] = {
-                (None, "first"): _AsyncCloseProbe("first", closed),
-                (None, "middle"): _AsyncCloseProbe("middle", closed, fail=True),
-                (None, "last"): _AsyncCloseProbe("last", closed),
-            }
-
-    async def fail_inside_runtime() -> None:
-        async with _ProbeRunContext.open(
-            RunRequest.model_construct(), integration, setup=RunSetup()
-        ):
-            raise _PolicyError
-
-    try:
-        with pytest.raises(_PolicyError) as caught:
-            asyncio.run(fail_inside_runtime())
-        assert closed == ["last", "middle", "first", "context"]
-        assert any("runtime cleanup also failed" in note for note in caught.value.__notes__)
-    finally:
-        integration.close()
 
 
 def test_root_workspace_and_typed_state_capabilities(tmp_path: Path) -> None:
@@ -478,20 +209,26 @@ def test_root_environment_and_trusted_evaluator_capabilities(tmp_path: Path) -> 
         integration.close()
 
 
-def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_scoped_workspace_adopts_candidate_and_closes_its_session(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()
     client = FakeAgentClient(model="scope").enqueue_text("worker", "scoped response")
-    monkeypatch.setattr(
-        "vibesys.orchestration.runtime.build_agent_client", lambda **_kwargs: client
+    role = AgentRole(
+        id="worker",
+        system_prompt="work in the candidate",
+        workspace_access=WorkspaceAccess.READ_WRITE,
     )
 
     async def exercise() -> None:
         unclosed_candidate = None
-        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
+        async with RunContext.open(
+            _request(project_root),
+            integration,
+            setup=RunSetup(),
+            agent_roles=(role,),
+            agent_client_factory=lambda **_kwargs: client,
+        ) as ctx:
             # Local worktrees provide a cheap substrate for the generic parallel capability.
             ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-030003; This test reads one private attribute to check internal wiring that has no public accessor.
                 ctx.environment.view, supports_parallel_candidate_evaluation=True
@@ -503,16 +240,12 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
             assert scoped.id is not None
             assert scoped.path != ctx.workspaces.root.path
             assert ctx.environment.view_for(scoped).env_kind == "local"
-            agent = await ctx.agents.spawn(
-                AgentDefinition("worker", AgentSpec(backend=AgentBackend.STUB, model="scope")),
-                scope=scoped,
-            )
-            assert agent.backend_name == "fake"
-            assert agent.driver_name == "fake"
-            assert agent.provider == "fake"
-            assert agent.model == "scope"
-            assert not agent.capabilities.mcp_servers
-            assert await agent.turn("work in the fork", label="scoped-turn") == "scoped response"
+            session = await ctx.agents.create_session(role, workspace=scoped)
+            assert session.binding.backend == "fake"
+            assert session.binding.driver == "fake"
+            assert session.binding.provider == "fake"
+            assert session.binding.model == "scope"
+            assert await session.turn("work in the fork") == "scoped response"
             (scoped.path / "queue.py").write_text("VALUE = 3\n")
             assert "queue.py" in await scoped.pending_changes()
             revision = await scoped.snapshot("scoped candidate")
@@ -534,144 +267,6 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
         assert unclosed_candidate is not None
         with pytest.raises(ValueError, match="closed"):
             _ = unclosed_candidate.path
-
-    try:
-        asyncio.run(exercise())
-    finally:
-        integration.close()
-
-
-class _ScopedCloseProbe:
-    """Fake scoped agent handle for exercising ``_discard_scope`` cleanup ordering.
-
-    ``close()`` is idempotent (like the real agent handle): a discarded scope's
-    agents stay in ``RunContext._agents`` and get a second ``close()`` call
-    when the run itself closes, so a fake that kept re-raising on every call
-    would fail the run teardown for reasons unrelated to what this test
-    covers.
-    """
-
-    def __init__(
-        self, scope_id: str, name: str, calls: list[str], *, exc: BaseException | None = None
-    ) -> None:
-        self.scope_id = scope_id
-        self._name = name
-        self._calls = calls
-        self._exc = exc
-        self._closed = False
-
-    async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        self._calls.append(self._name)
-        if self._exc is not None:
-            raise self._exc
-
-
-def test_discard_scope_continues_after_a_cancelled_agent_close(tmp_path: Path) -> None:
-    """Regression: ``_discard_scope`` used to catch only ``Exception``, so a
-    ``CancelledError`` from one agent's ``close()`` (a ``BaseException``, not an
-    ``Exception``) escaped immediately -- skipping every remaining agent's
-    cleanup and the worktree teardown entirely. It must instead behave like
-    ``RunContext.close()``'s sibling cleanup path: catch ``BaseException``,
-    keep closing the remaining agents, tear down the worktree, and surface
-    every error afterward.
-    """
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    integration = LocalRunIntegration()
-
-    async def exercise() -> None:
-        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-040024 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-                ctx.environment.view, supports_parallel_candidate_evaluation=True
-            )
-            parent_revision = ctx.workspaces.root.revision
-            assert parent_revision is not None
-            scoped = await ctx.workspaces.fork(parent_revision)
-            assert scoped.id is not None
-            calls: list[str] = []
-            ctx._agents[(scoped.id, "first")] = cast(  # noqa: SLF001  # LW-040025 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-                "_LocalAgentHandle",
-                _ScopedCloseProbe(scoped.id, "first", calls, exc=asyncio.CancelledError()),
-            )
-            ctx._agents[(scoped.id, "second")] = cast(  # noqa: SLF001  # LW-040026 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-                "_LocalAgentHandle", _ScopedCloseProbe(scoped.id, "second", calls)
-            )
-
-            with pytest.raises(BaseExceptionGroup) as caught:
-                await scoped.discard()
-
-            # Both agents were closed despite the first raising a BaseException.
-            assert calls == ["first", "second"]
-            assert isinstance(caught.value.exceptions[0], asyncio.CancelledError)
-            # The worktree itself was still torn down.
-            with pytest.raises(ValueError, match="closed"):
-                _ = scoped.path
-
-    try:
-        asyncio.run(exercise())
-    finally:
-        integration.close()
-
-
-@given(
-    exception_specs=st.lists(
-        st.sampled_from([None, RuntimeError, asyncio.CancelledError]),
-        min_size=1,
-        max_size=4,
-    )
-)
-@settings(
-    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
-)
-def test_discard_scope_closes_every_agent_for_any_failure_mix(
-    exception_specs: list[type[BaseException] | None],
-    tmp_path_factory: pytest.TempPathFactory,
-) -> None:
-    """Property generalizing the CancelledError regression: whatever mix of
-    ``Exception``/``BaseException`` failures scoped agents raise on
-    ``close()`` -- including several ``CancelledError``s in a row -- discard()
-    still attempts every agent's close() exactly once, in order, still tears
-    down the worktree, and surfaces every failure (none silently dropped).
-    """
-    project_root = tmp_path_factory.mktemp("discard_scope_property") / "project"
-    _write_project(project_root)
-    integration = LocalRunIntegration()
-
-    async def exercise() -> None:
-        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-040027 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-                ctx.environment.view, supports_parallel_candidate_evaluation=True
-            )
-            parent_revision = ctx.workspaces.root.revision
-            assert parent_revision is not None
-            scoped = await ctx.workspaces.fork(parent_revision)
-            assert scoped.id is not None
-            calls: list[str] = []
-            expected_failures = 0
-            names = [f"agent-{index}" for index in range(len(exception_specs))]
-            for name, exc_type in zip(names, exception_specs, strict=True):
-                exc = exc_type() if exc_type is not None else None
-                if exc is not None:
-                    expected_failures += 1
-                ctx._agents[(scoped.id, name)] = cast(  # noqa: SLF001  # LW-040028 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-                    "_LocalAgentHandle", _ScopedCloseProbe(scoped.id, name, calls, exc=exc)
-                )
-
-            if expected_failures:
-                with pytest.raises(BaseExceptionGroup) as caught:
-                    await scoped.discard()
-                assert len(caught.value.exceptions) == expected_failures
-            else:
-                await scoped.discard()
-
-            # Every agent's close() ran exactly once, regardless of failures.
-            assert calls == names
-            # The worktree itself was torn down either way.
-            with pytest.raises(ValueError, match="closed"):
-                _ = scoped.path
 
     try:
         asyncio.run(exercise())
