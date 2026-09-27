@@ -1,8 +1,7 @@
 """Tests for the agent image build (:func:`vs_agent.api.images.agent_image`).
 
-``build_task_image`` itself is covered by ``test_task_image.py`` (the module
-it now lives in :mod:`vs_agent.api.images`, but its behavior and
-tests did not change). This file covers the agent layer: its build args, how
+``build_task_image`` itself is covered by ``test_task_image.py``. This file
+covers the agent layer: its build args, how
 it chains onto a task image, and that the Dockerfile it builds ships with the
 package.
 """
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_agent import api as agent_api
+from vs_agent.api import CLI_VERSIONS, GO_TOOLCHAIN_VERSION, NODE_VERSION, RUST_TOOLCHAIN_VERSION
 from vs_agent.api.images import agent_image
 
 if TYPE_CHECKING:
@@ -67,8 +66,8 @@ def _expected_version_args() -> tuple[str, ...]:
     """The NODE_VERSION/CLI_VERSIONS build args ``agent_image`` should emit,
     read from :mod:`vs_agent.api` at test time (the same module the builder
     reads), so this asserts real plumbing rather than a patched round-trip."""
-    args: list[str] = ["--build-arg", f"NODE_VERSION={agent_api.NODE_VERSION}"]
-    for provider, version in agent_api.CLI_VERSIONS.items():
+    args: list[str] = ["--build-arg", f"NODE_VERSION={NODE_VERSION}"]
+    for provider, version in CLI_VERSIONS.items():
         args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
     return tuple(args)
 
@@ -98,9 +97,9 @@ def test_agent_image_base_only_argv() -> None:
         "--build-arg",
         "TOOLCHAINS=",
         "--build-arg",
-        f"RUST_VERSION={agent_api.RUST_TOOLCHAIN_VERSION}",
+        f"RUST_VERSION={RUST_TOOLCHAIN_VERSION}",
         "--build-arg",
-        f"GO_VERSION={agent_api.GO_TOOLCHAIN_VERSION}",
+        f"GO_VERSION={GO_TOOLCHAIN_VERSION}",
         "--build-arg",
         "PIP_EXTRAS=",
         str(_AGENT_IMAGE_DIR),
@@ -178,9 +177,9 @@ def test_agent_image_chains_task_image_as_base(tmp_path: Path) -> None:
         "--build-arg",
         "TOOLCHAINS=",
         "--build-arg",
-        f"RUST_VERSION={agent_api.RUST_TOOLCHAIN_VERSION}",
+        f"RUST_VERSION={RUST_TOOLCHAIN_VERSION}",
         "--build-arg",
-        f"GO_VERSION={agent_api.GO_TOOLCHAIN_VERSION}",
+        f"GO_VERSION={GO_TOOLCHAIN_VERSION}",
         "--build-arg",
         "PIP_EXTRAS=",
         str(_AGENT_IMAGE_DIR),
@@ -218,11 +217,11 @@ def test_agent_image_versions_come_from_the_agent_api() -> None:
 
     build_argv, _, _ = runner.calls[0]
     assert "--build-arg" in build_argv
-    assert f"NODE_VERSION={agent_api.NODE_VERSION}" in build_argv
-    for provider, version in agent_api.CLI_VERSIONS.items():
+    assert f"NODE_VERSION={NODE_VERSION}" in build_argv
+    for provider, version in CLI_VERSIONS.items():
         assert f"{provider.upper()}_VERSION={version}" in build_argv
-    assert f"RUST_VERSION={agent_api.RUST_TOOLCHAIN_VERSION}" in build_argv
-    assert f"GO_VERSION={agent_api.GO_TOOLCHAIN_VERSION}" in build_argv
+    assert f"RUST_VERSION={RUST_TOOLCHAIN_VERSION}" in build_argv
+    assert f"GO_VERSION={GO_TOOLCHAIN_VERSION}" in build_argv
 
 
 def test_agent_image_rejects_nonpositive_timeout() -> None:
@@ -244,7 +243,7 @@ def test_agent_dockerfile_ships_as_package_data() -> None:
 def test_agent_dockerfile_has_one_arg_per_cli_version() -> None:
     text = _AGENT_DOCKERFILE.read_text(encoding="utf-8")
     declared_args = set(re.findall(r"(?m)^ARG\s+([A-Z0-9_]+)", text))
-    expected_args = {f"{provider.upper()}_VERSION" for provider in agent_api.CLI_VERSIONS}
+    expected_args = {f"{provider.upper()}_VERSION" for provider in CLI_VERSIONS}
     assert expected_args <= declared_args
 
 

@@ -1,3 +1,5 @@
+"""Public contract tests for task-image construction."""
+
 from __future__ import annotations
 
 import subprocess
