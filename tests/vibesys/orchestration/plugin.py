@@ -32,6 +32,7 @@ def capability_plugin(
     *,
     agents: tuple[AgentRole, ...] = (),
     state: type[BaseModel] | None = None,
+    memory_paths: tuple[str, ...] = (),
 ) -> OrchestrationPlugin:
     """Declare exactly the capabilities a direct product-host test needs."""
     return OrchestrationPlugin(
@@ -40,6 +41,7 @@ def capability_plugin(
         options=EmptyOptions,
         orchestrate=_not_orchestrated,
         state=state,
+        memory_paths=memory_paths,
     )
 
 

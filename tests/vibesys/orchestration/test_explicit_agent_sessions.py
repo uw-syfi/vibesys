@@ -17,7 +17,6 @@ from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
 from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.request import RunRequest
@@ -166,7 +165,6 @@ def _run_with_clients(
                 agent_backend=configuration.agent_backend,
             ),
             integration,
-            setup=RunSetup(),
             agent_client_factory=configuration.client_factory or create_client,
             agent_tool_bindings=configuration.tool_bindings,
             plugin=plugin,

@@ -18,7 +18,6 @@ from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleState
-from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -175,7 +174,6 @@ def execute(
         config_version=plugin.config_version,
         options=configured.model_dump(mode="json"),
     )
-    prepared = built_in_orchestrations().resolve(plugin.id).prepare_plugin(descriptor)
     request = RunRequest(
         project_root=project_root,
         orchestration=descriptor,
@@ -202,12 +200,11 @@ def execute(
             async with open_product_run_host(
                 request,
                 integration,
-                setup=prepared.setup,
                 agent_client_factory=agent_client_factory(clients),
                 backend_factory=lambda *_args, **_kwargs: _ProfileAttributionBackend(),
                 plugin=plugin,
             ) as host:
-                status = await plugin.orchestrate(host, prepared.options)
+                status = await plugin.orchestrate(host, configured)
                 return status, host.run_id, host.workspaces.root.path
         finally:
             if unsubscribe is not None:

@@ -19,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vs_project.api import OrchestrationDescriptor
+
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
 
@@ -709,6 +711,14 @@ class PluginProjection(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class OrchestrationResumeDecision:
+    """A plugin-approved descriptor update and its workspace precondition."""
+
+    descriptor: OrchestrationDescriptor | None
+    requires_clean_workspace: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestrationPlugin:
     """One validated orchestration and every policy value it owns.
 
@@ -723,6 +733,15 @@ class OrchestrationPlugin:
     config_version: int = 1
     state: type[BaseModel] | None = None
     project: Callable[[BaseModel], PluginProjection] | None = None
+    resume_policy: (
+        Callable[
+            [OrchestrationDescriptor, OrchestrationDescriptor],
+            OrchestrationResumeDecision,
+        ]
+        | None
+    ) = None
+    memory_paths: tuple[str, ...] = ()
+    project_max_rounds: Callable[[BaseModel], int | None] | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate role IDs before any run resources open."""

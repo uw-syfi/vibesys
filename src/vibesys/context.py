@@ -36,7 +36,6 @@ from vibesys.events import (
     EventStatus,
     ExperimentsChangedData,
 )
-from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.request import RunRequest
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
@@ -96,7 +95,7 @@ from vs_project.api import (
     RunLogger,
     generate_run_id,
 )
-from vs_runtime.api import boot_trace
+from vs_runtime.api import OrchestrationResumeDecision, boot_trace
 from vs_runtime.api.infrastructure import (
     MultiSlotRoundTransactionCoordinator,
     ProjectMaterializer,
@@ -152,36 +151,6 @@ def _trusted_evaluation_plan(
         framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
         benchmark_contract=contract,
     )
-
-
-@dataclass(frozen=True, slots=True)
-class RunStartHints:
-    """Optional policy-owned budget and agent roles shown when a run starts."""
-
-    max_rounds: int | None = None
-    expected_roles: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class RunSetup:
-    """Policy-owned facts needed before the shared run context can open."""
-
-    resume_policy: (
-        Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
-        | None
-    ) = None
-    start_hints: RunStartHints | None = None
-    memory_paths: tuple[str, ...] = ()
-    """Workspace-relative paths the strategy writes agent memory into.
-
-    The host preserves these across ``workspaces.adopt``/``restore``/``transaction``
-    so a rollback never destroys progress notes written since the revision
-    being restored to. The one exception is explicit-session workspace
-    isolation for read-only roles: it passes ``preserve_memory=False``,
-    so a stray write a read-only role was not authorized to make is fully
-    reverted even when it lands inside a declared-memory path, instead of
-    surviving the restore and then failing the post-restore isolation check.
-    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,13 +329,16 @@ def _round_transaction_for_state(
 
 def open_run_resources(
     request: RunRequest,
-    setup: RunSetup,
     integration: LocalRunIntegration,
     *,
+    resume_policy: (
+        Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
+        | None
+    ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
-    """Open the one project context from a canonical request and policy setup.
+    """Open the one project context from a canonical request.
 
     ``backend_factory`` overrides how the compute backend is constructed
     (default: ``vs_sandbox.api.create_compute_backend``); a test injects
@@ -378,8 +350,8 @@ def open_run_resources(
         return _assemble_run_resources(
             teardown_stack=teardown_stack,
             request=request,
-            setup=setup,
             integration=integration,
+            resume_policy=resume_policy,
             state_binding=state_binding,
             backend_factory=backend_factory,
         )
@@ -405,8 +377,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     *,
     teardown_stack: ExitStack,
     request: RunRequest,
-    setup: RunSetup,
     integration: LocalRunIntegration,
+    resume_policy: (
+        Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
+        | None
+    ) = None,
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
@@ -429,7 +404,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     objective = request.objective or bundle.objective
     existing = request.resume is not None
     orchestration_descriptor = request.orchestration
-    orchestration_resume = setup.resume_policy or _exact_resume_descriptor
+    orchestration_resume = resume_policy or _exact_resume_descriptor
     trusted_input_baseline = None
     debug = request.debug
     profiler_kind = request.profiler_kind

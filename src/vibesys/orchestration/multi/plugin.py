@@ -1,11 +1,15 @@
 """Explicit declarations of the multi-agent orchestration presets."""
 
+from functools import partial
+
 from pydantic import BaseModel
 
 from vibesys.orchestration.hypothesis.readmodel import project_hypothesis_state
+from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestration.multi.agents import AGENTS
 from vibesys.orchestration.multi.models import MultiOptions, MultiState, ProfileGuidedMultiOptions
 from vibesys.orchestration.multi.orchestration import orchestrate, orchestrate_profile_guided
+from vibesys.orchestration.resume import compare_round_budget, project_round_budget
 from vs_runtime.api import OrchestrationPlugin, PluginProjection
 
 
@@ -21,6 +25,13 @@ PLUGIN = OrchestrationPlugin(
     state=MultiState,
     orchestrate=orchestrate,
     project=_project,
+    resume_policy=partial(
+        compare_round_budget,
+        plugin_id="multi-agent",
+        options_type=MultiOptions,
+    ),
+    memory_paths=declared_memory_paths(),
+    project_max_rounds=partial(project_round_budget, options_type=MultiOptions),
 )
 
 PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
@@ -30,6 +41,16 @@ PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
     state=MultiState,
     orchestrate=orchestrate_profile_guided,
     project=_project,
+    resume_policy=partial(
+        compare_round_budget,
+        plugin_id="profile-guided-multi-agent",
+        options_type=ProfileGuidedMultiOptions,
+    ),
+    memory_paths=declared_memory_paths(),
+    project_max_rounds=partial(
+        project_round_budget,
+        options_type=ProfileGuidedMultiOptions,
+    ),
 )
 
 __all__ = ["PLUGIN", "PROFILE_GUIDED_PLUGIN"]

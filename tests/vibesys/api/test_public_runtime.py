@@ -19,7 +19,7 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.context import RunSetup, borrow_run_agent_environment
+from vibesys.context import borrow_run_agent_environment
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import SkyPilotEnvironment
@@ -141,9 +141,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root), integration, plugin=_PLUGIN, setup=RunSetup()
-        ) as ctx:
+        async with open_product_run_host(_request(project_root), integration, plugin=_PLUGIN) as ctx:
             root = ctx.workspaces.root
             original = root.revision
             assert original is not None
@@ -181,7 +179,6 @@ def test_product_host_closes_resources_when_capability_assembly_fails(tmp_path: 
                 _request(project_root),
                 integration,
                 plugin=_PLUGIN,
-                setup=RunSetup(),
                 backend_factory=backend_factory,
                 agent_tool_bindings=_FailingToolBindings(),
             ):

@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibesys.api import RunStopped, create_session
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.orchestration.request import ResumeRef, RunRequest
@@ -108,9 +107,7 @@ def test_plugin_state_is_deep_copied_persisted_and_published(tmp_path: Path) -> 
     )
 
     async def exercise() -> str:
-        async with open_product_run_host(
-            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
-        ) as run:
+        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
             assert await run.state.load(_State) is None
             original = _State(values=[1])
             await run.state.commit(original, label="state only")
@@ -165,7 +162,6 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
             async with open_product_run_host(
                 _request(project_root),
                 integration,
-                setup=RunSetup(),
                 plugin=PLUGIN,
                 projector=_FailingProjector(),
             ) as run:
@@ -182,9 +178,7 @@ def test_observer_failure_is_after_durability_and_restart_can_commit(tmp_path: P
             update={"resume": ResumeRef(run_id=run_id), "exp_name": None}
         )
         try:
-            async with open_product_run_host(
-                request, integration, setup=RunSetup(), plugin=PLUGIN
-            ) as run:
+            async with open_product_run_host(request, integration, plugin=PLUGIN) as run:
                 assert await run.state.load(_State) == _State(values=[1])
                 await run.state.commit(_State(values=[2]))
                 assert await run.state.load(_State) == _State(values=[2])
@@ -222,9 +216,7 @@ def test_state_only_excludes_candidate_edits_and_workspace_commit_includes_them(
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
-        ) as run:
+        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
             root = run.workspaces.root
             (root.path / "queue.py").write_text("VALUE = 2\n")
             await run.state.commit(_State(values=[1]), label="state only")
@@ -246,9 +238,7 @@ def test_workspace_restore_leaves_candidate_checkpoint_index_clean(tmp_path: Pat
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
-        ) as run:
+        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
             root = run.workspaces.root
             candidate_file = root.path / "queue.py"
             candidate_file.write_text("VALUE = 2\n")
@@ -283,9 +273,7 @@ def test_real_state_adapter_rejects_wrong_models_and_non_root_workspaces(tmp_pat
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
-        ) as run:
+        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
             with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
                 await run.state.load(_OtherState)
             with pytest.raises(StateModelError, match="requires _State, got _ChildState"):
@@ -316,7 +304,7 @@ def test_run_context_rejects_a_plugin_other_than_the_selected_orchestration(
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(request, integration, setup=RunSetup(), plugin=PLUGIN):
+        async with open_product_run_host(request, integration, plugin=PLUGIN):
             pytest.fail("mismatched plugin was accepted")
 
     try:
@@ -332,9 +320,7 @@ def test_real_control_checkpoint_lands_a_pending_stop(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
-        ) as run:
+        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
             await run.control.checkpoint()
             integration.control.request_stop()
             with pytest.raises(RunStopped):
@@ -352,9 +338,7 @@ def test_real_run_facts_map_prepared_input_and_environment_once(tmp_path: Path) 
     integration = LocalRunIntegration()
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root), integration, setup=RunSetup(), plugin=PLUGIN
-        ) as run:
+        async with open_product_run_host(_request(project_root), integration, plugin=PLUGIN) as run:
             facts = run.facts
             assert facts.domain_id == "generic"
             assert facts.environment_notes == ""

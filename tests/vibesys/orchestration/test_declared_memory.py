@@ -1,8 +1,8 @@
-"""``RunSetup.memory_paths`` is preserved automatically by the host.
+"""Plugin-declared memory paths are preserved automatically by the host.
 
 A strategy used to pass ``preserve_paths=self._memory_paths()`` on every
 ``workspace.restore()`` call (rollback, isolation revert, final-candidate
-selection). It now declares its memory paths once on ``RunSetup``, and the
+selection). It now declares its memory paths once on its plugin, and the
 host (``_Workspaces._with_declared_memory``) merges them into every
 ``adopt``/``restore`` call automatically, whether or not the
 caller names them explicitly.
@@ -29,7 +29,6 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.context import RunSetup
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 
@@ -39,7 +38,7 @@ if TYPE_CHECKING:
     import pytest
 
 
-_PLUGIN = capability_plugin("memory-preserving")
+_PLUGIN = capability_plugin("memory-preserving", memory_paths=("progress.md",))
 
 
 def _write_project(root: Path) -> None:
@@ -78,7 +77,6 @@ def _run_restore(request: RunRequest, code: str, memory: str) -> None:
             request,
             integration,
             plugin=_PLUGIN,
-            setup=RunSetup(memory_paths=("progress.md",)),
         ) as host:
             root = host.workspaces.root
             (root.path / "code.py").write_text("VALUE = 1\n")

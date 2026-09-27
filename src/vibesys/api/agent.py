@@ -45,7 +45,7 @@ def agent_run_objectives(manifest: OrchestrationRunManifest) -> tuple[str, ...] 
         return None
     if registration.state_family != "agent":
         return None
-    options = registration.prepare_plugin(manifest.orchestration).options
+    options = registration.parse_options(manifest.orchestration)
     if not isinstance(options, AgentOrchestrationOptions):
         message = f"agent orchestration {manifest.orchestration.id!r} has incompatible options"
         raise TypeError(message)

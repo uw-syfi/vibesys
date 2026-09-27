@@ -11,7 +11,6 @@ from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.issue_queue import PLUGIN, IssueQueueState
 from vibesys.orchestration.runner import run_plugin
-from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import Project
@@ -85,7 +84,6 @@ def execute(
         config_version=PLUGIN.config_version,
         options=selected.model_dump(mode="json"),
     )
-    prepared = built_in_orchestrations().resolve(PLUGIN.id).prepare_plugin(descriptor)
     request = RunRequest(
         project_root=project_root,
         orchestration=descriptor,
@@ -107,7 +105,8 @@ def execute(
             status = await run_plugin(
                 request,
                 integration,
-                prepared,
+                PLUGIN,
+                selected,
                 agent_client_factory=agent_client_factory(clients),
                 backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
                 agent_tool_bindings=AGENT_TOOL_BINDINGS,

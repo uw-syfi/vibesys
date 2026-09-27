@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from vibesys.context import RunSetup, RunStartHints
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from vs_project.api import Project
     from vs_runtime.api import OrchestrationPlugin, PluginProjection
-
-
-type PluginSetupFactory = Callable[[BaseModel], RunSetup]
 
 
 class OrchestrationProjector(Protocol):
@@ -93,13 +87,12 @@ class OrchestrationRegistration:
     """The runtime plugin and optional read projection for one stable ID."""
 
     plugin: OrchestrationPlugin
-    plugin_setup: PluginSetupFactory | None = None
     projector: OrchestrationProjector | None = None
     portable_namespaces: tuple[str, ...] = ()
     state_family: str | None = None
 
-    def prepare_plugin(self, descriptor: OrchestrationDescriptor) -> PreparedPlugin:
-        """Validate and bind one plugin descriptor before run resources open."""
+    def parse_options(self, descriptor: OrchestrationDescriptor) -> BaseModel:
+        """Validate one descriptor and return the plugin's typed options."""
         plugin = self.plugin
         if descriptor.id != plugin.id:
             message = (
@@ -112,28 +105,10 @@ class OrchestrationRegistration:
                 f"{plugin.config_version}, got {descriptor.config_version}"
             )
             raise ValueError(message)
-        options = plugin.options.model_validate_json(
+        return plugin.options.model_validate_json(
             json.dumps(descriptor.options),
             strict=True,
         )
-        setup = self.plugin_setup(options) if self.plugin_setup is not None else RunSetup()
-        setup = replace(
-            setup,
-            start_hints=replace(
-                setup.start_hints or RunStartHints(),
-                expected_roles=tuple(role.id for role in plugin.agents),
-            ),
-        )
-        return PreparedPlugin(plugin=plugin, options=options, setup=setup)
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedPlugin:
-    """One descriptor-validated runtime plugin and its VibeSys host setup."""
-
-    plugin: OrchestrationPlugin
-    options: BaseModel
-    setup: RunSetup
 
 
 def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
@@ -167,7 +142,6 @@ class OrchestrationRegistry:
         self,
         plugin: OrchestrationPlugin,
         *,
-        setup: PluginSetupFactory | None = None,
         state_family: str | None = None,
     ) -> None:
         """Register a runtime plugin in the product catalog."""
@@ -181,7 +155,6 @@ class OrchestrationRegistry:
             raise ValueError(msg)
         self._registrations[plugin.id] = OrchestrationRegistration(
             plugin=plugin,
-            plugin_setup=setup,
             projector=_PluginProjector(plugin) if plugin.project is not None else None,
             portable_namespaces=(plugin.id,) if plugin.state is not None else (),
             state_family=state_family,

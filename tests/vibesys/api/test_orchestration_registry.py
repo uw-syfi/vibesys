@@ -21,9 +21,7 @@ from vibesys.api import (
     open_run_store,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
-from vibesys.context import RunSetup, RunStartHints
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
-from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.models import EvolveOptions
@@ -48,6 +46,7 @@ from vs_project.api import OrchestrationDescriptor, Project
 from vs_runtime.api import (
     AgentRole,
     OrchestrationPlugin,
+    OrchestrationResumeDecision,
     PluginProjection,
     ProjectedRound,
     RunHost,
@@ -113,6 +112,16 @@ def _project_plugin(state: BaseModel) -> PluginProjection:
     )
 
 
+def _accept_resume(
+    _recorded: OrchestrationDescriptor, _requested: OrchestrationDescriptor
+) -> OrchestrationResumeDecision:
+    return OrchestrationResumeDecision(descriptor=None)
+
+
+def _project_max_rounds(options: BaseModel) -> int:
+    return _PluginOptions.model_validate(options).max_rounds
+
+
 _SETUP_PLUGIN = OrchestrationPlugin(
     id="setup-plugin",
     agents=(AgentRole(id="worker", system_prompt="Complete the assigned work."),),
@@ -120,22 +129,10 @@ _SETUP_PLUGIN = OrchestrationPlugin(
     orchestrate=_run_plugin,
     state=_PluginState,
     project=_project_plugin,
+    resume_policy=_accept_resume,
+    memory_paths=(".vibesys-memory/progress.md",),
+    project_max_rounds=_project_max_rounds,
 )
-
-
-def _accept_resume(
-    _recorded: OrchestrationDescriptor, _requested: OrchestrationDescriptor
-) -> OrchestrationResumeDecision:
-    return OrchestrationResumeDecision(descriptor=None)
-
-
-def _plugin_setup(options: BaseModel) -> RunSetup:
-    parsed = _PluginOptions.model_validate(options)
-    return RunSetup(
-        resume_policy=_accept_resume,
-        start_hints=RunStartHints(max_rounds=parsed.max_rounds),
-        memory_paths=(".vibesys-memory/progress.md",),
-    )
 
 
 def _custom_request(tmp_path: Path) -> RunRequest:
@@ -231,7 +228,7 @@ def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Pa
     assert result.loop == "single-agent"
 
 
-def test_builtin_plugin_setup_is_private_product_wiring() -> None:
+def test_builtin_plugin_metadata_declares_product_policy() -> None:
     registry = built_in_orchestrations()
     agent_options: dict[str, JsonValue] = {
         "interface": "service",
@@ -247,15 +244,15 @@ def test_builtin_plugin_setup_is_private_product_wiring() -> None:
     )
     for descriptor in descriptors:
         registration = registry.resolve(descriptor.id)
-        prepared = registration.prepare_plugin(descriptor)
-        assert isinstance(prepared.options, AgentOrchestrationOptions)
-        assert prepared.plugin.id == descriptor.id
+        options = registration.parse_options(descriptor)
+        assert isinstance(options, AgentOrchestrationOptions)
+        assert registration.plugin.id == descriptor.id
         assert descriptor.options == agent_options
-        assert prepared.options.max_rounds == descriptor.options["max_rounds"]
-        assert prepared.setup.start_hints is not None
-        assert prepared.setup.start_hints.max_rounds == 4
-        assert prepared.setup.memory_paths == declared_memory_paths()
-        assert prepared.setup.resume_policy is not None
+        assert options.max_rounds == descriptor.options["max_rounds"]
+        assert registration.plugin.project_max_rounds is not None
+        assert registration.plugin.project_max_rounds(options) == 4
+        assert registration.plugin.memory_paths == declared_memory_paths()
+        assert registration.plugin.resume_policy is not None
 
     plain = OrchestrationDescriptor(
         id="plain",
@@ -267,14 +264,15 @@ def test_builtin_plugin_setup_is_private_product_wiring() -> None:
             "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
         },
     )
-    prepared_plain = registry.resolve("plain").prepare_plugin(plain)
-    assert isinstance(prepared_plain.options, IssueQueueOptions)
+    registration = registry.resolve("plain")
+    plain_options = registration.parse_options(plain)
+    assert isinstance(plain_options, IssueQueueOptions)
     assert plain.options["load_levels"] == [{"rate": 4, "duration": 20, "max_tokens": 64}]
-    assert prepared_plain.options.max_rounds == plain.options["max_rounds"]
-    assert prepared_plain.setup.start_hints is not None
-    assert prepared_plain.setup.start_hints.max_rounds == 5
-    assert prepared_plain.setup.memory_paths == ()
-    assert prepared_plain.setup.resume_policy is not None
+    assert plain_options.max_rounds == plain.options["max_rounds"]
+    assert registration.plugin.project_max_rounds is not None
+    assert registration.plugin.project_max_rounds(plain_options) == 5
+    assert registration.plugin.memory_paths == ()
+    assert registration.plugin.resume_policy is not None
 
 
 @pytest.mark.parametrize(
@@ -328,7 +326,7 @@ def test_builtin_plugin_setup_is_private_product_wiring() -> None:
         ),
     ],
 )
-def test_builtin_plugin_preparation_preserves_strict_tuples_from_persisted_json(
+def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
     plugin_id: str,
     options: dict[str, JsonValue],
     expected_tuple: tuple[str | int, ...],
@@ -339,20 +337,21 @@ def test_builtin_plugin_preparation_preserves_strict_tuples_from_persisted_json(
         options=options,
     )
 
-    prepared = built_in_orchestrations().resolve(descriptor.id).prepare_plugin(descriptor)
+    registration = built_in_orchestrations().resolve(descriptor.id)
+    parsed = registration.parse_options(descriptor)
 
     if plugin_id == "multi-agent":
-        assert isinstance(prepared.options, MultiOptions)
-        observed = prepared.options.operator_constraints
+        assert isinstance(parsed, MultiOptions)
+        observed = parsed.operator_constraints
     elif plugin_id == "plain":
-        assert isinstance(prepared.options, IssueQueueOptions)
-        assert prepared.options.load_levels is not None
-        observed = tuple(level.rate for level in prepared.options.load_levels)
+        assert isinstance(parsed, IssueQueueOptions)
+        assert parsed.load_levels is not None
+        observed = tuple(level.rate for level in parsed.load_levels)
     else:
-        assert isinstance(prepared.options, EvolveOptions)
-        observed = tuple(item.name for item in prepared.options.metric_space.objectives)
+        assert isinstance(parsed, EvolveOptions)
+        observed = tuple(item.name for item in parsed.metric_space.objectives)
     assert observed == expected_tuple
-    compare = prepared.setup.resume_policy
+    compare = registration.plugin.resume_policy
     assert compare is not None
     assert compare(descriptor, descriptor).descriptor is None
 
@@ -369,8 +368,7 @@ def test_builtin_plugins_allow_only_increased_total_budget_on_resume() -> None:
             "load_levels": [{"rate": 4, "duration": 20, "max_tokens": 64}],
         },
     )
-    prepared = registry.resolve(recorded.id).prepare_plugin(recorded)
-    compare = prepared.setup.resume_policy
+    compare = registry.resolve(recorded.id).plugin.resume_policy
     assert compare is not None
 
     increased = recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 3}})
@@ -412,11 +410,11 @@ def test_evolve_plugin_resume_allows_only_increased_generation_budget() -> None:
         config_version=1,
         options=options,
     )
-    prepared = registry.resolve("evolve").prepare_plugin(recorded)
-    compare = prepared.setup.resume_policy
+    plugin = registry.resolve("evolve").plugin
+    compare = plugin.resume_policy
     assert compare is not None
-    assert prepared.setup.start_hints is not None
-    assert prepared.setup.start_hints.max_rounds == 2
+    assert plugin.project_max_rounds is not None
+    assert plugin.project_max_rounds(plugin.options.model_validate(recorded.options)) == 2
 
     assert compare(recorded, recorded).descriptor is None
     increased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 3}})
@@ -448,7 +446,7 @@ def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
             "memory_layout": "directories",
         },
     )
-    compare = registry.resolve(recorded.id).prepare_plugin(recorded).setup.resume_policy
+    compare = registry.resolve(recorded.id).plugin.resume_policy
     assert compare is not None
 
     changed = recorded.model_copy(
@@ -559,7 +557,7 @@ def test_constructor_rejects_invalid_descriptor_before_run_resources(tmp_path: P
     assert not (request.project_root / ".vibesys").exists()
 
 
-def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
+def test_public_session_applies_registered_plugin_metadata(tmp_path: Path) -> None:
     request = _custom_request(tmp_path).model_copy(
         update={
             "orchestration": OrchestrationDescriptor(
@@ -570,7 +568,7 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
         }
     )
     registry = OrchestrationRegistry()
-    registry.register_plugin(_SETUP_PLUGIN, setup=_plugin_setup)
+    registry.register_plugin(_SETUP_PLUGIN)
     events: list[CoreEvent] = []
     committed: list[RunView] = []
 
@@ -629,12 +627,13 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
         result.run_id
     )
     assert historical.model_copy(update={"status": RunStatus.ACTIVE}) == committed[-1]
-    prepared = registry.resolve(_SETUP_PLUGIN.id).prepare_plugin(request.orchestration)
-    assert prepared.setup is not None
-    assert prepared.setup.resume_policy is _accept_resume
-    assert prepared.setup.start_hints is not None
-    assert prepared.setup.start_hints.expected_roles == ("worker",)
-    assert prepared.setup.memory_paths == (".vibesys-memory/progress.md",)
+    registration = registry.resolve(_SETUP_PLUGIN.id)
+    parsed = registration.parse_options(request.orchestration)
+    assert registration.plugin.resume_policy is _accept_resume
+    assert registration.plugin.project_max_rounds is not None
+    assert registration.plugin.project_max_rounds(parsed) == 3
+    assert tuple(role.id for role in registration.plugin.agents) == ("worker",)
+    assert registration.plugin.memory_paths == (".vibesys-memory/progress.md",)
 
 
 def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path: Path) -> None:
@@ -648,7 +647,7 @@ def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path
         }
     )
     registry = OrchestrationRegistry()
-    registry.register_plugin(_SETUP_PLUGIN, setup=_plugin_setup)
+    registry.register_plugin(_SETUP_PLUGIN)
 
     with pytest.raises(ValidationError, match="unknown"):
         create_session(request, sink=_discard_event, registry=registry)
@@ -656,24 +655,13 @@ def test_registered_plugin_rejects_invalid_options_before_run_resources(tmp_path
     assert not (request.project_root / ".vibesys").exists()
 
 
-def test_registered_plugin_without_setup_derives_roles_from_declaration(tmp_path: Path) -> None:
-    request = _custom_request(tmp_path).model_copy(
-        update={
-            "orchestration": OrchestrationDescriptor(
-                id=_SETUP_PLUGIN.id,
-                config_version=1,
-                options={"max_rounds": 1},
-            )
-        }
-    )
+def test_registered_plugin_derives_roles_from_declaration() -> None:
     registry = OrchestrationRegistry()
     registry.register_plugin(_SETUP_PLUGIN)
 
-    prepared = registry.resolve(_SETUP_PLUGIN.id).prepare_plugin(request.orchestration)
+    registration = registry.resolve(_SETUP_PLUGIN.id)
 
-    assert prepared.setup.start_hints is not None
-    assert prepared.setup.start_hints.max_rounds is None
-    assert prepared.setup.start_hints.expected_roles == ("worker",)
+    assert tuple(role.id for role in registration.plugin.agents) == ("worker",)
 
 
 def test_plugin_registration_derives_projection_and_portable_state_only_when_declared() -> None:

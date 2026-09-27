@@ -12,7 +12,6 @@ from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.config import Config
 from vibesys.context import (
-    RunSetup,
     WorkspaceResourceSpec,
     _profiler_support_extra,
     _RunResources,
@@ -215,10 +214,7 @@ def _create_context(
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
     )
-    plugin_setup = built_in_orchestrations().resolve(descriptor.id).prepare_plugin(descriptor).setup
-    setup = RunSetup(
-        resume_policy=plugin_setup.resume_policy,
-    )
+    plugin = built_in_orchestrations().resolve(descriptor.id).plugin
     with patch(
         "vibesys.context.resolve_domain",
         return_value=SimpleNamespace(
@@ -227,8 +223,8 @@ def _create_context(
     ):
         return open_run_resources(
             request,
-            setup,
             options.get("integration") or LocalRunIntegration(),
+            resume_policy=plugin.resume_policy,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
         )
 

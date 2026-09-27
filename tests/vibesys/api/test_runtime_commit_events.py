@@ -20,7 +20,6 @@ from pydantic import BaseModel
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.orchestration.request import ResumeRef, RunRequest
@@ -115,7 +114,6 @@ def test_commit_derives_round_finished_and_experiments_changed(tmp_path: Path) -
         async with open_product_run_host(
             _request(project_root),
             integration,
-            setup=RunSetup(),
             projector=_FakeProjector(),
             plugin=_PLUGIN,
         ) as ctx:
@@ -164,7 +162,6 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
             async with open_product_run_host(
                 _request(project_root),
                 integration,
-                setup=RunSetup(),
                 projector=_FakeProjector(),
                 plugin=_PLUGIN,
             ) as ctx:
@@ -183,7 +180,6 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
         async with open_product_run_host(
             _request(project_root, resume=ResumeRef(run_id=run_id)),
             resumed_integration,
-            setup=RunSetup(),
             projector=_FakeProjector(),
             plugin=_PLUGIN,
         ) as ctx:

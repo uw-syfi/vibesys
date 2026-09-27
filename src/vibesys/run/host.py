@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext
-from vibesys.context import RunSetup, _StateBinding, open_run_resources
+from vibesys.context import _StateBinding, open_run_resources
 from vibesys.orchestration.agents import _Agents, _AgentToolResolver
 from vibesys.orchestration.commands import _Commands
 from vibesys.orchestration.control import _RunControl
@@ -44,7 +44,6 @@ if TYPE_CHECKING:
 class _ProductHostFactory:
     request: RunRequest
     integration: LocalRunIntegration
-    setup: RunSetup
     open_agent_environment: Callable[..., AgentEnvironment] | None
     projector: OrchestrationProjector | None
     agent_client_factory: Callable[..., AgentClientProtocol] | None
@@ -64,8 +63,8 @@ class _ProductHostFactory:
         state_namespace = plugin.id if plugin.state is not None else None
         resources = open_run_resources(
             self.request,
-            self.setup,
             self.integration,
+            resume_policy=plugin.resume_policy,
             state_binding=(
                 _StateBinding(state_namespace, plugin.state)
                 if state_namespace is not None and plugin.state is not None
@@ -107,7 +106,7 @@ class _ProductHostFactory:
             WorkspaceResourceProvider(
                 resources,
                 self.request,
-                self.setup.memory_paths,
+                self.plugin.memory_paths,
                 self.integration.events,
                 close_sessions,
             )
@@ -203,7 +202,6 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     integration: LocalRunIntegration,
     *,
     plugin: OrchestrationPlugin,
-    setup: RunSetup | None = None,
     open_agent_environment: Callable[..., AgentEnvironment] | None = None,
     projector: OrchestrationProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
@@ -211,12 +209,9 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
 ) -> AsyncIterator[RunHost]:
     """Open one product-composed host under the reusable runtime lifecycle."""
-    if setup is None:
-        setup = RunSetup()
     factory = _ProductHostFactory(
         request=request,
         integration=integration,
-        setup=setup,
         open_agent_environment=open_agent_environment,
         projector=projector,
         agent_client_factory=agent_client_factory,

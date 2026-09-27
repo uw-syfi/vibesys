@@ -88,7 +88,7 @@ def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
     from vibesys.plugin_catalog import built_in_orchestrations  # noqa: PLC0415
 
     registration = built_in_orchestrations().resolve(descriptor.id)
-    registration.prepare_plugin(descriptor)
+    registration.parse_options(descriptor)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

@@ -10,7 +10,6 @@ from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.request import RunRequest
 from vibesys.profilers import ProfilerKind
@@ -72,7 +71,6 @@ def _run[T](
             _request(project_root, skill_root),
             integration,
             plugin=_PLUGIN,
-            setup=RunSetup(),
         ) as ctx:
             return await body(ctx)
 

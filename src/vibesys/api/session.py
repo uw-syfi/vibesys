@@ -179,7 +179,7 @@ class _LocalRunSession:
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
-        self._prepared_plugin = self._registration.prepare_plugin(request.orchestration)
+        self._plugin_options = self._registration.parse_options(request.orchestration)
         self._agent_client_factory = (
             partial(build_agent_client, stub_response_factory=response_factory)
             if response_factory is not None
@@ -308,8 +308,11 @@ class _LocalRunSession:
 
     async def _run(self) -> RunResult:
         request = self._request
-        prepared_plugin = self._prepared_plugin
-        hints = prepared_plugin.setup.start_hints
+        plugin = self._registration.plugin
+        options = self._plugin_options
+        max_rounds = (
+            plugin.project_max_rounds(options) if plugin.project_max_rounds is not None else None
+        )
         try:
             self._integration.events.emit(
                 CoreEventType.RUN_STARTED,
@@ -317,14 +320,15 @@ class _LocalRunSession:
                 data=RunStartedData(
                     outer_loop=request.orchestration_id,
                     input=str(request.input_bundle.root),
-                    max_rounds=hints.max_rounds if hints is not None else None,
-                    expected_roles=hints.expected_roles if hints is not None else (),
+                    max_rounds=max_rounds,
+                    expected_roles=tuple(role.id for role in plugin.agents),
                 ),
             )
             outcome = await run_plugin(
                 request,
                 self._integration,
-                prepared_plugin,
+                plugin,
+                options,
                 open_agent_environment=self.open_agent_environment,
                 projector=self._registration.projector,
                 agent_client_factory=self._agent_client_factory,

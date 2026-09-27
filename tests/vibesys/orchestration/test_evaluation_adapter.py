@@ -11,7 +11,6 @@ from tests.vibesys.orchestration.plugin import capability_plugin
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, EventStatus, GateFinishedData, GateStartedData
 from vibesys.orchestration.request import RunRequest
@@ -107,7 +106,6 @@ def _run(
             _request(project_root, agent_backend=agent_backend),
             integration,
             plugin=_PLUGIN,
-            setup=RunSetup(),
         ) as ctx:
             return await body(ctx)
 

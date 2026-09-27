@@ -17,7 +17,6 @@ from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -106,7 +105,6 @@ def execute(
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-    prepared = built_in_orchestrations().resolve(PLUGIN.id).prepare_plugin(request.orchestration)
 
     async def run() -> tuple[RunStatus, str, Path]:
         integration = LocalRunIntegration()
@@ -114,7 +112,6 @@ def execute(
             async with open_product_run_host(
                 request,
                 integration,
-                setup=prepared.setup,
                 agent_client_factory=agent_client_factory(clients),
                 backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
                 plugin=PLUGIN,

@@ -9,10 +9,10 @@ memory locations support two backward-compatible layouts:
   - ``roadmap/index.md`` + ``progress/round-NNNN.md`` -- a layout that stays
     scannable when a run grows to hundreds of rounds.
 
-A strategy declares these paths once, through ``RunSetup.memory_paths``
+A strategy declares these paths once, through ``OrchestrationPlugin.memory_paths``
 (:func:`declared_memory_paths`); the host then preserves them across
 ``workspaces.adopt``/``restore``/``transaction`` (see
-``vibesys.context.RunSetup.memory_paths``). This module owns creating and
+``vs_runtime.api.OrchestrationPlugin.memory_paths``). This module owns creating and
 writing to them: strategies call these functions directly rather than
 hand-rolling file I/O.
 """
@@ -92,7 +92,7 @@ def declared_memory_paths() -> tuple[str, ...]:
     built by joining fixed names under the workspace root), so resolving it
     against ``Path(".")`` and stringifying gives the same paths a strategy
     would compute per-run with ``path.relative_to(workspace_root)``. This is
-    the form ``RunSetup.memory_paths`` declares once, before the run's
+    the form ``OrchestrationPlugin.memory_paths`` declares once, before the run's
     workspace path is known.
     """
     return tuple(str(path) for path in framework_memory_paths(Path()))

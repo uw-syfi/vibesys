@@ -16,7 +16,6 @@ from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.orchestration.evolve import PLUGIN
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.profilers import ProfilerKind
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
@@ -98,7 +97,6 @@ def execute(
         config_version=PLUGIN.config_version,
         options=selected.model_dump(mode="json"),
     )
-    prepared = built_in_orchestrations().resolve(PLUGIN.id).prepare_plugin(descriptor)
     request = RunRequest(
         project_root=project_root,
         orchestration=descriptor,
@@ -120,12 +118,11 @@ def execute(
             async with open_product_run_host(
                 request,
                 integration,
-                setup=prepared.setup,
                 agent_client_factory=agent_client_factory(clients),
                 backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
                 plugin=PLUGIN,
             ) as host:
-                status = await PLUGIN.orchestrate(host, prepared.options)
+                status = await PLUGIN.orchestrate(host, selected)
                 return status, host.run_id, host.workspaces.root.path
         finally:
             integration.close()
