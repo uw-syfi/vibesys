@@ -1,5 +1,5 @@
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
-import {loadReplayFixture} from './replay.js';
+import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
 
@@ -19,10 +19,21 @@ export function App({
     session?.getState ?? (() => EMPTY_SESSION_STATE),
     session?.getState ?? (() => EMPTY_SESSION_STATE),
   );
+  const [replayError, setReplayError] = useState<Error | null>(null);
+  const [replayAttempt, setReplayAttempt] = useState(0);
   useEffect(() => {
-    if (session === undefined) void loadReplayFixture(store).catch(() => undefined);
-    else void session.start();
-  }, [session, store]);
+    if (session !== undefined) {
+      void session.start();
+      return;
+    }
+    const abort = new AbortController();
+    setReplayError(null);
+    const replayUrl = `${DEFAULT_REPLAY_FIXTURE_URL}?attempt=${replayAttempt}`;
+    void loadReplayFixture(store, replayUrl, abort.signal).catch(reason => {
+      if (!abort.signal.aborted) setReplayError(toError(reason));
+    });
+    return () => abort.abort();
+  }, [replayAttempt, session, store]);
   return (
     <main className="shell">
       <header className="header">
@@ -40,6 +51,14 @@ export function App({
           </span>
           <button type="button" onClick={() => session?.reattach()}>
             Reattach
+          </button>
+        </div>
+      )}
+      {replayError !== null && (
+        <div className="stale-banner" role="alert">
+          <span>Replay failed to load: {replayError.message}</span>
+          <button type="button" onClick={() => setReplayAttempt(attempt => attempt + 1)}>
+            Retry
           </button>
         </div>
       )}
@@ -80,6 +99,10 @@ export function App({
       </section>
     </main>
   );
+}
+
+function toError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
 }
 
 export function createDemoApp(): JSX.Element {
