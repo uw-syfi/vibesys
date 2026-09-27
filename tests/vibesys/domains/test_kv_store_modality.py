@@ -11,7 +11,7 @@ from vs_project.api import Project
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
 _SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_kv_store_is_a_registered_modality() -> None:

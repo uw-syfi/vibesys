@@ -1,4 +1,4 @@
-"""Pure agent-run policy, record, and issue-board assertions."""
+"""Pure hypothesis policy, record, and issue-board assertions."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Snapshot and size tests for final rendered agent prompts.
+"""Snapshot and size tests for final rendered multi-agent prompts.
 
 Snapshots show the complete role text after includes and domain interpolation.
 Prompt budgets cover both Codex's native structured-output path and the prose

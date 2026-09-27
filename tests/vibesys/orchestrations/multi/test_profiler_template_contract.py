@@ -1,6 +1,6 @@
 """Over-supply contract for the profiler template family.
 
-``MultiAgentTurns.profile`` (``src/vibesys/loops/multi/turns.py``) is a call site
+The multi plugin profiler turn is a call site
 that selects among ``profilers/*.j2`` by ``profiler_kind`` and renders
 whichever one gets selected with the same fixed set of kwargs — so a
 variable this call always passes but a given variant never references is
@@ -12,7 +12,7 @@ static analysis, so it also catches a key used only inside a branch this
 particular call wouldn't take).
 
 This needs no declared or derived "required" set — it only compares
-``MultiAgentTurns.profile``'s own fixed kwargs against what each template actually
+the multi profiler turn's own fixed kwargs against what each template actually
 reads. A variant with a reviewed, genuine reason to ignore one of them marks
 it with ``{# vs-prompts:unused: <var> - <reason> #}`` (mirroring
 ``FragmentFamily``'s empty-file convention for a deliberate skip); everything
@@ -43,7 +43,7 @@ from vs_prompts.api import filter_skip_marked
 _PROFILERS_DIR = PROMPTS_DIR / "shared" / "profilers"
 _AGENT_LOOP_ROOT = PROMPTS_DIR / "loops" / "multi"
 
-# Exactly the kwargs MultiAgentTurns.profile (src/vibesys/loops/multi/turns.py)
+# Exactly the kwargs passed by the multi plugin's profiler turn.
 # passes to whichever profiler template profiler_kind resolves to. Keep this
 # in sync with that call site, not with any individual template.
 _RUN_PROFILER_KWARGS: dict[str, object] = {
