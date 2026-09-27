@@ -3,11 +3,8 @@
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
-    AgentTool,
     WorkspaceAccess,
 )
-
-SHELL = AgentTool(id="shell")
 
 DESIGNER = AgentRole(
     id="orchestrator",
@@ -16,7 +13,6 @@ DESIGNER = AgentRole(
         "Keep hypothesis identifiers stable, do not update the hypothesis you are "
         "creating, and return only the requested structured response."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.LIMITED,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )
@@ -28,7 +24,6 @@ IMPLEMENTER = AgentRole(
         "self-review the result. Work only in the assigned workspace and return "
         "only the requested structured response."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.READ_WRITE,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )

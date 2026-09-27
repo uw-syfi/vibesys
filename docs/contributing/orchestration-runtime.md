@@ -32,7 +32,6 @@ from pydantic import BaseModel, ConfigDict
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
-    AgentTool,
     OrchestrationPlugin,
     Run,
     RunStatus,
@@ -55,7 +54,6 @@ class WorkerReply(BaseModel):
 WORKER = AgentRole(
     id="worker",
     system_prompt="Implement the requested change and report what you verified.",
-    tools=(AgentTool(id="shell"),),
     workspace_access=WorkspaceAccess.READ_WRITE,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )
@@ -91,9 +89,14 @@ Roles contain facts fixed for every session of that role:
 
 - `id`, which also binds the role to user-supplied model and reasoning config;
 - `system_prompt`;
-- declared tools;
+- `extra_tools`, for additive product-registered tools fixed for the role;
 - workspace access;
 - required driver capabilities.
+
+`extra_tools` is not an allowlist of every tool the agent can use. Harness-native
+shell and filesystem tools are configured by the selected runtime. Entries in
+`extra_tools` name additional tools that product composition must register and
+bind before the role can create a session.
 
 Changing evidence belongs in the message passed to `turn`, not in a rebuilt
 role. A response schema is selected per turn, so one session may request

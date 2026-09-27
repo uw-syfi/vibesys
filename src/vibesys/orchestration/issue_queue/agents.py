@@ -7,7 +7,6 @@ from vs_runtime.api import (
     WorkspaceAccess,
 )
 
-SHELL = AgentTool(id="shell")
 ISSUE_BOARD = AgentTool(id="issue-board")
 PROFILER = AgentTool(id="profiler")
 
@@ -44,7 +43,6 @@ Return only the requested structured response with analysis, metrics, evaluator_
 IMPLEMENTER = AgentRole(
     id="implementer",
     system_prompt=IMPLEMENTER_SYSTEM_PROMPT,
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.READ_WRITE,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )
@@ -52,7 +50,7 @@ IMPLEMENTER = AgentRole(
 JUDGE = AgentRole(
     id="judge",
     system_prompt=JUDGE_SYSTEM_PROMPT,
-    tools=(SHELL, ISSUE_BOARD),
+    extra_tools=(ISSUE_BOARD,),
     workspace_access=WorkspaceAccess.READ_WRITE,
     required_capabilities=frozenset({AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}),
 )
@@ -60,7 +58,7 @@ JUDGE = AgentRole(
 PERF_EVALUATOR = AgentRole(
     id="perf_eval",
     system_prompt=PERFORMANCE_SYSTEM_PROMPT,
-    tools=(SHELL, ISSUE_BOARD, PROFILER),
+    extra_tools=(ISSUE_BOARD, PROFILER),
     workspace_access=WorkspaceAccess.READ_WRITE,
     required_capabilities=frozenset({AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}),
 )

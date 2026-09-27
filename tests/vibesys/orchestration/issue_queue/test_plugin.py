@@ -147,7 +147,7 @@ def _fake_host(path: Path, script: _Script) -> FakeRun:
             benchmark_configured=True,
         ),
         responder=script.respond,
-        supported_agent_tools=_FAKE_AGENT_TOOLS,
+        supported_extra_tools=_FAKE_AGENT_TOOLS,
         supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
     )
 
@@ -155,9 +155,8 @@ def _fake_host(path: Path, script: _Script) -> FakeRun:
 def test_plugin_declares_fixed_roles_and_strict_policy_options() -> None:
     assert PLUGIN.id == "plain"
     assert PLUGIN.agents == (IMPLEMENTER, JUDGE, PERF_EVALUATOR)
-    assert [tool.id for tool in JUDGE.tools] == ["shell", "issue-board"]
-    assert [tool.id for tool in PERF_EVALUATOR.tools] == [
-        "shell",
+    assert [tool.id for tool in JUDGE.extra_tools] == ["issue-board"]
+    assert [tool.id for tool in PERF_EVALUATOR.extra_tools] == [
         "issue-board",
         "profiler",
     ]
@@ -618,7 +617,7 @@ def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path:
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Build the candidate."),
             responder=script.respond,
-            supported_agent_tools=_FAKE_AGENT_TOOLS,
+            supported_extra_tools=_FAKE_AGENT_TOOLS,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         try:
@@ -717,7 +716,7 @@ def test_session_construction_failure_leaves_no_policy_artifacts(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Build the candidate."),
-            supported_agent_tools=_FAKE_AGENT_TOOLS,
+            supported_extra_tools=_FAKE_AGENT_TOOLS,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         run.agents.script_creation(*creation_script)
@@ -794,8 +793,7 @@ def test_prompts_preserve_legacy_role_policy_and_dynamic_context(tmp_path: Path)
     )
     assert "positive token throughput" in judge
     assert '"verdict": "pass" | "fail"' in judge
-    assert [tool.id for tool in PERF_EVALUATOR.tools] == [
-        "shell",
+    assert [tool.id for tool in PERF_EVALUATOR.extra_tools] == [
         "issue-board",
         "profiler",
     ]

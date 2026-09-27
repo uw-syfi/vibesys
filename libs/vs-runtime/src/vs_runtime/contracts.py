@@ -111,7 +111,7 @@ class AgentCapability(StrEnum):
 
 
 class AgentTool(BaseModel):
-    """Minimal immutable reference to one registered agent tool."""
+    """Minimal immutable reference to one registered extra agent tool."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -192,7 +192,7 @@ class AgentRole(BaseModel):
 
     id: AgentRoleId
     system_prompt: str
-    tools: tuple[AgentTool, ...] = ()
+    extra_tools: tuple[AgentTool, ...] = ()
     workspace_access: WorkspaceAccess = WorkspaceAccess.READ_WRITE
     required_capabilities: frozenset[AgentCapability] = frozenset()
 

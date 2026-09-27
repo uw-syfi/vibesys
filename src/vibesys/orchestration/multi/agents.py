@@ -1,8 +1,6 @@
 """Fixed agent declarations owned by the multi-agent orchestration."""
 
-from vs_runtime.api import AgentCapability, AgentRole, AgentTool, WorkspaceAccess
-
-SHELL = AgentTool(id="shell")
+from vs_runtime.api import AgentCapability, AgentRole, WorkspaceAccess
 
 DESIGNER = AgentRole(
     id="orchestrator",
@@ -11,7 +9,6 @@ DESIGNER = AgentRole(
         "specialist profiling is useful, then design one bounded hypothesis at a "
         "time. Return only the requested structured response."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.LIMITED,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )
@@ -22,7 +19,6 @@ PROFILER = AgentRole(
         "You collect and interpret bounded profiling evidence without changing "
         "candidate source or configuration. Return only the requested structured response."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.LIMITED,
 )
 
@@ -33,7 +29,6 @@ IMPLEMENTER = AgentRole(
         "evidence, and report the exact observed outcome. Return only the requested "
         "structured response."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.READ_WRITE,
     required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
 )
@@ -44,7 +39,6 @@ JUDGE = AgentRole(
         "You independently audit the candidate and its evidence without editing the "
         "workspace. Return only the requested structured verdict."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.READ_ONLY,
 )
 

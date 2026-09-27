@@ -1022,11 +1022,11 @@ def test_workspace_and_runtime_close_owned_sessions_in_reverse_order() -> None:
     asyncio.run(scenario())
 
 
-def test_role_tools_are_resolved_once_and_fixed_for_the_session() -> None:
+def test_role_extra_tools_are_resolved_once_and_fixed_for_the_session() -> None:
     role = AgentRole(
         id="worker",
         system_prompt="Work.",
-        tools=(AgentTool(id="shell"), AgentTool(id="board")),
+        extra_tools=(AgentTool(id="board"),),
         required_capabilities=frozenset({AgentCapability.MCP_SERVERS}),
     )
     client = _client(responses=("done",))

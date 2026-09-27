@@ -17,7 +17,7 @@ from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
-    validate_agent_tools,
+    validate_extra_tools,
 )
 from vs_runtime._agent_execution import RuntimeAgentExecution
 from vs_runtime._workspace_access import unauthorized_paths
@@ -291,7 +291,7 @@ class RuntimeAgentSessions:
                 role.workspace_access,
                 writable_paths,
             )
-            bound_tool_ids = validate_agent_tools(role, self._tool_bindings.keys())
+            bound_tool_ids = validate_extra_tools(role, self._tool_bindings.keys())
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.

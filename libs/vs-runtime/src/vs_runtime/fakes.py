@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
-    validate_agent_tools,
+    validate_extra_tools,
 )
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import unauthorized_paths
@@ -469,7 +469,7 @@ class FakeAgentSessions:
         *,
         responder: TurnResponder = _echo_responder,
         bindings: dict[str, AgentBinding] | None = None,
-        supported_agent_tools: Collection[str] | None = None,
+        supported_extra_tools: Collection[str] | None = None,
         supported_agent_capabilities: Collection[AgentCapability] | None = None,
     ) -> None:
         """Build role lookup, optionally restricting simulated driver support."""
@@ -478,9 +478,9 @@ class FakeAgentSessions:
         self._bindings = bindings or {
             role.id: AgentBinding(backend="fake", driver="fake", provider="fake") for role in agents
         }
-        self._supported_agent_tools = frozenset(supported_agent_tools or ())
+        self._supported_extra_tools = frozenset(supported_extra_tools or ())
         default_capabilities = {AgentCapability.SESSION_REUSE}
-        if self._supported_agent_tools:
+        if self._supported_extra_tools:
             default_capabilities.add(AgentCapability.MCP_SERVERS)
         self._supported_agent_capabilities = frozenset(
             default_capabilities
@@ -519,7 +519,7 @@ class FakeAgentSessions:
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
         validate_member_id(member_id)
-        bound_tool_ids = validate_agent_tools(role, self._supported_agent_tools)
+        bound_tool_ids = validate_extra_tools(role, self._supported_extra_tools)
         validate_agent_capabilities(
             role,
             self._supported_agent_capabilities,
@@ -1357,7 +1357,7 @@ class FakeRun(Run):
         facts: RunFacts | None = None,
         responder: TurnResponder = _echo_responder,
         agent_bindings: dict[str, AgentBinding] | None = None,
-        supported_agent_tools: Collection[str] | None = None,
+        supported_extra_tools: Collection[str] | None = None,
         supported_agent_capabilities: Collection[AgentCapability] | None = None,
         supports_parallel_candidates: bool = False,
     ) -> None:
@@ -1369,7 +1369,7 @@ class FakeRun(Run):
             plugin.agents,
             responder=responder,
             bindings=agent_bindings,
-            supported_agent_tools=supported_agent_tools,
+            supported_extra_tools=supported_extra_tools,
             supported_agent_capabilities=supported_agent_capabilities,
         )
         workspaces = FakeWorkspaces(

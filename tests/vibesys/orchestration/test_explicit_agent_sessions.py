@@ -358,14 +358,14 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
     unsupported_tool = AgentRole(
         id="tool-user",
         system_prompt="Use a tool.",
-        tools=(AgentTool(id="unregistered"),),
+        extra_tools=(AgentTool(id="unregistered"),),
     )
     client = FakeAgentClient(session_reuse=True)
 
     async def body(ctx: Run) -> None:
         with pytest.raises(UnknownAgentRoleError, match="worker"):
             await ctx.agents.create_session(altered, workspace=ctx.workspaces.root)
-        with pytest.raises(RuntimeContractError, match="unsupported agent tools"):
+        with pytest.raises(RuntimeContractError, match="unsupported extra agent tools"):
             await ctx.agents.create_session(unsupported_tool, workspace=ctx.workspaces.root)
         with pytest.raises(RuntimeContractError, match="provider_session_resume"):
             await ctx.agents.create_session(requires_resume, workspace=ctx.workspaces.root)
@@ -383,11 +383,11 @@ def test_session_rejects_unknown_tool_before_spawning(tmp_path: Path) -> None:
     role = AgentRole(
         id="tool-user",
         system_prompt="Use the declared tool.",
-        tools=(AgentTool(id="unknown"),),
+        extra_tools=(AgentTool(id="unknown"),),
     )
 
     async def body(ctx: Run) -> None:
-        with pytest.raises(RuntimeContractError, match="unsupported agent tools: unknown"):
+        with pytest.raises(RuntimeContractError, match="unsupported extra agent tools: unknown"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
     _run_with_clients(tmp_path, [], body, declaration=(role,))
@@ -397,11 +397,11 @@ def test_direct_host_has_no_implicit_profiler_tool_binding(tmp_path: Path) -> No
     role = AgentRole(
         id="profiler",
         system_prompt="Analyze the profile.",
-        tools=(AgentTool(id="profiler"),),
+        extra_tools=(AgentTool(id="profiler"),),
     )
 
     async def body(ctx: Run) -> None:
-        with pytest.raises(RuntimeContractError, match="unsupported agent tools: profiler"):
+        with pytest.raises(RuntimeContractError, match="unsupported extra agent tools: profiler"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
     _run_with_clients(tmp_path, [], body, declaration=(role,))
@@ -413,7 +413,7 @@ def test_public_session_supplies_product_profiler_tool_binding(tmp_path: Path) -
     role = AgentRole(
         id="profiler",
         system_prompt="Analyze the profile.",
-        tools=(AgentTool(id="profiler"),),
+        extra_tools=(AgentTool(id="profiler"),),
     )
     observed: list[str] = []
 
@@ -450,11 +450,11 @@ def test_session_closes_agent_when_bound_tool_requires_unsupported_mcp(
     role = AgentRole(
         id="profiler",
         system_prompt="Analyze the profile.",
-        tools=(AgentTool(id="profiler"),),
+        extra_tools=(AgentTool(id="profiler"),),
     )
 
     async def body(ctx: Run) -> None:
-        with pytest.raises(RuntimeContractError, match="tool_servers"):
+        with pytest.raises(RuntimeContractError, match="mcp_servers"):
             await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
 
     _run_with_clients(
@@ -483,7 +483,7 @@ def test_session_resolves_bound_tools_once_and_reuses_specs_for_every_turn(
     role = AgentRole(
         id="profiler",
         system_prompt="Analyze the profile.",
-        tools=(AgentTool(id="profiler"),),
+        extra_tools=(AgentTool(id="profiler"),),
     )
 
     async def body(ctx: Run) -> None:
@@ -519,7 +519,7 @@ def test_tool_resolver_receives_selected_workspace_once(tmp_path: Path) -> None:
     role = AgentRole(
         id="worker",
         system_prompt="Use the workspace-scoped tool.",
-        tools=(AgentTool(id="workspace-tool"),),
+        extra_tools=(AgentTool(id="workspace-tool"),),
     )
     resolved_workspaces: list[Workspace] = []
 
@@ -550,7 +550,7 @@ def test_issue_board_binding_uses_fixed_workspace_relative_spec(tmp_path: Path) 
     role = AgentRole(
         id="judge",
         system_prompt="Review the issue.",
-        tools=(AgentTool(id="issue-board"),),
+        extra_tools=(AgentTool(id="issue-board"),),
     )
 
     async def body(ctx: Run) -> None:
@@ -608,12 +608,11 @@ def test_issue_queue_plugin_can_create_all_declared_sessions(tmp_path: Path) -> 
     assert all(client.closed for client in clients)
 
 
-def test_intrinsic_shell_tool_does_not_bind_an_mcp_server(tmp_path: Path) -> None:
+def test_role_without_extra_tools_does_not_bind_an_mcp_server(tmp_path: Path) -> None:
     client = FakeAgentClient(session_reuse=True).enqueue_text("worker", "done")
     role = AgentRole(
         id="worker",
         system_prompt="Work in the shell.",
-        tools=(AgentTool(id="shell"),),
     )
 
     async def body(ctx: Run) -> None:

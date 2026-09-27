@@ -241,7 +241,7 @@ def test_public_policy_trajectory_matches_golden(tmp_path: Path, scenario: str) 
                 benchmark_configured=True,
             ),
             responder=script.respond,
-            supported_agent_tools=_FAKE_AGENT_TOOLS,
+            supported_extra_tools=_FAKE_AGENT_TOOLS,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
         try:

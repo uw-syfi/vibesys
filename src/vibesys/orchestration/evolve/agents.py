@@ -2,7 +2,6 @@
 
 from vs_runtime.api import AgentRole, AgentTool, WorkspaceAccess
 
-SHELL = AgentTool(id="shell")
 PROFILER_TOOL = AgentTool(id="profiler")
 
 MUTATOR = AgentRole(
@@ -11,7 +10,6 @@ MUTATOR = AgentRole(
         "Edit the workspace to produce an offspring of the parent. "
         "Then return one JSON object matching the schema above."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.READ_WRITE,
 )
 
@@ -20,7 +18,6 @@ JUDGE = AgentRole(
     system_prompt=(
         "Review the implementation per the criteria above. Return only the JSON verdict."
     ),
-    tools=(SHELL,),
     workspace_access=WorkspaceAccess.READ_ONLY,
 )
 
@@ -29,7 +26,7 @@ PROFILER = AgentRole(
     system_prompt=(
         "Profile the server and return exactly one JSON object matching the schema above."
     ),
-    tools=(SHELL, PROFILER_TOOL),
+    extra_tools=(PROFILER_TOOL,),
     workspace_access=WorkspaceAccess.READ_ONLY,
 )
 

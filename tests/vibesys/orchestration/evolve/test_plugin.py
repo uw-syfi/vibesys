@@ -131,7 +131,7 @@ def test_parallel_candidates_get_isolated_explicit_profiler_sessions(tmp_path: P
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
-            supported_agent_tools={"profiler"},
+            supported_extra_tools={"profiler"},
             supports_parallel_candidates=True,
             facts=RunFacts(
                 domain_id="generic",
@@ -257,7 +257,7 @@ def test_trusted_accuracy_rejects_candidate_after_judge_passes(tmp_path: Path) -
             PLUGIN,
             project_root=tmp_path,
             responder=_passing_responder,
-            supported_agent_tools={"profiler"},
+            supported_extra_tools={"profiler"},
             facts=RunFacts(
                 domain_id="generic",
                 objective="Increase throughput.",
@@ -517,7 +517,7 @@ def test_pareto_metrics_keep_both_non_dominated_candidates(tmp_path: Path) -> No
             PLUGIN,
             project_root=tmp_path,
             responder=responder,
-            supported_agent_tools={"profiler"},
+            supported_extra_tools={"profiler"},
             facts=RunFacts(
                 domain_id="generic",
                 objective="Increase throughput without increasing latency.",

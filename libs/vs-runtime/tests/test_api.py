@@ -69,7 +69,6 @@ def _role(role_id: str = "implementer") -> AgentRole:
     return AgentRole(
         id=role_id,
         system_prompt="Improve the candidate.",
-        tools=(AgentTool(id="shell"),),
         workspace_access=WorkspaceAccess.READ_WRITE,
         required_capabilities=frozenset({AgentCapability.SESSION_REUSE}),
     )
@@ -98,8 +97,8 @@ def test_role_is_a_strict_complete_declaration() -> None:
 
     assert role.id == "implementer"
     assert role.system_prompt == "Improve the candidate."
-    assert role.tools == (AgentTool(id="shell"),)
-    for unknown_field in ("config_profile", "skills"):
+    assert role.extra_tools == ()
+    for unknown_field in ("config_profile", "skills", "tools"):
         with pytest.raises(ValidationError, match=unknown_field):
             AgentRole.model_validate(
                 {
@@ -331,12 +330,12 @@ def test_fake_session_factory_enforces_configured_tools_and_capabilities() -> No
         role = AgentRole(
             id="worker",
             system_prompt="Use the board.",
-            tools=(AgentTool(id="shell"), AgentTool(id="board")),
+            extra_tools=(AgentTool(id="board"),),
             required_capabilities=frozenset({AgentCapability.PROVIDER_SESSION_RESUME}),
         )
         plugin = _plugin(role)
         unsupported_tool = FakeRun(plugin)
-        with pytest.raises(RuntimeContractError, match="unsupported agent tools: board"):
+        with pytest.raises(RuntimeContractError, match="unsupported extra agent tools: board"):
             await unsupported_tool.agents.create_session(
                 role,
                 workspace=unsupported_tool.workspaces.root,
@@ -344,7 +343,7 @@ def test_fake_session_factory_enforces_configured_tools_and_capabilities() -> No
 
         unsupported_capability = FakeRun(
             plugin,
-            supported_agent_tools=frozenset({"board"}),
+            supported_extra_tools=frozenset({"board"}),
             supported_agent_capabilities=frozenset({AgentCapability.MCP_SERVERS}),
         )
         with pytest.raises(RuntimeContractError, match="provider_session_resume"):
@@ -355,7 +354,7 @@ def test_fake_session_factory_enforces_configured_tools_and_capabilities() -> No
 
         supported = FakeRun(
             plugin,
-            supported_agent_tools=frozenset({"board"}),
+            supported_extra_tools=frozenset({"board"}),
             supported_agent_capabilities=frozenset(
                 {
                     AgentCapability.MCP_SERVERS,

@@ -11,18 +11,16 @@ if TYPE_CHECKING:
 
     from vs_runtime.contracts import AgentRole
 
-_BUILT_IN_TOOL_IDS = frozenset({"shell"})
 
-
-def validate_agent_tools(
+def validate_extra_tools(
     role: AgentRole,
     supported_tools: Collection[str],
 ) -> tuple[str, ...]:
-    """Return non-built-in tool IDs after rejecting unsupported declarations."""
-    bound_tool_ids = tuple(tool.id for tool in role.tools if tool.id not in _BUILT_IN_TOOL_IDS)
+    """Return registered extra tool IDs after rejecting unsupported declarations."""
+    bound_tool_ids = tuple(tool.id for tool in role.extra_tools)
     unknown_tools = sorted(set(bound_tool_ids) - set(supported_tools))
     if unknown_tools:
-        message = f"unsupported agent tools: {', '.join(unknown_tools)}"
+        message = f"unsupported extra agent tools: {', '.join(unknown_tools)}"
         raise RuntimeContractError(message)
     return bound_tool_ids
 
