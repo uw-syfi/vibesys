@@ -7,8 +7,8 @@ from pydantic import BaseModel
 from vibesys.orchestration.issue_queue.agents import AGENTS
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions, IssueQueueState
 from vibesys.orchestration.issue_queue.orchestration import orchestrate
-from vibesys.orchestration.registration import OrchestrationRegistration
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
+from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection
 from vs_runtime.api import OrchestrationPlugin
 

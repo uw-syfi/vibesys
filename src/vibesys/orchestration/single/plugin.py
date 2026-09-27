@@ -6,7 +6,6 @@ from pydantic import BaseModel
 
 from vibesys.orchestration.hypothesis.readmodel import project_hypothesis_state
 from vibesys.orchestration.memory import declared_memory_paths
-from vibesys.orchestration.registration import OrchestrationRegistration
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
 from vibesys.orchestration.single.agents import AGENTS
 from vibesys.orchestration.single.models import (
@@ -15,6 +14,7 @@ from vibesys.orchestration.single.models import (
     SingleState,
 )
 from vibesys.orchestration.single.orchestration import orchestrate, orchestrate_profile_guided
+from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection
 from vs_runtime.api import OrchestrationPlugin
 

@@ -9,8 +9,8 @@ from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestration.multi.agents import AGENTS
 from vibesys.orchestration.multi.models import MultiOptions, MultiState, ProfileGuidedMultiOptions
 from vibesys.orchestration.multi.orchestration import orchestrate, orchestrate_profile_guided
-from vibesys.orchestration.registration import OrchestrationRegistration
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
+from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection
 from vs_runtime.api import OrchestrationPlugin
 

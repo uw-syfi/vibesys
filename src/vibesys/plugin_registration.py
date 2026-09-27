@@ -1,4 +1,4 @@
-"""VibeSys product policy bound to one reusable orchestration plugin."""
+"""Product metadata bound to one reusable orchestration plugin."""
 
 from __future__ import annotations
 

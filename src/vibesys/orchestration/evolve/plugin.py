@@ -8,7 +8,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.evolve.agents import AGENTS
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.orchestration import orchestrate
-from vibesys.orchestration.registration import OrchestrationRegistration
+from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection
 from vs_runtime.api import (
     OrchestrationDescriptor,

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from vibesys.orchestration.registration import (
+from vibesys.plugin_registration import (
     OrchestrationProjector,
     OrchestrationRegistration,
     project_run,

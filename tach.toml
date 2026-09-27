@@ -223,22 +223,22 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime",
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.orchestration.registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.orchestration.registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = [ "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.orchestration.registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = [ "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
 layer = "loops"
-depends_on = ["vs_runtime", "vs_issue_tracker", "vibesys.orchestration.registration", "vibesys.orchestration.resume", "vibesys.run.contracts"]
+depends_on = ["vs_runtime", "vs_issue_tracker", "vibesys.plugin_registration", "vibesys.orchestration.resume", "vibesys.run.contracts"]
 
 [[modules]]
 # Shared memory paths declared by the built-in orchestration plugins.
@@ -485,7 +485,7 @@ from = ["vibesys.run.skill_sources"]
 
 [[interfaces]]
 expose = ["OrchestrationProjector", "OrchestrationRegistration", "project_run"]
-from = ["vibesys.orchestration.registration"]
+from = ["vibesys.plugin_registration"]
 
 [[interfaces]]
 expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_skill_source_paths", "validate_platform_layout"]
@@ -506,15 +506,14 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-path = "vibesys.orchestration.registration"
-layer = "orchestration_host"
+path = "vibesys.plugin_registration"
 depends_on = ["vibesys.run.contracts", "vs_project", "vs_runtime"]
 
 [[modules]]
 # Thin product composition: in-repository plugins plus the temporary private
 # RunSetup adapter.
 path = "vibesys.plugin_catalog"
-depends_on = ["vibesys.orchestration.registration", "vs_runtime", "vs_project"]
+depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
 
 [[modules]]
 path = "vibesys.plugin_builtins"
