@@ -235,7 +235,7 @@ def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) ->
     session = _session()
     observed: list[RunReady] = []
     session.on_ready(observed.append)
-    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948027 [SLF001]; exercise the private composition input and validate its public projection contract.
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101220 [SLF001]; exercise the private composition input and validate its public projection contract.
     payload = observed[0].model_dump()
 
     with pytest.raises(ValidationError, match="drivers must be unique"):
@@ -299,7 +299,7 @@ def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
 def test_auxiliary_agent_projection_failure_closes_pending_environment(tmp_path: Path) -> None:
     environment = _Environment(path_error=RuntimeError("path projection failed"))
     session = _session()
-    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948029 [SLF001]; exercise public construction cleanup over deterministic resource fakes.
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101221 [SLF001]; exercise public construction cleanup over deterministic resource fakes.
     evidence = tmp_path / "evidence"
     evidence.mkdir()
 

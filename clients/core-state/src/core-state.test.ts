@@ -1436,10 +1436,7 @@ describe('the carried-forward profile flag', () => {
   });
 
   it('stays unset when the event records that profiling ran', () => {
-    const state = reduceEvent(
-      initialCoreState(),
-      roundFinishedEvent(1, {profile_skipped: false}),
-    );
+    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profile_skipped: false}));
 
     expect(state.rounds[0]?.status).toBe('completed');
     expect(state.rounds[0]?.profileSkipped).toBeUndefined();
