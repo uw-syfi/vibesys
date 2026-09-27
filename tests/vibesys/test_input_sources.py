@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,8 +13,10 @@ from vibesys.evaluators.input_manifest import (
     load_input_bundle,
     load_project_task,
 )
-from vibesys.run import Workspace
+from vibesys.run.workspace_policy import materialization_source
 from vs_project.api import Project
+from vs_runtime.api.infrastructure import ProjectMaterializer, SDKRoots
+from vs_runtime.api.testing import FakeGitRunner, FakeProjectMaterializationEffects
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,14 +45,14 @@ command = ["benchmark"]
     return bundle
 
 
-def _workspace(root: Path, *, excluded_dirs: set[str] | None = None) -> Workspace:
-    return Workspace(
+def _materializer(root: Path, *, excluded_dirs: set[str] | None = None) -> ProjectMaterializer:
+    return ProjectMaterializer(
         root,
-        run_environment=MagicMock(isolated=False),
-        backend=MagicMock(),
-        log=MagicMock(),
-        project_root=root.parent,
+        effects=FakeProjectMaterializationEffects(),
+        log=lambda _message: None,
+        sdk_roots=SDKRoots(checkout=root.parent / "sdk", packaged=root.parent / "sdk"),
         excluded_dirs=excluded_dirs or set(),
+        git_runner=FakeGitRunner(head="0123456"),
     )
 
 
@@ -430,8 +431,8 @@ def test_manifest_rejects_unknown_top_level_tables(tmp_path: Path) -> None:
 
 def test_workspace_source_destination_collision_is_rejected(tmp_path: Path) -> None:
     root = tmp_path / "project"
-    workspace = _workspace(root)
-    workspace.create()
+    materializer = _materializer(root)
+    materializer.create()
     (root / "library").mkdir()
     source = WorkspaceSource(
         name="library",
@@ -441,13 +442,13 @@ def test_workspace_source_destination_collision_is_rejected(tmp_path: Path) -> N
     )
 
     with pytest.raises(ValueError, match="destination already exists"):
-        workspace.materialize_git_source(source)
+        materializer.materialize_git_source(materialization_source(source))
 
 
 def test_workspace_source_destination_cannot_use_excluded_path(tmp_path: Path) -> None:
     root = tmp_path / "project"
-    workspace = _workspace(root, excluded_dirs={"repos", "target"})
-    workspace.create()
+    materializer = _materializer(root, excluded_dirs={"repos", "target"})
+    materializer.create()
     source = WorkspaceSource(
         name="library",
         repo="https://example.invalid/library.git",
@@ -456,6 +457,6 @@ def test_workspace_source_destination_cannot_use_excluded_path(tmp_path: Path) -
     )
 
     with pytest.raises(ValueError, match="excluded path component"):
-        workspace.materialize_git_source(source)
+        materializer.materialize_git_source(materialization_source(source))
 
     assert not (root / "repos").exists()

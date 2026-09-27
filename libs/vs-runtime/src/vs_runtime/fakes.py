@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TypeAlias, TypeVar, overload
@@ -44,6 +44,59 @@ ResponseT = TypeVar("ResponseT", bound=BaseModel)
 TurnResponder: TypeAlias = Callable[
     [AgentRole, tuple[str, ...], str, type[BaseModel] | None], object
 ]
+
+
+class FakeProjectMaterializationEffects:
+    """Deterministic environment effects for project materialization tests."""
+
+    def __init__(self, *, isolated: bool = False, removes_children: bool = True) -> None:
+        """Configure symlink and privileged-removal behavior."""
+        self._isolated = isolated
+        self.removes_children = removes_children
+        self.repaired: list[Path] = []
+        self.removed: list[tuple[Path, str]] = []
+
+    @property
+    def isolated(self) -> bool:
+        """Return the configured symlink policy."""
+        return self._isolated
+
+    def repair(self, workspace: Path) -> None:
+        """Record a requested permission repair."""
+        self.repaired.append(workspace)
+
+    def remove_child(self, workspace: Path, name: str) -> bool:
+        """Record and return the configured privileged-removal outcome."""
+        self.removed.append((workspace, name))
+        return self.removes_children
+
+
+class FakeGitRunner:
+    """In-memory command effect for pinned project-source checkouts."""
+
+    def __init__(self, *, head: str, fail_command: str | None = None) -> None:
+        """Configure the resolved commit and optional failing Git command."""
+        self.head = head
+        self.fail_command = fail_command
+        self.calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def __call__(self, args: Sequence[str], cwd: Path) -> str:
+        """Apply clone/checkout/rev-parse semantics without a subprocess."""
+        command = args[0]
+        self.calls.append((tuple(args), cwd))
+        if command == self.fail_command:
+            message = f"git {command} failed: configured fake failure"
+            raise RuntimeError(message)
+        if command == "clone":
+            destination = Path(args[-1])
+            (destination / ".git").mkdir(parents=True)
+            return ""
+        if command == "checkout":
+            return ""
+        if command == "rev-parse":
+            return f"{self.head}\n"
+        message = f"unsupported fake Git command: {command}"
+        raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True)

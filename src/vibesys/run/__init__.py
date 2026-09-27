@@ -18,23 +18,13 @@ from vibesys.run.project import (
     provision_project,
 )
 from vibesys.run.run_control import RunControlChannel, RunStopped, splice_steering
-from vibesys.run.workspace import (
-    EXCLUDED_WORKSPACE_DIRS,
-    CopySpec,
-    InputProjectSpec,
-    Workspace,
-    WorkspaceStep,
-)
 
 __all__ = [
-    "EXCLUDED_WORKSPACE_DIRS",
-    "CopySpec",
     "CoreEvent",
     "CoreEventType",
     "DeviceLease",
     "EventJournal",
     "ExperimentRepository",
-    "InputProjectSpec",
     "LocalRunIntegration",
     "ProjectProvisioningError",
     "ProjectProvisioningSpec",
@@ -43,8 +33,6 @@ __all__ = [
     "RunResourceHandoff",
     "RunStateNamespace",
     "RunStopped",
-    "Workspace",
-    "WorkspaceStep",
     "provision_project",
     "splice_steering",
 ]

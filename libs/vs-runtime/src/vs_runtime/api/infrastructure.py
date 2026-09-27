@@ -60,6 +60,15 @@ from vs_runtime._macos_cpu_profiler import MacOSProfilerEffects, MacOSProfilerTo
 from vs_runtime._macos_cpu_profiler import collect as collect_macos_profile
 from vs_runtime._macos_cpu_profiler import detect_capability as detect_macos_profiler
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
+from vs_runtime._project_materialization import (
+    GitSourceMaterialization,
+    InputProjectMaterialization,
+    ProjectMaterializationEffects,
+    ProjectMaterializationStep,
+    ProjectMaterializer,
+    ProjectTreeCopy,
+    WorkspaceSourceValue,
+)
 from vs_runtime._run_state import RunState
 from vs_runtime._sdk_paths import (
     InputProjectError,
@@ -325,8 +334,10 @@ __all__ = [
     "AgentToolResolver",
     "CompletedRound",
     "FrameworkValidationResult",
+    "GitSourceMaterialization",
     "InputDependency",
     "InputProjectError",
+    "InputProjectMaterialization",
     "LinuxProfileResult",
     "LinuxProfilerCapability",
     "LinuxProfilerDiagnostic",
@@ -349,6 +360,10 @@ __all__ = [
     "MultiSlotRoundTransactionCoordinator",
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
+    "ProjectMaterializationEffects",
+    "ProjectMaterializationStep",
+    "ProjectMaterializer",
+    "ProjectTreeCopy",
     "RoundRecoveryOutcome",
     "RoundTransactionError",
     "RunState",
@@ -356,6 +371,7 @@ __all__ = [
     "SkillCatalogEntry",
     "SkillMetadataError",
     "ValidationRecipe",
+    "WorkspaceSourceValue",
     "build_skill_catalog",
     "collect_linux_profile",
     "collect_macos_profile",

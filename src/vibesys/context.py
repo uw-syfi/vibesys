@@ -61,7 +61,6 @@ from vibesys.run import (
     ProjectProvisioningSpec,
     RunResourceHandoff,
     RunStateNamespace,
-    Workspace,
     provision_project,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
@@ -69,6 +68,10 @@ from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
+)
+from vibesys.run.workspace_policy import (
+    build_workspace_materialization_plan,
+    create_project_materializer,
 )
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
@@ -97,6 +100,7 @@ from vs_project.api import (
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import (
     MultiSlotRoundTransactionCoordinator,
+    ProjectMaterializer,
     RoundRecoveryOutcome,
     RunState,
 )
@@ -565,13 +569,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                 except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008205 [BLE001]; hook teardown is best effort and logs arbitrary hook failures without masking run cleanup.
                     hook_log[0](f"[warn] environment hook teardown failed: {exc}")
 
-            workspace_files = Workspace(
+            workspace_files = create_project_materializer(
                 project_root,
-                run_environment=environment,
+                environment=environment,
                 backend=backend_impl,
                 log=buffered_logs.append,
-                project_root=PROJECT_ROOT,
-                compute_backend=backend,
             )
             construction_complete = False
             if copied_project:
@@ -601,7 +603,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                     input_dir,
                     project_root,
                     spec=ProjectProvisioningSpec(
-                        workspace=workspace_files,
+                        materializer=workspace_files,
                         workspace_sources=workspace_sources,
                         evaluator_source=evaluator_source,
                         task_name=task_name,
@@ -811,7 +813,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                 teardown_stack.callback(_teardown_environment_hooks)
             environment_patch = cast("EnvironmentPatch", environment_patch)
 
-            plan = workspace_files.plan_setup(
+            plan = build_workspace_materialization_plan(
+                project_root,
                 existing=True,
                 input_dir=project_root,
                 evaluator_source=None,
@@ -819,11 +822,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-
                 input_project_dir=None,
                 profiler_support_path=profiler_support_path,
                 profiler_support_name=profiler_support_name,
+                compute_backend=backend,
                 workspace_sources=(),
                 extra_input_excludes=environment_patch.copy_excludes,
                 profiler_support_extra=profiler_support_extra,
             )
-            workspace_files.setup(plan, existing=True)
+            workspace_files.materialize(plan, existing=True)
 
         with boot_trace.span("environment_open"):
             runtime_state = project_state.portable_namespace(run_id, "runtime")
@@ -1188,13 +1192,11 @@ def _assemble_workspace_resources(
     )
     if parent.git.trusted_input_baseline is not None:
         git.configure_trusted_input_baseline(parent.git.trusted_input_baseline)
-    workspace_files = Workspace(
+    workspace_files = create_project_materializer(
         workspace,
-        run_environment=parent.run_environment,
+        environment=parent.run_environment,
         backend=parent.backend_impl,
         log=logger.lprint,
-        project_root=PROJECT_ROOT,
-        compute_backend=parent.backend,
     )
     project_path_policy = build_project_path_policy(workspace, evaluator_source=None)
     objective_document = None
@@ -1316,7 +1318,7 @@ class _RunResources:
         environment_hooks: EnvironmentHooks,
         environment_context: EnvironmentContext,
         environment_patch: EnvironmentPatch,
-        workspace_files: Workspace,
+        workspace_files: ProjectMaterializer,
         git: GitTracker,
         experiment_repository: ExperimentRepository | None,
         teardown_stack: ExitStack,

@@ -9,7 +9,6 @@ import importlib.util
 import tomllib
 from itertools import pairwise
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -18,9 +17,11 @@ from tests.support.example_registry import require_external_repo_checkout
 from vibesys.evaluators import PROJECT_ROOT_TOKEN
 from vibesys.evaluators.input_manifest import InputBundle, load_project_task
 from vibesys.run.project import ProjectProvisioningSpec, provision_project
-from vibesys.run.workspace import GitSourceSpec, Workspace
+from vibesys.run.workspace_policy import create_project_materializer
 from vibesys.sandbox.run_environment import LocalEnvironment
 from vs_project.api import Project
+from vs_runtime.api.testing import FakeGitRunner
+from vs_sandbox.api.testing import FakeComputeBackend
 
 PROJECT_ROOT = Path(__file__).parents[2]
 MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"
@@ -175,39 +176,29 @@ def test_hotel_tasks_share_packaged_go_oracle(task_name: str) -> None:
     assert bundle.manifest.workspace.sources[0].commit == KUBERNETES_SCENARIOS["hotel-reservation"]
 
 
-def test_hotel_native_task_materializes_shared_checker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_hotel_native_task_materializes_shared_checker(tmp_path: Path) -> None:
 
-    source = MICROSERVICE_ROOT / "hotel-correctness"
-    project = Project.open(source)
+    input_root = MICROSERVICE_ROOT / "hotel-correctness"
+    project = Project.open(input_root)
     bundle = load_project_task(project, project.select_task("kubernetes"))
     destination = tmp_path / "project"
-    workspace = Workspace(
-        destination,
-        run_environment=LocalEnvironment(),
-        backend=MagicMock(),
-        log=MagicMock(),
-        project_root=tmp_path,
-    )
-    real_setup = workspace.setup
-
-    def setup_without_network(steps: tuple, *, existing: bool) -> None:
-        # Source checkout is orthogonal; exercise actual bundle copying and task preservation.
-        real_setup(
-            tuple(step for step in steps if not isinstance(step, GitSourceSpec)), existing=existing
-        )
-
-    monkeypatch.setattr(workspace, "setup", setup_without_network)
     assert bundle.manifest.workspace is not None
+    workspace_source = bundle.manifest.workspace.sources[0]
+    materializer = create_project_materializer(
+        destination,
+        environment=LocalEnvironment(),
+        backend=FakeComputeBackend(),
+        log=lambda _message: None,
+        git_runner=FakeGitRunner(head=workspace_source.commit),
+    )
     provision_project(
-        source,
+        input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=workspace,
+            materializer=materializer,
             workspace_sources=bundle.manifest.workspace.sources,
             task_name="kubernetes",
-            input_project_dir=source,
+            input_project_dir=input_root,
         ),
     )
     copied = Project.open(destination)
@@ -219,7 +210,7 @@ def test_hotel_native_task_materializes_shared_checker(
         ".vibesys/tasks/compose/evaluator/internal/hotel/suite.go",
         ".vibesys/tasks/compose/benchmark/workload.toml",
     ):
-        assert (destination / path).read_bytes() == (source / path).read_bytes()
+        assert (destination / path).read_bytes() == (input_root / path).read_bytes()
     assert not (destination / "vibesys.input.toml").exists()
 
 

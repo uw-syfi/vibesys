@@ -18,8 +18,14 @@ from vibesys.evaluators.input_manifest import (
     WorkspaceSource,
     render_input_manifest,
 )
-from vibesys.run.workspace import CopySpec, GitSourceSpec, InputProjectSpec, Workspace
+from vibesys.run.workspace_policy import materialization_source
 from vs_project.api import Project, is_project_state_path
+from vs_runtime.api.infrastructure import (
+    InputProjectMaterialization,
+    ProjectMaterializationStep,
+    ProjectMaterializer,
+    ProjectTreeCopy,
+)
 
 _PRIVATE_PROJECT_ENTRY_NAMES = frozenset({".git", "agent.toml"})
 
@@ -94,12 +100,12 @@ class ProjectProvisioningError(ValueError):
 class ProjectProvisioningSpec:
     """Materialization dependencies for one copied project.
 
-    ``workspace`` owns the copy and source-materialization mechanisms and must
-    be rooted at the requested destination. The other paths are resolved input
+    ``materializer`` owns copy and source-materialization mechanics and must be
+    rooted at the requested destination. The other paths are resolved input
     dependencies, normally taken from :class:`~vibesys.evaluators.input_manifest.InputBundle`.
     """
 
-    workspace: Workspace
+    materializer: ProjectMaterializer
     workspace_sources: tuple[WorkspaceSource, ...] = ()
     evaluator_source: Path | None = None
     task_name: str | None = None
@@ -125,7 +131,7 @@ def provision_project(
         require_legacy_objective=spec.task_name is None,
     )
     destination = destination_root.expanduser().resolve()
-    _validate_destination(source, destination, workspace=spec.workspace)
+    _validate_destination(source, destination, materializer=spec.materializer)
     repository_task = spec.task_name is not None
     manifest_root = (
         Project.open(source).select_task(spec.task_name).path if repository_task else source
@@ -140,8 +146,8 @@ def provision_project(
     primary_steps = _primary_steps(source, destination, spec, copy_excludes)
 
     try:
-        spec.workspace.create()
-        spec.workspace.setup(primary_steps, existing=False)
+        spec.materializer.create()
+        spec.materializer.materialize(primary_steps, existing=False)
         evaluator_relative = _materialize_evaluator(
             source,
             destination,
@@ -184,12 +190,17 @@ def _require_input_root(path: Path, *, require_legacy_objective: bool) -> Path:
     return root
 
 
-def _validate_destination(source: Path, destination: Path, *, workspace: Workspace) -> None:
+def _validate_destination(
+    source: Path,
+    destination: Path,
+    *,
+    materializer: ProjectMaterializer,
+) -> None:
     if destination == source or destination.is_relative_to(source):
         raise ProjectProvisioningError.destination_inside_input(destination)
     if destination.exists() or destination.is_symlink():
         raise ProjectProvisioningError.destination_exists(destination)
-    workspace_root = workspace.root.expanduser().resolve()
+    workspace_root = materializer.root.expanduser().resolve()
     if workspace_root != destination:
         raise ProjectProvisioningError.workspace_root_mismatch(workspace_root, destination)
 
@@ -238,11 +249,11 @@ def _primary_steps(
     destination: Path,
     spec: ProjectProvisioningSpec,
     copy_excludes: frozenset[str],
-) -> tuple[CopySpec | GitSourceSpec | InputProjectSpec, ...]:
-    steps: list[CopySpec | GitSourceSpec | InputProjectSpec] = []
-    steps.extend(GitSourceSpec(source=item) for item in spec.workspace_sources)
+) -> tuple[ProjectMaterializationStep, ...]:
+    steps: list[ProjectMaterializationStep] = []
+    steps.extend(materialization_source(item) for item in spec.workspace_sources)
     steps.append(
-        CopySpec(
+        ProjectTreeCopy(
             src=source,
             dest=destination,
             reject_collisions=bool(spec.workspace_sources),
@@ -250,7 +261,7 @@ def _primary_steps(
         )
     )
     if spec.input_project_dir is not None:
-        steps.append(InputProjectSpec(project_dir=spec.input_project_dir))
+        steps.append(InputProjectMaterialization(project_dir=spec.input_project_dir))
     return tuple(steps)
 
 
@@ -280,9 +291,9 @@ def _materialize_evaluator(
     if source_relative is not None:
         _remove_path(destination / source_relative)
 
-    spec.workspace.setup(
+    spec.materializer.materialize(
         (
-            CopySpec(
+            ProjectTreeCopy(
                 src=evaluator_source,
                 dest=evaluator_destination,
                 respect_gitignore=_is_git_worktree(evaluator_source),
