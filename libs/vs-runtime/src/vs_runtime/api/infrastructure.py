@@ -22,6 +22,13 @@ from vs_runtime._accelerators import (
 )
 from vs_runtime._agent_sessions import RuntimeAgentSessions
 from vs_runtime._bundled_paths import resolve_bundled_tree, resolve_packaged_tree
+from vs_runtime._checkpoint import (
+    CompletedRound,
+    MultiSlotRoundTransaction,
+    MultiSlotRoundTransactionCoordinator,
+    RoundRecoveryOutcome,
+    RoundTransactionError,
+)
 from vs_runtime._input_project import InputDependency, materialize_input_project
 from vs_runtime._linux_cpu_profiler import (
     Capability as LinuxProfilerCapability,
@@ -58,6 +65,7 @@ from vs_runtime._macos_cpu_profiler import MacOSProfilerEffects, MacOSProfilerTo
 from vs_runtime._macos_cpu_profiler import collect as collect_macos_profile
 from vs_runtime._macos_cpu_profiler import detect_capability as detect_macos_profiler
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
+from vs_runtime._run_state import RunState
 from vs_runtime._sdk_paths import (
     InputProjectError,
     SDKRoots,
@@ -322,6 +330,7 @@ __all__ = [
     "AgentExecutionFactory",
     "AgentSessionRuntime",
     "AgentToolResolver",
+    "CompletedRound",
     "FrameworkValidationResult",
     "InputDependency",
     "InputProjectError",
@@ -343,8 +352,13 @@ __all__ = [
     "ModelRequestError",
     "ModelRequestReconciler",
     "ModelVolumeProvisioner",
+    "MultiSlotRoundTransaction",
+    "MultiSlotRoundTransactionCoordinator",
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
+    "RoundRecoveryOutcome",
+    "RoundTransactionError",
+    "RunState",
     "SDKRoots",
     "SkillCatalogEntry",
     "SkillMetadataError",

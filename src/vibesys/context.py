@@ -71,11 +71,6 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
-from vibesys.run.round_transaction import (
-    MultiSlotRoundTransactionCoordinator,
-    RoundRecoveryOutcome,
-)
-from vibesys.run.state import RunState
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
     RunEnvironmentRequest,
@@ -101,6 +96,11 @@ from vs_project.api import (
     generate_run_id,
 )
 from vs_runtime.api import boot_trace
+from vs_runtime.api.infrastructure import (
+    MultiSlotRoundTransactionCoordinator,
+    RoundRecoveryOutcome,
+    RunState,
+)
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy, Sandbox
 
 

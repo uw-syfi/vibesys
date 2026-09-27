@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from vibesys.run import RoundTransactionError
+from vs_runtime.api.infrastructure import RoundTransactionError
 
 _CASES: list[tuple[str, tuple[object, ...], str]] = [
     ("already_completed", (3,), "Checkpoint 3 has already completed"),

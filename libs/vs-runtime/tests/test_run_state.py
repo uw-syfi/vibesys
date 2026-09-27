@@ -4,9 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.state import RunState
-from vs_project.api import GitTracker, Project
+from vs_project.api import GitTracker, NullGitTrackerEvents, Project
+from vs_runtime.api.infrastructure import RunState
 
 
 def _tracker(root: Path, run_id: str) -> GitTracker:

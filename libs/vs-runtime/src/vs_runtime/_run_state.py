@@ -1,4 +1,4 @@
-"""Application boundary joining typed project state with Git history."""
+"""Private boundary joining typed project state with Git history."""
 
 from __future__ import annotations
 

@@ -10,15 +10,23 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support.run_execution import run_execution_record
 
-from vibesys.run import RoundRecoveryOutcome, RoundTransactionError
-from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.round_transaction import MultiSlotRoundTransactionCoordinator
-from vs_project.api import GitTracker, OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import (
+    GitTracker,
+    NullGitTrackerEvents,
+    OrchestrationDescriptor,
+    Project,
+    RunEnvironmentRecord,
+)
+from vs_runtime.api.infrastructure import (
+    MultiSlotRoundTransaction,
+    MultiSlotRoundTransactionCoordinator,
+    RoundRecoveryOutcome,
+    RoundTransactionError,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.run.round_transaction import MultiSlotRoundTransaction
     from vs_project.api import StateSlot
 
 _RUN_ID = "transaction-test"
@@ -169,22 +177,27 @@ def test_begin_translates_corrupt_journal_state(tmp_path: Path) -> None:
         coordinator.begin(1, writes={"state.json": _state(active=None, rounds=(1,))})
 
 
-def test_snapshot_failure_remains_recoverable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project, tracker, coordinator = _project(tmp_path)
+def test_snapshot_failure_remains_recoverable(tmp_path: Path) -> None:
+    project, tracker, _coordinator_unused = _project(tmp_path)
+
+    def fail_snapshot(_label: str, _snapshot: object, *, candidate: bool) -> None:
+        del candidate
+        failure_message = "simulated process failure"
+        raise RuntimeError(failure_message)
+
+    coordinator = MultiSlotRoundTransactionCoordinator(
+        project,
+        tracker,
+        _RUN_ID,
+        namespace="policy",
+        models={"state.json": _AgentState},
+        snapshot_committer=fail_snapshot,
+    )
     transaction = coordinator.begin(1, writes={"state.json": _state(active="after", rounds=(1,))})
     (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
-    original_snapshot = tracker.snapshot_with_framework_metadata
 
-    def fail_snapshot(_label: str, _snapshot: object) -> None:
-        _failure_message = "simulated process failure"
-        raise RuntimeError(_failure_message)
-
-    monkeypatch.setattr(tracker, "snapshot_with_framework_metadata", fail_snapshot)
     with pytest.raises(RuntimeError, match="simulated process failure"):
         transaction.complete()
-    monkeypatch.setattr(tracker, "snapshot_with_framework_metadata", original_snapshot)
 
     restarted = _coordinator(project, tracker)
     assert restarted.recover() is RoundRecoveryOutcome.COMMITTED

@@ -1,4 +1,4 @@
-"""Recoverable checkpoint for a policy's portable state namespace.
+"""Private recoverable checkpoint for an orchestration's opaque state.
 
 A v5 write-ahead log records exact typed state transitions and other namespace
 files before candidate or framework state is committed. Completing or
@@ -18,7 +18,7 @@ import binascii
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -32,7 +32,19 @@ from vs_project.api import FrameworkSnapshotStatus, ProjectStateError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from vs_project.api import GitTracker, Project
+    from vs_project.api import GitTracker, Project, StateSnapshot
+
+
+class _SnapshotCommitter(Protocol):
+    def __call__(
+        self,
+        label: str,
+        snapshot: StateSnapshot,
+        /,
+        *,
+        candidate: bool,
+    ) -> None: ...
+
 
 _JOURNAL_SCHEMA_VERSION: Literal[5] = 5
 _GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
@@ -226,7 +238,8 @@ class MultiSlotRoundTransactionCoordinator:
     recoverable paid-work cursor between checkpoints.
     """
 
-    def __init__(
+    # lint-waiver: LW-944001 [PLR0913]; project, Git identity, state declaration, and the injected snapshot effect are independent. A parameter object would expose a composition-only bag whose fields the implementation still needs individually.
+    def __init__(  # noqa: PLR0913
         self,
         project: Project,
         git: GitTracker,
@@ -234,6 +247,7 @@ class MultiSlotRoundTransactionCoordinator:
         *,
         namespace: str,
         models: Mapping[str, type[BaseModel]],
+        snapshot_committer: _SnapshotCommitter | None = None,
     ) -> None:
         """Validate the run identity and bind its declared typed slots."""
         if project.root.resolve() != git.root.resolve() or git.run_id != run_id:
@@ -242,6 +256,7 @@ class MultiSlotRoundTransactionCoordinator:
             raise RoundTransactionError.no_declared_slots()
         project.state.load_run(run_id)
         self._git = git
+        self._snapshot_committer = snapshot_committer or self._commit_snapshot
         self.run_id = run_id
         self.namespace = project.state.portable_namespace(run_id, namespace)
         self._slots = {name: self.namespace.slot(name, model) for name, model in models.items()}
@@ -373,10 +388,7 @@ class MultiSlotRoundTransactionCoordinator:
         snapshot = self.namespace.snapshot()
         if self._git.current_sha() == journal.pre_commit:
             label = journal.label or f"vibesys(round {journal.round_number}): record result"
-            if journal.candidate:
-                self._git.snapshot_with_framework_metadata(label, snapshot)
-            else:
-                self._git.snapshot_framework_state(label, snapshot)
+            self._snapshot_committer(label, snapshot, candidate=journal.candidate)
         elif self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
             raise RoundTransactionError.committed_state_conflict()
         if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
@@ -385,6 +397,19 @@ class MultiSlotRoundTransactionCoordinator:
         if revision is None:
             raise RoundTransactionError.inaccessible_head()
         return CompletedRound(checkpoint=revision)
+
+    def _commit_snapshot(
+        self,
+        label: str,
+        snapshot: StateSnapshot,
+        *,
+        candidate: bool,
+    ) -> None:
+        """Commit one state snapshot through the bound Git tracker."""
+        if candidate:
+            self._git.snapshot_with_framework_metadata(label, snapshot)
+        else:
+            self._git.snapshot_framework_state(label, snapshot)
 
     def _apply_journal(self, journal: _MultiSlotJournal) -> None:
         """Restore exact namespace bytes before creating or checking the commit."""

@@ -89,7 +89,6 @@
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "sleep", "count": 11}
 {"path": "tests/vibesys/loops/test_gates.py", "rule": "mock", "count": 10}
 {"path": "tests/vibesys/render/test_log.py", "rule": "mock", "count": 4}
-{"path": "tests/vibesys/run/test_round_transaction.py", "rule": "patch", "count": 2}
 {"path": "tests/vibesys/run/test_run_control.py", "rule": "sleep", "count": 2}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 83}
