@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.context import (
     WorkspaceResourceSpec,
-    borrow_run_agent_environment,
     create_workspace_resources,
     open_scoped_agent_environment,
 )
@@ -164,14 +163,11 @@ class _WorkspaceResource:
         root: bool,
     ) -> AgentExecutionEnvironment:
         resources = self.context
-        if resources.run_environment_view.share_agent_session:
-            return borrow_run_agent_environment(
-                resources,
-                mounts=configuration.resources,
-                agent_backend=configuration.spec.backend.value,
-                cli_provider=configuration.spec.provider,
-            )
-        if root and self._binding.agent_environment_opener is not None:
+        if (
+            root
+            and not resources.run_environment_view.share_agent_session
+            and self._binding.agent_environment_opener is not None
+        ):
             return self._binding.agent_environment_opener(
                 mounts=configuration.resources,
                 agent_backend=configuration.spec.backend.value,

@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import build_agent_client
 from vs_runtime.contracts import StructuredResponseError
+from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
         ToolServerDescriptor,
     )
     from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._run_environment import RunEnvironmentRequest, RunEnvironmentSession
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -75,6 +77,100 @@ class AgentExecutionEnvironment(Protocol):
     def close(self) -> None:
         """Release the scoped environment idempotently."""
         ...
+
+
+class SharedAgentEnvironmentConflictError(ValueError):
+    """A shared run session cannot satisfy agent-specific environment inputs."""
+
+    def __init__(self) -> None:
+        super().__init__("a shared agent environment cannot override backend, provider, or mounts")
+
+
+@dataclass(slots=True)
+class ScopedAgentEnvironment:
+    """Runtime-owned agent view over a borrowed or independently opened session."""
+
+    session: RunEnvironmentSession
+    skill_source_dirs: tuple[Path, ...]
+    skill_selection: SkillSelection
+    project_path_policy: ProjectPathPolicy
+    host_resources: tuple[HostResource, ...]
+    backends: dict[str, Sandbox] | None
+    use_docker: bool
+    owns_session: bool
+    _closed: bool = False
+
+    def close(self) -> None:
+        """Release an owned session exactly once; borrowed sessions remain open."""
+        if self._closed:
+            return
+        self._closed = True
+        if self.owns_session:
+            self.session.close()
+
+
+def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433 [PLR0913]; these are independent resolved lower-layer resources; bundling them would create the broad environment DTO this composition seam replaces.
+    base_request: RunEnvironmentRequest,
+    shared_session: RunEnvironmentSession,
+    *,
+    share_session: bool,
+    skill_source_dirs: tuple[Path, ...],
+    skill_selection: SkillSelection,
+    host_resources: tuple[HostResource, ...],
+    mounts: tuple[HostResource, ...] = (),
+    agent_backend: str | None = None,
+    cli_provider: str | None = None,
+    open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
+) -> ScopedAgentEnvironment:
+    """Open one agent environment, borrowing the run session when required.
+
+    A shared session fixes backend, provider, and mounts at workspace-open time.
+    Independently opened sessions inherit that request and add only the explicit
+    per-agent overrides and resources supplied here.
+    """
+    if share_session:
+        if (
+            mounts
+            or (agent_backend is not None and agent_backend != base_request.agent_backend)
+            or (cli_provider is not None and cli_provider != base_request.cli_provider)
+        ):
+            raise SharedAgentEnvironmentConflictError
+        session = shared_session
+        request = base_request
+        owns_session = False
+    else:
+        request = replace(
+            base_request,
+            agent_backend=(
+                agent_backend if agent_backend is not None else base_request.agent_backend
+            ),
+            cli_provider=(cli_provider if cli_provider is not None else base_request.cli_provider),
+            environment_bind_mounts=(
+                *base_request.environment_bind_mounts,
+                *(
+                    EnvironmentBindMount(
+                        mount.path,
+                        mount.agent_path if mount.agent_path is not None else str(mount.path),
+                        read_only=mount.access is HostResourceAccess.READ_ONLY,
+                    )
+                    for mount in mounts
+                ),
+            ),
+        )
+        session = open_session(request)
+        owns_session = True
+
+    sandboxed = session.view.cli_sandboxed
+    return ScopedAgentEnvironment(
+        session=session,
+        skill_source_dirs=skill_source_dirs,
+        skill_selection=skill_selection,
+        project_path_policy=request.project_path_policy,
+        host_resources=host_resources,
+        backends={"chat": session.sandbox} if sandboxed else None,
+        use_docker=sandboxed,
+        owns_session=owns_session,
+    )
 
 
 type ScopedAgentEnvironmentOpener = Callable[
@@ -469,4 +565,7 @@ __all__ = [
     "AgentExecutionStatus",
     "AgentMessageRouter",
     "RuntimeAgentExecution",
+    "ScopedAgentEnvironment",
+    "SharedAgentEnvironmentConflictError",
+    "open_agent_execution_environment",
 ]

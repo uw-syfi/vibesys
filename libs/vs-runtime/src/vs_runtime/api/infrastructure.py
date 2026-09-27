@@ -29,6 +29,9 @@ from vs_runtime._agent_execution import (
     AgentExecutionStarted,
     AgentExecutionStatus,
     AgentMessageRouter,
+    ScopedAgentEnvironment,
+    SharedAgentEnvironmentConflictError,
+    open_agent_execution_environment,
 )
 from vs_runtime._agent_sessions import RuntimeAgentSessions
 from vs_runtime._bundled_paths import (
@@ -456,6 +459,8 @@ __all__ = [
     "RuntimeWorkspaceEvaluation",
     "SDKRoots",
     "ScalarBenchmarkContract",
+    "ScopedAgentEnvironment",
+    "SharedAgentEnvironmentConflictError",
     "SkillCatalogEntry",
     "SkillMetadataError",
     "SkyPilotEnvironment",
@@ -494,6 +499,7 @@ __all__ = [
     "make_run_environment_spec",
     "materialize_input_project",
     "materialize_objective_document",
+    "open_agent_execution_environment",
     "open_run_host",
     "parse_profile_command",
     "preflight_native_cpu_profiler",

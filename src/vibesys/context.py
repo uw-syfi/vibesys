@@ -4,7 +4,7 @@ import shutil
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
@@ -43,11 +43,7 @@ from vibesys.orchestration.profilers import (
     resolve_profiler_kind,
 )
 from vibesys.orchestration.request import RunRequest
-from vibesys.orchestration.skills import (
-    SkillSelection,
-    platform_skill_excluded_paths,
-    platform_skill_selection,
-)
+from vibesys.orchestration.skills import platform_skill_excluded_paths, platform_skill_selection
 from vibesys.run import (
     DeviceLease,
     ExperimentRepository,
@@ -93,6 +89,8 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     RunState,
     ScalarBenchmarkContract,
+    ScopedAgentEnvironment,
+    SharedAgentEnvironmentConflictError,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
     TrustedEvaluatorRequirements,
@@ -101,6 +99,7 @@ from vs_runtime.api.infrastructure import (
     create_trusted_evaluation_executor,
     load_evaluator_package,
     make_run_environment_spec,
+    open_agent_execution_environment,
     preflight_native_cpu_profiler,
     run_environment_record,
 )
@@ -108,9 +107,6 @@ from vs_sandbox.api import (
     ComputeBackendImpl,
     EnvironmentBindMount,
     HostResource,
-    HostResourceAccess,
-    ProjectPathPolicy,
-    Sandbox,
     create_compute_backend,
 )
 from vs_sandbox.api.evaluator_tools import tool_install_root
@@ -1061,25 +1057,6 @@ class WorkspaceResourceSpec:
     cli_provider: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ScopedAgentEnvironment:
-    """One agent's view of a workspace sandbox."""
-
-    session: RunEnvironmentSession
-    skill_source_dirs: tuple[Path, ...]
-    skill_selection: SkillSelection
-    project_path_policy: ProjectPathPolicy
-    host_resources: tuple[HostResource, ...]
-    backends: dict[str, Sandbox] | None
-    use_docker: bool
-    owns_session: bool = True
-
-    def close(self) -> None:
-        """Release this agent's environment session."""
-        if self.owns_session:
-            self.session.close()
-
-
 def borrow_run_agent_environment(
     context: "_RunResources",
     *,
@@ -1093,12 +1070,15 @@ def borrow_run_agent_environment(
     Opening another environment for each role would bind the same bridge socket
     and let an agent close a bridge still used by the run.
     """
-    base = context.environment_request
-    if (
-        mounts
-        or (agent_backend is not None and agent_backend != base.agent_backend)
-        or (cli_provider is not None and cli_provider != base.cli_provider)
-    ):
+    try:
+        return _open_agent_environment(
+            context,
+            share_session=True,
+            mounts=mounts,
+            agent_backend=agent_backend,
+            cli_provider=cli_provider,
+        )
+    except SharedAgentEnvironmentConflictError as error:
         raise ConfigurationError(
             ConfigurationDiagnostic(
                 code="skypilot_agent_environment_conflict",
@@ -1108,18 +1088,7 @@ def borrow_run_agent_environment(
                     "provider, and mounts"
                 ),
             )
-        )
-    session = context.run_environment_session
-    return ScopedAgentEnvironment(
-        session=session,
-        skill_source_dirs=tuple(context.skill_source_paths),
-        skill_selection=platform_skill_selection(context.backend),
-        project_path_policy=base.project_path_policy,
-        host_resources=context.agent_host_resources,
-        backends={"chat": session.sandbox} if session.view.cli_sandboxed else None,
-        use_docker=session.view.cli_sandboxed,
-        owns_session=False,
-    )
+        ) from error
 
 
 def open_scoped_agent_environment(
@@ -1137,33 +1106,35 @@ def open_scoped_agent_environment(
             agent_backend=agent_backend,
             cli_provider=cli_provider,
         )
-    base = context.environment_request
-    request = replace(
-        base,
-        agent_backend=agent_backend if agent_backend is not None else base.agent_backend,
-        cli_provider=cli_provider if cli_provider is not None else base.cli_provider,
-        environment_bind_mounts=(
-            *base.environment_bind_mounts,
-            *(
-                EnvironmentBindMount(
-                    mount.path,
-                    mount.agent_path if mount.agent_path is not None else str(mount.path),
-                    read_only=mount.access is HostResourceAccess.READ_ONLY,
-                )
-                for mount in mounts
-            ),
-        ),
+    return _open_agent_environment(
+        context,
+        share_session=False,
+        mounts=mounts,
+        agent_backend=agent_backend,
+        cli_provider=cli_provider,
     )
-    session = open_run_environment(context.run_environment, request)
-    sandboxed = session.view.cli_sandboxed
-    return ScopedAgentEnvironment(
-        session=session,
+
+
+def _open_agent_environment(
+    context: "_RunResources",
+    *,
+    share_session: bool,
+    mounts: tuple[HostResource, ...],
+    agent_backend: str | None,
+    cli_provider: str | None,
+) -> ScopedAgentEnvironment:
+    """Bind product-resolved policy to the runtime's scoped session owner."""
+    return open_agent_execution_environment(
+        context.environment_request,
+        context.run_environment_session,
+        share_session=share_session,
         skill_source_dirs=tuple(context.skill_source_paths),
         skill_selection=platform_skill_selection(context.backend),
-        project_path_policy=request.project_path_policy,
         host_resources=context.agent_host_resources,
-        backends={"chat": session.sandbox} if sandboxed else None,
-        use_docker=session.view.cli_sandboxed if sandboxed else False,
+        mounts=mounts,
+        agent_backend=agent_backend,
+        cli_provider=cli_provider,
+        open_session=lambda request: open_run_environment(context.run_environment, request),
     )
 
 
