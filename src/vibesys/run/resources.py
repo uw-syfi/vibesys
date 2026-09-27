@@ -101,10 +101,6 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 
-_RUNTIME_STATE_NAMESPACE = "runtime"
-_SKYPILOT_STATE_NAMESPACE = "skypilot"
-
-
 _StateBinding = ProjectStateDeclaration
 
 
