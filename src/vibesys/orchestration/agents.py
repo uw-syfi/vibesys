@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
     from vibesys.context import _RunResources
     from vibesys.events import CoreEventWriter
-    from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
     from vs_agent.api import AgentClientProtocol, DurableSessionStore, ToolServerDescriptor
     from vs_runtime.api import AgentSession, Workspaces
@@ -51,7 +50,7 @@ class _Agents:
         *,
         control: RunControlChannel,
         lifecycle_events: AgentExecutionLifecycleSink,
-        open_agent_environment: Callable[..., AgentEnvironment] | None,
+        open_agent_environment: Callable[..., AgentExecutionEnvironment] | None,
         client_factory: Callable[..., AgentClientProtocol] | None,
     ) -> None:
         self._request = request

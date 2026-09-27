@@ -111,7 +111,6 @@ graph TD
     vibesys.orchestration.agent_options --> vibesys.orchestration.metrics
     vibesys.orchestration.agents --> vibesys
     vibesys.orchestration.agents --> vibesys.context
-    vibesys.orchestration.agents --> vibesys.orchestration.environment
     vibesys.orchestration.agents --> vibesys.orchestration.request
     vibesys.orchestration.agents --> vibesys.orchestration.steering
     vibesys.orchestration.agents --> vibesys.orchestration.workspace_resources
@@ -120,7 +119,6 @@ graph TD
     vibesys.orchestration.commands --> vibesys.orchestration.workspace_resources
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.control --> vibesys.run
-    vibesys.orchestration.environment --> vibesys
     vibesys.orchestration.evolve --> vibesys
     vibesys.orchestration.evolve --> vibesys.domains
     vibesys.orchestration.evolve --> vibesys.errors
@@ -161,7 +159,6 @@ graph TD
     vibesys.orchestration.request --> vibesys.sandbox
     vibesys.orchestration.resume --> vibesys.errors
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
-    vibesys.orchestration.runner --> vibesys.orchestration.environment
     vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runner --> vibesys.run.host
@@ -199,7 +196,6 @@ graph TD
     vibesys.run.host --> vibesys.orchestration.commands
     vibesys.run.host --> vibesys.orchestration.contracts
     vibesys.run.host --> vibesys.orchestration.control
-    vibesys.run.host --> vibesys.orchestration.environment
     vibesys.run.host --> vibesys.orchestration.gates
     vibesys.run.host --> vibesys.orchestration.request
     vibesys.run.host --> vibesys.orchestration.skills
@@ -348,7 +344,6 @@ graph TD
     vibesys.orchestration.agent_options --> vibesys.orchestration.metrics
     vibesys.orchestration.agents --> vibesys
     vibesys.orchestration.agents --> vibesys.context
-    vibesys.orchestration.agents --> vibesys.orchestration.environment
     vibesys.orchestration.agents --> vibesys.orchestration.request
     vibesys.orchestration.agents --> vibesys.orchestration.steering
     vibesys.orchestration.agents --> vibesys.orchestration.workspace_resources
@@ -364,9 +359,6 @@ graph TD
     vibesys.orchestration.contracts --> vs_project
     vibesys.orchestration.contracts --> vs_runtime
     vibesys.orchestration.control --> vibesys.run
-    vibesys.orchestration.environment --> vibesys
-    vibesys.orchestration.environment --> vs_agent
-    vibesys.orchestration.environment --> vs_sandbox
     vibesys.orchestration.evolve --> vibesys
     vibesys.orchestration.evolve --> vibesys.domains
     vibesys.orchestration.evolve --> vibesys.errors
@@ -422,7 +414,6 @@ graph TD
     vibesys.orchestration.resume --> vs_project
     vibesys.orchestration.resume --> vs_runtime
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
-    vibesys.orchestration.runner --> vibesys.orchestration.environment
     vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runner --> vibesys.run.host
@@ -473,7 +464,6 @@ graph TD
     vibesys.run.host --> vibesys.orchestration.commands
     vibesys.run.host --> vibesys.orchestration.contracts
     vibesys.run.host --> vibesys.orchestration.control
-    vibesys.run.host --> vibesys.orchestration.environment
     vibesys.run.host --> vibesys.orchestration.gates
     vibesys.run.host --> vibesys.orchestration.request
     vibesys.run.host --> vibesys.orchestration.skills
@@ -489,6 +479,7 @@ graph TD
     vibesys.sandbox --> vibesys.prompts
     vibesys.sandbox --> vs_agent
     vibesys.sandbox --> vs_project
+    vibesys.sandbox --> vs_runtime
     vibesys.sandbox --> vs_sandbox
     vs_agent --> vs_project
     vs_agent --> vs_sandbox

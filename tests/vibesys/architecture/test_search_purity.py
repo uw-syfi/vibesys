@@ -34,7 +34,6 @@ _FORBIDDEN_PACKAGES = (
     "vibesys.loops",
     "vibesys.orchestration.agents",
     "vibesys.orchestration.commands",
-    "vibesys.orchestration.environment",
     "vibesys.orchestration.gates",
     "vibesys.orchestration.runner",
     "vibesys.orchestration.single",

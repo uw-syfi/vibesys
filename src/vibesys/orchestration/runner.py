@@ -12,11 +12,11 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.contracts import OrchestrationProjector
-    from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
     from vs_runtime.api import OrchestrationPlugin, RunStatus, Workspace
+    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
     from vs_sandbox.api import ComputeBackendImpl
 
 
@@ -26,7 +26,7 @@ async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime 
     plugin: OrchestrationPlugin,
     options: BaseModel,
     *,
-    open_agent_environment: Callable[..., AgentEnvironment] | None = None,
+    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: OrchestrationProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,

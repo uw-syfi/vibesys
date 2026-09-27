@@ -225,11 +225,6 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-path = "vibesys.orchestration.environment"
-layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_sandbox"]
-
-[[modules]]
 # Host-owned agent memory (roadmap, progress log, Pareto archive): pure path
 # resolution plus the file writes strategies used to hand-roll via the
 # dissolved vibesys.agent_run.issue_board.
@@ -282,7 +277,7 @@ depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.evaluators", "vibesy
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.agents", "vibesys.orchestration.commands", "vibesys.orchestration.control", "vibesys.orchestration.contracts", "vibesys.orchestration.environment", "vibesys.orchestration.gates", "vibesys.orchestration.request", "vibesys.orchestration.skills", "vibesys.orchestration.state", "vibesys.orchestration.workspace_resources"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.agents", "vibesys.orchestration.commands", "vibesys.orchestration.control", "vibesys.orchestration.contracts", "vibesys.orchestration.gates", "vibesys.orchestration.request", "vibesys.orchestration.skills", "vibesys.orchestration.state", "vibesys.orchestration.workspace_resources"]
 
 [[modules]]
 path = "vibesys.domains"
@@ -414,7 +409,7 @@ depends_on = [ "vs_project", "vs_runtime", "vibesys.orchestration.view"]
 [[modules]]
 path = "vibesys.orchestration.runner"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.run.host", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vs_agent", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.run.host", "vibesys.orchestration.request", "vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration.commands"
@@ -429,7 +424,7 @@ depends_on = [ "vs_runtime"]
 [[modules]]
 path = "vibesys.orchestration.agents"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vibesys.orchestration.steering", "vibesys.orchestration.environment", "vibesys.orchestration.workspace_resources", "vibesys.orchestration.request"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.run", "vs_agent", "vs_runtime", "vibesys.orchestration.steering", "vibesys.orchestration.workspace_resources", "vibesys.orchestration.request"]
 
 [[modules]]
 path = "vibesys.orchestration.steering"

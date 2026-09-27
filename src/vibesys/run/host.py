@@ -32,11 +32,11 @@ if TYPE_CHECKING:
 
     from vibesys.context import _RunResources
     from vibesys.orchestration.contracts import OrchestrationProjector
-    from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
     from vs_runtime.api import OrchestrationPlugin, RunHost, Workspace
+    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
     from vs_sandbox.api import ComputeBackendImpl
 
 
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 class _ProductHostFactory:
     request: RunRequest
     integration: LocalRunIntegration
-    open_agent_environment: Callable[..., AgentEnvironment] | None
+    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None
     projector: OrchestrationProjector | None
     agent_client_factory: Callable[..., AgentClientProtocol] | None
     backend_factory: Callable[..., ComputeBackendImpl] | None
@@ -202,7 +202,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     integration: LocalRunIntegration,
     *,
     plugin: OrchestrationPlugin,
-    open_agent_environment: Callable[..., AgentEnvironment] | None = None,
+    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: OrchestrationProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
