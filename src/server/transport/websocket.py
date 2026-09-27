@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import os
 import secrets
 import threading
@@ -260,8 +261,8 @@ class WebSocketGateway:
         if not candidate.is_file():
             return _response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         try:
-            body = candidate.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            body = candidate.read_bytes()
+        except OSError:
             return _response(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to read asset\n", "text/plain"
             )
@@ -409,7 +410,7 @@ def _respond(_connection: ServerConnection, status: HTTPStatus, text: str) -> Ht
     return _response(status, text, "text/plain")
 
 
-def _response(status: HTTPStatus, text: str, content_type: str) -> HttpResponse:
+def _response(status: HTTPStatus, content: str | bytes, content_type: str) -> HttpResponse:
     from websockets.datastructures import (  # noqa: PLC0415  # lint-waiver: LW-101019 [PLC0415]; defer optional websocket imports until an HTTP response is needed
         Headers,
     )
@@ -417,7 +418,7 @@ def _response(status: HTTPStatus, text: str, content_type: str) -> HttpResponse:
         Response as HttpResponse,
     )
 
-    body = text.encode("utf-8")
+    body = content.encode("utf-8") if isinstance(content, str) else content
     return HttpResponse(
         status.value,
         status.phrase,
@@ -433,13 +434,17 @@ def _response(status: HTTPStatus, text: str, content_type: str) -> HttpResponse:
 
 
 def _content_type(path: Path) -> str:
-    return {
+    known_type = {
         ".css": "text/css; charset=utf-8",
         ".html": "text/html; charset=utf-8",
         ".js": "text/javascript; charset=utf-8",
         ".json": "application/json; charset=utf-8",
         ".svg": "image/svg+xml",
-    }.get(path.suffix, "application/octet-stream")
+    }.get(path.suffix.lower())
+    if known_type is not None:
+        return known_type
+    guessed_type, _encoding = mimetypes.guess_type(path.name)
+    return guessed_type or "application/octet-stream"
 
 
 def _connection_closed(connection: object) -> bool:

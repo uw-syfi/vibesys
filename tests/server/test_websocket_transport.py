@@ -37,12 +37,20 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
     assets.mkdir()
+    (assets / "assets").mkdir()
     (assets / "index.html").write_text("<!doctype html><title>VibeSys</title>")
+    image = b"\x89PNG\r\n\x1a\n\x00\xff\x80"
+    (assets / "assets" / "logo.png").write_bytes(image)
 
     with WebSocketGateway(parts.api, assets_dir=assets) as gateway:
         with urlopen(gateway.url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101021 [S310]; connect only to the loopback URL produced by the gateway under test
             assert response.status == 200
             assert response.read() == b"<!doctype html><title>VibeSys</title>"
+        asset_url = f"http://127.0.0.1:{gateway.bound_port}/assets/logo.png"
+        with urlopen(asset_url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101061 [S310]; connect only to the loopback URL produced by the gateway under test
+            assert response.status == 200
+            assert response.headers["Content-Type"] == "image/png"
+            assert response.read() == image
 
         response = asyncio.run(_request(gateway, SnapshotQuery()))
 
