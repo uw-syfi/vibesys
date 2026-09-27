@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vs_sandbox.api import (
+    EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
     HostResourceContext,
@@ -35,6 +36,14 @@ def test_declaration_sdk_collects_resources_without_importing_them(tmp_path: Pat
     ) == (
         HostResource(toolchain, purpose="test toolchain"),
         additional,
+    )
+
+
+def test_environment_bind_mount_defaults_to_read_only(tmp_path: Path) -> None:
+    assert EnvironmentBindMount(tmp_path / "model", "/model") == EnvironmentBindMount(
+        host_path=tmp_path / "model",
+        container_path="/model",
+        read_only=True,
     )
 
 

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         query_gpu_info,
     )
     from vs_sandbox.host_resources import (
+        EnvironmentBindMount,
         HostResource,
         HostResourceAccess,
         HostResourceContext,
@@ -83,6 +84,7 @@ __all__ = [
     "Device",
     "DeviceLease",
     "DockerSandbox",
+    "EnvironmentBindMount",
     "GpuContentionMonitor",
     "GpuInfo",
     "HostResource",
@@ -151,6 +153,7 @@ _LAZY_EXPORTS = {
     "DockerSandbox": ("docker_sandbox", "DockerSandbox"),
     "Sandbox": ("execution", "Sandbox"),
     "SandboxExecutionResult": ("execution", "SandboxExecutionResult"),
+    "EnvironmentBindMount": ("host_resources", "EnvironmentBindMount"),
     "HostResource": ("host_resources", "HostResource"),
     "HostResourceAccess": ("host_resources", "HostResourceAccess"),
     "HostResourceContext": ("host_resources", "HostResourceContext"),

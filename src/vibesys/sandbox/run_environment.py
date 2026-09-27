@@ -65,6 +65,7 @@ from vs_runtime.api.infrastructure import (
     required_evaluator_tools_root,
 )
 from vs_sandbox.api import (
+    EnvironmentBindMount,
     HostResource,
     ProjectPathPolicy,
     SandboxKind,
@@ -120,7 +121,6 @@ source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.domains.environment import EnvironmentBindMount
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vs_project.api import StateNamespace
     from vs_sandbox.api import ComputeBackendImpl, Sandbox

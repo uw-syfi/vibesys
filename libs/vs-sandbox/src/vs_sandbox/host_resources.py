@@ -43,6 +43,15 @@ class HostResource:
 
 
 @dataclass(frozen=True)
+class EnvironmentBindMount:
+    """Host-to-container path requested by product environment composition."""
+
+    host_path: Path
+    container_path: str
+    read_only: bool = True
+
+
+@dataclass(frozen=True)
 class HostResourceContext:
     """Host facts available to a resource declaration."""
 

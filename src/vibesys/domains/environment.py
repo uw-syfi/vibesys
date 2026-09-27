@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+# lint-waiver: LW-012401 [TC001]; this module intentionally re-exports the
+# lower-owned value type so existing domain hooks use one authoritative class;
+# a TYPE_CHECKING-only import would remove that runtime export.
+from vs_sandbox.api import EnvironmentBindMount  # noqa: TC001
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -28,15 +33,6 @@ class EnvironmentContext:
     model_cache_dir: Path
     runtime_artifact_dir: Path
     log: Callable[[str], None]
-
-
-@dataclass(frozen=True)
-class EnvironmentBindMount:
-    """Read-only or writable host-to-container path mapping."""
-
-    host_path: Path
-    container_path: str
-    read_only: bool = True
 
 
 @dataclass(frozen=True)
