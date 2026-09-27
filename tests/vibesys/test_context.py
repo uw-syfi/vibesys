@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 
 from vibesys.api import open_run_store
-from vibesys.api.agent import is_agent_run_manifest
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.context import (
@@ -547,8 +546,10 @@ def test_agent_v5_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     assert isinstance(stored, OrchestrationRunManifest)
     assert stored.orchestration.id == "multi-agent"
     assert stored.orchestration.options["max_rounds"] == 1
-    assert is_agent_run_manifest(stored)
-    assert open_run_store(Project.open(project)).get_run(run_id).loop == "multi-agent"
+    view = open_run_store(Project.open(project)).get_run(run_id)
+    assert view.loop == "multi-agent"
+    registration = built_in_orchestrations().resolve(stored.orchestration.id)
+    assert registration.plugin.project is not None
 
     with _create_context(
         project,

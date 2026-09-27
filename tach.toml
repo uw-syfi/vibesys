@@ -72,7 +72,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.agent", "vs_agent", "server.settings", "headless"]
+depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.settings", "headless"]
 
 [[modules]]
 path = "headless"
@@ -84,7 +84,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.api"
-depends_on = ["vibesys.api", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle"]
+depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle"]
 
 [[modules]]
 path = "server.chat"
@@ -160,15 +160,27 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skills", "vs_project", "vs_sandbox", "vibesys.api.agent", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.orchestration.evolve", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skills", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
 
 [[modules]]
-path = "vibesys.api.agent"
-depends_on = ["vibesys.plugin_catalog", "vs_project", "vs_loop_state", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.agent_options"]
+path = "vibesys.api.evolve"
+depends_on = ["vibesys.orchestration.evolve"]
+
+[[modules]]
+path = "vibesys.api.hypothesis"
+depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis.readmodel"]
+
+[[modules]]
+path = "vibesys.api.metrics"
+depends_on = ["vibesys.orchestration.metrics"]
+
+[[modules]]
+path = "vibesys.api.profilers"
+depends_on = ["vibesys.orchestration.profilers", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api.contracts"
-depends_on = ["vs_agent", "vibesys", "vs_project", "vs_loop_state", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.run.contracts"]
+depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.errors", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api.session"
@@ -188,7 +200,7 @@ depends_on = ["vibesys.api._store", "vibesys.plugin_catalog", "vs_project"]
 
 [[modules]]
 path = "vibesys.api._store"
-depends_on = ["vibesys.api.contracts", "vibesys.orchestration.agent_options", "vibesys.plugin_catalog", "vs_project"]
+depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project"]
 
 [[modules]]
 path = "vibesys.api.testing"
@@ -259,7 +271,7 @@ depends_on = ["vs_loop_state"]
 [[modules]]
 path = "vibesys.orchestration.profilers"
 layer = "orchestration_host"
-depends_on = ["vibesys"]
+depends_on = ["vibesys", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.review"
@@ -274,7 +286,7 @@ depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github"
 [[modules]]
 path = "vibesys.run.contracts"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.inputs", "vibesys.orchestration.profilers", "vs_project", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.host"
@@ -399,8 +411,24 @@ expose = ["api", "api\\..*"]
 from = ["vs_runtime"]
 
 [[interfaces]]
-expose = ["ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+expose = ["ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
 from = ["vibesys.run.contracts"]
+
+[[interfaces]]
+expose = ["resolve_openevolve_options"]
+from = ["vibesys.api.evolve"]
+
+[[interfaces]]
+expose = ["AgentRunProjection", "CandidateDisposition", "HypothesisOutcome", "HypothesisResolution", "HypothesisRoundView", "HypothesisView", "JudgeVerdict", "PerfDeltaReason", "RoundView", "agent_projection"]
+from = ["vibesys.api.hypothesis"]
+
+[[interfaces]]
+expose = ["MetricSpace", "Objective"]
+from = ["vibesys.api.metrics"]
+
+[[interfaces]]
+expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
+from = ["vibesys.api.profilers"]
 
 [[interfaces]]
 expose = ["agent_options", "evolve", "evolve\\..*", "gates", "hypothesis", "hypothesis\\..*", "issue_queue", "issue_queue\\..*", "metrics", "multi", "multi\\..*", "profile_focus", "profile_focus\\..*", "profilers", "review", "single", "single\\..*"]

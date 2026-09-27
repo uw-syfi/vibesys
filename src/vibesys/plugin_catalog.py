@@ -88,7 +88,6 @@ class OrchestrationRegistration:
 
     plugin: OrchestrationPlugin
     projector: OrchestrationProjector | None = None
-    state_family: str | None = None
 
     def parse_options(self, descriptor: OrchestrationDescriptor) -> BaseModel:
         """Validate one descriptor and return the plugin's typed options."""
@@ -137,8 +136,6 @@ class OrchestrationRegistry:
     def register_plugin(
         self,
         plugin: OrchestrationPlugin,
-        *,
-        state_family: str | None = None,
     ) -> None:
         """Register a runtime plugin in the product catalog."""
         try:
@@ -152,7 +149,6 @@ class OrchestrationRegistry:
         self._registrations[plugin.id] = OrchestrationRegistration(
             plugin=plugin,
             projector=_PluginProjector(plugin) if plugin.project is not None else None,
-            state_family=state_family,
         )
 
     def resolve(self, kind: str) -> OrchestrationRegistration:
@@ -179,10 +175,10 @@ def built_in_orchestrations() -> OrchestrationRegistry:
     from vibesys.orchestration.single import plugin as single_plugin  # noqa: PLC0415
 
     registry = OrchestrationRegistry()
-    registry.register_plugin(single_plugin.PLUGIN, state_family="agent")
-    registry.register_plugin(single_plugin.PROFILE_GUIDED_PLUGIN, state_family="agent")
-    registry.register_plugin(multi_plugin.PLUGIN, state_family="agent")
-    registry.register_plugin(multi_plugin.PROFILE_GUIDED_PLUGIN, state_family="agent")
+    registry.register_plugin(single_plugin.PLUGIN)
+    registry.register_plugin(single_plugin.PROFILE_GUIDED_PLUGIN)
+    registry.register_plugin(multi_plugin.PLUGIN)
+    registry.register_plugin(multi_plugin.PROFILE_GUIDED_PLUGIN)
     registry.register_plugin(issue_queue_plugin.PLUGIN)
     registry.register_plugin(evolve_plugin.PLUGIN)
     return registry

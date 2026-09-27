@@ -18,7 +18,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
-from vibesys.api import AgentRunProjection, WorkspaceChange, agent_projection
+from vibesys.api import WorkspaceChange
+from vibesys.api.hypothesis import AgentRunProjection, agent_projection
 
 if TYPE_CHECKING:
     from vibesys.api import RunView
@@ -86,7 +87,7 @@ class DesignLog:
         baseline, the commit the run branched from, and anchors hypotheses that
         recorded no parent of their own.
 
-        ``state`` is the `vibesys.api.RunView` for the attached run: its agent
+        ``state`` is the `vibesys.api.RunView` for the attached run: its hypothesis
         projection's `HypothesisView.rounds`/`rounds` carry the same
         `round_number`/`commit`/`parent_commit` facts this projection used to
         read off the core `AgentRunState` directly.

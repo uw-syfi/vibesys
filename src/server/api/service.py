@@ -46,10 +46,8 @@ from server.api.protocol import (
 )
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.api import (
-    RunRecordReadError,
-    agent_projection,
-)
+from vibesys.api import RunRecordReadError
+from vibesys.api.hypothesis import agent_projection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -140,8 +138,6 @@ class RunApi:
         self._design: tuple[str, DesignLog] | None = None
         self._design_lock = threading.Lock()
         self._experiment_projection = ExperimentProjection()
-        self._experiment_run_kind: tuple[str, bool] | None = None
-        self._experiment_run_kind_lock = threading.Lock()
         self._journal.add_listener(
             self._observe_experiment_change,
             replay_filter=lambda _header: False,
@@ -389,7 +385,8 @@ class RunApi:
         record = self._controller.attached_run
         if record is None:
             return []
-        projection = agent_projection(record.view())
+        view = record.view()
+        projection = agent_projection(view)
         if projection is None:
             return []
         return [
@@ -415,12 +412,13 @@ class RunApi:
         record = self._controller.attached_run
         if record is None:
             return None
-        objectives = record.facts().objectives
-        if objectives is None:
+        view = record.view()
+        projection = agent_projection(view)
+        if projection is None:
             return None
         return build_performance_context(
-            record.view(),
-            objectives=objectives,
+            view,
+            objectives=projection.objectives,
             objective_description=self._objective_description(),
         )
 
@@ -550,7 +548,7 @@ class RunApi:
         An authoritative ``RunRecord.view`` reload here re-reads durable state;
         that is expected since this branch runs only on a cache miss or race.
         """
-        while self._is_agent_run(record):
+        while True:
             projection_id = record.identity
             cached = self._experiment_projection.query(
                 record.run_id,
@@ -576,18 +574,6 @@ class RunApi:
             if current is None:
                 return None
             record = current
-        return None
-
-    def _is_agent_run(self, record: RunRecord) -> bool:
-        key = record.identity
-        with self._experiment_run_kind_lock:
-            cached = self._experiment_run_kind
-            if cached is not None and cached[0] == key:
-                return cached[1]
-        is_agent = record.facts().is_agent_run
-        with self._experiment_run_kind_lock:
-            self._experiment_run_kind = (key, is_agent)
-        return is_agent
 
     def observe_committed_state(self, view: RunView, changed_keys: tuple[str, ...] | None) -> None:
         """Incrementally project a state object immediately after its commit.

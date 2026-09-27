@@ -24,6 +24,9 @@ hypothesis planner's skill-selection and title rules are public through
 `vibesys.orchestration.hypothesis`, not a top-level schema catch-all. Generic
 session composition lives behind the public `vibesys.api.session` contract;
 workspace, persistence, and sandbox mechanisms live in the runtime libraries.
+The `vibesys.api` package root is policy-neutral. Applications opt into a
+built-in policy through a named facade such as `vibesys.api.hypothesis` or
+`vibesys.api.evolve`; the generic facade does not re-export those contracts.
 Tach records each dependency. `vs_project` owns generic project layout and
 persistence operations.
 The v5 manifest separates policy-specific descriptor options from the generic
@@ -77,15 +80,12 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 graph TD
     vibesys --> vibesys.errors
     vibesys.api --> vibesys
-    vibesys.api --> vibesys.api.agent
     vibesys.api --> vibesys.api.auxiliary
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.api.session
     vibesys.api --> vibesys.api.store
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration.agent_options
-    vibesys.api --> vibesys.orchestration.evolve
-    vibesys.api --> vibesys.orchestration.profilers
     vibesys.api --> vibesys.plugin_catalog
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.run.contracts
@@ -102,16 +102,16 @@ graph TD
     vibesys.api._session --> vibesys.run.host
     vibesys.api._session --> vibesys.run.skills
     vibesys.api._store --> vibesys.api.contracts
-    vibesys.api._store --> vibesys.orchestration.agent_options
     vibesys.api._store --> vibesys.plugin_catalog
-    vibesys.api.agent --> vibesys.orchestration.agent_options
-    vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
-    vibesys.api.agent --> vibesys.plugin_catalog
     vibesys.api.auxiliary --> vibesys.api.store
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
-    vibesys.api.contracts --> vibesys.orchestration.metrics
     vibesys.api.contracts --> vibesys.run.contracts
+    vibesys.api.evolve --> vibesys.orchestration.evolve
+    vibesys.api.hypothesis --> vibesys.orchestration.hypothesis.readmodel
+    vibesys.api.metrics --> vibesys.orchestration.metrics
+    vibesys.api.profilers --> vibesys.orchestration.profilers
+    vibesys.api.profilers --> vibesys.run.contracts
     vibesys.api.session --> vibesys.api._session
     vibesys.api.session --> vibesys.api.auxiliary
     vibesys.api.session --> vibesys.api.contracts
@@ -167,6 +167,7 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.resume
     vibesys.orchestration.multi --> vibesys.orchestration.review
     vibesys.orchestration.profilers --> vibesys
+    vibesys.orchestration.profilers --> vibesys.run.contracts
     vibesys.orchestration.prompts --> vibesys
     vibesys.orchestration.resume --> vibesys.errors
     vibesys.orchestration.single --> vibesys
@@ -191,7 +192,6 @@ graph TD
     vibesys.run --> vibesys.inputs
     vibesys.run.contracts --> vibesys
     vibesys.run.contracts --> vibesys.inputs
-    vibesys.run.contracts --> vibesys.orchestration.profilers
     vibesys.run.environment --> vibesys.orchestration.prompts
     vibesys.run.evaluation --> vibesys
     vibesys.run.evaluation --> vibesys.run.contracts
@@ -212,7 +212,10 @@ graph TD
     entrypoints --> headless
     entrypoints --> server.settings
     entrypoints --> vibesys.api
-    entrypoints --> vibesys.api.agent
+    entrypoints --> vibesys.api.evolve
+    entrypoints --> vibesys.api.hypothesis
+    entrypoints --> vibesys.api.metrics
+    entrypoints --> vibesys.api.profilers
     entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
@@ -229,6 +232,7 @@ graph TD
     server.api --> server.run_lifecycle
     server.api --> server.settings
     server.api --> vibesys.api
+    server.api --> vibesys.api.hypothesis
     server.chat --> server
     server.chat --> server.controller
     server.chat --> server.events
@@ -285,15 +289,12 @@ graph TD
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys.api --> vibesys
-    vibesys.api --> vibesys.api.agent
     vibesys.api --> vibesys.api.auxiliary
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.api.session
     vibesys.api --> vibesys.api.store
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration.agent_options
-    vibesys.api --> vibesys.orchestration.evolve
-    vibesys.api --> vibesys.orchestration.profilers
     vibesys.api --> vibesys.plugin_catalog
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.run.contracts
@@ -318,22 +319,20 @@ graph TD
     vibesys.api._session --> vs_runtime
     vibesys.api._session --> vs_sandbox
     vibesys.api._store --> vibesys.api.contracts
-    vibesys.api._store --> vibesys.orchestration.agent_options
     vibesys.api._store --> vibesys.plugin_catalog
     vibesys.api._store --> vs_project
-    vibesys.api.agent --> vibesys.orchestration.agent_options
-    vibesys.api.agent --> vibesys.orchestration.hypothesis.readmodel
-    vibesys.api.agent --> vibesys.plugin_catalog
-    vibesys.api.agent --> vs_loop_state
-    vibesys.api.agent --> vs_project
     vibesys.api.auxiliary --> vibesys.api.store
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
-    vibesys.api.contracts --> vibesys.orchestration.metrics
     vibesys.api.contracts --> vibesys.run.contracts
     vibesys.api.contracts --> vs_agent
-    vibesys.api.contracts --> vs_loop_state
     vibesys.api.contracts --> vs_project
+    vibesys.api.evolve --> vibesys.orchestration.evolve
+    vibesys.api.hypothesis --> vibesys.orchestration.hypothesis.readmodel
+    vibesys.api.hypothesis --> vs_loop_state
+    vibesys.api.metrics --> vibesys.orchestration.metrics
+    vibesys.api.profilers --> vibesys.orchestration.profilers
+    vibesys.api.profilers --> vibesys.run.contracts
     vibesys.api.session --> vibesys.api._session
     vibesys.api.session --> vibesys.api.auxiliary
     vibesys.api.session --> vibesys.api.contracts
@@ -409,6 +408,7 @@ graph TD
     vibesys.orchestration.multi --> vs_prompts
     vibesys.orchestration.multi --> vs_runtime
     vibesys.orchestration.profilers --> vibesys
+    vibesys.orchestration.profilers --> vibesys.run.contracts
     vibesys.orchestration.prompts --> vibesys
     vibesys.orchestration.prompts --> vs_prompts
     vibesys.orchestration.resume --> vibesys.errors
@@ -446,7 +446,6 @@ graph TD
     vibesys.run --> vs_sandbox
     vibesys.run.contracts --> vibesys
     vibesys.run.contracts --> vibesys.inputs
-    vibesys.run.contracts --> vibesys.orchestration.profilers
     vibesys.run.contracts --> vs_project
     vibesys.run.contracts --> vs_runtime
     vibesys.run.environment --> vibesys.orchestration.prompts

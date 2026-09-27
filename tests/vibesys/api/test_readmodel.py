@@ -13,10 +13,15 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 import pytest
 from pydantic import ValidationError
 
-from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.hypothesis import OrchestratorPlan, derive_hypothesis_title
-from vibesys.orchestration.hypothesis.readmodel import project_run_view as _project_run_view
+from vibesys.orchestration.hypothesis.readmodel import (
+    AgentRunProjection,
+    agent_projection,
+)
+from vibesys.orchestration.hypothesis.readmodel import (
+    project_run_view as _project_run_view,
+)
 from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,

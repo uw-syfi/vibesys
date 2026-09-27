@@ -11,16 +11,11 @@ from typing import Protocol
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEvent, EventStatus
-
-# Objective/MetricSpace are shared evaluator contracts.
-from vibesys.orchestration.metrics import MetricSpace, Objective
-from vibesys.run.contracts import ResumeRef, RunRequest, RunResult, RunStatus, RunView
+from vibesys.run.contracts import ProfilerKind, ResumeRef, RunRequest, RunResult, RunStatus, RunView
 from vs_agent.api import MCPServerSpec
-from vs_loop_state.api import CandidateDisposition, PerfDeltaReason
 from vs_project.api import OrchestrationDescriptor
 
 __all__ = [
-    "CandidateDisposition",
     "Config",
     "ConfigurationDiagnostic",
     "ConfigurationError",
@@ -28,10 +23,8 @@ __all__ = [
     "EventSink",
     "EventStatus",
     "MCPServerSpec",
-    "MetricSpace",
-    "Objective",
     "OrchestrationDescriptor",
-    "PerfDeltaReason",
+    "ProfilerKind",
     "ResumeRef",
     "RunRequest",
     "RunResult",

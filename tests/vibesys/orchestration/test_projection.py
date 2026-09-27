@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.api.agent import AgentRunProjection
 from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.readmodel import AgentRunProjection
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
@@ -42,6 +43,12 @@ PLUGINS = (
 def _search_state() -> HypothesisState:
     return HypothesisState(
         experiment_revision=7,
+        metrics=MetricSpace(
+            objectives=(
+                Objective(name="throughput", direction="max"),
+                Objective(name="latency", direction="min"),
+            )
+        ),
         hypotheses=[
             Hypothesis(
                 hypothesis_id="H-01",
@@ -100,6 +107,7 @@ def test_plugin_projects_aggregate_state_without_mutating_it(
     payload = AgentRunProjection.model_validate(projection.payload)
     assert payload.kind == "agent"
     assert payload.current_round == 1
+    assert payload.objectives == ("throughput:max", "latency:min")
     assert payload.experiment_revision == 7
     assert payload.active_hypothesis_id is None
     assert payload.hypotheses[0].title == "Batch prefill"

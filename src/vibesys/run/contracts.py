@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.inputs import InputBundle
-from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
@@ -23,6 +22,21 @@ class ResumeRef(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
+
+
+class ProfilerKind(StrEnum):
+    """Known profiler modes selectable in a run request."""
+
+    AUTO = "auto"
+    NONE = "none"
+    NSYS = "nsys"
+    ROCPROF = "rocprof"
+    OTEL = "otel"
+    TORCH = "torch"
+    NEURON = "neuron"
+    MACOS_CPU = "macos_cpu"
+    LINUX_CPU = "linux_cpu"
+    HEADROOM = "headroom"
 
 
 class RunRequest(BaseModel):
@@ -114,6 +128,7 @@ class RunView(BaseModel):
 
 
 __all__ = [
+    "ProfilerKind",
     "ResumeRef",
     "RoundSummary",
     "RunRequest",

@@ -39,7 +39,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from vibesys.api import RunStore, open_run_store
-from vibesys.api.agent import agent_projection
+from vibesys.api.hypothesis import agent_projection
 from vs_agent.api import ToolSpec, serve_stdio
 from vs_project.api import Project
 

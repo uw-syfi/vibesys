@@ -132,6 +132,7 @@ class AgentRunProjection(BaseModel):
 
     kind: Literal["agent"] = "agent"
     current_round: int
+    objectives: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
     active_hypothesis_id: str | None = None
     experiment_revision: int
     hypotheses: list[HypothesisView] = Field(default_factory=list)
@@ -205,6 +206,9 @@ def _agent_run_projection(
     """Build the shared agent payload used by plugin and run envelopes."""
     return AgentRunProjection(
         current_round=len(state.rounds),
+        objectives=tuple(
+            f"{objective.name}:{objective.direction}" for objective in state.metrics.objectives
+        ),
         active_hypothesis_id=state.active_hypothesis_id,
         experiment_revision=experiment_revision,
         hypotheses=[

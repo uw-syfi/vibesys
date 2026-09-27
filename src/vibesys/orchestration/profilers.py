@@ -4,30 +4,15 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, FiniteFloat
 
 from vibesys.constants import ComputeBackend, DomainName
+from vibesys.run.contracts import ProfilerKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-class ProfilerKind(StrEnum):
-    """Known profiler modes."""
-
-    AUTO = "auto"
-    NONE = "none"
-    NSYS = "nsys"
-    ROCPROF = "rocprof"
-    OTEL = "otel"
-    TORCH = "torch"
-    NEURON = "neuron"
-    MACOS_CPU = "macos_cpu"
-    LINUX_CPU = "linux_cpu"
-    HEADROOM = "headroom"
 
 
 class UnsupportedProfilerError(ValueError):

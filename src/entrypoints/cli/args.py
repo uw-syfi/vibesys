@@ -14,11 +14,11 @@ from vibesys.api import (
     ConfigurationDiagnostic,
     ConfigurationError,
     DomainName,
-    Objective,
     ProfilerKind,
     RepositoryVisibility,
 )
-from vibesys.api.request import CLI_PROFILER_CHOICES, coerce_profiler_kind
+from vibesys.api.metrics import Objective
+from vibesys.api.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
 from vs_agent.api import SHIPPED_PROVIDERS
 
 

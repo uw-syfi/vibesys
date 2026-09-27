@@ -117,6 +117,10 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.projection == expected.model_dump(mode="json")
     assert len(listed) == 1
     assert listed[0] == direct
+    assert store.get_record(manifest.run_id).facts().model_dump() == {
+        "trusted_input_baseline": "0" * 40,
+        "effective_objective": None,
+    }
 
 
 def test_evolve_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:

@@ -8,12 +8,10 @@ from tests.support import run_test_command
 
 import vibesys.api.request
 from vibesys.api.request import (
-    CLI_PROFILER_CHOICES,
     REPOSITORY_SLUG,
     InputBundle,
     RunEnvironmentSpec,
     build_task_image,
-    coerce_profiler_kind,
     default_skill_roots,
     experiment_origin_matches,
     generate_experiment_name,
@@ -41,8 +39,6 @@ _NAMES = [
     "RunEnvironmentSpec",
     "make_run_environment_spec",
     "build_task_image",
-    "CLI_PROFILER_CHOICES",
-    "coerce_profiler_kind",
     "REPOSITORY_SLUG",
     "generate_experiment_name",
     "validate_experiment_name",
@@ -73,8 +69,6 @@ def test_request_names_are_exported_and_importable() -> None:
     assert RunEnvironmentSpec is not None
     assert make_run_environment_spec is not None
     assert build_task_image is not None
-    assert CLI_PROFILER_CHOICES is not None
-    assert coerce_profiler_kind is not None
     assert REPOSITORY_SLUG is not None
     assert generate_experiment_name is not None
     assert validate_experiment_name is not None

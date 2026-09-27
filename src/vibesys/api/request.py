@@ -32,17 +32,13 @@ from vibesys.inputs import (
     load_project_task,
     synthesize_input_bundle,
 )
-from vibesys.orchestration.profilers import (
-    CLI_PROFILER_CHOICES,
-    ProfilerKind,
-    coerce_profiler_kind,
-)
 from vibesys.repository import (
     REPOSITORY_SLUG,
     generate_experiment_name,
     repository_name_from_experiment,
     validate_experiment_name,
 )
+from vibesys.run.contracts import ProfilerKind
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.skills import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
@@ -80,14 +76,12 @@ def with_operator_constraints(objective: str, constraints: list[str]) -> str:
 
 
 __all__ = [
-    "CLI_PROFILER_CHOICES",
     "REPOSITORY_SLUG",
     "InputBundle",
     "InputSynthesisError",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
     "build_task_image",
-    "coerce_profiler_kind",
     "default_skill_roots",
     "experiment_origin_matches",
     "generate_experiment_name",

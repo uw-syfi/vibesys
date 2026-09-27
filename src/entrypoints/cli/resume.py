@@ -11,8 +11,9 @@ from entrypoints.cli.args import _parse_cli_objective
 from entrypoints.cli.constants import _RUN_ENVIRONMENT_OPTION_CLI_FIELDS
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from entrypoints.cli.loops import _resolve_project_root
-from vibesys.api import ComputeBackend, Objective, ProfilerKind
-from vibesys.api.request import coerce_profiler_kind, validate_descriptor
+from vibesys.api import ComputeBackend, ProfilerKind
+from vibesys.api.profilers import coerce_profiler_kind
+from vibesys.api.request import validate_descriptor
 from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Mapping
 
+    from vibesys.api.metrics import Objective
     from vs_project.api import RunEnvironmentRecord
 
 

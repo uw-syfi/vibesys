@@ -19,15 +19,14 @@ from entrypoints.cli.remote import _clone_project, _is_remote_project
 from headless import run as headless_run
 from vibesys.api import (
     DomainName,
-    MetricSpace,
-    Objective,
     OrchestrationDescriptor,
     ResumeRef,
     RunRequest,
     RunResult,
     boot_trace,
-    resolve_openevolve_options,
 )
+from vibesys.api.evolve import resolve_openevolve_options
+from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
     validate_descriptor,

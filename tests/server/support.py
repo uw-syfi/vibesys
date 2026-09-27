@@ -13,7 +13,8 @@ from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTr
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
-from vibesys.api import AuxiliaryAgentDriver, CoreEventType, MetricSpace, open_run_store
+from vibesys.api import AuxiliaryAgentDriver, CoreEventType, open_run_store
+from vibesys.api.metrics import MetricSpace
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )

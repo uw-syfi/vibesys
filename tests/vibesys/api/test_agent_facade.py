@@ -1,99 +1,46 @@
-"""The public API exposes frontend facts without exposing agent-policy helpers."""
+"""Generic and policy-specific public facade boundaries."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import UTC, datetime
 
 import vibesys.api as generic_api
-from vibesys.api import MetricSpace, Objective
-from vibesys.api import agent as agent_api
-from vibesys.orchestration.single.models import SingleOptions
-from vs_project.api import (
-    OrchestrationDescriptor,
-    OrchestrationRunManifest,
-    RunEnvironmentRecord,
-    RunExecutionRecord,
-)
+from vibesys.api import hypothesis as hypothesis_api
 
 
-def _manifest(orchestration: OrchestrationDescriptor) -> OrchestrationRunManifest:
-    return OrchestrationRunManifest(
-        schema_version=5,
-        run_id="run-1",
-        project_id="project-1",
-        display_name="Run 1",
-        created_at=datetime(2026, 9, 27, tzinfo=UTC),
-        input_fingerprint="a" * 64,
-        trusted_input_baseline="b" * 40,
-        branch="vibesys/run-1",
-        vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="local"),
-        execution=RunExecutionRecord(
-            model="test-model",
-            agent_backend="stub",
-            compute_backend="cpu",
-            requested_profiler="none",
-            resolved_profiler="none",
-            agent_roles={},
-        ),
-        orchestration=orchestration,
-    )
-
-
-def test_generic_api_import_does_not_load_builtin_policies() -> None:
+def test_generic_api_import_does_not_load_builtin_policy() -> None:
     script = (
         "import sys, vibesys.api; "
-        "assert 'vibesys.api._session' not in sys.modules; "
-        "assert not any(name.startswith(('vibesys.orchestration.multi', "
-        "'vibesys.orchestration.single')) for name in sys.modules)"
+        "assert 'vs_loop_state' not in sys.modules; "
+        "assert not any(name.startswith('vibesys.orchestration') for name in sys.modules)"
     )
-    subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; The subprocess runs the current interpreter on a fixed script literal.
+    subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; the subprocess runs the current interpreter on a fixed script literal.
 
 
-def test_frontend_projection_names_are_available_from_the_top_level_facade() -> None:
-    frontend_projection = {
+def test_generic_api_does_not_publish_hypothesis_policy() -> None:
+    policy_names = {
+        "AgentRunProjection",
+        "CandidateDisposition",
+        "HypothesisOutcome",
+        "HypothesisResolution",
+        "HypothesisRoundView",
+        "HypothesisView",
+        "JudgeVerdict",
+        "MetricSpace",
+        "Objective",
+        "PerfDeltaReason",
+        "agent_projection",
+        "resolve_openevolve_options",
+    }
+
+    assert policy_names.isdisjoint(generic_api.__all__)
+
+
+def test_hypothesis_policy_has_an_explicit_opt_in_facade() -> None:
+    assert {
         "AgentRunProjection",
         "HypothesisRoundView",
         "HypothesisView",
         "agent_projection",
-    }
-    policy_helpers = {
-        "RoundView",
-        "agent_run_objectives",
-        "is_agent_run_manifest",
-    }
-    assert frontend_projection <= set(generic_api.__all__)
-    assert frontend_projection | policy_helpers <= set(agent_api.__all__)
-    assert policy_helpers.isdisjoint(generic_api.__all__)
-    for name in frontend_projection | policy_helpers:
-        assert getattr(agent_api, name) is not None
-
-
-def test_agent_objectives_are_parsed_by_the_registered_plugin() -> None:
-    options = SingleOptions(
-        interface="inprocess",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        metric_space=MetricSpace(
-            objectives=(
-                Objective("throughput", "max"),
-                Objective("latency", "min"),
-            )
-        ),
-    )
-    manifest = _manifest(
-        OrchestrationDescriptor(
-            id="single-agent",
-            config_version=1,
-            options=options.model_dump(mode="json"),
-        )
-    )
-
-    assert agent_api.agent_run_objectives(manifest) == (
-        "throughput:max",
-        "latency:min",
-    )
+    } <= set(hypothesis_api.__all__)

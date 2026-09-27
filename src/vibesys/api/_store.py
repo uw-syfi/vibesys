@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.api.contracts import RunStatus
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.plugin_catalog import project_run
 from vs_project.api import (
     GitTracker,
@@ -57,13 +56,11 @@ class WorkspaceChange(BaseModel):
 
 
 class RunRecordFacts(BaseModel):
-    """Immutable manifest and objective facts needed by run frontends."""
+    """Immutable policy-neutral facts needed by run frontends."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     trusted_input_baseline: str
-    is_agent_run: bool
-    objectives: tuple[str, ...] | None = None
     effective_objective: str | None = None
 
 
@@ -209,23 +206,8 @@ class _LocalRunRecord:
 
     def facts(self) -> RunRecordFacts:
         manifest = self._manifest()
-        registration = self._registration(manifest)
-        is_agent = registration is not None and registration.state_family == "agent"
-        objectives: tuple[str, ...] | None = None
-        if is_agent and registration is not None:
-            options = registration.parse_options(manifest.orchestration)
-            if not isinstance(options, AgentOrchestrationOptions):
-                message = (
-                    f"agent orchestration {manifest.orchestration.id!r} has incompatible options"
-                )
-                raise TypeError(message)
-            objectives = tuple(
-                f"{axis.name}:{axis.direction}" for axis in options.metric_space.objectives
-            )
         return RunRecordFacts(
             trusted_input_baseline=manifest.trusted_input_baseline,
-            is_agent_run=is_agent,
-            objectives=objectives,
             effective_objective=self._effective_objective(),
         )
 

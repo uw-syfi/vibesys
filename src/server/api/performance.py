@@ -2,7 +2,7 @@
 
 Like the experiment log, this is a one-way projection: recorded measurement
 facts and manifest objectives are copied onto the wire, never recomputed.
-`vibesys.api`'s `HypothesisView` already carries the headline measurement
+The hypothesis plugin's `HypothesisView` already carries the headline measurement
 each hypothesis recorded (see `vibesys.orchestration.hypothesis.readmodel`); this module only
 selects the newest one and reshapes it into the wire DTO.
 """
@@ -12,10 +12,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import PerformanceContext
-from vibesys.api import agent_projection
+from vibesys.api.hypothesis import HypothesisView, agent_projection
 
 if TYPE_CHECKING:
-    from vibesys.api import HypothesisView, RunView
+    from vibesys.api import RunView
 
 # The objective document is operator-authored markdown of arbitrary length,
 # and the payload must stay bounded, so only one capped paragraph is sent.
