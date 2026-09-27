@@ -100,7 +100,11 @@ def _round_log(count: int, *, with_threads: bool = False) -> list[RunEvent]:
                     sequence,
                     EventType.ROUND_FINISHED,
                     round_label=f"round-{sequence // _ROUND_EVERY}",
-                    data=RoundFinishedData(attempts=1, judge_verdict="pass"),
+                    data=RoundFinishedData(
+                        attempts=1,
+                        judge_verdict="pass",
+                        profile_skipped=False,
+                    ),
                 )
             )
         elif with_threads and sequence == count - 1:

@@ -150,7 +150,11 @@ def _generated_events(
                     **common,
                     type=EventType.ROUND_FINISHED,
                     round_label=f"round-{index}",
-                    data=RoundFinishedData(attempts=1, judge_verdict="pass"),
+                    data=RoundFinishedData(
+                        attempts=1,
+                        judge_verdict="pass",
+                        profile_skipped=False,
+                    ),
                 )
             )
         else:

@@ -279,7 +279,11 @@ def test_semantic_failure_events_do_not_require_diagnostics(tmp_path: Path) -> N
     round_finished = parts.journal.record(
         EventType.ROUND_FINISHED,
         status=EventStatus.FAILED,
-        data=RoundFinishedData(attempts=1, judge_verdict="fail"),
+        data=RoundFinishedData(
+            attempts=1,
+            judge_verdict="fail",
+            profile_skipped=False,
+        ),
     )
     assert judge.diagnostic is None
     assert round_finished.diagnostic is None

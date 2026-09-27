@@ -177,6 +177,7 @@ def test_round_finished_rejects_non_finite_perf_metric(value: float) -> None:
             judge_verdict="pass",
             perf_metric=value,
             perf_unit="req/s",
+            profile_skipped=False,
         )
 
 
@@ -196,17 +197,15 @@ class TestRoundFinishedProfileSkipped:
         assert isinstance(restored.data, RoundFinishedData)
         assert restored.data.profile_skipped is True
 
-    def test_payload_without_flag_defaults_false(self) -> None:
-        """Events recorded before the field existed must keep replaying."""
+    def test_payload_without_flag_is_rejected(self) -> None:
         raw = (
             '{"protocol_version": 1, "sequence": 7, "run_id": "r", '
             '"timestamp": "2026-01-01T00:00:00Z", "type": "round_finished", '
             '"data": {"kind": "round_finished", "attempts": 2, "judge_verdict": "pass", '
             '"perf_metric": 100.0, "perf_unit": "req/s"}}'
         )
-        event = RunEvent.model_validate_json(raw)
-        assert isinstance(event.data, RoundFinishedData)
-        assert event.data.profile_skipped is False
+        with pytest.raises(ValidationError, match="profile_skipped"):
+            RunEvent.model_validate_json(raw)
 
 
 class TestFrameworkEventRoundTrip:

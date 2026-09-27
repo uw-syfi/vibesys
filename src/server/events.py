@@ -376,9 +376,8 @@ class RoundFinishedData(EventPayload):
     perf_metric: FiniteFloat | None = None
     perf_unit: str | None = None
     # True when no fresh profile ran this round; such a round records no perf
-    # reading (perf_metric stays None). Defaults False so legacy persisted
-    # events stay valid.
-    profile_skipped: bool = False
+    # reading (perf_metric stays None).
+    profile_skipped: bool
 
 
 class GateStartedData(EventPayload):
