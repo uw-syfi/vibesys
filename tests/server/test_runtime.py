@@ -23,7 +23,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.run.run_control import RunControlChannel
+from vs_runtime.api.infrastructure import RunControlChannel
 
 if TYPE_CHECKING:
     from vibesys.api import RunSession

@@ -55,7 +55,7 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
 
-    # Run-control transitions (see `vibesys.run.run_control.RunControlChannel`):
+    # Run-control transitions (see `vs_runtime.api.infrastructure.RunControlChannel`):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
     # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
     # `STEER_CONSUMED`) come from the run boundary or an agent turn. A server

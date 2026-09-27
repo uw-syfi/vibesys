@@ -56,10 +56,10 @@ from vibesys.render.run_log import format_framework_event
 from vibesys.render.sink import output_sink
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.integration import RunResourceHandoff
-from vibesys.run.run_control import RunStopped
 from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_runtime.api import boot_trace
+from vs_runtime.api.infrastructure import RunStopped
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 __all__ = [

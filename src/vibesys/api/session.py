@@ -152,7 +152,7 @@ class _LocalRunSession:
     """`RunSession` that runs one loop function in-process via `asyncio.to_thread`.
 
     `RunControl` methods write to `self._integration.control`, the same
-    `vibesys.run.run_control.RunControlChannel` consumed by run boundaries
+    `vs_runtime.api.infrastructure.RunControlChannel` consumed by run boundaries
     and agent turns in `vibesys.orchestration.runtime`.
     """
 

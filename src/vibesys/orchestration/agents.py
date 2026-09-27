@@ -33,9 +33,9 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
+from vibesys.orchestration.steering import splice_steering
 from vibesys.orchestration.workspaces import WorkspaceHandle
 from vibesys.prompts import PROMPTS_DIR, Prompt, render_template
-from vibesys.run.run_control import splice_steering
 from vibesys.runtime import (
     AgentDefinition,
     AgentHandle,

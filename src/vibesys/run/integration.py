@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+from vibesys.events import CoreEvent, CoreEventType
 from vibesys.run.event_journal import EventJournal
-from vibesys.run.run_control import RunControlChannel
+from vs_runtime.api.infrastructure import (
+    RunControlTransition,
+    create_run_control_channel,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,6 +57,23 @@ class RunResourceHandoff:
     host_resources: tuple[HostResource, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _CoreRunControlEvents:
+    """Persist runtime transitions in VibeSys's stable core-event format."""
+
+    journal: EventJournal
+
+    def __call__(self, transition: RunControlTransition) -> CoreEvent:
+        """Translate one semantic transition without changing its payload."""
+        return self.journal.emit(
+            CoreEventType(transition.kind.value),
+            transition.text,
+            agent_kind=transition.agent_kind,
+            round_label=transition.round_label,
+            execution_id=transition.execution_id,
+        )
+
+
 class LocalRunIntegration:
     """Default integration used when a run is driven without a server.
 
@@ -69,7 +90,7 @@ class LocalRunIntegration:
     def __init__(self) -> None:
         """Compose a durable journal with direct invocation control."""
         self.events = EventJournal()
-        self.control = RunControlChannel(self.events)
+        self.control = create_run_control_channel(_CoreRunControlEvents(self.events))
         output_sink = import_module("vibesys.render").output_sink
 
         self._unsubscribe_output = output_sink().subscribe(self.events.record)

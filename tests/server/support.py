@@ -13,13 +13,18 @@ from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTr
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
+from vibesys.api import CoreEventType
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.orchestrations.agent_options import (
     AgentOrchestrationOptions,
     descriptor_from_options,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
-from vibesys.run.run_control import RunControlChannel
+from vs_runtime.api.infrastructure import (
+    RunControlChannel,
+    RunControlTransition,
+    create_run_control_channel,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,6 +61,19 @@ class _ControlBridge:
 
     def stop(self) -> None:
         self._channel.request_stop()
+
+
+def _record_control_transition(
+    events: CoreEventJournal, transition: RunControlTransition
+) -> object:
+    """Adapt runtime transitions to the core journal in test composition."""
+    return events.emit(
+        CoreEventType(transition.kind.value),
+        transition.text,
+        agent_kind=transition.agent_kind,
+        round_label=transition.round_label,
+        execution_id=transition.execution_id,
+    )
 
 
 def agent_descriptor(
@@ -177,7 +195,9 @@ def build_server_parts(
     chat.set_fallback_answer(RunInspector(integration).answer)
     core_events = CoreEventJournal()
     core_events.subscribe(integration.project_event)
-    control = RunControlChannel(core_events)
+    control = create_run_control_channel(
+        lambda transition: _record_control_transition(core_events, transition)
+    )
     control_bridge = _ControlBridge(control)
     api = RunApi(
         condition,

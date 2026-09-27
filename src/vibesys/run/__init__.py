@@ -17,7 +17,6 @@ from vibesys.run.project import (
     ProjectProvisioningSpec,
     provision_project,
 )
-from vibesys.run.run_control import RunControlChannel, RunStopped, splice_steering
 
 __all__ = [
     "CoreEvent",
@@ -29,10 +28,7 @@ __all__ = [
     "ProjectProvisioningError",
     "ProjectProvisioningSpec",
     "RepositoryVisibility",
-    "RunControlChannel",
     "RunResourceHandoff",
     "RunStateNamespace",
-    "RunStopped",
     "provision_project",
-    "splice_steering",
 ]

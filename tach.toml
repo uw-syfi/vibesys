@@ -374,7 +374,7 @@ expose = ["agent_options", "evolve", "evolve\\..*", "hypothesis_readmodel", "iss
 from = ["vibesys.orchestrations"]
 
 [[interfaces]]
-expose = ["OrchestrationResumeDecision", "skills", "local_validation"]
+expose = ["OrchestrationResumeDecision", "skills", "local_validation", "steering"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
@@ -414,7 +414,12 @@ depends_on = ["vibesys", "vibesys.orchestration._host", "vs_runtime"]
 [[modules]]
 path = "vibesys.orchestration.agents"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vs_runtime", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.steering"]
+
+[[modules]]
+path = "vibesys.orchestration.steering"
+layer = "orchestration_host"
+depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.workspaces"

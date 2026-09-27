@@ -69,6 +69,14 @@ from vs_runtime._project_materialization import (
     ProjectTreeCopy,
     WorkspaceSourceValue,
 )
+from vs_runtime._run_control import (
+    RunControlChannel,
+    RunControlEventSink,
+    RunControlTransition,
+    RunControlTransitionKind,
+    RunStopped,
+    RuntimeRunControlChannel,
+)
 from vs_runtime._run_state import RunState
 from vs_runtime._sdk_paths import (
     InputProjectError,
@@ -94,6 +102,11 @@ if TYPE_CHECKING:
 
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+
+def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel:
+    """Create one thread-safe cooperative run-control channel."""
+    return RuntimeRunControlChannel(events)
 
 
 class ManagedAgentWorkspace(Workspace, Protocol):
@@ -366,7 +379,12 @@ __all__ = [
     "ProjectTreeCopy",
     "RoundRecoveryOutcome",
     "RoundTransactionError",
+    "RunControlChannel",
+    "RunControlEventSink",
+    "RunControlTransition",
+    "RunControlTransitionKind",
     "RunState",
+    "RunStopped",
     "SDKRoots",
     "SkillCatalogEntry",
     "SkillMetadataError",
@@ -377,6 +395,7 @@ __all__ = [
     "collect_macos_profile",
     "create_agent_session_runtime",
     "create_model_request_reconciler",
+    "create_run_control_channel",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",

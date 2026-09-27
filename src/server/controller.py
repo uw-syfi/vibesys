@@ -137,7 +137,7 @@ class RunController:
         """Allocate an invocation's identity and track it.
 
         Pause, stop, and steering are no longer applied here: they are
-        core's job now, through `vibesys.run.run_control.RunControlChannel`
+        core's job now, through `vs_runtime.api.infrastructure.RunControlChannel`
         at the entry to an agent turn. This method
         only allocates the execution; the caller is responsible for having
         already applied any entry-side run control to `user_prompt`.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TypeAlias, TypeVar, overload
+from typing import TYPE_CHECKING, TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel
 
@@ -40,10 +40,32 @@ from vs_runtime.contracts import (
     validate_workspace_writable_paths,
 )
 
+if TYPE_CHECKING:
+    from vs_runtime._run_control import RunControlTransition
+
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 TurnResponder: TypeAlias = Callable[
     [AgentRole, tuple[str, ...], str, type[BaseModel] | None], object
 ]
+
+
+class FakeRunControlEventSink:
+    """Record synchronous run-control transitions in emission order."""
+
+    def __init__(
+        self,
+        *,
+        on_transition: Callable[[RunControlTransition], None] | None = None,
+    ) -> None:
+        """Configure an optional deterministic reaction to each transition."""
+        self.transitions: list[RunControlTransition] = []
+        self._on_transition = on_transition
+
+    def __call__(self, transition: RunControlTransition) -> None:
+        """Record one transition and invoke the configured reaction."""
+        self.transitions.append(transition)
+        if self._on_transition is not None:
+            self._on_transition(transition)
 
 
 class FakeProjectMaterializationEffects:
