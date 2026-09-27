@@ -261,9 +261,7 @@ def test_provision_project_rejects_destination_in_source(
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(
-                materializer=_materializer(destination)
-            ),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
         )
 
     assert (input_root / "candidate.py").read_text() == "VALUE = 1\n"
@@ -281,9 +279,7 @@ def test_provision_project_preserves_existing_destination(tmp_path: Path) -> Non
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(
-                materializer=_materializer(destination)
-            ),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
         )
 
     assert marker.read_text() == "keep\n"
@@ -356,9 +352,7 @@ dest = "library"
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(
-                materializer=_materializer(destination)
-            ),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
         )
 
     assert not destination.exists()
@@ -486,9 +480,7 @@ def test_provision_project_rejects_workspace_rooted_elsewhere(tmp_path: Path) ->
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(
-                materializer=_materializer(other_root)
-            ),
+            spec=ProjectProvisioningSpec(materializer=_materializer(other_root)),
         )
 
     assert f"{other_root.resolve()} != {destination.resolve()}" in str(info.value)

@@ -36,6 +36,7 @@ class _RecordingHooks(SandboxLifecycleHooks):
     def before_ready(self, context: BeforeReadyContext) -> None:
         self.sandbox = context.sandbox
 
+
 _FACTORIES = {
     "real": CudaBackend,
     "fake": FakeComputeBackend,
