@@ -35,6 +35,10 @@ class _ParallelBatchInterruptedError(RuntimeError):
     """Deterministic interruption injected during one parallel batch."""
 
 
+class _StateCommitInterruptedError(RuntimeError):
+    """Deterministic interruption before one state replacement is durable."""
+
+
 def _options(**updates: object) -> EvolveOptions:
     values: dict[str, object] = {
         "max_generations": 1,
@@ -72,6 +76,30 @@ def _passing_responder(
         "perf_metric": 100.0,
         "perf_unit": "tokens/s",
     }
+
+
+async def _reopen_host(
+    persisted: EvolveState,
+    *,
+    project_root: Path,
+    supports_parallel_candidates: bool = False,
+) -> FakeRunHost:
+    """Build a new fake host from only the last publicly persisted state."""
+    host = FakeRunHost(
+        PLUGIN,
+        project_root=project_root,
+        responder=_passing_responder,
+        supports_parallel_candidates=supports_parallel_candidates,
+    )
+    for individual in persisted.population.individuals:
+        if individual.commit is not None:
+            host.workspaces.root.add_retained_revision(individual.commit)
+    await host.state.commit(
+        persisted,
+        workspace=host.workspaces.root,
+        label="reopen persisted evolve state",
+    )
+    return host
 
 
 def test_deployment_retention_is_rejected_outside_the_runtime_boundary() -> None:
@@ -327,22 +355,78 @@ def test_interrupted_parallel_batch_reopens_atomically_and_cleans_up(tmp_path: P
         assert len(interrupted_candidate_sessions) == 4
         assert all(session.closed for session in interrupted_candidate_sessions)
 
-        status = await PLUGIN.orchestrate(host, options)
-
-        assert status is RunStatus.SUCCEEDED
-        reopened = await host.state.load(EvolveState)
-        assert reopened is not None
-        assert len(reopened.population.individuals) == 3
-        assert reopened.generation_start is None
-        assert reopened.admitted_slots == 0
-        assert len(host.workspaces.candidates) == 4
-        assert all(candidate.discarded for candidate in host.workspaces.candidates)
-        all_candidate_sessions = [
-            session for session in host.agents.sessions if session.workspace.id is not None
-        ]
-        assert len(all_candidate_sessions) == 8
-        assert all(session.closed for session in all_candidate_sessions)
         await host.close()
+        resumed_host = await _reopen_host(
+            interrupted,
+            project_root=tmp_path,
+            supports_parallel_candidates=True,
+        )
+
+        try:
+            status = await PLUGIN.orchestrate(resumed_host, options)
+
+            assert status is RunStatus.SUCCEEDED
+            reopened = await resumed_host.state.load(EvolveState)
+            assert reopened is not None
+            assert len(reopened.population.individuals) == 3
+            assert reopened.generation_start is None
+            assert reopened.admitted_slots == 0
+            assert len(resumed_host.workspaces.candidates) == 2
+            assert all(candidate.discarded for candidate in resumed_host.workspaces.candidates)
+            resumed_candidate_sessions = [
+                session
+                for session in resumed_host.agents.sessions
+                if session.workspace.id is not None
+            ]
+            assert len(resumed_candidate_sessions) == 4
+            assert all(session.closed for session in resumed_candidate_sessions)
+        finally:
+            await resumed_host.close()
+
+    asyncio.run(scenario())
+
+
+def test_crash_after_admit_before_state_commit_replays_only_uncommitted_slot(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        options = _options()
+        interrupted_host = FakeRunHost(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=_passing_responder,
+        )
+        interrupted_host.state.script_commit(
+            None,
+            None,
+            None,
+            _StateCommitInterruptedError("commit interrupted"),
+        )
+
+        with pytest.raises(_StateCommitInterruptedError, match="commit interrupted"):
+            await PLUGIN.orchestrate(interrupted_host, options)
+
+        persisted = await interrupted_host.state.load(EvolveState)
+        assert persisted is not None
+        assert len(persisted.population.individuals) == 1
+        assert persisted.generation_start is not None
+        assert persisted.admitted_slots == 0
+        assert len(interrupted_host.evaluation.accuracy_calls) == 2
+        await interrupted_host.close()
+
+        resumed_host = await _reopen_host(persisted, project_root=tmp_path)
+        try:
+            status = await PLUGIN.orchestrate(resumed_host, options)
+
+            assert status is RunStatus.SUCCEEDED
+            resumed = await resumed_host.state.load(EvolveState)
+            assert resumed is not None
+            assert len(resumed.population.individuals) == 2
+            assert resumed.generation_start is None
+            assert resumed.admitted_slots == 0
+            assert len(resumed_host.evaluation.accuracy_calls) == 1
+        finally:
+            await resumed_host.close()
 
     asyncio.run(scenario())
 

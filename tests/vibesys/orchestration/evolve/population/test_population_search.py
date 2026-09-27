@@ -154,6 +154,59 @@ def test_crash_after_admit_but_before_checkpoint_state_is_immutable() -> None:
     assert len(post_admit.individuals) == 1
 
 
+@given(
+    passes=st.lists(st.booleans(), min_size=1, max_size=8),
+    seed=st.integers(min_value=0, max_value=1000),
+)
+@settings(max_examples=100)
+def test_every_crash_boundary_resumes_to_the_uninterrupted_population(
+    passes: list[bool], seed: int
+) -> None:
+    """Every durable slot prefix resumes without replaying admitted slots."""
+    search = PopulationSearch(PopulationConfig(seed=seed))
+    _, seeded = search.admit(search.initial(), _outcome(perf_metric=1.0, code="seed"))
+    generation_start = search.end_generation(seeded)
+
+    proposal_state = generation_start
+    outcomes: list[CandidateOutcome] = []
+    for sequence, passed in enumerate(passes, start=1):
+        proposal, proposal_state = search.propose(proposal_state)
+        assert proposal is not None
+        outcomes.append(
+            CandidateOutcome(
+                passed=passed,
+                parent_id=proposal.parent.id,
+                inspiration_ids=tuple(item.id for item in proposal.inspirations),
+                commit=f"c{sequence}" if passed else None,
+                perf_metric=float(sequence) if passed else None,
+                summary=f"candidate {sequence}",
+                feedback="" if passed else f"failure {sequence}",
+                code=f"code {sequence}" if passed else None,
+                policy_parent_id=proposal.policy_parent_id,
+                target_island=proposal.target_island,
+            )
+        )
+
+    uninterrupted = generation_start
+    for outcome in outcomes:
+        _, uninterrupted = search.admit(uninterrupted, outcome)
+
+    for crash_after in range(len(outcomes) + 1):
+        partial = generation_start
+        for outcome in outcomes[:crash_after]:
+            _, partial = search.admit(partial, outcome)
+        persisted = type(partial).model_validate_json(partial.model_dump_json())
+
+        resumed = persisted
+        evaluated_slots: list[int] = []
+        for slot, outcome in enumerate(outcomes[crash_after:], start=crash_after + 1):
+            evaluated_slots.append(slot)
+            _, resumed = search.admit(resumed, outcome)
+
+        assert resumed == uninterrupted
+        assert evaluated_slots == list(range(crash_after + 1, len(outcomes) + 1))
+
+
 # ---------------------------------------------------------------------------
 # failure_lessons / wip_seed: used by evolve's bootstrap to steer cold starts
 # ---------------------------------------------------------------------------

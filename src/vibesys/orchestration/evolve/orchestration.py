@@ -93,8 +93,11 @@ class _Sessions:
         for session in (self.profiler, self.judge, self.mutator):
             if session is None:
                 continue
-            if error := await _capture_cleanup(session.close()):
+            while error := await _capture_cleanup(session.close()):
+                if isinstance(error, asyncio.CancelledError):
+                    continue
                 errors.append(error)
+                break
         if errors:
             raise BaseExceptionGroup(_CLEANUP_ERROR, errors)
 

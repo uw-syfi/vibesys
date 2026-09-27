@@ -1078,6 +1078,7 @@ class FakeState:
         self._root = root
         self._value: BaseModel | None = None
         self._commits: list[FakeStateCommit] = []
+        self._commit_results: list[BaseException | None] = []
 
     @property
     def commits(self) -> tuple[FakeStateCommit, ...]:
@@ -1092,6 +1093,10 @@ class FakeState:
             )
             for commit in self._commits
         )
+
+    def script_commit(self, *results: BaseException | None) -> None:
+        """Queue deterministic durable-commit successes or failures."""
+        self._commit_results.extend(results)
 
     async def load(self, model: type[ResponseT]) -> ResponseT | None:
         """Return a detached value after validating the exact declared model."""
@@ -1116,6 +1121,10 @@ class FakeState:
         if model is None:
             raise StateModelError(None, type(value))
         snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
+        if self._commit_results:
+            failure = self._commit_results.pop(0)
+            if failure is not None:
+                raise failure
         self._value = snapshot
         recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True))
         self._commits.append(FakeStateCommit(recorded, workspace, label))

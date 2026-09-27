@@ -771,6 +771,25 @@ def test_fake_state_preserves_round_trip_pydantic_values() -> None:
     asyncio.run(scenario())
 
 
+def test_fake_state_scripts_commit_failures_without_replacing_durable_value() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(state=_State))
+        await host.state.commit(_State(values=[1]))
+        host.state.script_commit(None, RuntimeError("storage unavailable"))
+
+        await host.state.commit(_State(values=[2]))
+        with pytest.raises(RuntimeError, match="storage unavailable"):
+            await host.state.commit(_State(values=[3]))
+
+        assert await host.state.load(_State) == _State(values=[2])
+        assert [commit.value for commit in host.state.commits] == [
+            _State(values=[1]),
+            _State(values=[2]),
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_fake_control_records_checkpoints_and_propagates_stop() -> None:
     class _Stopped(BaseException):
         pass

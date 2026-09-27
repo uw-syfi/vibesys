@@ -454,6 +454,43 @@ def test_close_waits_for_active_turn_and_rejects_queued_and_new_turns(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_cancelled_close_preserves_owned_cleanup_for_a_later_waiter(
+    implementation: str,
+) -> None:
+    async def scenario() -> None:
+        role = AgentRole(id="worker", system_prompt="Work carefully.")
+        workspace = (
+            _BlockedFakeWorkspace("root")
+            if implementation == "fake"
+            else _BlockedRuntimeWorkspace("root")
+        )
+        opened = await _open_session_contract(implementation, role, (workspace,))
+        session = opened.sessions[0]
+        active = asyncio.create_task(session.turn("active"))
+        await workspace.gate.entered.wait()
+
+        close_started = asyncio.Event()
+
+        async def close_session() -> None:
+            close_started.set()
+            await session.close()
+
+        closing = asyncio.create_task(close_session())
+        await close_started.wait()
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+
+        workspace.gate.release.set()
+        assert await active
+        await session.close()
+        assert session.closed
+        await opened.close()
+
+    asyncio.run(scenario())
+
+
 _workspace_change_specs = st.lists(
     st.tuples(st.booleans(), st.booleans()),
     min_size=1,
