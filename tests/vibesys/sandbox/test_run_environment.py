@@ -13,15 +13,6 @@ import pytest
 from tests.support import provider_profiles as fake_profiles
 
 from vibesys.constants import ComputeBackend
-from vibesys.evaluators import (
-    EvaluatorPackageRequirement,
-    EvaluatorToolLifecycleHooks,
-    evaluator_tools_install_command,
-    prepare_evaluator_tools,
-    resolve_evaluator_package,
-    tool_install_root,
-    tool_spec_digest,
-)
 from vibesys.inputs import (
     WorkspaceSource,
     load_project_task,
@@ -38,6 +29,8 @@ from vs_runtime._run_environment import (
     _SkyPilotRunEnvironmentSession,
 )
 from vs_runtime.api.infrastructure import (
+    EvaluatorPackageRequirement,
+    ResolvedEvaluatorPackage,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
@@ -50,6 +43,9 @@ from vs_runtime.api.infrastructure import (
     make_run_environment_spec,
     run_environment_record,
 )
+from vs_runtime.api.infrastructure import (
+    resolve_evaluator_package as _resolve_evaluator_package,
+)
 from vs_sandbox.api import (
     EnvironmentBindMount,
     HostResource,
@@ -58,7 +54,14 @@ from vs_sandbox.api import (
     SandboxKind,
     SandboxLifecycle,
 )
-from vs_sandbox.api.evaluator_tools import EvaluatorToolError
+from vs_sandbox.api.evaluator_tools import (
+    EvaluatorToolError,
+    EvaluatorToolLifecycleHooks,
+    evaluator_tools_install_command,
+    prepare_evaluator_tools,
+    tool_install_root,
+    tool_spec_digest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -71,6 +74,14 @@ if TYPE_CHECKING:
 # how the run environment expands and quotes nested shell argv, not any
 # particular candidate repository.
 NESTED_SHELL_PROJECT = Path(__file__).parent / "fixtures" / "nested_shell_project"
+_EVALUATOR_PACKAGES_ROOT = Path(__file__).parents[3] / "resources" / "evaluators"
+
+
+def resolve_evaluator_package(
+    requirement: EvaluatorPackageRequirement,
+) -> ResolvedEvaluatorPackage:
+    """Resolve a bundled package through the lower package API for these integration tests."""
+    return _resolve_evaluator_package(_EVALUATOR_PACKAGES_ROOT, requirement)
 
 
 def _open(environment: RunEnvironment, request: RunEnvironmentRequest) -> RunEnvironmentSession:

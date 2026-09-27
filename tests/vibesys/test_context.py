@@ -9,7 +9,7 @@ from tests.support import run_test_command
 
 from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
-from vibesys.config import Config
+from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.context import (
     WorkspaceResourceSpec,
     _profiler_support_extra,
@@ -18,11 +18,6 @@ from vibesys.context import (
     open_run_resources,
 )
 from vibesys.errors import ConfigurationError
-from vibesys.evaluators import (
-    EvaluatorPackageRequirement,
-    resolve_evaluator_package,
-    tool_install_root,
-)
 from vibesys.events import CoreEventType
 from vibesys.inputs import (
     WorkspaceInput,
@@ -44,8 +39,13 @@ from vibesys.plugin_catalog import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import boot_trace
-from vs_runtime.api.infrastructure import RunEnvironmentSpec
+from vs_runtime.api.infrastructure import (
+    EvaluatorPackageRequirement,
+    RunEnvironmentSpec,
+    resolve_evaluator_package,
+)
 from vs_sandbox.api import HostResourceAccess
+from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
 
 
@@ -252,11 +252,14 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
 ) -> None:
     project = tmp_path / "queue"
     _write_project(project)
+    packages_root = BUNDLED_RESOURCES.directory("evaluators")
+    assert packages_root is not None
     package = resolve_evaluator_package(
+        packages_root,
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
             version="0.1.0",
-        )
+        ),
     )
 
     tools_root = Project.open(project).state.model_cache_directory("evaluator-tools")

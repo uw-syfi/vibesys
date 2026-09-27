@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
-from vibesys.evaluators import (
+from vs_evaluator_protocol.api import parse_records, read_measurement
+from vs_runtime.api.infrastructure import (
     EvaluatorPackageRequirement,
     resolve_evaluator_package,
-    tool_token,
 )
-from vs_evaluator_protocol.api import parse_records, read_measurement
+from vs_sandbox.api.evaluator_tools import tool_token
 
 if TYPE_CHECKING:
     import subprocess
@@ -42,10 +42,11 @@ def _load_script(name: str) -> ModuleType:
 
 def test_engine_entrypoint_is_the_direct_tool_command() -> None:
     package = resolve_evaluator_package(
+        _PACKAGE_ROOT.parent,
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
             version="0.1.0",
-        )
+        ),
     )
     engine_arguments = [
         "--trace",

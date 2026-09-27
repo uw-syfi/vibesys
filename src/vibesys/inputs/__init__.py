@@ -1,8 +1,8 @@
 """Validated authored-input contracts and bundle construction.
 
 This is the product-owned interface for reading, validating, rendering, and
-synthesizing VibeSys input bundles. Evaluator execution remains owned by
-``vibesys.evaluators``.
+synthesizing VibeSys input bundles. Lower libraries own evaluator package and
+execution mechanics.
 """
 
 from vibesys.inputs._manifest import (

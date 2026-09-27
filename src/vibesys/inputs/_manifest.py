@@ -11,10 +11,14 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import DomainName
-from vibesys.evaluators import resolve_evaluator_package
 from vs_project.api import RunResourceRequest
-from vs_runtime.api.infrastructure import EvaluatorPackageRequirement
+from vs_runtime.api.infrastructure import (
+    EvaluatorPackageNotFoundError,
+    EvaluatorPackageRequirement,
+    resolve_evaluator_package,
+)
 
 if TYPE_CHECKING:
     from vs_project.api import Project, TaskDirectory
@@ -24,6 +28,10 @@ MANIFEST_NAME = "vibesys.input.toml"
 _MIN_COMMIT_HASH_LENGTH = 7
 _MAX_COMMIT_HASH_LENGTH = 64
 PROTOCOL_OUTPUT_FLAG = "--vs-output"
+_MISSING_EVALUATOR_RESOURCES_MESSAGE = (
+    "VibeSys evaluator package resources are not available; install a complete "
+    "VibeSys distribution or pass packages_root"
+)
 
 
 def benchmark_output_argument(
@@ -741,7 +749,9 @@ def _resolve_evaluator_commands(
     manifest: InputManifest,
 ) -> tuple[ResolvedEvaluatorPackage | None, list[tuple[str, ...]]]:
     requirement = manifest.evaluator.package_requirement if manifest.evaluator is not None else None
-    evaluator_package = resolve_evaluator_package(requirement) if requirement is not None else None
+    evaluator_package = (
+        _resolve_bundled_evaluator_package(requirement) if requirement is not None else None
+    )
     commands = [
         _resolve_evaluator_command(root, label, command, evaluator_package)
         for label, command in (
@@ -750,6 +760,16 @@ def _resolve_evaluator_commands(
         )
     ]
     return evaluator_package, commands
+
+
+def _resolve_bundled_evaluator_package(
+    requirement: EvaluatorPackageRequirement,
+) -> ResolvedEvaluatorPackage:
+    """Resolve an authored package requirement from VibeSys's bundled collection."""
+    packages_root = BUNDLED_RESOURCES.directory("evaluators")
+    if packages_root is None:
+        raise EvaluatorPackageNotFoundError(_MISSING_EVALUATOR_RESOURCES_MESSAGE)
+    return resolve_evaluator_package(packages_root, requirement)
 
 
 def _resolve_evaluator_command(

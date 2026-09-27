@@ -25,7 +25,6 @@ from vibesys.constants import (
     DomainName,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.evaluators import tool_install_root
 from vibesys.events import (
     CoreEventType,
     ExperimentsChangedData,
@@ -114,6 +113,7 @@ from vs_sandbox.api import (
     Sandbox,
     create_compute_backend,
 )
+from vs_sandbox.api.evaluator_tools import tool_install_root
 
 _RUNTIME_STATE_NAMESPACE = "runtime"
 _SKYPILOT_STATE_NAMESPACE = "skypilot"

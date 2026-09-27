@@ -14,13 +14,13 @@ import pytest
 import yaml
 from tests.support.example_registry import require_external_repo_checkout
 
-from vibesys.evaluators import PROJECT_ROOT_TOKEN
 from vibesys.inputs import InputBundle, load_project_task
 from vibesys.run.project import ProjectProvisioningSpec, provision_project
 from vibesys.run.workspace_policy import create_project_materializer
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import LocalEnvironment
 from vs_runtime.api.testing import FakeGitRunner
+from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN
 from vs_sandbox.api.testing import FakeComputeBackend
 
 PROJECT_ROOT = Path(__file__).parents[2]

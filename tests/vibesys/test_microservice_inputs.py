@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from tests.support.example_registry import require_external_repos
 
-from vibesys.evaluators import PROJECT_ROOT_TOKEN
 from vibesys.inputs import InputBundle, load_project_task
 from vs_project.api import Project, ProjectLayoutError
+from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN
 
 PROJECT_ROOT = Path(__file__).parents[2]
 MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"

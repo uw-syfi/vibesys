@@ -22,11 +22,12 @@ from typing import Never, cast
 from entrypoints.launcher import bundled_tui
 from vibesys.api.request import default_skill_roots
 from vibesys.config import BUNDLED_RESOURCES
-from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
 from vs_runtime.api.infrastructure import (
+    EvaluatorPackageRequirement,
     SDKRoots,
     materialize_input_project,
+    resolve_evaluator_package,
     resolve_packaged_tree,
 )
 
@@ -214,8 +215,14 @@ def _verify_resources() -> None:
         support = BUNDLED_RESOURCES.directory("profilers", kind.value)
         if support is None or "site-packages" not in str(support.resolve()):
             _fail(f"Installed profiler resources did not resolve for {kind.value}: {support}")
+    evaluator_packages = BUNDLED_RESOURCES.directory("evaluators")
+    if evaluator_packages is None:
+        _fail("Installed evaluator package resources did not resolve")
     for name in ("vibesys-evaluator-microservice", "vibesys-evaluator-queue"):
-        package = resolve_evaluator_package(EvaluatorPackageRequirement(name=name, version="0.1.0"))
+        package = resolve_evaluator_package(
+            evaluator_packages,
+            EvaluatorPackageRequirement(name=name, version="0.1.0"),
+        )
         if "site-packages" not in str(package.root.resolve()):
             _fail(f"Installed evaluator package did not resolve for {name}: {package.root}")
 
