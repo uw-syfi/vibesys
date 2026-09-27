@@ -7,18 +7,18 @@
 # Scope: src/ (entrypoints, server, vibesys) and every libs/*/src. sdk/ is out.
 # Tach is the single boundary tool; there is no other import checker.
 #
-# Modeling: `vibesys` is a module whose children (`vibesys.agents`, ...) are
+# Modeling: `vibesys` is a module whose children (`vibesys.orchestration`, ...) are
 # also modules. tach assigns each file to its deepest module, so `vibesys` means
 # the top-level vibesys/*.py files (config, schemas, ...). `server` is
 # modeled the same way: `server.api`, `server.runtime`, ... are modules, and
 # bare `server` is its package `__init__`.
 #
 # Cycles are forbidden (`forbid_circular_dependencies = true`). The `vibesys`
-# core modules are ordered by their explicit edges, bottom to top: `vibesys`
-# (top-level vibesys/*.py: config, schemas, ...); then backends, evaluators,
-# prompts, render, skypilot; then domains; then sandbox; then run composition;
-# then loops; `vibesys.api` is the facade on top. Do not add an
-# upward edge; move the shared code down instead.
+# core modules are ordered by their explicit edges, bottom to top: product
+# contracts and configuration, input/catalog handling, orchestration policy,
+# run composition, and the `vibesys.api` facade. Runtime mechanisms live in
+# `vs_runtime` and lower libraries. Do not add an upward edge; move shared code
+# to its owning lower layer instead.
 #
 # Tach `layers` are not used. Every edge is listed, including those of
 # `entrypoints` and each `server.*` module. Order is enforced by the explicit
