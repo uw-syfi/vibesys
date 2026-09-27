@@ -1,4 +1,4 @@
-"""Product evaluation semantics over runtime-owned trusted execution."""
+"""Shared orchestration policy over runtime-owned trusted evaluation."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from vs_runtime.api import (
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
     RuntimeContractError,
@@ -435,3 +436,17 @@ class _EvaluationAdapter:
             self._log(
                 f"[model-request] staged {len(volumes)} model volume(s): " + ", ".join(volumes)
             )
+
+
+def create_evaluation(
+    run_id: str,
+    request: RunRequest,
+    runtime: WorkspaceRuntime,
+    events: CoreEventWriter,
+    log: Callable[[str], None],
+) -> Evaluation:
+    """Bind shared VibeSys evaluation policy to one run's execution mechanism."""
+    return _EvaluationAdapter(run_id, request, runtime, events, log)
+
+
+__all__ = ["create_evaluation", "trusted_evaluation_plan"]

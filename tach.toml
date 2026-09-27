@@ -159,7 +159,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skills", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -187,7 +187,7 @@ depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.cont
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.run.skills", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"
@@ -268,6 +268,16 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.errors", "vibesys.run.contracts", "vs_agent", "vs_runtime"]
 
 [[modules]]
+path = "vibesys.orchestration.evaluation"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.skill_selection"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vs_agent", "vs_runtime"]
+
+[[modules]]
 path = "vibesys.orchestration.review"
 layer = "roles_search"
 depends_on = []
@@ -285,7 +295,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.resources", "vibesys.run.skills", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.run", "vibesys.orchestration.evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_runtime", "vs_sandbox", "vibesys.orchestration.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -293,19 +303,9 @@ layer = "orchestration_host"
 depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.run.evaluation"
-layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.inputs", "vs_runtime", "vibesys.run.contracts"]
-
-[[modules]]
 path = "vibesys.run.resources"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vibesys.run.evaluation", "vibesys.run.skills", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
-
-[[modules]]
-path = "vibesys.run.skills"
-layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.evaluation", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration.domains"
@@ -444,6 +444,14 @@ from = ["vibesys.inputs"]
 [[interfaces]]
 expose = ["OrchestrationResumeDecision", "skills", "steering"]
 from = ["vibesys.orchestration"]
+
+[[interfaces]]
+expose = ["create_evaluation", "trusted_evaluation_plan"]
+from = ["vibesys.orchestration.evaluation"]
+
+[[interfaces]]
+expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_skill_source_dirs", "resolve_skill_source_paths", "validate_platform_layout", "validate_skill_tree"]
+from = ["vibesys.orchestration.skill_selection"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]

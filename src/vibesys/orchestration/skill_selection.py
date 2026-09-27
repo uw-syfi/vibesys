@@ -1,4 +1,4 @@
-"""Product binding for selecting, routing, and resolving agent skills."""
+"""Shared orchestration policy for selecting and routing agent skills."""
 
 from __future__ import annotations
 
@@ -426,6 +426,7 @@ __all__ = [
     "platform_skill_excluded_paths",
     "platform_skill_selection",
     "resolve_skill_source_dirs",
+    "resolve_skill_source_paths",
     "validate_platform_layout",
     "validate_skill_tree",
 ]

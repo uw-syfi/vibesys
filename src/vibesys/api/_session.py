@@ -17,10 +17,10 @@ from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
+from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.plugin_catalog import project_run
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
-from vibesys.run.skills import platform_skill_selection
 from vs_agent.api import (
     ToolServerDescriptor,
     agent_catalog,

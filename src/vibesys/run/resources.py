@@ -23,6 +23,7 @@ from vibesys.events import (
     CoreEventType,
     ExperimentsChangedData,
 )
+from vibesys.orchestration.evaluation import trusted_evaluation_plan
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
@@ -32,9 +33,12 @@ from vibesys.orchestration.profilers import (
 from vibesys.orchestration.profilers import (
     profiler_support_extra as resolve_profiler_support_extra,
 )
+from vibesys.orchestration.skill_selection import (
+    platform_skill_excluded_paths,
+    resolve_skill_source_paths,
+)
 from vibesys.run.contracts import RunRequest
 from vibesys.run.environment import open_run_environment
-from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
@@ -51,7 +55,6 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
-from vibesys.run.skills import platform_skill_excluded_paths, resolve_skill_source_paths
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     create_project_materializer,

@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING
 
 from vibesys.composition import AgentToolContext, resolve_agent_specs
 from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
+from vibesys.orchestration.evaluation import create_evaluation
+from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
-from vibesys.run.evaluation import _EvaluationAdapter
 from vibesys.run.resources import _StateBinding, open_run_resources
-from vibesys.run.skills import platform_skill_selection
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -171,7 +171,7 @@ class _ProductHostFactory:
                 else None
             ),
         )
-        evaluation = _EvaluationAdapter(
+        evaluation = create_evaluation(
             run_id,
             self.request,
             agent_runtime,

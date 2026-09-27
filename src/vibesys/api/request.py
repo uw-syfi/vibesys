@@ -32,6 +32,7 @@ from vibesys.inputs import (
     load_project_task,
     synthesize_input_bundle,
 )
+from vibesys.orchestration.skill_selection import resolve_skill_source_dirs
 from vibesys.repository import (
     REPOSITORY_SLUG,
     generate_experiment_name,
@@ -40,7 +41,6 @@ from vibesys.repository import (
 )
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.run.skills import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
 from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,

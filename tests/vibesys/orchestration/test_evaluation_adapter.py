@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.vibesys.orchestration.plugin import capability_plugin
-from vibesys.run.host import open_product_run_host
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -16,6 +15,7 @@ from vibesys.events import CoreEventType, EventStatus, GateFinishedData, GateSta
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
+from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
@@ -41,14 +41,35 @@ if TYPE_CHECKING:
 _PLUGIN = capability_plugin("evaluation")
 
 
-def _write_project(root: Path, *, accuracy_command: str = "true") -> None:
+def _write_project(
+    root: Path,
+    *,
+    accuracy_command: str = "true",
+    benchmark_command: tuple[str, ...] = ("python", "benchmark.py"),
+    protocol_row: dict[str, float] | None = None,
+) -> None:
     root.mkdir(parents=True)
     (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
+    if protocol_row is None:
+        benchmark_body = "    json.dump({'throughput': 42.0}, output)\n"
+        result_contract = (
+            '[benchmark.result]\njson_argument = "--output-json"\nmetric = "throughput"\n'
+        )
+    else:
+        declarations = {
+            name: {"direction": "min" if name == "latency" else "max"} for name in protocol_row
+        }
+        records = "\n".join(
+            (
+                json.dumps({"kind": "hello", "protocol": 2, "metrics": declarations}),
+                json.dumps({"kind": "result", "values": protocol_row}),
+            )
+        )
+        benchmark_body = f"    output.write({records!r})\n"
+        result_contract = "result_protocol = 2\n"
     (root / "benchmark.py").write_text(
-        "import json, sys\n"
-        "with open(sys.argv[2], 'w') as output:\n"
-        "    json.dump({'throughput': 42.0}, output)\n"
+        f"import json, sys\nwith open(sys.argv[2], 'w') as output:\n{benchmark_body}"
     )
     (root / "validation").mkdir()
     (root / "validation" / "recipes.json").write_text(
@@ -70,8 +91,8 @@ def _write_project(root: Path, *, accuracy_command: str = "true") -> None:
     (root / "vibesys.input.toml").write_text(
         'version = 1\n[agent]\ndomain = "generic"\n'
         f'[accuracy]\ncommand = ["{accuracy_command}"]\n'
-        '[benchmark]\ncommand = ["python", "benchmark.py"]\n'
-        '[benchmark.result]\njson_argument = "--output-json"\nmetric = "throughput"\n'
+        f"[benchmark]\ncommand = {json.dumps(benchmark_command)}\n"
+        f"{result_contract}"
     )
 
 
@@ -99,6 +120,15 @@ def _run(
 ) -> tuple[_Result, LocalRunIntegration]:
     project_root = tmp_path / "project"
     _write_project(project_root, accuracy_command=accuracy_command)
+    return _run_project(project_root, body, agent_backend=agent_backend)
+
+
+def _run_project(
+    project_root: Path,
+    body: Callable[[Run], Awaitable[_Result]],
+    *,
+    agent_backend: str | None = None,
+) -> tuple[_Result, LocalRunIntegration]:
     integration = LocalRunIntegration()
 
     async def exercise() -> _Result:
@@ -174,6 +204,55 @@ def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
         assert not result.passed
         assert result.feedback is not None
         assert result.feedback.startswith("Framework accuracy gate failed.")
+    finally:
+        integration.close()
+
+
+def test_single_metric_without_objectives_uses_scalar_contract_direction(tmp_path: Path) -> None:
+    async def body(ctx: Run) -> BenchmarkEvaluation:
+        return await ctx.evaluation.benchmark(ctx.workspaces.root)
+
+    result, integration = _run(tmp_path, body)
+    try:
+        assert result.passed
+        assert result.metric_name == "throughput"
+        assert result.metric_value == 42.0
+        assert result.metric_direction is MetricDirection.MAXIMIZE
+    finally:
+        integration.close()
+
+
+def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path: Path) -> None:
+    async def body(ctx: Run) -> BenchmarkEvaluation:
+        return await ctx.evaluation.benchmark(ctx.workspaces.root)
+
+    row = {"latency": 8.0, "throughput": 42.0}
+    project_root = tmp_path / "project"
+    _write_project(project_root, protocol_row=row)
+    result, integration = _run_project(project_root, body)
+    try:
+        assert not result.passed
+        assert result.row == row
+        assert result.metric_name is None
+        assert result.feedback is not None
+        assert "no headline metric is defined" in result.feedback
+        assert "objectives.toml" in result.feedback
+    finally:
+        integration.close()
+
+
+def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:
+    async def body(ctx: Run) -> BenchmarkEvaluation:
+        return await ctx.evaluation.benchmark(ctx.workspaces.root)
+
+    project_root = tmp_path / "project"
+    _write_project(project_root, benchmark_command=("false",))
+    result, integration = _run_project(project_root, body)
+    try:
+        assert result.executed
+        assert not result.passed
+        assert result.feedback is not None
+        assert result.feedback.startswith("Framework benchmark failed.")
     finally:
         integration.close()
 
