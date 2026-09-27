@@ -61,11 +61,11 @@ WORKER = AgentRole(
 )
 
 
-async def orchestrate(host: Run, raw_options: BaseModel) -> RunStatus:
+async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     options = Options.model_validate(raw_options)
-    session = await host.agents.create_session(
+    session = await run.agents.create_session(
         WORKER,
-        workspace=host.workspaces.root,
+        workspace=run.workspaces.root,
     )
     try:
         for round_number in range(1, options.max_rounds + 1):
@@ -73,7 +73,7 @@ async def orchestrate(host: Run, raw_options: BaseModel) -> RunStatus:
                 f"Implement round {round_number}.",
                 response=WorkerReply,
             )
-            host.observations.note(reply.summary)
+            run.observations.note(reply.summary)
     finally:
         await session.close()
     return RunStatus.SUCCEEDED
@@ -112,15 +112,15 @@ them through the plugin's `agents` tuple.
 
 ## Explicit session semantics
 
-`host.agents.create_session` makes conversation lifetime visible in policy
+`run.agents.create_session` makes conversation lifetime visible in policy
 code:
 
 ```python
-first = await host.agents.create_session(WORKER, workspace=workspace)
+first = await run.agents.create_session(WORKER, workspace=workspace)
 await first.turn("Inspect the failure.")
 await first.turn("Now implement the fix.")  # continues the same context
 
-second = await host.agents.create_session(WORKER, workspace=workspace)
+second = await run.agents.create_session(WORKER, workspace=workspace)
 await second.turn("Review independently.")  # a fresh conversation
 ```
 
@@ -136,7 +136,7 @@ fixed when the session is created. `WorkspaceAccess.LIMITED` requires explicit
 workspace-relative `writable_paths`; other access modes reject them. A session
 bound to a discarded candidate workspace is invalidated.
 
-Close sessions in `finally`. `close()` is idempotent, and the run host closes
+Close sessions in `finally`. `close()` is idempotent, and the runtime closes
 all remaining sessions in reverse creation order as a failure-path fallback.
 Explicit cleanup in policy keeps the intended lifetime readable and releases
 resources before the whole run ends.
@@ -150,7 +150,7 @@ policy that owns it.
 ```python
 roles = (PLANNER, IMPLEMENTER, REVIEWER)
 team = [
-    await host.agents.create_session(role, workspace=workspace)
+    await run.agents.create_session(role, workspace=workspace)
     for role in roles
 ]
 try:
@@ -189,7 +189,7 @@ implementation objects:
 | `observations` | Publish informational notes or non-fatal semantic warnings |
 
 Workspace and candidate lifetimes are explicit. A plugin creates a candidate
-with `host.workspaces.create_candidate()`, retains or adopts a revision through
+with `run.workspaces.create_candidate()`, retains or adopts a revision through
 the workspace APIs, and discards the candidate in `finally`. The lower runtime
 owns Git, sandbox, worktree, and cleanup mechanics. Similarly, orchestration
 decides when correctness or performance evaluation is due and interprets the
@@ -260,22 +260,22 @@ def respond(
 
 
 async def scenario() -> None:
-    host = FakeRun(PLUGIN, responder=respond)
+    run = FakeRun(PLUGIN, responder=respond)
     try:
-        status = await PLUGIN.orchestrate(host, Options())
+        status = await PLUGIN.orchestrate(run, Options())
         assert status is RunStatus.SUCCEEDED
-        assert host.agents.sessions[0].closed
+        assert run.agents.sessions[0].closed
     finally:
-        await host.close()
+        await run.close()
 
 
 asyncio.run(scenario())
 ```
 
 The fake records sessions, per-session message history, workspaces, evaluation
-calls, state commits, control checkpoints, commands, skills, and logs. Configure
-those public fake capabilities directly. Do not patch runtime internals or
-replace private functions.
+calls, state commits, control checkpoints, commands, skills, and observations.
+Configure those public fake capabilities directly. Do not patch runtime
+internals or replace private functions.
 
 Useful focused commands:
 
