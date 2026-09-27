@@ -91,9 +91,16 @@ def test_supported_profilers_matches_the_live_run_environment() -> None:
 
     result = supported_profilers(spec)
 
-    assert result == build_run_environment(spec).supported_profiler_kinds
-    # The local environment supports every profiler kind (no restriction).
     assert result is None
+    # The local environment supports every profiler kind (no restriction).
+
+    modal_spec = make_run_environment_spec(use_modal=True)
+    modal_result = supported_profilers(modal_spec)
+
+    assert modal_result is not None
+    assert {profiler.value for profiler in modal_result} == build_run_environment(
+        modal_spec
+    ).supported_profiler_ids
 
 
 def test_experiment_origin_matches_is_false_for_a_non_matching_repo(tmp_path: Path) -> None:

@@ -492,8 +492,15 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_kind,
                 domain=profiler_domain,
                 backend_profiler_kind=default_profiler_for_backend(backend),
-                environment_default_profiler_kind=environment.default_profiler_kind,
-                environment_supported_profiler_kinds=environment.supported_profiler_kinds,
+                environment_default_profiler_kind=ProfilerKind(environment.default_profiler_id),
+                environment_supported_profiler_kinds=(
+                    None
+                    if environment.supported_profiler_ids is None
+                    else frozenset(
+                        ProfilerKind(profiler_id)
+                        for profiler_id in environment.supported_profiler_ids
+                    )
+                ),
             )
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS:
                 agent_spec = agent_spec_from_config(

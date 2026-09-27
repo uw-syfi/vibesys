@@ -31,7 +31,7 @@ from vibesys.evaluators.input_synthesis import (
     synthesize_input_bundle,
 )
 from vibesys.evaluators.objective import load_objective, with_operator_constraints
-from vibesys.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
+from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibesys.repository import (
     REPOSITORY_SLUG,
     generate_experiment_name,
@@ -51,7 +51,6 @@ from vs_agent.api.images import build_task_image
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.profilers import ProfilerKind
     from vs_project.api import OrchestrationDescriptor
 
 
@@ -102,13 +101,16 @@ def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | N
     """Return the profiler kinds `spec`'s run environment supports.
 
     `None` means the environment supports every profiler kind (no
-    restriction), matching `RunEnvironment.supported_profiler_kinds` and its
+    restriction), matching `RunEnvironment.supported_profiler_ids` and its
     use in `entrypoints.cli._validate_run_environment_profiler`. Building
     the environment just to read this one attribute is intentional here so
     callers never need to import `build_run_environment` (which returns a
     live, potentially side-effecting environment handle) themselves.
     """
-    return build_run_environment(spec).supported_profiler_kinds
+    supported_ids = build_run_environment(spec).supported_profiler_ids
+    if supported_ids is None:
+        return None
+    return frozenset(ProfilerKind(profiler_id) for profiler_id in supported_ids)
 
 
 def experiment_origin_matches(destination: Path, repository: str) -> bool:

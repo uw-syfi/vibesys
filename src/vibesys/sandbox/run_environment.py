@@ -37,7 +37,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_agent.api import (
     DOCKER_PROVIDER_ENV,
@@ -245,8 +244,8 @@ class RunEnvironment(Protocol):
 
     isolated: bool
     materialize_local_model_weights: bool
-    default_profiler_kind: ProfilerKind
-    supported_profiler_kinds: frozenset[ProfilerKind] | None
+    default_profiler_id: str
+    supported_profiler_ids: frozenset[str] | None
     backend_image: str | None
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -292,8 +291,8 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
 
     isolated: bool = False
     materialize_local_model_weights: bool = True
-    default_profiler_kind: ProfilerKind = ProfilerKind.NSYS
-    supported_profiler_kinds: frozenset[ProfilerKind] | None = None
+    default_profiler_id = "nsys"
+    supported_profiler_ids: frozenset[str] | None = None
     backend_image: str | None = None
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -361,8 +360,8 @@ class DockerEnvironment:
 
     isolated = True
     materialize_local_model_weights = True
-    default_profiler_kind = ProfilerKind.NSYS
-    supported_profiler_kinds: frozenset[ProfilerKind] | None = None
+    default_profiler_id = "nsys"
+    supported_profiler_ids: frozenset[str] | None = None
 
     def __init__(self, config: DockerEnvironmentConfig) -> None:
         """Configure Docker execution from its image settings."""
@@ -524,10 +523,8 @@ class SkyPilotEnvironment(DockerEnvironment):
 
     config: SkyPilotEnvironmentConfig
     materialize_local_model_weights = False
-    default_profiler_kind = ProfilerKind.NONE
-    supported_profiler_kinds: frozenset[ProfilerKind] | None = frozenset(
-        {ProfilerKind.AUTO, ProfilerKind.NONE}
-    )
+    default_profiler_id = "none"
+    supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "none"})
 
     def __init__(self, config: SkyPilotEnvironmentConfig) -> None:
         """Create an environment from operator-owned settings."""
@@ -724,10 +721,8 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
     isolated = True
     materialize_local_model_weights = False
-    default_profiler_kind = ProfilerKind.TORCH
-    supported_profiler_kinds: frozenset[ProfilerKind] | None = frozenset(
-        {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
-    )
+    default_profiler_id = "torch"
+    supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "torch", "none"})
 
     def __init__(self, config: ModalEnvironmentConfig) -> None:
         """Configure Modal execution from its deployment settings."""
