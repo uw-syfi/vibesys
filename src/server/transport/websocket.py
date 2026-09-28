@@ -260,8 +260,8 @@ class WebSocketGateway:
         if not candidate.is_file():
             return _response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         try:
-            body = candidate.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            body = candidate.read_bytes()
+        except OSError:
             return _response(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to read asset\n", "text/plain"
             )
@@ -409,7 +409,7 @@ def _respond(_connection: ServerConnection, status: HTTPStatus, text: str) -> Ht
     return _response(status, text, "text/plain")
 
 
-def _response(status: HTTPStatus, text: str, content_type: str) -> HttpResponse:
+def _response(status: HTTPStatus, text: str | bytes, content_type: str) -> HttpResponse:
     from websockets.datastructures import (  # noqa: PLC0415  # lint-waiver: LW-101019 [PLC0415]; defer optional websocket imports until an HTTP response is needed
         Headers,
     )
@@ -417,7 +417,7 @@ def _response(status: HTTPStatus, text: str, content_type: str) -> HttpResponse:
         Response as HttpResponse,
     )
 
-    body = text.encode("utf-8")
+    body = text.encode("utf-8") if isinstance(text, str) else text
     return HttpResponse(
         status.value,
         status.phrase,
@@ -439,6 +439,8 @@ def _content_type(path: Path) -> str:
         ".js": "text/javascript; charset=utf-8",
         ".json": "application/json; charset=utf-8",
         ".svg": "image/svg+xml",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
     }.get(path.suffix, "application/octet-stream")
 
 

@@ -1,0 +1,74 @@
+.dock {
+  padding-block: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.qline {
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+  height: 28px;
+  margin-bottom: var(--space-2);
+  padding-left: var(--space-3);
+  color: var(--text-muted);
+}
+.qline .q {
+  font-weight: 500;
+}
+.qline .qt {
+  overflow: hidden;
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cmp {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-height: 44px;
+  padding: 6px 6px 6px var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.cmp:focus-within {
+  border-color: var(--accent);
+}
+.cmp .prompt {
+  color: var(--accent);
+  font: 600 var(--text-sm) / 1 var(--font-mono);
+}
+.cmp textarea {
+  field-sizing: content;
+  min-height: 20px;
+  max-height: 7.5em;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  line-height: 20px;
+}
+.cmp textarea::placeholder {
+  color: var(--text-muted);
+}
+.steer-error {
+  margin-top: var(--space-2);
+  color: var(--status-failed);
+  font-size: var(--text-xs);
+}
+@media (max-width: 767px) {
+  .dock {
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+  .qline {
+    padding-left: var(--space-1);
+  }
+  .cmp {
+    min-height: 48px;
+  }
+  .cmp .btn {
+    width: 36px;
+    height: 36px;
+  }
+}

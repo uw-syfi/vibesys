@@ -25,6 +25,8 @@ export type {
   ExperimentUpdate,
   HypothesisEntry,
   HypothesisRound,
+  PerformanceContext,
+  PerformanceRound,
   ProtocolRequest,
   ProtocolResponse,
   RequestInput,

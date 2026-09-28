@@ -1,11 +1,10 @@
-export {App, createDemoApp, createLiveApp} from './App.js';
-export {loadReplayFixture} from './replay.js';
+export {App} from './App.js';
+export {fetchReplay, replayTransport} from './replay.js';
 export {
   type BrowserLifecycle,
-  WebSession,
-  type WebSessionOptions,
-  type WebSessionState,
-  type WebSessionStatus,
+  type WorkspaceClient,
+  WorkspaceSession,
+  type WorkspaceSessionOptions,
+  type WorkspaceState,
   webSocketUrlFromLocation,
 } from './session.js';
-export {type CoreStateStore, createCoreStateStore} from './store.js';

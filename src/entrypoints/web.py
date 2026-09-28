@@ -24,7 +24,7 @@ _LIVE_PORT = 8765
 _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
-_DEMO_LOG = Path("clients/tui/dev/fixtures/framework-events.jsonl")
+_DEMO_LOG = Path("clients/web/src/fixtures/demo-run.jsonl")
 
 
 def _repository_root() -> Path:

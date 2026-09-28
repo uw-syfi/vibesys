@@ -131,6 +131,16 @@ projects, legacy input bundles, Docker, Modal, remote repositories, resume, and
 alternate search loops. The [CLI reference](docs/cli-flags.md) documents every
 flag. Contributor setup belongs in [`docs/contributing/development.md`](docs/contributing/development.md).
 
+## Browser workspace (local development)
+
+The [web workspace](clients/web/README.md) displays a backend run's live
+activity, hypotheses, performance, and evaluation evidence, with pause,
+resume, and steering controls. It shares the backend protocol and state
+reducers with the terminal client.
+
+Run `./scripts/run-web-ui.sh` for a replay demo; see the
+[web UI README](clients/web/README.md) for live and remote workflows.
+
 ## Citation
 
 If you use the VibeServe initiative in your research, please cite:

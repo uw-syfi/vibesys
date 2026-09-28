@@ -23,7 +23,7 @@ const PACKAGES = {
   '@vibesys/web': {
     directory: 'web',
     runtimeWorkspaceDependencies: ['@vibesys/backend-client', '@vibesys/core-state'],
-    forbiddenDependencyPrefixes: ['@vibesys/tui'],
+    forbiddenDependencyPrefixes: ['@vibesys/tui', '@opentui/'],
   },
 };
 

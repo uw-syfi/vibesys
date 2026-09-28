@@ -38,11 +38,17 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
     assets = tmp_path / "web"
     assets.mkdir()
     (assets / "index.html").write_text("<!doctype html><title>VibeSys</title>")
+    (assets / "assets").mkdir()
+    (assets / "assets" / "plex.woff2").write_bytes(b"wOF2\x00\xff")
 
     with WebSocketGateway(parts.api, assets_dir=assets) as gateway:
         with urlopen(gateway.url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101021 [S310]; connect only to the loopback URL produced by the gateway under test
             assert response.status == 200
             assert response.read() == b"<!doctype html><title>VibeSys</title>"
+        font_url = gateway.url.replace("/?", "/assets/plex.woff2?")
+        with urlopen(font_url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101222 [S310]; connect only to the loopback URL produced by the gateway under test
+            assert response.headers["Content-Type"] == "font/woff2"
+            assert response.read() == b"wOF2\x00\xff"
 
         response = asyncio.run(_request(gateway, SnapshotQuery()))
 

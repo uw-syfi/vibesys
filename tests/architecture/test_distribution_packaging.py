@@ -301,6 +301,18 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "clients/backend-client/src/index.ts" in members
     assert "clients/core-state/src/index.ts" in members
     assert "clients/tui/src/index.ts" in members
+    assert "clients/web/src/App.tsx" in members
+    assert "clients/web/src/tokens.css" in members
+    assert "clients/web/package.json" in members
+    assert "clients/web/vite.config.ts" in members
+    assert "clients/web/index.html" in members
+    assert "clients/web/vite.browser.config.ts" in members
+    assert not any(
+        member.startswith(
+            ("clients/web/dist/", "clients/web/node_modules/", "clients/web/.browser-dist/")
+        )
+        for member in members
+    )
     assert "clients/backend-client/package.json" in members
     assert "clients/core-state/package.json" in members
     assert "clients/tui/package.json" in members

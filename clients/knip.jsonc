@@ -32,6 +32,10 @@
         "benchmarks/*.ts"
       ],
       "project": ["src/**/*.ts", "dev/**/*.ts", "benchmarks/**/*.ts"]
+    },
+    "web": {
+      // The package's public surface, and the hand-run screenshot capture (`node web/scripts/capture.mjs`).
+      "entry": ["src/index.ts", "scripts/*.mjs"]
     }
   }
 }
