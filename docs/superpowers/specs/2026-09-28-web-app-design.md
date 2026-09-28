@@ -1,134 +1,128 @@
 # VibeSys desktop app: design
 
-Status: draft for review, 2026-09-28. Branch: `adi/web-ui`.
+Status: draft for review, 2026-09-28, revised after a Codex code review. Branch: `adi/web-ui`.
 
 ## Summary
 
-One app that does everything: pick a project, configure a run, start it, watch it, steer it, and review finished runs. React UI, a long-lived local Python home server, and an Electron shell that launches both. The Python core (runs, agents, journals, run store, run protocol) does not change beyond three bug fixes.
+One app that does everything: pick a project, configure a run, start it, watch it, steer it, resume it, and review finished runs. React UI, a long-lived local Python home server, and an Electron shell that launches both. The Python core (runs, agents, journals, run store, run protocol) keeps its contracts; the changes are three bug fixes, a reopen identity path, and small launch options.
 
 The visual design is the approved mockup `2026-09-28-web-app/mockup.html` (Radix Slate neutrals, one Indigo accent, hairline panes, native window chrome). The TUI is the source of concepts and capabilities, not of layout.
 
 ## Goals
 
-- Start a run from the app with no CLI steps: folder, task, agents, keys, start.
-- Watch a live run and reopen finished runs with full data (experiments, performance, design).
+- Start a run from the app with no CLI steps: folder, task, loop, agents, compute backend, keys, start.
+- Watch a live run; reopen and resume finished runs with full data (experiments, performance, design).
 - Reach every TUI capability: rounds, agent graph, transcript, pause/resume/steer/stop, experiment chat threads and models, notes, diff, experiments and performance, prompt and todos, themes, command palette.
-- Launch everything with one command in development (`pnpm app` or equivalent).
-- Fast iteration: Vite hot reload for UI work in both the browser and the Electron window.
+- One command launches everything in development; Vite hot reload in the browser and the Electron window.
 
 ## Non-goals (v1)
 
-- More than one live run per project at a time (the gateway record is one per project).
+- More than one live run per project (one gateway record per project).
+- Per-role backends or providers (the run config has one backend/provider; only model and reasoning effort vary per role).
 - Per-project provider keys (keys go to the `.env` VibeSys already loads).
 - Remote execution environments in setup (Docker, Modal, SkyPilot, Slurm stay CLI flags).
-- A signed, notarized, Python-bundling distributable. v1 runs the shell from a checkout.
-- Controls the protocol does not have (skip round, approve, manual keep/revert).
+- Minimizing-objective task authoring (new tasks are scalar maximize; existing tasks with other contracts run and display read-only).
+- A signed, notarized, Python-bundling distributable (v1 runs from a checkout).
+- Live provider-key validation; controls the protocol lacks (skip, approve, manual keep/revert).
 
 ## Architecture
 
 ```
-Electron main process ── spawns ──▶ Python home server (127.0.0.1, capability token)
-      │ opens window                   │ JSON API + static app
-      ▼                                │ spawns, tracks
-React app (same code in a browser) ────┼──▶ run server per project
-      │ HTTP /api/*                    │    (existing entrypoints.server --web --detach)
-      └──── WebSocket per run ─────────┴──▶ existing gateway + run protocol
+Electron main ── spawns ──▶ Python home server (127.0.0.1:<stable port>, capability token)
+     │ opens window            │ HTTP: app + /api/*
+     ▼                         │ spawns, tracks
+React app (same code in a browser) ──▶ run server per project (entrypoints.server --web --detach
+     │ WebSocket per run            --web-origin <home origin>)
+     └───────────────────────────────▶ existing gateway + run protocol
 ```
 
-- **Home server**: new `vibesys web home` subcommand in `src/entrypoints/web.py`, built on the same `websockets` HTTP handling, token check and Origin allowlist as `src/server/transport/websocket.py`. No new Python dependency. It serves the built app and `/api/*`, and prints its capability URL on startup (the shell reads it).
-- **Run servers**: unchanged. The home server launches them the way `web.py live` does today (`_live_command`) and reads their `WebInstanceRecord` (`<project>/.vibesys/web-gateway.json`). The app connects to a run's gateway directly with that record's URL and token.
-- **Browser mode**: `vibesys web home --open` opens the same app in a browser. Useful for development and remote hosts.
+- **Home server**: new `vibesys web home` subcommand in `src/entrypoints/web.py`, on stdlib `http.server.ThreadingHTTPServer` (the `websockets` HTTP parser rejects non-GET methods and bodies, so the gateway's HTTP handling cannot be reused; share only the token and Origin helpers). No new Python dependency. It listens on a stable configured port (default 8764; the port lives in the state home) so run gateways launched with `--web-origin` keep accepting the app across home restarts. It prints its capability URL on startup.
+- **Run servers**: the home server launches `entrypoints.server --web --detach` as `web.py live` does, adding `--web-origin <home origin>` (and the Vite origin in dev), a no-browser flag, and retained child stderr. It distinguishes three readiness levels: gateway ready (record written), run ready (record attached; see fix 1.2), run failed (child exited, last stderr lines returned).
+- **Browser mode**: `vibesys web home --open` serves the same app in a browser.
 
 ## Sub-projects
 
-Each gets its own implementation plan and PR stack on `adi/web-ui`. Order: 1 and 3 can start in parallel; 2 before 4; 6 after 2.
+Each has its own implementation plan and stacked PRs. Dependencies: 1 and 3 start together; 2 needs nothing but lands before 4, 5 and 6; reopen/resume UI and demo e2e need 1; 4 and 5 need 2 and 3; 6 needs 2's auth contract and a loadable app from 3.
 
 ### 1. Backend correctness
 
-1. **Reopen attaches the run record.** `RunController.attach_read_only` (`src/server/controller.py:60`) attaches only the journal, so `attached_run` is `None` and experiments, performance and design queries return empty (`src/server/api/service.py:179`, `:399`). Resolve the record with `open_run_store(project).get_record(run_id)` and attach it as `attach()` does. Test: reopen a finished run fixture and assert non-empty experiments and performance.
-2. **Startup race.** `resources.py:441-444` emits `EXPERIMENTS_CHANGED(reason="project_attached")` before resources publish (`:568`) and before `RunIntegrationAdapter.handle_run_ready` attaches the record (`src/server/integration.py:224-234`). Emit the readiness signal after the record is attached. Test: a client that queries on the signal gets data, not an empty response.
-3. **Demo bundle.** The demo replays `clients/web/src/fixtures/demo-run.jsonl` with no project, so it cannot answer data queries. Package the demo as a small recorded project (journal plus run record) and reopen it through fix 1.
+1. **Reopen with identity.** Reopen passes only a log directory (`src/entrypoints/server.py:361`, `src/server/runtime.py:160`), and `RunController.attach_read_only` (`src/server/controller.py:60`) attaches only the journal, so `attached_run` is `None` and experiments, performance and design return empty (`src/server/api/service.py:179`, `:399`). Pass project and run identity through the reopen path, resolve the record with `open_run_store(project).get_record(run_id)`, and attach it read-only without lifecycle writes. Test: reopen a finished run fixture; experiments and performance are non-empty and nothing is written to the run.
+2. **Readiness signal.** `resources.py:441-444` emits `EXPERIMENTS_CHANGED(reason="project_attached")` before resources publish (`:568`) and before `RunIntegrationAdapter.handle_run_ready` attaches the record (`src/server/integration.py:224-234`). Emit it after the record is attached. Test: a client querying on the signal gets data.
+3. **Historical gateways.** `server.py:309` reuses any live project gateway regardless of the requested run. Reopened runs get a run-specific discovery record so a reopen never attaches to the live run's gateway (or vice versa), and records carry `run_id` and `mode` (live, reopen).
+4. **Demo bundle.** Package the demo as a small recorded project (journal plus run record) reopened through 1.1; the browser-only replay transport (`clients/web/src/replay.ts:33`) returns empty data and is only a fallback.
 
 ### 2. Home server and setup API
 
-All endpoints require the token. Requests with an unexpected Origin are rejected. Keys are never returned.
+Auth: HTML, `/api/*` and WebSockets require the token; secret-free built assets under the canonical assets root are served without it (the app's `index.html` loads them tokenless). Every state-changing request checks Origin against the exact home origin (and Vite in dev); requests with a null or unexpected Origin are rejected. Keys are never returned or logged.
 
 | Endpoint | Purpose | Built on |
 |---|---|---|
-| `GET /api/fs?path=` | List subdirectories for the folder picker (home directory by default; hidden folders excluded) | stdlib |
-| `POST /api/projects/validate` | Directory exists, git work tree, clean tree, `.vibesys/tasks` present, discovered tasks | new `validate_project()` wrapping `Project.open`, `is_initialized()`, `git rev-parse`, `discover_tasks()` (`libs/vs-project/src/vs_project/_layout.py`) |
-| `GET /api/projects` | Recent projects (persisted in the VibeSys state home) | new, small JSON file |
-| `GET /api/projects/{id}/tasks`, `GET .../tasks/{name}` | Task list and detail (objective, accuracy, benchmark, metric, domain) | `select_task`, `load_project_task` |
-| `POST /api/projects/{id}/tasks` | Create a task: writes `OBJECTIVE.md` and `vibesys.input.toml` | `InputManifest` + `render_input_manifest()` (`src/vibesys/inputs/_manifest.py`) |
-| `GET /api/agents/catalog` | Drivers, providers, suggested models | `agent_catalog()` (`libs/vs-agent/src/vs_agent/catalog.py`) + the suggested-models list in `src/server/chat/options.py` (moved to a shared module) |
-| `GET /api/auth` | Per provider: `key` set / `cli` signed in / `missing` | env and `.env` presence; CLI sign-in inferred from the provider profile's `state_dirs` (`vs_agent/provider_profiles.py`) |
-| `PUT /api/auth/{provider}` | Write-only key; validates format, writes the VibeSys `.env` (mode 0600, atomic replace), responds with status only | new; `.env` path from `vibesys.constants.PROJECT_ROOT` (what `load_config` reads) |
-| `GET /api/projects/{id}/runs` | Runs newest first, plus the live one | `open_run_store(project).list_runs()`, `WebInstanceRecord.discover` |
-| `POST /api/projects/{id}/runs` | Start: task, per-role backend/model, max rounds. Returns the run's gateway URL and token once the record appears | spawns `entrypoints.server --web --detach` with the matching argv |
-| `POST /api/projects/{id}/runs/{run}/open` | Reopen a finished run read-only (uses fix 1); returns gateway URL and token | `--web-reopen` path |
-| `DELETE /api/projects/{id}/live` | Stop the live run (SIGTERM, as `web stop` does) | `_run_stop` logic |
-| `GET/PUT /api/notes/{run}` | Run notes, shared with the TUI (`~/.vibesys/tui/notes/<run>.json`) | same format as `clients/tui/src/notes-store.ts` |
+| `GET /api/fs?path=` | Directories for the folder picker, confined to granted roots (home by default); canonical paths, symlink targets checked against roots, permission errors reported | stdlib; containment like `_layout.py:419` |
+| `POST /api/projects/validate` | States: missing, not a git work tree, no commits, dirty tree, uninitialized (no `.vibesys/tasks`), zero tasks, ready (with tasks) | new `validate_project()` over `Project.open`, `is_initialized`, `discover_tasks`, git checks |
+| `GET /api/projects` | Recent projects, `$VIBESYS_STATE_HOME/web/recent-projects.json` (default `~/.vibesys`) | new |
+| `GET /api/projects/{id}/tasks`, `GET .../tasks/{name}` | Task list and detail (objective, accuracy, benchmark, result contract, domain) and whether it is editable | `select_task`, `load_project_task` |
+| `POST .../tasks`, `PUT .../tasks/{name}` | Create or edit a task (writes `OBJECTIVE.md`, `vibesys.input.toml`). Edit only when serialization is lossless (the serializer drops `benchmark.result_protocol`, `_manifest.py:253,455`); otherwise read-only. PUT uses a content hash for conflict detection | `InputManifest` + `render_input_manifest()` |
+| `POST .../commit` | Show and commit task-file changes after explicit confirmation (launch rejects dirty or commitless repos, `_git_tracker.py:870`) | git |
+| `GET /api/agents/catalog` | Drivers, providers, suggested models, outer loops, compute backends | `agent_catalog()` + the suggested-models list moved from `src/server/chat/options.py` to a shared module; `ComputeBackend` |
+| `GET /api/auth` | Per provider: key present (env or `.env`, and whether the process env shadows `.env`), CLI session present (unverified; honors the profile's `state_root_env` and `auth_files`), or missing | env, `.env`, `vs_agent` provider profiles |
+| `PUT /api/auth/{provider}` | Write-only. Allowlisted variable names per provider, non-empty, no control characters; serialized writes, atomic replace, mode 0600, symlink targets rejected, unrelated entries preserved. Returns status only ("unverified until first run"); reports when a process env var shadows the new value | `.env` at `vibesys.constants.PROJECT_ROOT` (what `load_config` reads, `override=False`) |
+| `GET /api/projects/{id}/runs` | Runs newest first with a gateway state: live (verified by attaching and matching run identity), starting, ended-but-serving, stale/unreachable, external (started outside the app, e.g. TUI without `--web`), none | `open_run_store(project).list_runs()`, discovery records |
+| `POST /api/projects/{id}/runs` | Start: task, outer loop, loop budget (`--max-rounds`, or `--max-generations` for evolve), compute backend, one backend/provider, default model and per-role model/reasoning overrides (written to a run-owned TOML passed with `--config`). Surfaces profile-guided prerequisites. Returns gateway URL and token at gateway-ready, then run-ready or run-failed | spawns the run server (argv from `args.py:237,451,615`) |
+| `POST .../runs/{run}/open` | Reopen read-only (fix 1.1, 1.3) | `--web-reopen` + identity |
+| `POST .../runs/{run}/resume` | Resume with the recorded configuration; only non-decreasing total budget | `cli/resume.py:58,228` |
+| `DELETE /api/projects/{id}/live` | Stop the live run (SIGTERM) | `web stop` logic |
+| `GET/PUT /api/notes/{run}` | Run notes shared with the TUI (`$VIBESYS_STATE_HOME/tui/notes/<run>.json`, same sanitization as `notes-store.ts:31`; last write wins) | new |
 
-Setup fields map to real inputs: folder, task (existing or new: objective, accuracy command, benchmark command, metric name from `benchmark.result.metric`, domain `generic` or `llm-serving`), agent backend and model with per-role overrides (`agent.toml` `[agent].roles`, passed as run args), max rounds (`--max-rounds`). Metric direction is not a setup field; it comes from the benchmark outcome.
-
-Errors are typed (`invalid_path`, `not_git`, `dirty_tree`, `no_tasks`, `task_invalid` with the manifest error, `key_rejected`, `launch_failed` with the child's last stderr lines, `already_live`).
+Errors are typed: `invalid_path`, `outside_roots`, `not_git`, `no_commits`, `dirty_tree`, `uninitialized`, `no_tasks`, `task_invalid` (manifest error), `task_conflict`, `task_read_only`, `already_live`, `launch_failed` (stderr tail), `run_failed`.
 
 ### 3. App shell and run view
 
-Replaces the current `clients/web` UI components (keeps `session.ts` transport wiring, `core-state`, `backend-client`). New pieces:
+Replaces the current `clients/web` UI components; keeps `session.ts` transport wiring, `core-state` and `backend-client`.
 
-- **Tokens**: Radix Slate and Indigo, with the corrected contrast table from the mockup (meaningful text at least 4.5:1 on every surface; field borders and graph edges at least 3:1). System, Light and Dark themes.
-- **Chrome**: sidebar (projects, runs, the selected run's rounds with `rN`, two-line titles, delta), a title row (run title, run status, Pause/Resume with the pending state, retained metric with its label, pane toggle, ••• menu with Stop and confirm), a collapsible sidebar and resizable panes.
-- **Transcript**: sticky round header with a one-line result (attempted vs retained), agent turns with phase names, tool calls as one line (verb plus object, middle-elided commands, tool duration) that expand to output or diff, Prompt and Todos disclosures from invocation events, and the judge verdict block.
-- **Right pane** (scoped label "Round N" or "Run"): Ask, Changes (bound to the selected round, full diff), Agents, Experiments (plot with legend plus per-experiment evidence and design summary), Notes.
-- **Agent graph**: `@xyflow/react` (new dependency) read-only, `@dagrejs/dagre` (already a dependency) top-to-bottom. Edges come from execution order and invocation dependencies; only concurrent invocations stack. Each node keeps its `invocationId` so clicking filters the transcript (fixes the current graph's identity collapse).
-- **Composer**: steer only, with queued and applied states from `CommandAck`.
+- **Tokens**: Radix Slate and Indigo with the mockup's contrast table (meaningful text at least 4.5:1 on every surface; field borders and graph edges at least 3:1). System, Light, Dark.
+- **Chrome**: sidebar (projects; runs with gateway state; the selected run's rounds as `rN`, two-line titles, delta), title row (run title, status, Pause/Resume with the pending state, labelled retained metric, pane toggle, ••• with Stop and confirm), collapsible sidebar, resizable panes. At 1024 the sidebar collapses before the transcript drops below 560px.
+- **Transcript**: sticky round header with a one-line result (attempted vs retained), agent turns with phase names, one-line tool calls (verb plus object, middle-elided commands, tool duration) expanding to output or diff, Prompt and Todos from invocation and todo events, the judge verdict block.
+- **Right pane** (scope label "Round N" or "Run"): Ask, Changes (the selected round's available patches with explicit unavailable and truncated states and a reproduction command), Agents, Experiments (plot with legend, per-experiment evidence, design summary), Notes.
+- **Agent graph**: `@xyflow/react` (new dependency) read-only, with `@dagrejs/dagre` (already a dependency) top-to-bottom. Nodes are keyed by `execution_id` with `invocation_id` fallback (`src/server/events.py:499`); edges are inferred chronologically within a round and marked as inferred, since events carry no dependency graph; only concurrent executions stack. Clicking a node filters the transcript (fixes the identity collapse in `derive.ts:136`). Codex recommended keeping the existing dagre/SVG renderer instead; React Flow is kept because the owner asked for a library and approved the mockup with it.
+- **Composer**: steer only. "Queued" on the pending `CommandAck` (`protocol.py:254`); "Applied" on the consumed steer control event (`controller.py:285`).
 - **⌘K palette**: every command routes somewhere; ⌘N new run.
-- **1024 wide**: the sidebar collapses before the transcript drops below 560px.
 
-Replacing the components also clears the 22 biome complexity violations recorded in merge commit `34f93651`.
+Replacing the components clears the 22 biome complexity violations noted in merge commit `34f93651`.
 
 ### 4. Setup UI
 
-The new-run view from the mockup on top of sub-project 2: saved task as a summary with Edit, a new-task form, per-role override, provider rows (CLI signed in, key set, missing, checking, rejected), readiness that links each blocker to its field, Start, a starting view (baseline measurement), Round 1, and a start-failure view with Retry and a clickable file location.
+The new-run view on sub-project 2: project states (uninitialized, zero tasks, dirty tree) with next actions; saved task as a summary with Edit (or read-only); new-task form (objective, accuracy command, benchmark command, result JSON argument and metric name, domain); a commit-task-files confirmation; outer loop and budget; compute backend (defaults to the host, e.g. Metal or CPU on a Mac, instead of CUDA); backend/provider and model with per-role model override; provider rows (key present, CLI session unverified, missing, saving, rejected-format, shadowed by env); readiness linking each blocker to its field; Start → starting (gateway ready, baseline) → Round 1; start failure with the stderr tail, Retry and a clickable file location. Resume and reopen entry points from finished runs.
 
 ### 5. Ask, notes, palette, themes
 
-Experiment chat as the Ask tab (thread switcher, new thread, model picker from `query.chat_options`, the no-chat-harness state), notes editor with "Use as steer draft" and "Use as ask draft" (drafts only), the theme switcher.
+Ask tab (thread switcher, new thread, model picker from `query.chat_options`, the no-chat-harness state), notes editor with "Use as steer draft" and "Use as ask draft" (drafts only), theme switcher.
 
 ### 6. Electron shell
 
-- `clients/desktop` package: Electron main process plus preload, built with `electron-vite`.
-- Starts the home server with `uv run python -m entrypoints.web home` from the checkout, reads its printed URL and token, and loads it in a `BrowserWindow` with `titleBarStyle: 'hiddenInset'` (traffic lights in the sidebar as designed). In dev it loads the Vite dev server for hot reload.
-- Single instance, a menu, quit kills the home server (run servers are detached and keep running; the app reattaches on next launch).
-- Security: `contextIsolation`, no Node integration in the renderer, navigation restricted to the home server origin.
-- One command from the repo root starts everything.
+- `clients/desktop`: main process plus preload, `electron-vite`; added to the architecture checks' package list (`clients/.dependency-cruiser.cjs:3`).
+- Main starts `uv run python -m entrypoints.web home` from the checkout, keeps the home capability, and loads the app in a `BrowserWindow` (`titleBarStyle: 'hiddenInset'`). Dev loads the Vite dev server for hot reload.
+- Security: `contextIsolation` on, no Node integration, a narrow preload API with sender validation; exact allowed origins per mode (home, Vite in dev); deny external navigation and new windows; never forward the capability off-origin.
+- Single instance, a menu; quitting stops the home server, while detached run servers keep running and are rediscovered on next launch.
 
 Distribution (bundled Python, signing, notarization, auto-update) is a later spec.
 
-## Security
-
-- Home server binds 127.0.0.1 only, requires the capability token on every request (including assets; the gateway's `/assets` exemption is not copied), and checks Origin.
-- Keys: write-only API, 0600 file mode, atomic writes, never logged, never echoed; the UI shows status only.
-- Folder browsing is read-only and lists directories only.
-
 ## Testing
 
-- Sub-project 1: server tests for reopen data and the readiness signal.
-- Sub-project 2: API tests per endpoint, including a test that a key PUT never appears in any response or log and that `.env` has mode 0600.
-- Sub-projects 3 to 5: component tests (bun), Playwright e2e against the demo bundle, and screenshots at 1440 and 1024 in light and dark, viewed and reviewed by Codex before each PR.
-- Sub-project 6: a smoke test that the app starts the home server and loads the UI.
-- Existing gates stay green: TUI tests on shared-library changes, `check:ts` (biome), architecture and knip checks.
+- 1: reopen returns data and writes nothing; readiness signal ordering; reopen never attaches to the live gateway.
+- 2: API tests per endpoint and error; key writes never appear in responses or logs, `.env` is 0600, symlinks rejected, other entries preserved; folder browsing confined to roots; Origin and token enforcement.
+- 3 to 5: component tests (bun); Playwright e2e against the demo bundle; screenshots at 1440 and 1024 in light and dark, viewed and reviewed by Codex before each PR.
+- 6: smoke test that the app starts the home server, loads the UI, and refuses off-origin navigation.
+- Existing gates stay green (TUI tests on shared-library changes, `check:ts`, architecture, knip).
 
-## Open questions
+## Decisions from open questions
 
-1. Provider key validation: format check only, or a live provider call (costs a request)? Default: format check plus "checked on first run".
-2. Recent projects list location: the VibeSys state home (`~/.vibesys/`) is assumed.
-3. The PR target for this branch (main as a stack, or a long-lived integration branch).
+1. Key validation: non-empty, control-character-safe input; shown as "unverified until first run". No live provider calls in v1.
+2. Recent projects: `$VIBESYS_STATE_HOME/web/recent-projects.json`, default `~/.vibesys`.
+3. PRs: stacked, ultimately targeting main; dependent PRs target their predecessor.
 
 ## Appendix: source references
 
-- Design brief and reviews: `2026-09-28-web-app/` (mockup, renders).
-- Reopen bug and race: `src/server/controller.py:60-78`, `src/server/api/service.py:179-186,399-406`, `src/vibesys/run/resources.py:441-444,568-580`, `src/server/integration.py:224-234`.
-- Launch and discovery: `src/entrypoints/server.py:253-287`, `src/entrypoints/web.py:109-197,258-276`, `src/server/transport/discovery.py:23-131`.
-- Config and keys: `src/vibesys/config.py:103-221`, `libs/vs-agent/src/vs_agent/{catalog,provider_profiles}.py`.
+- Reopen, readiness, discovery: `src/server/controller.py:60-78`, `src/server/api/service.py:179-186,399-406`, `src/vibesys/run/resources.py:441-444,568-580`, `src/server/integration.py:224-234`, `src/entrypoints/server.py:253-309,361`, `src/server/runtime.py:160-239`, `src/server/transport/discovery.py:23-131`.
+- Launch args and resume: `src/entrypoints/cli/args.py:237,451,615`, `src/entrypoints/cli/resume.py:58,228`.
+- Config, keys, providers: `src/vibesys/config.py:84-221`, `libs/vs-agent/src/vs_agent/{catalog,provider_profiles,host_resource_declarations,cli_docker}.py`.
+- Manifest: `src/vibesys/inputs/_manifest.py:219-373,455`; evaluation direction `src/vibesys/run/evaluation.py:435`.
