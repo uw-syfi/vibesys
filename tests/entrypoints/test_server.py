@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
+from tests.server.support import finished_run
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
@@ -23,6 +24,7 @@ from entrypoints.server import (
     main,
 )
 from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
+from vibesys.api import ConfigurationError, RunRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -343,3 +345,102 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert options["web_assets"] == tmp_path.resolve()
     assert callable(options["tui_defaults"])
     assert observed["request"] is request
+
+
+def test_web_requested_accepts_reopen_flags_in_both_forms() -> None:
+    assert _web_requested(["--web-reopen-run", "queue-run"]) is True
+    assert _web_requested(["--web-reopen-run=queue-run"]) is True
+    assert _web_requested(["--web-reopen=run-events.jsonl"]) is True
+    assert _web_requested(["--local"]) is False
+
+
+def test_web_reopen_run_attaches_the_recorded_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, run_id, log_dir = finished_run(tmp_path / "project")
+    observed: dict[str, object] = {}
+
+    class FakeRuntime:
+        def __init__(self, *, socket_path: Path, **options: object) -> None:
+            del socket_path
+            observed.update(options)
+
+        def run(self, callback: Callable[[], object]) -> object:
+            return callback()
+
+    monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
+    # test-isolation: replace the dynamic runtime import to observe reopen wiring without serving
+    monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
+
+    main(["--web-reopen-run", run_id, "--project", str(project.root)])
+
+    record = observed["read_only_record"]
+    assert isinstance(record, RunRecord)
+    assert record.run_id == run_id
+    assert observed["read_only_log"] == log_dir
+
+
+def _refuse_launch(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError(  # noqa: TRY003  # lint-waiver: LW-394843 [TRY003]; this is a test-failure message naming the invariant a fixture must never reach
+        "reopen must fail before launching a gateway"
+    )
+
+
+def test_web_reopen_run_rejects_an_unknown_run_before_launching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, _run_id, _log_dir = finished_run(tmp_path / "project")
+    # test-isolation: a detached launch is the side effect this failure must prevent
+    monkeypatch.setattr(server_entrypoint, "_spawn_detached", _refuse_launch)
+
+    with pytest.raises(ConfigurationError, match="does not exist"):
+        main(
+            ["--web", "--detach", "--web-reopen-run", "missing-run", "--project", str(project.root)]
+        )
+
+
+def test_web_reopen_run_rejects_an_unsafe_run_id_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, _run_id, _log_dir = finished_run(tmp_path / "project")
+    # test-isolation: discovery would create lock files named after the run id
+    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", _refuse_launch)
+
+    with pytest.raises(ConfigurationError, match="Invalid VibeSys run ID"):
+        main(["--web", "--detach", "--web-reopen-run", "../escape", "--project", str(project.root)])
+    assert list(tmp_path.rglob("*web-gateway*")) == []
+
+
+def test_web_reopen_run_requires_the_recorded_event_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, run_id, log_dir = finished_run(tmp_path / "project")
+    (log_dir / "run-events.jsonl").unlink()
+    # test-isolation: a detached launch is the side effect this failure must prevent
+    monkeypatch.setattr(server_entrypoint, "_spawn_detached", _refuse_launch)
+
+    with pytest.raises(ConfigurationError, match="No event journal to reopen"):
+        main(["--web", "--detach", "--web-reopen-run", run_id, "--project", str(project.root)])
+
+
+def test_web_reopen_run_rejects_another_runs_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, run_id, _logs = finished_run(tmp_path / "a")
+    _other, _other_id, other_logs = finished_run(tmp_path / "b", run_id="other-run")
+    # test-isolation: a detached launch is the side effect this failure must prevent
+    monkeypatch.setattr(server_entrypoint, "_spawn_detached", _refuse_launch)
+
+    with pytest.raises(ConfigurationError, match="belongs to run other-run"):
+        main(
+            [
+                "--web",
+                "--detach",
+                "--web-reopen-run",
+                run_id,
+                "--web-reopen",
+                str(other_logs),
+                "--project",
+                str(project.root),
+            ]
+        )

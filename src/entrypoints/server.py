@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -16,10 +17,10 @@ from urllib.parse import urlsplit
 from entrypoints import cli
 from server.runtime import WebInstanceClaim, WebInstanceRecord
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
-from vibesys.api import ConfigurationError
+from vibesys.api import ConfigurationError, open_run_store
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
-from vs_project.api import Project
+from vs_project.api import Project, ProjectError
 
 _WEB_PORT_MAX = 65_535
 
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
 
-    from vibesys.api import Config
+    from vibesys.api import Config, RunRecord
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
@@ -36,8 +37,11 @@ def _control_socket_from_argv(argv: list[str]) -> Path | None:
     return Path(value) if value else None
 
 
+_WEB_FLAGS = frozenset({"--web", "--web-reopen", "--web-reopen-run"})
+
+
 def _web_requested(argv: list[str]) -> bool:
-    return "--web" in argv or "--web-reopen" in argv
+    return any(argument.partition("=")[0] in _WEB_FLAGS for argument in argv)
 
 
 def _detach_requested(argv: list[str]) -> bool:
@@ -114,6 +118,45 @@ def _read_only_log_from_argv(argv: list[str]) -> Path | None:
         return None
     path = Path(value).expanduser().resolve()
     return path.parent if path.name == "run-events.jsonl" else path
+
+
+def _project_root_from_argv(argv: list[str]) -> Path:
+    value = cli.option_from_argv(argv, "--project")
+    return Path(value).expanduser().resolve() if value else Path.cwd()
+
+
+def _reopen_from_argv(argv: list[str]) -> tuple[Path | None, RunRecord | None]:
+    """Resolve the read-only journal and, with ``--web-reopen-run``, its run record.
+
+    Only the journal's first event is checked here, so a wrong journal fails
+    before launch; ``RunController.attach_read_only`` checks every event.
+    """
+    log_dir = _read_only_log_from_argv(argv)
+    record = None
+    run_id = cli.option_from_argv(argv, "--web-reopen-run") or None
+    if run_id is not None:
+        project = Project.open(_project_root_from_argv(argv))
+        record = open_run_store(project).get_record(run_id)
+        log_dir = log_dir or project.state.log_directory(run_id)
+    if log_dir is None:
+        return None, None
+    events = log_dir / "run-events.jsonl"
+    if not events.is_file():
+        cli.configuration_error(
+            f"No event journal to reopen at {log_dir}",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
+    if record is not None:
+        with events.open(encoding="utf-8") as stream:
+            journal_run = json.loads(stream.readline() or "{}").get("run_id")
+        if journal_run != record.run_id:
+            cli.configuration_error(
+                f"Journal {log_dir} belongs to run {journal_run}, not {record.run_id}",
+                code="invalid_arguments",
+                stage="argument_parsing",
+            )
+    return log_dir, record
 
 
 def _headless_argv(argv: list[str]) -> list[str]:
@@ -305,7 +348,15 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
             code="invalid_arguments",
             stage="argument_parsing",
         )
-    instance_path = _web_instance_from_argv(arguments) if web else None
+    try:
+        read_only_log, read_only_record = _reopen_from_argv(arguments)
+        instance_path = _web_instance_from_argv(arguments) if web else None
+    except (ValueError, ProjectError) as exc:
+        cli.configuration_error(
+            str(exc),
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
     if web and os.environ.get("VIBESYS_DETACHED_CHILD") != "1":
         if instance_path is None:  # pragma: no cover - web always supplies a path.
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
@@ -331,7 +382,6 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
         web_port = _web_port_from_argv(arguments)
         web_assets = _web_assets_from_argv(arguments)
         web_origins = _web_origins_from_argv(arguments)
-        read_only_log = _read_only_log_from_argv(arguments)
     except ValueError as exc:
         cli.configuration_error(
             str(exc),
@@ -351,6 +401,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
+                read_only_record=read_only_record,
             )
         else:
             runtime = server_runtime(

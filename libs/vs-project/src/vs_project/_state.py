@@ -806,7 +806,6 @@ class ProjectState:
         self._metadata_gitignore_path = self._metadata_dir / ".gitignore"
         self._workspace_local_dir = self._metadata_dir / "local"
         self._state_home = _state_home()
-        _prepare_state_home(self._state_home)
         self._local_dir = _external_project_state_directory(self._state_home, root)
         self._current_run_path = self._local_dir / "current-run"
         self._validate_storage_roots()
@@ -886,6 +885,7 @@ class ProjectState:
     def model_cache_directory(self, name: str) -> Path:
         """Return a named machine-local model cache directory."""
         self._validate_storage_roots()
+        _prepare_state_home(self._state_home)
         cache_root = _contained_without_symlinks(
             self._local_dir,
             self._local_dir / "cache",
@@ -1137,6 +1137,7 @@ class ProjectState:
             return
         normalized = _validate_run_id(run_id)
         self.load_run(normalized)
+        _prepare_state_home(self._state_home)
         _atomic_write_text(self._current_run_path, f"{normalized}\n")
 
     def resolve_run(self, run_id: str | None = None) -> OrchestrationRunManifest:
@@ -1222,6 +1223,7 @@ class ProjectState:
     def _contained_local_run_dir(self, run_id: str) -> Path:
         self._validate_storage_roots()
         normalized = _validate_run_id(run_id)
+        _prepare_state_home(self._state_home)
         return _contained_without_symlinks(
             self._local_dir,
             self._local_dir / "runs" / normalized,

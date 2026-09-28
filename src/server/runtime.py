@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunRequest, RunResult, RunSession
+    from vibesys.api import RunRecord, RunRequest, RunResult, RunSession
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -69,6 +69,7 @@ class ServerRuntime:
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
+        read_only_record: RunRecord | None = None,
     ) -> None:
         """Compose all server components around one shared condition."""
         self.socket_path = socket_path
@@ -79,6 +80,7 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
+        self.read_only_record = read_only_record
         self._shutdown = threading.Event()
         self.condition = threading.Condition(threading.RLock())
         self.journal = WireJournal(self.condition)
@@ -158,7 +160,7 @@ class ServerRuntime:
         if install_sigterm:
             signal.signal(signal.SIGTERM, interrupt_from_launcher)
         if self.read_only_log is not None:
-            self.controller.attach_read_only(self.read_only_log)
+            self.controller.attach_read_only(self.read_only_log, record=self.read_only_record)
         else:
             self.controller.attach(self.socket_path.parent)
             self.journal.record(

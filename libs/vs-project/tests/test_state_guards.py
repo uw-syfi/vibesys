@@ -355,7 +355,22 @@ def test_state_home_creation_failure_is_reported(
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(blocker / "home"))
 
     with pytest.raises(ProjectStateError, match=r"Could not create VibeSys state home .*blocker"):
-        _ = Project.open(project).state
+        Project.open(project).state.model_cache_directory("probe")
+
+
+def test_reading_project_state_leaves_an_absent_state_home_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "absent-home"
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(home))
+    store = _store(_project_dir(tmp_path))
+
+    assert store.state.list_runs() == []
+    assert store.state.current_run_id() is None
+    assert not home.exists()
+
+    store.state.model_cache_directory("probe")
+    assert (home / "projects").is_dir()
 
 
 def test_storage_root_must_be_a_directory(tmp_path: Path) -> None:

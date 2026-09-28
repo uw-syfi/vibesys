@@ -254,13 +254,12 @@ class _LocalRunRecord:
 
     def _effective_objective(self) -> str | None:
         try:
-            document = (
-                self._project.state.portable_namespace(self._run_id, "runtime").external_directory()
-                / "effective-objective.md"
+            contents = self._project.state.portable_namespace(self._run_id, "runtime").read_bytes(
+                "effective-objective.md"
             )
-            return document.read_text(encoding="utf-8") if document.is_file() else None
         except (OSError, ProjectStateError):
             return None
+        return contents.decode("utf-8") if contents is not None else None
 
     def _git_read(
         self,

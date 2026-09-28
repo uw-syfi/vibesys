@@ -58,13 +58,22 @@ class RunController:
             self._journal.attach(log_dir, run_id=record.run_id if record is not None else None)
             self._apply_locked(RunTrigger.ATTACHED)
 
-    def attach_read_only(self, log_dir: Path, *, run_id: str | None = None) -> None:
-        """Open an ended journal without appending lifecycle or query events."""
+    def attach_read_only(self, log_dir: Path, *, record: RunRecord | None = None) -> None:
+        """Open an ended journal and its run record without appending any event."""
         with self._condition:
-            self._project_run = None
-            self._journal.attach(log_dir, run_id=run_id, read_only=True)
+            self._journal.attach(
+                log_dir,
+                run_id=record.run_id if record is not None else None,
+                read_only=True,
+            )
             status = RunStatus.STARTING
             for event in self._journal.read_history():
+                if record is not None and event.run_id != record.run_id:
+                    raise ValueError(  # noqa: TRY003  # lint-waiver: LW-101106 [TRY003]; name both runs when a reopened journal belongs to another run
+                        # > A dedicated exception class would be raised once, here, and the
+                        # > entrypoint already reports ValueError as a configuration error.
+                        f"Journal {log_dir} belongs to run {event.run_id}, not {record.run_id}"
+                    )
                 if event.type is EventType.RUN_STATUS_CHANGED and isinstance(
                     event.data, RunStatusChangedData
                 ):
@@ -76,6 +85,7 @@ class RunController:
             if not status.has_ended:
                 raise ValueError("Read-only serving requires a finished run")  # noqa: TRY003  # lint-waiver: LW-101044 [TRY003]; reject reopening an unfinished run with a clear API error
             self._status = status
+            self._attached_run = record
 
     def is_read_only(self) -> bool:
         """Return whether this controller is serving a finished run."""

@@ -108,6 +108,13 @@ from the existing event store, query bookkeeping is suppressed, and control or t
 requests return the typed `run_read_only` diagnostic. A reopened server remains alive until
 explicitly stopped.
 
+`--web-reopen-run RUN_ID` adds the run's identity: the server opens the run record from the project
+(`--project`, default the working directory) and attaches it read-only, so experiment, performance,
+and design queries answer from the recorded run without writing to the project, the log directory,
+or the state home. Without `--web-reopen`, the journal is read from that run's log directory. An
+unknown or invalid run ID, a missing journal, or a journal recorded by another run is a
+configuration error before any gateway starts.
+
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
 labels and tones are semantic annotations derived from event fields; the TUI decides whether and how

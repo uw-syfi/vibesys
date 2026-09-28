@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import socket
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import build_server_parts, finished_run, run_record
 
-from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
+from server.api.protocol import (
+    DesignQuery,
+    ExperimentQuery,
+    PerformanceQuery,
+    SnapshotQuery,
+    StopCommand,
+    SubscribeRequest,
+)
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceRecord
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from vs_project.api import Project
 
 
 def _wait_for(path: Path) -> None:
@@ -95,6 +103,47 @@ def test_finished_journal_reopens_read_only_without_mutating_storage(tmp_path: P
     assert getattr(failure.value, "diagnostic_code", None) == "run_read_only"
     reader.close()
     assert before == {path: path.read_bytes() for path in before}
+
+
+def _tree(root: Path) -> dict[Path, bytes | None]:
+    """Every file and directory under *root*, with file contents."""
+    return {path: path.read_bytes() if path.is_file() else None for path in root.rglob("*")}
+
+
+def test_reopened_run_serves_its_record_without_writing(tmp_path: Path) -> None:
+    project, run_id, recorded_logs = finished_run(tmp_path / "project")
+    log_dir = tmp_path / "logs"
+    shutil.copytree(recorded_logs, log_dir)
+    state_home = Path(os.environ["VIBESYS_STATE_HOME"])
+    shutil.rmtree(state_home)
+    before = (_tree(project.root), _tree(log_dir))
+
+    reader = build_server_parts()
+    reader.controller.attach_read_only(
+        log_dir, record=run_record(Project.open(project.root), run_id)
+    )
+    experiments = reader.api.execute(ExperimentQuery())
+    performance = reader.api.execute(PerformanceQuery())
+    design = reader.api.execute(DesignQuery())
+    reader.close()
+
+    assert experiments.experiments_ready is True
+    assert [entry.hypothesis_id for entry in experiments.experiments] == ["H-01"]
+    assert [(item.round, item.perf_metric) for item in performance.performance] == [(1, 42.0)]
+    assert design.design_ready is True
+    assert [item.round for item in design.design] == [1]
+    assert not state_home.exists()
+    assert (_tree(project.root), _tree(log_dir)) == before
+
+
+def test_reopen_rejects_a_journal_from_another_run(tmp_path: Path) -> None:
+    project, run_id, _logs = finished_run(tmp_path / "a")
+    _other, _other_id, other_logs = finished_run(tmp_path / "b", run_id="other-run")
+
+    reader = build_server_parts()
+    with pytest.raises(ValueError, match="belongs to run other-run"):
+        reader.controller.attach_read_only(other_logs, record=run_record(project, run_id))
+    reader.close()
 
 
 def test_stale_instance_record_is_removed(tmp_path: Path) -> None:

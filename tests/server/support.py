@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from tests.support.run_execution import run_execution_record
+
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController
@@ -18,8 +20,12 @@ from vibesys.api.metrics import MetricSpace
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
+from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.orchestration.single.models import SingleState
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
-from vs_project.api import OrchestrationDescriptor
+from vs_loop_state.api import RoundRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api.infrastructure import (
     RunControlChannel,
     RunControlTransition,
@@ -34,7 +40,6 @@ if TYPE_CHECKING:
     from server.run_attachment import AgentSelection
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
-    from vs_project.api import Project
 
 
 class _ControlBridge:
@@ -243,3 +248,53 @@ def build_server_parts(
     if log_dir is not None:
         parts.attach(log_dir, record=record)
     return parts
+
+
+def finished_run(root: Path, run_id: str = "queue-run") -> tuple[Project, str, Path]:
+    """Record a finished single-agent run with one measured round and a closed journal."""
+    root.mkdir()
+    (root / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
+    project = Project.open(root)
+    project.state.create_project("queue")
+    manifest = project.state.new_run_manifest(
+        "queue",
+        run_id=run_id,
+        branch=f"vibesys/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=agent_descriptor(),
+        trusted_input_baseline="0" * 40,
+    )
+    project.state.create_run(manifest)
+    plan = OrchestratorPlan(
+        hypothesis_id="H-01",
+        hypothesis="claim for H-01",
+        task="test H-01",
+        pass_criteria="",
+        reasoning="",
+    )
+    measured = RoundRecord(
+        round_number=1,
+        commit="c1",
+        perf_metric=42.0,
+        perf_unit="ops_s",
+        perf_provenance="implementer",
+        passed=True,
+        judge_verdict="pass",
+        hypothesis_id="H-01",
+    )
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(
+            search=HypothesisState(
+                hypotheses=[
+                    Hypothesis(hypothesis_id="H-01", plan=plan, started_round=1, rounds=[measured])
+                ]
+            )
+        )
+    )
+    log_dir = project.state.log_directory(run_id)
+    writer = build_server_parts(log_dir, record=run_record(project, run_id))
+    writer.controller.finish()
+    writer.close()
+    return project, run_id, log_dir
