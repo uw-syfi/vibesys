@@ -1,0 +1,1110 @@
+<!doctype html>
+<!--
+VibeSys desktop app, mockup v3.1 (brief: scratchpad/design-brief-v3.md plus the owner's and Codex's review).
+Built from app.tpl.html by app-build.py; do not edit app.html by hand.
+
+Data: rounds R1..R7 are the real recording (demo-run.jsonl via tui-data.json): hypotheses, agent notes, tool
+calls and outputs, judge analyses and verdicts, metrics, commits, files, invocation ids, tool counts. Baseline
+950 tok/s is from the R1 judge text.
+[mock] other runs, projects and relative times; the judge's elapsed time; agent prompts (composed from the
+recorded plan fields: task, hypothesis, pass criteria) and implementer todos (derived from its recorded tool
+descriptions); the steer text on #steer; the second chat thread and the chat answer to "Why did round 3 fail
+the judge?" (paraphrases the recorded verdict); new-thread replies use the recorder's own "Mock reply" text;
+the claude-sonnet-5 option; notes text; setup variants (dirty tree, rejected key, Codex CLI backend); the
+round 6 hunk is rebuilt from the recorded rg output (old) and Write content (new); "Open in editor" and
+"Copy" only change their labels.
+
+Screens by hash: home setup setup-checking setup-blockers setup-new starting round1 startfail live steer
+pausing paused stop round prompt todos changes changes-full agents experiments design ask thread model
+nochat notes palette collapsed otherrun. ?capture=1 (or any automated browser) hides the screen switcher.
+?theme=light|dark forces a theme; otherwise it follows the system.
+
+Colour: Radix Slate neutrals, one Indigo accent, elevation by lightness. Changes from the brief's table, all
+to reach WCAG AA on every surface the colour sits on (hover, selected, raised and diff tints included):
+  text.3   dark #696e77 -> #9a9ea6 (between Slate 10 and 11); light #8b8d98 -> #60646c (Slate 11). Slate has
+           no light step between 10 and 11 that passes on the selected fill, so light text.3 equals text.2 and
+           hierarchy there comes from size and weight. Nothing meaningful is fainter than text.3.
+  line     new token for editable-field borders, graph edges and arrowheads (>= 3:1).
+  live     accent in light, accent-text (#9eb1ff) in dark, for the live dot and active ring (>= 3:1). No pulse.
+  status   light success #218358 -> #1c724d, warn #ab6400 -> #935600, error #ce2c31 -> #c22a2f.
+Traffic-light colours are OS chrome, not tokens.
+
+Contrast (WCAG 2.x, computed by app-build.py from the tokens; min over the listed surfaces)
+  token        | light min | dark min | needs | on
+  -------------|-----------|----------|-------|------------------------------
+  text-1       |     13.41 |    11.26 |   4.5 | app, sidebar, raised, hover, selected, tint-add, tint-del (body, titles, diff text)
+  text-2       |      4.86 |     6.28 |   4.5 | app, sidebar, raised, hover, selected (secondary text, meta)
+  text-3       |      4.86 |     4.86 |   4.5 | app, sidebar, raised, hover, selected, tint-add, tint-del (labels, hints, placeholders, line numbers, ticks)
+  success      |      4.82 |     6.97 |   4.5 | app, sidebar, raised, hover, selected (kept, +lines, Accepted)
+  warn         |      4.81 |     8.53 |   4.5 | app, sidebar, raised, hover, selected (paused)
+  error        |      4.69 |     6.20 |   4.5 | app, sidebar, raised, hover, selected (rejected, exit codes, −lines)
+  accent-text  |      4.91 |     6.34 |   4.5 | app, sidebar, raised, hover, selected (links, active role)
+  line         |      3.12 |     3.33 |   3.0 | app, sidebar, raised (field borders, graph edges, arrowheads)
+  live         |      4.26 |     6.34 |   3.0 | app, sidebar, hover, selected (live dot, active node ring)
+  white/accent |      5.21 |     5.21 |   4.5 | primary button label
+
+Element inventory, live screen (element | its one message)
+  traffic lights, sidebar toggle | native window; the sidebar can be hidden (and is, at 1024 with a pane open)
+  New run ⌘N                     | start another run
+  Search and commands ⌘K         | every command and destination
+  project label                  | which repository these runs belong to
+  run row                        | this run is live, and when it last changed
+  round rows (glyph, rN, title, Δ)| each hypothesis, kept or reverted, and what it moved the metric by
+  "6 more planned"               | how much of the round budget is left
+  title: run name                | which run (hover: objective)
+  "Judging round 6"              | what the run is doing now (the only run-level live signal)
+  Pause                          | pause after the current agent call
+  "Retained 1,230 tok/s +29%..." | the run's best kept result, scoped to the run, against the baseline
+  pane toggle, ••• menu          | Ask, Changes, Agents, Experiments, Notes; Stop
+  sticky round bar               | which round you are reading, and its result so far
+  hypothesis paragraph           | what this round tests
+  turn heading (role, phase)     | which agent invocation, in which phase
+  Prompt / Todos                 | what the agent was asked, and its checklist
+  action rows (verb, object)     | one tool call each; click for full command and output; time is tool time
+  active Judge turn              | the judge is working, and what it is checking
+  steer composer                 | guide the next agent call
+
+Left out (and where it went): the graph (Agents tab), per-agent colours, agent durations in the transcript
+(graph detail panel), token and context counters, the TUI key-hint footer (⌘K and hover titles), rounds
+r7..r12 (one "6 more planned" line), Stop as a button (••• menu, ⌘K), a separate performance pane (Experiments
+chart), Task lines that restate the hypothesis (implementer Prompt), status badges (glyphs and words).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<title>VibeSys</title>
+<link rel="preconnect" href="https://esm.sh">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xyflow/react@12.3.6/dist/base.css">
+<script type="importmap">
+{ "imports": {
+  "react": "https://esm.sh/react@18.3.1",
+  "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+  "@xyflow/react": "https://esm.sh/@xyflow/react@12.3.6?deps=react@18.3.1,react-dom@18.3.1",
+  "@dagrejs/dagre": "https://esm.sh/@dagrejs/dagre@1.1.4",
+  "htm": "https://esm.sh/htm@3.1.1"
+} }
+</script>
+<style>
+:root {
+  --bg-app: #fcfcfd; --bg-sidebar: #f9f9fb; --bg-raised: #ffffff; --bg-hover: #f0f0f3; --bg-selected: #e8e8ec;
+  --border-subtle: #e8e8ec; --border: #d9d9e0; --line: #8b8e96;
+  --text-1: #1c2024; --text-2: #60646c; --text-3: #60646c;
+  --accent: #3e63dd; --accent-text: #3a5bc7; --live: #3e63dd;
+  --success: #1c724d; --warn: #935600; --error: #c22a2f;
+  --tint-add: #e3eee9; --tint-del: #f8e5e6;
+  --shadow: 0 10px 32px -6px rgb(0 0 0 / .16), 0 2px 6px rgb(0 0 0 / .06);
+  --scrim: rgb(0 0 0 / .18);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif;
+  --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg-app: #111113; --bg-sidebar: #18191b; --bg-raised: #212225; --bg-hover: #272a2d; --bg-selected: #2e3135;
+  --border-subtle: #272a2d; --border: #363a3f; --line: #6e737a;
+  --text-1: #edeef0; --text-2: #b0b4ba; --text-3: #9a9ea6;
+  --accent: #3e63dd; --accent-text: #9eb1ff; --live: #9eb1ff;
+  --success: #3dd68c; --warn: #ffca16; --error: #ff9592;
+  --tint-add: #172b23; --tint-del: #302224;
+  --shadow: 0 12px 40px -8px rgb(0 0 0 / .6), 0 2px 8px rgb(0 0 0 / .3);
+  --scrim: rgb(0 0 0 / .45);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg-app); color: var(--text-1); font: 13px/20px var(--sans); -webkit-font-smoothing: antialiased; overflow: hidden; }
+::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; text-align: left; }
+button[disabled] { cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+.t2 { color: var(--text-2); } .t3 { color: var(--text-3); }
+.ok { color: var(--success); } .bad { color: var(--error); } .warn { color: var(--warn); }
+svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+svg.g { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.kbd { font-size: 11px; line-height: 14px; color: var(--text-3); letter-spacing: .02em; white-space: nowrap; }
+.dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.live { background: var(--live); } .dot.err { background: var(--error); } .dot.okd { background: var(--success); } .dot.wrn { background: var(--warn); }
+.gl { display: grid; place-items: center; width: 14px; height: 20px; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--text-1); animation: rot .9s linear infinite; flex: none; }
+@keyframes rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* window */
+.win { display: flex; height: 100vh; }
+.side { flex: none; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; position: relative; min-width: 0; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; container-type: inline-size; }
+.pane { flex: none; border-left: 1px solid var(--border-subtle); display: flex; flex-direction: column; position: relative; min-width: 0; background: var(--bg-app); }
+.drag { position: absolute; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; touch-action: none; }
+.side > .drag { right: -4px; } .pane > .drag { left: -4px; }
+.drag:hover, .drag.on { background: linear-gradient(90deg, transparent 3px, var(--line) 3px, var(--line) 4px, transparent 4px); }
+
+/* sidebar */
+.lights { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; flex: none; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 .5px rgb(0 0 0 / .15); }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.side .lights .iconbtn { margin-left: auto; }
+.iconbtn { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--text-2); flex: none; }
+.iconbtn:hover { background: var(--bg-hover); color: var(--text-1); }
+.iconbtn.on { color: var(--text-1); background: var(--bg-selected); }
+.nav, .run, .rnd { width: calc(100% - 16px); margin: 0 8px; border-radius: 6px; }
+.nav { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; color: var(--text-2); }
+.nav:hover { background: var(--bg-hover); color: var(--text-1); }
+.nav.on { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
+.nav .kbd { margin-left: auto; }
+.sect { font-size: 11px; line-height: 14px; color: var(--text-3); padding: 18px 18px 6px; }
+.sidescroll { flex: 1; overflow: auto; padding-bottom: 12px; }
+.run { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 8px; min-height: 30px; padding: 5px 8px; color: var(--text-2); }
+.run:hover { background: var(--bg-hover); }
+.run .ttl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run.cur { color: var(--text-1); font-weight: 500; }
+.run.sel { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
+.run .meta { font-size: 12px; color: var(--text-2); font-weight: 400; }
+.rounds { margin: 2px 0 6px; }
+.rnd { display: grid; grid-template-columns: 14px 22px 1fr auto; align-items: start; gap: 4px 6px; padding: 4px 8px 4px 20px; font-size: 12px; line-height: 16px; color: var(--text-2); }
+.rnd:hover { background: var(--bg-hover); }
+.rnd.sel { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
+.rnd .gl { height: 16px; }
+.rnd .rn { color: var(--text-3); font-variant-numeric: tabular-nums; font-weight: 400; }
+.rnd .ttl { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rnd .d { font-variant-numeric: tabular-nums; font-weight: 400; }
+.rnd.more { display: block; color: var(--text-3); padding-left: 62px; }
+
+/* title row */
+.titlebar { height: 40px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 18px; border-bottom: 1px solid var(--border-subtle); min-width: 0; }
+.titlebar .lights { padding: 0 6px 0 0; }
+.titlebar .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 60px; flex-shrink: 1; }
+.titlebar .status { flex-shrink: 0; }
+.titlebar .proj { color: var(--text-2); white-space: nowrap; }
+.titlebar .sp { flex: 1; }
+.status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.kept { font-size: 12px; white-space: nowrap; color: var(--text-2); }
+.kept b { color: var(--text-1); font-weight: 500; }
+.vsep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex: none; }
+.chip { height: 26px; padding: 0 9px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-1); flex: none; box-shadow: inset 0 0 0 1px var(--border); }
+.chip:hover { background: var(--bg-hover); }
+@container (max-width: 820px) { .titlebar .proj, .kept .lbl, .kept .unit { display: none; } }
+
+/* transcript */
+.scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
+.col { max-width: 720px; margin: 0 auto; padding: 0 32px 32px; }
+.sticky { position: sticky; top: 0; z-index: 3; background: var(--bg-app); border-bottom: 1px solid var(--border-subtle); }
+.sticky .in { max-width: 720px; margin: 0 auto; padding: 0 32px; height: 40px; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sticky .rn { color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.sticky .ttl { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.res { margin-left: auto; font-size: 12px; color: var(--text-2); white-space: nowrap; display: flex; gap: 6px; flex: none; }
+.res .sep { color: var(--text-3); }
+.claim { margin: 18px 0 0; color: var(--text-2); max-width: 66ch; }
+.turn { margin-top: 30px; }
+.who { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.who .r { font-weight: 600; color: var(--text-1); }
+.who .r.act { color: var(--accent-text); }
+.who .ph { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .acts { margin-left: auto; display: flex; gap: 4px; flex: none; }
+.disc { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border-radius: 6px; color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.disc:hover { background: var(--bg-hover); color: var(--text-1); }
+.disc.on { color: var(--text-1); background: var(--bg-selected); }
+.turn p { margin: 0 0 10px; max-width: 68ch; }
+.block { margin: 2px 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-sidebar); padding: 10px 12px; font-size: 12px; line-height: 18px; }
+.block .bh { color: var(--text-2); margin-bottom: 4px; }
+.block pre { margin: 0; font: inherit; white-space: pre-wrap; color: var(--text-1); }
+.todo { display: flex; gap: 8px; align-items: center; color: var(--text-1); }
+.todo .g { color: var(--success); }
+.actions { margin: 4px 0 14px; padding-left: 12px; border-left: 1px solid var(--border); }
+.tool { margin-left: -6px; }
+.trow { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 4px 6px; border-radius: 6px; color: var(--text-2); font-size: 12px; }
+.trow:hover { background: var(--bg-hover); }
+.trow .verb { font-weight: 500; color: var(--text-2); flex: none; }
+.trow .obj { font-family: var(--mono); font-size: 12px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.trow .sub { color: var(--text-2); font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.trow .stat { font-variant-numeric: tabular-nums; flex: none; }
+.trow .end { margin-left: auto; padding-left: 12px; flex: none; font-variant-numeric: tabular-nums; }
+.trow .chev { width: 12px; height: 12px; color: var(--text-2); flex: none; transition: transform .15s ease-out; opacity: 0; }
+.trow:hover .chev, .trow:focus-visible .chev, .tool.open .chev { opacity: 1; }
+.tool.open .chev { transform: rotate(90deg); }
+.out { margin: 4px 0 8px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-sidebar); overflow: auto; }
+.out pre { margin: 0; padding: 10px 12px; font: 12px/18px var(--mono); color: var(--text-1); white-space: pre-wrap; word-break: break-word; }
+.out .cmd { color: var(--text-2); }
+.out .fl { color: var(--error); }
+.linkish { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
+.diff { font: 12px/20px var(--mono); padding: 4px 0; }
+.diff > div { padding: 0 12px 0 0; white-space: pre; }
+.diff .a { background: var(--tint-add); color: var(--text-1); }
+.diff .d { background: var(--tint-del); color: var(--text-1); }
+.diff .c { color: var(--text-1); }
+.diff .h { color: var(--text-3); padding: 2px 12px; }
+.diff .ln { display: inline-block; width: 38px; padding-right: 8px; text-align: right; color: var(--text-3); user-select: none; }
+.diff .mk { display: inline-block; width: 14px; color: var(--text-2); user-select: none; }
+.working { color: var(--text-2); display: flex; gap: 8px; align-items: baseline; }
+.working b { color: var(--text-1); font-weight: 500; }
+.verdict { margin-top: 14px; padding-top: 16px; border-top: 1px solid var(--border); }
+.vword { font-size: 15px; line-height: 22px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.human { background: var(--bg-hover); border-radius: 10px; padding: 8px 12px; margin: 24px 0 4px auto; max-width: 80%; width: fit-content; }
+.hmeta { text-align: right; font-size: 12px; color: var(--text-2); display: flex; justify-content: flex-end; gap: 6px; align-items: center; }
+.filterbar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); margin-top: 14px; }
+.linkbtn { color: var(--accent-text); font-size: 12px; }
+.linkbtn:hover { text-decoration: underline; text-underline-offset: 2px; }
+.endline { color: var(--text-2); margin-top: 20px; font-size: 12px; }
+
+/* composer */
+.dock { flex: none; padding: 0 32px 16px; }
+.dock .inner { max-width: 656px; margin: 0 auto; }
+.pill { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 6px 6px 16px; border-radius: 22px; background: var(--bg-raised); border: 1px solid var(--line); }
+.pill:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.pill input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; color: var(--text-1); }
+.pill input::placeholder { color: var(--text-3); }
+.pill.off { border-color: var(--border); }
+.send { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--bg-selected); color: var(--text-2); flex: none; }
+.send.ready { background: var(--accent); color: #fff; }
+.mchip { height: 28px; padding: 0 8px; border-radius: 14px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); flex: none; }
+.mchip:hover { background: var(--bg-hover); color: var(--text-1); }
+
+/* right pane */
+.tabs { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--border-subtle); }
+.tab { height: 26px; padding: 0 9px; border-radius: 6px; color: var(--text-2); white-space: nowrap; }
+.tab:hover { color: var(--text-1); background: var(--bg-hover); }
+.tab.on { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
+.tabs .iconbtn { margin-left: auto; }
+.pbody { flex: 1; overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+.phead { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 16px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); flex: none; }
+.phead .scope { color: var(--text-1); font-weight: 500; }
+.phead .r { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.fhead { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-sidebar); }
+.fhead .mono { color: var(--text-1); }
+.morerow { display: flex; align-items: center; gap: 6px; padding: 8px 16px; color: var(--text-2); font-size: 12px; border-bottom: 1px solid var(--border-subtle); width: 100%; }
+.morerow:hover { background: var(--bg-hover); color: var(--text-1); }
+.note { padding: 10px 16px 12px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chart { padding: 12px 16px 0; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { font: 11px var(--sans); fill: var(--text-3); font-variant-numeric: tabular-nums; }
+.chart text.v { fill: var(--text-1); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px 12px; font-size: 11px; line-height: 14px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.xrow { display: grid; grid-template-columns: 22px 1fr auto 44px; align-items: center; gap: 8px; min-height: 36px; padding: 0 16px; border-bottom: 1px solid var(--border-subtle); color: var(--text-1); width: 100%; }
+.xrow:hover { background: var(--bg-hover); }
+.xrow.sel { background: var(--bg-selected); }
+.xrow .id { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.xrow .ttl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xrow .oc { font-size: 12px; }
+.xrow .m { text-align: right; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.ev { padding: 4px 16px 14px 46px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-sidebar); }
+.kv { display: grid; grid-template-columns: 96px 1fr; gap: 6px 12px; font-size: 12px; line-height: 18px; margin: 10px 0 0; }
+.kv dt { color: var(--text-2); } .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.seg2 { display: inline-flex; gap: 2px; }
+.graphwrap { position: relative; flex: none; border-bottom: 1px solid var(--border-subtle); }
+.graph { min-height: 80px; }
+.ag { width: 140px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-app); cursor: pointer; }
+.ag:hover { background: var(--bg-hover); }
+.ag.sel { box-shadow: 0 0 0 1px var(--bg-app), 0 0 0 2px var(--text-2); }
+.ag.act { border-color: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent); }
+.ag.act.sel { box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent), 0 0 0 4px var(--text-2); }
+.ag .r { display: flex; align-items: center; gap: 6px; color: var(--text-1); font-size: 12px; line-height: 16px; font-weight: 500; }
+.ag .r .g { margin-left: auto; color: var(--text-2); }
+.ag .r .dot { margin-left: auto; }
+.ag .m { font-size: 11px; line-height: 14px; color: var(--text-2); margin-top: 2px; white-space: nowrap; }
+.react-flow { --xy-background-color: transparent; }
+.react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
+.react-flow__node { cursor: pointer; }
+.react-flow__attribution { display: none; }
+.detail { padding: 12px 16px 16px; }
+.detail h3 { font-size: 13px; line-height: 20px; margin: 0; font-weight: 600; }
+.detail h3 span { color: var(--text-2); font-weight: 400; margin-left: 6px; }
+.notesed { flex: 1; min-height: 200px; margin: 0; padding: 14px 16px; border: 0; outline: 0; resize: none; background: transparent; color: var(--text-1); font: 13px/20px var(--sans); }
+.notesed::placeholder { color: var(--text-3); }
+.pfoot { flex: none; display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-subtle); align-items: center; }
+.thread { flex: 1; overflow: auto; padding: 16px; }
+.thread .human { margin-top: 0; }
+.answer { margin: 8px 0 18px; }
+.answer .who2 { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.answer p { margin: 0 0 8px; }
+.pdock { flex: none; padding: 0 12px 12px; }
+.empty1 { color: var(--text-2); padding: 16px; }
+
+/* popovers */
+.pop { position: absolute; z-index: 40; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; min-width: 220px; }
+.pop .it { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 10px; border-radius: 6px; color: var(--text-1); }
+.pop .it:hover, .pop .it.on { background: var(--bg-hover); }
+.pop .it .d { margin-left: auto; color: var(--text-2); font-size: 12px; }
+.pop .it.danger { color: var(--error); }
+.pop .sepl { height: 1px; background: var(--border-subtle); margin: 4px 6px; }
+.pop .gh { font-size: 11px; color: var(--text-3); padding: 6px 10px 2px; }
+.confirm { padding: 14px 14px 12px; width: 300px; }
+.confirm h4 { margin: 0 0 4px; font-size: 13px; }
+.confirm p { margin: 0 0 12px; color: var(--text-2); font-size: 12px; line-height: 18px; }
+.confirm .row { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* palette */
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 50; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+.pal { width: min(580px, calc(100vw - 32px)); background: var(--bg-raised); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; max-height: 76vh; }
+.pal input { width: 100%; height: 48px; border: 0; outline: 0; padding: 0 16px; font: 14px var(--sans); background: transparent; color: var(--text-1); border-bottom: 1px solid var(--border-subtle); flex: none; }
+.pal input::placeholder { color: var(--text-3); }
+.pal .list { overflow: auto; padding: 6px; max-height: 392px; }
+.pal .list.more { -webkit-mask-image: linear-gradient(#000 calc(100% - 36px), transparent); mask-image: linear-gradient(#000 calc(100% - 36px), transparent); }
+.pal .gh { font-size: 11px; color: var(--text-3); padding: 10px 10px 4px; }
+.pal .it { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; width: 100%; color: var(--text-1); }
+.pal .it .d { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pal .it .kbd { margin-left: auto; }
+.pal .it.on { background: var(--bg-selected); }
+.pal .foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border-subtle); flex: none; }
+
+/* setup */
+.form { max-width: 600px; margin: 0 auto; padding: 32px 32px 40px; }
+.fr { display: grid; grid-template-columns: 116px 1fr; gap: 12px; align-items: start; margin-bottom: 16px; }
+.fr > label, .fr > .lab { padding-top: 6px; color: var(--text-2); }
+.fld { height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); padding: 0 10px; display: flex; align-items: center; gap: 8px; color: var(--text-1); min-width: 0; }
+.fld.area { height: auto; min-height: 52px; padding: 6px 10px; align-items: flex-start; }
+.fld .sp { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fld .ph { color: var(--text-3); }
+.fld.bad { border-color: var(--error); }
+.fld.focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.hint.bad { color: var(--error); }
+.hint { font-size: 12px; line-height: 18px; color: var(--text-2); margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.row2 { display: flex; gap: 8px; }
+.row2 > .fld { flex: 1; }
+.summary { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+.summary .t { font-weight: 500; }
+.summary .m { font-size: 12px; color: var(--text-2); grid-column: 1; }
+.summary .btn { grid-row: 1 / span 3; grid-column: 2; align-self: start; }
+.btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg-raised); color: var(--text-1); display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 13px; }
+.btn:hover { background: var(--bg-hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary[disabled] { background: var(--bg-selected); border-color: var(--border); color: var(--text-2); }
+.btn.ghost { border-color: transparent; background: none; color: var(--text-2); }
+.btn.ghost:hover { color: var(--text-1); background: var(--bg-hover); }
+.btn.danger { color: var(--error); }
+.sheetfoot { flex: none; border-top: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2); }
+.sheetfoot .sp { flex: 1; }
+.empty { flex: 1; display: grid; place-items: center; color: var(--text-2); }
+
+/* harness */
+.harness { position: fixed; right: 12px; bottom: 12px; z-index: 99; font-size: 12px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; box-shadow: var(--shadow); color: var(--text-2); }
+.harness select { font: inherit; color: var(--text-1); background: var(--bg-raised); border: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script id="data" type="application/json">[{"n": 1, "agents": [{"kind": "orchestrator", "label": "round-1-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.7, "inv": "cfa1d5b7479bcf3b25f40d2e5ae9828b", "tools": 0}, {"kind": "orchestrator", "label": "round-1-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.8, "inv": "22ed6c2e17e884ed702133c1c17e202c", "tools": 0}, {"kind": "implementer", "label": "round-1-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 8.7, "inv": "47ae99500678224a4c5e0996413fa3d9", "tools": 10}, {"kind": "judge", "label": "round-1-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.7, "inv": "d44fe6ccd46b708642bb40582b7c9b98", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-1-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-1-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-1-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-1-plan"}, {"k": "start", "role": "implementer", "label": "round-1-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-1-retry-1-implementer", "text": "Profiling the decode loop first to see where time goes."}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "python bench.py --profile --iters 200 --out /tmp/decode.prof", "desc": "Profile the decode loop", "out": "Wrote profile to /tmp/decode.prof\ntop frames:\n  launch_decode_kernel  61.4%\n  copy_kv_block         14.1%\n  sample_token           9.8%", "err": false, "exit": 0, "dur": 6.8}, {"k": "note", "role": "implementer", "label": "round-1-retry-1-implementer", "text": "Most of the time is in per-sequence kernel launches. Batching them into one launch per step should help."}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn decode_step' src/batch.rs", "desc": "Find the decode step entry point", "out": "src/batch.rs:142:pub fn decode_step(&mut self, seqs: &mut [Sequence]) {", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "sed -n \"120,170p\" src/batch.rs", "desc": "Read the current decode step", "out": "for seq in seqs.iter_mut() {\n    launch_decode_kernel(seq);\n    sample_token(seq);\n}\n", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-1-retry-1-implementer", "text": "Rewriting decode_step to build one batched launch instead of looping per sequence."}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Edit", "file": "src/batch.rs", "old": "for seq in seqs.iter_mut() {\n    launch_decode_kernel(seq);\n    sample_token(seq);\n}", "new": "let mut batch = DecodeBatch::with_capacity(seqs.len());\nfor seq in seqs.iter() {\n    batch.push(seq);\n}\nlaunch_decode_kernel_batched(&batch);\nfor seq in seqs.iter_mut() {\n    sample_token(seq);\n}", "out": "Updated src/batch.rs (18 lines changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release 2>&1 | tail -30", "desc": "Run the test suite", "out": "running 24 tests\n...\ntest batch::tests::decode_step_matches_reference ... FAILED\n\nfailures:\n    batch::tests::decode_step_matches_reference\n\ntest result: FAILED. 23 passed; 1 failed; 0 ignored", "err": true, "exit": 1, "dur": 21.3}, {"k": "note", "role": "implementer", "label": "round-1-retry-1-implementer", "text": "The batched path drops the last sequence in an odd-sized batch. Fixing the loop bound."}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn push' src/batch.rs", "desc": "Find DecodeBatch::push", "out": "src/batch.rs:58:    pub fn push(&mut self, seq: &Sequence) {", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Edit", "file": "src/batch.rs", "old": "if self.len < self.capacity - 1 {", "new": "if self.len < self.capacity {", "out": "Updated src/batch.rs (1 line changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release 2>&1 | tail -10", "desc": "Re-run the test suite", "out": "running 24 tests\n...\ntest result: ok. 24 passed; 0 failed; 0 ignored", "err": false, "exit": 0, "dur": 19.8}, {"k": "note", "role": "implementer", "label": "round-1-retry-1-implementer", "text": "Tests pass. Running the throughput benchmark to measure the effect."}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "cargo bench --bench decode 2>&1 | tail -5", "desc": "Run the decode throughput benchmark", "out": "decode_throughput      time:   [0.943 ms 0.951 ms 0.960 ms]\nmedian_tok_per_sec: 1060.4", "err": false, "exit": 0, "dur": 34.1}, {"k": "tool", "role": "implementer", "label": "round-1-retry-1-implementer", "tool": "Bash", "cmd": "git diff --stat", "desc": "Review the change set", "out": " src/batch.rs | 22 +++++++++++++++-------\n 1 file changed, 15 insertions(+), 7 deletions(-)", "err": false, "exit": 0, "dur": 0.4}, {"k": "start", "role": "judge", "label": "round-1-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-1-retry-1", "verdict": "pass", "text": "The batched launch path is a straightforward, well-tested rewrite of the decode loop. The regression test the implementer added catches the odd-batch-size bug they hit and fixed, and the full suite is green. Median throughput moved from 950 to 1060 tok/s, consistent with removing one kernel launch per sequence per step. No behavior change to sampling or output tokens."}, {"k": "result", "label": "round-1", "verdict": "pass", "perf": 1060, "attempts": 1}], "perf": 1060, "hid": "H-01", "title": "Batch decode steps across active sequences", "hypothesis": "Batching the decode step across all active sequences amortizes per-step kernel launch overhead. This should raise tokens/sec without changing per-token outputs.", "reasoning": "Profiling showed the decode loop launching one kernel per sequence; batching should cut launch overhead.", "task": "Batch the decode step across active sequences", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Reviewed the batched decode implementation against the reference sequential path; outputs match token-for-token on the fixture prompts.", "commit": "2233daf", "files": ["src/batch.rs"], "exp_outcome": "supported", "summary": "Batched the per-sequence decode calls into one kernel launch per step."}, {"n": 2, "agents": [{"kind": "orchestrator", "label": "round-2-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.5, "inv": "f33dfef4c99d913e9b35f78dca2db994", "tools": 0}, {"kind": "orchestrator", "label": "round-2-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.4, "inv": "4ea91d11fbee9aff92779db5ebcbd4e1", "tools": 0}, {"kind": "implementer", "label": "round-2-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 6.0, "inv": "5580b811ad651ba27977e6426cc22151", "tools": 7}, {"kind": "judge", "label": "round-2-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.8, "inv": "51fd5670b598f7aa0ea65c80e48a7598", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-2-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-2-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-2-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-2-plan"}, {"k": "start", "role": "implementer", "label": "round-2-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-2-retry-1-implementer", "text": "Checking the allocator trace from round 1's profile for the KV cache path."}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Bash", "cmd": "python -c \"import json;d=json.load(open('/tmp/decode.prof'));print(d.get('alloc_calls_per_token'))\"", "desc": "Read allocator call rate from the saved profile", "out": "18.6", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-2-retry-1-implementer", "text": "18.6 allocator calls per token in the KV cache path. Growing the block size should cut that down a lot."}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'const KV_BLOCK_TOKENS' src/kv_cache.rs", "desc": "Find the KV block size constant", "out": "src/kv_cache.rs:9:const KV_BLOCK_TOKENS: usize = 16;", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Edit", "file": "src/kv_cache.rs", "old": "const KV_BLOCK_TOKENS: usize = 16;", "new": "const KV_BLOCK_TOKENS: usize = 64;", "out": "Updated src/kv_cache.rs (1 line changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Bash", "cmd": "sed -n \"1,40p\" src/kv_cache.rs", "desc": "Check the free-list threshold near the block size", "out": "const FREE_LIST_LOW_WATERMARK: usize = 4;\nconst FREE_LIST_HIGH_WATERMARK: usize = 32;", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-2-retry-1-implementer", "text": "The free-list watermarks were tuned for 16-token blocks; retuning them for 64-token blocks so we do not thrash the allocator."}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Edit", "file": "src/kv_cache.rs", "old": "const FREE_LIST_LOW_WATERMARK: usize = 4;\nconst FREE_LIST_HIGH_WATERMARK: usize = 32;", "new": "const FREE_LIST_LOW_WATERMARK: usize = 8;\nconst FREE_LIST_HIGH_WATERMARK: usize = 64;", "out": "Updated src/kv_cache.rs (2 lines changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release kv_cache 2>&1 | tail -8", "desc": "Run KV cache tests", "out": "running 9 tests\ntest result: ok. 9 passed; 0 failed; 0 ignored", "err": false, "exit": 0, "dur": 8.4}, {"k": "tool", "role": "implementer", "label": "round-2-retry-1-implementer", "tool": "Bash", "cmd": "cargo bench --bench decode 2>&1 | tail -6", "desc": "Run the decode throughput benchmark", "out": "decode_throughput      time:   [0.865 ms 0.870 ms 0.878 ms]\nmedian_tok_per_sec: 1150.2\npeak_rss_mb: 512 -> 561", "err": false, "exit": 0, "dur": 33.6}, {"k": "note", "role": "implementer", "label": "round-2-retry-1-implementer", "text": "Throughput is up and peak memory grew about 10%, which is within the budget the objective allows."}, {"k": "start", "role": "judge", "label": "round-2-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-2-retry-1", "verdict": "pass", "text": "Growing the KV block to 64 tokens and retuning the free-list watermarks together is a coherent change, and both are covered by the existing KV cache tests. Throughput rose to 1150 tok/s with a modest 10% memory increase, which is an acceptable trade for this objective. Nothing here touches sampling or output correctness."}, {"k": "result", "label": "round-2", "verdict": "pass", "perf": 1150, "attempts": 1}], "perf": 1150, "hid": "H-02", "title": "Grow the KV cache block size", "hypothesis": "A larger KV cache block size reduces the number of allocator calls per generated token. Memory use rises slightly but allocator overhead drops.", "reasoning": "The allocator trace from round 1 showed frequent small allocations in the KV cache path.", "task": "Grow the KV cache block size from 16 to 64 tokens", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Confirmed the free-list watermark change keeps allocation count bounded under the new block size; no correctness regression.", "commit": "d2b065f", "files": ["src/kv_cache.rs"], "exp_outcome": "supported", "summary": "Raised the KV cache block size and re-tuned the free-list threshold."}, {"n": 3, "agents": [{"kind": "orchestrator", "label": "round-3-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.4, "inv": "14d3f09127d416c490fcd88e57219456", "tools": 0}, {"kind": "orchestrator", "label": "round-3-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.5, "inv": "28a6ac758a71b59faad18b9fba5cb6cc", "tools": 0}, {"kind": "implementer", "label": "round-3-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 7.4, "inv": "8d8ece8b3b680f83e1d95f7df1ab3430", "tools": 8}, {"kind": "judge", "label": "round-3-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.5, "inv": "be9ce70da0d73cebb9d1490e002a3553", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-3-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-3-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-3-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-3-plan"}, {"k": "start", "role": "implementer", "label": "round-3-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-3-retry-1-implementer", "text": "The profiler shows a full device sync right after sampling, before the next batch starts. Removing it should let sampling overlap the next step."}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'device_sync' src/sampler.rs", "desc": "Find the sync call", "out": "src/sampler.rs:77:    device_sync();  // ensure logits are host-visible before sampling", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Bash", "cmd": "sed -n \"60,90p\" src/sampler.rs", "desc": "Read the sampling function", "out": "fn sample_token(seq: &mut Sequence) {\n    device_sync();\n    let logits = seq.logits_host();\n    let token = argmax(logits);\n    seq.push_token(token);\n}", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-3-retry-1-implementer", "text": "Removing the sync and reading logits through the pinned staging buffer instead of the raw device pointer."}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Edit", "file": "src/sampler.rs", "old": "    device_sync();\n    let logits = seq.logits_host();", "new": "    let logits = seq.logits_staging();", "out": "Updated src/sampler.rs (2 lines changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release 2>&1 | tail -20", "desc": "Run the test suite", "out": "running 24 tests\ntest sampler::tests::sample_matches_reference ... FAILED\ntest sampler::tests::concurrent_decode_is_deterministic ... FAILED\n\ntest result: FAILED. 22 passed; 2 failed; 0 ignored", "err": true, "exit": 1, "dur": 22.7}, {"k": "note", "role": "implementer", "label": "round-3-retry-1-implementer", "text": "Two failures: the staging buffer is written asynchronously, so sampling can read a stale value. Trying a fence instead of a full sync."}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn logits_staging' src/sampler.rs", "desc": "Find the staging accessor", "out": "src/sampler.rs:104:pub fn logits_staging(&self) -> &[f32] {", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Edit", "file": "src/sampler.rs", "old": "pub fn logits_staging(&self) -> &[f32] {", "new": "pub fn logits_staging(&self) -> &[f32] {\n    device_fence(self.stream);", "out": "Updated src/sampler.rs (1 line changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release sampler 2>&1 | tail -12", "desc": "Re-run sampler tests", "out": "running 6 tests\ntest sampler::tests::sample_matches_reference ... FAILED\n\ntest result: FAILED. 5 passed; 1 failed; 0 ignored", "err": true, "exit": 1, "dur": 9.1}, {"k": "note", "role": "implementer", "label": "round-3-retry-1-implementer", "text": "Still one mismatch under concurrent decode. The fence orders the stream but not the specific copy this read depends on; this needs a real dependency, not a cheaper stand-in for the sync."}, {"k": "tool", "role": "implementer", "label": "round-3-retry-1-implementer", "tool": "Bash", "cmd": "git diff --stat", "desc": "Review the change set before reporting", "out": " src/sampler.rs | 6 ++++--\n 1 file changed, 4 insertions(+), 2 deletions(-)", "err": false, "exit": 0, "dur": 0.4}, {"k": "start", "role": "judge", "label": "round-3-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-3-retry-1", "verdict": "fail", "text": "The staging-buffer approach still returns stale logits under concurrent decode; the implementer’s own regression test (sample_matches_reference) fails after two attempts to fix it with a cheaper fence. This is a correctness gate failure, not a marginal result: removing the sync breaks the ordering guarantee sampling depends on. Reverting to the round 2 checkpoint."}, {"k": "result", "label": "round-3", "verdict": "fail", "perf": null, "attempts": 1}], "perf": null, "hid": "H-03", "title": "Skip the post-sampling device sync", "hypothesis": "The sampler blocks on a device sync after every token. Removing it should overlap sampling with the next decode step.", "reasoning": "The profiler showed a full sync between sampling and the next batch build.", "task": "Remove the device sync after sampling", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Ran the full suite against the reverted staging-buffer patch: sample_matches_reference fails deterministically under the concurrent-decode fixture.", "commit": "a82f251", "files": ["src/sampler.rs"], "exp_outcome": "implementation_failed", "summary": "Removed the post-sampling sync so the next decode step can start immediately."}, {"n": 4, "agents": [{"kind": "orchestrator", "label": "round-4-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.7, "inv": "93280c502a1047700cc26d2404a954ab", "tools": 0}, {"kind": "orchestrator", "label": "round-4-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.5, "inv": "9cba3973fef8e9ba9a6c3664300c4747", "tools": 0}, {"kind": "implementer", "label": "round-4-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 7.6, "inv": "ec8a2870edba3d647d3f745defdb725e", "tools": 8}, {"kind": "judge", "label": "round-4-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.7, "inv": "7eaf8518fe9ae913c51a00fa67d19bc8", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-4-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-4-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-4-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-4-plan"}, {"k": "start", "role": "implementer", "label": "round-4-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-4-retry-1-implementer", "text": "Reverted to the round 2 checkpoint. Looking at host-device transfer cost instead of touching the sync path again."}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn stage_kv_transfer' src/kv_cache.rs", "desc": "Find the KV transfer path", "out": "src/kv_cache.rs:210:pub fn stage_kv_transfer(block: &KvBlock) -> PinnedBuffer {", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Bash", "cmd": "sed -n \"205,230p\" src/kv_cache.rs", "desc": "Read the transfer staging function", "out": "pub fn stage_kv_transfer(block: &KvBlock) -> PinnedBuffer {\n    PinnedBuffer::alloc(block.size())\n}", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-4-retry-1-implementer", "text": "A fresh pinned allocation per request is expensive. Pooling buffers by size class should remove most of that cost."}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Write", "file": "src/kv_cache.rs", "new": "// pinned buffer pool, keyed by size class\npub struct PinnedPool { free: Mutex<HashMap<usize, Vec<PinnedBuffer>>> }\n", "out": "Wrote src/kv_cache.rs (38 lines added)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Edit", "file": "src/kv_cache.rs", "old": "pub fn stage_kv_transfer(block: &KvBlock) -> PinnedBuffer {\n    PinnedBuffer::alloc(block.size())\n}", "new": "pub fn stage_kv_transfer(block: &KvBlock, pool: &PinnedPool) -> PinnedBuffer {\n    pool.acquire(block.size())\n}", "out": "Updated src/kv_cache.rs (3 lines changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'stage_kv_transfer(' src/batch.rs", "desc": "Find callers to update for the new pool argument", "out": "src/batch.rs:88:    let buf = stage_kv_transfer(&block);", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Edit", "file": "src/batch.rs", "old": "let buf = stage_kv_transfer(&block);", "new": "let buf = stage_kv_transfer(&block, &self.pinned_pool);", "out": "Updated src/batch.rs (1 line changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release 2>&1 | tail -8", "desc": "Run the test suite", "out": "running 24 tests\ntest result: ok. 24 passed; 0 failed; 0 ignored", "err": false, "exit": 0, "dur": 20.5}, {"k": "tool", "role": "implementer", "label": "round-4-retry-1-implementer", "tool": "Bash", "cmd": "cargo bench --bench decode 2>&1 | tail -5", "desc": "Run the decode throughput benchmark", "out": "decode_throughput      time:   [0.885 ms 0.893 ms 0.901 ms]\nmedian_tok_per_sec: 1120.7", "err": false, "exit": 0, "dur": 33.9}, {"k": "note", "role": "implementer", "label": "round-4-retry-1-implementer", "text": "Throughput is 1120, a bit under round 2’s 1150 peak — the pool adds a small lookup cost on the fast path — but it removes the allocation entirely, which round 5’s prefetch idea depends on."}, {"k": "start", "role": "judge", "label": "round-4-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-4-retry-1", "verdict": "pass", "text": "The pinned buffer pool is correct and fully tested, and the implementer is upfront that this round trades a small amount of peak throughput for removing per-request allocation from the transfer path. That is a reasonable trade given it unblocks the prefetch approach queued for the next round. Keeping this checkpoint."}, {"k": "result", "label": "round-4", "verdict": "pass", "perf": 1120, "attempts": 1}], "perf": 1120, "hid": "H-04", "title": "Reuse pinned host buffers for KV transfers", "hypothesis": "Reusing pinned host memory buffers instead of reallocating them per request cuts host-device transfer latency.", "reasoning": "The transfer path still allocates a fresh pinned buffer per request; pooling should remove that cost.", "task": "Pool pinned host buffers for KV cache transfers", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Verified pool acquire/release does not leak buffers across 10k simulated requests.", "commit": "ee1ca5a", "files": ["src/kv_cache.rs", "src/batch.rs"], "exp_outcome": "supported", "summary": "Added a small pinned-buffer pool keyed by transfer size."}, {"n": 5, "agents": [{"kind": "orchestrator", "label": "round-5-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.7, "inv": "836ed5d7ce19d0232c025e9f4d859f02", "tools": 0}, {"kind": "orchestrator", "label": "round-5-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.7, "inv": "f7e639af71a1e044a4d9a152627f1568", "tools": 0}, {"kind": "implementer", "label": "round-5-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 5.4, "inv": "ebca80fd34dcca6341c482f670db9830", "tools": 6}, {"kind": "judge", "label": "round-5-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.6, "inv": "2e0ab18384aa28f507f7df22ffaa72ac", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-5-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-5-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-5-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-5-plan"}, {"k": "start", "role": "implementer", "label": "round-5-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-5-retry-1-implementer", "text": "With buffer acquisition cheap now, prefetching the next KV block should hide its cost behind the current step’s compute."}, {"k": "tool", "role": "implementer", "label": "round-5-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn decode_step' src/batch.rs", "desc": "Locate the decode step to add a prefetch hook", "out": "src/batch.rs:142:pub fn decode_step(&mut self, seqs: &mut [Sequence]) {", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-5-retry-1-implementer", "tool": "Edit", "file": "src/batch.rs", "old": "launch_decode_kernel_batched(&batch);", "new": "self.kv_cache.prefetch_next_block(&batch);\nlaunch_decode_kernel_batched(&batch);", "out": "Updated src/batch.rs (2 lines changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-5-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn prefetch_next_block' src/kv_cache.rs", "desc": "Check whether prefetch already exists", "out": "", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-5-retry-1-implementer", "text": "No existing prefetch hook; adding one that acquires the next block from the pinned pool ahead of time."}, {"k": "tool", "role": "implementer", "label": "round-5-retry-1-implementer", "tool": "Write", "file": "src/kv_cache.rs", "new": "pub fn prefetch_next_block(&mut self, batch: &DecodeBatch) {\n    for seq in batch.iter() {\n        self.pool.acquire_ahead(seq.next_block_size());\n    }\n}\n", "out": "Wrote src/kv_cache.rs (7 lines added)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-5-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release 2>&1 | tail -8", "desc": "Run the test suite", "out": "running 25 tests\ntest result: ok. 25 passed; 0 failed; 0 ignored", "err": false, "exit": 0, "dur": 21.1}, {"k": "tool", "role": "implementer", "label": "round-5-retry-1-implementer", "tool": "Bash", "cmd": "cargo bench --bench decode 2>&1 | tail -5", "desc": "Run the decode throughput benchmark", "out": "decode_throughput      time:   [0.808 ms 0.813 ms 0.820 ms]\nmedian_tok_per_sec: 1230.6", "err": false, "exit": 0, "dur": 34.4}, {"k": "note", "role": "implementer", "label": "round-5-retry-1-implementer", "text": "Throughput is up to 1230, back above the round 2 peak."}, {"k": "start", "role": "judge", "label": "round-5-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-5-retry-1", "verdict": "pass", "text": "The prefetch hook is a small, well-scoped addition on top of the round 4 pool, with a new test covering the prefetch-then-acquire path. Throughput improved to 1230 tok/s, ahead of every prior round. No changes to sampling or output tokens."}, {"k": "result", "label": "round-5", "verdict": "pass", "perf": 1230, "attempts": 1}], "perf": 1230, "hid": "H-05", "title": "Prefetch the next KV block during decode", "hypothesis": "Prefetching the next KV cache block while writing the current one hides allocation latency behind compute.", "reasoning": "The pinned-buffer pool from round 4 made allocations cheap enough to prefetch profitably.", "task": "Prefetch the next KV cache block one step ahead", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Checked that prefetch failures fall back to a synchronous acquire rather than panicking.", "commit": "72cb4bd", "files": ["src/kv_cache.rs"], "exp_outcome": "supported", "summary": "Added one-step-ahead prefetch for the next KV cache block."}, {"n": 6, "agents": [{"kind": "orchestrator", "label": "round-6-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.5, "inv": "ce742cd86ea300ea81c283bd2d37fb4c", "tools": 0}, {"kind": "orchestrator", "label": "round-6-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.6, "inv": "2556ad199bd4188cacd8315903149cbc", "tools": 0}, {"kind": "implementer", "label": "round-6-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 5.6, "inv": "2b7120fc0f905b626a19ed1eae1a6514", "tools": 6}, {"kind": "judge", "label": "round-6-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.9, "inv": "1a3424a8f514b359c923723e054184aa", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-6-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-6-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-6-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-6-plan"}, {"k": "start", "role": "implementer", "label": "round-6-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-6-retry-1-implementer", "text": "Checking queue contention under the benchmark’s concurrent load profile."}, {"k": "tool", "role": "implementer", "label": "round-6-retry-1-implementer", "tool": "Bash", "cmd": "python bench.py --profile --concurrency 64 --out /tmp/queue.prof", "desc": "Profile the request queue under load", "out": "top frames:\n  queue_mutex_wait      7.2%\n  launch_decode_kernel  58.9%", "err": false, "exit": 0, "dur": 7.9}, {"k": "note", "role": "implementer", "label": "round-6-retry-1-implementer", "text": "Queue contention is real but small next to kernel launch time. Trying a lock-free ring anyway since it is a bounded, well-understood change."}, {"k": "tool", "role": "implementer", "label": "round-6-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'struct RequestQueue' src/queue.rs", "desc": "Find the current queue implementation", "out": "src/queue.rs:14:pub struct RequestQueue {\n    inner: Mutex<VecDeque<Request>>,\n}", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-6-retry-1-implementer", "tool": "Write", "file": "src/queue.rs", "new": "pub struct RequestQueue {\n    ring: LockFreeRing<Request>,\n}\n", "out": "Wrote src/queue.rs (54 lines added)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-6-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release queue 2>&1 | tail -10", "desc": "Run queue tests", "out": "running 11 tests\ntest result: ok. 11 passed; 0 failed; 0 ignored", "err": false, "exit": 0, "dur": 12.2}, {"k": "tool", "role": "implementer", "label": "round-6-retry-1-implementer", "tool": "Bash", "cmd": "cargo bench --bench decode -- --measurement-time 20 2>&1 | tail -6", "desc": "Run the throughput benchmark under load", "out": "decode_throughput      time:   [0.808 ms 0.811 ms 0.816 ms]\nmedian_tok_per_sec: 1234.1", "err": false, "exit": 0, "dur": 41.7}, {"k": "note", "role": "implementer", "label": "round-6-retry-1-implementer", "text": "Throughput moved from 1230 to 1234, inside the benchmark’s run-to-run noise band."}, {"k": "tool", "role": "implementer", "label": "round-6-retry-1-implementer", "tool": "Bash", "cmd": "git diff --stat", "desc": "Review the size of the change", "out": " src/queue.rs | 61 ++++++++++++++++++++++++++++++++++++++++++++++++++--------\n 1 file changed, 54 insertions(+), 7 deletions(-)", "err": false, "exit": 0, "dur": 0.4}, {"k": "start", "role": "judge", "label": "round-6-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-6-retry-1", "verdict": "fail", "text": "The lock-free ring passes its tests, but the measured gain (1230 to 1234 tok/s) is within this benchmark’s noise band, not a real improvement. In exchange the queue module goes from a mutex-guarded VecDeque to hand-written unsafe ring buffer code, which is a meaningful increase in maintenance risk for no demonstrated benefit. Rejecting and keeping the round 5 checkpoint."}, {"k": "result", "label": "round-6", "verdict": "fail", "perf": 1234, "attempts": 1}], "perf": 1234, "hid": "H-06", "title": "Switch the request queue to a lock-free MPMC ring", "hypothesis": "A lock-free ring buffer for the request queue should remove mutex contention under high concurrency.", "reasoning": "Contention profiling showed time in the queue mutex under concurrent load.", "task": "Replace the mutex-guarded request queue with a lock-free ring buffer", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Reran the benchmark three times at this checkpoint and at round 5’s checkpoint; the two ranges overlap.", "commit": "85bffc2", "files": ["src/queue.rs"], "exp_outcome": "disproven", "summary": "Swapped the mutex-guarded VecDeque for a lock-free MPMC ring buffer."}, {"n": 7, "agents": [{"kind": "orchestrator", "label": "round-7-pre", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.8, "inv": "f607a19bf67e7aa41dcb8e4910bede67", "tools": 0}, {"kind": "orchestrator", "label": "round-7-plan", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.6, "inv": "a83d902857be2755fcb6dedfc2b221d0", "tools": 0}, {"kind": "implementer", "label": "round-7-retry-1-implementer", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 5.5, "inv": "f385518771ef78add983fc2ef1004c7c", "tools": 6}, {"kind": "judge", "label": "round-7-retry-1-judge", "model": "claude-opus-5", "provider": "claude", "driver": "cli", "status": "completed", "dur": 0.6, "inv": "f12a699db430400d876b442b4a82e8f7", "tools": 0}], "entries": [{"k": "start", "role": "orchestrator", "label": "round-7-pre"}, {"k": "analysis", "role": "orchestrator", "label": "round-7-pre", "text": "Prior round profile still reflects the hot path."}, {"k": "start", "role": "orchestrator", "label": "round-7-plan"}, {"k": "plan", "role": "orchestrator", "label": "round-7-plan"}, {"k": "start", "role": "implementer", "label": "round-7-retry-1-implementer"}, {"k": "note", "role": "implementer", "label": "round-7-retry-1-implementer", "text": "Logging batch sizes at admission to see how often decode steps run under-filled."}, {"k": "tool", "role": "implementer", "label": "round-7-retry-1-implementer", "tool": "Bash", "cmd": "rg -n 'fn admit' src/scheduler.rs", "desc": "Find the batch admission function", "out": "src/scheduler.rs:33:pub fn admit(&mut self, incoming: &[Request]) -> DecodeBatch {", "err": false, "exit": 0, "dur": 0.4}, {"k": "tool", "role": "implementer", "label": "round-7-retry-1-implementer", "tool": "Bash", "cmd": "python bench.py --log-batch-sizes --iters 500 2>&1 | tail -6", "desc": "Collect batch size distribution", "out": "batch_size histogram:\n  1: 41%\n  2: 27%\n  3+: 32%\navg_batch_size: 1.9", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-7-retry-1-implementer", "text": "Average batch size is under 2. A short admission delay should let more requests land in the same step."}, {"k": "tool", "role": "implementer", "label": "round-7-retry-1-implementer", "tool": "Edit", "file": "src/scheduler.rs", "old": "pub fn admit(&mut self, incoming: &[Request]) -> DecodeBatch {", "new": "pub fn admit(&mut self, incoming: &[Request]) -> DecodeBatch {\n    self.wait_for_admission_window(Duration::from_micros(300));", "out": "Updated src/scheduler.rs (2 lines changed)", "err": false, "exit": null, "dur": null}, {"k": "tool", "role": "implementer", "label": "round-7-retry-1-implementer", "tool": "Bash", "cmd": "cargo test --release scheduler 2>&1 | tail -8", "desc": "Run scheduler tests", "out": "running 8 tests\ntest result: ok. 8 passed; 0 failed; 0 ignored", "err": false, "exit": 0, "dur": 10.6}, {"k": "tool", "role": "implementer", "label": "round-7-retry-1-implementer", "tool": "Bash", "cmd": "cargo bench --bench decode 2>&1 | tail -6", "desc": "Run the decode throughput benchmark", "out": "decode_throughput      time:   [0.769 ms 0.774 ms 0.780 ms]\nmedian_tok_per_sec: 1300.3\navg_batch_size: 3.4", "err": false, "exit": 0, "dur": 35.2}, {"k": "tool", "role": "implementer", "label": "round-7-retry-1-implementer", "tool": "Bash", "cmd": "python bench.py --measure-p99-latency --iters 500 2>&1 | tail -4", "desc": "Check the p99 latency cost of the admission window", "out": "p99_latency_ms: 41.2 (baseline 40.6)", "err": false, "exit": 0, "dur": 0.4}, {"k": "note", "role": "implementer", "label": "round-7-retry-1-implementer", "text": "Average batch size roughly doubled and p99 latency only grew by 0.6ms, well inside the objective’s latency budget."}, {"k": "start", "role": "judge", "label": "round-7-retry-1-judge"}, {"k": "judge", "role": "judge", "label": "round-7-retry-1", "verdict": "pass", "text": "The 300us admission window is a small, reversible scheduler change with tests covering both the delay and the batching behavior it produces. Average batch size nearly doubled and throughput rose to 1300 tok/s, with only a 0.6ms p99 latency cost. This is the strongest single-round gain of the run so far."}, {"k": "result", "label": "round-7", "verdict": "pass", "perf": 1300, "attempts": 1}], "perf": 1300, "hid": "H-07", "title": "Coalesce small decode batches with an admission delay", "hypothesis": "Waiting a few hundred microseconds before admitting more requests into a decode batch increases average batch size and throughput.", "reasoning": "Batch-size logs showed many decode steps running with only one or two sequences.", "task": "Add a short admission delay to the decode scheduler", "pass_criteria": "Existing correctness tests pass and decode throughput does not regress.", "judge_analysis": "Confirmed the admission window is bounded and cannot starve a request indefinitely under the fairness test.", "commit": "0f5377e", "files": ["src/scheduler.rs", "benches/decode.rs"], "exp_outcome": "supported", "summary": "Added a 300us admission window before closing a decode batch."}]</script>
+<script type="module">
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react';
+import { createRoot } from 'react-dom/client';
+import htm from 'htm';
+import { ReactFlow, Handle, Position, MarkerType } from '@xyflow/react';
+import dagre from '@dagrejs/dagre';
+const html = htm.bind(React.createElement);
+const Frag = React.Fragment;
+
+/* ================= data ================= */
+const ROUNDS = JSON.parse(document.getElementById('data').textContent);
+const BASELINE = 950, MAX_ROUNDS = 12, METRIC = 'median_tok_per_sec', UNIT = 'tok/s', BENCH = 'cargo bench --bench decode';
+const OBJECTIVE = 'Increase decode throughput of the batch inference server without changing outputs.';
+const fmt = n => n == null ? '—' : n.toLocaleString('en-US');
+const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + fmt(Math.abs(n));
+const pct = (a, b) => Math.round((a / b - 1) * 100);
+const verdictOf = r => r.entries.find(e => e.k === 'judge')?.verdict;
+const HIST = (() => { let ret = BASELINE, kr = 0; return ROUNDS.map(r => {
+  const kept = verdictOf(r) === 'pass', prev = ret, prevRound = kr;
+  if (kept) { ret = r.perf; kr = r.n; }
+  return { kept, prev, prevRound, retained: ret, retainedRound: kr, delta: kept ? r.perf - prev : null };
+}); })();
+const retainedBefore = n => n <= 1 ? { v: BASELINE, r: 0 } : { v: HIST[n - 2].retained, r: HIST[n - 2].retainedRound };
+const ROLE = { orchestrator: 'Orchestrator', implementer: 'Implementer', judge: 'Judge' };
+const phaseOf = (label, n) => /-pre$/.test(label) ? (n === 1 ? 'Reviewing the starting point' : 'Reviewing the previous round')
+  : /-plan$/.test(label) ? 'Planning' : `Attempt ${(/retry-(\d+)/.exec(label) || [])[1] || 1}`;
+const shortPhase = (label, n) => /-pre$/.test(label) ? 'Reviewing' : /-plan$/.test(label) ? 'Planning' : `Attempt ${(/retry-(\d+)/.exec(label) || [])[1] || 1}`;
+const STATUS_VERB = { pre: 'Reviewing before round', plan: 'Planning round', implementer: 'Implementing round', judge: 'Judging round' };
+const elide = (s, n = 58) => s.length <= n ? s : s.slice(0, Math.ceil(n * .62)) + '…' + s.slice(-Math.floor(n * .34));
+
+/* [mock] prompt composed from recorded plan fields; todos derived from recorded tool descriptions */
+function promptOf(r, a) {
+  const rb = retainedBefore(r.n);
+  if (/-pre$/.test(a.label)) return `Objective: ${OBJECTIVE}\nMetric: ${METRIC}, higher is better. Retained so far: ${fmt(rb.v)} ${UNIT}.\nReview the previous round's profile and results before round ${r.n} is planned.`;
+  if (/-plan$/.test(a.label)) return `Propose one hypothesis for round ${r.n} that can raise ${METRIC}, with the task and pass criteria for the implementer.`;
+  if (a.kind === 'implementer') return `Task: ${r.task}\nHypothesis: ${r.hypothesis}\nPass criteria: ${r.pass_criteria}\nBenchmark: ${BENCH}`;
+  return `Judge round ${r.n} against the pass criteria: ${r.pass_criteria}\nCheckpoint to beat: ${rb.r ? 'round ' + rb.r : 'baseline'} at ${fmt(rb.v)} ${UNIT}.`;
+}
+function todosOf(r) {
+  const ts = r.entries.filter(e => e.k === 'tool');
+  const first = ts[0]?.desc, bench = ts.find(e => /cargo bench/.test(e.cmd || ''))?.desc;
+  return [...new Set([first, `Change ${r.files.join(', ')}`, 'Run the tests', bench].filter(Boolean))];
+}
+
+/* ================= screens ================= */
+const MOCK_STEER = 'Measure lock hold time before replacing the queue.'; // [mock]
+const SCREENS = {
+  home: { view: 'home' }, setup: { view: 'setup', setup: 'ready' }, 'setup-checking': { view: 'setup', setup: 'checking' },
+  'setup-blockers': { view: 'setup', setup: 'blockers' }, 'setup-new': { view: 'setup', setup: 'new' },
+  starting: { view: 'starting' }, startfail: { view: 'startfail' },
+  round1: { live: 1, round: 1, cut: 2 },
+  live: {}, steer: { steers: [{ text: MOCK_STEER, state: 'queued' }] },
+  pausing: { run: 'pausing' }, paused: { run: 'paused' }, stop: { menu: 'stop' },
+  round: { round: 3, expand: 'round-3:14' },
+  prompt: { open: { 'round-6-retry-1-implementer:prompt': 1 }, scrollTo: 'round-6-retry-1-implementer' },
+  todos: { open: { 'round-6-retry-1-implementer:todos': 1 }, scrollTo: 'round-6-retry-1-implementer' },
+  changes: { pane: 'changes' }, 'changes-full': { pane: 'changes', round: 3, diffFull: true },
+  agents: { pane: 'agents', agent: 'round-6-retry-1-implementer' },
+  experiments: { pane: 'experiments', expOpen: 3 }, design: { pane: 'experiments', expView: 'design' },
+  ask: { pane: 'ask' }, thread: { pane: 'ask', menu: 'thread' }, model: { pane: 'ask', menu: 'model' }, nochat: { pane: 'ask', harness: false },
+  notes: { pane: 'notes' }, palette: { palette: true }, collapsed: { sideOpen: false }, otherrun: { view: 'other', other: 'Reduce p99 prefill latency' },
+};
+const THREADS = [ // [mock] answers
+  { id: 't1', title: 'Why did round 3 fail the judge?', msgs: [
+    { who: 'you', text: 'Why did round 3 fail the judge?' },
+    { who: 'claude-opus-5', text: 'On correctness, not performance. Removing the post-sampling device sync let sampling read stale logits under concurrent decode. The implementer replaced the sync with a cheaper fence, but sample_matches_reference still failed, because the fence orders the stream and not the specific copy the read depends on.\n\nThe judge treated that as a failed correctness gate, and the run reverted to the round 2 checkpoint at 1,150 tok/s.' }] },
+  { id: 't2', title: 'Is the round 4 buffer pool worth keeping?', msgs: [
+    { who: 'you', text: 'Is the round 4 buffer pool worth keeping?' },
+    { who: 'claude-opus-5', text: 'Mock reply. This server replays a recorded run; there is no agent behind it.' }] },
+];
+const base = () => ({ view: 'run', live: 6, cut: null, round: 6, pane: null, paneW: 400, sideOpen: true, sideW: 276, expand: null, open: {}, agent: null,
+  run: 'running', menu: null, steers: [], draft: '', askDraft: '', threads: THREADS, thread: 't1', model: 'claude-opus-5', harness: true,
+  notes: 'Round 4 traded peak throughput for the buffer pool that round 5 needed. Check p99 latency before keeping round 7’s admission delay.', // [mock]
+  diffFull: false, expView: 'hyp', expOpen: null, palette: false, palQ: '', setup: 'ready', other: null, scrollTo: null, copied: null });
+const fromHash = () => ({ ...base(), ...(SCREENS[location.hash.slice(1)] || {}) });
+
+/* ================= icons ================= */
+const I = {
+  plus: 'M8 3.5v9M3.5 8h9', search: 'M7.25 12a4.75 4.75 0 1 0 0-9.5 4.75 4.75 0 0 0 0 9.5zM10.6 10.6l2.9 2.9',
+  side: 'M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2zM6.5 2.5v11',
+  pane: 'M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2zM9.5 2.5v11',
+  more: 'M4 8h.01M8 8h.01M12 8h.01', chev: 'M6 4l4 4-4 4', down: 'M4.5 6.5 8 10l3.5-3.5',
+  pause: 'M6 4v8M10 4v8', play: 'M5.5 3.8v8.4L12 8z', up: 'M8 12.5v-9M4.5 7 8 3.5 11.5 7', x: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
+  check: 'M3.5 8.3 6.5 11l6-6.5',
+};
+const Icon = ({ n, cls = 'i' }) => html`<svg className=${cls} viewBox="0 0 16 16" aria-hidden="true"><path d=${I[n]}/></svg>`;
+const Check = ({ c = 'ok', label = 'kept' }) => html`<svg className=${'g ' + c} viewBox="0 0 12 12" role="img" aria-label=${label}><path d="M2.5 6.3 5 8.7l4.5-5.2"/></svg>`;
+const Revert = () => html`<svg className="g bad" viewBox="0 0 12 12" role="img" aria-label="reverted"><path d="M4.5 2.5 2.5 4.5l2 2"/><path d="M2.5 4.5h4.25a2.75 2.75 0 0 1 0 5.5H5"/></svg>`;
+const PauseG = () => html`<svg className="g warn" viewBox="0 0 12 12" role="img" aria-label="paused"><path d="M4.5 3v6M7.5 3v6"/></svg>`;
+const Chev = ({ open }) => html`<svg className="g" viewBox="0 0 12 12" aria-hidden="true" style=${{ transform: open ? 'rotate(90deg)' : '' }}><path d="M4.5 3 7.5 6l-3 3"/></svg>`;
+
+/* ================= app context ================= */
+const Ctx = createContext(null);
+const useApp = () => useContext(Ctx);
+function useWidth() { const [w, setW] = useState(innerWidth); useEffect(() => { const f = () => setW(innerWidth); addEventListener('resize', f); return () => removeEventListener('resize', f); }, []); return w; }
+
+/* run-derived state: one place that knows what is live */
+function liveInfo(s) {
+  const r = ROUNDS[s.live - 1], done = s.run === 'paused';
+  const shown = done ? r.entries : s.cut ? r.entries.slice(0, s.cut) : r.entries.filter(e => e.k !== 'judge' && e.k !== 'result');
+  const starts = shown.filter(e => e.k === 'start');
+  const active = done ? null : starts[starts.length - 1]?.label;
+  const phase = active ? (/-pre$/.test(active) ? 'pre' : /-plan$/.test(active) ? 'plan' : /implementer$/.test(active) ? 'implementer' : 'judge') : null;
+  return { r, done, shown, active, phase };
+}
+const entriesOf = (s, r) => r.n === s.live ? liveInfo(s).shown : r.entries;
+const roundDone = (s, n) => n < s.live || (n === s.live && s.run === 'paused');
+
+/* ================= sidebar ================= */
+const OTHER_RUNS = [{ title: 'Reduce p99 prefill latency', time: '2d', g: 'done', proj: 'llm-serve' }, { title: 'Shrink KV cache footprint', time: '5d', g: 'stopped', proj: 'llm-serve' }]; // [mock]
+function RunGlyph({ g }) {
+  if (g === 'live') return html`<span className="gl"><span className="dot live" role="img" aria-label="running"/></span>`;
+  if (g === 'paused') return html`<span className="gl"><${PauseG}/></span>`;
+  if (g === 'failed') return html`<span className="gl"><span className="dot err" role="img" aria-label="failed"/></span>`;
+  if (g === 'done') return html`<span className="gl"><${Check} c="t2" label="finished"/></span>`;
+  return html`<span className="gl"><svg className="g t2" viewBox="0 0 12 12" role="img" aria-label="stopped"><rect x="3.5" y="3.5" width="5" height="5" rx="1"/></svg></span>`;
+}
+function Resizer({ onDrag }) {
+  const [on, setOn] = useState(false);
+  return html`<div className=${'drag' + (on ? ' on' : '')} title="Drag to resize" onPointerDown=${e => { e.target.setPointerCapture(e.pointerId); setOn(true); }}
+    onPointerMove=${e => on && onDrag(e.clientX)} onPointerUp=${() => setOn(false)}/>`;
+}
+function Sidebar() {
+  const { s, set } = useApp();
+  const inRun = ['run', 'starting', 'startfail'].includes(s.view);
+  const g = s.view === 'startfail' ? 'failed' : s.run === 'paused' ? 'paused' : 'live';
+  return html`<nav className="side" style=${{ width: s.sideW }} aria-label="Runs">
+    <div className="lights"><i/><i/><i/><button className="iconbtn" title="Hide sidebar" aria-label="Hide sidebar" onClick=${() => set({ sideOpen: false })}><${Icon} n="side"/></button></div>
+    <button className=${'nav' + (s.view === 'setup' ? ' on' : '')} onClick=${() => set({ view: 'setup', setup: 'ready' })}><${Icon} n="plus"/>New run<span className="kbd">⌘N</span></button>
+    <button className="nav" onClick=${() => set({ palette: true, palQ: '' })}><${Icon} n="search"/>Search and commands<span className="kbd">⌘K</span></button>
+    <div className="sidescroll">
+      <div className="sect">llm-serve</div>
+      <button className=${'run' + (inRun ? ' cur' : '') + (inRun && s.view !== 'run' ? ' sel' : '')} onClick=${() => set({ view: 'run', round: s.live })} title=${OBJECTIVE}>
+        <${RunGlyph} g=${g}/><span className="ttl">Increase decode throughput</span><span className="meta">${s.view === 'run' ? 'now' : '1m'}</span>
+      </button>
+      ${s.view === 'starting' && html`<div className="rounds"><div className="rnd" style=${{ cursor: 'default' }}><span className="gl"><span className="dot live"/></span><span className="rn"></span><span className="ttl">Baseline</span><span className="d"></span></div></div>`}
+      ${s.view === 'run' && html`<div className="rounds" role="list">
+        ${ROUNDS.slice(0, s.live).map(r => {
+          const h = HIST[r.n - 1], done = roundDone(s, r.n);
+          return html`<button role="listitem" key=${r.n} className=${'rnd' + (s.round === r.n ? ' sel' : '')} aria-current=${s.round === r.n}
+            onClick=${() => set({ round: r.n, expand: null, agent: null, diffFull: false })} title=${`Round ${r.n}: ${r.hypothesis}`}>
+            <span className="gl">${!done ? html`<span className="dot live" role="img" aria-label="running"/>` : h.kept ? html`<${Check}/>` : html`<${Revert}/>`}</span>
+            <span className="rn">r${r.n}</span><span className="ttl">${entriesOf(s, r).some(e => e.k === 'plan') ? r.title : 'No hypothesis yet'}</span>
+            <span className="d">${done && h.kept ? signed(h.delta) : ''}</span>
+          </button>`; })}
+        <div className="rnd more">${MAX_ROUNDS - s.live} more planned</div>
+      </div>`}
+      ${OTHER_RUNS.map(r => html`<button className=${'run' + (s.other === r.title && s.view === 'other' ? ' sel' : '')} key=${r.title} onClick=${() => set({ view: 'other', other: r.title })}><${RunGlyph} g=${r.g}/><span className="ttl">${r.title}</span><span className="meta">${r.time}</span></button>`)}
+      <div className="sect">tokenizer-rs</div>
+      <button className=${'run' + (s.other === 'Speed up the BPE merge loop' && s.view === 'other' ? ' sel' : '')} onClick=${() => set({ view: 'other', other: 'Speed up the BPE merge loop' })}><${RunGlyph} g="done"/><span className="ttl">Speed up the BPE merge loop</span><span className="meta">1w</span></button>
+    </div>
+    <${Resizer} onDrag=${x => set({ sideW: Math.max(220, Math.min(380, x)) })}/>
+  </nav>`;
+}
+
+/* ================= transcript pieces ================= */
+function describe(e) {
+  if (e.tool === 'Edit') return { verb: 'Edited', obj: e.file, add: (e.new || '').split('\n').length, del: (e.old || '').split('\n').length };
+  if (e.tool === 'Write') { const m = /(\d+) lines added/.exec(e.out || ''); return { verb: 'Wrote', obj: e.file, add: m ? +m[1] : null }; }
+  if (e.tool === 'Read') return { verb: 'Read', obj: e.file };
+  const c = e.cmd.replace(/\s*2>&1.*$/, '').replace(/\s*\|\s*tail.*$/, '');
+  let m = /^sed -n "(\d+),(\d+)p" (\S+)/.exec(c); if (m) return { verb: 'Read', obj: m[3], sub: `lines ${m[1]}–${m[2]}` };
+  m = /^rg -n '([^']+)' (\S+)/.exec(c); if (m) return { verb: 'Searched', obj: m[2], sub: `for ${m[1]}` };
+  return { verb: 'Ran', obj: elide(c), full: e.cmd };
+}
+function ToolOut({ e }) {
+  if (e.tool === 'Edit' && (e.old || e.new)) return html`<div className="out"><${Hunk} file=${e.file} oldT=${e.old} newT=${e.new}/></div>`;
+  return html`<div className="out"><pre>${e.cmd ? html`<span className="cmd">${'$ ' + e.cmd + '\n'}</span>` : ''}${(e.out || '').split('\n').map((l, i) =>
+    html`<span key=${i} className=${/FAILED/.test(l) ? 'fl' : ''}>${l + '\n'}</span>`)}</pre></div>`;
+}
+function ToolRow({ e, id }) {
+  const { s, set } = useApp();
+  const open = s.expand === id, d = describe(e);
+  return html`<div className=${'tool' + (open ? ' open' : '')} data-id=${id}>
+    <button className="trow" aria-expanded=${open} onClick=${() => set({ expand: open ? null : id })} title=${(d.full || e.cmd || e.file || '') + (e.desc ? '\n' + e.desc : '')}>
+      <span className="verb">${d.verb}</span><span className="obj">${d.obj}</span>
+      ${d.sub && html`<span className="sub">${d.sub}</span>`}
+      ${d.add != null && html`<span className="stat"><span className="ok">+${d.add}</span>${d.del ? html` <span className="bad">−${d.del}</span>` : ''}</span>`}
+      <span className="end">${e.err ? html`<span className="bad">exit ${e.exit}</span>` : e.dur != null ? html`<span className="t2">${e.dur}s</span>` : ''}</span>
+      <svg className="chev" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4.5 3 7.5 6l-3 3"/></svg>
+    </button>
+    ${open && html`<${ToolOut} e=${e}/>`}
+  </div>`;
+}
+function Disclosures({ r, a }) {
+  const { s, set } = useApp();
+  const kp = a.label + ':prompt', kt = a.label + ':todos', tog = k => set({ open: { ...s.open, [k]: !s.open[k] } });
+  return html`<${Frag}>
+    <button className=${'disc' + (s.open[kp] ? ' on' : '')} aria-expanded=${!!s.open[kp]} onClick=${() => tog(kp)}><${Chev} open=${s.open[kp]}/>Prompt</button>
+    ${a.kind === 'implementer' && html`<button className=${'disc' + (s.open[kt] ? ' on' : '')} aria-expanded=${!!s.open[kt]} onClick=${() => tog(kt)}><${Chev} open=${s.open[kt]}/>Todos (${todosOf(r).length})</button>`}
+  </${Frag}>`;
+}
+function DisclosureBodies({ r, a, doneTurn }) {
+  const { s } = useApp();
+  return html`<${Frag}>
+    ${s.open[a.label + ':prompt'] && html`<div className="block"><div className="bh">Prompt sent to ${ROLE[a.kind].toLowerCase()}</div><pre>${promptOf(r, a)}</pre></div>`}
+    ${s.open[a.label + ':todos'] && html`<div className="block"><div className="bh">Todos</div>${todosOf(r).map(t => html`<div className="todo" key=${t}>${doneTurn ? html`<${Check} label="done"/>` : html`<span className="gl" style=${{ width: '12px' }}>○</span>`}${t}</div>`)}</div>`}
+  </${Frag}>`;
+}
+function groupItems(items) { // consecutive tool calls form one action group
+  const out = []; items.forEach(it => { const last = out[out.length - 1];
+    if (it.e.k === 'tool') { if (last && last.tools) last.tools.push(it); else out.push({ tools: [it] }); } else out.push(it); });
+  return out;
+}
+function Verdict({ r, e }) {
+  const pass = e.verdict === 'pass';
+  return html`<section className="verdict" aria-label="Judge verdict">
+    <div className=${'vword ' + (pass ? 'ok' : 'bad')}><span className=${'dot ' + (pass ? 'okd' : 'err')}/>${pass ? 'Accepted' : 'Rejected'}</div>
+    <p>${e.text}</p>
+  </section>`;
+}
+function Turn({ r, t }) {
+  const { s } = useApp();
+  const a = r.agents.find(x => x.label === t.label) || { label: t.label, kind: t.role };
+  const li = r.n === s.live ? liveInfo(s) : null, active = li && li.active === t.label;
+  return html`<section className="turn" data-agent=${t.label} aria-label=${ROLE[t.role]}>
+    <div className="who" title=${`${t.label} · ${a.model || ''}`}>
+      <span className=${'r' + (active ? ' act' : '')}>${ROLE[t.role]}</span><span className="ph">${phaseOf(t.label, r.n)}</span>
+      <span className="acts"><${Disclosures} r=${r} a=${a}/></span>
+    </div>
+    <${DisclosureBodies} r=${r} a=${a} doneTurn=${!active}/>
+    ${groupItems(t.items).map((g, k) => {
+      if (g.tools) return html`<div className="actions" key=${k}>${g.tools.map(({ e, i }) => html`<${ToolRow} key=${i} e=${e} id=${`round-${r.n}:${i}`}/>`)}</div>`;
+      const { e, i } = g;
+      if (e.k === 'analysis' || e.k === 'note') return html`<p key=${i}>${e.text}</p>`;
+      if (e.k === 'plan') return html`<p key=${i}>${r.reasoning}</p>`;
+      if (e.k === 'judge') return html`<div key=${i}><p>${r.judge_analysis}</p><${Verdict} r=${r} e=${e}/></div>`;
+      return null;
+    })}
+    ${active && (t.role === 'judge'
+      ? html`<div className="working"><span className="spin"/><span>Checking the change against the pass criteria: <b>${r.pass_criteria}</b></span></div>`
+      : html`<div className="working"><span className="spin"/><span>Working</span></div>`)}
+  </section>`;
+}
+function ResultLine({ r }) {
+  const { s } = useApp();
+  const done = roundDone(s, r.n), h = HIST[r.n - 1], rb = retainedBefore(r.n);
+  const parts = [];
+  if (!done) {
+    const li = liveInfo(s), measured = li.shown.some(e => e.k === 'tool' && /cargo bench/.test(e.cmd || ''));
+    parts.push(html`<span className="num">${measured ? fmt(r.perf) + ' attempted, not yet judged' : 'Not measured yet'}</span>`);
+    parts.push(html`<span className="num">${rb.r ? 'Retained' : 'Baseline'} ${fmt(rb.v)}</span>`);
+  } else {
+    parts.push(html`<span className=${h.kept ? 'ok' : 'bad'}>${h.kept ? 'Accepted' : 'Rejected'}</span>`);
+    parts.push(html`<span>${h.kept ? 'Kept' : 'Reverted'}</span>`);
+    if (h.kept) parts.push(html`<span className="num">${fmt(r.perf)} ${UNIT} <span className=${h.delta >= 0 ? 'ok' : 'bad'}>${signed(h.delta)}</span></span>`);
+    else { parts.push(html`<span className="num">${r.perf == null ? 'Not measured' : fmt(r.perf) + ' attempted'}</span>`); parts.push(html`<span className="num">Retained ${fmt(h.retained)}</span>`); }
+  }
+  return html`<span className="res">${parts.map((p, i) => html`<${Frag} key=${i}>${i ? html`<span className="sep">·</span>` : ''}${p}</${Frag}>`)}</span>`;
+}
+function turnsOf(entries) {
+  const turns = []; let cur = null;
+  entries.forEach((e, i) => {
+    if (e.k === 'start') { cur = { role: e.role, label: e.label, items: [] }; turns.push(cur); return; }
+    if (e.k === 'result' || !cur) return;
+    cur.items.push({ e, i });
+  });
+  return turns;
+}
+function Transcript() {
+  const { s, set } = useApp();
+  const r = ROUNDS[s.round - 1];
+  const planned = entriesOf(s, r).some(e => e.k === 'plan');
+  let turns = turnsOf(entriesOf(s, r));
+  const filtered = s.agent && turns.find(t => t.label === s.agent);
+  if (filtered) turns = [filtered];
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    const tgt = s.expand ? el.querySelector(`[data-id="${s.expand}"]`) : s.scrollTo ? el.querySelector(`[data-agent="${s.scrollTo}"]`) : null;
+    if (tgt && (s.scrollTo || tgt.getBoundingClientRect().top < el.getBoundingClientRect().top + 40)) { tgt.scrollIntoView({ block: 'start' }); el.scrollTop -= 52; }
+  }, [s.round, s.agent, s.run, s.scrollTo]);
+  return html`<div className="scroll" ref=${ref}>
+    <div className="sticky"><div className="in"><span className="rn">Round ${r.n}</span><span className="ttl" title=${planned ? r.title : ''}>${planned ? r.title : 'No hypothesis yet'}</span><${ResultLine} r=${r}/></div></div>
+    <div className="col">
+      <p className="claim">${planned ? r.hypothesis : 'The hypothesis appears once the orchestrator forms one.'}</p>
+      ${filtered && html`<div className="filterbar">Showing only ${ROLE[filtered.role]} (${phaseOf(filtered.label, r.n).toLowerCase()})<button className="linkbtn" onClick=${() => set({ agent: null })}>Show all</button></div>`}
+      ${turns.map(t => html`<${Turn} key=${t.label} r=${r} t=${t}/>`)}
+      ${r.n === s.live && s.steers.map((st, i) => html`<div key=${i}><div className="human">${st.text}</div>
+        <div className="hmeta">${st.state === 'queued' ? html`<span className="spin"/>Queued for the next agent call` : html`<${Check} label="applied"/>Applied to the next agent call`}</div></div>`)}
+      ${r.n === s.live && s.run === 'paused' && html`<div className="endline">Round ${s.live + 1} starts when you resume.</div>`}
+    </div>
+  </div>`;
+}
+
+/* ================= composer: composes only ================= */
+function Composer({ placeholder, value, onChange, onSend, disabled, children }) {
+  return html`<div className=${'pill' + (disabled ? ' off' : '')}>
+    <input aria-label=${placeholder} placeholder=${placeholder} value=${value} disabled=${disabled} onChange=${e => onChange(e.target.value)}
+      onKeyDown=${e => { if (e.key === 'Enter' && value.trim()) onSend(); }}/>
+    ${children}
+    <button className=${'send' + (value.trim() && !disabled ? ' ready' : '')} aria-label="Send" title="Send (↵)" disabled=${disabled || !value.trim()} onClick=${onSend}><${Icon} n="up"/></button>
+  </div>`;
+}
+function SteerDock({ placeholder = 'Steer the next agent call…' }) {
+  const { s, set, later } = useApp();
+  const send = () => { const i = s.steers.length; set({ steers: [...s.steers, { text: s.draft.trim(), state: 'queued' }], draft: '' });
+    if (s.run === 'running') later(2400, p => ({ steers: p.steers.map((x, k) => k === i ? { ...x, state: 'applied' } : x) })); };
+  return html`<div className="dock"><div className="inner"><${Composer} placeholder=${placeholder} value=${s.draft} onChange=${v => set({ draft: v })} onSend=${send}/></div></div>`;
+}
+
+/* ================= title row, run controls, menus ================= */
+function Popover({ style, children, onClose }) {
+  useEffect(() => { const f = e => e.key === 'Escape' && onClose(); addEventListener('keydown', f); return () => removeEventListener('keydown', f); }, []);
+  return html`<${Frag}><div style=${{ position: 'fixed', inset: 0, zIndex: 39 }} onClick=${onClose}/><div className="pop" style=${style} role="menu">${children}</div></${Frag}>`;
+}
+function MoreMenu() {
+  const { s, set } = useApp();
+  if (s.menu === 'more') return html`<${Popover} style=${{ top: 36, right: 8 }} onClose=${() => set({ menu: null })}>
+    <button className="it" role="menuitem" onClick=${() => set({ menu: null, pane: 'notes' })}>Notes</button>
+    <button className="it" role="menuitem" onClick=${() => { navigator.clipboard?.writeText('20260925-140000-8f21c3a0-web-live'); set({ menu: null }); }}>Copy run ID</button>
+    <div className="sepl"/>
+    <button className="it danger" role="menuitem" onClick=${() => set({ menu: 'stop' })}>Stop run…</button>
+  </${Popover}>`;
+  if (s.menu === 'stop') return html`<${Popover} style=${{ top: 36, right: 8 }} onClose=${() => set({ menu: null })}>
+    <div className="confirm" role="alertdialog" aria-labelledby="stop-h">
+      <h4 id="stop-h">Stop this run?</h4>
+      <p>The ${liveInfo(s).phase === 'judge' ? 'judge' : 'current agent'} finishes its call, then no further rounds start. Kept checkpoints stay in the repository.</p>
+      <div className="row"><button className="btn ghost" autoFocus onClick=${() => set({ menu: null })}>Cancel</button><button className="btn danger" onClick=${() => set({ menu: null, run: 'stopping' })}>Stop run</button></div>
+    </div>
+  </${Popover}>`;
+  return null;
+}
+function RunControls() {
+  const { s, set, later } = useApp();
+  const li = liveInfo(s), rb = retainedBefore(s.run === 'paused' ? s.live + 1 : s.live);
+  const status = s.run === 'pausing' ? html`<span className="spin"/>Pausing after the current call…`
+    : s.run === 'stopping' ? html`<span className="spin"/>Stopping after the current call…`
+    : s.run === 'paused' ? html`<${PauseG}/>Paused after round ${s.live}` : `${STATUS_VERB[li.phase]} ${s.live}`;
+  const pause = () => { set({ run: 'pausing' }); later(2600, p => p.run === 'pausing' ? { run: 'paused' } : {}); };
+  return html`<${Frag}>
+    <span className="status" aria-live="polite">${status}</span>
+    ${s.run === 'running' && html`<button className="chip" onClick=${pause} title="Pause after the current agent call"><${Icon} n="pause" cls="g"/>Pause</button>`}
+    ${s.run === 'paused' && html`<button className="chip" onClick=${() => set({ run: 'running' })} title="Resume the run"><${Icon} n="play" cls="g"/>Resume</button>`}
+    <span className="vsep"/>
+    <span className="kept num" title=${`Best kept result of this run (${rb.r ? 'round ' + rb.r : 'baseline'}). Baseline ${fmt(BASELINE)} ${UNIT}.`}>${rb.r ? 'Retained ' : 'Baseline '}<b>${fmt(rb.v)}</b><span className="unit"> ${UNIT}</span>${rb.r ? html` · <span className="ok">+${pct(rb.v, BASELINE)}%</span><span className="lbl"> vs baseline</span>` : ''}</span>
+  </${Frag}>`;
+}
+function TitleRow({ name = 'Increase decode throughput', proj = 'llm-serve', children, tools = true }) {
+  const { s, set, sideShown } = useApp();
+  return html`<header className="titlebar">
+    ${!sideShown && html`<div className="lights"><i/><i/><i/></div><button className="iconbtn" title="Show sidebar" aria-label="Show sidebar" onClick=${() => set({ sideOpen: true, ...(innerWidth < 1200 ? { pane: null } : {}) })}><${Icon} n="side"/></button>`}
+    <span className="name" title=${OBJECTIVE}>${name}</span>${proj && html`<span className="proj">${proj}</span>`}
+    <span className="sp"/>
+    ${children}
+    ${tools && s.view === 'run' && html`<span className="vsep"/>
+      <button className=${'iconbtn' + (s.pane ? ' on' : '')} title="Ask, changes, agents, experiments, notes" aria-label="Toggle side pane" aria-pressed=${!!s.pane} onClick=${() => set({ pane: s.pane ? null : 'changes' })}><${Icon} n="pane"/></button>
+      <button className=${'iconbtn' + (s.menu === 'more' || s.menu === 'stop' ? ' on' : '')} title="Notes, copy run ID, stop" aria-label="More" onClick=${() => set({ menu: 'more' })}><${Icon} n="more"/></button>`}
+    ${s.view === 'run' && html`<${MoreMenu}/>`}
+  </header>`;
+}
+
+/* ================= right pane ================= */
+function lcsDiff(a, b) { // prefix/suffix context, middle as -/+
+  let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  let j = 0; while (j < a.length - i && j < b.length - i && a[a.length - 1 - j] === b[b.length - 1 - j]) j++;
+  return [...a.slice(0, i).map(t => ['c', t]), ...a.slice(i, a.length - j).map(t => ['d', t]), ...b.slice(i, b.length - j).map(t => ['a', t]), ...a.slice(a.length - j).map(t => ['c', t])];
+}
+function Hunk({ file, oldT, newT, start = null }) {
+  const rows = lcsDiff((oldT || '').replace(/\n$/, '').split('\n'), (newT || '').replace(/\n$/, '').split('\n'));
+  let o = start || 1, n = start || 1;
+  return html`<div className="diff">${rows.map(([k, t], i) => { const ln = start ? (k === 'a' ? n++ : k === 'd' ? o++ : (o++, n++)) : '';
+    return html`<div className=${k} key=${i}><span className="ln">${ln}</span><span className="mk">${k === 'a' ? '+' : k === 'd' ? '−' : ''}</span>${t}</div>`; })}</div>`;
+}
+function roundChanges(r) {
+  const ents = r.entries.filter(e => e.k === 'tool');
+  const stat = [...ents].reverse().find(e => /git diff --stat/.test(e.cmd || ''))?.out || '';
+  const m = /(\d+) insertions?\(\+\)(?:, (\d+) deletions?\(-\))?/.exec(stat);
+  const files = r.files.map(f => {
+    const hunks = [];
+    ents.forEach((e, idx) => {
+      if (e.tool === 'Edit' && e.file === f && (e.old || e.new)) hunks.push({ oldT: e.old, newT: e.new });
+      if (e.tool === 'Write' && e.file === f && e.new) {
+        const prior = ents.slice(0, idx).reverse().find(x => /^rg -n/.test(x.cmd || '') && (x.out || '').startsWith(f + ':'));
+        const mm = prior && /^[^:]+:(\d+):([\s\S]*)$/.exec(prior.out);
+        hunks.push({ oldT: mm ? mm[2] : '', newT: e.new, start: mm ? +mm[1] : null });
+      }
+    });
+    return { f, hunks };
+  });
+  const shown = files.reduce((n, x) => n + x.hunks.reduce((k, h) => k + lcsDiff((h.oldT || '').split('\n'), (h.newT || '').replace(/\n$/, '').split('\n')).filter(([t]) => t !== 'c').length, 0), 0);
+  return { files, add: m ? +m[1] : null, del: m ? +(m[2] || 0) : null, shown };
+}
+function Changes() {
+  const { s, set } = useApp();
+  const r = ROUNDS[s.round - 1], h = HIST[r.n - 1], ch = roundChanges(r), total = (ch.add || 0) + (ch.del || 0), rest = total - ch.shown;
+  const cmd = `git show ${r.commit}`;
+  return html`<${Frag}>
+    <div className="phead"><span className="scope">Round ${r.n}</span><span>against ${h.prevRound ? 'the round ' + h.prevRound + ' checkpoint' : 'the baseline'}</span><span className="r mono">${r.commit}</span></div>
+    ${ch.files.map(x => html`<div key=${x.f}>
+      <div className="fhead"><span className="mono">${x.f}</span>${ch.files.length === 1 && ch.add != null && html`<span className="num" style=${{ fontSize: '12px' }}><span className="ok">+${ch.add}</span> <span className="bad">−${ch.del}</span></span>`}</div>
+      ${x.hunks.length ? x.hunks.map((hk, i) => html`<${Hunk} key=${i} ...${hk} file=${x.f}/>`) : html`<div className="note">No hunk for this file in the recording.</div>`}
+    </div>`)}
+    ${rest > 0 && html`<button className="morerow" aria-expanded=${s.diffFull} onClick=${() => set({ diffFull: !s.diffFull })}><${Chev} open=${s.diffFull}/>${rest} more changed lines</button>`}
+    ${rest > 0 && s.diffFull && html`<div className="note"><span>The recording keeps only the hunks above. The full change is in commit <span className="mono">${r.commit}</span>.</span>
+      <button className="chip" onClick=${() => { navigator.clipboard?.writeText(cmd); set({ copied: cmd }); }}>${s.copied === cmd ? 'Copied' : html`Copy <span className="mono">${cmd}</span>`}</button></div>`}
+  </${Frag}>`;
+}
+function AgentNode({ data }) {
+  return html`<div className=${'ag' + (data.active ? ' act' : '') + (data.sel ? ' sel' : '')} title=${`${data.label}\nClick to show only this agent's turns`}>
+    <${Handle} type="target" position=${Position.Top}/>
+    <div className="r">${data.role}${data.active ? html`<span className="dot live" role="img" aria-label="active"/>` : data.failed ? html`<span className="dot err"/>` : html`<${Check} c="t2" label="completed"/>`}</div>
+    <div className="m">${data.phase}</div>
+    <${Handle} type="source" position=${Position.Bottom}/>
+  </div>`;
+}
+const nodeTypes = { agent: AgentNode };
+function Agents() {
+  const { s, set } = useApp();
+  const r = ROUNDS[s.round - 1];
+  const li = r.n === s.live ? liveInfo(s) : null;
+  const shownLabels = new Set(entriesOf(s, r).filter(e => e.k === 'start').map(e => e.label));
+  const agents = r.agents.filter(a => shownLabels.has(a.label));
+  const W = 140, H = 44;
+  const { nodes, edges, width, height } = useMemo(() => {
+    const g = new dagre.graphlib.Graph(); g.setGraph({ rankdir: 'TB', nodesep: 16, ranksep: 24, marginx: 16, marginy: 16 }); g.setDefaultEdgeLabel(() => ({}));
+    agents.forEach(a => g.setNode(a.label, { width: W, height: H }));
+    // execution order: each invocation depends on the previous one (the recording has no concurrent invocations)
+    const edges = agents.slice(1).map((a, i) => { const live = li && li.active === a.label;
+      return { id: `${agents[i].label}>${a.label}`, source: agents[i].label, target: a.label, animated: !!live,
+        style: { stroke: 'var(--line)', strokeWidth: 1.25 }, markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'var(--line)' } }; });
+    edges.forEach(e => g.setEdge(e.source, e.target)); dagre.layout(g);
+    const nodes = agents.map(a => { const p = g.node(a.label);
+      return { id: a.label, type: 'agent', position: { x: p.x - W / 2, y: p.y - H / 2 },
+        data: { label: a.label, role: ROLE[a.kind], phase: shortPhase(a.label, r.n), active: li && li.active === a.label, failed: a.status === 'failed', sel: s.agent === a.label } }; });
+    return { nodes, edges, width: g.graph().width, height: g.graph().height };
+  }, [r, li && li.active, s.agent, agents.length]);
+  // top-to-bottom at 1:1: every invocation is visible on open; fan-out would spread sideways
+  const paneW = s.paneW, x = Math.max(0, (paneW - width) / 2);
+  const a = r.agents.find(x => x.label === s.agent) || r.agents.find(x => li && x.label === li.active);
+  return html`<${Frag}>
+    <div className="phead"><span className="scope">Round ${r.n}</span><span>${agents.length} invocations, in order</span></div>
+    <div className="graphwrap"><div className="graph" style=${{ height }}><${ReactFlow} key=${r.n + ':' + paneW} nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes}
+      defaultViewport=${{ x, y: 0, zoom: 1 }} minZoom=${1} maxZoom=${1}
+      nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false} zoomOnScroll=${false} zoomOnDoubleClick=${false}
+      panOnDrag=${false} panOnScroll=${false} zoomOnPinch=${false} preventScrolling=${false} proOptions=${{ hideAttribution: true }}
+      onNodeClick=${(_, n) => set({ agent: s.agent === n.id ? null : n.id })}/></div></div>
+    ${a ? html`<div className="detail">
+      <h3>${ROLE[a.kind]}<span>${phaseOf(a.label, r.n)}</span></h3>
+      <dl className="kv">
+        <dt>Invocation</dt><dd className="mono" title=${a.inv}>${a.inv ? a.inv.slice(0, 12) + '…' : '—'}</dd>
+        <dt>Label</dt><dd className="mono">${a.label}</dd>
+        <dt>Model</dt><dd>${a.model}, Claude Code ${a.driver.toUpperCase()}</dd>
+        <dt>Tool calls</dt><dd className="num">${a.tools}</dd>
+        <dt>Wall time</dt><dd className="num">${li && li.active === a.label ? 'running' : a.dur + 's (replay clock)'}</dd>
+      </dl>
+      <div style=${{ display: 'flex', gap: '4px', margin: '10px 0 0 -6px', flexWrap: 'wrap' }}><${Disclosures} r=${r} a=${a}/>
+        <button className="disc" onClick=${() => set({ agent: s.agent === a.label ? null : a.label })}>${s.agent === a.label ? 'Show all turns' : 'Show only its turns'}</button></div>
+      <${DisclosureBodies} r=${r} a=${a} doneTurn=${!(li && li.active === a.label)}/>
+    </div>` : html`<div className="empty1">Select an invocation to see its prompt and tool calls.</div>`}
+  </${Frag}>`;
+}
+const OUTCOME = { supported: ['Supported', 'ok'], disproven: ['Disproven', 'bad'], implementation_failed: ['Failed', 'bad'] };
+function Chart() {
+  const { s } = useApp();
+  const W = 368, H = 136, pad = { l: 6, r: 42, t: 10, b: 20 }, lo = 900, hi = 1320;
+  const x = n => pad.l + (n - 0.5) / MAX_ROUNDS * (W - pad.l - pad.r), y = v => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
+  const shown = ROUNDS.slice(0, s.live);
+  let d = `M${pad.l} ${y(BASELINE)}`, ret = BASELINE;
+  shown.forEach(r => { if (roundDone(s, r.n) && HIST[r.n - 1].kept) { d += ` H${x(r.n)} V${y(r.perf)}`; ret = r.perf; } });
+  const endX = x(s.live) + 6; d += ` H${endX}`;
+  return html`<div className="chart"><svg viewBox=${`0 0 ${W} ${H}`} role="img" aria-label="Retained metric and attempts by round">
+    <line x1=${pad.l} x2=${W - pad.r} y1=${y(BASELINE)} y2=${y(BASELINE)} stroke="var(--border)"/>
+    <path d=${d} fill="none" stroke="var(--text-1)" strokeWidth="1.5"/>
+    ${shown.map(r => { const h = HIST[r.n - 1], done = roundDone(s, r.n);
+      if (r.perf == null) return html`<path key=${r.n} d=${`M${x(r.n) - 3.5} ${H - pad.b - 9}l7 7m0 -7l-7 7`} stroke="var(--error)" strokeWidth="1.5"><title>Round ${r.n}: not measured</title></path>`;
+      return html`<circle key=${r.n} cx=${x(r.n)} cy=${y(r.perf)} r="3.5" fill=${done && h.kept ? 'var(--text-1)' : 'var(--bg-app)'}
+        stroke=${!done ? 'var(--live)' : h.kept ? 'var(--text-1)' : 'var(--error)'} strokeWidth="1.5"><title>Round ${r.n}: ${fmt(r.perf)} ${UNIT}${done ? '' : ', not yet judged'}</title></circle>`; })}
+    ${Array.from({ length: MAX_ROUNDS - s.live }, (_, k) => s.live + k + 1).map(n => html`<circle key=${'p' + n} cx=${x(n)} cy=${H - pad.b - 5.5} r="2" fill="none" stroke="var(--line)"/>`)}
+    ${Array.from({ length: MAX_ROUNDS }, (_, k) => k + 1).map(n => html`<text key=${'t' + n} x=${x(n)} y=${H - 3} textAnchor="middle">${n}</text>`)}
+    <text x=${W - pad.r + 6} y=${y(BASELINE) + 4}>${fmt(BASELINE)}</text>
+    <text className="v" x=${W - pad.r + 6} y=${y(ret) + 4}>${fmt(ret)}</text>
+  </svg></div>
+  <div className="legend">
+    <span><svg width="16" height="8"><path d="M1 4h14" stroke="var(--text-1)" strokeWidth="1.5"/></svg>Retained</span>
+    <span><svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="var(--text-1)"/></svg>Kept</span>
+    <span><svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="none" stroke="var(--error)" strokeWidth="1.5"/></svg>Rejected</span>
+    <span><svg width="8" height="8"><circle cx="4" cy="4" r="3" fill="none" stroke="var(--live)" strokeWidth="1.5"/></svg>Being judged</span>
+    <span><svg width="8" height="8"><path d="M1 1l6 6m0-6l-6 6" stroke="var(--error)" strokeWidth="1.5"/></svg>Not measured</span>
+    <span><svg width="8" height="8"><circle cx="4" cy="4" r="2" fill="none" stroke="var(--line)"/></svg>Planned</span>
+  </div>`;
+}
+function Experiments() {
+  const { s, set } = useApp();
+  const shown = ROUNDS.slice(0, s.live);
+  return html`<${Frag}>
+    <div className="phead"><span className="scope">Run</span><span>${s.live} of ${MAX_ROUNDS} rounds</span>
+      <span className="r seg2"><button className=${'disc' + (s.expView !== 'design' ? ' on' : '')} style=${{ fontWeight: s.expView !== 'design' ? 500 : 400 }} onClick=${() => set({ expView: 'hyp' })}>Hypotheses</button><button className=${'disc' + (s.expView === 'design' ? ' on' : '')} style=${{ fontWeight: s.expView === 'design' ? 500 : 400 }} onClick=${() => set({ expView: 'design' })}>Design</button></span></div>
+    ${s.expView === 'design' ? html`<div>${shown.map(r => { const ch = roundChanges(r), done = roundDone(s, r.n), h = HIST[r.n - 1];
+        return html`<button key=${r.n} className="xrow" style=${{ gridTemplateColumns: '22px 1fr auto', padding: '8px 16px', alignItems: 'start' }} onClick=${() => set({ round: r.n, pane: 'changes' })}>
+          <span className="id">r${r.n}</span><span><div className="mono">${r.files.join(', ')}</div><div className="t2" style=${{ fontSize: '12px' }}>${r.summary}</div></span>
+          <span className="m num">${ch.add != null ? html`<span className="ok">+${ch.add}</span> <span className="bad">−${ch.del}</span>` : ''}${done && !h.kept ? html`<div className="t2">reverted</div>` : ''}</span></button>`; })}</div>`
+    : html`<${Frag}><${Chart}/>
+      <div role="list">${shown.map(r => { const done = roundDone(s, r.n); const [w, c] = done ? OUTCOME[r.exp_outcome] : ['Judging', 't2']; const open = s.expOpen === r.n;
+        return html`<div key=${r.n} role="listitem"><button className=${'xrow' + (open ? ' sel' : '')} aria-expanded=${open} onClick=${() => set({ expOpen: open ? null : r.n })}>
+          <span className="id">r${r.n}</span><span className="ttl">${r.title}</span><span className=${'oc ' + c}>${w}</span><span className="m">${fmt(r.perf)}</span></button>
+          ${open && html`<div className="ev"><dl className="kv">
+            <dt>Hypothesis</dt><dd>${r.hypothesis}</dd><dt>Pass criteria</dt><dd>${r.pass_criteria}</dd>
+            ${done && html`<${Frag}><dt>Judge</dt><dd>${r.judge_analysis}</dd></${Frag}>`}
+            <dt>Change</dt><dd>${r.summary}</dd><dt>Files</dt><dd className="mono">${r.files.join(', ')}</dd><dt>Commit</dt><dd className="mono">${r.commit}</dd>
+          </dl><div style=${{ marginTop: '8px', display: 'flex', gap: '12px' }}><button className="linkbtn" onClick=${() => set({ round: r.n })}>Open round ${r.n}</button><button className="linkbtn" onClick=${() => set({ round: r.n, pane: 'changes' })}>View changes</button></div></div>`}
+        </div>`; })}</div></${Frag}>`}
+  </${Frag}>`;
+}
+function Notes() {
+  const { s, set } = useApp();
+  return html`<${Frag}>
+    <div className="phead"><span className="scope">Run</span><span>private to you, never sent</span></div>
+    <textarea className="notesed" aria-label="Notes" placeholder="Write notes for this run…" value=${s.notes} onChange=${e => set({ notes: e.target.value })}/>
+    <div className="pfoot"><button className="btn" disabled=${!s.notes.trim()} onClick=${() => set({ draft: s.notes })}>Use as steer draft</button>
+      <button className="btn" disabled=${!s.notes.trim()} onClick=${() => set({ askDraft: s.notes, pane: 'ask' })}>Use as ask draft</button></div>
+  </${Frag}>`;
+}
+function Ask() {
+  const { s, set, later } = useApp();
+  if (!s.harness) return html`<div className="phead"><span className="scope">Run</span></div><div className="empty1">This run offers no chat harness.</div>`;
+  const th = s.threads.find(t => t.id === s.thread);
+  const send = () => { const q = s.askDraft.trim(); const id = s.thread;
+    set({ askDraft: '', threads: s.threads.map(t => t.id === id ? { ...t, title: t.msgs.length ? t.title : q, msgs: [...t.msgs, { who: 'you', text: q }] } : t) });
+    later(900, p => ({ threads: p.threads.map(t => t.id === id ? { ...t, msgs: [...t.msgs, { who: p.model, text: 'Mock reply. This server replays a recorded run; there is no agent behind it.' }] } : t) })); };
+  const newThread = () => { const id = 't' + (s.threads.length + 1); set({ threads: [...s.threads, { id, title: 'New thread', msgs: [] }], thread: id, menu: null }); };
+  return html`<${Frag}>
+    <div className="phead" style=${{ position: 'relative' }}><span className="scope">Run</span>
+      <button className=${'disc' + (s.menu === 'thread' ? ' on' : '')} style=${{ minWidth: 0, maxWidth: '100%', overflow: 'hidden' }} aria-haspopup="menu" onClick=${() => set({ menu: 'thread' })}><span style=${{ overflow: 'hidden', textOverflow: 'ellipsis' }}>${th.title}</span><${Icon} n="down" cls="g"/></button>
+      <span className="r"><button className="iconbtn" title="New thread" aria-label="New thread" onClick=${newThread}><${Icon} n="plus"/></button></span>
+      ${s.menu === 'thread' && html`<${Popover} style=${{ top: 36, left: 12, width: 300 }} onClose=${() => set({ menu: null })}>
+        <div className="gh">${s.threads.length} threads</div>
+        ${s.threads.map(t => html`<button key=${t.id} className=${'it' + (t.id === s.thread ? ' on' : '')} role="menuitemradio" aria-checked=${t.id === s.thread} onClick=${() => set({ thread: t.id, menu: null })}>
+          <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.title}</span><span className="d">${t.msgs.length}</span></button>`)}
+        <div className="sepl"/><button className="it" onClick=${newThread}><${Icon} n="plus" cls="g"/>New thread</button>
+      </${Popover}>`}
+    </div>
+    <div className="thread">${th.msgs.length ? th.msgs.map((m, i) => m.who === 'you' ? html`<div key=${i} className="human">${m.text}</div>`
+      : html`<div key=${i} className="answer"><div className="who2">${m.who}</div>${m.text.split('\n\n').map((p, k) => html`<p key=${k}>${p}</p>`)}</div>`)
+      : html`<div className="t2">Ask about progress, a failure, or what a hypothesis changed.</div>`}</div>
+    <div className="pdock" style=${{ position: 'relative' }}>
+      <${Composer} placeholder=${s.harness ? 'Ask about this run…' : 'This run offers no chat harness'} value=${s.askDraft} disabled=${!s.harness} onChange=${v => set({ askDraft: v })} onSend=${send}>
+        ${s.harness && html`<button className="mchip" aria-haspopup="menu" onClick=${() => set({ menu: 'model' })} title="Chat model">${s.model}<${Icon} n="down" cls="g"/></button>`}
+      </${Composer}>
+      ${s.menu === 'model' && html`<${Popover} style=${{ bottom: 60, right: 12, width: 250 }} onClose=${() => set({ menu: null })}>
+        <div className="gh">Claude Code harness</div>
+        ${['claude-opus-5', 'claude-sonnet-5'].map(m => html`<button key=${m} className=${'it' + (m === s.model ? ' on' : '')} role="menuitemradio" aria-checked=${m === s.model} onClick=${() => set({ model: m, menu: null })}>${m}${m === s.model && html`<span className="d"><${Icon} n="check" cls="g"/></span>`}</button>`)}
+      </${Popover}>`}
+    </div>
+  </${Frag}>`;
+}
+const TABS = [['ask', 'Ask'], ['changes', 'Changes'], ['agents', 'Agents'], ['experiments', 'Experiments'], ['notes', 'Notes']];
+function Pane() {
+  const { s, set } = useApp();
+  return html`<aside className="pane" style=${{ width: s.paneW }} aria-label="Run details">
+    <${Resizer} onDrag=${x => set({ paneW: Math.max(340, Math.min(640, innerWidth - x)) })}/>
+    <div className="tabs" role="tablist">${TABS.map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${s.pane === k} className=${'tab' + (s.pane === k ? ' on' : '')} onClick=${() => set({ pane: k, menu: null })}>${l}</button>`)}
+      <button className="iconbtn" title="Close pane" aria-label="Close pane" onClick=${() => set({ pane: null })}><${Icon} n="x"/></button></div>
+    <div className="pbody">
+      ${s.pane === 'ask' && html`<${Ask}/>`}${s.pane === 'changes' && html`<${Changes}/>`}${s.pane === 'agents' && html`<${Agents}/>`}
+      ${s.pane === 'experiments' && html`<${Experiments}/>`}${s.pane === 'notes' && html`<${Notes}/>`}
+    </div>
+  </aside>`;
+}
+
+/* ================= palette ================= */
+function commands(s, set, later) {
+  const li = liveInfo(s);
+  const go = patch => () => set({ view: 'run', palette: false, ...patch });
+  const latest = [...entriesOf(s, ROUNDS[s.live - 1])].reverse().find(e => e.k === 'start')?.label;
+  const impl = ROUNDS[s.round - 1].agents.find(a => a.kind === 'implementer')?.label;
+  return [
+    ['Run', [
+      s.run === 'paused' ? ['Resume the run', '', '', go({ run: 'running' })] : ['Pause after the current agent call', '', '', () => { set({ palette: false, run: 'pausing' }); later(2600, p => p.run === 'pausing' ? { run: 'paused' } : {}); }],
+      ['Stop run…', 'asks first', '', go({ menu: 'stop' })],
+      ['Steer the next agent call', 'focus the composer', '', () => { set({ palette: false }); setTimeout(() => document.querySelector('.dock input')?.focus(), 0); }],
+      ['New run', '', '⌘N', () => set({ palette: false, view: 'setup', setup: 'ready' })]]],
+    ['Go to', [
+      ...ROUNDS.slice(0, s.live).map(r => [`Round ${r.n}`, r.title, r.n === 1 ? '⌘G' : '', go({ round: r.n, expand: null, agent: null })]),
+      ['Ask', 'chat about this run', '', go({ pane: 'ask' })], ['Changes', 'selected round', '', go({ pane: 'changes' })], ['Agents', 'invocation graph', '', go({ pane: 'agents' })],
+      ['Experiments', 'hypotheses and performance', '', go({ pane: 'experiments', expView: 'hyp' })], ['Design summary', 'files each round changed', '', go({ pane: 'experiments', expView: 'design' })],
+      ['Notes', 'private to you', '', go({ pane: 'notes' })]]],
+    ['Agent', [
+      ['Show the latest prompt', latest ? phaseOf(latest, s.live).toLowerCase() : '', '', go({ round: s.live, open: { ...s.open, [latest + ':prompt']: 1 }, scrollTo: latest })],
+      ['Show the implementer’s todos', `round ${s.round}`, '', go({ open: { ...s.open, [impl + ':todos']: 1 }, scrollTo: impl })]]],
+    ['Ask', [
+      ['New thread', '', '', go({ pane: 'ask', threads: [...s.threads, { id: 't' + (s.threads.length + 1), title: 'New thread', msgs: [] }], thread: 't' + (s.threads.length + 1) })],
+      ['Switch thread…', `${s.threads.length} threads`, '', go({ pane: 'ask', menu: 'thread' })], ['Chat model…', s.model, '', go({ pane: 'ask', menu: 'model' })]]],
+    ['Appearance', ['System', 'Light', 'Dark'].map(t => [`Theme: ${t}`, '', '', () => { setTheme(t.toLowerCase()); set({ palette: false }); }])],
+  ];
+}
+function Palette() {
+  const app = useApp(), { s, set, later } = app;
+  const [sel, setSel] = useState(0); const [more, setMore] = useState(false); const listRef = useRef(null);
+  const q = s.palQ.toLowerCase();
+  const groups = commands(s, set, later).map(([g, items]) => [g, items.filter(it => (g + ' ' + it[0] + ' ' + it[1]).toLowerCase().includes(q))]).filter(g => g[1].length);
+  const flat = groups.flatMap(g => g[1]);
+  const upd = () => { const el = listRef.current; if (el) setMore(el.scrollTop + el.clientHeight < el.scrollHeight - 4); };
+  useEffect(upd, [q]);
+  useEffect(() => { listRef.current?.querySelector('.it.on')?.scrollIntoView({ block: 'nearest' }); }, [sel]);
+  let k = -1;
+  return html`<div className="scrim" onClick=${e => e.target === e.currentTarget && set({ palette: false })}>
+    <div className="pal" role="dialog" aria-label="Search and commands">
+      <input autoFocus placeholder="Search commands, rounds and views…" value=${s.palQ} onChange=${e => { set({ palQ: e.target.value }); setSel(0); }}
+        onKeyDown=${e => { if (e.key === 'ArrowDown') { setSel(Math.min(sel + 1, flat.length - 1)); e.preventDefault(); } if (e.key === 'ArrowUp') { setSel(Math.max(sel - 1, 0)); e.preventDefault(); } if (e.key === 'Enter' && flat[sel]) flat[sel][3](); if (e.key === 'Escape') set({ palette: false }); }}/>
+      <div className=${'list' + (more ? ' more' : '')} role="listbox" ref=${listRef} onScroll=${upd}>${groups.map(([g, items]) => html`<div key=${g}><div className="gh">${g}</div>
+        ${items.map(it => { k++; const on = k === sel, kk = k; return html`<button key=${it[0]} role="option" aria-selected=${on} className=${'it' + (on ? ' on' : '')} onMouseEnter=${() => setSel(kk)} onClick=${it[3]}>
+          <span style=${{ whiteSpace: 'nowrap' }}>${it[0]}</span>${it[1] && html`<span className="d">${it[1]}</span>`}${it[2] && html`<span className="kbd">${it[2]}</span>`}</button>`; })}</div>`)}
+        ${!flat.length && html`<div className="gh">No matching commands</div>`}
+      </div>
+      <div className="foot"><span className="kbd">↑↓ move</span><span className="kbd">↵ run</span><span className="kbd">esc close</span><span className="kbd" style=${{ marginLeft: 'auto' }}>${flat.length} results${more ? ', scroll for more' : ''}</span></div>
+    </div>
+  </div>`;
+}
+
+/* ================= setup ================= */
+function Setup() {
+  const { s, set } = useApp();
+  const v = s.setup, isNew = v === 'new', blk = v === 'blockers', checking = v === 'checking';
+  const focusF = id => { const el = document.getElementById(id); el?.scrollIntoView({ block: 'center' }); el?.focus(); };
+  const blockers = blk ? [['f-folder', 'Folder has uncommitted changes'], ['f-key', 'Anthropic key was rejected']]
+    : isNew ? [['f-obj', 'Objective is empty'], ['f-key', 'OpenAI key is needed for Codex CLI']] : [];
+  const ready = v === 'ready';
+  return html`<${Frag}>
+    <${TitleRow} name="New run" proj=${null} tools=${false}/>
+    <div className="scroll"><div className="form">
+      <div className="fr"><label htmlFor="f-folder">Folder</label><div>
+        <div className="row2"><div className=${'fld' + (blk ? ' bad' : '')} id="f-folder" tabIndex="0"><span className="sp mono">~/src/llm-serve</span></div><button className="btn">Browse…</button></div>
+        ${blk ? html`<div className="hint bad">Uncommitted changes in src/batch.rs. Commit or stash them so rounds can revert cleanly.</div>`
+          : html`<div className="hint"><${Check}/>Git repository on main, working tree clean</div>`}</div></div>
+      <div className="fr"><span className="lab">Task</span>${isNew ? html`<div className="fld"><span className="sp">New task</span><${Icon} n="down" cls="g t2"/></div>`
+        : html`<div className="summary"><span className="t">Increase decode throughput</span>
+            <span className="m">${OBJECTIVE}</span><span className="m"><span className="mono">${BENCH}</span>, ${METRIC} higher is better, 12 rounds</span>
+            <button className="btn" onClick=${() => set({ setup: 'new' })}>Edit</button></div>`}</div>
+      ${isNew && html`<${Frag}>
+        <div className="fr"><label htmlFor="f-obj">Objective</label><div className="fld area" id="f-obj" tabIndex="0"><span className="ph">What should improve, and what must not change?</span></div></div>
+        <div className="fr"><label>Benchmark</label><div><div className="fld"><span className="sp mono">${BENCH}</span></div><div className="hint">Found in benches/ of this folder.</div></div></div>
+        <div className="fr"><label>Metric</label><div className="row2"><div className="fld"><span className="sp mono">${METRIC}</span></div><div className="fld" style=${{ flex: 'none' }}>Higher is better<${Icon} n="down" cls="g t2"/></div></div></div>
+        <div className="fr"><label>Rounds</label><div className="fld num" style=${{ width: '64px' }}>12</div></div></${Frag}>`}
+      <div className="fr"><span className="lab">Model</span><div>
+        <div className="fld"><span className="sp">${isNew ? html`Codex CLI <span className="t2">gpt-5-codex</span>` : html`Claude Code <span className="t2">claude-opus-5</span>`}</span><${Icon} n="down" cls="g t2"/></div>
+        <button className="disc" style=${{ marginTop: '4px', marginLeft: '-6px' }}><${Chev}/>Use a different model per role</button></div></div>
+      <div className="fr"><label htmlFor="f-key">${isNew ? 'OpenAI key' : 'Anthropic key'}</label><div>
+        <div className=${'fld' + (blk ? ' bad' : checking ? ' focus' : '')} id="f-key" tabIndex="0">
+          ${isNew ? html`<span className="sp ph">Paste a key…</span>` : html`<span className="sp" style=${{ letterSpacing: '.12em' }}>••••••••••••••••••••</span>`}
+          ${checking && html`<span className="spin"/><span className="t2" style=${{ fontSize: '12px' }}>Checking…</span><button className="linkbtn">Cancel</button>`}
+          ${ready && html`<${Check} label="accepted"/><span className="t2" style=${{ fontSize: '12px' }}>Accepted</span>`}
+        </div>
+        <div className=${'hint' + (blk ? ' bad' : '')}>${blk ? html`Rejected: the provider answered 401 invalid x-api-key. Paste a new key.`
+          : isNew ? 'Required by Codex CLI. The check was cancelled; paste the key again to check it. Write-only.' : 'Write-only. Stored for this machine and never shown again.'}</div></div></div>
+      <div className="fr"><span/><button className="disc" style=${{ marginLeft: '-6px' }}><${Chev}/>Advanced</button></div>
+    </div></div>
+    <footer className="sheetfoot">
+      ${blockers.length ? html`<span>${blockers.length} to fix:</span>${blockers.map(([id, t], i) => html`<button key=${id} className="linkbtn" onClick=${() => focusF(id)}>${t}</button>`)}` : ''}
+      <span className="sp"/><button className="btn ghost" onClick=${() => set({ view: 'home' })}>Cancel</button>
+      <button className="btn primary" disabled=${!ready} onClick=${() => set({ view: 'starting' })}>Start run</button>
+    </footer>
+  </${Frag}>`;
+}
+function Starting({ failed }) {
+  const { s, set } = useApp();
+  const [opened, setOpened] = useState(false);
+  return html`<${Frag}>
+    <${TitleRow}><span className="status" aria-live="polite">${failed ? html`<span className="dot err"/>Did not start` : html`<span className="spin"/>Measuring the baseline`}</span></${TitleRow}>
+    <div className="scroll">
+      <div className="sticky"><div className="in"><span className="rn">Before round 1</span><span className="ttl">Baseline</span>
+        <span className="res">${failed ? html`<span className="bad">Failed</span>` : html`<span>No agents running yet</span>`}</span></div></div>
+      <div className="col">
+        <p className="claim">${failed ? html`The benchmark exited with code 101 before printing <span className="mono">${METRIC}</span>. Your settings are kept.`
+          : html`VibeSys measures <span className="mono">${METRIC}</span> on the unchanged code. Round 1’s orchestrator starts when it finishes.`}</p>
+        <div className="actions" style=${{ marginTop: '20px' }}>
+          ${failed ? html`<div className="tool open"><div className="trow"><span className="verb">Ran</span><span className="obj">${BENCH}</span><span className="end bad">exit 101</span></div>
+            <div className="out"><pre><span className="cmd">${'$ ' + BENCH + '\n'}</span>${'error[E0599]: no method named `decode_step` found\n  --> '}<button className="linkish" onClick=${() => setOpened(true)}>benches/decode.rs:41:14</button></pre></div></div>`
+          : html`<div className="tool"><div className="trow"><span className="spin"/><span className="verb">Running</span><span className="obj">${BENCH}</span><span className="end t2">12s</span></div></div>`}
+        </div>
+        ${failed && html`<div style=${{ display: 'flex', gap: '8px', marginTop: '6px' }}><button className="btn primary" onClick=${() => set({ view: 'starting' })}>Retry</button>
+          <button className="btn" onClick=${() => setOpened(true)}>${opened ? 'Opened in editor' : 'Open benches/decode.rs:41 in editor'}</button><button className="btn ghost" onClick=${() => set({ view: 'setup', setup: 'ready' })}>Back to setup</button></div>`}
+      </div>
+    </div>
+    ${!failed && html`<${SteerDock} placeholder="Steer round 1’s planning…"/>`}
+  </${Frag}>`;
+}
+
+/* ================= app ================= */
+function setTheme(t) { const r = document.documentElement; const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches); r.setAttribute('data-theme', dark ? 'dark' : 'light'); }
+const params = new URLSearchParams(location.search);
+setTheme(params.get('theme') || 'system');
+if (!params.get('theme')) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme('system'));
+const hideHarness = params.get('capture') === '1' || navigator.webdriver;
+
+function App() {
+  const [s, setS] = useState(fromHash);
+  const set = patch => setS(p => ({ ...p, ...(typeof patch === 'function' ? patch(p) : patch) }));
+  const later = (ms, fn) => setTimeout(() => setS(p => ({ ...p, ...fn(p) })), ms);
+  const w = useWidth();
+  const narrow = w < 1200;
+  const sideShown = s.sideOpen && !(narrow && s.view === 'run' && s.pane);
+  useEffect(() => { const f = () => setS(fromHash()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  useEffect(() => { const f = e => { if (!(e.metaKey || e.ctrlKey)) return;
+    if (e.key === 'k') { e.preventDefault(); set({ palette: true, palQ: '' }); }
+    if (e.key === 'n') { e.preventDefault(); set({ view: 'setup', setup: 'ready', palette: false }); }
+    if (e.key === 'g') { e.preventDefault(); set({ palette: true, palQ: 'Round ' }); } };
+    addEventListener('keydown', f); return () => removeEventListener('keydown', f); }, []);
+  let main;
+  if (s.view === 'home') main = html`<${TitleRow} name="" proj=${null} tools=${false}/><div className="empty">Select a run, or start one with ⌘N</div>`;
+  else if (s.view === 'other') main = html`<${TitleRow} name=${s.other} proj=${null} tools=${false}><span className="status">Finished</span></${TitleRow}><div className="empty">This run’s rounds are not part of the recording.</div>`;
+  else if (s.view === 'setup') main = html`<${Setup}/>`;
+  else if (s.view === 'starting') main = html`<${Starting}/>`;
+  else if (s.view === 'startfail') main = html`<${Starting} failed=${true}/>`;
+  else main = html`<${TitleRow}><${RunControls}/></${TitleRow}><${Transcript}/><${SteerDock}/>`;
+  return html`<${Ctx.Provider} value=${{ s, set, later, sideShown }}>
+    <div className="win">
+      ${sideShown && html`<${Sidebar}/>`}
+      <main className="main">${main}</main>
+      ${s.view === 'run' && s.pane && html`<${Pane}/>`}
+    </div>
+    ${s.palette && html`<${Palette}/>`}
+    ${!hideHarness && html`<div className="harness">Screen <select value=${location.hash.slice(1) || 'live'} onChange=${e => location.hash = e.target.value}>${Object.keys(SCREENS).map(k => html`<option key=${k}>${k}</option>`)}</select></div>`}
+  </${Ctx.Provider}>`;
+}
+createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
