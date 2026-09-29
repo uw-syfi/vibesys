@@ -701,9 +701,7 @@ def list_runs(request: Request) -> RunList:
     except ProjectError:
         manifests = []
     store = open_run_store(project)
-    rows = [
-        _row(config, root, store, manifest, published) for manifest in reversed(manifests)
-    ]
+    rows = [_row(config, root, store, manifest, published) for manifest in reversed(manifests)]
     known = {row.run_id for row in rows}
     launch = config.launches.get(_live_record(config, root))
     candidates = [item.run_id for item in published] + ([launch.run_id] if launch else [])
