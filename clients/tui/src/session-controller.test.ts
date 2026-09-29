@@ -1188,6 +1188,53 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.selectedId).toBe('H-resumed');
   });
 
+  it('stops loading experiments when the run ends before its project attaches', async () => {
+    const transport = new FakeTransport();
+    transport.experimentsReady = false;
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    expect(controller.state.experimentLog?.pending).toBe(true);
+
+    transport.emit({
+      type: 'event_batch',
+      events: [
+        {
+          ...event(1, 'run_failed'),
+          diagnostic: {
+            code: 'run_failed',
+            summary: 'Setup failed.',
+            scope: 'run',
+            severity: 'fatal',
+            retryability: 'never',
+          },
+        },
+      ],
+      through_sequence: 1,
+      active_executions: [],
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.pending).toBe(false);
+    expect(controller.state.experimentLog?.error).toBe(
+      'The run ended before its experiments were available.',
+    );
+  });
+
+  it('shows recorded experiments for an ended run without a failure', async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [entry('H-01', 1, 1, {})];
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emit({type: 'event', event: event(1, 'run_finished')});
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.error).toBeNull();
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-01',
+    ]);
+  });
+
   it('reports how long the landing view waited for experiments', async () => {
     const transport = new FakeTransport();
     transport.experiments = [entry('H-01', 1, 1, {resolved_outcome: 'proven'})];

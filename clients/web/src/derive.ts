@@ -437,10 +437,15 @@ export function trendModel(
   };
 }
 
-/** What the rail shows from the experiments query: `experiments_ready: false` is unattached. */
-export function railState(experiments: ProtocolResponse | null, error: string | null): RailState {
+/** What the rail shows from the experiments query: not ready is unattached, or never attached once ended. */
+export function railState(
+  experiments: ProtocolResponse | null,
+  error: string | null,
+  ended: boolean,
+): RailState {
   if (experiments === null) return error === null ? 'loading' : 'error';
-  return experiments.experiments_ready === false ? 'unattached' : 'ready';
+  if (experiments.experiments_ready !== false) return 'ready';
+  return ended ? 'ended-unattached' : 'unattached';
 }
 
 export function steers(captured: readonly RunEvent[]): Steers {

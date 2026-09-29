@@ -28,7 +28,7 @@ export interface RailRow {
 }
 
 /** `error` is a failed first load: the rail shows only the error, no skeleton. */
-export type RailState = 'loading' | 'error' | 'unattached' | 'ready';
+export type RailState = 'loading' | 'error' | 'unattached' | 'ended-unattached' | 'ready';
 
 export interface RailModel {
   rows: RailRow[];

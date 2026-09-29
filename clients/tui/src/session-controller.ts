@@ -131,6 +131,9 @@ import {
 import {renderDesignSummary} from './ui/design-log.js';
 import {DEFAULT_THEME_NAME, type ThemeName} from './ui/theme.js';
 
+/** Shown when a run ends before its project, and so its experiments, ever attached. */
+const EXPERIMENTS_NEVER_ATTACHED = 'The run ended before its experiments were available.';
+
 export interface SessionController {
   readonly state: SessionState;
   start(): Promise<void>;
@@ -1069,7 +1072,12 @@ export class SocketSessionController implements SessionController {
         type: 'query.experiments',
         ...(this.#experimentCursor === null ? {} : {after: this.#experimentCursor}),
       });
-      if (response.experiments_ready === false) return;
+      if (response.experiments_ready === false) {
+        if (hasRunEnded(this.#state.core)) {
+          this.#setState(failExperiments(this.#state, EXPERIMENTS_NEVER_ATTACHED));
+        }
+        return;
+      }
       const entries = response.experiments ?? [];
       const update = response.experiment_update;
       if (this.#experimentResponseStale(generation, update)) {
@@ -1537,7 +1545,15 @@ export class SocketSessionController implements SessionController {
       relevant = true;
       this.#noteExperimentsChanged(event);
     }
-    if (!relevant || !this.#experimentRefreshNeeded()) return;
+    if (!relevant) {
+      // A run that ends before its project attaches never signals; ask once
+      // more so the answer settles the pending log instead of loading forever.
+      if (this.#state.experimentLog?.pending === true && hasRunEnded(this.#state.core)) {
+        void this.#loadExperiments();
+      }
+      return;
+    }
+    if (!this.#experimentRefreshNeeded()) return;
     if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
     void this.#loadExperiments();
   }

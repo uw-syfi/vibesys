@@ -173,13 +173,19 @@ test('rail rows: statuses, values, official, incumbent, rounds left', () => {
   );
 });
 
-test('rail state: loading, unattached, ready, and a failed first load', () => {
+test('rail state: loading, unattached, ended before attaching, ready, and a failed first load', () => {
   const experiments = (ready: boolean) => ({request_id: 'q', ok: true, experiments_ready: ready});
-  assert.equal(railState(null, null), 'loading');
-  assert.equal(railState(experiments(false), null), 'unattached');
-  assert.equal(railState(experiments(true), null), 'ready');
-  assert.equal(railState(null, 'Experiments unavailable'), 'error', 'the error alone, no skeleton');
-  assert.equal(railState(experiments(true), 'down'), 'ready', 'a failed refetch keeps its rows');
+  assert.equal(railState(null, null, false), 'loading');
+  assert.equal(railState(experiments(false), null, false), 'unattached');
+  assert.equal(
+    railState(experiments(false), null, true),
+    'ended-unattached',
+    'an ended run stops waiting',
+  );
+  assert.equal(railState(experiments(true), null, true), 'ready', 'an ended run with data is ready');
+  assert.equal(railState(experiments(true), null, false), 'ready');
+  assert.equal(railState(null, 'Experiments unavailable', false), 'error', 'the error alone, no skeleton');
+  assert.equal(railState(experiments(true), 'down', false), 'ready', 'a failed refetch keeps its rows');
 });
 
 test('R0: a baseline row only with a baseline value, the incumbent until the first kept round', () => {

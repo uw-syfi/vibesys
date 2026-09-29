@@ -439,13 +439,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
         with boot_trace.span("workspace_setup"):
             integration.attach(log_dir, project=project, run_id=run_id)
-            integration.events.emit(
-                CoreEventType.EXPERIMENTS_CHANGED,
-                data=ExperimentsChangedData(reason="project_attached"),
-            )
-            logger.lprint(
-                f"experiments gate open after {(time.perf_counter() - context_start) * 1000:.0f}ms"
-            )
 
             project_ref_dir = (
                 project_root / task_root.relative_to(input_dir) / "reference"
@@ -586,6 +579,15 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 skill_source_dirs=tuple(skill_source_paths),
                 host_resources=agent_host_resources,
             )
+        )
+        # The resource listener attaches the run record synchronously, so a
+        # client that queries on this signal finds experiments ready.
+        integration.events.emit(
+            CoreEventType.EXPERIMENTS_CHANGED,
+            data=ExperimentsChangedData(reason="project_attached"),
+        )
+        logger.lprint(
+            f"experiments gate open after {(time.perf_counter() - context_start) * 1000:.0f}ms"
         )
         project_resources.mark_ready()
         experiment_repository.arm()

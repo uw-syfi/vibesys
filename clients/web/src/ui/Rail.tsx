@@ -89,6 +89,8 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
         </ol>
       ) : state === 'unattached' ? (
         <p className="rail-note">Waiting for the project to attach</p>
+      ) : state === 'ended-unattached' ? (
+        <p className="rail-note">The run ended before the project attached</p>
       ) : model.rows.length === 0 ? (
         <p className="rail-note">No rounds started yet</p>
       ) : (

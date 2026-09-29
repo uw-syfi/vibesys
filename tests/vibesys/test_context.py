@@ -11,11 +11,15 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 
+from tests.server.support import build_server_parts
+
+from server.api.protocol import ExperimentQuery
 from vibesys.api import open_run_store
+from vibesys.api._session import _run_ready
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.errors import ConfigurationError
-from vibesys.events import CoreEventType
+from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import (
     WorkspaceInput,
     WorkspaceSource,
@@ -34,6 +38,7 @@ from vibesys.orchestration.profilers import (
 from vibesys.plugin_builtins import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vibesys.run.contracts import ResumeRef, RunRequest
+from vibesys.run.integration import RunResources
 from vibesys.run.resources import (
     _PreparedRun,
     open_run_resources,
@@ -341,13 +346,48 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
         integration.close()
 
 
+def test_project_attached_signal_finds_the_record_attached(tmp_path: Path) -> None:
+    """A client that queries on ``project_attached`` gets an attached run.
+
+    Mirrors production: ``RunSession`` projects resources with ``_run_ready`` and
+    ``RunIntegrationAdapter.handle_run_ready`` attaches the record, synchronously,
+    inside the resource listener.
+    """
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    integration = LocalRunIntegration()
+    server = build_server_parts()
+    answers: list[bool | None] = []
+
+    def attach_record(resources: RunResources) -> None:
+        ready = _run_ready(resources, built_in_orchestrations())
+        server.integration.attach(ready.log_directory, record=ready.record)
+
+    def query_on_signal(event: CoreEvent) -> None:
+        data = event.data
+        if isinstance(data, ExperimentsChangedData) and data.reason == "project_attached":
+            answers.append(server.api.execute(ExperimentQuery()).experiments_ready)
+
+    integration.add_resource_listener(attach_record)
+    unsubscribe = integration.events.subscribe(query_on_signal)
+    try:
+        with _create_context(project, evaluator=evaluator, integration=integration):
+            pass
+    finally:
+        unsubscribe()
+        integration.close()
+        server.close()
+
+    assert answers == [True]
+
+
 def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
     ``open_run_resources`` spends time before the TUI's hypothesis screen
-    can leave "loading experiments..." (the gate flips when the second
-    ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
+    can leave "loading experiments..." (the gate flips when
+    ``EXPERIMENTS_CHANGED`` is recorded after resource publication).
     """
     project = tmp_path / "queue"
     evaluator = _write_project(project)

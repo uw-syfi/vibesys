@@ -1,4 +1,5 @@
 import type {DesignRound, HypothesisEntry, PerformanceRound} from '@vibesys/backend-client';
+import {hasRunEnded} from '@vibesys/core-state';
 import {
   type ReactNode,
   useCallback,
@@ -218,7 +219,7 @@ export function App({session, connect}: {session: WorkspaceSession; connect?: Re
       {summary === null ? null : <Summary model={summary} trend={trend} />}
       <div className="shell">
         <Rail
-          state={railState(queries.experiments.response, queries.experiments.error)}
+          state={railState(queries.experiments.response, queries.experiments.error, hasRunEnded(core))}
           model={rail}
           selected={selected}
           error={queries.experiments.error}
