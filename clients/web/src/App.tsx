@@ -1,6 +1,6 @@
 /** The run window over one WorkspaceSession: the only component that reads the session. */
 
-import type {HypothesisEntry} from '@vibesys/backend-client';
+import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
 import {
   type Dispatch,
@@ -30,6 +30,7 @@ import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js
 import {AgentsTab} from './ui/Agents.js';
 import {Banner} from './ui/Banner.js';
 import {ChangesTab} from './ui/Changes.js';
+import {ExperimentsTab} from './ui/Experiments.js';
 import {Pane, Placeholder} from './ui/Pane.js';
 import {Resizer} from './ui/Resizer.js';
 import {Sidebar} from './ui/Sidebar.js';
@@ -57,6 +58,7 @@ import {
 import './window.css';
 
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
+const NO_DESIGN: DesignRound[] = [];
 const ACTION_WORDS = {pause: 'Pause', resume: 'Resume', steer: 'Steer', stop: 'Stop'} as const;
 
 export interface AppProps {
@@ -371,8 +373,30 @@ function agentsTab(props: PaneHostProps) {
   );
 }
 
+function experimentsTab(props: PaneHostProps) {
+  const {dispatch, view, state} = props;
+  const open = (round: number) => dispatch({type: 'round', round, live: view.live});
+  return (
+    <ExperimentsTab
+      summary={view.summary}
+      experiments={state.queries.experiments.response?.experiments ?? NO_EXPERIMENTS}
+      designRounds={state.queries.design.response?.design ?? NO_DESIGN}
+      captured={state.captured}
+      maxRounds={state.core.maxRounds}
+      view={props.ui.experimentsView}
+      open={props.ui.evidence}
+      onView={next => dispatch({type: 'experimentsView', view: next})}
+      onToggle={round => dispatch({type: 'evidence', round})}
+      onRound={open}
+      onChanges={round => {
+        open(round);
+        dispatch({type: 'pane', pane: 'changes'});
+      }}
+    />
+  );
+}
+
 function PaneBody(props: PaneHostProps) {
-  const scope = props.view.round === null ? 'Run' : `Round ${props.view.round}`;
   switch (props.tab) {
     case 'ask':
       return <Placeholder scope="Run" text="Chat about this run is not available yet." />;
@@ -383,7 +407,7 @@ function PaneBody(props: PaneHostProps) {
     case 'agents':
       return agentsTab(props);
     case 'experiments':
-      return <Placeholder scope={scope} text="Not available yet." />;
+      return experimentsTab(props);
   }
 }
 

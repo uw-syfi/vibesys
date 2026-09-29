@@ -185,3 +185,23 @@ test('agents: one card per execution, top to bottom; a card filters the transcri
   await page.locator('.filterbar').getByRole('button', {name: 'Show all'}).click();
   await expect(page.locator('main .turn')).toHaveCount(4);
 });
+
+test('experiments: chart with legend, evidence per round, design summary', async ({page}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
+  await page.getByRole('tab', {name: 'Experiments'}).click();
+  const pane = page.getByRole('complementary', {name: 'Run details'});
+  await expect(
+    pane.getByRole('img', {name: 'Retained metric and attempts by round'}),
+  ).toBeVisible();
+  await expect(pane.locator('.legend')).toContainText('Being judged');
+  await pane.locator('.xrow', {hasText: 'Skip the post-sampling device sync'}).click();
+  await expect(pane.locator('.ev')).toContainText('Pass criteria');
+  await pane.getByRole('button', {name: 'View changes'}).click();
+  await expect(page.getByRole('tab', {name: 'Changes'})).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.sticky')).toContainText('Round 3');
+  await page.getByRole('tab', {name: 'Experiments'}).click();
+  await pane.getByRole('button', {name: 'Design'}).click();
+  await expect(pane).toContainText('src/sampler.rs');
+});

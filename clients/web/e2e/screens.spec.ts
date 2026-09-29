@@ -109,6 +109,25 @@ const SCREENS: Screen[] = [
       await page.locator('.filterbar').waitFor();
     },
   },
+  {
+    name: 'experiments',
+    act: async page => {
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByRole('tab', {name: 'Experiments'}).click();
+      await page
+        .getByRole('complementary', {name: 'Run details'})
+        .locator('.xrow', {hasText: 'Skip the post-sampling device sync'})
+        .click();
+    },
+  },
+  {
+    name: 'design',
+    act: async page => {
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByRole('tab', {name: 'Experiments'}).click();
+      await page.getByRole('button', {name: 'Design'}).click();
+    },
+  },
 ];
 
 test.describe('screens', () => {

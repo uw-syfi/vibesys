@@ -193,3 +193,24 @@ dialog::backdrop { background: var(--scrim); }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .detailacts { display: flex; gap: 4px; margin: 10px 0 0 -6px; flex-wrap: wrap; }
 .detailacts .acts { margin-left: 0; }
+
+/* experiments */
+.seg2 { display: inline-flex; gap: 2px; }
+.chart { padding: 12px 16px 0; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { font: 11px var(--sans); fill: var(--text-3); font-variant-numeric: tabular-nums; }
+.chart text.v { fill: var(--text-1); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px 12px; font-size: 11px; line-height: 14px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.xrow { display: grid; grid-template-columns: 22px 1fr auto 44px; align-items: center; gap: 8px; min-height: 36px; padding: 0 16px; border-bottom: 1px solid var(--border-subtle); color: var(--text-1); width: 100%; }
+.xrow:hover { background: var(--bg-hover); }
+.xrow.sel { background: var(--bg-selected); }
+.xrow.design { grid-template-columns: 22px 1fr auto; padding: 8px 16px; align-items: start; }
+.xrow .id { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.xrow .ttl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xrow .oc { font-size: 12px; }
+.xrow .m { text-align: right; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.xrow .t2 { font-size: 12px; }
+.ev { padding: 4px 16px 14px 46px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-sidebar); }
+.evacts { margin-top: 8px; display: flex; gap: 12px; }
+.evlist { list-style: none; margin: 0; padding: 0; }
