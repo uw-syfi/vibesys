@@ -220,7 +220,10 @@ test('⌘K opens the palette; a command runs and closes it; Escape closes it', a
   await page.getByRole('button', {name: /Search and commands/}).click();
   await page.keyboard.type('experiments');
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('tab', {name: 'Experiments'})).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', {name: 'Experiments'})).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await page.keyboard.press('ControlOrMeta+k');
   await page.keyboard.press('Escape');
   await expect(palette).toHaveCount(0);

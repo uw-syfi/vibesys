@@ -36,15 +36,53 @@ const OUTCOMES: readonly Outcome[] = [
 const isOutcome = (value: string | null): value is Outcome =>
   OUTCOMES.some(outcome => outcome === value);
 
-export const DEMO: RunEvent[] = readFileSync(
+const RECORDED: RunEvent[] = readFileSync(
   new URL('../src/fixtures/demo-run.jsonl', import.meta.url),
   'utf8',
 )
   .split('\n')
   .filter(Boolean)
   .map(line => JSON.parse(line) as RunEvent);
-/** Round 6's judge is working: its execution started (231, 232) and has not finished (233). */
-export const LIVE_THROUGH = 232;
+
+/** [mock] The recording carries no prompt or todo text. Round 6's implementer, the current turn
+ * most screens open on, gets both so the Prompt and Todos disclosures have something to show. */
+const MOCK_PROMPT_EXECUTION_ID = '2b7120fc0f905b626a19ed1eae1a6514';
+const MOCK_USER_PROMPT =
+  'Round 6 plan: mutex contention profiling showed time in the queue mutex under concurrent ' +
+  'load. Switch the request queue to a lock-free MPMC ring buffer and confirm throughput does ' +
+  'not regress.';
+const MOCK_TODOS: {content: string; status: string}[] = [
+  {content: 'Profile queue contention under concurrent load', status: 'completed'},
+  {content: 'Replace the mutex-backed queue with a lock-free MPMC ring', status: 'completed'},
+  {content: 'Run the test suite', status: 'in_progress'},
+  {content: 'Benchmark decode throughput', status: 'pending'},
+];
+
+/** Gives round 6's implementer a prompt and inserts a todo_update event right after it starts,
+ * then renumbers sequences (the recording's are contiguous from 1) so both stay consistent. */
+function withMockPromptAndTodos(events: readonly RunEvent[]): RunEvent[] {
+  const withTodos = events.flatMap(event => {
+    if (
+      event.execution_id !== MOCK_PROMPT_EXECUTION_ID ||
+      event.data?.kind !== 'agent_execution_started'
+    ) {
+      return [event];
+    }
+    const started: RunEvent = {...event, data: {...event.data, user_prompt: MOCK_USER_PROMPT}};
+    const todoUpdate: RunEvent = {
+      ...event,
+      type: 'todo_update',
+      data: {kind: 'todo_update', todos: MOCK_TODOS},
+    };
+    return [started, todoUpdate];
+  });
+  return withTodos.map((event, index) => ({...event, sequence: index + 1}));
+}
+
+export const DEMO: RunEvent[] = withMockPromptAndTodos(RECORDED);
+/** Round 6's judge is working: its execution started (232, 233) and has not finished (234), one
+ * later than the recording's own sequence because the mock todo_update above adds an event. */
+export const LIVE_THROUGH = 233;
 export const FINISHED = DEMO.at(-1)?.sequence ?? 0;
 /** [mock] The objective and the 950 tok/s baseline the recording's round 1 judge states. */
 export const DEMO_CONTEXT: PerformanceContext = {

@@ -30,24 +30,22 @@ form to connect to a live gateway URL.
 
 ## Behavior
 
-- Three regions: a round rail, the selected round's log, and an inspector.
-  From 768 to 1199 px the inspector is a dialog opened by selecting a round.
-  Below 768 px the rail is a chip strip, and tapping the selected chip opens
-  the inspector as a bottom sheet.
-- Core-state projects snapshots, ordered events, duplicate replay, execution
-  checkpoints, and history prefixes. Bootstrap requests 300 events. When the
-  selected round starts below that tail, earlier history loads on its own in
-  500-event chunks until the round's start is in.
-- `query.snapshot`, `query.experiments`, `query.design`, and
-  `query.performance` run once per bootstrap batch; the last three rerun on
-  `experiments_changed`. Only `performance_context` is kept: the header
-  objective and the R0 baseline.
-- Pause and Resume follow the run status only. A failed command shows its
-  diagnostic next to the control until the next command. A steer shows as
-  Queued until a `control` consumed event places it in the log.
-- Keys: `j`/`k` or the arrows change the round, `p` pauses or resumes, `/`
-  focuses the steer input, and `?` lists the keys with a toggle that turns
-  the single-key shortcuts off or back on.
+- One window: a sidebar (projects, runs, and the open run's rounds), the selected round's
+  transcript, and an optional right pane (Ask, Changes, Agents, Experiments, Notes). The sidebar
+  yields before the transcript drops below 560 px; both edges resize by drag or arrow keys.
+- The title row says what the run is doing now, offers Pause or Resume (hidden while a
+  transition is pending), shows the kept checkpoint against the baseline, toggles the pane, and
+  opens ••• (Notes, Copy run ID, Stop run with a confirmation).
+- The transcript groups a round by agent execution: one-line tool calls that open to their
+  output or diff, Prompt and Todos when the execution recorded them, and the judge verdict. A
+  steer shows Queued on the backend's pending acknowledgment and Applied on its consumed control
+  event.
+- Agents draws the round's executions top to bottom (React Flow, dagre). Edges follow start
+  times and are dashed because events carry no dependency graph; a card filters the transcript.
+- ⌘K lists the visible controls, the rounds and the pane tabs. Ask and Notes are placeholders
+  until sub-project 5. The sidebar reads `HomeApi`, a fixture until the home server exists.
+- Themes: System (default), Light and Dark (`?theme=light|dark`).
+- Session, core-state, the tail bootstrap and backfill are unchanged (`src/session.ts`).
 
 ## Verification
 

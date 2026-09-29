@@ -31,9 +31,9 @@ From a VibeSys source checkout:
 uv run python -m entrypoints.web dev
 ```
 
-Open `http://127.0.0.1:5173`. This mode serves the deterministic event fixture
-through Vite and shows a `Live gateway URL` field. It does not start a Python
-server or a WebSocket connection until a capability URL is submitted.
+Open `http://127.0.0.1:5173`. This mode replays `clients/web/src/fixtures/demo-run.jsonl` in the
+browser; queries answer empty, so round titles come from the recorded plans. It starts no Python
+server. Append `?gateway=<capability URL>` to connect the page to a live gateway instead.
 
 ## Live demo mode
 
