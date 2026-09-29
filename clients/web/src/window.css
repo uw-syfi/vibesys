@@ -306,3 +306,11 @@ dialog.picker:not([open]) { display: none; }
 .pit .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .picker .hint { margin: 0; padding: 0 14px 8px; }
 .picker .row { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--border-subtle); }
+
+/* task form and commit confirmation */
+.fld.flag { flex: none; width: 96px; }
+.acts2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.acts2 .hint { margin: 0; white-space: pre-wrap; }
+dialog.commit { width: 440px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow); }
+.commit .files { margin: 0 0 10px; padding: 8px 10px; list-style: none; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-sidebar); max-height: 160px; overflow: auto; }
+.commit .err { margin: 0 0 10px; font: 12px/18px var(--mono); color: var(--error); white-space: pre-wrap; }

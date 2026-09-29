@@ -3,20 +3,22 @@
  * field that fixes it), the folder and key status lines, and the start request. Pure; `SetupView`
  * owns the state and the API calls.
  */
-import type {
-  AuthStatus,
-  Catalog,
-  ComputeBackend,
-  Driver,
-  OuterLoop,
-  OuterLoopId,
-  ProjectValidation,
-  ProviderAuth,
-  StartRun,
-  TaskDetail,
-  TaskDomain,
-  TaskForm,
-  TaskSummary,
+import {
+  type AuthStatus,
+  type Catalog,
+  type ComputeBackend,
+  type Driver,
+  errorText,
+  HomeError,
+  type OuterLoop,
+  type OuterLoopId,
+  type ProjectValidation,
+  type ProviderAuth,
+  type StartRun,
+  type TaskDetail,
+  type TaskDomain,
+  type TaskForm,
+  type TaskSummary,
 } from './home-api.js';
 
 /** The task select's "New task" value; task names start with [a-z0-9], so it cannot collide. */
@@ -153,6 +155,30 @@ export function withTasks(form: SetupForm, tasks: readonly TaskSummary[]): Setup
   if (form.task === NEW_TASK || kept) return form;
   const first = tasks.find(task => task.valid)?.name;
   return withTask(form, first ?? NEW_TASK);
+}
+
+/** Discard: an edit returns to its saved task; a new task to the first valid task, or a fresh form. */
+export function withoutDraft(form: SetupForm, tasks: readonly TaskSummary[]): SetupForm {
+  if (form.task !== NEW_TASK) return {...form, draft: null};
+  return withTasks({...form, task: null, draft: null}, tasks);
+}
+
+/** A name the server would refuse; empty is only incomplete. */
+export const badTaskName = (name: string): boolean => name !== '' && !TASK_NAME.test(name);
+
+/** A refused task save as one line. A conflict never retries: the saved task is reloaded by Discard. */
+export function saveError(reason: unknown): string {
+  if (!(reason instanceof HomeError)) return errorText(reason);
+  switch (reason.code) {
+    case 'task_conflict':
+      return 'The task changed on disk. Discard to load it, then edit again.';
+    case 'task_exists':
+      return 'A task with this name already exists.';
+    case 'task_read_only':
+      return `Read-only: ${reason.message}`;
+    default:
+      return errorText(reason);
+  }
 }
 
 export function draftOf(detail: TaskDetail): Draft {

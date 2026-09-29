@@ -3,9 +3,11 @@ import {type Dispatch, type SetStateAction, useCallback, useEffect, useRef, useS
 import {
   type AuthStatus,
   type Catalog,
+  type CommitPreview,
   errorText,
   type FsListing,
   type HomeClient,
+  HomeError,
   type ProjectValidation,
   type TaskDetail,
   type TaskSummary,
@@ -14,6 +16,7 @@ import {launchLine, useLaunch} from './launch.js';
 import {homeHref} from './route.js';
 import {
   blockers,
+  draftOf,
   type FieldId,
   fieldId,
   folderStatus,
@@ -23,12 +26,16 @@ import {
   NEW_TASK,
   type RoleChoice,
   type SetupForm,
+  saveError,
   startRequest,
+  taskForm,
   withLoop,
+  withoutDraft,
   withProvider,
   withTask,
   withTasks,
 } from './setup.js';
+import {CommitDialog} from './ui/CommitDialog.js';
 import {FolderPicker} from './ui/FolderPicker.js';
 import {KeyRow} from './ui/KeyRow.js';
 import {
@@ -41,6 +48,7 @@ import {
   SetupFooter,
   TaskRow,
 } from './ui/Setup.js';
+import {TaskFormRows} from './ui/TaskForm.js';
 
 interface SetupData {
   catalog: Catalog;
@@ -193,7 +201,6 @@ function useTaskDetail(
 function formActions(setForm: Dispatch<SetStateAction<SetupForm>>, catalog: Catalog) {
   return {
     patch: (next: Partial<SetupForm>) => setForm(form => ({...form, ...next})),
-    task: (name: string) => setForm(form => withTask(form, name)),
     provider: (provider: string) => setForm(form => withProvider(form, catalog, provider)),
     loop: (loopId: string) => setForm(form => withLoop(form, catalog, loopId)),
     role: (role: string, choice: RoleChoice) =>
@@ -304,23 +311,207 @@ function chooseFolder(
   folder.check(path);
 }
 
-interface FolderPickerHostProps {
+interface TaskSave {
+  projectId: string;
+  form: SetupForm;
+  /** The content hash the edit started from; the server refuses the save if the task changed since. */
+  base: string | null;
+  onSaved: (detail: TaskDetail) => void;
+  /** The task changed on disk: reload it so Discard shows what is there now. */
+  onStale: () => void;
+}
+
+function useTaskSave(client: HomeClient) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = ({projectId, form, base, onSaved, onStale}: TaskSave) => {
+    const draft = form.draft;
+    if (draft === null) return;
+    setSaving(true);
+    setError(null);
+    const request =
+      form.task === NEW_TASK
+        ? client.createTask(projectId, {...taskForm(draft), name: draft.name})
+        : client.editTask(projectId, form.task ?? '', {...taskForm(draft), base_hash: base ?? ''});
+    request.then(
+      saved => {
+        setSaving(false);
+        onSaved(saved);
+      },
+      (reason: unknown) => {
+        setSaving(false);
+        setError(saveError(reason));
+        if (reason instanceof HomeError && reason.code === 'task_conflict') onStale();
+      },
+    );
+  };
+  return {saving, error, save, clearError: () => setError(null)};
+}
+
+interface TaskFieldsProps {
+  client: HomeClient;
+  form: SetupForm;
+  setForm: Dispatch<SetStateAction<SetupForm>>;
+  tasks: TaskSummary[] | null;
+  projectId: string | null;
+  detail: TaskDetail | null;
+  /** A saved or reloaded task. */
+  onDetail: (detail: TaskDetail) => void;
+  /** A save changed the task files: check the folder again. */
+  onRecheck: () => void;
+}
+
+/** The task select or saved card, and the task form while creating or editing. */
+function TaskFields({
+  client,
+  form,
+  setForm,
+  tasks,
+  projectId,
+  detail,
+  onDetail,
+  onRecheck,
+}: TaskFieldsProps) {
+  const saver = useTaskSave(client);
+  const onSaved = (saved: TaskDetail) => {
+    onDetail(saved);
+    setForm(current => ({...current, task: saved.name, draft: null}));
+    onRecheck();
+  };
+  const onStale = () => {
+    if (projectId !== null && form.task !== null)
+      client.task(projectId, form.task).then(onDetail, () => undefined);
+  };
+  // Taken when Edit opens the form, so a reload of the task after a conflict never becomes the base.
+  const [base, setBase] = useState<string | null>(null);
+  const draft = form.draft;
+  return (
+    <>
+      <TaskRow
+        form={form}
+        tasks={tasks ?? []}
+        detail={detail}
+        disabled={projectId === null}
+        onTask={name => {
+          saver.clearError();
+          setForm(current => withTask(current, name));
+        }}
+        onEdit={() => {
+          if (detail === null) return;
+          setBase(detail.content_hash);
+          setForm(current => ({...current, draft: draftOf(detail)}));
+        }}
+      />
+      {draft === null ? null : (
+        <TaskFormRows
+          draft={draft}
+          creating={form.task === NEW_TASK}
+          saving={saver.saving}
+          error={saver.error}
+          onDraft={next =>
+            setForm(current =>
+              current.draft === null ? current : {...current, draft: {...current.draft, ...next}},
+            )
+          }
+          onSave={() => {
+            if (projectId !== null) saver.save({projectId, form, base, onSaved, onStale});
+          }}
+          onDiscard={() => {
+            saver.clearError();
+            setForm(current => withoutDraft(current, tasks ?? []));
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+interface CommitState {
+  preview: CommitPreview | null;
+  error: string | null;
+  busy: boolean;
+}
+
+/** The commit confirmation. Each preview takes a ticket; an answer for an older one is dropped. */
+function useCommit(client: HomeClient, projectId: string | null, onDone: () => void) {
+  const [state, setState] = useState<CommitState | null>(null);
+  const ticket = useRef(0);
+  const patch = (next: Partial<CommitState>) =>
+    setState(current => (current === null ? null : {...current, ...next}));
+  const load = (id: string, error: string | null) => {
+    const mine = ++ticket.current;
+    setState({preview: null, error, busy: false});
+    client.commitPreview(id).then(
+      preview => {
+        if (mine === ticket.current) patch({preview});
+      },
+      (reason: unknown) => {
+        if (mine === ticket.current) patch({error: errorText(reason)});
+      },
+    );
+  };
+  const confirm = () => {
+    const preview = state?.preview;
+    if (projectId === null || preview == null) return;
+    patch({busy: true, error: null});
+    client.commit(projectId, preview.task_files).then(
+      () => {
+        setState(null);
+        onDone();
+      },
+      (reason: unknown) => {
+        // The files changed since the preview: show the new list, and the user confirms again.
+        if (reason instanceof HomeError && reason.code === 'task_conflict') {
+          load(projectId, 'The task files changed. Review the list again.');
+        } else patch({busy: false, error: errorText(reason)});
+      },
+    );
+  };
+  const open = () => {
+    if (projectId !== null) load(projectId, null);
+  };
+  const close = () => {
+    ticket.current += 1;
+    setState(null);
+  };
+  return {state, open, confirm, close};
+}
+
+interface SetupDialogsProps {
   folder: Folder;
   act: ReturnType<typeof formActions>;
   picker: ReturnType<typeof usePicker>;
+  commit: ReturnType<typeof useCommit>;
 }
 
-/** The picker dialog, or nothing while it is closed. */
-function FolderPickerHost({folder, act, picker}: FolderPickerHostProps) {
-  if (picker.picker === null) return null;
+/** The folder picker and the commit confirmation while open, and the reasoning effort suggestions. */
+function SetupDialogs({folder, act, picker, commit}: SetupDialogsProps) {
   return (
-    <FolderPicker
-      listing={picker.picker.listing}
-      error={picker.picker.error}
-      onOpen={picker.open}
-      onChoose={path => chooseFolder(picker, folder, act, path)}
-      onClose={picker.close}
-    />
+    <>
+      <datalist id="efforts">
+        {EFFORTS.map(value => (
+          <option key={value} value={value} />
+        ))}
+      </datalist>
+      {picker.picker === null ? null : (
+        <FolderPicker
+          listing={picker.picker.listing}
+          error={picker.picker.error}
+          onOpen={picker.open}
+          onChoose={path => chooseFolder(picker, folder, act, path)}
+          onClose={picker.close}
+        />
+      )}
+      {commit.state === null ? null : (
+        <CommitDialog
+          preview={commit.state.preview}
+          error={commit.state.error}
+          busy={commit.state.busy}
+          onCommit={commit.confirm}
+          onClose={commit.close}
+        />
+      )}
+    </>
   );
 }
 
@@ -342,9 +533,10 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
   const folder = useFolder(client, recent[0] ?? '', onChecked);
   const project = folder.validation?.project ?? null;
   const tasks = useTasks(client, folder.validation);
-  const [detail] = useTaskDetail(client, project?.id ?? null, form.task);
+  const [detail, setDetail] = useTaskDetail(client, project?.id ?? null, form.task);
   const launch = useLaunch(client, token);
   const picker = usePicker(client);
+  const commit = useCommit(client, project?.id ?? null, folder.recheck);
   useEffect(() => {
     if (tasks !== null) setForm(current => withTasks(current, tasks));
   }, [tasks]);
@@ -384,13 +576,17 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
             }}
             onCheck={() => folder.check(form.path)}
             onBrowse={() => picker.open(folder.validation?.path ?? null)}
+            onCommit={commit.open}
           />
-          <TaskRow
+          <TaskFields
+            client={client}
             form={checked}
-            tasks={tasks ?? []}
+            setForm={setForm}
+            tasks={tasks}
+            projectId={project?.id ?? null}
             detail={shown}
-            disabled={project === null}
-            onTask={act.task}
+            onDetail={setDetail}
+            onRecheck={folder.recheck}
           />
           <BudgetRow loop={loop} value={form.budget} onBudget={budget => act.patch({budget})} />
           <ModelRow
@@ -415,12 +611,7 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
             onLoop={act.loop}
             onChange={act.patch}
           />
-          <datalist id="efforts">
-            {EFFORTS.map(value => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-          <FolderPickerHost folder={folder} act={act} picker={picker} />
+          <SetupDialogs folder={folder} act={act} picker={picker} commit={commit} />
         </div>
       </div>
       <SetupFooter

@@ -17,7 +17,7 @@ export interface FolderPickerProps {
  * Opens as a native modal dialog: focus is trapped and Escape (the dialog's own cancel) closes it. Focus returns to
  * the element that had it when the picker opened, whether the dialog closes natively or the caller unmounts it.
  */
-function useModal() {
+export function useModal() {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const opener = document.activeElement;

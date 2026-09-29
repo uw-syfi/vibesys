@@ -9,6 +9,7 @@ import type {
   TaskDetail,
   TaskSummary,
 } from './home-api.js';
+import {HomeError} from './home-api.js';
 import {
   blockers,
   draftOf,
@@ -20,8 +21,10 @@ import {
   type Readiness,
   resultText,
   roleSummary,
+  saveError,
   startRequest,
   withLoop,
+  withoutDraft,
   withProvider,
   withTask,
   withTasks,
@@ -313,5 +316,46 @@ test('summaries: the per-role disclosure counts overrides; results say how they 
   assert.equal(
     resultText({...DECODE, result: {...DECODE.result, kind: 'protocol'}}),
     'reported through the result protocol',
+  );
+});
+
+test('Discard returns an edit to the saved task and a new task to the first valid one', () => {
+  const editing = {...ready().form, draft: draftOf(DECODE)};
+  assert.deepEqual(
+    [withoutDraft(editing, TASKS).task, withoutDraft(editing, TASKS).draft],
+    ['decode', null],
+  );
+  const creating = withTask(ready().form, NEW_TASK);
+  assert.deepEqual(
+    [withoutDraft(creating, TASKS).task, withoutDraft(creating, TASKS).draft],
+    ['decode', null],
+  );
+  const only = withoutDraft(creating, []);
+  assert.equal(only.task, NEW_TASK);
+  assert.equal(only.draft?.objective, '');
+});
+
+test('a refused save reads as one line that says what to do', () => {
+  const refused = (code: 'task_conflict' | 'task_exists' | 'task_read_only', message: string) =>
+    saveError(new HomeError(code, message, null));
+  assert.equal(
+    refused('task_conflict', 'the task changed on disk since it was loaded; reload it'),
+    'The task changed on disk. Discard to load it, then edit again.',
+  );
+  assert.equal(
+    refused('task_exists', 'task decode already exists'),
+    'A task with this name already exists.',
+  );
+  assert.equal(
+    refused('task_read_only', 'the manifest uses [[metrics]]'),
+    'Read-only: the manifest uses [[metrics]]',
+  );
+  assert.equal(
+    saveError(
+      new HomeError('task_invalid', 'the task manifest is invalid', {
+        errors: [{msg: 'bad metric'}],
+      }),
+    ),
+    'the task manifest is invalid\nbad metric',
   );
 });

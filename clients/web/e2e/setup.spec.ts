@@ -320,3 +320,139 @@ test('arrow keys move focus over the picker rows; Enter opens the focused one', 
   await page.keyboard.press('Enter');
   await expect(picker.locator('h4')).toHaveText(ROOT);
 });
+
+test('a new task is saved, committed after confirmation, and the folder becomes ready', async ({
+  page,
+}) => {
+  const home = await mockHome(page, {validation: {state: 'no_tasks', pending: []}, tasks: []});
+  await page.goto(NEW);
+  await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Save task'})).toBeDisabled();
+  await page.getByLabel('Name').fill('decode-throughput');
+  await page.getByLabel('Objective').fill('Increase decode throughput without changing outputs.');
+  await page.getByLabel('Accuracy').fill('cargo test --release');
+  await page.getByLabel('Benchmark').fill('cargo bench --bench decode');
+  await page.getByLabel('Metric').fill('median_tok_per_sec');
+  await expect(page.locator('.sheetfoot')).toContainText('Save the task');
+  await page.getByRole('button', {name: 'Save task'}).click();
+  await expect(page.getByText('Task files are not committed.')).toBeVisible();
+  await page.getByRole('button', {name: 'Commit task files…'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Commit the task files?'});
+  await expect(dialog).toContainText('.vibesys/tasks/decode-throughput/OBJECTIVE.md');
+  await dialog.getByRole('button', {name: 'Commit', exact: true}).click();
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  await expect(page.locator('.summary')).toContainText('decode-throughput');
+  await expect(page.getByRole('button', {name: 'Start run'})).toBeEnabled();
+  expect(posts(home, '/commit').map(request => request.body)).toEqual([
+    {
+      paths: [
+        '.vibesys/tasks/decode-throughput/OBJECTIVE.md',
+        '.vibesys/tasks/decode-throughput/vibesys.input.toml',
+      ],
+      message: null,
+    },
+  ]);
+});
+
+test('Cancel in the commit confirmation commits nothing', async ({page}) => {
+  const home = await mockHome(page, {
+    validation: {state: 'dirty_tree', pending: ['.vibesys/tasks/decode/OBJECTIVE.md']},
+  });
+  await page.goto(NEW);
+  await page.getByRole('button', {name: 'Commit task files…'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Commit the task files?'});
+  await expect(dialog.getByRole('button', {name: 'Cancel'})).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(posts(home, '/commit')).toHaveLength(0);
+});
+
+test('a task file that appears after the preview is listed again before anything commits', async ({
+  page,
+}) => {
+  const home = await mockHome(page, {
+    validation: {state: 'dirty_tree', pending: ['.vibesys/tasks/decode/OBJECTIVE.md']},
+    commitRace: true,
+  });
+  await page.goto(NEW);
+  await page.getByRole('button', {name: 'Commit task files…'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Commit the task files?'});
+  await dialog.getByRole('button', {name: 'Commit', exact: true}).click();
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'The task files changed. Review the list again.',
+  );
+  await expect(dialog).toContainText('.vibesys/tasks/decode/profile.toml');
+  await dialog.getByRole('button', {name: 'Commit', exact: true}).click();
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  expect(posts(home, '/commit').map(request => request.body)).toEqual([
+    {paths: ['.vibesys/tasks/decode/OBJECTIVE.md'], message: null},
+    {
+      paths: ['.vibesys/tasks/decode/OBJECTIVE.md', '.vibesys/tasks/decode/profile.toml'],
+      message: null,
+    },
+  ]);
+});
+
+test('Edit applies the form onto the saved task with its content hash', async ({page}) => {
+  const home = await mockHome(page);
+  await page.goto(NEW);
+  await page.getByRole('button', {name: 'Edit'}).click();
+  await expect(page.getByLabel('Name')).toHaveCount(0);
+  await page.getByLabel('Benchmark').fill('cargo bench --bench decode -- --quick');
+  await page.getByRole('button', {name: 'Save task'}).click();
+  await expect(page.locator('.summary')).toContainText('cargo bench --bench decode -- --quick');
+  const put = home.requests.find(request => request.method === 'PUT');
+  expect(put?.path).toBe(`/api/projects/${PROJECT_ID}/tasks/decode`);
+  expect(put?.body).toMatchObject({
+    base_hash: 'h1',
+    benchmark_command: 'cargo bench --bench decode -- --quick',
+  });
+});
+
+test('an edit of a task that changed on disk is refused until the new version is loaded', async ({
+  page,
+}) => {
+  const home = await mockHome(page, {changedOnDisk: true});
+  await page.goto(NEW);
+  await page.getByRole('button', {name: 'Edit'}).click();
+  await page.getByLabel('Benchmark').fill('cargo bench --bench decode -- --quick');
+  const save = page.getByRole('button', {name: 'Save task'});
+  await save.click();
+  await expect(page.getByRole('alert')).toHaveText(
+    'The task changed on disk. Discard to load it, then edit again.',
+  );
+  await save.click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button', {name: 'Discard'}).click();
+  await expect(page.locator('.summary')).toContainText('--features simd');
+  await page.getByRole('button', {name: 'Edit'}).click();
+  await expect(page.getByLabel('Benchmark')).toHaveValue(
+    'cargo bench --bench decode --features simd',
+  );
+  await save.click();
+  await expect(page.locator('.summary')).toBeVisible();
+  const hashes = home.requests
+    .filter(request => request.method === 'PUT')
+    .map(request => (request.body as {base_hash: string}).base_hash);
+  expect(hashes).toEqual(['h1', 'h1', 'h2']);
+});
+
+test('a new task name is checked as it is typed, and an existing name is refused', async ({
+  page,
+}) => {
+  await mockHome(page);
+  await page.goto(NEW);
+  await page.getByLabel('Task', {exact: true}).selectOption('+new');
+  await page.getByLabel('Name').fill('Decode');
+  await expect(page.getByRole('alert')).toHaveText(
+    'Up to 128 of a-z, 0-9, ., _ or -, starting with a letter or digit.',
+  );
+  await page.getByLabel('Name').fill('decode');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByLabel('Objective').fill('Faster decode.');
+  await page.getByLabel('Accuracy').fill('cargo test');
+  await page.getByLabel('Benchmark').fill('cargo bench');
+  await page.getByLabel('Metric').fill('tok_per_sec');
+  await page.getByRole('button', {name: 'Save task'}).click();
+  await expect(page.getByRole('alert')).toHaveText('A task with this name already exists.');
+});

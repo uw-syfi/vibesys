@@ -61,7 +61,7 @@ export function Hint({tone, children}: {tone: Tone; children: ReactNode}) {
 }
 
 /** A native select drawn as a field, with the form's own chevron. */
-function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <span className="sel">
       <select {...props} />

@@ -87,6 +87,10 @@ export interface HomeOptions {
   slowFs: string[];
   /** Calls that never answer: `open`, `attach` (a launch stays starting), `key` (a key write). */
   hold: Hold[];
+  /** The saved task changes on disk right after it is first read, so an edit of that read conflicts. */
+  changedOnDisk: boolean;
+  /** Another task file appears between the commit preview and the first commit, which conflicts. */
+  commitRace: boolean;
 }
 
 export interface FakeHome {
@@ -108,6 +112,8 @@ const DEFAULTS: HomeOptions = {
   slow: [],
   slowFs: [],
   hold: [],
+  changedOnDisk: false,
+  commitRace: false,
 };
 
 interface Reply {
@@ -230,6 +236,7 @@ class FakeServer {
   private readonly auth: AuthStatus;
   private launched: string | null = null;
   private polls = 0;
+  private raced = false;
   private readonly waiting = new Map<string, () => void>();
 
   constructor(private readonly options: HomeOptions) {
@@ -351,6 +358,10 @@ class FakeServer {
 
   private task(name: string): Reply {
     const detail = this.details.get(name);
+    if (this.options.changedOnDisk && detail?.content_hash === DECODE.content_hash) {
+      const benchmark_command = 'cargo bench --bench decode --features simd';
+      this.details.set(name, {...detail, benchmark_command, content_hash: 'h2'});
+    }
     return detail === undefined ? fail(404, 'unknown_task', `no task ${name}`) : ok(detail);
   }
 
@@ -407,6 +418,16 @@ class FakeServer {
   }
 
   private commit(): Reply {
+    if (this.options.commitRace && !this.raced) {
+      this.raced = true;
+      const extra = '.vibesys/tasks/decode/profile.toml';
+      this.validation = {...this.validation, pending: [...this.validation.pending, extra].sort()};
+      return fail(
+        409,
+        'task_conflict',
+        'the task files changed since the preview; review them again',
+      );
+    }
     const {task_files, other} = this.preview();
     this.validation =
       other.length > 0 ? {state: 'dirty_tree', pending: other} : {state: 'ready', pending: []};
