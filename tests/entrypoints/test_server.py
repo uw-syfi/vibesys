@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -381,9 +383,7 @@ def test_web_reopen_run_attaches_the_recorded_run(
 
 
 def _refuse_launch(*_args: object, **_kwargs: object) -> None:
-    raise AssertionError(  # noqa: TRY003  # lint-waiver: LW-394843 [TRY003]; this is a test-failure message naming the invariant a fixture must never reach
-        "reopen must fail before launching a gateway"
-    )
+    pytest.fail("reopen must fail before launching a gateway")
 
 
 def test_web_reopen_run_rejects_an_unknown_run_before_launching(
@@ -444,3 +444,73 @@ def test_web_reopen_run_rejects_another_runs_journal(
                 str(project.root),
             ]
         )
+
+
+def _tree(root: Path) -> dict[Path, bytes | None]:
+    """Every file and directory under *root*, with file contents."""
+    return {path: path.read_bytes() if path.is_file() else None for path in root.rglob("*")}
+
+
+@pytest.mark.parametrize("journal_exists", [True, False])
+def test_web_reopen_run_resolves_the_log_directory_without_preparing_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, journal_exists: bool
+) -> None:
+    """An absent state home stays absent (or unchanged) whether the journal exists or not.
+
+    Regression for the implicit-resolution path (no ``--web-reopen``):
+    `project.state.log_directory` prepares the state home as a side effect of
+    computing a path; resolving a reopen must use a non-creating equivalent.
+    """
+    project, run_id, log_dir = finished_run(tmp_path / "project")
+    state_home = Path(os.environ["VIBESYS_STATE_HOME"])
+    preserved = _tree(log_dir) if journal_exists else {}
+    shutil.rmtree(state_home)
+    if journal_exists:
+        # Recreate only the run's own log directory, as if it were restored
+        # onto a machine that never prepared machine-local state.
+        for path, contents in preserved.items():
+            if contents is None:
+                path.mkdir(parents=True, exist_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+
+    class FakeRuntime:
+        def __init__(self, *, socket_path: Path, **options: object) -> None:
+            del socket_path, options
+
+        def run(self, callback: Callable[[], object]) -> object:
+            return callback()
+
+    monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
+    # test-isolation: replace the dynamic runtime import to observe reopen wiring without serving
+    monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
+
+    if journal_exists:
+        before = _tree(state_home)
+        main(["--web-reopen-run", run_id, "--project", str(project.root)])
+        assert _tree(state_home) == before
+    else:
+        with pytest.raises(ConfigurationError, match="No event journal to reopen"):
+            main(["--web-reopen-run", run_id, "--project", str(project.root)])
+        assert not state_home.exists()
+
+
+def test_web_reopen_run_rejects_an_empty_value_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # test-isolation: discovery would create lock files named after the run id
+    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", _refuse_launch)
+
+    with pytest.raises(ConfigurationError, match="requires a non-empty run ID"):
+        main(["--web", "--detach", "--web-reopen-run=", "--project", str(tmp_path)])
+
+
+def test_web_reopen_run_rejects_a_missing_value_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # test-isolation: discovery would create lock files named after the run id
+    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", _refuse_launch)
+
+    with pytest.raises(ConfigurationError, match="requires a non-empty run ID"):
+        main(["--web", "--detach", "--project", str(tmp_path), "--web-reopen-run"])

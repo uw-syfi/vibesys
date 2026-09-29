@@ -125,6 +125,27 @@ def _project_root_from_argv(argv: list[str]) -> Path:
     return Path(value).expanduser().resolve() if value else Path.cwd()
 
 
+def _run_id_from_argv(argv: list[str]) -> str | None:
+    """Return the ``--web-reopen-run`` value, rejecting a present-but-empty one.
+
+    ``cli.option_from_argv`` returns ``None`` both when the flag is absent and
+    when it is the last, valueless argument, and returns ``""`` for
+    ``--web-reopen-run=``; all three are distinct: only a genuinely absent
+    flag should mean "no reopen requested".
+    """
+    value = cli.option_from_argv(argv, "--web-reopen-run")
+    if value:
+        return value
+    if any(
+        argument == "--web-reopen-run" or argument.startswith("--web-reopen-run=")
+        for argument in argv
+    ):
+        raise ValueError(  # noqa: TRY003  # lint-waiver: LW-232915 [TRY003]; report an empty or valueless reopen flag as a user-facing configuration error
+            "--web-reopen-run requires a non-empty run ID"
+        )
+    return None
+
+
 def _reopen_from_argv(argv: list[str]) -> tuple[Path | None, RunRecord | None]:
     """Resolve the read-only journal and, with ``--web-reopen-run``, its run record.
 
@@ -133,11 +154,11 @@ def _reopen_from_argv(argv: list[str]) -> tuple[Path | None, RunRecord | None]:
     """
     log_dir = _read_only_log_from_argv(argv)
     record = None
-    run_id = cli.option_from_argv(argv, "--web-reopen-run") or None
+    run_id = _run_id_from_argv(argv)
     if run_id is not None:
         project = Project.open(_project_root_from_argv(argv))
         record = open_run_store(project).get_record(run_id)
-        log_dir = log_dir or project.state.log_directory(run_id)
+        log_dir = log_dir or project.state.log_directory_path(run_id)
     if log_dir is None:
         return None, None
     events = log_dir / "run-events.jsonl"
