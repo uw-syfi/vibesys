@@ -41,7 +41,9 @@ test('the folder row: its status, and Browse and Commit only where the view offe
   );
   assert.match(bare, /<input id="f-folder" class="fld mono bad" list="recent-folders"/);
   assert.match(bare, /<option value="\/r">/);
-  assert.match(bare, /<div class="hint bad" role="alert">Task files are not committed\./);
+  // The folder's state describes the field; it is not an alert announced on load.
+  assert.match(bare, /aria-describedby="f-folder-hint"/);
+  assert.match(bare, /<div id="f-folder-hint" class="hint bad">Task files are not committed\./);
   assert.doesNotMatch(bare, /Commit task files|Browse/);
   const full = renderToStaticMarkup(
     <FolderRow

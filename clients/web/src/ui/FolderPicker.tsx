@@ -7,6 +7,8 @@ import {tildePath} from '../setup.js';
 export interface FolderPickerProps {
   /** Null while the first listing loads. */
   listing: FsListing | null;
+  /** The user's home directory, shown as `~`; null when the home server did not report it. */
+  home: string | null;
   error: string | null;
   /** Lists a folder; null lists the granted roots. */
   onOpen: (path: string | null) => void;
@@ -42,13 +44,13 @@ function onRowKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
   rows[Math.min(rows.length - 1, Math.max(0, index + step))]?.focus();
 }
 
-export function FolderPicker({listing, error, onOpen, onChoose, onClose}: FolderPickerProps) {
+export function FolderPicker({listing, home, error, onOpen, onChoose, onClose}: FolderPickerProps) {
   const dialog = useModal();
   const here = listing?.path ?? null;
   return (
     <dialog ref={dialog} className="picker" aria-labelledby="picker-title" onClose={onClose}>
       <h4 id="picker-title" className="mono" title={here ?? undefined}>
-        {here === null ? 'Folders you can open' : tildePath(here)}
+        {here === null ? 'Folders you can open' : tildePath(here, home)}
       </h4>
       <div className="plist">
         {here === null ? null : (

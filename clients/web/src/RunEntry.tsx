@@ -17,6 +17,8 @@ export interface RunEntryProps {
   root: string | null;
   /** The run's outer loop, matched against the catalog for the budget field's wording. */
   loop: string | null;
+  /** The run's recorded budget total, the least a resume accepts; null when unknown. */
+  recorded: number | null;
 }
 
 const WHOLE = /^[1-9]\d*$/;
@@ -77,7 +79,8 @@ export function ReopenView({client, token, projectId, runId, title, root}: RunEn
   );
 }
 
-export function ResumeView({client, token, projectId, runId, title, root, loop}: RunEntryProps) {
+export function ResumeView(props: RunEntryProps) {
+  const {client, token, projectId, runId, title, root, loop, recorded} = props;
   const {state, start, reset} = useLaunch(client, token);
   const [budget, setBudget] = useState('');
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -96,6 +99,7 @@ export function ResumeView({client, token, projectId, runId, title, root, loop}:
   const label = budgetLabel(catalog?.outer_loops.find(option => option.id === loop));
   const trimmed = budget.trim();
   const valid = trimmed === '' || WHOLE.test(trimmed);
+  const unit = label.toLowerCase();
   const resume = () =>
     start(projectId, () =>
       client.resume(projectId, runId, trimmed === '' ? null : Number(trimmed)),
@@ -131,17 +135,19 @@ export function ResumeView({client, token, projectId, runId, title, root, loop}:
                 line.error === null ? 'fld num budget resume' : 'fld num budget resume bad'
               }
               type="number"
-              min={1}
+              min={recorded ?? 1}
               step={1}
               inputMode="numeric"
               value={budget}
               placeholder="Recorded"
-              title={`Total ${label.toLowerCase()} for the run; empty keeps the recorded total`}
+              title={`Total ${unit} for the run; empty keeps the recorded total`}
               onChange={event => setBudget(event.target.value)}
             />
             <Hint tone={line.error === null ? 'plain' : 'bad'}>
               {line.error ??
-                `Runs again with the recorded configuration and total. A larger total adds ${label.toLowerCase()}.`}
+                (recorded === null
+                  ? `Runs again with the recorded configuration and total. A larger total adds ${unit}.`
+                  : `Recorded: ${recorded} ${unit}. Runs again with the recorded configuration; a larger total adds ${unit}.`)}
             </Hint>
           </Row>
         </div>

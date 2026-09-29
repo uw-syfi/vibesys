@@ -29,6 +29,7 @@ const other: HomeRun = {
   updatedAt: '2026-09-23T14:00:00Z',
   url: null,
   loop: 'agent',
+  budget: 12,
 };
 
 test('the open run is listed even when the home API knows nothing', () => {
@@ -91,6 +92,7 @@ const row = (patch: Partial<RunRow>): RunRow => ({
   rounds: 12,
   gateway: gw('none'),
   reopen: null,
+  budget: 12,
   error: null,
   task: 'decode',
   objective: 'Increase decode throughput\n\nWithout changing outputs.',
@@ -113,6 +115,7 @@ test('home runs: serving gateways open directly, finished runs reopen, launches 
     updatedAt: '2026-09-25T14:01:00+00:00',
     url: runHref('h', 'p1', WS),
     loop: 'agent',
+    budget: 12,
   });
   const finished = homeRun(row({}), 'p1', 'h');
   assert.deepEqual(

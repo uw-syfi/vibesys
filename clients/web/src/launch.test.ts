@@ -28,6 +28,7 @@ const row = (state: Gateway['state'], patch: Partial<Gateway> = {}): RunRow => (
   rounds: 0,
   gateway: gateway(state, patch),
   reopen: null,
+  budget: null,
   error: null,
   task: null,
   objective: null,

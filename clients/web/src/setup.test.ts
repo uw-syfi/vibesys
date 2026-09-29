@@ -24,7 +24,6 @@ import {
   saveError,
   startRequest,
   tildePath,
-  untildePath,
   withLoop,
   withoutDraft,
   withProvider,
@@ -371,14 +370,10 @@ test('a refused save reads as one line that says what to do', () => {
   );
 });
 
-test('a path under the home directory reads with ~; others as they are', () => {
-  assert.equal(tildePath('/Users/me/src/llm-serve'), '~/src/llm-serve');
-  assert.equal(tildePath('/home/me'), '~');
-  assert.equal(tildePath('/srv/me/x'), '/srv/me/x');
-  assert.equal(tildePath('/Users/me2x'), '~');
-  // A typed ~ expands with the home of the path it replaces; without one it stays as typed.
-  assert.equal(untildePath('~/src/x', '/Users/me/src/llm-serve'), '/Users/me/src/x');
-  assert.equal(untildePath('~', '/home/me/a'), '/home/me');
-  assert.equal(untildePath('~/x', ''), '~/x');
-  assert.equal(untildePath('/srv/x', '/Users/me'), '/srv/x');
+test('a path under the reported home directory reads with ~; others as they are', () => {
+  assert.equal(tildePath('/Users/me/src/llm-serve', '/Users/me'), '~/src/llm-serve');
+  assert.equal(tildePath('/Users/me', '/Users/me'), '~');
+  assert.equal(tildePath('/Users/me2x', '/Users/me'), '/Users/me2x');
+  assert.equal(tildePath('/Users/Shared/x', '/Users/me'), '/Users/Shared/x');
+  assert.equal(tildePath('/Users/me/x', null), '/Users/me/x');
 });

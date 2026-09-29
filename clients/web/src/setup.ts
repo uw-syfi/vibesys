@@ -519,18 +519,11 @@ export function keyView(row: ProviderAuth, write: KeyWrite, dotenvPath: string):
   };
 }
 
-// ponytail: the home server does not report the user's home directory, so it is read off the
-// macOS/Linux path shape. Report it from the server if other layouts matter.
-const HOME_PREFIX = /^\/(?:Users|home)\/[^/]+(?=\/|$)/;
-
-/** A path as shown: the home directory as `~`. The canonical path stays in state and in hints. */
-export const tildePath = (path: string): string => path.replace(HOME_PREFIX, '~');
-
-/** Undoes `tildePath` for a typed path, with the home directory read off a known absolute path. */
-export function untildePath(shown: string, known: string): string {
-  const home = HOME_PREFIX.exec(known)?.[0];
-  const tilde = shown === '~' || shown.startsWith('~/');
-  return home !== undefined && tilde ? `${home}${shown.slice(1)}` : shown;
+/** A path as shown: under the home directory the home server reports, as `~`. Display only. */
+export function tildePath(path: string, home: string | null): string {
+  if (home === null || home === '' || home === '/') return path;
+  if (path === home) return '~';
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
 
 const blank = (text: string): string | null => (text.trim() === '' ? null : text.trim());

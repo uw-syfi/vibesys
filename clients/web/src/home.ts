@@ -26,6 +26,8 @@ export interface HomeRun {
   url: string | null;
   /** The outer loop the run started with; null when the run store has not recorded it yet. */
   loop: string | null;
+  /** The recorded loop budget total; a resume cannot go below it. */
+  budget: number | null;
 }
 
 export interface HomeApi {
@@ -80,6 +82,7 @@ export function openRun(input: {
       updatedAt: input.updatedAt ?? '',
       url: null,
       loop: null,
+      budget: null,
     },
   };
 }
@@ -206,6 +209,7 @@ export function homeRun(row: RunRow, projectId: string, token: string): HomeRun 
     updatedAt: row.created_at ?? '',
     url: rowUrl(row, projectId, token),
     loop: row.loop,
+    budget: row.budget,
   };
 }
 

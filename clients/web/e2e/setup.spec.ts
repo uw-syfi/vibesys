@@ -6,6 +6,7 @@ import {
   FINISHED_RUN,
   GATEWAY_WS,
   HOME,
+  LIVE_RUN,
   mockHome,
   OTHER_ROOT,
   PROJECT_ID,
@@ -17,7 +18,7 @@ const sidebar = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
 test('the home page lists every project with its runs and links New run', async ({page}) => {
   await mockHome(page);
   await page.goto(HOME);
-  await expect(page.getByText('Select a run, or start one with ⌘N')).toBeVisible();
+  await expect(page.getByText('Select a run, or choose New run in the sidebar')).toBeVisible();
   const llm = sidebar(page).getByRole('region', {name: 'llm-serve'});
   await expect(llm.getByRole('link', {name: /Reduce p99 prefill latency/})).toHaveAttribute(
     'href',
@@ -160,8 +161,7 @@ test('a slow check of an older folder never replaces a newer one', async ({page}
   await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
   await expect(page.getByText('Git repository, working tree clean')).toHaveCount(0);
   // The home directory reads as ~; the canonical path is the hint.
-  await expect(folder).toHaveValue('~/src/tokenizer-rs');
-  await expect(folder).toHaveAttribute('title', OTHER_ROOT);
+  await expect(folder).toHaveValue(OTHER_ROOT);
 });
 
 test('the home palette opens from its sidebar row and from ⌘K, and opens a run', async ({page}) => {
@@ -247,7 +247,7 @@ test('Browse… walks folders and checks the chosen one', async ({page}) => {
   await picker.getByRole('button', {name: /tokenizer-rs/}).click();
   await picker.getByRole('button', {name: 'Choose this folder'}).click();
   await expect(picker).toHaveCount(0);
-  await expect(page.getByLabel('Folder')).toHaveAttribute('title', OTHER_ROOT);
+  await expect(page.getByLabel('Folder')).toHaveValue(OTHER_ROOT);
   await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
   expect(
     home.requests.map(request => request.path).filter(path => path.startsWith('/api/fs')),
@@ -450,11 +450,13 @@ test('a new task name is checked as it is typed, and an existing name is refused
   await page.goto(NEW);
   await page.getByLabel('Task', {exact: true}).selectOption('+new');
   await page.getByLabel('Name').fill('Decode');
-  await expect(page.getByRole('alert')).toHaveText(
+  // A field-state hint describes its field; only action results are alerts.
+  await expect(page.getByLabel('Name')).toHaveAccessibleDescription(
     'Up to 128 of a-z, 0-9, ., _ or -, starting with a letter or digit.',
   );
-  await page.getByLabel('Name').fill('decode');
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByLabel('Name').fill('decode');
+  await expect(page.locator('#f-name-hint')).toHaveCount(0);
   await page.getByLabel('Objective').fill('Faster decode.');
   await page.getByLabel('Accuracy').fill('cargo test');
   await page.getByLabel('Benchmark').fill('cargo bench');
@@ -517,6 +519,8 @@ test("Resume… from a finished run's menu resumes it; a smaller budget is refus
   await page.getByRole('button', {name: 'More'}).click();
   await page.getByRole('menuitem', {name: 'Resume run…'}).click();
   await expect(page).toHaveURL(new RegExp(`#resume=${PROJECT_ID}/`));
+  await expect(page.locator('.form')).toContainText('Recorded: 12 rounds.');
+  await expect(page.getByLabel('Rounds')).toHaveAttribute('min', '12');
   await page.getByLabel('Rounds').fill('6');
   await page.getByRole('button', {name: 'Resume run'}).click();
   await expect(page.getByRole('alert')).toContainText(
@@ -526,6 +530,15 @@ test("Resume… from a finished run's menu resumes it; a smaller budget is refus
   await page.getByRole('button', {name: 'Resume run'}).click();
   await expect(page).toHaveURL(/gateway=/);
   expect(posts(home, '/resume').map(request => request.body)).toEqual([{budget: 6}, {budget: 20}]);
+});
+
+test('a resume refused while another run is live names that run', async ({page}) => {
+  await mockHome(page, {liveRun: LIVE_RUN});
+  await page.goto(`${HOME}#resume=${PROJECT_ID}/${FINISHED_RUN}`);
+  await page.getByRole('button', {name: 'Resume run'}).click();
+  await expect(page.getByRole('alert')).toHaveText(
+    `Run ${LIVE_RUN} is still live in this project; open it and stop it first.`,
+  );
 });
 
 test('a live run offers no Resume', async ({page}) => {

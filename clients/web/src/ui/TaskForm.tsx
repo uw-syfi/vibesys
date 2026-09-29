@@ -58,12 +58,15 @@ function NameRow({name, onName}: {name: string; onName: (name: string) => void})
         value={name}
         placeholder="e.g. decode-throughput"
         title="The task's folder under .vibesys/tasks/"
+        aria-describedby={bad ? 'f-name-hint' : undefined}
         spellCheck={false}
         autoComplete="off"
         onChange={event => onName(event.target.value)}
       />
       {bad ? (
-        <Hint tone="bad">Up to 128 of a-z, 0-9, ., _ or -, starting with a letter or digit.</Hint>
+        <Hint tone="bad" id="f-name-hint">
+          Up to 128 of a-z, 0-9, ., _ or -, starting with a letter or digit.
+        </Hint>
       ) : null}
     </Row>
   );

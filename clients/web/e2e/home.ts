@@ -83,6 +83,8 @@ export interface HomeOptions {
   recordedBudget: number;
   /** POST .../open and .../resume answer unknown_run instead of launching. */
   unknownRun: boolean;
+  /** POST .../resume answers already_live naming this run, as while another run is live. */
+  liveRun: string | null;
   /** Folders whose validation waits for `release(path)`. */
   slow: string[];
   /** Folder listings (by the requested `path`, `''` for the granted roots) that wait for `releaseFs(path)`. */
@@ -112,6 +114,7 @@ const DEFAULTS: HomeOptions = {
   rejectKey: false,
   recordedBudget: 12,
   unknownRun: false,
+  liveRun: null,
   slow: [],
   slowFs: [],
   hold: [],
@@ -163,6 +166,7 @@ const run = (
   rounds,
   gateway: gateway(state),
   reopen: null,
+  budget: objective === null ? null : 12,
   error: null,
   task: objective === null ? null : 'decode',
   objective,
@@ -289,7 +293,7 @@ class FakeServer {
     const at = (method: string, suffix: string) =>
       new RegExp(`^${method} /api/projects/([^/]+)${suffix}$`);
     return [
-      [/^GET \/api\/projects$/, () => ok({projects: PROJECTS})],
+      [/^GET \/api\/projects$/, () => ok({projects: PROJECTS, home: '/Users/me'})],
       [/^GET \/api\/fs$/, (_match, _body, search) => this.fs(search.get('path'))],
       [
         /^POST \/api\/projects\/validate$/,
@@ -484,6 +488,11 @@ class FakeServer {
 
   private resume(runId: string, budget: unknown): Reply {
     if (this.options.unknownRun) return fail(404, 'unknown_run', `no run ${runId}`);
+    if (this.options.liveRun !== null) {
+      return fail(409, 'already_live', 'this project already has a live run; stop it first', {
+        run_id: this.options.liveRun,
+      });
+    }
     if (typeof budget === 'number' && budget < this.options.recordedBudget) {
       return fail(422, 'budget_decrease', 'The budget is below the recorded total', {
         recorded: this.options.recordedBudget,

@@ -137,6 +137,7 @@ test('the home palette: New run unless it is open, and every run the sidebar lin
     updatedAt: '2026-09-28T12:00:00Z',
     url,
     loop: 'agent',
+    budget: null,
   });
   const sections = [
     {id: 'p1', name: 'llm-serve', runs: [run('a', '/?token=h#open=p1/a'), run('b', null)]},

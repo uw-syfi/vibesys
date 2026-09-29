@@ -46,9 +46,13 @@ if (client === null || token === null) {
       // would dial a socket that can never connect, so say what to do instead.
       if (error instanceof HomeError && error.code === 'unauthorized') {
         root.render(
-          <p className="empty">
-            This link is no longer valid. Open the URL `vibesys web home` prints.
-          </p>,
+          <div className="win">
+            <main className="main">
+              <p className="empty">
+                This link is no longer valid. Open the URL `vibesys web home` prints.
+              </p>
+            </main>
+          </div>,
         );
         return;
       }

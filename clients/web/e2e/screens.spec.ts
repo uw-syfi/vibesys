@@ -238,7 +238,11 @@ const shadowed = {
 };
 
 const SETUP_SCREENS: SetupScreen[] = [
-  {name: 'home', url: HOME, act: page => see(page, 'Select a run, or start one with ⌘N')},
+  {
+    name: 'home',
+    url: HOME,
+    act: page => see(page, 'Select a run, or choose New run in the sidebar'),
+  },
   {name: 'setup', url: NEW, act: ready},
   {name: 'checking', url: NEW, options: {slow: [ROOT]}, act: page => see(page, 'Checking…')},
   {

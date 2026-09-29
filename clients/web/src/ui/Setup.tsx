@@ -14,8 +14,6 @@ import {
   roleSummary,
   type SetupForm,
   suggestedModels,
-  tildePath,
-  untildePath,
 } from '../setup.js';
 
 type Tone = 'ok' | 'bad' | 'warn' | 'plain' | 'busy';
@@ -51,11 +49,19 @@ export function Row({
   );
 }
 
-/** A status line under a field; `ok` adds a check mark and keeps the text secondary, `busy` a spinner. */
-export function Hint({tone, children}: {tone: Tone; children: ReactNode}) {
+/**
+ * A status line under a field; `ok` adds a check mark and keeps the text secondary, `busy` a spinner.
+ * A `bad` hint is an alert, the result of an action; a hint with an `id` describes its field's state
+ * (the field names it in `aria-describedby`) and is never an alert, so a load does not announce it.
+ */
+export function Hint({tone, id, children}: {tone: Tone; id?: string; children: ReactNode}) {
   const className = tone === 'bad' || tone === 'warn' ? `hint ${tone}` : 'hint';
   return (
-    <div className={className} role={tone === 'bad' ? 'alert' : undefined}>
+    <div
+      id={id}
+      className={className}
+      role={tone === 'bad' && id === undefined ? 'alert' : undefined}
+    >
       {tone === 'ok' ? <Check size={12} strokeWidth={1.75} className="ok" aria-hidden /> : null}
       {tone === 'busy' ? <span className="spin" aria-hidden /> : null}
       {children}
@@ -114,12 +120,12 @@ export function FolderRow({
           id="f-folder"
           className={status?.tone === 'bad' ? 'fld mono bad' : 'fld mono'}
           list="recent-folders"
-          value={tildePath(path)}
-          title={path === '' ? undefined : path}
+          value={path}
+          aria-describedby={status === null ? undefined : 'f-folder-hint'}
           placeholder="/path/to/a/git/repository"
           spellCheck={false}
           autoComplete="off"
-          onChange={event => onPath(untildePath(event.target.value, path || (recent[0] ?? '')))}
+          onChange={event => onPath(event.target.value)}
           onBlur={onCheck}
           onKeyDown={event => {
             if (event.key === 'Enter') onCheck();
@@ -137,7 +143,7 @@ export function FolderRow({
         )}
       </div>
       {status === null ? null : (
-        <Hint tone={status.tone}>
+        <Hint tone={status.tone} id="f-folder-hint">
           {status.text}
           {commit ? (
             <button type="button" className="linkbtn" onClick={onCommit}>

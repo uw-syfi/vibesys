@@ -56,7 +56,7 @@ test('a name outside the task name rule says so under the field', () => {
   assert.doesNotMatch(render(EMPTY, true), /letter or digit/);
   assert.match(
     render({...EMPTY, name: 'Decode'}, true),
-    /<div class="hint bad" role="alert">Up to 128 of a-z, 0-9, \., _ or -, starting with a letter or digit\.<\/div>/,
+    /<div id="f-name-hint" class="hint bad">Up to 128 of a-z, 0-9, \., _ or -, starting with a letter or digit\.<\/div>/,
   );
 });
 

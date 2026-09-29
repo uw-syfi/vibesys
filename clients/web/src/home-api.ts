@@ -83,6 +83,8 @@ interface RecentProject extends ProjectRef {
 
 interface ProjectList {
   projects: RecentProject[];
+  /** The user's home directory, for display only. */
+  home: string | null;
 }
 
 export interface TaskSummary {
@@ -226,6 +228,8 @@ export interface RunRow {
   rounds: number;
   gateway: Gateway;
   reopen: Gateway | null;
+  /** The recorded total of the loop's budget flag; a resume cannot go below it. */
+  budget: number | null;
   error: string | null;
   /** The task the run optimizes; null while a launch is not yet in the run store. */
   task: string | null;

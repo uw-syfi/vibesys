@@ -8,6 +8,7 @@ const none = () => undefined;
 test('the picker lists subfolders with their git tag, goes up, and chooses the folder it shows', () => {
   const html = renderToStaticMarkup(
     <FolderPicker
+      home="/Users/me"
       listing={{
         path: '/Users/me/src',
         parent: '/Users/me',
@@ -38,6 +39,7 @@ test('the picker lists subfolders with their git tag, goes up, and chooses the f
 test('at the roots there is nothing to choose; errors show under the list', () => {
   const html = renderToStaticMarkup(
     <FolderPicker
+      home="/Users/me"
       listing={{path: null, parent: null, entries: [{name: 'me', path: '/Users/me', git: false}]}}
       error="Path is outside the granted roots"
       onOpen={none}
@@ -51,7 +53,14 @@ test('at the roots there is nothing to choose; errors show under the list', () =
   assert.match(html, /class="btn primary" disabled="">Choose this folder/);
   assert.match(
     renderToStaticMarkup(
-      <FolderPicker listing={null} error={null} onOpen={none} onChoose={none} onClose={none} />,
+      <FolderPicker
+        home={null}
+        listing={null}
+        error={null}
+        onOpen={none}
+        onChoose={none}
+        onClose={none}
+      />,
     ),
     />Loading…</,
   );

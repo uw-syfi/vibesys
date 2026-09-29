@@ -57,30 +57,35 @@ interface SetupData {
   auth: AuthStatus;
   /** Recent project roots, most recent first. */
   recent: string[];
+  /** The user's home directory, for display only. */
+  home: string | null;
 }
 
 function useSetupData(client: HomeClient): {
   data: SetupData | null;
   error: string | null;
   refreshAuth: () => void;
+  load: () => void;
 } {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [recent, setRecent] = useState<string[] | null>(null);
+  const [projects, setProjects] = useState<Pick<SetupData, 'recent' | 'home'> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fail = useCallback((reason: unknown) => setError(errorText(reason)), []);
   const refreshAuth = useCallback(() => void client.auth().then(setAuth, fail), [client, fail]);
-  useEffect(() => {
+  const load = useCallback(() => {
+    setError(null);
     client.catalog().then(setCatalog, fail);
     client.projects().then(
-      list => setRecent(list.projects.map(project => project.root)),
-      () => setRecent([]),
+      list => setProjects({recent: list.projects.map(project => project.root), home: list.home}),
+      () => setProjects({recent: [], home: null}),
     );
     refreshAuth();
   }, [client, fail, refreshAuth]);
+  useEffect(load, [load]);
   const data =
-    catalog === null || auth === null || recent === null ? null : {catalog, auth, recent};
-  return {data, error, refreshAuth};
+    catalog === null || auth === null || projects === null ? null : {catalog, auth, ...projects};
+  return {data, error, refreshAuth, load};
 }
 
 interface Folder {
@@ -596,6 +601,7 @@ function useCommit(client: HomeClient, projectId: string | null, onDone: () => v
 }
 
 interface SetupDialogsProps {
+  home: string | null;
   folder: Folder;
   act: ReturnType<typeof formActions>;
   picker: ReturnType<typeof usePicker>;
@@ -603,7 +609,7 @@ interface SetupDialogsProps {
 }
 
 /** The folder picker and the commit confirmation while open, and the reasoning effort suggestions. */
-function SetupDialogs({folder, act, picker, commit}: SetupDialogsProps) {
+function SetupDialogs({home, folder, act, picker, commit}: SetupDialogsProps) {
   return (
     <>
       <datalist id="efforts">
@@ -614,6 +620,7 @@ function SetupDialogs({folder, act, picker, commit}: SetupDialogsProps) {
       {picker.picker === null ? null : (
         <FolderPicker
           listing={picker.picker.listing}
+          home={home}
           error={picker.picker.error}
           onOpen={picker.open}
           onChoose={path => chooseFolder(picker, folder, act, path)}
@@ -652,7 +659,7 @@ interface NewRunProps {
 
 /** The form is inert (a disabled fieldset) while a launch is in flight: an edit then would be lost. */
 function NewRun({client, token, data, refreshAuth}: NewRunProps) {
-  const {catalog, auth, recent} = data;
+  const {catalog, auth, recent, home} = data;
   const [form, setForm] = useState(() => initialForm(catalog, auth, recent[0] ?? ''));
   const act = formActions(setForm, catalog);
   const onChecked = useCallback(
@@ -736,7 +743,7 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
             onLoop={act.loop}
             onChange={act.patch}
           />
-          <SetupDialogs folder={folder} act={act} picker={picker} commit={commit} />
+          <SetupDialogs home={home} folder={folder} act={act} picker={picker} commit={commit} />
         </fieldset>
       </div>
       <SetupFooter
@@ -758,12 +765,17 @@ export interface SetupViewProps {
 }
 
 export function SetupView({client, token}: SetupViewProps) {
-  const {data, error, refreshAuth} = useSetupData(client);
+  const {data, error, refreshAuth, load} = useSetupData(client);
   if (error !== null) {
     return (
       <>
         <NewRunTitle />
-        <p className="empty bad" role="alert">{`The home server did not answer: ${error}`}</p>
+        <div className="empty">
+          <p className="bad" role="alert">{`The home server did not answer: ${error}`}</p>
+          <button type="button" className="btn" onClick={load}>
+            Retry
+          </button>
+        </div>
       </>
     );
   }

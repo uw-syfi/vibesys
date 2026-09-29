@@ -33,7 +33,7 @@ function EmptyHome() {
   return (
     <>
       <Titlebar />
-      <p className="empty">Select a run, or start one with ⌘N</p>
+      <p className="empty">Select a run, or choose New run in the sidebar</p>
     </>
   );
 }
@@ -64,6 +64,7 @@ function HomeMain({view, client, token, listing}: HomeMainProps) {
         title: run?.title ?? runId,
         root: project?.path ?? null,
         loop: run?.loop ?? null,
+        recorded: run?.budget ?? null,
       };
       const key = `${view.kind}:${projectId}/${runId}`;
       return view.kind === 'open' ? (
