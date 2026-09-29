@@ -29,7 +29,18 @@ export function TitleRow({title, objective, project, leading, children}: TitleRo
   );
 }
 
-export function RunStatus({line}: {line: StatusLine}) {
+/** What the run is doing; an ended run that failed also says why, the full text in the hint. */
+export function RunStatus({line, control}: {line: StatusLine; control: RunControl}) {
+  if (control.kind === 'ended' && control.summary !== null) {
+    return (
+      <span className="status ended" aria-live="polite" title={control.tip ?? control.summary}>
+        <span className="dot err" aria-hidden />
+        <span className="why">
+          {line.text}: {control.summary}
+        </span>
+      </span>
+    );
+  }
   return (
     <span className="status" aria-live="polite">
       {line.busy ? <span className="spin" /> : null}
@@ -104,13 +115,7 @@ function Popover({
   }, [onClose]);
   return (
     <>
-      <button
-        type="button"
-        className="popscrim"
-        aria-label="Close"
-        tabIndex={-1}
-        onClick={onClose}
-      />
+      <button type="button" className="popscrim" aria-hidden tabIndex={-1} onClick={onClose} />
       <div className="pop" role={role} {...label}>
         {children}
       </div>
@@ -173,22 +178,33 @@ export interface MoreMenuProps {
 
 export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, children}: MoreMenuProps) {
   const trigger = useRef<HTMLButtonElement>(null);
+  // A confirmation for a run that can no longer stop is gone, whatever the stored menu says.
+  const shown = menu === 'stop' && !canStop ? null : menu;
   const close = () => onMenu(null);
+  // Whatever closed the menu (an item, Escape, a click outside), focus goes back to •••
+  // unless the item moved it on purpose.
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && shown === null && document.activeElement === document.body) {
+      trigger.current?.focus();
+    }
+    wasOpen.current = shown !== null;
+  }, [shown]);
   return (
     <span className="menuwrap">
       <button
         ref={trigger}
         type="button"
-        className={menu === null ? 'iconbtn' : 'iconbtn on'}
-        title="Copy run ID, stop the run"
+        className={shown === null ? 'iconbtn' : 'iconbtn on'}
+        title={canStop ? 'Notes, copy run ID, stop the run' : 'Notes, copy run ID'}
         aria-label="More"
         aria-haspopup="menu"
-        aria-expanded={menu === 'more'}
-        onClick={() => onMenu(menu === null ? 'more' : null)}
+        aria-expanded={shown === 'more'}
+        onClick={() => onMenu(shown === null ? 'more' : null)}
       >
         <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
       </button>
-      {menu === 'more' ? (
+      {shown === 'more' ? (
         <Popover role="menu" label={{'aria-label': 'Run'}} onClose={close}>
           {children}
           <button
@@ -218,7 +234,7 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
           ) : null}
         </Popover>
       ) : null}
-      {menu === 'stop' && canStop ? (
+      {shown === 'stop' ? (
         <StopConfirm who={stopWho} trigger={trigger} onCancel={close} onStop={onStop} />
       ) : null}
     </span>

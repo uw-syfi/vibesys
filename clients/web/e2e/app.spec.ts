@@ -297,3 +297,50 @@ test('a long palette list fades at its end and says it scrolls', async ({page}) 
   await page.keyboard.type('round 3');
   await expect(palette.locator('.count')).not.toContainText('scroll for more');
 });
+
+test('the agent filter ends with its round: the live round advancing, or another round picked', async ({
+  page,
+}) => {
+  const gateway = await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
+  await page.getByRole('tab', {name: 'Agents'}).click();
+  const pane = page.getByRole('complementary', {name: 'Run details'});
+  await pane.getByRole('button', {name: /^Implementer/}).click();
+  await expect(page.locator('.filterbar')).toBeVisible();
+  // Round 7 starts: the followed transcript shows it whole.
+  gateway.advance(ROUND_6_FINISHED + 4);
+  await expect(page.locator('.sticky')).toContainText('Round 7');
+  await expect(page.locator('.filterbar')).toHaveCount(0);
+  await expect(page.locator('main .turn').first()).toBeVisible();
+  await round(page, 6).click();
+  await expect(page.locator('.filterbar')).toHaveCount(0);
+  await expect(page.locator('main .turn')).toHaveCount(4);
+  await pane.getByRole('button', {name: /^Implementer/}).click();
+  await expect(page.locator('.filterbar')).toBeVisible();
+  await round(page, 3).click();
+  await expect(page.locator('.filterbar')).toHaveCount(0);
+});
+
+test('a failed run says why in the title row, the full diagnostic on hover', async ({page}) => {
+  const gateway = await mockGateway(page);
+  await page.goto('/?token=e2e');
+  gateway.push({
+    type: 'run_failed',
+    text: 'Benchmark harness crashed',
+    diagnostic: {
+      code: 'benchmark_crashed',
+      summary: 'Benchmark harness crashed',
+      detail: 'cargo bench exited with status 137 after 41.7s (killed by the OOM killer).',
+      scope: 'run',
+      severity: 'fatal',
+    },
+  });
+  const status = page.locator('.titlebar .status');
+  await expect(status).toHaveText('Failed: Benchmark harness crashed');
+  await expect(status).toHaveAttribute(
+    'title',
+    'cargo bench exited with status 137 after 41.7s (killed by the OOM killer).',
+  );
+  await expect(page.locator('.titlebar').getByRole('button', {name: 'Pause'})).toHaveCount(0);
+});

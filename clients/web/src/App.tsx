@@ -56,6 +56,7 @@ import {
 } from './ui/TitleRow.js';
 import {Transcript, type TranscriptControls} from './ui/Transcript.js';
 import {
+  agentFilter,
   forRun,
   frame,
   INITIAL_UI,
@@ -228,7 +229,12 @@ function toggleRun(session: WorkspaceSession, state: WorkspaceState): void {
 }
 
 function canStop(state: WorkspaceState, view: View): boolean {
-  return !view.ended && state.core.status !== 'stopping' && state.connection === 'connected';
+  return (
+    !view.ended &&
+    state.core.status !== 'stopping' &&
+    state.connection === 'connected' &&
+    state.command.sending === null
+  );
 }
 
 interface SectionProps {
@@ -287,6 +293,7 @@ function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listin
 function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: () => void}) {
   const {state, view, ui, dispatch, session} = props;
   const error = state.command.error;
+  const control = runControl(state.core, state.captured, state.connection);
   const stop = () => {
     dispatch({type: 'menu', menu: null});
     void session.command({type: 'command.stop', mode: 'after_current_agent_call'});
@@ -302,7 +309,7 @@ function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: 
         )
       }
     >
-      <RunStatus line={view.status} />
+      <RunStatus line={view.status} control={control} />
       {error !== null && error.action !== 'steer' ? (
         <span
           className="cmderr bad"
@@ -310,7 +317,7 @@ function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: 
         >{`${ACTION_WORDS[error.action]} failed: ${error.message}`}</span>
       ) : null}
       <RunControlChip
-        control={runControl(state.core, state.captured, state.connection)}
+        control={control}
         busy={view.status.busy}
         onToggle={() => toggleRun(session, state)}
       />
@@ -348,6 +355,8 @@ function resumeLine(state: WorkspaceState, view: View): string | null {
   const {row, round, live} = view;
   if (state.core.status !== 'paused' || round === null || round !== live) return null;
   if (row === undefined || row.state === 'running') return null;
+  // The budget is spent: no round follows.
+  if (view.summary.planned === 0) return null;
   return `Round ${round + 1} starts when you resume.`;
 }
 
@@ -365,8 +374,8 @@ function RunTranscript({state, view, ui, dispatch, history}: SectionProps & {his
       empty={connecting ? 'Connecting…' : 'Waiting for round 1.'}
       endline={resumeLine(state, view)}
       controls={transcriptControls(state, ui, dispatch)}
-      only={ui.agent}
-      onShowAll={() => dispatch({type: 'agent', id: null})}
+      only={agentFilter(ui, view.round)}
+      onShowAll={() => dispatch({type: 'agent', id: null, round: view.round})}
     />
   );
 }
@@ -417,7 +426,7 @@ function agentsTab(props: PaneHostProps) {
       core={props.state.core}
       round={view.round}
       turns={view.transcript?.turns ?? []}
-      selected={props.ui.agent}
+      selected={agentFilter(props.ui, view.round)}
       width={props.width}
       controls={props.controls}
       onSelect={props.onAgent}
@@ -523,9 +532,8 @@ function paletteInput(
   ui: UiState,
   sidebarShown: boolean,
 ): PaletteInput {
-  const visible = (view.transcript?.turns ?? []).filter(
-    turn => ui.agent === null || turn.id === ui.agent,
-  );
+  const only = agentFilter(ui, view.round);
+  const visible = (view.transcript?.turns ?? []).filter(turn => only === null || turn.id === only);
   const withPrompt = visible.filter(turn => turn.prompt !== null).at(-1);
   const withTodos = visible.filter(turn => turn.todos.length > 0).at(-1);
   const where = (phase: string) =>
@@ -534,10 +542,12 @@ function paletteInput(
     control: runControl(state.core, state.captured, state.connection),
     pending: view.status.busy,
     canStop: canStop(state, view),
-    canSteer: !view.ended && state.connection === 'connected',
+    canSteer: !view.ended && state.connection === 'connected' && state.command.sending === null,
     hasRunId: state.runId !== null,
     rows: view.summary.rows,
     live: view.live,
+    selected: view.round,
+    pane: ui.pane,
     sidebarShown,
     prompt:
       withPrompt === undefined ? null : {turn: withPrompt.id, detail: where(withPrompt.phase)},
@@ -554,7 +564,10 @@ export function App({session, home}: AppProps) {
   usePaletteShortcut(dispatch);
   const width = useWindowWidth();
   const layout = frame(width, ui);
-  const selectAgent = useCallback((id: string) => dispatch({type: 'agent', id}), [dispatch]);
+  const selectAgent = useCallback(
+    (id: string) => dispatch({type: 'agent', id, round: view.round}),
+    [dispatch, view.round],
+  );
   const section: SectionProps = {state, view, ui, dispatch, session};
   const toggleSidebar = () => {
     if (layout.sidebar) return dispatch({type: 'sidebar', open: false});

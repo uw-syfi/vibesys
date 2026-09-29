@@ -5,6 +5,14 @@ import type {RunControl} from '../model.js';
 import type {Menu} from '../ui-state.js';
 import {MoreMenu, Retained, RunControlChip, RunStatus, TitleRow} from './TitleRow.js';
 
+const pause: RunControl = {
+  kind: 'action',
+  action: 'pause',
+  label: 'Pause',
+  tip: 'Pause after the current agent call',
+  disabled: false,
+};
+
 test('the title row: run name with its objective as the hint, status, labelled metric', () => {
   const html = renderToStaticMarkup(
     <TitleRow
@@ -14,6 +22,7 @@ test('the title row: run name with its objective as the hint, status, labelled m
     >
       <RunStatus
         line={{text: 'Judging round 6', busy: false, paused: false, activeKind: 'judge'}}
+        control={pause}
       />
       <Retained
         text={{
@@ -49,18 +58,11 @@ test('a status in transition shows a spinner', () => {
   const html = renderToStaticMarkup(
     <RunStatus
       line={{text: 'Pausing after the current call…', busy: true, paused: false, activeKind: null}}
+      control={pause}
     />,
   );
   assert.match(html, /class="spin"/);
 });
-
-const pause: RunControl = {
-  kind: 'action',
-  action: 'pause',
-  label: 'Pause',
-  tip: 'Pause after the current agent call',
-  disabled: false,
-};
 
 test('the run control: Pause while running; nothing while pending or after the end', () => {
   const html = renderToStaticMarkup(
@@ -71,7 +73,7 @@ test('the run control: Pause while running; nothing while pending or after the e
     renderToStaticMarkup(<RunControlChip control={pause} busy onToggle={() => {}} />),
     '',
   );
-  const ended: RunControl = {kind: 'ended', word: 'Completed', tip: null};
+  const ended: RunControl = {kind: 'ended', word: 'Completed', summary: null, tip: null};
   assert.equal(
     renderToStaticMarkup(<RunControlChip control={ended} busy={false} onToggle={() => {}} />),
     '',
@@ -96,7 +98,34 @@ test('stop asks first in a popover under ••• and names who finishes; none 
   );
   assert.match(menu(true, 'stop'), /The judge finishes its call, then no further rounds start\./);
   assert.equal(menu(false, 'stop').includes('alertdialog'), false);
+  // The run ended with the confirmation open: ••• is no longer pressed.
+  assert.match(menu(false, 'stop'), /class="iconbtn"[^>]*aria-expanded="false"/);
+  assert.match(menu(false, 'more'), /title="Notes, copy run ID"/);
   assert.match(menu(true, 'more'), /role="menuitem"[^>]*>Stop run…</);
   assert.equal(menu(false, 'more').includes('Stop run'), false);
   assert.match(menu(false, 'more'), />Copy run ID</);
+});
+
+test('a failed run says why: the summary in the row, the full diagnostic as its hint', () => {
+  const failed: RunControl = {
+    kind: 'ended',
+    word: 'Failed',
+    summary: 'Benchmark harness crashed',
+    tip: 'Benchmark harness crashed: exit 137 after 41.7s (OOM killer)',
+  };
+  const html = renderToStaticMarkup(
+    <RunStatus
+      line={{text: 'Failed', busy: false, paused: false, activeKind: null}}
+      control={failed}
+    />,
+  );
+  assert.match(html, /title="Benchmark harness crashed: exit 137 after 41.7s \(OOM killer\)"/);
+  assert.match(html, /<span class="why">Failed: Benchmark harness crashed<\/span>/);
+  const completed = renderToStaticMarkup(
+    <RunStatus
+      line={{text: 'Completed', busy: false, paused: false, activeKind: null}}
+      control={{kind: 'ended', word: 'Completed', summary: null, tip: null}}
+    />,
+  );
+  assert.equal(completed.includes('title='), false);
 });

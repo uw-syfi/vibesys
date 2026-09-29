@@ -1,9 +1,9 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
-import {forRun, frame, INITIAL_UI, PANE, SIDE, uiReducer} from './ui-state.js';
+import {agentFilter, forRun, frame, INITIAL_UI, PANE, SIDE, uiReducer} from './ui-state.js';
 
 test('picking the live round follows it again; another round pins and clears row state', () => {
-  const busy = {...INITIAL_UI, expanded: '26', agent: 'x1'};
+  const busy = {...INITIAL_UI, expanded: '26', agent: 'x1', agentRound: 6};
   const pinned = uiReducer(busy, {type: 'round', round: 3, live: 6});
   assert.deepEqual([pinned.round, pinned.expanded, pinned.agent], [3, null, null]);
   assert.equal(uiReducer(pinned, {type: 'round', round: 6, live: 6}).round, null);
@@ -18,11 +18,20 @@ test('toggles: tool rows, disclosures (or set open), the agent filter, evidence'
   assert.equal(state.disclosed['x1:prompt'], true);
   state = uiReducer(state, {type: 'disclose', key: 'x1:prompt', open: true});
   assert.equal(state.disclosed['x1:prompt'], true);
-  state = uiReducer(state, {type: 'agent', id: 'x1'});
-  assert.equal(uiReducer(state, {type: 'agent', id: 'x1'}).agent, null);
-  assert.equal(uiReducer(state, {type: 'agent', id: null}).agent, null);
+  state = uiReducer(state, {type: 'agent', id: 'x1', round: 6});
+  assert.equal(uiReducer(state, {type: 'agent', id: 'x1', round: 6}).agent, null);
+  assert.equal(uiReducer(state, {type: 'agent', id: null, round: 6}).agent, null);
   state = uiReducer(state, {type: 'evidence', round: 3});
   assert.equal(uiReducer(state, {type: 'evidence', round: 3}).evidence, null);
+});
+
+test('the agent filter holds only in the round it was set in', () => {
+  const filtered = uiReducer(INITIAL_UI, {type: 'agent', id: 'x1', round: 6});
+  assert.equal(agentFilter(filtered, 6), 'x1');
+  // The followed live round advances: nothing is dispatched, and the filter lapses.
+  assert.equal(agentFilter(filtered, 7), null);
+  const picked = uiReducer(filtered, {type: 'round', round: 3, live: 6});
+  assert.deepEqual([picked.agent, agentFilter(picked, 6)], [null, null]);
 });
 
 test('the pane opens on Changes and choosing a tab closes a menu', () => {

@@ -56,6 +56,23 @@ const SCREENS: Screen[] = [
     },
   },
   {
+    name: 'failed',
+    act: async (page, gateway) => {
+      gateway.push({
+        type: 'run_failed',
+        text: 'Benchmark harness crashed',
+        diagnostic: {
+          code: 'benchmark_crashed',
+          summary: 'Benchmark harness crashed',
+          detail: 'cargo bench exited with status 137 after 41.7s (killed by the OOM killer).',
+          scope: 'run',
+          severity: 'fatal',
+        },
+      });
+      await page.getByText('Failed: Benchmark harness crashed').waitFor();
+    },
+  },
+  {
     name: 'stop',
     act: async page => {
       await page.getByRole('button', {name: 'More'}).click();

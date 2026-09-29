@@ -176,8 +176,15 @@ export function runControl(
   const word = endedWord(core, captured);
   if (word !== null) {
     const diagnostic = core.diagnostics.filter(candidate => candidate.scope === 'run').at(-1);
-    const tip = diagnostic ? (diagnostic.detail ?? diagnostic.summary) : null;
-    return {kind: 'ended', word, tip: word === 'Completed' ? null : tip};
+    if (word === 'Completed' || diagnostic === undefined) {
+      return {kind: 'ended', word, summary: null, tip: null};
+    }
+    return {
+      kind: 'ended',
+      word,
+      summary: diagnostic.summary,
+      tip: diagnostic.detail ?? diagnostic.summary,
+    };
   }
   const offline = connection !== 'connected';
   switch (core.status) {

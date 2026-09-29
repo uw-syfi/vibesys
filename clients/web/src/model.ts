@@ -17,7 +17,14 @@ export type RunControl =
       tip: string;
       disabled: boolean;
     }
-  | {kind: 'ended'; word: EndedWord; tip: string | null};
+  | {
+      kind: 'ended';
+      word: EndedWord;
+      /** A failed or interrupted run's one-line reason, shown in the title row. */
+      summary: string | null;
+      /** The full diagnostic text: the reason's hover hint. */
+      tip: string | null;
+    };
 
 export interface Steers {
   /** Steers the backend journaled as pending and has not consumed yet. */

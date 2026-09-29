@@ -15,8 +15,10 @@ export interface UiState {
   expanded: string | null;
   /** `<turn id>:prompt` and `<turn id>:todos` disclosures. */
   disclosed: Readonly<Record<string, boolean>>;
-  /** The execution the transcript is filtered to. */
+  /** The execution the transcript is filtered to; read it through `agentFilter`. */
   agent: string | null;
+  /** The round the filter was set in: it lapses once another round shows. */
+  agentRound: number | null;
   menu: Menu;
   palette: boolean;
   /** The experiments row whose evidence is open. */
@@ -33,7 +35,7 @@ export type UiAction =
   | {type: 'resize'; target: 'side' | 'pane'; width: number}
   | {type: 'expand'; id: string}
   | {type: 'disclose'; key: string; open?: boolean}
-  | {type: 'agent'; id: string | null}
+  | {type: 'agent'; id: string | null; round: number | null}
   | {type: 'menu'; menu: Menu}
   | {type: 'palette'; open: boolean}
   | {type: 'evidence'; round: number}
@@ -52,11 +54,20 @@ export const INITIAL_UI: UiState = {
   expanded: null,
   disclosed: {},
   agent: null,
+  agentRound: null,
   menu: null,
   palette: false,
   evidence: null,
   experimentsView: 'hypotheses',
 };
+
+/**
+ * The agent filter for the round on screen. A filter belongs to the round it was set in, so it
+ * ends when the reader picks another round or the followed live round advances.
+ */
+export function agentFilter(ui: UiState, round: number | null): string | null {
+  return ui.agent !== null && ui.agentRound === round ? ui.agent : null;
+}
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 
@@ -74,10 +85,17 @@ export function forRun(state: UiState, runId: string | null): UiState {
     expanded: null,
     disclosed: {},
     agent: null,
+    agentRound: null,
     menu: null,
     palette: false,
     evidence: null,
   };
+}
+
+/** Picking the filtered execution again (in the same round) clears the filter. */
+function toggleAgent(state: UiState, id: string | null, round: number | null): UiState {
+  const agent = state.agent === id && state.agentRound === round ? null : id;
+  return {...state, agent, agentRound: agent === null ? null : round};
 }
 
 export function uiReducer(state: UiState, action: UiAction): UiState {
@@ -90,6 +108,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
         round: action.round === action.live ? null : action.round,
         expanded: null,
         agent: null,
+        agentRound: null,
       };
     case 'pane':
       return {...state, pane: action.pane, menu: null};
@@ -109,7 +128,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
         disclosed: {...state.disclosed, [action.key]: action.open ?? !state.disclosed[action.key]},
       };
     case 'agent':
-      return {...state, agent: state.agent === action.id ? null : action.id};
+      return toggleAgent(state, action.id, action.round);
     case 'menu':
       return {...state, menu: action.menu};
     case 'palette':

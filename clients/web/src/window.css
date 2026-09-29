@@ -51,6 +51,8 @@ a.run:hover { background: var(--bg-hover); }
 .titlebar .proj { color: var(--text-2); white-space: nowrap; }
 .titlebar .sp { flex: 1; }
 .status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 0; }
+.status.ended { flex-shrink: 1; }
+.status .why { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kept { font-size: 12px; white-space: nowrap; color: var(--text-2); }
 .kept b { color: var(--text-1); font-weight: 500; }
 .vsep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex: none; }

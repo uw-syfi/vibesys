@@ -57,6 +57,9 @@ test('run control comes from core.status and the connection only', () => {
   assert.deepEqual(interrupted, {
     kind: 'ended',
     word: 'Interrupted',
+    summary: fold(QUEUE)
+      .diagnostics.filter(item => item.scope === 'run')
+      .at(-1)?.summary,
     tip: 'RuntimeError: launcher_terminated (SIGTERM)',
   });
 });
