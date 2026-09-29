@@ -219,7 +219,11 @@ export function App({session, connect}: {session: WorkspaceSession; connect?: Re
       {summary === null ? null : <Summary model={summary} trend={trend} />}
       <div className="shell">
         <Rail
-          state={railState(queries.experiments.response, queries.experiments.error, hasRunEnded(core))}
+          state={railState(
+            queries.experiments.response,
+            queries.experiments.error,
+            hasRunEnded(core),
+          )}
           model={rail}
           selected={selected}
           error={queries.experiments.error}

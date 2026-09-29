@@ -182,10 +182,22 @@ test('rail state: loading, unattached, ended before attaching, ready, and a fail
     'ended-unattached',
     'an ended run stops waiting',
   );
-  assert.equal(railState(experiments(true), null, true), 'ready', 'an ended run with data is ready');
+  assert.equal(
+    railState(experiments(true), null, true),
+    'ready',
+    'an ended run with data is ready',
+  );
   assert.equal(railState(experiments(true), null, false), 'ready');
-  assert.equal(railState(null, 'Experiments unavailable', false), 'error', 'the error alone, no skeleton');
-  assert.equal(railState(experiments(true), 'down', false), 'ready', 'a failed refetch keeps its rows');
+  assert.equal(
+    railState(null, 'Experiments unavailable', false),
+    'error',
+    'the error alone, no skeleton',
+  );
+  assert.equal(
+    railState(experiments(true), 'down', false),
+    'ready',
+    'a failed refetch keeps its rows',
+  );
 });
 
 test('R0: a baseline row only with a baseline value, the incumbent until the first kept round', () => {

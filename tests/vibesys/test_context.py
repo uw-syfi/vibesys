@@ -9,9 +9,8 @@ from unittest.mock import patch
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from tests.support import run_test_command
-
 from tests.server.support import build_server_parts
+from tests.support import run_test_command
 
 from server.api.protocol import ExperimentQuery
 from vibesys.api import open_run_store
