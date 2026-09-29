@@ -87,7 +87,8 @@ const sentence = (text: string): string => {
 
 function failureOf(error: unknown): LaunchFailure {
   if (!(error instanceof HomeError)) {
-    return {message: error instanceof Error ? error.message : String(error), tail: [], log: null};
+    const text = error instanceof Error ? error.message : String(error);
+    return {message: sentence(text), tail: [], log: null};
   }
   const tail = error.details?.['stderr_tail'];
   const log = error.details?.['stderr_log'];
@@ -113,6 +114,12 @@ function rejectionText(error: HomeError): string {
     return `The run already has a budget of ${recorded}; resume with at least that.`;
   }
   if (error.code === 'unknown_run') return 'This run no longer exists.';
+  if (error.code === 'already_live') {
+    const live = error.details?.['run_id'];
+    return typeof live === 'string'
+      ? `Run ${live} is still live in this project; open it and stop it first.`
+      : 'Another launcher has a run live in this project; stop it there first.';
+  }
   return error.message;
 }
 
@@ -172,8 +179,6 @@ export function locationText(root: string | null, location: FileLocation): strin
 }
 
 const POLL_MS = 1_000;
-/** Two minutes of polls; a run server that has not attached by then is treated as stuck. */
-const MAX_POLLS = 120;
 const IDLE: LaunchState = {kind: 'idle'};
 const sleep = (ms: number) =>
   new Promise<void>(resolve => {
@@ -192,8 +197,9 @@ async function poll(client: HomeClient, projectId: string, runId: string): Promi
 }
 
 /**
- * Polls the project's runs until the launched run attaches, fails, the cap runs out, or the page
- * leaves. `pause` waits between polls; tests pass one that resolves at once.
+ * Polls the project's runs until the launched run attaches, fails, or the page leaves. No time
+ * cap: a cold start can take minutes, and the home server reports a dead run server as `failed`,
+ * `none` or `stale`. `pause` waits between polls; tests pass one that resolves at once.
  */
 export async function followLaunch(
   client: HomeClient,
@@ -203,12 +209,7 @@ export async function followLaunch(
   pause: (ms: number) => Promise<void> = sleep,
 ): Promise<LaunchPhase> {
   let phase = gatewayPhase(result.gateway, null);
-  for (let polls = 0; phase.kind === 'waiting' && alive(); polls += 1) {
-    if (polls === MAX_POLLS) {
-      return failedWith(
-        'The run has not attached after two minutes. It may still start; check the home page.',
-      );
-    }
+  while (phase.kind === 'waiting' && alive()) {
     await pause(POLL_MS);
     if (!alive()) break;
     phase = await poll(client, projectId, result.run_id);

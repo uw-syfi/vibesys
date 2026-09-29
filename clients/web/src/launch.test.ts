@@ -80,10 +80,22 @@ test('launch_failed and an unreachable home fail with the tail; other refusals a
     failure: {message: 'Exited 1.', tail: ['a', 'b'], log: '/l'},
   });
   assert.equal(launchError(new HomeError('network', 'down', null)).kind, 'failed');
+  assert.deepEqual(launchError(new Error('boom')), {
+    kind: 'failed',
+    failure: {message: 'Boom.', tail: [], log: null},
+  });
   const live = launchError(
     new HomeError('already_live', 'The project already has a live run', {run_id: 'r0'}),
   );
-  assert.deepEqual(launchLine(live), {busy: null, error: 'The project already has a live run'});
+  assert.deepEqual(launchLine(live), {
+    busy: null,
+    error: 'Run r0 is still live in this project; open it and stop it first.',
+  });
+  const external = launchError(new HomeError('already_live', 'live', {run_id: null}));
+  assert.equal(
+    launchLine(external).error,
+    'Another launcher has a run live in this project; stop it there first.',
+  );
   const smaller = launchError(
     new HomeError('budget_decrease', 'budget below recorded', {recorded: 12}),
   );
@@ -134,15 +146,16 @@ test('stderr lines split into text and file locations (Rust and Python forms)', 
 const STARTING = {run_id: 'r1', gateway: gateway('starting')};
 const now = async () => undefined;
 
-test('a launch that never attaches settles as failed after 120 polls', async () => {
+test('a launch keeps waiting past 120 polls while the gateway is starting', async () => {
   let polls = 0;
   const client = homeClient('t', async () => {
     polls += 1;
-    return Response.json({runs: []});
+    const state = polls <= 150 ? 'starting' : 'live';
+    return Response.json({runs: [row(state, {websocket_url: WS})]});
   });
   const phase = await followLaunch(client, 'p', STARTING, () => true, now);
-  assert.equal(phase.kind, 'failed');
-  assert.equal(polls, 120);
+  assert.deepEqual(phase, {kind: 'ready', websocketUrl: WS});
+  assert.equal(polls, 151);
 });
 
 test('a poll the home server did not answer keeps waiting; the next one attaches', async () => {
