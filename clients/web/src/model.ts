@@ -241,6 +241,8 @@ export interface ConsumedSteer extends PendingSteer {
   round: number | null;
   roundLabel: string | null;
   agentKind: string | null;
+  /** The consuming call's execution, when the control event names it. */
+  executionId: string | null;
 }
 
 /** What the live region compares between renders. */
@@ -249,4 +251,11 @@ export interface RunPulse {
   round: number | null;
   ended: EndedWord | null;
   connection: Connection;
+}
+
+/** One row of a rendered diff; `line` is the file line number when the patch gives one. */
+export interface DiffLine {
+  tone: 'add' | 'del' | 'ctx' | 'hunk' | 'meta';
+  text: string;
+  line: number | null;
 }

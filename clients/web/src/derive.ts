@@ -448,6 +448,17 @@ export function railState(
   return ended ? 'ended-unattached' : 'unattached';
 }
 
+/** Where a consumed control event delivered its steers: the consuming call's scope. */
+function consumer(event: RunEvent): Omit<ConsumedSteer, 'id' | 'text'> {
+  return {
+    sequence: event.sequence ?? 0,
+    round: roundNumberFromLabel(event.round_label),
+    roundLabel: event.round_label ?? null,
+    agentKind: event.agent_kind ?? null,
+    executionId: event.execution_id ?? event.invocation_id ?? null,
+  };
+}
+
 export function steers(captured: readonly RunEvent[]): Steers {
   let pending: PendingSteer[] = [];
   const consumed: ConsumedSteer[] = [];
@@ -457,15 +468,8 @@ export function steers(captured: readonly RunEvent[]): Steers {
       pending.push({id: `steer-${event.sequence}`, text: event.text.slice('/steer: '.length)});
     } else if (event.status === 'consumed') {
       // One consumed event delivers every steer queued since the previous one.
-      for (const steer of pending) {
-        consumed.push({
-          ...steer,
-          sequence: event.sequence ?? 0,
-          round: roundNumberFromLabel(event.round_label),
-          roundLabel: event.round_label ?? null,
-          agentKind: event.agent_kind ?? null,
-        });
-      }
+      const scope = consumer(event);
+      for (const steer of pending) consumed.push({...steer, ...scope});
       pending = [];
     }
   }
@@ -520,7 +524,7 @@ function toolResult(entry: TranscriptEntry): ToolResultSummary | null {
  * seconds, whole seconds under a minute, `m:ss` above: `0:00` would say nothing about the 40 ms
  * reads that are most of a round, and `0.0s` would claim a call took no time at all.
  */
-function toolDuration(entry: TranscriptEntry): string | null {
+export function toolDuration(entry: TranscriptEntry): string | null {
   const payload = entry.toolResult?.payload;
   const seconds = payload?.kind === 'command' ? payload.duration : null;
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;

@@ -404,6 +404,7 @@ test('steers: pending until a consumed control event, then placed at the consumi
       round: 3,
       roundLabel: 'round-3-retry-1-implementer',
       agentKind: 'implementer',
+      executionId: '5dd3de497ad84055b8ce7485f0947c15',
     },
   ]);
   const groups = logGroups(fold(STUB), consumed, 3, null);
