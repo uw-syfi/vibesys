@@ -161,7 +161,12 @@ def test_edit_needs_the_current_hash(home: Home) -> None:
     edited = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base}).json()
     stale = home.put(
         f"/api/projects/{key}/tasks/bench",
-        {**FORM, "objective": "Never applied.\n", "result_metric": "never_applied", "base_hash": base},
+        {
+            **FORM,
+            "objective": "Never applied.\n",
+            "result_metric": "never_applied",
+            "base_hash": base,
+        },
     ).json()
 
     assert edited["objective"] == FORM["objective"]
@@ -169,7 +174,10 @@ def test_edit_needs_the_current_hash(home: Home) -> None:
     assert stale["error"]["code"] == "task_conflict"
     manifest = root / ".vibesys" / "tasks" / "bench" / "vibesys.input.toml"
     assert (root / ".vibesys" / "tasks" / "bench" / "OBJECTIVE.md").read_text() == FORM["objective"]
-    assert tomllib.loads(manifest.read_text())["benchmark"]["result"]["metric"] == FORM["result_metric"]
+    assert (
+        tomllib.loads(manifest.read_text())["benchmark"]["result"]["metric"]
+        == FORM["result_metric"]
+    )
 
 
 def test_edit_keeps_manifest_settings_the_form_does_not_show(home: Home) -> None:
