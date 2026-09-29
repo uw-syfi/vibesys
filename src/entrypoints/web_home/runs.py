@@ -22,7 +22,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
-from entrypoints.web_home.catalog import LOOPS
+from entrypoints.cli.resume import _POLICY_CLI_SELECTION
+from entrypoints.web_home.catalog import LOOPS, budget_destination
 from entrypoints.web_home.context import atomic_write, parse_body, safe_segment, validation_errors
 from entrypoints.web_home.contract import (
     ApiError,
@@ -31,7 +32,9 @@ from entrypoints.web_home.contract import (
     GatewayState,
     LaunchResult,
     ProjectState,
+    ResumeRun,
     StartRun,
+    StopResult,
 )
 from entrypoints.web_home.projects import inspect_project, project_id, resolve_project
 from entrypoints.web_home.tasks import select_task
@@ -45,6 +48,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from entrypoints.web_home.context import HomeConfig, Request
+    from vs_project.api import OrchestrationRunManifest
 
 _RECORD_POLL_SECONDS = 0.05
 _REAP_SECONDS = 5.0
@@ -166,6 +170,11 @@ def _spawn(
     is reported as ``launch_failed``; a timed-out child is terminated and reaped
     before the error returns, so a retry never races it.
     """
+    settled = [
+        path for path, launch in config.launches.items() if launch.process.poll() is not None
+    ]
+    for path in settled:
+        del config.launches[path]
     record_path.parent.mkdir(parents=True, exist_ok=True)
     _owner_path(record_path).unlink(missing_ok=True)
     origins = (config.origin, *config.dev_origins)
@@ -230,14 +239,29 @@ def _owner_run(
     return owner.run_id
 
 
-def _require_no_live(config: HomeConfig, root: Path) -> None:
+@dataclass(frozen=True)
+class _Live:
+    path: Path
+    record: WebInstanceRecord
+    run_id: str | None
+    external: bool
+
+
+def _live(config: HomeConfig, root: Path) -> _Live | None:
+    """Return the project's serving live gateway, home-owned first, then external."""
     project = Project.open(root)
     for path, external in ((_live_record(config, root), False), (_external_record(project), True)):
         record = WebInstanceRecord.discover(path)
         if record is not None:
-            message = "this project already has a live run; stop it first"
             run_id = _owner_run(path, record, project, external=external)
-            raise ApiError(ErrorCode.ALREADY_LIVE, message, details={"run_id": run_id})
+            return _Live(path=path, record=record, run_id=run_id, external=external)
+    return None
+
+
+def _require_no_live(config: HomeConfig, root: Path) -> None:
+    if (live := _live(config, root)) is not None:
+        message = "this project already has a live run; stop it first"
+        raise ApiError(ErrorCode.ALREADY_LIVE, message, details={"run_id": live.run_id})
 
 
 def _require_ready(root: Path) -> None:
@@ -335,3 +359,121 @@ def start_run(request: Request) -> LaunchResult:
         arguments = _start_arguments(body, root, run_id, run_config)
         record = _spawn(config, root, _live_record(config, root), run_id, arguments)
     return LaunchResult(run_id=run_id, gateway=_connected(record, GatewayState.STARTING))
+
+
+def _reopen_record(config: HomeConfig, root: Path, run_id: str) -> Path:
+    return _gateway_dir(config, root) / f"reopen-{safe_segment(run_id)}.json"
+
+
+def _load_run(root: Path, run_id: str) -> OrchestrationRunManifest:
+    try:
+        return Project.open(root).state.load_run(run_id)
+    except (ProjectError, ValueError):
+        message = f"no run {run_id!r} in this project"
+        raise ApiError(ErrorCode.UNKNOWN_RUN, message) from None
+
+
+def _stop(record: WebInstanceRecord, path: Path, *, group: bool) -> None:
+    """SIGTERM a gateway, its whole process group when home-owned; wait for it to go.
+
+    An external gateway (the TUI's) gets a plain SIGTERM, as ``web stop`` sends:
+    its group may be the operator's shell job.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        if group:
+            os.killpg(record.pid, signal.SIGTERM)
+        else:
+            os.kill(record.pid, signal.SIGTERM)
+    deadline = time.monotonic() + _REAP_SECONDS
+    while WebInstanceRecord.discover(path) is not None and time.monotonic() < deadline:
+        time.sleep(_RECORD_POLL_SECONDS)
+
+
+def resume_run(request: Request) -> LaunchResult:
+    """``POST .../runs/{run}/resume``: resume; the CLI restores the recorded configuration.
+
+    Resuming the run that is already live returns its gateway instead of a second backend.
+    """
+    body = parse_body(request, ResumeRun)
+    config = request.config
+    root = resolve_project(config, request.params[0])
+    run_id = request.params[1]
+    with config.launch_lock:
+        live = _live(config, root)
+        if live is not None and live.run_id == run_id and body.budget is None:
+            return LaunchResult(run_id=run_id, gateway=_connected(live.record, GatewayState.LIVE))
+        descriptor = _load_run(root, run_id).orchestration
+        if descriptor.id not in _POLICY_CLI_SELECTION:
+            message = f"the app cannot resume orchestration {descriptor.id!r}"
+            raise ApiError(ErrorCode.NOT_RESUMABLE, message)
+        loop = _POLICY_CLI_SELECTION[descriptor.id][0]
+        flag = LOOPS[loop][0]
+        recorded = descriptor.options.get(budget_destination(flag))
+        if body.budget is not None and isinstance(recorded, int) and body.budget < recorded:
+            message = f"{flag} is the run's total limit and cannot go below {recorded}"
+            raise ApiError(ErrorCode.BUDGET_DECREASE, message, details={"recorded": recorded})
+        _require_no_live(config, root)
+        arguments = ["--project", str(root), "--resume", run_id, "--outer-loop", loop]
+        if body.budget is not None:
+            arguments += [flag, str(body.budget)]
+        record = _spawn(config, root, _live_record(config, root), run_id, arguments)
+    return LaunchResult(run_id=run_id, gateway=_connected(record, GatewayState.STARTING))
+
+
+def _reopen_arguments(root: Path, run_id: str) -> list[str]:
+    # Sub-project 1: `--web-reopen-run` with `--project` reads the run's own journal and record.
+    return ["--project", str(root), "--web-reopen-run", run_id]
+
+
+def _serving_reopen(
+    config: HomeConfig, root: Path, run_id: str
+) -> tuple[WebInstanceRecord, bool] | None:
+    """Return a serving read-only gateway for *run_id* and whether it rejects our origin.
+
+    Ours is checked first, then plan 1's default record from another launcher.
+    """
+    external = _external_record(Project.open(root)).with_name(f"web-gateway-{run_id}.json")
+    for path in (_reopen_record(config, root, run_id), external):
+        record = WebInstanceRecord.discover(path) if path.exists() else None
+        if record is not None and (record.mode, record.run_id) == ("reopen", run_id):
+            owner = _read_owner(path) if path != external else None
+            return record, owner is not None and owner.origin != config.origin
+    return None
+
+
+def open_run(request: Request) -> LaunchResult:
+    """``POST .../runs/{run}/open``: serve a run read-only, reusing a gateway that still serves.
+
+    The live run's own gateway is returned as is. A reopen gateway started for an
+    older home origin is restarted, since it would reject the app.
+    """
+    config = request.config
+    root = resolve_project(config, request.params[0])
+    run_id = request.params[1]
+    with config.launch_lock:
+        live = _live(config, root)
+        if live is not None and live.run_id == run_id:
+            return LaunchResult(run_id=run_id, gateway=_connected(live.record, GatewayState.LIVE))
+        _load_run(root, run_id)
+        path = _reopen_record(config, root, run_id)
+        serving = _serving_reopen(config, root, run_id)
+        if serving is not None and serving[1]:
+            _stop(serving[0], path, group=True)
+            serving = None
+        if serving is None:
+            record = _spawn(config, root, path, run_id, _reopen_arguments(root, run_id))
+        else:
+            record = serving[0]
+    return LaunchResult(run_id=run_id, gateway=_connected(record, GatewayState.REOPENED))
+
+
+def stop_live(request: Request) -> StopResult:
+    """``DELETE /api/projects/{id}/live``: SIGTERM the live gateway; a no-op once it is gone."""
+    config = request.config
+    root = resolve_project(config, request.params[0])
+    with config.launch_lock:
+        live = _live(config, root)
+        if live is None:
+            return StopResult(stopped=False, run_id=None)
+        _stop(live.record, live.path, group=not live.external)
+    return StopResult(stopped=True, run_id=live.run_id)

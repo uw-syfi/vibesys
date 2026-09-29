@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import tomllib
@@ -12,11 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.entrypoints.web_home.support import make_project, project_key
+from tests.support.run_execution import run_execution_record
 
 from entrypoints.web_home import runs
 from entrypoints.web_home.contract import StartRun
 from entrypoints.web_home.runs import render_run_config
 from vibesys.api import Config
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -246,3 +249,123 @@ def test_run_config_escapes_non_bmp_and_control_characters() -> None:
 
     assert config["model"]["name"] == model
     assert config["agent"]["roles"]["implementer"]["reasoning_effort"] == "\U0001f600"
+
+
+def _persist_run(root: Path, run_id: str, *, max_rounds: int = 3) -> None:
+    project = Project.open(root)
+    project.state.create_project("proj")
+    manifest = project.state.new_run_manifest(
+        run_id,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="plain",
+            config_version=1,
+            options={
+                "max_rounds": max_rounds,
+                "max_attempts_per_issue": 2,
+                "max_issues_per_perf_eval": 2,
+            },
+        ),
+        trusted_input_baseline="0" * 40,
+    )
+    project.state.create_run(manifest)
+
+
+def test_resume_keeps_the_recorded_loop_and_refuses_a_smaller_budget(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run", max_rounds=3)
+
+    smaller = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {"budget": 2}).json()
+    resumed = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {"budget": 5}).json()
+
+    argv = _argv(runs_home)
+    assert smaller["error"]["code"] == "budget_decrease"
+    assert resumed["run_id"] == "plain-run"
+    assert argv[argv.index("--resume") + 1] == "plain-run"
+    assert argv[argv.index("--outer-loop") + 1] == "plain"
+    assert argv[argv.index("--max-rounds") + 1] == "5"
+    missing = runs_home.post(f"/api/projects/{key}/runs/ghost/resume", {}).json()
+    assert missing["error"]["code"] == "unknown_run"
+
+
+def test_open_serves_a_run_read_only_beside_the_live_one(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+
+    first = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+    again = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+
+    argv = _argv(runs_home, "reopen-plain-run")
+    assert first["gateway"]["state"] == "reopened"
+    assert again["gateway"]["url"] == first["gateway"]["url"]
+    assert argv[argv.index("--web-reopen-run") + 1] == "plain-run"
+    assert argv[argv.index("--project") + 1] == str(root)
+    assert "--web-reopen" not in argv
+    missing = runs_home.post(f"/api/projects/{key}/runs/ghost/open")
+    assert (missing.status, missing.json()["error"]["code"]) == (404, "unknown_run")
+
+
+def test_a_reopen_published_by_another_launcher_is_reused(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    record = Project.open(root).configuration_path() / "web-gateway-plain-run.json"
+    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101311 [S603]; the test starts its own fake gateway script with fixed arguments.
+        # > run_test_command waits for exit, but this gateway must keep serving while the
+        # > test queries the API; a shell wrapper would add quoting for no gain.
+        [sys.executable, str(FAKE), "--web-instance", str(record), "--web-reopen-run", "plain-run"],
+        cwd=root,
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline() == b"ready\n"
+        opened = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+        assert opened["gateway"]["url"] == json.loads(record.read_text())["url"]
+        assert runs_home.config.launches == {}
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+def test_stop_terminates_the_live_gateway_once(runs_home: Home) -> None:
+    key, _ = _project(runs_home)
+    started = runs_home.post(f"/api/projects/{key}/runs", START).json()
+
+    stopped = runs_home.delete(f"/api/projects/{key}/live").json()
+    next(iter(runs_home.config.launches.values())).process.wait(timeout=10)
+
+    assert stopped == {"stopped": True, "run_id": started["run_id"]}
+    assert runs_home.delete(f"/api/projects/{key}/live").json() == {
+        "stopped": False,
+        "run_id": None,
+    }
+
+
+def test_resume_and_open_reuse_the_live_gateway_of_the_same_run(runs_home: Home) -> None:
+    key, _ = _project(runs_home)
+    started = runs_home.post(f"/api/projects/{key}/runs", START).json()
+    run_id = started["run_id"]
+
+    resumed = runs_home.post(f"/api/projects/{key}/runs/{run_id}/resume", {}).json()
+    opened = runs_home.post(f"/api/projects/{key}/runs/{run_id}/open").json()
+
+    assert resumed["gateway"]["url"] == started["gateway"]["url"]
+    assert opened["gateway"] == {**resumed["gateway"], "state": "live"}
+    assert len(runs_home.config.launches) == 1
+
+
+def test_a_new_launch_prunes_launches_that_have_exited(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    plain = runs_home.config.environ
+    runs_home.config.environ = {**plain, "FAKE_RUN_SERVER_FAIL": "1"}
+    assert runs_home.post(f"/api/projects/{key}/runs", START).status == 502
+    runs_home.config.environ = plain
+    _persist_run(root, "plain-run")
+
+    runs_home.post(f"/api/projects/{key}/runs/plain-run/open")
+
+    assert [path.name for path in runs_home.config.launches] == ["reopen-plain-run.json"]

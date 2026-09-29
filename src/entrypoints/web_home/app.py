@@ -58,6 +58,9 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("GET", re.compile(_PROJECT + r"/commit"), tasks.commit_preview),
     ("POST", re.compile(_PROJECT + r"/commit"), tasks.commit),
     ("POST", re.compile(_PROJECT + r"/runs"), runs.start_run),
+    ("POST", re.compile(_PROJECT + r"/runs/([^/]+)/open"), runs.open_run),
+    ("POST", re.compile(_PROJECT + r"/runs/([^/]+)/resume"), runs.resume_run),
+    ("DELETE", re.compile(_PROJECT + r"/live"), runs.stop_live),
 )
 
 
