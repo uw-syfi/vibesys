@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
+    from entrypoints.web_home.runs import Launch
+
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _GIT_TIMEOUT_SECONDS = 60
 _GIT_TERM_GRACE_SECONDS = 5
@@ -27,6 +30,8 @@ _GIT_OVERRIDES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"})
 _PORCELAIN_STATUS_WIDTH = len("XY ")
 _KEYCHAIN_TIMEOUT_SECONDS = 2
 _KEYCHAIN_ITEM_NOT_FOUND = 44
+_UNSAFE_SEGMENT = re.compile(r"[^a-zA-Z0-9_.-]")
+_BMP_LAST = 0xFFFF
 
 
 def _utc_now() -> datetime:
@@ -70,11 +75,15 @@ class HomeConfig:
     port: int
     dev_origins: tuple[str, ...] = ()
     environ: Mapping[str, str] = field(default_factory=lambda: os.environ)
+    run_server_argv: tuple[str, ...] = (sys.executable, "-m", "entrypoints.server")
     clock: Callable[[], datetime] = _utc_now
     keychain: Callable[[str], bool | None] = keychain_has
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     # ponytail: one lock serializes every file write; per-file locks if it contends.
     write_lock: threading.Lock = field(default_factory=threading.Lock)
+    launch_lock: threading.Lock = field(default_factory=threading.Lock)
+    launch_timeout: float = 30.0
+    launches: dict[Path, Launch] = field(default_factory=dict)
 
     @property
     def origin(self) -> str:
@@ -195,3 +204,17 @@ def pending_changes(root: Path) -> list[str]:
         if record[0] in "RC":
             index += 1
     return sorted(paths)
+
+
+def safe_segment(value: str) -> str:
+    """Confine an opaque id to one path segment exactly as the TUI's ``sanitizeRunId`` does.
+
+    JavaScript replaces per UTF-16 code unit, so a character outside the BMP
+    becomes two underscores there and must here too.
+    """
+    return "".join(
+        "_" * (2 if ord(character) > _BMP_LAST else 1)
+        if _UNSAFE_SEGMENT.fullmatch(character)
+        else character
+        for character in value
+    )

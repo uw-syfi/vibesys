@@ -14,8 +14,9 @@ from http import HTTPStatus
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
+from pydantic.alias_generators import to_camel
 
-from vibesys.api import ComputeBackend, DomainName
+from vibesys.api import ComputeBackend, DomainName, RunStatus
 from vs_agent.api import Driver
 
 
@@ -367,6 +368,121 @@ class CommitResult(_Model):
     committed: list[str]
 
 
+# Group (c): runs and notes.
+
+
+class GatewayState(StrEnum):
+    """What the app can do with a run's gateway."""
+
+    LIVE = "live"
+    STARTING = "starting"
+    ENDED_SERVING = "ended_serving"
+    FAILED = "failed"
+    STALE = "stale"
+    EXTERNAL = "external"
+    REOPENED = "reopened"
+    NONE = "none"
+
+
+class Gateway(_Model):
+    """A run gateway; connection fields are set only when it answers health probes."""
+
+    state: GatewayState
+    url: str | None = None
+    websocket_url: str | None = None
+    token: str | None = None
+    stderr_tail: list[str] = Field(default_factory=list)
+    stderr_log: str | None = None
+    origin_mismatch: bool = False
+
+
+class RunRow(_Model):
+    """One run, newest first; ``reopen`` is its read-only gateway when one is serving."""
+
+    run_id: str
+    loop: str | None
+    status: RunStatus
+    rounds: int
+    gateway: Gateway
+    reopen: Gateway | None = None
+    error: str | None = None
+    task: str | None = None
+    objective: str | None = None
+    created_at: str | None = None
+
+
+class RunList(_Model):
+    """Response of ``GET /api/projects/{id}/runs``."""
+
+    runs: list[RunRow]
+
+
+class RoleOverride(_Model):
+    """Per-role model controls written to ``[agent.roles.<id>]``."""
+
+    model: str | None = Field(default=None, min_length=1, max_length=256)
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class StartRun(_Model):
+    """Body of ``POST /api/projects/{id}/runs``."""
+
+    task: str
+    outer_loop: str
+    budget: int | None = Field(default=None, ge=1)
+    compute_backend: ComputeBackend
+    driver: Driver | None = None
+    provider: str
+    model: str = Field(min_length=1, max_length=256)
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=256)
+    roles: dict[str, RoleOverride] = Field(default_factory=dict)
+
+
+class ResumeRun(_Model):
+    """Body of ``POST .../runs/{run}/resume``; ``budget`` may only grow."""
+
+    budget: int | None = Field(default=None, ge=1)
+
+
+class LaunchResult(_Model):
+    """Response of start, resume, and open."""
+
+    run_id: str
+    gateway: Gateway
+
+
+class StopResult(_Model):
+    """Response of ``DELETE /api/projects/{id}/live``."""
+
+    stopped: bool
+    run_id: str | None
+
+
+class NoteRecord(BaseModel):
+    """A TUI-compatible note file (camelCase on the wire and on disk)."""
+
+    model_config = ConfigDict(
+        extra="ignore", frozen=True, alias_generator=to_camel, populate_by_name=True
+    )
+
+    run_id: str
+    text: str
+    created_at: str
+    updated_at: str
+
+
+class NoteResponse(_Model):
+    """Response of ``GET``/``PUT /api/notes/{run}``."""
+
+    note: NoteRecord | None
+
+
+class NoteUpdate(_Model):
+    """Body of ``PUT /api/notes/{run}``."""
+
+    text: str
+
+
 SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     ErrorBody,
     FsListing,
@@ -384,6 +500,13 @@ SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     CommitPreview,
     CommitRequest,
     CommitResult,
+    RunList,
+    StartRun,
+    ResumeRun,
+    LaunchResult,
+    StopResult,
+    NoteResponse,
+    NoteUpdate,
 )
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast, override
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from entrypoints.web_home import catalog, keys, projects, tasks
+from entrypoints.web_home import catalog, keys, projects, runs, tasks
 from entrypoints.web_home.context import HomeConfig, Request, atomic_write
 from entrypoints.web_home.contract import ApiError, ErrorBody, ErrorCode
 from server.runtime import WebInstanceClaim, WebInstanceRecord
@@ -57,6 +57,7 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("PUT", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.edit_task),
     ("GET", re.compile(_PROJECT + r"/commit"), tasks.commit_preview),
     ("POST", re.compile(_PROJECT + r"/commit"), tasks.commit),
+    ("POST", re.compile(_PROJECT + r"/runs"), runs.start_run),
 )
 
 
