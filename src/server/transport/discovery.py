@@ -77,6 +77,17 @@ class WebInstanceRecord:
         if current == self:
             path.unlink(missing_ok=True)
 
+    def process_alive(self) -> bool:
+        """Report whether the process that published this record still exists.
+
+        This is the weakest liveness fact the record carries, and the only one
+        that survives the gateway's own teardown: the gateway unlinks its
+        record first and keeps the rest of its instance files open until the
+        interpreter exits, so a caller that needs the instance directory to be
+        quiescent has to wait on the process, not on the record.
+        """
+        return _pid_alive(self.pid)
+
 
 class WebInstanceClaim:
     """A project-local startup lock held for the gateway lifetime."""

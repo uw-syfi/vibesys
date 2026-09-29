@@ -59,6 +59,13 @@ uv run python -m entrypoints.web status --instance clients/web/.vibesys-demo/web
 uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
 ```
 
+`stop` exits 0 only once the gateway process is gone, so after it succeeds
+nothing is holding the instance record, the claim lock, or the startup log open
+and the runtime directory can be reused or removed. It exits 1 if the process
+outlives its SIGTERM, because the record disappears as the first step of the
+gateway's teardown and therefore says nothing about that. The claim lock and
+the startup log are retained by design; `stop` does not delete them.
+
 Pass a real project and task for an operator-owned run. Additional VibeSys run
 arguments follow `--`:
 

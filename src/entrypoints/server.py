@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,8 @@ from vs_project.api import Project
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
 _DETACHED_STOP_TIMEOUT_SECONDS = 2.0
+_DETACHED_EXIT_TIMEOUT_SECONDS = 10.0
+_DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
 
 if TYPE_CHECKING:
@@ -260,7 +263,7 @@ class _DetachedProcess(Protocol):
 
 
 class _DetachedLaunchEffects:
-    """Process, discovery, and clock effects for detached gateway startup."""
+    """Process, discovery, and clock effects for the detached gateway lifetime."""
 
     def spawn(
         self,
@@ -280,6 +283,12 @@ class _DetachedLaunchEffects:
 
     def discover(self, instance_path: Path) -> WebInstanceRecord | None:
         return WebInstanceRecord.discover(instance_path, cleanup_stale=False)
+
+    def terminate(self, record: WebInstanceRecord) -> None:
+        os.kill(record.pid, signal.SIGTERM)
+
+    def is_running(self, record: WebInstanceRecord) -> bool:
+        return record.process_alive()
 
     def monotonic(self) -> float:
         return time.monotonic()
@@ -324,7 +333,7 @@ def _spawn_detached(
                         output,
                     )
                 )
-            effects.sleep(0.05)
+            effects.sleep(_DETACHED_POLL_SECONDS)
         _stop_detached(process)
         raise RuntimeError(
             _detached_failure(
@@ -349,6 +358,36 @@ def _stop_detached(process: _DetachedProcess) -> None:
             process.wait(timeout=_DETACHED_STOP_TIMEOUT_SECONDS)
         except (ProcessLookupError, subprocess.TimeoutExpired):
             return
+
+
+def stop_detached_gateway(
+    record: WebInstanceRecord,
+    effects: _DetachedLaunchEffects = _DETACHED_EFFECTS,
+) -> bool:
+    """Terminate the gateway ``record`` describes and wait for it to be gone.
+
+    Returns whether the process has exited. A detached gateway is nobody's
+    child (`_spawn_detached` starts a new session), so there is no handle to
+    wait on and `_stop_detached` does not apply; the recorded pid is the only
+    thing an unrelated process can observe. That pid disappearing is also the
+    only signal that the gateway has released the files under its instance
+    directory: it unlinks its instance record as the *first* step of teardown
+    and keeps its claim lock and its startup log open until the interpreter
+    exits, so "the record is gone" says nothing about whether that directory
+    is still in use. A caller that reuses or removes the directory needs this
+    postcondition. A false result means the deadline expired with the process
+    still alive, and the caller must not assume ownership.
+    """
+    try:
+        effects.terminate(record)
+    except ProcessLookupError:
+        return True
+    deadline = effects.monotonic() + _DETACHED_EXIT_TIMEOUT_SECONDS
+    while effects.is_running(record):
+        if effects.monotonic() >= deadline:
+            return False
+        effects.sleep(_DETACHED_POLL_SECONDS)
+    return True
 
 
 def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:

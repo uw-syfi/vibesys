@@ -12,10 +12,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
+from hypothesis import given
+from hypothesis.strategies import integers
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
 from entrypoints.server import (
+    _DETACHED_EXIT_TIMEOUT_SECONDS,
     _control_socket_from_argv,
     _DetachedLaunchEffects,
     _headless_argv,
@@ -28,6 +31,7 @@ from entrypoints.server import (
     _web_port_from_argv,
     _web_requested,
     main,
+    stop_detached_gateway,
 )
 from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 
@@ -93,6 +97,69 @@ class RecordingDetachedEffects(_DetachedLaunchEffects):
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
+
+
+def _gateway_record(pid: int) -> WebInstanceRecord:
+    token = "capability" + "-token"
+    return WebInstanceRecord(
+        pid=pid,
+        port=43_211,
+        token=token,
+        url=f"http://127.0.0.1:43211/?token={token}",
+        project_root="/project",
+        started_at=1.0,
+    )
+
+
+class FakeDetachedGateway(_DetachedLaunchEffects):
+    """An in-memory detached gateway with a simulated clock.
+
+    It models the only thing an unrelated process can observe about a detached
+    gateway: SIGTERM starts teardown, and the pid stays observable for
+    ``polls_before_exit`` further liveness checks, because a real gateway
+    unlinks its instance record first and its process outlives that by however
+    long interpreter shutdown takes. ``polls_before_exit=None`` models a
+    gateway that ignores the signal, and ``already_exited`` models a process
+    that vanished between discovery and the signal. The clock only advances
+    when the caller sleeps, so a deadline is simulated instead of waited for.
+    """
+
+    def __init__(
+        self,
+        record: WebInstanceRecord,
+        *,
+        polls_before_exit: int | None = 0,
+        already_exited: bool = False,
+    ) -> None:
+        self.record = record
+        self.polls_before_exit = polls_before_exit
+        self.already_exited = already_exited
+        self.signals = 0
+        self.observations = 0
+        self.sleeps: list[float] = []
+        self.clock = 0.0
+
+    def terminate(self, record: WebInstanceRecord) -> None:
+        assert record == self.record
+        if self.already_exited:
+            raise ProcessLookupError(record.pid)
+        self.signals += 1
+
+    def is_running(self, record: WebInstanceRecord) -> bool:
+        assert record == self.record
+        self.observations += 1
+        if self.already_exited:
+            return False
+        if self.signals == 0 or self.polls_before_exit is None:
+            return True
+        return self.observations <= self.polls_before_exit
+
+    def monotonic(self) -> float:
+        return self.clock
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.clock += seconds
 
 
 def test_control_socket_argument_forms() -> None:
@@ -310,6 +377,75 @@ def test_detached_stop_escalates_only_when_the_child_ignores_termination() -> No
     _stop_detached(stubborn)
     assert stubborn.terminated is True
     assert stubborn.killed is True
+
+
+def test_stop_detached_gateway_waits_until_the_recorded_process_is_gone() -> None:
+    record = _gateway_record(4321)
+    gateway = FakeDetachedGateway(record, polls_before_exit=3)
+
+    assert stop_detached_gateway(record, gateway) is True
+
+    # The regression: the instance record disappears as the first step of the
+    # gateway's teardown, so a stop that returns before the pid is gone leaves
+    # the caller owning a directory the gateway still has open.
+    assert gateway.signals == 1
+    assert gateway.observations == 4
+    assert gateway.sleeps == [0.05, 0.05, 0.05]
+
+
+@given(polls_before_exit=integers(min_value=0, max_value=64))
+def test_stop_detached_gateway_outlasts_any_teardown_length(polls_before_exit: int) -> None:
+    record = _gateway_record(4321)
+    gateway = FakeDetachedGateway(record, polls_before_exit=polls_before_exit)
+
+    assert stop_detached_gateway(record, gateway) is True
+
+    # However long teardown takes, the last thing observed before returning is
+    # a process that is gone, and every wait in between is one poll interval.
+    assert gateway.observations == polls_before_exit + 1
+    assert gateway.sleeps == [0.05] * polls_before_exit
+    assert gateway.clock < _DETACHED_EXIT_TIMEOUT_SECONDS
+
+
+def test_stop_detached_gateway_reports_a_gateway_that_ignores_termination() -> None:
+    record = _gateway_record(4321)
+    gateway = FakeDetachedGateway(record, polls_before_exit=None)
+
+    assert stop_detached_gateway(record, gateway) is False
+
+    assert gateway.signals == 1
+    assert gateway.clock >= _DETACHED_EXIT_TIMEOUT_SECONDS
+    assert gateway.sleeps == [0.05] * len(gateway.sleeps)
+
+
+def test_stop_detached_gateway_accepts_a_process_that_already_exited() -> None:
+    record = _gateway_record(4321)
+    gateway = FakeDetachedGateway(record, already_exited=True)
+
+    assert stop_detached_gateway(record, gateway) is True
+
+    assert gateway.observations == 0
+    assert gateway.sleeps == []
+
+
+def test_detached_launch_effects_stop_a_real_child_process() -> None:
+    effects = _DetachedLaunchEffects()
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.read()"],
+        stdin=subprocess.PIPE,
+    )
+    record = _gateway_record(process.pid)
+    try:
+        assert effects.is_running(record) is True
+        effects.terminate(record)
+    finally:
+        if process.stdin is not None:
+            process.stdin.close()
+        process.wait()
+
+    # `is_running` reads the pid, so only a reaped process is observably gone;
+    # a zombie still answers, which is why the wait above precedes the check.
+    assert effects.is_running(record) is False
 
 
 def test_detached_launch_effects_capture_a_real_child_and_use_discovery(tmp_path: Path) -> None:

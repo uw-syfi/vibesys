@@ -399,10 +399,37 @@ def test_status_and_stop_report_gateway_lifecycle(
     assert _run_status(argparse.Namespace(instance=instance)) == 0
     assert "VibeSys web UI:" in capsys.readouterr().out
 
-    # test-isolation: lifecycle stop must not signal the test process.
-    monkeypatch.setattr(web.os, "kill", lambda _pid, _sig: None)
-    assert _run_stop(argparse.Namespace(instance=instance)) == 0
+    stopped: list[web.WebInstanceRecord] = []
+
+    def stop_gateway(stopping: web.WebInstanceRecord) -> bool:
+        stopped.append(stopping)
+        return True
+
+    assert _run_stop(argparse.Namespace(instance=instance), stop_gateway) == 0
+    assert stopped == [record]
     assert "Stopped VibeSys web gateway" in capsys.readouterr().out
+
+
+def test_stop_reports_a_gateway_that_outlives_its_stop_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    instance = tmp_path / "runtime" / "record.json"
+    record = _record()
+
+    def discover(path: Path, *, cleanup_stale: bool) -> web.WebInstanceRecord:
+        assert path == instance
+        assert not cleanup_stale
+        return record
+
+    # test-isolation: lifecycle status is isolated from a real gateway process.
+    monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
+
+    # A gateway that outlives SIGTERM still owns its instance directory, so
+    # reporting success would hand the caller files another process has open.
+    assert _run_stop(argparse.Namespace(instance=instance), lambda _record: False) == 1
+    output = capsys.readouterr().out
+    assert f"{record.pid} did not exit after SIGTERM" in output
+    assert str(tmp_path / "runtime") in output
 
 
 def test_status_and_stop_are_idempotent_when_record_is_absent(

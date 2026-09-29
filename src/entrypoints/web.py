@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -13,11 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
+from entrypoints.server import stop_detached_gateway
 from server.runtime import WebInstanceRecord
 from vs_project.api import Project
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 _LIVE_PORT = 8765
 _DEV_PORT = 5173
@@ -80,7 +80,7 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--local-port", type=_port, default=None)
     tunnel.add_argument("--browser-origin", default="http://127.0.0.1:5173")
 
-    stop = commands.add_parser("stop", help="stop a detached gateway")
+    stop = commands.add_parser("stop", help="stop a detached gateway and wait for it to exit")
     stop.add_argument("--instance", type=Path, required=True)
 
     status = commands.add_parser("status", help="show a detached gateway status")
@@ -270,15 +270,21 @@ def _run_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_stop(args: argparse.Namespace) -> int:
+def _run_stop(
+    args: argparse.Namespace,
+    stop_gateway: Callable[[WebInstanceRecord], bool] = stop_detached_gateway,
+) -> int:
     record = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
     if record is None:
         print("No VibeSys web gateway is running.", flush=True)  # noqa: T201  # lint-waiver: LW-101099 [T201]; report an already-stopped gateway to the operator
         return 0
-    os.kill(record.pid, signal.SIGTERM)
-    deadline = time.monotonic() + _RECORD_WAIT_SECONDS
-    while time.monotonic() < deadline and args.instance.exists():
-        time.sleep(0.05)
+    if not stop_gateway(record):
+        print(  # noqa: T201  # lint-waiver: LW-101107 [T201]; tell the operator the gateway outlived its stop request
+            f"VibeSys web gateway {record.pid} did not exit after SIGTERM; "
+            f"it may still be using {args.instance.parent}.",
+            flush=True,
+        )
+        return 1
     print(f"Stopped VibeSys web gateway {record.pid}.", flush=True)  # noqa: T201  # lint-waiver: LW-101100 [T201]; confirm the gateway lifecycle action to the operator
     return 0
 
