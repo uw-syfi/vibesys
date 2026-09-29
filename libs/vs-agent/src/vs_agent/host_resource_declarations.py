@@ -220,23 +220,8 @@ _NARROWED_WRITABLE_STATE_DIRS: dict[str, dict[str, tuple[str, ...]]] = {
 def _state_root(
     state_dir: str, *, home: Path, ctx: HostResourceContext, profile: ProviderProfile
 ) -> Path:
-    """Return where *state_dir* actually lives, honoring the CLI's own relocation variable.
-
-    ``ProviderProfile.state_root_env`` (agentshim 0.6.1+) names the
-    environment variable a CLI documents for relocating its primary state
-    directory, ``state_dirs[0]`` (``CLAUDE_CONFIG_DIR`` for Claude,
-    ``CODEX_HOME`` for Codex; ``None`` for a provider that documents none).
-    Only that first directory can move this way, and only when the run
-    environment actually sets the variable; every other state directory, and
-    every provider with no such variable, stays under ``home``.
-    """
-    if (
-        profile.state_root_env
-        and state_dir == profile.state_dirs[0]
-        and profile.state_root_env in ctx.env
-    ):
-        return Path(ctx.env[profile.state_root_env]).expanduser()
-    return home / state_dir
+    """Return where *state_dir* actually lives; see ``provider_profiles.state_dir_path``."""
+    return provider_profiles.state_dir_path(profile, state_dir, home=home, env=ctx.env)
 
 
 def declare_provider_state_resources(

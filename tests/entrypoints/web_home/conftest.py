@@ -42,6 +42,7 @@ def home(tmp_path: Path) -> Iterator[Home]:
             "VIBESYS_STATE_HOME": os.environ["VIBESYS_STATE_HOME"],
         },
         clock=lambda: datetime(2026, 9, 28, 12, 0, tzinfo=UTC),
+        keychain=lambda _service: False,
     )
     server = HomeServer(config)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

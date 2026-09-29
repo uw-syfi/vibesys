@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast, override
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from entrypoints.web_home import catalog, projects
+from entrypoints.web_home import catalog, keys, projects
 from entrypoints.web_home.context import HomeConfig, Request, atomic_write
 from entrypoints.web_home.contract import ApiError, ErrorBody, ErrorCode
 from server.runtime import WebInstanceClaim, WebInstanceRecord
@@ -48,6 +48,8 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("POST", re.compile(r"/api/projects/validate"), projects.validate),
     ("GET", re.compile(r"/api/projects"), projects.recent),
     ("GET", re.compile(r"/api/agents/catalog"), catalog.get_catalog),
+    ("GET", re.compile(r"/api/auth"), keys.auth_status),
+    ("PUT", re.compile(r"/api/auth/([^/]+)"), keys.write_key),
 )
 
 

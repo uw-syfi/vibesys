@@ -6,6 +6,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -23,10 +24,38 @@ _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _GIT_TIMEOUT_SECONDS = 60
 _GIT_OVERRIDES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"})
 _PORCELAIN_STATUS_WIDTH = len("XY ")
+_KEYCHAIN_TIMEOUT_SECONDS = 2
+_KEYCHAIN_ITEM_NOT_FOUND = 44
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def keychain_has(service: str) -> bool | None:
+    """Return whether the macOS keychain holds a *service* item, without reading its secret.
+
+    ``None`` means unknown: not macOS, no ``security`` tool, a timeout, or an
+    unexpected status. Without ``-w`` the tool prints attributes only, and the
+    output is discarded.
+    """
+    executable = shutil.which("security") if sys.platform == "darwin" else None
+    if executable is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-101307 [S603]; fixed `security` lookup argv with a constant service name, never a shell string.
+            # > A keychain binding would be a new dependency for one presence check;
+            # > shell=True would weaken argv safety.
+            [executable, "find-generic-password", "-s", service],
+            capture_output=True,
+            timeout=_KEYCHAIN_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode == 0:
+        return True
+    return False if result.returncode == _KEYCHAIN_ITEM_NOT_FOUND else None
 
 
 @dataclass
@@ -41,6 +70,7 @@ class HomeConfig:
     dev_origins: tuple[str, ...] = ()
     environ: Mapping[str, str] = field(default_factory=lambda: os.environ)
     clock: Callable[[], datetime] = _utc_now
+    keychain: Callable[[str], bool | None] = keychain_has
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     # ponytail: one lock serializes every file write; per-file locks if it contends.
     write_lock: threading.Lock = field(default_factory=threading.Lock)

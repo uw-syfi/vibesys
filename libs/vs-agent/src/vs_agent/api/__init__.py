@@ -56,7 +56,7 @@ from vs_agent.provider_policy import (
     SUGGESTED_MODELS,
     cli_skill_dirs,
 )
-from vs_agent.provider_profiles import provider_profile
+from vs_agent.provider_profiles import credential_path, provider_profile
 from vs_agent.selection import AgentSelection
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import (
@@ -136,6 +136,7 @@ __all__ = [
     "auth_paths",
     "build_agent_client",
     "cli_skill_dirs",
+    "credential_path",
     "declare_provider_state_resources",
     "expose_as_tools",
     "provider_profile",
