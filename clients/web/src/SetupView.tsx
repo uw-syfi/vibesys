@@ -12,7 +12,7 @@ import {
   type TaskDetail,
   type TaskSummary,
 } from './home-api.js';
-import {launchLine, useLaunch} from './launch.js';
+import {type LaunchFailure, launchLine, useLaunch} from './launch.js';
 import {homeHref} from './route.js';
 import {
   blockers,
@@ -48,6 +48,7 @@ import {
   SetupFooter,
   TaskRow,
 } from './ui/Setup.js';
+import {StartFailure} from './ui/StartFailure.js';
 import {TaskFormRows} from './ui/TaskForm.js';
 
 interface SetupData {
@@ -198,6 +199,45 @@ function useTaskDetail(
   return [detail, setDetail];
 }
 
+interface Derived {
+  loop: Catalog['outer_loops'][number] | undefined;
+  effort: boolean;
+  shown: TaskDetail | null;
+  checked: SetupForm;
+  blocking: ReturnType<typeof blockers>;
+}
+
+interface DeriveInput {
+  form: SetupForm;
+  catalog: Catalog;
+  auth: AuthStatus;
+  folder: Folder;
+  tasks: TaskSummary[] | null;
+  detail: TaskDetail | null;
+  project: ProjectValidation['project'];
+}
+
+/** The loop, reasoning-effort support, the form with an unlisted task cleared, and its blockers. */
+function derive({form, catalog, auth, folder, tasks, detail, project}: DeriveInput): Derived {
+  const loop = catalog.outer_loops.find(option => option.id === form.loop);
+  const effort =
+    catalog.providers.find(option => option.provider === form.provider)
+      ?.supports_reasoning_effort ?? false;
+  const shown = project !== null && detail?.name === form.task ? detail : null;
+  // A task chosen in another folder, or before this folder's tasks arrived, is not a choice here.
+  const listed = form.task === NEW_TASK || (tasks?.some(task => task.name === form.task) ?? false);
+  const checked = listed ? form : {...form, task: null};
+  const blocking = blockers({
+    form: checked,
+    validation: folder.validation,
+    tasks: tasks ?? [],
+    detail: shown,
+    catalog,
+    auth,
+  });
+  return {loop, effort, shown, checked, blocking};
+}
+
 function formActions(setForm: Dispatch<SetStateAction<SetupForm>>, catalog: Catalog) {
   return {
     patch: (next: Partial<SetupForm>) => setForm(form => ({...form, ...next})),
@@ -221,6 +261,36 @@ function Titlebar() {
     <header className="titlebar">
       <span className="name">New run</span>
     </header>
+  );
+}
+
+interface StartFailedProps {
+  failure: LaunchFailure;
+  root: string | null;
+  onRetry: () => void;
+  onBack: () => void;
+}
+
+/** In place of the form while a launch is `failed`: the failure titlebar and `StartFailure`. */
+function StartFailed({failure, root, onRetry, onBack}: StartFailedProps) {
+  return (
+    <>
+      <header className="titlebar">
+        <span className="name">New run</span>
+        <span className="sp" />
+        <span className="status">
+          <span className="dot err" />
+          Did not start
+        </span>
+      </header>
+      <StartFailure
+        failure={failure}
+        root={root}
+        backLabel="Back to setup"
+        onRetry={onRetry}
+        onBack={onBack}
+      />
+    </>
   );
 }
 
@@ -540,27 +610,22 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
   useEffect(() => {
     if (tasks !== null) setForm(current => withTasks(current, tasks));
   }, [tasks]);
-  const loop = catalog.outer_loops.find(option => option.id === form.loop);
-  const effort =
-    catalog.providers.find(option => option.provider === form.provider)
-      ?.supports_reasoning_effort ?? false;
-  const shown = project !== null && detail?.name === form.task ? detail : null;
-  // A task chosen in another folder, or before this folder's tasks arrived, is not a choice here.
-  const listed = form.task === NEW_TASK || (tasks?.some(task => task.name === form.task) ?? false);
-  const checked = listed ? form : {...form, task: null};
-  const blocking = blockers({
-    form: checked,
-    validation: folder.validation,
-    tasks: tasks ?? [],
-    detail: shown,
-    catalog,
-    auth,
-  });
+  const derived = derive({form, catalog, auth, folder, tasks, detail, project});
+  const {loop, effort, shown, checked, blocking} = derived;
   const start = () => {
     if (project !== null)
       launch.start(project.id, () => client.start(project.id, startRequest(form, catalog)));
   };
   const line = launchLine(launch.state);
+  if (launch.state.kind === 'failed')
+    return (
+      <StartFailed
+        failure={launch.state.failure}
+        root={project?.root ?? null}
+        onRetry={start}
+        onBack={launch.reset}
+      />
+    );
   return (
     <>
       <Titlebar />

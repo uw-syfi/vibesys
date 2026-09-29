@@ -456,3 +456,35 @@ test('a new task name is checked as it is typed, and an existing name is refused
   await page.getByRole('button', {name: 'Save task'}).click();
   await expect(page.getByRole('alert')).toHaveText('A task with this name already exists.');
 });
+
+test('a launch failure shows the stderr tail with copyable locations; Retry sends again', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const home = await mockHome(page, {start: 'launch_failed'});
+  await page.goto(NEW);
+  await page.getByRole('button', {name: 'Start run'}).click();
+  await expect(page.locator('.titlebar')).toContainText('Did not start');
+  await expect(page.locator('.claim')).toContainText('The run server exited with status 1');
+  await page
+    .getByRole('button', {name: 'File "/Users/me/vibesys/src/vibesys/config.py", line 214'})
+    .click();
+  await expect(page.getByText('Copied /Users/me/vibesys/src/vibesys/config.py:214')).toBeVisible();
+  await page.getByRole('button', {name: 'Retry'}).click();
+  await expect.poll(() => posts(home, '/runs').length).toBe(2);
+  await page.getByRole('button', {name: 'Back to setup'}).click();
+  await expect(page.getByLabel('Rounds')).toHaveValue('12');
+});
+
+test('a run server that dies while starting shows its stderr tail', async ({page}) => {
+  await mockHome(page, {start: 'failed'});
+  await page.goto(NEW);
+  await page.getByRole('button', {name: 'Start run'}).click();
+  await expect(page.locator('.titlebar')).toContainText('Did not start');
+  await expect(page.getByRole('button', {name: 'benches/decode.rs:41:14'})).toHaveAttribute(
+    'title',
+    `Copy ${ROOT}/benches/decode.rs:41:14`,
+  );
+  await expect(page).not.toHaveURL(/gateway=/);
+});

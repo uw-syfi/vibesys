@@ -317,3 +317,9 @@ dialog.picker:not([open]) { display: none; }
 dialog.commit { width: 440px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow); }
 .commit .files { margin: 0 0 10px; padding: 8px 10px; list-style: none; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-sidebar); max-height: 160px; overflow: auto; }
 .commit .err { margin: 0 0 10px; font: 12px/18px var(--mono); color: var(--error); white-space: pre-wrap; }
+
+/* start failure (mockup #startfail) */
+.failure .out { margin: 18px 0 10px; }
+.linkish { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
+.logline { margin: 0 0 12px; font-size: 12px; color: var(--text-2); }
+.failacts { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
