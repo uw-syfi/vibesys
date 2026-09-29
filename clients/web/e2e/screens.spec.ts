@@ -26,6 +26,8 @@ interface Screen {
   through?: number;
   chat?: 'off' | 'error' | 'held' | 'unanswered';
   notes?: 'fail';
+  /** Default `/?token=e2e`; Notes need a run page the home server opened (a gateway link). */
+  url?: string;
   act?: (page: Page, gateway: Gateway) => Promise<void>;
 }
 
@@ -51,6 +53,8 @@ const askQuestion = async (page: Page) => {
 /** [mock] The mockup's note text. */
 const NOTE =
   "Round 4 traded peak throughput for the buffer pool that round 5 needed. Check p99 latency before keeping round 7's admission delay.";
+
+const HOME_RUN = '/?token=e2e&gateway=/';
 
 const SCREENS: Screen[] = [
   {name: 'live'},
@@ -253,8 +257,8 @@ const SCREENS: Screen[] = [
       await page.keyboard.type('theme');
     },
   },
-  {name: 'notes', act: async page => openPane(page, 'Notes')},
-  {name: 'notes-failed', notes: 'fail', act: async page => openPane(page, 'Notes')},
+  {name: 'notes', url: HOME_RUN, act: async page => openPane(page, 'Notes')},
+  {name: 'notes-failed', url: HOME_RUN, notes: 'fail', act: async page => openPane(page, 'Notes')},
 ];
 
 const mockScreenNotes = (page: Page, screen: Screen) =>
@@ -273,7 +277,7 @@ test.describe('screens', () => {
       await page.clock.setFixedTime(new Date('2026-09-25T14:02:00Z'));
       await page.setViewportSize({width: 1440, height: 900});
       await mockScreenNotes(page, screen);
-      await page.goto('/?token=e2e');
+      await page.goto(screen.url ?? '/?token=e2e');
       await page.locator('.titlebar').waitFor();
       await screen.act?.(page, gateway);
       for (const width of [1440, 1024]) {

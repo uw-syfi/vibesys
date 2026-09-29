@@ -5,7 +5,7 @@ import {WebSocketTransport} from './browser-entry.js';
 import {HomeWindow} from './HomeWindow.js';
 import {fixtureHomeApi, type HomeApi, httpHomeApi} from './home.js';
 import {HomeError, homeClient} from './home-api.js';
-import {httpNotesApi} from './notes.js';
+import {httpNotesApi, type NotesApi} from './notes.js';
 import {fetchReplay, replayTransport} from './replay.js';
 import {pageParams, type RunLinks, runLinks} from './route.js';
 import {browserLifecycle, WorkspaceSession, webSocketUrlFromLocation} from './session.js';
@@ -21,11 +21,12 @@ applyTheme(document.documentElement, theme);
 const page = pageParams(window.location.href);
 const token = page.token;
 const client = token === null ? null : homeClient(token, (url, init) => fetch(url, init));
-// Notes live on the home server, which opened this page with its token; the replay has none.
-const notes = token === null ? null : httpNotesApi(token);
 
-/** The run window: one session per page load, created outside React so a remount cannot close it. */
-const showRun = (home: HomeApi, links: RunLinks | null) => {
+/**
+ * The run window: one session per page load, created outside React so a remount cannot close it.
+ * `notes` is the home server's notes API, present only on a run page the home opened.
+ */
+const showRun = (home: HomeApi, links: RunLinks | null, notes: NotesApi | null) => {
   const live = page.token !== null || page.gateway !== null;
   const session = new WorkspaceSession(
     live
@@ -38,9 +39,13 @@ const showRun = (home: HomeApi, links: RunLinks | null) => {
 };
 
 if (client === null || token === null) {
-  showRun(fixtureHomeApi(), null);
+  showRun(fixtureHomeApi(), null, null);
 } else if (page.gateway !== null) {
-  showRun(httpHomeApi(client, token), page.project === null ? null : runLinks(token, page.project));
+  showRun(
+    httpHomeApi(client, token),
+    page.project === null ? null : runLinks(token, page.project),
+    httpNotesApi(token),
+  );
 } else {
   // `?token=` alone is the home page, or a run gateway's own page (`vibesys web live`), whose
   // origin has no home API: only the home answers.
@@ -61,7 +66,7 @@ if (client === null || token === null) {
         );
         return;
       }
-      showRun(fixtureHomeApi(), null);
+      showRun(fixtureHomeApi(), null, null);
     },
   );
 }

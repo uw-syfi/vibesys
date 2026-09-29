@@ -426,6 +426,9 @@ test('a question that fails returns to the composer', async ({page}) => {
   await expect(box).toHaveValue('Why did round 3 fail the judge?');
 });
 
+/** A run page the home server opened: only there does the page have a notes API. */
+const HOME_RUN = '/?token=e2e&gateway=/';
+
 const notesPane = async (page: Page) => {
   await page.getByRole('button', {name: 'More'}).click();
   await page.getByRole('menuitem', {name: 'Notes'}).click();
@@ -437,7 +440,7 @@ test('Notes load, save as you type, and become a steer or ask draft without send
 }) => {
   const gateway = await mockGateway(page);
   const notes = await mockNotes(page, 'Check p99 before keeping round 7.');
-  await page.goto('/?token=e2e');
+  await page.goto(HOME_RUN);
   const pane = await notesPane(page);
   const editor = pane.getByRole('textbox', {name: 'Notes'});
   await expect(editor).toHaveValue('Check p99 before keeping round 7.');
@@ -463,7 +466,7 @@ test('Notes load, save as you type, and become a steer or ask draft without send
 test('Notes: edits survive a tab switch and are saved', async ({page}) => {
   await mockGateway(page);
   const notes = await mockNotes(page, null);
-  await page.goto('/?token=e2e');
+  await page.goto(HOME_RUN);
   const pane = await notesPane(page);
   const editor = pane.getByRole('textbox', {name: 'Notes'});
   await editor.fill('Typed, then away at once');
@@ -473,10 +476,34 @@ test('Notes: edits survive a tab switch and are saved', async ({page}) => {
   await expect(editor).toHaveValue('Typed, then away at once');
 });
 
+test('Notes: leaving the page saves what the timer has not', async ({page}) => {
+  await mockGateway(page);
+  const notes = await mockNotes(page, null);
+  await page.clock.install();
+  await page.goto(HOME_RUN);
+  const pane = await notesPane(page);
+  const editor = pane.getByRole('textbox', {name: 'Notes'});
+  await expect(editor).toHaveValue('');
+  // Timers stop here, so the 500 ms save never fires: only pagehide can send the text.
+  await page.clock.pauseAt(Date.now() + 60_000);
+  await editor.fill('Leaving');
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expect.poll(() => notes.puts).toEqual(['Leaving']);
+});
+
+test('Notes: a run page the home server did not open says where notes live', async ({page}) => {
+  await mockGateway(page);
+  const notes = await mockNotes(page, 'Never loaded.');
+  await page.goto('/?token=e2e');
+  const pane = await notesPane(page);
+  await expect(pane).toContainText('Notes are kept by the VibeSys home server');
+  expect(notes.auth).toEqual([]);
+});
+
 test('Notes: a note that fails to load is not editable', async ({page}) => {
   await mockGateway(page);
   await page.route('**/api/notes/*', route => route.fulfill({status: 404, body: 'Not found'}));
-  await page.goto('/?token=e2e');
+  await page.goto(HOME_RUN);
   const pane = await notesPane(page);
   await expect(pane).toContainText('Could not load the note: Notes are unavailable (HTTP 404)');
   await expect(pane.getByRole('textbox', {name: 'Notes'})).toHaveCount(0);
