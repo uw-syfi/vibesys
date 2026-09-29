@@ -1,0 +1,9 @@
+{
+  "dotenv_path": "/Users/me/vibesys/.env",
+  "providers": [
+    {"provider": "claude", "display_name": "Claude Code", "status": "key", "keys": [{"name": "ANTHROPIC_API_KEY", "source": "dotenv", "shadowed": false}], "cli_session": "absent", "login_command": "claude"},
+    {"provider": "codex", "display_name": "Codex CLI", "status": "missing", "keys": [{"name": "OPENAI_API_KEY", "source": "missing", "shadowed": false}], "cli_session": "absent", "login_command": "codex login"},
+    {"provider": "gemini", "display_name": "Gemini CLI", "status": "missing", "keys": [{"name": "GEMINI_API_KEY", "source": "missing", "shadowed": false}], "cli_session": "unknown", "login_command": "gemini"},
+    {"provider": "opencode", "display_name": "OpenCode", "status": "missing", "keys": [], "cli_session": "absent", "login_command": "opencode auth login"}
+  ]
+}

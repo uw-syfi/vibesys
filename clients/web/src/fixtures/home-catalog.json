@@ -1,0 +1,21 @@
+{
+  "drivers": [
+    {"driver": "agentshim", "providers": ["claude", "codex", "gemini", "opencode"], "supports_docker": true},
+    {"driver": "omnigent", "providers": ["claude", "codex"], "supports_docker": false}
+  ],
+  "providers": [
+    {"provider": "claude", "display_name": "Claude Code", "supports_reasoning_effort": true, "suggested_models": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]},
+    {"provider": "codex", "display_name": "Codex CLI", "supports_reasoning_effort": true, "suggested_models": ["gpt-5.5", "gpt-5.6-sol"]},
+    {"provider": "gemini", "display_name": "Gemini CLI", "supports_reasoning_effort": false, "suggested_models": []},
+    {"provider": "opencode", "display_name": "OpenCode", "supports_reasoning_effort": false, "suggested_models": ["google-vertex/gemini-3-pro-preview"]}
+  ],
+  "outer_loops": [
+    {"id": "agent", "budget": {"flag": "--max-rounds", "default": 12}, "requires_profile_guided": false, "roles": ["orchestrator", "implementer", "judge"]},
+    {"id": "profile-guided", "budget": {"flag": "--max-rounds", "default": 12}, "requires_profile_guided": true, "roles": ["profiler", "implementer", "judge"]},
+    {"id": "dynamic", "budget": {"flag": "--max-rounds", "default": 12}, "requires_profile_guided": false, "roles": ["orchestrator", "implementer", "judge"]},
+    {"id": "plain", "budget": {"flag": "--max-rounds", "default": 12}, "requires_profile_guided": false, "roles": ["implementer"]},
+    {"id": "evolve", "budget": {"flag": "--max-generations", "default": 8}, "requires_profile_guided": false, "roles": ["mutator"]}
+  ],
+  "compute_backends": ["cuda", "metal", "trainium", "rocm", "cpu"],
+  "default_compute_backend": "metal"
+}
