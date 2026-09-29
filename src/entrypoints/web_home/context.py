@@ -124,8 +124,8 @@ def git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
             timeout=_GIT_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
-        message = f"git {' '.join(arguments)} timed out after {_GIT_TIMEOUT_SECONDS}s"
-        raise ApiError(ErrorCode.NOT_GIT, message) from None
+        message = f"git did not respond within {_GIT_TIMEOUT_SECONDS}s"
+        raise ApiError(ErrorCode.INTERNAL, message) from None
 
 
 def pending_changes(root: Path) -> list[str]:

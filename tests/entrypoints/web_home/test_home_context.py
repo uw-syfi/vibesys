@@ -26,4 +26,4 @@ def test_git_timeout_raises_api_error_instead_of_500(
     with pytest.raises(ApiError) as excinfo:
         context.git(tmp_path, "status")
 
-    assert excinfo.value.code == ErrorCode.NOT_GIT
+    assert excinfo.value.code == ErrorCode.INTERNAL
