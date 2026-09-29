@@ -8,8 +8,10 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   useSyncExternalStore,
 } from 'react';
+import {type AskView, askView, chatOffer} from './ask.js';
 import {copyText} from './clipboard.js';
 import {attachNote, latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
@@ -38,6 +40,7 @@ import {
   toolDetail,
 } from './transcript.js';
 import {AgentsTab} from './ui/Agents.js';
+import {AskTab} from './ui/Ask.js';
 import {Banner} from './ui/Banner.js';
 import {ChangesTab} from './ui/Changes.js';
 import {ExperimentsTab} from './ui/Experiments.js';
@@ -145,6 +148,62 @@ function useBackfill(
     error: wants ? historyError : null,
     onRetry: () => void session.loadOlder(),
   };
+}
+
+interface AskHost {
+  view: AskView;
+  error: string | null;
+  start: (selection: {provider: string; model: string} | null) => void;
+}
+
+function useAsk(
+  session: WorkspaceSession,
+  state: WorkspaceState,
+  ui: UiState,
+  dispatch: Dispatch<UiAction>,
+): AskHost {
+  const {core, captured, asks} = state;
+  const {options, checking} = chatOffer(state.queries.chat_options);
+  const view = useMemo(
+    () =>
+      askView({
+        threads: core.chatThreads,
+        transcripts: core.chatTranscripts,
+        captured,
+        asks,
+        options,
+        checking,
+        selected: ui.thread,
+      }),
+    [core.chatThreads, core.chatTranscripts, captured, asks, options, checking, ui.thread],
+  );
+  // Options are asked for where they show (Ask, Notes, the palette), again as the run's status
+  // moves (a run still starting reports none yet), and when the connection returns (which also
+  // retries a query that failed).
+  const wanted = ui.pane === 'ask' || ui.pane === 'notes' || ui.palette;
+  const offered = view.harness === 'available';
+  const connected = state.connection === 'connected';
+  useEffect(() => {
+    if (wanted && !offered && connected && core.status !== 'connecting')
+      void session.load('chat_options');
+  }, [session, wanted, offered, connected, core.status]);
+  const [failure, setFailure] = useState<{runId: string | null; message: string} | null>(null);
+  // A thread error belongs to the run it happened in.
+  const error = failure !== null && failure.runId === state.runId ? failure.message : null;
+  const start = (selection: {provider: string; model: string} | null) => {
+    const runId = state.runId;
+    setFailure(null);
+    dispatch({type: 'menu', menu: null});
+    session.createThread(selection).then(
+      id => dispatch({type: 'thread', id}),
+      (reason: unknown) =>
+        setFailure({
+          runId,
+          message: `Could not start a thread: ${reason instanceof Error ? reason.message : String(reason)}`,
+        }),
+    );
+  };
+  return {view, error, start};
 }
 
 /** The UI state of the session's current run; a replaced run starts from a clean selection. */
@@ -371,6 +430,7 @@ interface PaneHostProps extends SectionProps {
   width: number;
   controls: TranscriptControls;
   onAgent: (id: string) => void;
+  ask: AskHost;
 }
 
 function changesTab(props: PaneHostProps) {
@@ -430,10 +490,29 @@ function experimentsTab(props: PaneHostProps) {
   );
 }
 
+function askTab(props: PaneHostProps) {
+  const {state, ui, dispatch, session, ask} = props;
+  const connected = state.connection === 'connected';
+  return (
+    <AskTab
+      view={ask.view}
+      menu={ui.menu}
+      draft={ui.drafts.ask}
+      reason={connected ? null : 'Asking resumes when the connection returns'}
+      error={ask.error}
+      onMenu={menu => dispatch({type: 'menu', menu})}
+      onThread={id => dispatch({type: 'thread', id})}
+      onNewThread={ask.start}
+      onDraft={text => dispatch({type: 'draft', target: 'ask', text})}
+      onSend={text => Promise.resolve(session.ask(text, ask.view.current.id))}
+    />
+  );
+}
+
 function PaneBody(props: PaneHostProps) {
   switch (props.tab) {
     case 'ask':
-      return <Placeholder scope="Run" text="Chat about this run is not available yet." />;
+      return askTab(props);
     case 'notes':
       return <Placeholder scope="Run" text="Run notes are not available yet." />;
     case 'changes':
@@ -548,6 +627,7 @@ export function App({session, home, links}: AppProps) {
   const view = useRunView(state, ui);
   const listing = useHome(home);
   const history = useBackfill(session, state, view.round);
+  const ask = useAsk(session, state, ui, dispatch);
   usePaletteShortcut(useCallback(() => dispatch({type: 'palette', open: true}), [dispatch]));
   useNewRunShortcut(links?.newRun ?? null);
   const width = useWindowWidth();
@@ -587,6 +667,7 @@ export function App({session, home, links}: AppProps) {
           width={layout.paneWidth}
           controls={controls}
           onAgent={selectAgent}
+          ask={ask}
         />
       )}
       {ui.palette ? (

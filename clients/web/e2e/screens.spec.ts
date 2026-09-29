@@ -24,10 +24,28 @@ const OUT = process.env['CAPTURE_DIR'];
 interface Screen {
   name: string;
   through?: number;
+  chat?: 'off' | 'error' | 'held';
   act?: (page: Page, gateway: Gateway) => Promise<void>;
 }
 
 const runs = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
+const openPane = async (page: Page, tab: string) => {
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
+  await page
+    .getByRole('complementary', {name: 'Run details'})
+    .getByRole('tab', {name: tab})
+    .click();
+};
+const sendQuestion = async (page: Page) => {
+  await openPane(page, 'Ask');
+  const box = page.getByRole('textbox', {name: 'Ask about this run'});
+  await box.fill('Why did round 3 fail the judge?');
+  await box.press('Enter');
+};
+const askQuestion = async (page: Page) => {
+  await sendQuestion(page);
+  await page.getByText(/^Mock reply\./).waitFor();
+};
 
 const SCREENS: Screen[] = [
   {name: 'live'},
@@ -95,10 +113,49 @@ const SCREENS: Screen[] = [
   {name: 'pane', act: async page => page.getByRole('button', {name: 'Toggle side pane'}).click()},
   {name: 'collapsed', act: async page => page.getByRole('button', {name: 'Hide sidebar'}).click()},
   {
-    name: 'ask',
+    name: 'ask-empty',
     act: async page => {
-      await page.getByRole('button', {name: 'Toggle side pane'}).click();
-      await page.getByRole('tab', {name: 'Ask'}).click();
+      await openPane(page, 'Ask');
+      await page.getByRole('textbox', {name: 'Ask about this run'}).waitFor();
+    },
+  },
+  {
+    name: 'ask-asking',
+    chat: 'held',
+    act: async page => {
+      await sendQuestion(page);
+      await page.getByText('Answering…').waitFor();
+    },
+  },
+  {name: 'ask', act: askQuestion},
+  {
+    name: 'ask-thread',
+    act: async page => {
+      await askQuestion(page);
+      await page.getByRole('button', {name: /^Thread:/}).click();
+    },
+  },
+  {
+    name: 'ask-model',
+    act: async page => {
+      await askQuestion(page);
+      await page.getByRole('button', {name: 'Chat model'}).click();
+    },
+  },
+  {
+    name: 'ask-nochat',
+    chat: 'off',
+    act: async page => {
+      await openPane(page, 'Ask');
+      await page.getByText('This run offers no chat harness.').waitFor();
+    },
+  },
+  {
+    name: 'ask-checking',
+    chat: 'error',
+    act: async page => {
+      await openPane(page, 'Ask');
+      await page.getByText('Checking the chat harness…').waitFor();
     },
   },
   {
@@ -173,10 +230,10 @@ test.describe('screens', () => {
   test.skip(OUT === undefined, 'Set CAPTURE_DIR to write the frames');
   for (const screen of SCREENS) {
     test(screen.name, async ({page}) => {
-      const gateway = await mockGateway(
-        page,
-        screen.through === undefined ? {} : {through: screen.through},
-      );
+      const gateway = await mockGateway(page, {
+        ...(screen.through === undefined ? {} : {through: screen.through}),
+        ...(screen.chat === undefined ? {} : {chat: screen.chat}),
+      });
       await page.clock.setFixedTime(new Date('2026-09-25T14:02:00Z'));
       await page.setViewportSize({width: 1440, height: 900});
       await page.goto('/?token=e2e');

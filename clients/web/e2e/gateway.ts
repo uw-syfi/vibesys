@@ -99,6 +99,27 @@ export const DEMO_CONTEXT: PerformanceContext = {
     'Increase decode throughput of the batch inference server without changing outputs.',
 };
 
+/** [mock] The run's chat offer: the run model, then one suggestion. */
+const CHAT_OPTIONS = {
+  providers: [
+    {
+      provider: 'claude',
+      models: [
+        {model: 'claude-opus-5', source: 'run', default: true},
+        {model: 'claude-sonnet-5', source: 'suggested'},
+      ],
+    },
+  ],
+};
+/** [mock] The recording has no chat agent behind it. */
+export const MOCK_ANSWER =
+  'Mock reply. This gateway replays a recorded run; there is no agent behind it.';
+/**
+ * `late` offers nothing on the first ask and `error` fails it; both offer after that. `held`
+ * offers chat but never answers a question.
+ */
+type ChatMode = 'on' | 'off' | 'late' | 'error' | 'held';
+
 const roundOf = (label: string | null | undefined): number =>
   Number(/round-(\d+)/.exec(label ?? '')?.[1] ?? 0);
 /** [mock] The recording keeps no commits; each round gets a stable fake id. */
@@ -311,6 +332,10 @@ export interface GatewayRequest {
   head?: string;
   path?: string;
   text?: string;
+  thread_id?: string | null;
+  provider?: string;
+  model?: string;
+  title?: string | null;
 }
 
 export interface Gateway {
@@ -320,6 +345,8 @@ export interface Gateway {
   /** Sends the recording's next events, up to and including sequence `through`. */
   advance(through: number): void;
   requests: GatewayRequest[];
+  /** Closes every open stream, as a dropped connection would; the page then reconnects. */
+  drop(): void;
 }
 
 function answer(
@@ -367,6 +394,9 @@ class DemoRun {
   played: number;
   /** Request types answered with an error instead of an acknowledgment. */
   readonly rejects: ReadonlySet<string>;
+  threads = 0;
+  optionsAsked = 0;
+  chat: ChatMode = 'on';
 
   constructor(through: number, status: RunStatus | undefined, rejects: readonly string[]) {
     this.rejects = new Set(rejects);
@@ -417,9 +447,78 @@ class DemoRun {
     }
   }
 
+  /** Experiment chat as the backend answers it: recorded to the journal first, then returned. */
+  chatAnswer(request: GatewayRequest): Record<string, unknown> | null {
+    switch (request.type) {
+      case 'query.chat_options': {
+        this.optionsAsked += 1;
+        const offered = this.chat !== 'off' && (this.chat !== 'late' || this.optionsAsked > 1);
+        return offered ? {chat_options: CHAT_OPTIONS} : {};
+      }
+      case 'query.chat_thread_create':
+        return this.createThread(request);
+      case 'query.chat':
+        return this.answerChat(request);
+      default:
+        return null;
+    }
+  }
+
+  createThread(request: GatewayRequest): Record<string, unknown> {
+    const spec = {
+      thread_id: `thread-${++this.threads}`,
+      title: request.title ?? '',
+      driver: 'agentshim',
+      provider: request.provider ?? 'claude',
+      model: request.model ?? 'claude-opus-5',
+    };
+    this.push({
+      type: 'chat_thread_created',
+      agent_kind: 'chat',
+      round_label: 'experiment-chat',
+      chat_thread_id: spec.thread_id,
+      data: {kind: 'chat_thread_created', ...spec, created_at: '2026-09-25T14:02:00Z'},
+    });
+    return {chat_thread: spec, events: [this.events.at(-1)]};
+  }
+
+  answerChat(request: GatewayRequest): Record<string, unknown> {
+    const thread = request.thread_id ?? null;
+    const first =
+      thread !== null &&
+      !this.events.some(event => event.type === 'chat' && event.chat_thread_id === thread);
+    this.push({
+      type: 'chat',
+      text: request.text ?? '',
+      status: 'answered',
+      agent_kind: 'chat',
+      round_label: 'experiment-chat',
+      chat_thread_id: thread,
+      data: {
+        kind: 'chat',
+        answer: MOCK_ANSWER,
+        thread_title: first ? (request.text ?? null) : null,
+        invocation_id: `chat-${this.sequence + 1}`,
+      },
+    });
+    return {
+      chat: {question: request.text ?? '', answer: MOCK_ANSWER, thread_id: thread},
+      events: [this.events.at(-1)],
+    };
+  }
+
+  drop = (): void => {
+    for (const ws of this.streams) void ws.close();
+    this.streams.clear();
+  };
+
   onRequest(ws: WebSocketRoute, request: GatewayRequest): void {
     this.requests.push(request);
-    if (this.rejects.has(request.type)) {
+    const failed =
+      this.chat === 'error' && request.type === 'query.chat_options' && this.optionsAsked === 0;
+    if (failed) this.optionsAsked += 1;
+    if (this.chat === 'held' && request.type === 'query.chat') return;
+    if (this.rejects.has(request.type) || failed) {
       ws.send(
         JSON.stringify({
           protocol_version: 1,
@@ -432,7 +531,7 @@ class DemoRun {
       return;
     }
     const snapshot = () => ({run_id: this.runId, sequence: this.sequence, status: this.status});
-    const fields = answer(request, this.events, snapshot);
+    const fields = this.chatAnswer(request) ?? answer(request, this.events, snapshot);
     ws.send(
       JSON.stringify({protocol_version: 1, request_id: request.request_id, ok: true, ...fields}),
     );
@@ -464,9 +563,15 @@ class DemoRun {
 
 export async function mockGateway(
   page: Page,
-  options: {through?: number; status?: RunStatus; reject?: readonly string[]} = {},
+  options: {
+    through?: number;
+    status?: RunStatus;
+    reject?: readonly string[];
+    chat?: Exclude<ChatMode, 'on'>;
+  } = {},
 ): Promise<Gateway> {
   const run = new DemoRun(options.through ?? LIVE_THROUGH, options.status, options.reject ?? []);
+  run.chat = options.chat ?? 'on';
   // main.tsx probes GET /api/projects to tell a home page from a gateway's own page. Without a
   // mocked home server, Vite's dev proxy forwards it to a home server that isn't running, which
   // logs ECONNREFUSED noise for every gateway-only screen; answer 404 so main.tsx falls through
@@ -491,5 +596,6 @@ export async function mockGateway(
     setStatus: run.setStatus,
     advance: run.advance,
     requests: run.requests,
+    drop: run.drop,
   };
 }

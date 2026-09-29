@@ -7,7 +7,7 @@ import type {ChatOptions, RunEvent} from '@vibesys/backend-client';
 import {type ChatThread, DEFAULT_CHAT_THREAD_ID, type TranscriptEntry} from '@vibesys/core-state';
 import {prose} from './derive.js';
 import type {ProsePart} from './model.js';
-import type {SentAsk} from './session.js';
+import type {QueryState, SentAsk} from './session.js';
 
 export interface AskMessage {
   id: string;
@@ -137,6 +137,14 @@ function modelGroups(options: ChatOptions | null): ModelGroup[] {
       models: (group.models ?? []).map(option => option.model),
     }))
     .filter(group => group.models.length > 0);
+}
+
+/** The options query as Ask reads it: a failed query has not answered, so it is never "none offered". */
+export function chatOffer(query: QueryState): Pick<AskInput, 'options' | 'checking'> {
+  return {
+    options: query.response?.chat_options ?? null,
+    checking: query.loading || query.response === null || query.error !== null,
+  };
 }
 
 export function askView(input: AskInput): AskView {

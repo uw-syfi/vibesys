@@ -39,9 +39,7 @@
       // e2e/gateway.ts and e2e/home.ts are the harness's own public surface: specs use only part
       // of it. home-api.ts, setup.ts, launch.ts and ui/Setup.tsx are consumed from real app code
       // (SetupView.tsx, RunEntry.tsx, HomeWindow.tsx, main.tsx) and traced from src/index.ts.
-      // ask.ts is temporary: plan 5 task 2 adds the Ask view model, task 4 wires it into the Ask
-      // tab UI; until then its exports have no consumer. Task 8 removes this line.
-      "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts", "src/ask.ts"]
+      "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts"]
     }
   }
 }

@@ -1,5 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
-import {FINISHED, mockGateway, ROUND_6_FINISHED} from './gateway.js';
+import {FINISHED, MOCK_ANSWER, mockGateway, ROUND_6_FINISHED} from './gateway.js';
 
 const rounds = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
 const round = (page: Page, n: number) =>
@@ -158,17 +158,77 @@ test('the sidebar hides and returns, and resizes from the keyboard', async ({pag
   await expect(rounds(page)).toBeVisible();
 });
 
-test('Ask and Notes say they are not available yet; Notes is also in the ••• menu', async ({
-  page,
-}) => {
+test('Notes opens from the ••• menu', async ({page}) => {
   await mockGateway(page);
   await page.goto('/?token=e2e');
   await page.getByRole('button', {name: 'More'}).click();
   await page.getByRole('menuitem', {name: 'Notes'}).click();
+  await expect(page.getByRole('tab', {name: 'Notes'})).toHaveAttribute('aria-selected', 'true');
+});
+
+const askPane = async (page: Page) => {
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
   const pane = page.getByRole('complementary', {name: 'Run details'});
-  await expect(pane).toContainText('Run notes are not available yet.');
   await pane.getByRole('tab', {name: 'Ask'}).click();
-  await expect(pane).toContainText('Chat about this run is not available yet.');
+  return pane;
+};
+
+test('Ask: a question gets one answer; a model starts a thread; the switcher returns', async ({
+  page,
+}) => {
+  const gateway = await mockGateway(page);
+  await page.goto('/?token=e2e');
+  const pane = await askPane(page);
+  const box = pane.getByRole('textbox', {name: 'Ask about this run'});
+  await box.fill('Why did round 3 fail the judge?');
+  await box.press('Enter');
+  await expect(box).toHaveValue('');
+  await expect(pane.locator('.human')).toHaveText(['Why did round 3 fail the judge?']);
+  await expect(pane.locator('.answer')).toHaveCount(1);
+  await expect(pane.locator('.answer')).toContainText(MOCK_ANSWER);
+  await pane.getByRole('button', {name: 'Chat model'}).click();
+  await page.getByRole('menuitemradio', {name: 'claude-sonnet-5'}).click();
+  await expect(pane.getByRole('button', {name: 'Chat model'})).toContainText('claude-sonnet-5');
+  await expect(pane.locator('.human')).toHaveCount(0);
+  expect(
+    gateway.requests
+      .filter(request => request.type === 'query.chat_thread_create')
+      .map(request => request.model),
+  ).toEqual(['claude-sonnet-5']);
+  await pane.getByRole('button', {name: /^Thread:/}).click();
+  await expect(page.getByRole('menuitemradio')).toHaveCount(2);
+  await page.getByRole('menuitemradio', {name: /^Why did round 3 fail the judge\?/}).click();
+  await expect(pane.locator('.human')).toHaveCount(1);
+});
+
+test('Ask without a chat harness says so and offers no composer', async ({page}) => {
+  await mockGateway(page, {chat: 'off'});
+  await page.goto('/?token=e2e');
+  const pane = await askPane(page);
+  await expect(pane).toContainText('This run offers no chat harness.');
+  await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toHaveCount(0);
+});
+
+test('Ask offers chat once a starting run reports its options', async ({page}) => {
+  const gateway = await mockGateway(page, {chat: 'late'});
+  await page.goto('/?token=e2e');
+  const pane = await askPane(page);
+  await expect(pane).toContainText('This run offers no chat harness.');
+  gateway.setStatus('pausing');
+  await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toBeVisible();
+});
+
+test('a failed options query keeps checking and asks again when the connection returns', async ({
+  page,
+}) => {
+  const gateway = await mockGateway(page, {chat: 'error'});
+  await page.goto('/?token=e2e');
+  const pane = await askPane(page);
+  await expect(pane).toContainText('Checking the chat harness…');
+  await expect(pane).not.toContainText('This run offers no chat harness.');
+  gateway.drop();
+  await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toBeVisible();
+  expect(gateway.requests.filter(request => request.type === 'query.chat_options')).toHaveLength(2);
 });
 
 test('changes: a patch, one the repository cannot produce, a truncated one, a running round', async ({

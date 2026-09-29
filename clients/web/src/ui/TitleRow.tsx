@@ -116,8 +116,8 @@ export function RunControlChip({
   );
 }
 
-/** A popover under the ••• button: Escape or a click outside closes it. */
-function Popover({
+/** A popover (the ••• menu, the Stop confirmation, Ask's menus): Escape or a click outside closes it. */
+export function Popover({
   role,
   label,
   onClose,

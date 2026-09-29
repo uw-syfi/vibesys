@@ -2,7 +2,7 @@ import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
 import type {ChatOptions, RunEvent} from '@vibesys/backend-client';
 import {type ChatThread, DEFAULT_CHAT_THREAD_ID, type TranscriptEntry} from '@vibesys/core-state';
-import {type AskInput, askView} from './ask.js';
+import {type AskInput, askView, chatOffer} from './ask.js';
 import type {SentAsk} from './session.js';
 
 const chat = (
@@ -179,4 +179,19 @@ test('the harness: available with a provider, checking until the options query a
   assert.equal(askView({...BASE, options: null}).harness, 'none');
   assert.equal(askView({...BASE, options: {providers: []}}).harness, 'none');
   assert.equal(askView({...BASE, options: null}).current.model, null);
+});
+
+test('a failed options query reads as checking, never as no harness', () => {
+  const EMPTY = {request_id: 'q', ok: true} as const;
+  const harness = (query: Parameters<typeof chatOffer>[0]) =>
+    askView({...BASE, ...chatOffer(query)}).harness;
+  assert.equal(harness({response: null, loading: false, error: null}), 'checking');
+  assert.equal(harness({response: null, loading: false, error: 'socket closed'}), 'checking');
+  assert.equal(harness({response: EMPTY, loading: false, error: 'socket closed'}), 'checking');
+  assert.equal(harness({response: EMPTY, loading: true, error: null}), 'checking');
+  assert.equal(harness({response: EMPTY, loading: false, error: null}), 'none');
+  assert.equal(
+    harness({response: {...EMPTY, chat_options: OPTIONS}, loading: false, error: null}),
+    'available',
+  );
 });

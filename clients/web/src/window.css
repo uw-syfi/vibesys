@@ -337,3 +337,23 @@ a.it { text-decoration: none; }
 @media (prefers-reduced-motion: no-preference) {
   .disc .chev, .trow .chev, .morerow .chev { transition: transform 0.15s ease-out; }
 }
+
+/* ask */
+.askhead, .pdock { position: relative; }
+.askhead .disc { min-width: 0; max-width: 100%; overflow: hidden; }
+.askhead .ttl, .pop .it .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.askhead .pop { top: 36px; left: 12px; right: auto; width: 300px; }
+.pdock .pop { top: auto; bottom: 60px; right: 12px; width: 250px; }
+.pop .gh { font-size: 11px; color: var(--text-3); padding: 6px 10px 2px; }
+.pop .it .d { margin-left: auto; color: var(--text-2); font-size: 12px; }
+.pop .it.on { background: var(--bg-hover); }
+.thread { flex: 1; overflow: auto; padding: 16px; }
+.thread .human { margin-top: 0; }
+.answer { margin: 8px 0 18px; }
+.answer .who2 { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.answer p { margin: 0 0 8px; }
+.answer .spin { vertical-align: -1px; }
+.pdock { flex: none; padding: 0 12px 12px; }
+.pdock .hint { margin-left: 16px; }
+.mchip { height: 28px; padding: 0 8px; border-radius: 14px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); flex: none; }
+.mchip:hover { background: var(--bg-hover); color: var(--text-1); }
