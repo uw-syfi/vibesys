@@ -53,8 +53,10 @@ from vs_agent.provider_policy import (
     NODE_VERSION,
     RUST_TOOLCHAIN_VERSION,
     SHIPPED_PROVIDERS,
+    SUGGESTED_MODELS,
     cli_skill_dirs,
 )
+from vs_agent.provider_profiles import provider_profile
 from vs_agent.selection import AgentSelection
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import (
@@ -88,6 +90,7 @@ __all__ = [
     "NULL_SKILL_SELECTION",
     "RUST_TOOLCHAIN_VERSION",
     "SHIPPED_PROVIDERS",
+    "SUGGESTED_MODELS",
     "AgentBackend",
     "AgentCapabilities",
     "AgentClient",
@@ -135,6 +138,7 @@ __all__ = [
     "cli_skill_dirs",
     "declare_provider_state_resources",
     "expose_as_tools",
+    "provider_profile",
     "register_tool",
     "serve_stdio",
     "task_agent_host_resources",

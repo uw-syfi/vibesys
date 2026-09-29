@@ -89,6 +89,7 @@ __all__ = [
     "load_objective",
     "load_project_task",
     "make_run_environment_spec",
+    "orchestration_roles",
     "repository_name_from_experiment",
     "resolve_agent_driver",
     "resolve_skill_source_dirs",
@@ -108,6 +109,17 @@ def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
 
     registration = built_in_orchestrations().resolve(descriptor.id)
     registration.parse_options(descriptor)
+
+
+def orchestration_roles(orchestration_id: str) -> tuple[str, ...]:
+    """Return the agent role IDs a built-in orchestration declares, in order."""
+    # lint-waiver: LW-101320 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
+    # > Module scope would import every policy whenever the request facade loads;
+    # > a shared cached loader adds indirection for two call sites.
+    from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
+
+    plugin = built_in_orchestrations().resolve(orchestration_id).plugin
+    return tuple(str(role.id) for role in plugin.agents)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:
