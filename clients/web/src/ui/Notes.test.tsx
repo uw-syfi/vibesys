@@ -25,7 +25,7 @@ const props = (overrides: Partial<NotesTabProps> = {}): NotesTabProps => ({
 
 test('the editor with its scope line and both draft buttons', () => {
   const html = renderToStaticMarkup(<NotesTab {...props()} />);
-  assert.match(html, /<span class="scope">Run<\/span><span>private to you, never sent<\/span>/);
+  assert.match(html, /<span class="scope">Run<\/span><span>never sent to agents<\/span>/);
   assert.match(html, /<textarea class="notesed" aria-label="Notes"[^>]*>Check p99\.<\/textarea>/);
   assert.match(
     html,
@@ -47,6 +47,8 @@ test('empty or ended: the draft buttons are off and say why on hover; a failed s
   assert.match(ended, /disabled="" title="This run offers no chat harness">Use as ask draft/);
   const checking = renderToStaticMarkup(<NotesTab {...props({harness: 'checking'})} />);
   assert.match(checking, /disabled="" title="Checking the chat harness…">Use as ask draft/);
+  const failed = renderToStaticMarkup(<NotesTab {...props({harness: 'failed'})} />);
+  assert.match(failed, /disabled="" title="Couldn&#x27;t check the chat harness">Use as ask draft/);
   assert.match(ended, /role="alert">Not saved: offline</);
 });
 

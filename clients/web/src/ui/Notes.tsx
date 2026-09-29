@@ -19,7 +19,7 @@ export function NotesTab(props: NotesTabProps) {
   return (
     <>
       <PaneHead scope="Run">
-        <span>private to you, never sent</span>
+        <span>never sent to agents</span>
       </PaneHead>
       <NoteBody {...props} />
     </>
@@ -86,7 +86,9 @@ function Editor(props: NotesTabProps & {text: string; error: string | null}) {
               ? 'Put this note in the Ask composer; nothing is sent'
               : harness === 'checking'
                 ? 'Checking the chat harness…'
-                : 'This run offers no chat harness'
+                : harness === 'failed'
+                  ? "Couldn't check the chat harness"
+                  : 'This run offers no chat harness'
           }
           onClick={props.onAskDraft}
         >

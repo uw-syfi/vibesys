@@ -40,12 +40,19 @@ form to connect to a live gateway URL.
   output or diff, Prompt and Todos when the execution recorded them, and the judge verdict. A
   steer shows Queued on the backend's pending acknowledgment and Applied on its consumed control
   event.
+- Ask talks to the run's experiment chat: a thread switcher, New thread, and a model chip whose
+  choices come from the run's `query.chat_options` (a model belongs to a thread, so choosing one
+  starts a thread on it). One question per thread is in flight at a time. Without a chat harness
+  the tab says so and keeps recorded threads readable.
+- Notes are private run notes shared with the TUI through the home server
+  (`GET/PUT /api/notes/{run}`, last write wins), saved as you type. "Use as steer draft" and
+  "Use as ask draft" only fill a composer; nothing is sent.
 - Agents draws the round's executions top to bottom (React Flow, dagre). Edges follow start
   times and are dashed because events carry no dependency graph; a card filters the transcript.
-- ⌘K lists the visible controls, the rounds and the pane tabs. Ask and Notes are placeholders
-  until sub-project 5. The sidebar reads the home server's API; a replay page or a gateway's own
-  page lists only the open run.
-- Themes: System (default), Light and Dark (`?theme=light|dark`).
+- ⌘K lists the visible controls, the rounds and the pane tabs. The sidebar reads the home
+  server's API; a replay page or a gateway's own page lists only the open run.
+- Themes: System (default), Light and Dark, from the ••• menu or ⌘K, remembered per browser;
+  `?theme=light|dark` overrides for reviews and captures.
 - Session, core-state, the tail bootstrap and backfill are unchanged (`src/session.ts`).
 - The home page (the URL `vibesys web home` prints) lists every recent project's runs. New run
   (⌘N) checks a folder, picks a task or creates one (its files are committed only after a
