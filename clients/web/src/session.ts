@@ -9,6 +9,7 @@ import type {
 } from '@vibesys/backend-client';
 import {
   type CoreState,
+  DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
   reduceEvent,
@@ -34,7 +35,7 @@ export interface QueryState {
   error: string | null;
 }
 
-export type QueryName = 'experiments' | 'design' | 'performance';
+export type QueryName = 'experiments' | 'design' | 'performance' | 'chat_options';
 export type CommandAction = 'pause' | 'resume' | 'steer' | 'stop';
 type Command = Extract<
   RequestInput,
@@ -51,6 +52,21 @@ export interface SentSteer {
   afterSequence: number;
 }
 
+/**
+ * A question sent to experiment chat. It leaves `asks` once its recorded `chat` event is captured;
+ * `answer` is set only when the backend answered without recording (a thread that cannot answer
+ * right now), `error` when the request failed.
+ */
+export interface SentAsk {
+  id: string;
+  threadId: string;
+  text: string;
+  /** The core sequence when it was sent: a recorded question after it may be this one. */
+  afterSequence: number;
+  answer: string | null;
+  error: string | null;
+}
+
 export interface WorkspaceState {
   core: CoreState;
   runId: string | null;
@@ -64,6 +80,8 @@ export interface WorkspaceState {
   command: {sending: CommandAction | null; error: {action: CommandAction; message: string} | null};
   /** Steers acknowledged as pending, oldest first; the transcript shows them until consumed. */
   sent: readonly SentSteer[];
+  /** Questions to experiment chat not yet seen recorded, oldest first. */
+  asks: readonly SentAsk[];
   /** Events core-state drops or does not keep (see `CAPTURED_TYPES`), ascending by sequence. */
   captured: readonly RunEvent[];
   historyLoading: boolean;
@@ -78,10 +96,12 @@ export interface WorkspaceSessionOptions {
 
 /**
  * Events core-state drops or does not keep, recorded before each fold: steers (`control`), judge
- * verdicts, round results, agent executions (prompts and results), and the run's start and end.
+ * verdicts, round results, agent executions (prompts and results), chat answers, and the run's
+ * start and end.
  */
 export const CAPTURED_TYPES: ReadonlySet<string> = new Set([
   'control',
+  'chat',
   'judge_result',
   'round_finished',
   'agent_execution_started',
@@ -95,6 +115,13 @@ export const CAPTURED_TYPES: ReadonlySet<string> = new Set([
 ]);
 const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
 const emptyQuery = (): QueryState => ({response: null, loading: true, error: null});
+const emptyQueries = (): WorkspaceState['queries'] => ({
+  experiments: emptyQuery(),
+  design: emptyQuery(),
+  performance: emptyQuery(),
+  // Asked for where it is shown (Ask, Notes, the palette), never per bootstrap.
+  chat_options: {response: null, loading: false, error: null},
+});
 const idleCommand = (): WorkspaceState['command'] => ({sending: null, error: null});
 
 /** Owns browser subscriptions and query state; core-state owns the event projection. */
@@ -106,9 +133,10 @@ export class WorkspaceSession {
     connectionError: null,
     canRetry: false,
     snapshotError: null,
-    queries: {experiments: emptyQuery(), design: emptyQuery(), performance: emptyQuery()},
+    queries: emptyQueries(),
     command: idleCommand(),
     sent: [],
+    asks: [],
     captured: [],
     historyLoading: false,
     historyError: null,
@@ -124,6 +152,7 @@ export class WorkspaceSession {
   #spine = new Set<number>();
   #storeId = '';
   #sentCount = 0;
+  #askCount = 0;
   #fetches = new Map<QueryName, Promise<void>>();
   #refreshPending = new Set<QueryName>();
   readonly #reconnectDelaysMs: readonly number[];
@@ -314,6 +343,67 @@ export class WorkspaceSession {
     return response.design_patch ?? null;
   };
 
+  /**
+   * Asks experiment chat on one thread; true once the question is on its way. The answer arrives
+   * as the recorded `chat` event (captured from the response and deduplicated with the stream by
+   * sequence). One question per thread at a time; a failed one does not hold its thread.
+   */
+  ask(text: string, threadId: string): boolean {
+    const waiting = this.#state.asks.some(
+      ask => ask.threadId === threadId && ask.answer === null && ask.error === null,
+    );
+    if (waiting || this.#state.connection !== 'connected') return false;
+    const sent: SentAsk = {
+      id: `ask-${++this.#askCount}`,
+      threadId,
+      text,
+      afterSequence: this.#state.core.sequence,
+      answer: null,
+      error: null,
+    };
+    this.#set({asks: [...this.#state.asks, sent]});
+    void this.#answer(sent, this.#runGeneration);
+    return true;
+  }
+
+  /** Creates a chat thread on `selection`, or on the run's own agent; resolves its id. */
+  async createThread(selection: {provider: string; model: string} | null): Promise<string> {
+    const response = await this.client.request({
+      type: 'query.chat_thread_create',
+      ...(selection ?? {}),
+    });
+    const id = response.chat_thread?.thread_id;
+    if (id === undefined) throw new Error('The backend returned no chat thread.');
+    return id;
+  }
+
+  async #answer(sent: SentAsk, generation: number): Promise<void> {
+    try {
+      const response = await this.client.request({
+        type: 'query.chat',
+        text: sent.text,
+        ...(sent.threadId === DEFAULT_CHAT_THREAD_ID ? {} : {thread_id: sent.threadId}),
+      });
+      if (generation !== this.#runGeneration) return;
+      const events = response.events ?? [];
+      if (events.some(event => event.type === 'chat')) {
+        this.#set({
+          captured: capture(this.#state.captured, events),
+          asks: this.#state.asks.filter(ask => ask.id !== sent.id),
+        });
+      } else {
+        this.#settleAsk(sent.id, {answer: response.chat?.answer ?? 'No answer was returned.'});
+      }
+    } catch (error) {
+      if (generation !== this.#runGeneration) return;
+      this.#settleAsk(sent.id, {error: commandMessage(error)});
+    }
+  }
+
+  #settleAsk(id: string, patch: Pick<SentAsk, 'answer'> | Pick<SentAsk, 'error'>): void {
+    this.#set({asks: this.#state.asks.map(ask => (ask.id === id ? {...ask, ...patch} : ask))});
+  }
+
   async loadOlder(): Promise<void> {
     const floor = this.#state.core.historyAfterSequence;
     if (floor === 0 || this.#state.historyLoading) return;
@@ -366,9 +456,10 @@ export class WorkspaceSession {
           core: initialCoreState(),
           captured: [],
           snapshotError: null,
-          queries: {experiments: emptyQuery(), design: emptyQuery(), performance: emptyQuery()},
+          queries: emptyQueries(),
           command: idleCommand(),
           sent: [],
+          asks: [],
           historyLoading: false,
           historyError: null,
         });

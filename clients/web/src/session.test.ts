@@ -814,3 +814,151 @@ test('design patches are requested by range and path; an unattached server answe
     });
   assert.equal((await session.designPatch('aaa', 'bbb', 'src/lib.rs'))?.patch, '+x\n');
 });
+
+const chatEvent = (
+  sequence: number,
+  question: string,
+  answer: string,
+  thread: string | null = null,
+): RunEvent => ({
+  sequence,
+  type: 'chat',
+  timestamp: '2026-09-21T12:00:00Z',
+  text: question,
+  status: 'answered',
+  agent_kind: 'chat',
+  round_label: 'experiment-chat',
+  chat_thread_id: thread,
+  data: {kind: 'chat', answer, invocation_id: `inv-${sequence}`},
+});
+
+test('chat events are captured for the Ask tab', () => {
+  assert.ok(CAPTURED_TYPES.has('chat'));
+});
+
+test('one question per thread at a time; the stream and the response carry one answer once', async () => {
+  const client = new FakeClient();
+  let reply: (value: ProtocolResponse) => void = () => {};
+  const previous = client.replies;
+  client.replies = input =>
+    input.type === 'query.chat'
+      ? new Promise(resolve => {
+          reply = resolve;
+        })
+      : previous(input);
+  const session = new WorkspaceSession(client);
+  await session.start();
+  assert.equal(session.ask('Why did round 3 fail?', 'default'), true);
+  assert.equal(session.ask('And round 4?', 'default'), false, 'the default thread waits');
+  assert.equal(session.ask('Other thread', 't2'), true, 'another thread is free');
+  assert.deepEqual(
+    client.requests.filter(request => request.type === 'query.chat'),
+    [
+      {type: 'query.chat', text: 'Why did round 3 fail?'},
+      {type: 'query.chat', text: 'Other thread', thread_id: 't2'},
+    ],
+  );
+  assert.deepEqual(
+    session.getSnapshot().asks.map(ask => [ask.id, ask.threadId, ask.afterSequence]),
+    [
+      ['ask-1', 'default', 0],
+      ['ask-2', 't2', 0],
+    ],
+  );
+  const event = chatEvent(5, 'Other thread', 'Answered.', 't2');
+  // The backend publishes the recorded answer before it returns the response.
+  client.emit({type: 'event', event});
+  reply(response({chat: {question: 'Other thread', answer: 'Answered.'}, events: [event]}));
+  await settle();
+  const state = session.getSnapshot();
+  assert.equal(state.captured.filter(item => item.type === 'chat').length, 1);
+  assert.deepEqual(
+    state.asks.map(ask => ask.id),
+    ['ask-1'],
+    'the answered ask leaves; the other still waits',
+  );
+  await session.close();
+});
+
+test('an unrecorded answer stays on its ask; a failure keeps its message; a new run drops asks', async () => {
+  const client = new FakeClient();
+  const previous = client.replies;
+  client.replies = async input => {
+    if (input.type === 'query.chat' && 'thread_id' in input && input.thread_id === 't2')
+      return response({
+        chat: {question: 'Hi', answer: 'Thread t2 cannot answer right now.', thread_id: 't2'},
+        events: [],
+      });
+    if (input.type === 'query.chat') throw new Error('gateway closed');
+    return previous(input);
+  };
+  const session = new WorkspaceSession(client);
+  await session.start();
+  session.ask('Hi', 't2');
+  session.ask('Why?', 'default');
+  await settle();
+  assert.deepEqual(
+    session.getSnapshot().asks.map(ask => [ask.threadId, ask.answer, ask.error]),
+    [
+      ['t2', 'Thread t2 cannot answer right now.', null],
+      ['default', null, 'gateway closed'],
+    ],
+  );
+  assert.equal(session.ask('Again', 'default'), true, 'a failed ask does not hold its thread');
+  client.emit({type: 'subscribed', run_id: 'run-2', request_id: 'sub', latest_sequence: 0});
+  assert.deepEqual(session.getSnapshot().asks, []);
+  await session.close();
+});
+
+test('threads are created with the chosen model, or the run default without one', async () => {
+  const client = new FakeClient();
+  const previous = client.replies;
+  client.replies = async input =>
+    input.type === 'query.chat_thread_create'
+      ? response({
+          chat_thread: {
+            thread_id: 't9',
+            driver: 'agentshim',
+            provider: 'claude',
+            model: 'claude-sonnet-5',
+          },
+        })
+      : previous(input);
+  const session = new WorkspaceSession(client);
+  await session.start();
+  assert.equal(await session.createThread({provider: 'claude', model: 'claude-sonnet-5'}), 't9');
+  assert.deepEqual(client.requests.at(-1), {
+    type: 'query.chat_thread_create',
+    provider: 'claude',
+    model: 'claude-sonnet-5',
+  });
+  await session.createThread(null);
+  assert.deepEqual(client.requests.at(-1), {type: 'query.chat_thread_create'});
+  client.replies = async () => response();
+  await assert.rejects(session.createThread(null), /no chat thread/);
+  await session.close();
+});
+
+test('chat options are loaded on demand, never by a bootstrap', async () => {
+  const client = new FakeClient();
+  const previous = client.replies;
+  client.replies = async input =>
+    input.type === 'query.chat_options'
+      ? response({chat_options: {providers: [{provider: 'claude', models: []}]}})
+      : previous(input);
+  const session = new WorkspaceSession(client);
+  await session.start();
+  await settle();
+  assert.equal(queryCounts(client)['query.chat_options'], undefined);
+  assert.deepEqual(session.getSnapshot().queries.chat_options, {
+    response: null,
+    loading: false,
+    error: null,
+  });
+  await session.load('chat_options');
+  assert.equal(
+    session.getSnapshot().queries.chat_options.response?.chat_options?.providers?.[0]?.provider,
+    'claude',
+  );
+  await session.close();
+});
