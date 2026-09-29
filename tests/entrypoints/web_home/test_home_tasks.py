@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import stat
 import tomllib
 from typing import TYPE_CHECKING
 
@@ -231,3 +232,60 @@ def test_commit_works_in_a_repository_without_commits(home: Home) -> None:
 
     assert result.status == 200
     assert home.post("/api/projects/validate", {"path": str(root)}).json()["state"] == "ready"
+
+
+def test_commit_leaves_a_pre_staged_unrelated_file_out(home: Home) -> None:
+    key, root = _setup(home, tasks=())
+    home.post(f"/api/projects/{key}/tasks", {**FORM, "name": "serve"})
+    (root / "notes.txt").write_text("mine")
+    run_test_command(["git", "add", "notes.txt"], cwd=root, check=True)
+
+    preview = home.get(f"/api/projects/{key}/commit").json()
+    result = home.post(f"/api/projects/{key}/commit", {"paths": preview["task_files"]}).json()
+
+    assert result["committed"] == preview["task_files"]
+    status = run_test_command(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True
+    )
+    assert status.stdout == "A  notes.txt\n"
+
+
+def _install_failing_hook(root: Path) -> None:
+    hooks = root / ".git" / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\necho rejected >&2\nexit 1\n")
+    hook.chmod(hook.stat().st_mode | stat.S_IEXEC)
+
+
+def test_a_rejecting_hook_is_a_typed_error_and_unstages_the_task_files(home: Home) -> None:
+    key, root = _setup(home, tasks=())
+    home.post(f"/api/projects/{key}/tasks", {**FORM, "name": "serve"})
+    _install_failing_hook(root)
+
+    preview = home.get(f"/api/projects/{key}/commit").json()
+    reply = home.post(f"/api/projects/{key}/commit", {"paths": preview["task_files"]})
+    body = reply.json()
+
+    assert body["error"]["code"] == "commit_failed"
+    assert "rejected" in "\n".join(body["error"]["details"]["stderr_tail"])
+    status = run_test_command(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True
+    )
+    # The add this request made is undone: the task files are back to untracked, not staged.
+    assert status.stdout == "?? .vibesys/\n"
+
+
+def test_commit_uses_the_given_message(home: Home) -> None:
+    key, root = _setup(home, tasks=())
+    home.post(f"/api/projects/{key}/tasks", {**FORM, "name": "serve"})
+
+    preview = home.get(f"/api/projects/{key}/commit").json()
+    home.post(
+        f"/api/projects/{key}/commit", {"paths": preview["task_files"], "message": "add serve"}
+    )
+
+    log = run_test_command(
+        ["git", "log", "-1", "--format=%s"], cwd=root, capture_output=True, text=True, check=True
+    )
+    assert log.stdout == "add serve\n"

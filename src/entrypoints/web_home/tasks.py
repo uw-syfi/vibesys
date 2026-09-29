@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 _COMMIT_TAIL_LINES = 20
 
 
-
 def project_of(request: Request) -> Project:
     """Open the project named by the first path parameter."""
     root = resolve_project(request.config, request.params[0])
@@ -265,22 +264,30 @@ def commit(request: Request) -> CommitResult:
             raise ApiError(
                 ErrorCode.TASK_CONFLICT, message, details={"task_files": list(preview.task_files)}
             )
-        for arguments in (
-            ("add", "--", *preview.task_files),
-            (
-                "commit",
-                "--quiet",
-                "-m",
-                body.message or "vibesys: add task files",
-                "--",
-                *preview.task_files,
-            ),
-        ):
-            result = git(project.root, *arguments)
-            if result.returncode != 0:
-                message = f"git {arguments[0]} failed"
-                raise ApiError(
-                    ErrorCode.COMMIT_FAILED, message, details={"stderr_tail": _tail(result.stderr)}
-                )
+        paths = preview.task_files
+        added = git(project.root, "--literal-pathspecs", "add", "--", *paths)
+        if added.returncode != 0:
+            message = "git add failed"
+            raise ApiError(
+                ErrorCode.COMMIT_FAILED, message, details={"stderr_tail": _tail(added.stderr)}
+            )
+        committed = git(
+            project.root,
+            "--literal-pathspecs",
+            "commit",
+            "--quiet",
+            "-m",
+            body.message or "vibesys: add task files",
+            "--",
+            *paths,
+        )
+        if committed.returncode != 0:
+            # Undo the add above so a rejected commit (a failing hook, a blank
+            # message) does not leave the task files staged behind the user's back.
+            git(project.root, "--literal-pathspecs", "reset", "-q", "--", *paths)
+            message = "git commit failed"
+            raise ApiError(
+                ErrorCode.COMMIT_FAILED, message, details={"stderr_tail": _tail(committed.stderr)}
+            )
         head = git(project.root, "rev-parse", "HEAD").stdout.strip()
-    return CommitResult(commit=head, committed=preview.task_files)
+    return CommitResult(commit=head, committed=paths)

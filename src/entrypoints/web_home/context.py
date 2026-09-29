@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 _GIT_TIMEOUT_SECONDS = 60
+_GIT_TERM_GRACE_SECONDS = 5
 _GIT_OVERRIDES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"})
 _PORCELAIN_STATUS_WIDTH = len("XY ")
 _KEYCHAIN_TIMEOUT_SECONDS = 2
@@ -134,28 +135,44 @@ def atomic_write(path: Path, data: bytes, *, mode: int) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    """Run one git command in *root* without a shell or inherited repository overrides."""
+def git(
+    root: Path, *arguments: str, timeout: float = _GIT_TIMEOUT_SECONDS
+) -> subprocess.CompletedProcess[str]:
+    """Run one git command in *root* without a shell or inherited repository overrides.
+
+    On a timeout, git is asked to exit (SIGTERM) and given a grace period
+    before being killed. A SIGKILL would skip git's lockfile cleanup and leave
+    ``.git/index.lock`` behind, wedging the repository for every later git call,
+    including the user's own.
+    """
     executable = shutil.which("git")
     if executable is None:
         message = "git is not installed"
         raise ApiError(ErrorCode.NOT_GIT, message)
     environment = {key: value for key, value in os.environ.items() if key not in _GIT_OVERRIDES}
+    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101302 [S603]; git argv is built here from fixed subcommands and validated paths, never a shell string.
+        # > Routing through GitTracker needs a run id and state integration the
+        # > setup API does not have; shell=True would weaken argv safety.
+        [executable, *arguments],
+        cwd=root,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     try:
-        return subprocess.run(  # noqa: S603  # lint-waiver: LW-101302 [S603]; git argv is built here from fixed subcommands and validated paths, never a shell string.
-            # > Routing through GitTracker needs a run id and state integration the
-            # > setup API does not have; shell=True would weaken argv safety.
-            [executable, *arguments],
-            cwd=root,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_GIT_TIMEOUT_SECONDS,
-        )
+        stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        message = f"git did not respond within {_GIT_TIMEOUT_SECONDS}s"
+        process.terminate()
+        try:
+            process.communicate(timeout=_GIT_TERM_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+        message = f"git did not respond within {timeout}s"
         raise ApiError(ErrorCode.INTERNAL, message) from None
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
 
 
 def pending_changes(root: Path) -> list[str]:
