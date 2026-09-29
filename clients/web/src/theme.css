@@ -1,0 +1,58 @@
+/* Design tokens (theme.css): Radix Slate neutrals and one Indigo accent, as the approved mockup defines them
+   (docs/superpowers/specs/2026-09-28-web-app/mockup.html, header comment). Its contrast table is
+   the contract: meaningful text >= 4.5:1 on every surface it sits on; --line (field borders,
+   graph edges, arrowheads) and --live >= 3:1. System follows the OS; data-theme on <html> forces
+   one. light-dark() takes the light value first. */
+:root {
+  color-scheme: light dark;
+  --bg-app: light-dark(#fcfcfd, #111113);
+  --bg-sidebar: light-dark(#f9f9fb, #18191b);
+  --bg-raised: light-dark(#ffffff, #212225);
+  --bg-hover: light-dark(#f0f0f3, #272a2d);
+  --bg-selected: light-dark(#e8e8ec, #2e3135);
+  --border-subtle: light-dark(#e8e8ec, #272a2d);
+  --border: light-dark(#d9d9e0, #363a3f);
+  --line: light-dark(#8b8e96, #6e737a);
+  --text-1: light-dark(#1c2024, #edeef0);
+  --text-2: light-dark(#60646c, #b0b4ba);
+  --text-3: light-dark(#60646c, #9a9ea6);
+  --accent: #3e63dd;
+  --accent-text: light-dark(#3a5bc7, #9eb1ff);
+  --live: light-dark(#3e63dd, #9eb1ff);
+  --success: light-dark(#1c724d, #3dd68c);
+  --warn: light-dark(#935600, #ffca16);
+  --error: light-dark(#c22a2f, #ff9592);
+  --tint-add: light-dark(#e3eee9, #172b23);
+  --tint-del: light-dark(#f8e5e6, #302224);
+  --shadow: 0 10px 32px -6px light-dark(rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.6)),
+    0 2px 6px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.3));
+  --scrim: light-dark(rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.45));
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, system-ui, sans-serif;
+  --mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg-app); color: var(--text-1); font: 13px/20px var(--sans); -webkit-font-smoothing: antialiased; overflow: hidden; }
+::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; text-align: left; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+.t2 { color: var(--text-2); }
+.t3 { color: var(--text-3); }
+.ok { color: var(--success); }
+.bad { color: var(--error); }
+.warn { color: var(--warn); }
+.kbd { font-size: 11px; line-height: 14px; color: var(--text-3); letter-spacing: 0.02em; white-space: nowrap; }
+.dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.live { background: var(--live); }
+.dot.err { background: var(--error); }
+.dot.okd { background: var(--success); }
+.gl { display: grid; place-items: center; width: 14px; height: 20px; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--text-1); animation: rot 0.9s linear infinite; flex: none; display: inline-block; }
+@keyframes rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
