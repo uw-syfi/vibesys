@@ -18,10 +18,13 @@ import {
 import {type Home, type HomeEnd, startHome} from './home.js';
 import {
   allowPermission,
+  devOrigin,
   homeArguments,
   isAllowedRequest,
   isAppUrl,
   originOf,
+  type QuitState,
+  quitRequest,
   windowUrl,
 } from './policy.js';
 
@@ -30,8 +33,8 @@ const REPOSITORY = resolve(app.getAppPath(), '../..');
 /** Main is built as CommonJS next to the preload (electron.vite.config.ts). */
 const PRELOAD = join(__dirname, '../preload/index.cjs');
 /** Set by `electron-vite dev` to the Vite server of clients/web; unset for the built app. */
-const DEV_URL = process.env['ELECTRON_RENDERER_URL'];
-const DEV_ORIGIN = DEV_URL === undefined ? null : new URL(DEV_URL).origin;
+const RENDERER_URL = process.env['ELECTRON_RENDERER_URL'];
+const DEV_ORIGIN = devOrigin(RENDERER_URL, import.meta.env.DEV);
 /** The first `uv run` in a checkout syncs its environment before the server starts. */
 const READY_TIMEOUT_MS = 60_000;
 const STOP_GRACE_MS = 5_000;
@@ -41,10 +44,14 @@ let home: Promise<Home | null> = Promise.resolve(null);
 let win: BrowserWindow | null = null;
 /** Where the window may navigate and send requests: the home server, or Vite in dev. */
 let appOrigins: readonly string[] = [];
-let quitting = false;
+let quit: QuitState = 'running';
 
 function log(message: string): void {
   console.error(`vibesys-desktop: ${message}`);
+}
+
+if (RENDERER_URL !== undefined && DEV_ORIGIN === null) {
+  log(`ignoring ELECTRON_RENDERER_URL (${originOf(RENDERER_URL)}): not the dev Vite origin`);
 }
 
 function guard(contents: WebContents): void {
@@ -103,6 +110,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      webSecurity: true,
       spellcheck: false,
     },
   });
@@ -135,8 +143,10 @@ async function launch(): Promise<Home | null> {
     // A HomeStartError holds a headline and the server's stderr tail; neither carries the token.
     const detail = error instanceof Error ? error.message : String(error);
     log(detail.split('\n', 1)[0] ?? detail);
-    dialog.showErrorBox('VibeSys could not start its home server', detail);
-    app.quit();
+    if (quit === 'running') {
+      dialog.showErrorBox('VibeSys could not start its home server', detail);
+      app.quit();
+    }
     return null;
   }
 }
@@ -144,8 +154,10 @@ async function launch(): Promise<Home | null> {
 async function openHome(): Promise<void> {
   home = launch();
   const current = await home;
-  if (current === null || quitting) return;
-  void current.ended.then(onHomeEnded);
+  if (current === null || quit !== 'running') return;
+  void current.ended
+    .then(onHomeEnded)
+    .catch(error => log(`could not handle the home server's exit: ${(error as Error).message}`));
   appOrigins = [DEV_ORIGIN ?? current.origin];
   win ??= createWindow();
   // The rejection message quotes the URL, which carries the token: report the origin only.
@@ -177,7 +189,7 @@ async function onHomeEnded(end: HomeEnd): Promise<void> {
         defaultId: 0,
         cancelId: 1,
       });
-      if (response === 0 && !quitting) await openHome();
+      if (response === 0 && quit === 'running') await openHome();
       else app.quit();
     }
   }
@@ -186,21 +198,28 @@ async function onHomeEnded(end: HomeEnd): Promise<void> {
 function main(): void {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => app.quit());
   app.on('second-instance', () => {
-    if (win === null) return;
+    if (quit !== 'running') return;
+    // While the home server starts there is no window yet: open it now, empty, as feedback.
+    win ??= createWindow();
     if (win.isMinimized()) win.restore();
+    win.show();
     win.focus();
   });
   app.on('web-contents-created', (_event, contents) => guard(contents));
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', event => {
-    if (quitting) return;
-    quitting = true;
-    event.preventDefault();
+    const {hold, startStop} = quitRequest(quit);
+    if (hold) event.preventDefault();
+    if (!startStop) return;
+    quit = 'stopping';
     void home
       .then(current => current?.stop())
       // stop() rejects only when signalling fails (e.g. EPERM); the message names no URL.
       .catch(error => log(`could not stop the home server: ${(error as Error).message}`))
-      .finally(() => app.quit());
+      .finally(() => {
+        quit = 'stopped';
+        app.quit();
+      });
   });
   void app.whenReady().then(() => {
     secureSession();

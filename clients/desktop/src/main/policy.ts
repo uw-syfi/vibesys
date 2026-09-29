@@ -51,3 +51,28 @@ export function windowUrl(
   url.searchParams.set('token', home.token);
   return url.href;
 }
+
+/** The origin `electron-vite dev` serves clients/web on (electron.vite.config.ts). */
+const VITE_ORIGIN = 'http://127.0.0.1:5173';
+
+/**
+ * The dev origin: `ELECTRON_RENDERER_URL` when it is exactly the Vite origin in a dev build,
+ * else null. A stray value from a shell must not become an app origin that receives the token.
+ */
+export function devOrigin(rendererUrl: string | undefined, dev: boolean): string | null {
+  return dev && rendererUrl === VITE_ORIGIN ? VITE_ORIGIN : null;
+}
+
+/** running: no quit yet; stopping: the home server is being stopped; stopped: it settled. */
+export type QuitState = 'running' | 'stopping' | 'stopped';
+
+/**
+ * What a quit request does: `hold` defers the exit, `startStop` begins stopping the home server.
+ * Every request is held until the stop settles, so a repeated quit cannot orphan the server.
+ */
+export function quitRequest(state: QuitState): {
+  readonly hold: boolean;
+  readonly startStop: boolean;
+} {
+  return {hold: state !== 'stopped', startStop: state === 'running'};
+}

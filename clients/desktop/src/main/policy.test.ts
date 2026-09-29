@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   allowPermission,
+  devOrigin,
   homeArguments,
   isAllowedRequest,
   isAppUrl,
   originOf,
+  quitRequest,
   windowUrl,
 } from './policy.js';
 
@@ -68,4 +70,24 @@ test('the window opens the app on the mode origin with the home capability', () 
   const home = {origin: HOME, token: 'abc_-9'};
   assert.equal(windowUrl(home, null), `${HOME}/?token=abc_-9`);
   assert.equal(windowUrl(home, VITE), `${VITE}/?token=abc_-9`);
+});
+
+test('the dev origin is exactly the Vite origin, and only in a dev build', () => {
+  assert.equal(devOrigin(VITE, true), VITE);
+  assert.equal(devOrigin(VITE, false), null);
+  assert.equal(devOrigin(undefined, true), null);
+  for (const url of [
+    `${VITE}/`,
+    'http://localhost:5173',
+    'http://127.0.0.1:5174',
+    'https://example.com',
+  ]) {
+    assert.equal(devOrigin(url, true), null, url);
+  }
+});
+
+test('every quit is held until the home server stop settles; only the first starts it', () => {
+  assert.deepEqual(quitRequest('running'), {hold: true, startStop: true});
+  assert.deepEqual(quitRequest('stopping'), {hold: true, startStop: false});
+  assert.deepEqual(quitRequest('stopped'), {hold: false, startStop: false});
 });

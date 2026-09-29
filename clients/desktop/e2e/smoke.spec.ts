@@ -114,7 +114,15 @@ test('one launch starts the home server and shows the app; it stays on its origi
   expect(app.windows()).toHaveLength(1);
 
   const pid = await homePid(stateHome);
-  await app.close();
+  // A repeated quit (a second Cmd+Q) still waits for the home server to stop.
+  const closed = app.waitForEvent('close');
+  await app
+    .evaluate(({app: electron}) => {
+      electron.quit();
+      electron.quit();
+    })
+    .catch(() => undefined);
+  await closed;
   expect(alive(pid)).toBe(false);
   await expect(readFile(join(stateHome, 'web', 'home.json'))).rejects.toThrow();
   expect(launched.output()).not.toContain(token);
