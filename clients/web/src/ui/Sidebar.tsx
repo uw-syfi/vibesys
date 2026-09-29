@@ -139,7 +139,7 @@ function CurrentRun({
 }) {
   return (
     <>
-      <div className="run cur" title={run.title}>
+      <div className="run cur" title={runHint(run)}>
         <RunGlyph outcome={run.outcome} />
         <span className="ttl">{run.title}</span>
         <span className="meta">
@@ -169,6 +169,13 @@ function CurrentRun({
   );
 }
 
+/** The run row's hint: its title, and its gateway's state unless that is simply live. */
+function runHint(run: HomeRun): string {
+  return run.gateway === 'live'
+    ? run.title
+    : `${run.title}\nGateway: ${run.gateway.replaceAll('_', ' ')}`;
+}
+
 function OtherRun({run, now}: {run: HomeRun; now: Date}) {
   const body = (
     <>
@@ -179,13 +186,13 @@ function OtherRun({run, now}: {run: HomeRun; now: Date}) {
   );
   if (run.url === null) {
     return (
-      <div className="run" title={`${run.title} (not reachable from this page)`}>
+      <div className="run" title={`${runHint(run)}\nNot reachable from this page`}>
         {body}
       </div>
     );
   }
   return (
-    <a className="run" href={run.url} title={run.title}>
+    <a className="run" href={run.url} title={runHint(run)}>
       {body}
     </a>
   );

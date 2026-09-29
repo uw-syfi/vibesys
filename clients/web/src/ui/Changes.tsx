@@ -115,7 +115,12 @@ export function Changes({
 }) {
   switch (model.kind) {
     case 'none':
-      return <p className="empty1">No round has started yet.</p>;
+      return (
+        <>
+          <PaneHead scope="Run" />
+          <p className="empty1">No round has started yet.</p>
+        </>
+      );
     case 'running':
       return (
         <>

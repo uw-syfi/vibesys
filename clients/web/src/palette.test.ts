@@ -28,6 +28,8 @@ const BASE: PaletteInput = {
   hasRunId: true,
   rows: [row(1, 'Batch decode steps'), row(2, 'Grow the KV cache block')],
   live: 2,
+  selected: null,
+  pane: null,
   sidebarShown: true,
   prompt: {turn: 'x1', detail: 'round 2, attempt 1'},
   todos: {turn: 'x1', detail: 'round 2'},
@@ -57,7 +59,7 @@ test('the palette mirrors the visible controls', () => {
 test('what is not visible is not offered: an ended run, a pending transition, no prompt', () => {
   const ended = labels({
     ...BASE,
-    control: {kind: 'ended', word: 'Completed', tip: null},
+    control: {kind: 'ended', word: 'Completed', summary: null, tip: null},
     canStop: false,
     canSteer: false,
     prompt: null,
@@ -78,6 +80,10 @@ test('what is not visible is not offered: an ended run, a pending transition, no
   const paused = labels({...BASE, control: {...PAUSE, action: 'resume', label: 'Resume'}});
   assert.equal(paused[0], 'Run: Resume the run');
   assert.ok(labels({...BASE, sidebarShown: false}).includes('Go to: Show sidebar'));
+  const here = labels({...BASE, selected: 2, pane: 'changes'});
+  assert.equal(here.includes('Go to: Round 2'), false);
+  assert.equal(here.includes('Go to: Changes'), false);
+  assert.ok(here.includes('Go to: Round 1'));
 });
 
 test('filtering matches group, label and detail, ignoring case', () => {

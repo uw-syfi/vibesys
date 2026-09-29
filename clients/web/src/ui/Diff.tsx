@@ -4,7 +4,9 @@ const MARK: Record<DiffLine['tone'], string> = {add: '+', del: '−', ctx: '', h
 
 /**
  * Rows of a diff: content with line number and mark. The line numbers carry position, so a hunk
- * header is only a thin break between hunks, its raw text in the hint.
+ * header is only a thin break between hunks, its raw text in the hint. One gutter serves both
+ * sides: a removed row carries its old-file number, context and added rows their new-file number,
+ * so numbers restart where the two sides diverge.
  */
 export function Diff({lines}: {lines: DiffLine[]}) {
   return (

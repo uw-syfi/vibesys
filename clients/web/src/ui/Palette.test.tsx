@@ -10,7 +10,6 @@ const ITEMS: PaletteItem[] = [
     group: 'Run',
     label: 'Pause after the current agent call',
     detail: '',
-    keys: '',
     intent: {kind: 'toggleRun'},
   },
   {
@@ -18,7 +17,6 @@ const ITEMS: PaletteItem[] = [
     group: 'Go to',
     label: 'Round 1',
     detail: 'Batch decode steps',
-    keys: '',
     intent: {kind: 'ui', action: {type: 'round', round: 1, live: 2}},
   },
 ];

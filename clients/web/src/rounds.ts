@@ -339,6 +339,7 @@ export function statusLine(core: CoreState, sending: CommandAction | null): Stat
     const where = done === 'completed' || done === 'failed' ? 'after' : 'in';
     return line(`Paused ${where} round ${round}`, false, true);
   }
+  if (core.status === 'connecting') return line('Connecting', true);
   if (core.status !== 'running') return line('Starting', true);
   if (round === null) return line('Running');
   if (acting === undefined) return line(`Round ${round}`);

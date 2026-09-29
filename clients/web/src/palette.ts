@@ -16,7 +16,6 @@ export interface PaletteItem {
   group: 'Run' | 'Go to' | 'Agent';
   label: string;
   detail: string;
-  keys: string;
   intent: Intent;
 }
 
@@ -29,6 +28,9 @@ export interface PaletteInput {
   hasRunId: boolean;
   rows: readonly RoundRow[];
   live: number | null;
+  /** The round on screen and the open tab: going to either would do nothing. */
+  selected: number | null;
+  pane: PaneTab | null;
   sidebarShown: boolean;
   /** The selected round's latest turn that recorded a prompt. */
   prompt: {turn: string; detail: string} | null;
@@ -55,7 +57,6 @@ const item = (
   group,
   label,
   detail,
-  keys: '',
   intent,
 });
 
@@ -84,13 +85,15 @@ function runItems(input: PaletteInput): PaletteItem[] {
 }
 
 function goToItems(input: PaletteInput): PaletteItem[] {
-  const rounds = input.rows.map(row =>
-    item(`round-${row.round}`, 'Go to', `Round ${row.round}`, row.title ?? '', {
-      kind: 'ui',
-      action: {type: 'round', round: row.round, live: input.live},
-    }),
-  );
-  const tabs = TABS.map(([pane, label, detail]) =>
+  const rounds = input.rows
+    .filter(row => row.round !== input.selected)
+    .map(row =>
+      item(`round-${row.round}`, 'Go to', `Round ${row.round}`, row.title ?? '', {
+        kind: 'ui',
+        action: {type: 'round', round: row.round, live: input.live},
+      }),
+    );
+  const tabs = TABS.filter(([pane]) => pane !== input.pane).map(([pane, label, detail]) =>
     item(`pane-${pane}`, 'Go to', label, detail, {kind: 'ui', action: {type: 'pane', pane}}),
   );
   const sidebar = item(
