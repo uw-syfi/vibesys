@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from http.client import HTTPConnection, HTTPMessage
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
@@ -57,6 +58,85 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
 
     assert response["ok"] is True
     assert response["snapshot"]["status"] == "running"
+
+
+def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        routes = {
+            name: _fetch(gateway.bound_port, path)
+            for name, path in (
+                ("index", f"/?token={gateway.token}"),
+                ("asset", "/assets/index.js"),
+                ("health", f"/health?token={gateway.token}"),
+                ("missing-token", "/"),
+                ("unknown-route", f"/nope?token={gateway.token}"),
+            )
+        }
+
+    assert {name: status for name, (status, _headers) in routes.items()} == {
+        "index": 200,
+        "asset": 200,
+        "health": 200,
+        "missing-token": 403,
+        "unknown-route": 404,
+    }
+    for name, (_status, headers) in routes.items():
+        assert headers.get_all("Cache-Control") == ["no-store"], name
+        assert headers.get_all("Referrer-Policy") == ["no-referrer"], name
+        policies = headers.get_all("Content-Security-Policy")
+        assert policies is not None
+        assert len(policies) == 1, name
+        sources = set(_policy_sources(policies[0]))
+        assert sources <= {"'none'", "'self'", "ws://127.0.0.1:*"}, name
+
+
+def test_gateway_content_security_policy_denies_every_unused_destination(tmp_path: Path) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        _status, headers = _fetch(gateway.bound_port, f"/?token={gateway.token}")
+
+    policies = headers.get_all("Content-Security-Policy") or []
+    assert len(policies) == 1
+    assert _policy_directives(policies[0]) == {
+        "default-src": "'none'",
+        "script-src": "'self'",
+        "style-src": "'self'",
+        "img-src": "'self'",
+        "font-src": "'none'",
+        "connect-src": "'self' ws://127.0.0.1:*",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-ancestors": "'none'",
+        "object-src": "'none'",
+    }
+
+
+def _asset_gateway(tmp_path: Path) -> WebSocketGateway:
+    parts = build_server_parts(tmp_path / "logs")
+    assets = tmp_path / "web"
+    (assets / "assets").mkdir(parents=True)
+    (assets / "index.html").write_text("<!doctype html><title>VibeSys</title>")
+    (assets / "assets" / "index.js").write_text("export {};\n")
+    return WebSocketGateway(parts.api, assets_dir=assets)
+
+
+def _fetch(port: int, path: str) -> tuple[int, HTTPMessage]:
+    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        response.read()
+        return response.status, response.headers
+    finally:
+        connection.close()
+
+
+def _policy_directives(policy: str) -> dict[str, str]:
+    parts = (directive.strip().partition(" ") for directive in policy.split(";"))
+    return {name: sources for name, _space, sources in parts}
+
+
+def _policy_sources(policy: str) -> list[str]:
+    return [source for sources in _policy_directives(policy).values() for source in sources.split()]
 
 
 def test_gateway_rejects_wrong_origin_and_capability_token(tmp_path: Path) -> None:

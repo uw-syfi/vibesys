@@ -66,6 +66,53 @@ arguments follow `--`:
 uv run python -m entrypoints.web live --project /path/to/project --task TASK --open -- --outer-loop agent --local
 ```
 
+## Gateway HTTP hygiene
+
+Every gateway HTTP response, including the 403 and 404 bodies, carries the same
+three headers from one writer (`_HYGIENE_HEADERS` in
+`src/server/transport/websocket.py`), so no route can set or duplicate them:
+
+| Header | Value | Reason |
+| --- | --- | --- |
+| `Cache-Control` | `no-store` | The page URL carries the capability token and run output is live. |
+| `Referrer-Policy` | `no-referrer` | A `Referer` header would copy that token to any navigation target. |
+| `Content-Security-Policy` | below | Transcripts render model- and tool-produced text. |
+
+The policy denies every fetch destination and then grants only what the built
+bundle uses:
+
+```text
+default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self';
+font-src 'none'; connect-src 'self' ws://127.0.0.1:*; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'; object-src 'none'
+```
+
+`script-src` and `style-src` are `'self'` with no `'unsafe-inline'`: the Vite
+production build emits one external script and one external stylesheet, and the
+React tree sets no inline `style` attributes, so nothing inline is needed.
+`connect-src` names `ws://127.0.0.1:*` instead of relying on `'self'` because
+`'self'` is not resolved against `ws:` by every browser engine. Its port is
+wildcarded because the bound port is only known after startup while this policy
+is one value shared by every response; the WebSocket handshake Origin check is
+what pins the socket to this gateway instance, and `connect-src` only has to
+keep an injected exfiltration channel on loopback. `font-src 'none'` keeps the
+bundle usable on an air-gapped host.
+
+`clients/web/e2e/gateway-hygiene.spec.ts` asserts the whole policy against a
+live gateway, fails on any reported `securitypolicyviolation`, and aborts and
+fails on any request the page makes off loopback.
+
+### `/assets/*` is served without a capability token
+
+`_process_request` requires the token on every path except `/assets/*`, and that
+exemption is deliberate rather than an oversight. The token lives in the page
+URL, and a subresource request carries no query string of its own, so requiring
+it would mean rewriting every asset URL in the built `index.html` at serve time
+or moving the token into a cookie. The assets are the public frontend bundle and
+hold no run data. Run data moves only over `/ws`, which requires both the token
+and an exact Origin match. `/health` keeps the token requirement because its
+purpose is to confirm that one specific gateway is live.
+
 ## Remote host and local laptop
 
 The gateway intentionally binds only to loopback. For the one-command demo,

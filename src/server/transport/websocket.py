@@ -11,6 +11,7 @@ import threading
 from contextlib import suppress
 from http import HTTPStatus
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -40,6 +41,40 @@ _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
 _ALLOWED_ORIGIN_TEMPLATE = "http://127.0.0.1:{port}"
 _WEB_SOCKET_PATH = "/ws"
+
+# The gateway renders model- and tool-produced transcript text, so the served
+# page is denied every fetch destination by default and then granted exactly
+# what the built bundle uses: its own script and stylesheet, and a loopback
+# WebSocket. `connect-src` names the loopback scheme explicitly because `'self'`
+# is not resolved against `ws:` by every browser engine, and the port is left
+# wildcarded because the bound port is only known after startup while this
+# policy is one value shared by every response. The gateway's Origin check is
+# what pins the WebSocket to this instance; `connect-src` only has to keep an
+# injected exfiltration channel on loopback.
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "img-src 'self'; "
+    "font-src 'none'; "
+    "connect-src 'self' ws://127.0.0.1:*; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'; "
+    "object-src 'none'"
+)
+
+# Every gateway response carries the same hygiene headers, so `Cache-Control`
+# has exactly one writer. `Referrer-Policy` is `no-referrer` because the page
+# URL carries the capability token in its query string and a `Referer` header
+# would copy it to whatever the page links or navigates to.
+_HYGIENE_HEADERS = MappingProxyType(
+    {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": _CONTENT_SECURITY_POLICY,
+        "Referrer-Policy": "no-referrer",
+    }
+)
 
 
 class WebSocketGateway:
@@ -235,12 +270,10 @@ class WebSocketGateway:
             return _response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
 
         if parsed.path in {"/", "/index.html"}:
-            return self._asset_response("index.html", cache_control="no-store")
+            return self._asset_response("index.html")
         if not parsed.path.startswith("/assets/"):
             return _respond(connection, HTTPStatus.NOT_FOUND, "Not found\n")
-        return self._asset_response(
-            unquote(parsed.path.removeprefix("/")), cache_control="no-store"
-        )
+        return self._asset_response(unquote(parsed.path.removeprefix("/")))
 
     def _actual_origin(self) -> str:
         if self._bound_port is None:
@@ -250,7 +283,7 @@ class WebSocketGateway:
     def _allowed_origins(self) -> frozenset[str]:
         return frozenset({self._actual_origin(), *self.allowed_origins})
 
-    def _asset_response(self, relative: str, *, cache_control: str) -> HttpResponse:
+    def _asset_response(self, relative: str) -> HttpResponse:
         if self.assets_dir is None:
             return _response(HTTPStatus.NOT_FOUND, "Web assets are not installed\n", "text/plain")
         candidate = (self.assets_dir / relative).resolve()
@@ -266,9 +299,7 @@ class WebSocketGateway:
             return _response(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to read asset\n", "text/plain"
             )
-        response = _response(HTTPStatus.OK, body, _content_type(candidate))
-        response.headers["Cache-Control"] = cache_control  # type: ignore[attr-defined]
-        return response
+        return _response(HTTPStatus.OK, body, _content_type(candidate))
 
     async def _handle_connection(self, connection: ServerConnection) -> None:
         websocket = connection
@@ -440,7 +471,7 @@ def _response(status: HTTPStatus, content: str | bytes, content_type: str) -> Ht
             {
                 "Content-Type": content_type,
                 "Content-Length": str(len(body)),
-                "Cache-Control": "no-store",
+                **_HYGIENE_HEADERS,
             }
         ),
         body,
