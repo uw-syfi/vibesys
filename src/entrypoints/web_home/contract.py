@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
 
-from vibesys.api import ComputeBackend
+from vibesys.api import ComputeBackend, DomainName
 from vs_agent.api import Driver
 
 
@@ -281,6 +281,92 @@ class KeyWriteResult(_Model):
     shadowed_by_env: bool
 
 
+# Group (b): tasks and commit.
+
+
+class TaskSummary(_Model):
+    """One task in ``GET .../tasks``; ``error`` is set when it does not load."""
+
+    name: str
+    valid: bool
+    domain: str | None = None
+    error: str | None = None
+
+
+class TaskList(_Model):
+    """Response of ``GET /api/projects/{id}/tasks``."""
+
+    tasks: list[TaskSummary]
+
+
+class ResultContract(_Model):
+    """How the benchmark reports its score."""
+
+    kind: Literal["metric", "protocol", "none"]
+    json_argument: str | None = None
+    metric: str | None = None
+    protocol_version: int | None = None
+
+
+class TaskDetail(_Model):
+    """Response of task detail, create, and edit."""
+
+    name: str
+    objective: str
+    domain: DomainName
+    accuracy_command: str
+    benchmark_command: str
+    result: ResultContract
+    profile_guided: bool
+    editable: bool
+    read_only_reason: str | None
+    content_hash: str
+
+
+class TaskForm(_Model):
+    """The editable task fields; commands are shell-quoted strings split with ``shlex``."""
+
+    objective: str = Field(min_length=1)
+    domain: DomainName
+    accuracy_command: str
+    benchmark_command: str
+    result_json_argument: str
+    result_metric: str
+
+
+class TaskCreate(TaskForm):
+    """Body of ``POST .../tasks``."""
+
+    name: str
+
+
+class TaskEdit(TaskForm):
+    """Body of ``PUT .../tasks/{name}``; ``base_hash`` is the detail's ``content_hash``."""
+
+    base_hash: str
+
+
+class CommitPreview(_Model):
+    """Pending changes split into committable task files and everything else."""
+
+    task_files: list[str]
+    other: list[str]
+
+
+class CommitRequest(_Model):
+    """Body of ``POST .../commit``: exactly the previewed ``task_files``."""
+
+    paths: list[str]
+    message: str | None = None
+
+
+class CommitResult(_Model):
+    """Response of ``POST .../commit``."""
+
+    commit: str
+    committed: list[str]
+
+
 SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     ErrorBody,
     FsListing,
@@ -291,6 +377,13 @@ SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
     AuthStatus,
     KeyWrite,
     KeyWriteResult,
+    TaskList,
+    TaskDetail,
+    TaskCreate,
+    TaskEdit,
+    CommitPreview,
+    CommitRequest,
+    CommitResult,
 )
 
 

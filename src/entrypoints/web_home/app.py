@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast, override
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from entrypoints.web_home import catalog, keys, projects
+from entrypoints.web_home import catalog, keys, projects, tasks
 from entrypoints.web_home.context import HomeConfig, Request, atomic_write
 from entrypoints.web_home.contract import ApiError, ErrorBody, ErrorCode
 from server.runtime import WebInstanceClaim, WebInstanceRecord
@@ -43,6 +43,7 @@ _SECURITY_HEADERS = (
     ("Cross-Origin-Resource-Policy", "same-origin"),
 )
 _STATE_CHANGING = frozenset({"POST", "PUT", "DELETE"})
+_PROJECT = r"/api/projects/([^/]+)"
 _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...] = (
     ("GET", re.compile(r"/api/fs"), projects.list_directory),
     ("POST", re.compile(r"/api/projects/validate"), projects.validate),
@@ -50,6 +51,8 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("GET", re.compile(r"/api/agents/catalog"), catalog.get_catalog),
     ("GET", re.compile(r"/api/auth"), keys.auth_status),
     ("PUT", re.compile(r"/api/auth/([^/]+)"), keys.write_key),
+    ("GET", re.compile(_PROJECT + r"/tasks"), tasks.task_list),
+    ("GET", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.task_detail),
 )
 
 

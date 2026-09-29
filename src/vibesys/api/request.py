@@ -26,10 +26,12 @@ from vibesys.composition import resolve_agent_driver
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
+    InputManifest,
     InputSynthesisError,
     SynthesizedInputSpec,
     load_input_bundle,
     load_project_task,
+    render_input_manifest,
     synthesize_input_bundle,
 )
 from vibesys.repository import (
@@ -78,6 +80,7 @@ def with_operator_constraints(objective: str, constraints: list[str]) -> str:
 __all__ = [
     "REPOSITORY_SLUG",
     "InputBundle",
+    "InputManifest",
     "InputSynthesisError",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
@@ -90,6 +93,7 @@ __all__ = [
     "load_project_task",
     "make_run_environment_spec",
     "orchestration_roles",
+    "render_input_manifest",
     "repository_name_from_experiment",
     "resolve_agent_driver",
     "resolve_skill_source_dirs",
