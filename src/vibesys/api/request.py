@@ -33,6 +33,7 @@ from vibesys.inputs import (
     load_project_task,
     render_input_manifest,
     synthesize_input_bundle,
+    toml_string,
 )
 from vibesys.repository import (
     REPOSITORY_SLUG,
@@ -100,6 +101,7 @@ __all__ = [
     "run_environment_record",
     "supported_profilers",
     "synthesize_input_bundle",
+    "toml_string",
     "validate_descriptor",
     "validate_experiment_name",
     "with_operator_constraints",
