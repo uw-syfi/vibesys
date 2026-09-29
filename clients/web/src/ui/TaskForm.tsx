@@ -15,6 +15,8 @@ export interface TaskFormProps {
   creating: boolean;
   saving: boolean;
   error: string | null;
+  /** The task changed on disk: Save stays off until Discard reloads it. */
+  conflict: boolean;
   onDraft: (patch: Partial<Draft>) => void;
   onSave: () => void;
   onDiscard: () => void;
@@ -54,7 +56,7 @@ function NameRow({name, onName}: {name: string; onName: (name: string) => void})
         id="f-name"
         className={bad ? 'fld mono bad' : 'fld mono'}
         value={name}
-        placeholder="decode-throughput"
+        placeholder="e.g. decode-throughput"
         title="The task's folder under .vibesys/tasks/"
         spellCheck={false}
         autoComplete="off"
@@ -75,7 +77,7 @@ function MetricRow({draft, onDraft}: Pick<TaskFormProps, 'draft' | 'onDraft'>) {
           id="f-metric"
           className="fld mono"
           value={draft.result_metric}
-          placeholder="median_tok_per_sec"
+          placeholder="e.g. median_tok_per_sec"
           title="The field of the benchmark's JSON output to maximize"
           spellCheck={false}
           autoComplete="off"
@@ -86,13 +88,19 @@ function MetricRow({draft, onDraft}: Pick<TaskFormProps, 'draft' | 'onDraft'>) {
           aria-label="JSON flag"
           value={draft.result_json_argument}
           placeholder="--json"
-          title="Passed to the benchmark so it prints JSON; the metric is read from it"
+          title="Benchmark flag that makes it print JSON"
           spellCheck={false}
           autoComplete="off"
           onChange={event => onDraft({result_json_argument: event.target.value})}
         />
       </div>
-      <Hint tone="plain">Higher is better.</Hint>
+      <Hint tone="plain">
+        <span>
+          Read from the benchmark's{' '}
+          <code className="mono">{draft.result_json_argument.trim() || '--json'}</code> output.
+          Higher is better.
+        </span>
+      </Hint>
     </Row>
   );
 }
@@ -102,6 +110,7 @@ export function TaskFormRows({
   creating,
   saving,
   error,
+  conflict,
   onDraft,
   onSave,
   onDiscard,
@@ -142,7 +151,7 @@ export function TaskFormRows({
         id="f-accuracy"
         label="Accuracy"
         value={draft.accuracy_command}
-        placeholder="cargo test --release"
+        placeholder="e.g. cargo test --release"
         hint="Must pass before a round's change is measured; runs from the repository root"
         onValue={accuracy_command => onDraft({accuracy_command})}
       />
@@ -150,7 +159,7 @@ export function TaskFormRows({
         id="f-benchmark"
         label="Benchmark"
         value={draft.benchmark_command}
-        placeholder="cargo bench --bench decode"
+        placeholder="e.g. cargo bench --bench decode"
         hint="Runs from the repository root"
         onValue={benchmark_command => onDraft({benchmark_command})}
       />
@@ -162,7 +171,8 @@ export function TaskFormRows({
             id="f-save"
             type="button"
             className="btn"
-            disabled={saving || !complete}
+            disabled={saving || !complete || conflict}
+            title={conflict ? 'Discard to load the task from disk, then edit again' : undefined}
             onClick={onSave}
           >
             {saving ? 'Saving…' : 'Save task'}

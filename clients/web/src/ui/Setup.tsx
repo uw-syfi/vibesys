@@ -14,9 +14,11 @@ import {
   roleSummary,
   type SetupForm,
   suggestedModels,
+  tildePath,
+  untildePath,
 } from '../setup.js';
 
-type Tone = 'ok' | 'bad' | 'warn' | 'plain';
+type Tone = 'ok' | 'bad' | 'warn' | 'plain' | 'busy';
 
 export const EFFORTS = ['low', 'medium', 'high'] as const;
 const COMPUTE: Record<ComputeBackend, string> = {
@@ -49,12 +51,13 @@ export function Row({
   );
 }
 
-/** A status line under a field; `ok` adds a check mark and keeps the text secondary. */
+/** A status line under a field; `ok` adds a check mark and keeps the text secondary, `busy` a spinner. */
 export function Hint({tone, children}: {tone: Tone; children: ReactNode}) {
   const className = tone === 'bad' || tone === 'warn' ? `hint ${tone}` : 'hint';
   return (
     <div className={className} role={tone === 'bad' ? 'alert' : undefined}>
       {tone === 'ok' ? <Check size={12} strokeWidth={1.75} className="ok" aria-hidden /> : null}
+      {tone === 'busy' ? <span className="spin" aria-hidden /> : null}
       {children}
     </div>
   );
@@ -111,11 +114,12 @@ export function FolderRow({
           id="f-folder"
           className={status?.tone === 'bad' ? 'fld mono bad' : 'fld mono'}
           list="recent-folders"
-          value={path}
+          value={tildePath(path)}
+          title={path === '' ? undefined : path}
           placeholder="/path/to/a/git/repository"
           spellCheck={false}
           autoComplete="off"
-          onChange={event => onPath(event.target.value)}
+          onChange={event => onPath(untildePath(event.target.value, path || (recent[0] ?? '')))}
           onBlur={onCheck}
           onKeyDown={event => {
             if (event.key === 'Enter') onCheck();
@@ -152,9 +156,16 @@ export interface TaskRowProps {
   detail: TaskDetail | null;
   /** No project yet: nothing to choose from. */
   disabled: boolean;
+  /** The folder is being checked. */
+  checking: boolean;
   onTask: (name: string) => void;
   /** Opens the saved task in the form. */
   onEdit?: () => void;
+}
+
+function emptyTaskText(disabled: boolean, checking: boolean): string {
+  if (checking) return 'Checking the folder…';
+  return disabled ? 'Choose a folder first' : 'Loading tasks…';
 }
 
 function TaskSelect({
@@ -162,6 +173,7 @@ function TaskSelect({
   form,
   tasks,
   disabled,
+  checking,
   onTask,
 }: Omit<TaskRowProps, 'detail' | 'onEdit'> & {className: string}) {
   return (
@@ -172,9 +184,7 @@ function TaskSelect({
       disabled={disabled}
       onChange={event => onTask(event.target.value)}
     >
-      {form.task === null ? (
-        <option value="">{disabled ? 'Choose a folder first' : 'Loading tasks…'}</option>
-      ) : null}
+      {form.task === null ? <option value="">{emptyTaskText(disabled, checking)}</option> : null}
       {tasks.map(task => (
         <option
           key={task.name}
@@ -206,13 +216,14 @@ function TaskAction({detail, onEdit}: {detail: TaskDetail; onEdit: (() => void) 
   );
 }
 
-export function TaskRow({form, tasks, detail, disabled, onTask, onEdit}: TaskRowProps) {
+export function TaskRow({form, tasks, detail, disabled, checking, onTask, onEdit}: TaskRowProps) {
   const select = (className: string) => (
     <TaskSelect
       className={className}
       form={form}
       tasks={tasks}
       disabled={disabled}
+      checking={checking}
       onTask={onTask}
     />
   );
@@ -346,7 +357,7 @@ export function Roles({roles, form, effort, onRole}: RolesProps) {
                 className="fld effort"
                 list="efforts"
                 aria-label={`${name} reasoning effort`}
-                placeholder="Effort"
+                placeholder="Reasoning"
                 value={choice.effort}
                 autoComplete="off"
                 onChange={event => onRole(role, {...choice, effort: event.target.value})}
@@ -445,6 +456,8 @@ export interface SetupFooterProps {
   blockers: readonly Blocker[];
   /** What is in flight; disables Start. */
   busy: string | null;
+  /** A check or key save is in flight: Start waits, and the field says so. */
+  waiting: boolean;
   error: string | null;
   cancelHref: string;
   onFix: (field: FieldId) => void;
@@ -456,7 +469,7 @@ function FooterLine({
   busy,
   error,
   onFix,
-}: Omit<SetupFooterProps, 'cancelHref' | 'onStart'>) {
+}: Omit<SetupFooterProps, 'cancelHref' | 'onStart' | 'waiting'>) {
   if (busy !== null) {
     return (
       <span className="busy" aria-live="polite">
@@ -475,22 +488,32 @@ function FooterLine({
   if (blockers.length === 0) return null;
   return (
     <>
-      <span>{`${blockers.length} to fix:`}</span>
-      {blockers.map(blocker => (
-        <button
-          key={`${blocker.field}:${blocker.text}`}
-          type="button"
-          className="linkbtn"
-          onClick={() => onFix(blocker.field)}
-        >
-          {blocker.text}
-        </button>
-      ))}
+      <span className="cnt">{`${blockers.length} to fix:`}</span>
+      <span className="blk">
+        {blockers.map(blocker => (
+          <button
+            key={`${blocker.field}:${blocker.text}`}
+            type="button"
+            className="linkbtn"
+            onClick={() => onFix(blocker.field)}
+          >
+            {blocker.text}
+          </button>
+        ))}
+      </span>
     </>
   );
 }
 
-export function SetupFooter({blockers, busy, error, cancelHref, onFix, onStart}: SetupFooterProps) {
+export function SetupFooter({
+  blockers,
+  busy,
+  waiting,
+  error,
+  cancelHref,
+  onFix,
+  onStart,
+}: SetupFooterProps) {
   return (
     <footer className="sheetfoot">
       <FooterLine blockers={blockers} busy={busy} error={error} onFix={onFix} />
@@ -501,7 +524,7 @@ export function SetupFooter({blockers, busy, error, cancelHref, onFix, onStart}:
       <button
         type="button"
         className="btn primary"
-        disabled={blockers.length > 0 || busy !== null}
+        disabled={blockers.length > 0 || busy !== null || waiting}
         onClick={onStart}
       >
         Start run

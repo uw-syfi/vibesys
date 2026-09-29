@@ -23,13 +23,14 @@ const FULL: Draft = {
   result_metric: 'median_tok_per_sec',
 };
 const none = () => undefined;
-const render = (draft: Draft, creating: boolean, error: string | null = null) =>
+const render = (draft: Draft, creating: boolean, error: string | null = null, conflict = false) =>
   renderToStaticMarkup(
     <TaskFormRows
       draft={draft}
       creating={creating}
       saving={false}
       error={error}
+      conflict={conflict}
       onDraft={none}
       onSave={none}
       onDiscard={none}
@@ -45,7 +46,10 @@ test('a new task asks for a name; an edited one does not', () => {
   }
   assert.match(html, /<option value="llm-serving" selected="">LLM serving<\/option>/);
   assert.match(html, /aria-label="JSON flag"/);
-  assert.match(html, />Higher is better\.</);
+  assert.match(
+    html,
+    /Read from the benchmark&#x27;s <code class="mono">--json<\/code> output\.\s+Higher is better\./,
+  );
 });
 
 test('a name outside the task name rule says so under the field', () => {
@@ -68,5 +72,10 @@ test('Save is enabled only for a complete form; a save error shows beside it', (
   assert.match(
     render(FULL, false, 'The task changed on disk'),
     /<span class="hint bad" role="alert">The task changed on disk<\/span>/,
+  );
+  // After a conflict, Save stays off until Discard reloads the task.
+  assert.match(
+    render(FULL, false, 'The task changed on disk', true),
+    /<button id="f-save" type="button" class="btn" disabled="" title="Discard to load the task from disk, then edit again">Save task<\/button>/,
   );
 });

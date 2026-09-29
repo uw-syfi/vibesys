@@ -34,6 +34,7 @@
 a.run:hover { background: var(--bg-hover); }
 .run .ttl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .run.cur { color: var(--text-1); font-weight: 500; }
+.run.sel { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
 .run .meta { font-size: 12px; color: var(--text-2); font-weight: 400; }
 .rounds { margin: 2px 0 6px; }
 .rnd { display: grid; grid-template-columns: 14px 22px 1fr auto; align-items: start; gap: 4px 6px; padding: 4px 8px 4px 20px; font-size: 12px; line-height: 16px; color: var(--text-2); }
@@ -52,6 +53,7 @@ a.run:hover { background: var(--bg-hover); }
 .titlebar .sp { flex: 1; }
 .status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 0; }
 .status.ended { flex-shrink: 1; }
+.titlebar > .status:last-child { margin-right: 10px; }
 .status .why { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kept { font-size: 12px; white-space: nowrap; color: var(--text-2); }
 .kept b { color: var(--text-1); font-weight: 500; }
@@ -78,7 +80,6 @@ a.run:hover { background: var(--bg-hover); }
 .disc { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border-radius: 6px; color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .disc:hover { background: var(--bg-hover); color: var(--text-1); }
 .disc.on { color: var(--text-1); background: var(--bg-selected); }
-.disc .chev { transition: transform 0.15s ease-out; }
 .disc .chev.open { transform: rotate(90deg); }
 .turn p { margin: 0 0 10px; max-width: 68ch; }
 .turn code { font-family: var(--mono); font-size: 12px; }
@@ -95,7 +96,7 @@ a.run:hover { background: var(--bg-hover); }
 .trow .sub { color: var(--text-2); font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .trow .stat { font-variant-numeric: tabular-nums; flex: none; }
 .trow .end { margin-left: auto; padding-left: 12px; flex: none; font-variant-numeric: tabular-nums; }
-.trow .chev { color: var(--text-2); flex: none; transition: transform 0.15s ease-out; opacity: 0; }
+.trow .chev { color: var(--text-2); flex: none; opacity: 0; }
 .trow:hover .chev, .trow:focus-visible .chev, .tool.open .chev { opacity: 1; }
 .tool.open .chev { transform: rotate(90deg); }
 .out { margin: 4px 0 8px 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-sidebar); overflow: auto; }
@@ -179,7 +180,6 @@ dialog::backdrop { background: var(--scrim); }
 .note.stack { flex-direction: column; align-items: flex-start; }
 .morerow { display: flex; align-items: center; gap: 6px; padding: 8px 16px; color: var(--text-2); font-size: 12px; border-bottom: 1px solid var(--border-subtle); width: 100%; }
 .morerow:hover { background: var(--bg-hover); color: var(--text-1); }
-.morerow .chev { transition: transform 0.15s ease-out; }
 .morerow .chev.open { transform: rotate(90deg); }
 .pbody .diff { border-bottom: 1px solid var(--border-subtle); }
 
@@ -247,17 +247,20 @@ a.nav { text-decoration: none; }
 .empty { flex: 1; display: grid; place-items: center; color: var(--text-2); margin: 0; }
 /* setup (mockup #setup) */
 .form { max-width: 600px; margin: 0 auto; padding: 32px 32px 40px; }
+fieldset.form { border: 0; min-width: 0; }
 .fr { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 12px; align-items: start; margin-bottom: 16px; }
 .fr > label, .fr > .lab { padding-top: 6px; color: var(--text-2); }
 .fld { height: 32px; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); padding: 0 10px; color: var(--text-1); font: inherit; }
 .fld.mono { font: 12px var(--mono); }
 .fld.area { height: auto; min-height: 52px; padding: 6px 10px; line-height: 20px; resize: vertical; }
 .fld::placeholder { color: var(--text-3); }
+.fld.mono::placeholder { font-family: var(--sans); }
 .fld:focus-visible, .fld.model:focus-within, .keyfld:focus-within { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
 .fld.bad { border-color: var(--error); }
 .fld[disabled] { color: var(--text-2); }
+.fld::-webkit-calendar-picker-indicator { display: none !important; }
 .fld.budget { width: 80px; }
-/* Resume's budget field carries the "As recorded" placeholder, which the plain 80px clips. */
+/* Resume's budget field carries the "Recorded" placeholder, which the plain 80px clips. */
 .fld.budget.resume { width: 140px; }
 .selbox { position: relative; display: block; }
 .selbox > select { appearance: none; padding-right: 28px; }
@@ -287,12 +290,14 @@ a.nav { text-decoration: none; }
 .fld.effort { width: 96px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary[disabled] { background: var(--bg-selected); border-color: var(--border); color: var(--text-2); }
-.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled { color: var(--text-2); cursor: default; }
 .btn:not(.primary):not(.ghost):disabled:hover { background: var(--bg-raised); }
 .btn.ghost:disabled:hover { background: none; color: var(--text-2); }
 a.btn { text-decoration: none; }
-.sheetfoot { flex: none; border-top: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+.sheetfoot { flex: none; border-top: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2); }
 .sheetfoot .sp { flex: 1; }
+.sheetfoot .cnt { white-space: nowrap; }
+.sheetfoot .blk { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .busy { display: inline-flex; align-items: center; gap: 8px; }
 
 /* provider key */
@@ -323,7 +328,12 @@ dialog.commit { width: 440px; padding: 14px; border: 1px solid var(--border); bo
 /* start failure (mockup #startfail) */
 .failure .out { margin: 18px 0 10px; }
 .linkish { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
+.linkish.mono { font: 12px var(--mono); }
 .logline { margin: 0 0 12px; font-size: 12px; color: var(--text-2); }
 .failacts { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 
 a.it { text-decoration: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .disc .chev, .trow .chev, .morerow .chev { transition: transform 0.15s ease-out; }
+}

@@ -50,6 +50,7 @@ import {
 } from './ui/Setup.js';
 import {StartFailure} from './ui/StartFailure.js';
 import {TaskFormRows} from './ui/TaskForm.js';
+import {Titlebar} from './ui/TitleRow.js';
 
 interface SetupData {
   catalog: Catalog;
@@ -149,9 +150,19 @@ function useFolder(
   return {validation, checking, error, check, recheck, clear};
 }
 
-/** The checked project's tasks; null until they are known. Refetched after every check. */
-function useTasks(client: HomeClient, validation: ProjectValidation | null): TaskSummary[] | null {
+/**
+ * The checked project's tasks; null until they are known. Refetched after every check; the form
+ * then keeps a valid choice or takes the first valid task.
+ */
+function useTasks(
+  client: HomeClient,
+  validation: ProjectValidation | null,
+  setForm: Dispatch<SetStateAction<SetupForm>>,
+): TaskSummary[] | null {
   const [tasks, setTasks] = useState<TaskSummary[] | null>(null);
+  useEffect(() => {
+    if (tasks !== null) setForm(current => withTasks(current, tasks));
+  }, [tasks, setForm]);
   useEffect(() => {
     let current = true;
     setTasks(null);
@@ -215,10 +226,12 @@ interface DeriveInput {
   tasks: TaskSummary[] | null;
   detail: TaskDetail | null;
   project: ProjectValidation['project'];
+  keyWrite: KeyWrite;
 }
 
 /** The loop, reasoning-effort support, the form with an unlisted task cleared, and its blockers. */
-function derive({form, catalog, auth, folder, tasks, detail, project}: DeriveInput): Derived {
+function derive(input: DeriveInput): Derived {
+  const {form, catalog, auth, folder, tasks, detail, project, keyWrite} = input;
   const loop = catalog.outer_loops.find(option => option.id === form.loop);
   const effort =
     catalog.providers.find(option => option.provider === form.provider)
@@ -234,6 +247,8 @@ function derive({form, catalog, auth, folder, tasks, detail, project}: DeriveInp
     detail: shown,
     catalog,
     auth,
+    checking: folder.checking,
+    keyWrite,
   });
   return {loop, effort, shown, checked, blocking};
 }
@@ -256,11 +271,11 @@ function focusField(field: FieldId): void {
   element?.focus();
 }
 
-function Titlebar() {
+function NewRunTitle() {
   return (
-    <header className="titlebar">
+    <Titlebar>
       <span className="name">New run</span>
-    </header>
+    </Titlebar>
   );
 }
 
@@ -275,14 +290,14 @@ interface StartFailedProps {
 function StartFailed({failure, root, onRetry, onBack}: StartFailedProps) {
   return (
     <>
-      <header className="titlebar">
+      <Titlebar>
         <span className="name">New run</span>
         <span className="sp" />
         <span className="status">
           <span className="dot err" />
           Did not start
         </span>
-      </header>
+      </Titlebar>
       <StartFailure
         failure={failure}
         root={root}
@@ -299,15 +314,17 @@ interface ProviderKeyProps {
   auth: AuthStatus;
   provider: string;
   refreshAuth: () => void;
+  /** Held by the form, whose footer names a rejected key; reset with the provider. */
+  write: KeyWrite;
+  setWrite: (write: KeyWrite) => void;
 }
 
 /**
  * The key typed for one provider. Mounted with `key={provider}`, so a provider change unmounts it
  * and the typed value goes with it; a successful write clears the value before anything else renders.
  */
-function ProviderKey({client, auth, provider, refreshAuth}: ProviderKeyProps) {
+function ProviderKey({client, auth, provider, refreshAuth, write, setWrite}: ProviderKeyProps) {
   const [value, setValue] = useState('');
-  const [write, setWrite] = useState<KeyWrite>({kind: 'idle'});
   const row = auth.providers.find(item => item.provider === provider);
   if (row === undefined) return null;
   const name = row.keys[0]?.name;
@@ -394,6 +411,8 @@ interface TaskSave {
 function useTaskSave(client: HomeClient) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The task changed on disk: Save stays off, and its message stays, until Discard or another task.
+  const [conflict, setConflict] = useState(false);
   const save = ({projectId, form, base, onSaved, onStale}: TaskSave) => {
     const draft = form.draft;
     if (draft === null) return;
@@ -411,11 +430,30 @@ function useTaskSave(client: HomeClient) {
       (reason: unknown) => {
         setSaving(false);
         setError(saveError(reason));
-        if (reason instanceof HomeError && reason.code === 'task_conflict') onStale();
+        if (reason instanceof HomeError && reason.code === 'task_conflict') {
+          setConflict(true);
+          onStale();
+        }
       },
     );
   };
-  return {saving, error, save, clearError: () => setError(null)};
+  return {
+    saving,
+    error,
+    conflict,
+    save,
+    /** A field was edited: a refused save's message goes, except a conflict's. */
+    edited: () => {
+      if (!conflict) setError(null);
+    },
+    /** The reload after a conflict failed. */
+    staleFailed: (reason: unknown) =>
+      setError(`The task changed on disk and could not be reloaded: ${errorText(reason)}`),
+    reset: () => {
+      setError(null);
+      setConflict(false);
+    },
+  };
 }
 
 interface TaskFieldsProps {
@@ -424,6 +462,8 @@ interface TaskFieldsProps {
   setForm: Dispatch<SetStateAction<SetupForm>>;
   tasks: TaskSummary[] | null;
   projectId: string | null;
+  /** The folder is being checked. */
+  checking: boolean;
   detail: TaskDetail | null;
   /** A saved or reloaded task. */
   onDetail: (detail: TaskDetail) => void;
@@ -438,6 +478,7 @@ function TaskFields({
   setForm,
   tasks,
   projectId,
+  checking,
   detail,
   onDetail,
   onRecheck,
@@ -450,7 +491,7 @@ function TaskFields({
   };
   const onStale = () => {
     if (projectId !== null && form.task !== null)
-      client.task(projectId, form.task).then(onDetail, () => undefined);
+      client.task(projectId, form.task).then(onDetail, saver.staleFailed);
   };
   // Taken when Edit opens the form, so a reload of the task after a conflict never becomes the base.
   const [base, setBase] = useState<string | null>(null);
@@ -462,12 +503,14 @@ function TaskFields({
         tasks={tasks ?? []}
         detail={detail}
         disabled={projectId === null}
+        checking={checking}
         onTask={name => {
-          saver.clearError();
+          saver.reset();
           setForm(current => withTask(current, name));
         }}
         onEdit={() => {
           if (detail === null) return;
+          saver.reset();
           setBase(detail.content_hash);
           setForm(current => ({...current, draft: draftOf(detail)}));
         }}
@@ -478,16 +521,18 @@ function TaskFields({
           creating={form.task === NEW_TASK}
           saving={saver.saving}
           error={saver.error}
-          onDraft={next =>
+          conflict={saver.conflict}
+          onDraft={next => {
+            saver.edited();
             setForm(current =>
               current.draft === null ? current : {...current, draft: {...current.draft, ...next}},
-            )
-          }
+            );
+          }}
           onSave={() => {
             if (projectId !== null) saver.save({projectId, form, base, onSaved, onStale});
           }}
           onDiscard={() => {
-            saver.clearError();
+            saver.reset();
             setForm(current => withoutDraft(current, tasks ?? []));
           }}
         />
@@ -524,12 +569,15 @@ function useCommit(client: HomeClient, projectId: string | null, onDone: () => v
     const preview = state?.preview;
     if (projectId === null || preview == null) return;
     patch({busy: true, error: null});
+    // Cancel takes a new ticket: an answer after it neither reopens nor updates the dialog.
+    const mine = ticket.current;
     client.commit(projectId, preview.task_files).then(
       () => {
-        setState(null);
+        if (mine === ticket.current) setState(null);
         onDone();
       },
       (reason: unknown) => {
+        if (mine !== ticket.current) return;
         // The files changed since the preview: show the new list, and the user confirms again.
         if (reason instanceof HomeError && reason.code === 'task_conflict') {
           load(projectId, 'The task files changed. Review the list again.');
@@ -585,6 +633,16 @@ function SetupDialogs({folder, act, picker, commit}: SetupDialogsProps) {
   );
 }
 
+/** One provider's key write, held by the form so its footer can name it; a provider change starts idle. */
+function useKeyWrite(provider: string): [KeyWrite, (write: KeyWrite) => void] {
+  const [held, setHeld] = useState<{provider: string; write: KeyWrite}>({
+    provider,
+    write: {kind: 'idle'},
+  });
+  const set = useCallback((write: KeyWrite) => setHeld({provider, write}), [provider]);
+  return [held.provider === provider ? held.write : {kind: 'idle'}, set];
+}
+
 interface NewRunProps {
   client: HomeClient;
   token: string;
@@ -592,6 +650,7 @@ interface NewRunProps {
   refreshAuth: () => void;
 }
 
+/** The form is inert (a disabled fieldset) while a launch is in flight: an edit then would be lost. */
 function NewRun({client, token, data, refreshAuth}: NewRunProps) {
   const {catalog, auth, recent} = data;
   const [form, setForm] = useState(() => initialForm(catalog, auth, recent[0] ?? ''));
@@ -602,15 +661,13 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
   );
   const folder = useFolder(client, recent[0] ?? '', onChecked);
   const project = folder.validation?.project ?? null;
-  const tasks = useTasks(client, folder.validation);
+  const tasks = useTasks(client, folder.validation, setForm);
   const [detail, setDetail] = useTaskDetail(client, project?.id ?? null, form.task);
   const launch = useLaunch(client, token);
   const picker = usePicker(client);
   const commit = useCommit(client, project?.id ?? null, folder.recheck);
-  useEffect(() => {
-    if (tasks !== null) setForm(current => withTasks(current, tasks));
-  }, [tasks]);
-  const derived = derive({form, catalog, auth, folder, tasks, detail, project});
+  const [write, setWrite] = useKeyWrite(form.provider);
+  const derived = derive({form, catalog, auth, folder, tasks, detail, project, keyWrite: write});
   const {loop, effort, shown, checked, blocking} = derived;
   const start = () => {
     if (project !== null)
@@ -628,9 +685,9 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
     );
   return (
     <>
-      <Titlebar />
+      <NewRunTitle />
       <div className="scroll">
-        <div className="form">
+        <fieldset className="form" disabled={line.busy !== null}>
           <FolderRow
             path={form.path}
             recent={recent}
@@ -649,6 +706,7 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
             setForm={setForm}
             tasks={tasks}
             projectId={project?.id ?? null}
+            checking={folder.checking}
             detail={shown}
             onDetail={setDetail}
             onRecheck={folder.recheck}
@@ -668,6 +726,8 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
             auth={auth}
             provider={form.provider}
             refreshAuth={refreshAuth}
+            write={write}
+            setWrite={setWrite}
           />
           <Advanced
             catalog={catalog}
@@ -677,11 +737,12 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
             onChange={act.patch}
           />
           <SetupDialogs folder={folder} act={act} picker={picker} commit={commit} />
-        </div>
+        </fieldset>
       </div>
       <SetupFooter
         blockers={blocking}
         busy={line.busy}
+        waiting={folder.checking || write.kind === 'saving'}
         error={line.error}
         cancelHref={homeHref(token, {kind: 'empty'})}
         onFix={focusField}
@@ -701,7 +762,7 @@ export function SetupView({client, token}: SetupViewProps) {
   if (error !== null) {
     return (
       <>
-        <Titlebar />
+        <NewRunTitle />
         <p className="empty bad" role="alert">{`The home server did not answer: ${error}`}</p>
       </>
     );
@@ -709,7 +770,7 @@ export function SetupView({client, token}: SetupViewProps) {
   if (data === null) {
     return (
       <>
-        <Titlebar />
+        <NewRunTitle />
         <p className="empty">Loading…</p>
       </>
     );

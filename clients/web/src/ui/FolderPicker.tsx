@@ -2,6 +2,7 @@
 import {CornerLeftUp, Folder} from 'lucide-react';
 import {type KeyboardEvent, useEffect, useRef} from 'react';
 import type {FsListing} from '../home-api.js';
+import {tildePath} from '../setup.js';
 
 export interface FolderPickerProps {
   /** Null while the first listing loads. */
@@ -31,11 +32,12 @@ export function useModal() {
 }
 
 /** Arrow keys move focus between the row buttons; Enter/Space activate the focused one natively. */
-function onRowsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+function onRowKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
   if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
   event.preventDefault();
-  const rows = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button.pit'));
-  const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const list = event.currentTarget.parentElement;
+  const rows = Array.from(list?.querySelectorAll<HTMLButtonElement>('button.pit') ?? []);
+  const index = rows.indexOf(event.currentTarget);
   const step = event.key === 'ArrowDown' ? 1 : -1;
   rows[Math.min(rows.length - 1, Math.max(0, index + step))]?.focus();
 }
@@ -46,14 +48,15 @@ export function FolderPicker({listing, error, onOpen, onChoose, onClose}: Folder
   return (
     <dialog ref={dialog} className="picker" aria-labelledby="picker-title" onClose={onClose}>
       <h4 id="picker-title" className="mono" title={here ?? undefined}>
-        {here ?? 'Folders you can open'}
+        {here === null ? 'Folders you can open' : tildePath(here)}
       </h4>
-      <div className="plist" role="toolbar" aria-orientation="vertical" onKeyDown={onRowsKeyDown}>
+      <div className="plist">
         {here === null ? null : (
           <button
             type="button"
             className="pit"
             aria-label="Up"
+            onKeyDown={onRowKeyDown}
             onClick={() => onOpen(listing?.parent ?? null)}
           >
             <CornerLeftUp size={14} strokeWidth={1.5} aria-hidden />
@@ -67,6 +70,7 @@ export function FolderPicker({listing, error, onOpen, onChoose, onClose}: Folder
             type="button"
             className="pit"
             title={entry.path}
+            onKeyDown={onRowKeyDown}
             onClick={() => onOpen(entry.path)}
           >
             <Folder size={14} strokeWidth={1.5} aria-hidden />

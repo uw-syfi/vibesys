@@ -23,6 +23,8 @@ import {
   roleSummary,
   saveError,
   startRequest,
+  tildePath,
+  untildePath,
   withLoop,
   withoutDraft,
   withProvider,
@@ -76,6 +78,8 @@ const ready = (patch: Partial<Readiness> = {}): Readiness => ({
   detail: DECODE,
   catalog: CATALOG,
   auth: AUTH,
+  checking: false,
+  keyWrite: {kind: 'idle'},
   ...patch,
 });
 
@@ -143,8 +147,16 @@ test('each blocker names its field, in form order', () => {
     {field: 'folder', text: 'Folder has uncommitted changes'},
     {field: 'budget', text: 'Rounds must be a whole number'},
     {field: 'model', text: 'Model is empty'},
-    {field: 'key', text: 'Codex CLI key is needed'},
+    {field: 'key', text: 'OpenAI API key is needed for Codex CLI'},
   ]);
+  // Named as the key field is; nothing while the key saves, and a refusal says so.
+  const codex = withProvider(ready().form, CATALOG, 'codex');
+  assert.deepEqual(blockers(ready({form: codex, keyWrite: {kind: 'saving'}})), []);
+  assert.deepEqual(blockers(ready({form: codex, keyWrite: {kind: 'rejected', message: '401'}})), [
+    {field: 'key', text: 'OpenAI API key was rejected'},
+  ]);
+  // While the folder is checked, its field says so and the footer does not.
+  assert.deepEqual(blockers(ready({validation: null, checking: true})), []);
   const cliOnly = withProvider(ready().form, CATALOG, 'opencode');
   assert.deepEqual(blockers(ready({form: cliOnly})), [
     {field: 'key', text: 'Sign in to OpenCode from a terminal'},
@@ -173,7 +185,7 @@ test('uncommitted task files, a new task and profile-guided prerequisites are bl
     draft: {...draftOf(DECODE), name: 'decode-2'},
   };
   assert.deepEqual(blockers(ready({form: complete, detail: null})), [
-    {field: 'save', text: 'Save the task'},
+    {field: 'save', text: 'Task has unsaved changes'},
   ]);
   const guided = withLoop(ready().form, CATALOG, 'profile-guided');
   assert.deepEqual(blockers(ready({form: guided})), [
@@ -189,7 +201,7 @@ test('folder status: next actions per state, and commit only when task files are
     commit: false,
   });
   assert.deepEqual(folderStatus(null, true, null), {
-    tone: 'plain',
+    tone: 'busy',
     text: 'Checking…',
     commit: false,
   });
@@ -244,10 +256,10 @@ test('key rows: present, missing, CLI-only, saving, saved, rejected, shadowed', 
   const gemini = keyView(provider('gemini'), {kind: 'idle'}, where);
   assert.equal(gemini.label, 'Gemini API key');
   const opencode = keyView(provider('opencode'), {kind: 'idle'}, where);
-  // No key variable to derive a vendor from: falls back to the provider's own display name.
+  // No key, only a terminal sign-in.
   assert.deepEqual(
     [opencode.label, opencode.name, opencode.login],
-    ['OpenCode key', null, 'opencode auth login'],
+    ['OpenCode sign-in', null, 'opencode auth login'],
   );
   assert.equal(keyView(provider('codex'), {kind: 'saving'}, where).hint, 'Saving…');
   assert.deepEqual(
@@ -272,9 +284,8 @@ test('key rows: present, missing, CLI-only, saving, saved, rejected, shadowed', 
     [shadowed.tone, shadowed.hint, shadowed.placeholder],
     [
       'warn',
-      "ANTHROPIC_API_KEY in this app's environment overrides .env.",
-      // Must not invite pasting a key that the environment variable would still override.
-      'An environment variable is in use…',
+      "ANTHROPIC_API_KEY in this app's environment overrides .env. Unset it and restart VibeSys to use .env.",
+      'Paste a new key to replace it…',
     ],
   );
 });
@@ -358,4 +369,16 @@ test('a refused save reads as one line that says what to do', () => {
     ),
     'the task manifest is invalid\nbad metric',
   );
+});
+
+test('a path under the home directory reads with ~; others as they are', () => {
+  assert.equal(tildePath('/Users/me/src/llm-serve'), '~/src/llm-serve');
+  assert.equal(tildePath('/home/me'), '~');
+  assert.equal(tildePath('/srv/me/x'), '/srv/me/x');
+  assert.equal(tildePath('/Users/me2x'), '~');
+  // A typed ~ expands with the home of the path it replaces; without one it stays as typed.
+  assert.equal(untildePath('~/src/x', '/Users/me/src/llm-serve'), '/Users/me/src/x');
+  assert.equal(untildePath('~', '/home/me/a'), '/home/me');
+  assert.equal(untildePath('~/x', ''), '~/x');
+  assert.equal(untildePath('/srv/x', '/Users/me'), '/srv/x');
 });

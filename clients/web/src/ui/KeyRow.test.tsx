@@ -44,8 +44,11 @@ test('saving disables the field; a CLI-only provider shows its terminal sign-in'
   assert.match(saving, /disabled="" value="x"\/><span class="spin" aria-hidden="true"><\/span>/);
   assert.doesNotMatch(saving, />Save</);
   const cli = render('opencode', '');
-  assert.match(cli, /<span class="lab">OpenCode key<\/span>/);
-  assert.match(cli, /<code id="f-key" class="mono" tabindex="-1">opencode auth login<\/code>/);
+  assert.match(cli, /<span class="lab">OpenCode sign-in<\/span>/);
+  assert.match(
+    cli,
+    /<button id="f-key" type="button" class="linkish mono" title="Copy opencode auth login">opencode auth login<\/button>/,
+  );
   assert.match(cli, />Check again<\/button>/);
   assert.doesNotMatch(cli, /type="password"/);
 });

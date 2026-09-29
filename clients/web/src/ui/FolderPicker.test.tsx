@@ -24,7 +24,7 @@ test('the picker lists subfolders with their git tag, goes up, and chooses the f
   );
   assert.match(
     html,
-    /<dialog class="picker" aria-labelledby="picker-title"><h4 id="picker-title" class="mono" title="\/Users\/me\/src">\/Users\/me\/src<\/h4>/,
+    /<dialog class="picker" aria-labelledby="picker-title"><h4 id="picker-title" class="mono" title="\/Users\/me\/src">~\/src<\/h4><div class="plist">/,
   );
   assert.match(html, /aria-label="Up"/);
   assert.match(

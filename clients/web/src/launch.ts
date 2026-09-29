@@ -30,8 +30,17 @@ const failedWith = (message: string): LaunchPhase => ({
   failure: {message, tail: [], log: null},
 });
 
-/** `ended_serving` is ready too: the run page shows how the run ended. */
-export function gatewayPhase(gateway: Gateway, error: string | null): LaunchPhase {
+const SERVER_EXITED = 'The run server exited before the run started.';
+
+/**
+ * `ended_serving` is ready too: the run page shows how the run ended. `recorded` says the run is in
+ * the run store, so a failure before it attached is its baseline's, not the run server's start-up.
+ */
+export function gatewayPhase(
+  gateway: Gateway,
+  error: string | null,
+  recorded = false,
+): LaunchPhase {
   switch (gateway.state) {
     case 'starting':
       return WAITING;
@@ -45,7 +54,7 @@ export function gatewayPhase(gateway: Gateway, error: string | null): LaunchPhas
       return {
         kind: 'failed',
         failure: {
-          message: error ?? 'The run server exited before the run started.',
+          message: error ?? (recorded ? 'The baseline benchmark failed.' : SERVER_EXITED),
           tail: gateway.stderr_tail,
           log: gateway.stderr_log,
         },
@@ -55,12 +64,12 @@ export function gatewayPhase(gateway: Gateway, error: string | null): LaunchPhas
     case 'external':
       return failedWith('Another launcher started a run in this project first.');
     case 'none':
-      return failedWith('The run server exited before the run started.');
+      return failedWith(SERVER_EXITED);
   }
 }
 
 export function launchPhase(row: RunRow | undefined): LaunchPhase {
-  return row === undefined ? WAITING : gatewayPhase(row.gateway, row.error);
+  return row === undefined ? WAITING : gatewayPhase(row.gateway, row.error, row.task !== null);
 }
 
 export type LaunchState =
@@ -70,6 +79,12 @@ export type LaunchState =
   | {kind: 'failed'; failure: LaunchFailure}
   | {kind: 'rejected'; error: HomeError};
 
+/** The home server's launch errors are lower-case clauses ("the run server exited with status 1"). */
+const sentence = (text: string): string => {
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
+};
+
 function failureOf(error: unknown): LaunchFailure {
   if (!(error instanceof HomeError)) {
     return {message: error instanceof Error ? error.message : String(error), tail: [], log: null};
@@ -77,7 +92,7 @@ function failureOf(error: unknown): LaunchFailure {
   const tail = error.details?.['stderr_tail'];
   const log = error.details?.['stderr_log'];
   return {
-    message: error.message,
+    message: sentence(error.message),
     tail: Array.isArray(tail)
       ? tail.filter((line): line is string => typeof line === 'string')
       : [],

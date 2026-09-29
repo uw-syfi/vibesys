@@ -159,7 +159,9 @@ test('a slow check of an older folder never replaces a newer one', async ({page}
   await answered;
   await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
   await expect(page.getByText('Git repository, working tree clean')).toHaveCount(0);
-  await expect(folder).toHaveValue(OTHER_ROOT);
+  // The home directory reads as ~; the canonical path is the hint.
+  await expect(folder).toHaveValue('~/src/tokenizer-rs');
+  await expect(folder).toHaveAttribute('title', OTHER_ROOT);
 });
 
 test('the home palette opens from its sidebar row and from ⌘K, and opens a run', async ({page}) => {
@@ -186,12 +188,12 @@ test('a key is sent once in a PUT body and never shown back', async ({page}) => 
   await page.goto(NEW);
   await page.getByRole('combobox', {name: 'Provider'}).selectOption('codex');
   const footer = page.locator('.sheetfoot');
-  await footer.getByRole('button', {name: 'Codex CLI key is needed'}).click();
+  await footer.getByRole('button', {name: 'OpenAI API key is needed for Codex CLI'}).click();
   const key = page.getByLabel('OpenAI API key');
   await expect(key).toBeFocused();
   await key.fill(SECRET);
   await key.press('Enter');
-  await expect(page.getByText('Saved to .env. Unverified until the first run.')).toBeVisible();
+  await expect(page.getByText('Saved in .env. Unverified until the first run.')).toBeVisible();
   await expect(key).toHaveValue('');
   await expect(footer).not.toContainText('key is needed');
   expect(home.requests.filter(request => JSON.stringify(request).includes(SECRET))).toEqual([
@@ -215,7 +217,7 @@ test('a rejected key keeps the field and says why', async ({page}) => {
   await expect(alert).toBeVisible();
   await expect(alert).not.toContainText('sk-"bad');
   await expect(key).toHaveValue('sk-"bad');
-  await expect(page.locator('.sheetfoot')).toContainText('Codex CLI key is needed');
+  await expect(page.locator('.sheetfoot')).toContainText('OpenAI API key was rejected');
 });
 
 test('a provider change drops a typed key; a CLI-only provider shows its sign-in', async ({
@@ -227,7 +229,7 @@ test('a provider change drops a typed key; a CLI-only provider shows its sign-in
   await provider.selectOption('codex');
   await page.getByLabel('OpenAI API key').fill(SECRET);
   await provider.selectOption('opencode');
-  await expect(page.locator('code#f-key')).toHaveText('opencode auth login');
+  await expect(page.locator('button#f-key')).toHaveText('opencode auth login');
   await expect(page.locator('.sheetfoot')).toContainText('Sign in to OpenCode from a terminal');
   await provider.selectOption('codex');
   await expect(page.getByLabel('OpenAI API key')).toHaveValue('');
@@ -239,13 +241,13 @@ test('Browse… walks folders and checks the chosen one', async ({page}) => {
   await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
   await page.getByRole('button', {name: 'Browse…'}).click();
   const picker = page.getByRole('dialog');
-  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await expect(picker.locator('h4')).toHaveAttribute('title', ROOT);
   await picker.getByRole('button', {name: 'Up'}).click();
-  await expect(picker.locator('h4')).toHaveText('/Users/me/src');
+  await expect(picker.locator('h4')).toHaveText('~/src');
   await picker.getByRole('button', {name: /tokenizer-rs/}).click();
   await picker.getByRole('button', {name: 'Choose this folder'}).click();
   await expect(picker).toHaveCount(0);
-  await expect(page.getByLabel('Folder')).toHaveValue(OTHER_ROOT);
+  await expect(page.getByLabel('Folder')).toHaveAttribute('title', OTHER_ROOT);
   await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
   expect(
     home.requests.map(request => request.path).filter(path => path.startsWith('/api/fs')),
@@ -265,15 +267,15 @@ test('a slow listing for a folder left behind is ignored once a newer one has la
   await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
   await page.getByRole('button', {name: 'Browse…'}).click();
   const picker = page.getByRole('dialog');
-  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await expect(picker.locator('h4')).toHaveAttribute('title', ROOT);
   await picker.getByRole('button', {name: 'Up'}).click();
-  await expect(picker.locator('h4')).toHaveText('/Users/me/src');
+  await expect(picker.locator('h4')).toHaveText('~/src');
   // Fires the slow fs(OTHER_ROOT); the displayed listing stays at /Users/me/src while it hangs.
   await picker.getByRole('button', {name: /tokenizer-rs/}).click();
   await picker.getByRole('button', {name: /llm-serve/}).click();
-  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await expect(picker.locator('h4')).toHaveAttribute('title', ROOT);
   home.releaseFs(OTHER_ROOT);
-  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await expect(picker.locator('h4')).toHaveAttribute('title', ROOT);
   await expect(picker.getByText('No folders here.')).toBeVisible();
 });
 
@@ -312,7 +314,7 @@ test('arrow keys move focus over the picker rows; Enter opens the focused one', 
   await page.getByRole('button', {name: 'Browse…'}).click();
   const picker = page.getByRole('dialog');
   await picker.getByRole('button', {name: 'Up'}).click();
-  await expect(picker.locator('h4')).toHaveText('/Users/me/src');
+  await expect(picker.locator('h4')).toHaveText('~/src');
   await page.keyboard.press('ArrowDown');
   await expect(picker.getByRole('button', {name: /llm-serve/})).toBeFocused();
   await page.keyboard.press('ArrowDown');
@@ -320,7 +322,7 @@ test('arrow keys move focus over the picker rows; Enter opens the focused one', 
   await page.keyboard.press('ArrowUp');
   await expect(picker.getByRole('button', {name: /llm-serve/})).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await expect(picker.locator('h4')).toHaveAttribute('title', ROOT);
 });
 
 test('a new task is saved, committed after confirmation, and the folder becomes ready', async ({
@@ -335,7 +337,7 @@ test('a new task is saved, committed after confirmation, and the folder becomes 
   await page.getByLabel('Accuracy').fill('cargo test --release');
   await page.getByLabel('Benchmark').fill('cargo bench --bench decode');
   await page.getByLabel('Metric').fill('median_tok_per_sec');
-  await expect(page.locator('.sheetfoot')).toContainText('Save the task');
+  await expect(page.locator('.sheetfoot')).toContainText('Task has unsaved changes');
   await page.getByRole('button', {name: 'Save task'}).click();
   await expect(page.getByText('Task files are not committed.')).toBeVisible();
   await page.getByRole('button', {name: 'Commit task files…'}).click();
@@ -423,7 +425,9 @@ test('an edit of a task that changed on disk is refused until the new version is
   await expect(page.getByRole('alert')).toHaveText(
     'The task changed on disk. Discard to load it, then edit again.',
   );
-  await save.click();
+  // Save stays off, and the message stays through an edit, until Discard loads the new version.
+  await expect(save).toBeDisabled();
+  await page.getByLabel('Benchmark').fill('cargo bench --bench decode -- --quick --x');
   await expect(page.getByRole('alert')).toBeVisible();
   await page.getByRole('button', {name: 'Discard'}).click();
   await expect(page.locator('.summary')).toContainText('--features simd');
@@ -436,7 +440,7 @@ test('an edit of a task that changed on disk is refused until the new version is
   const hashes = home.requests
     .filter(request => request.method === 'PUT')
     .map(request => (request.body as {base_hash: string}).base_hash);
-  expect(hashes).toEqual(['h1', 'h1', 'h2']);
+  expect(hashes).toEqual(['h1', 'h2']);
 });
 
 test('a new task name is checked as it is typed, and an existing name is refused', async ({
@@ -538,4 +542,27 @@ test('a 404 unknown_run, from a stale sidebar link, reads as a clear one-line me
   await mockHome(page, {unknownRun: true});
   await page.goto(`${HOME}#open=${PROJECT_ID}/${FINISHED_RUN}`);
   await expect(page.getByRole('alert')).toHaveText('This run no longer exists.');
+});
+
+test('the home sidebar hides, returns and resizes as in the run window', async ({page}) => {
+  await mockHome(page);
+  await page.goto(NEW);
+  await sidebar(page).getByRole('button', {name: 'Hide sidebar'}).click();
+  await expect(sidebar(page)).toHaveCount(0);
+  await page.locator('.titlebar').getByRole('button', {name: 'Show sidebar'}).click();
+  const resizer = page.getByRole('separator', {name: 'Resize the sidebar'});
+  await resizer.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(sidebar(page)).toHaveCSS('width', '292px');
+});
+
+test('the run list refreshes while the page is visible', async ({page}) => {
+  await page.clock.install();
+  const home = await mockHome(page);
+  await page.goto(HOME);
+  await expect(sidebar(page).getByText('Reduce p99 prefill latency')).toBeVisible();
+  const lists = () => home.requests.filter(request => request.path === '/api/projects').length;
+  const before = lists();
+  await page.clock.runFor(5_000);
+  await expect.poll(lists).toBeGreaterThan(before);
 });

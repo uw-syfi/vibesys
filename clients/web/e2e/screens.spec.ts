@@ -186,7 +186,10 @@ test.describe('screens', () => {
         for (const theme of ['dark', 'light'] as const) {
           await page.setViewportSize({width, height: 900});
           await page.emulateMedia({colorScheme: theme, reducedMotion: 'reduce'});
-          await page.screenshot({path: join(OUT ?? '', `${screen.name}-${width}-${theme}.png`)});
+          await page.screenshot({
+            path: join(OUT ?? '', `${screen.name}-${width}-${theme}.png`),
+            animations: 'disabled',
+          });
         }
       }
     });
@@ -311,7 +314,7 @@ const SETUP_SCREENS: SetupScreen[] = [
     },
   },
   {name: 'key-saving', url: NEW, options: {hold: ['key']}, act: pasteKey('Saving…')},
-  {name: 'key-saved', url: NEW, act: pasteKey('Saved to .env')},
+  {name: 'key-saved', url: NEW, act: pasteKey('Saved in .env')},
   {name: 'key-rejected', url: NEW, options: {rejectKey: true}, act: pasteKey('Rejected:')},
   {
     name: 'key-shadowed',
@@ -372,6 +375,7 @@ test.describe('setup screens', () => {
           await page.emulateMedia({colorScheme: theme, reducedMotion: 'reduce'});
           await page.screenshot({
             path: join(OUT ?? '', `setup-${screen.name}-${width}-${theme}.png`),
+            animations: 'disabled',
           });
         }
       }

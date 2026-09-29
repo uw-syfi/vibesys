@@ -63,6 +63,12 @@ test('a run server that died reports its stderr; a vanished one says so', () => 
   });
   assert.equal(launchPhase(row('none')).kind, 'failed');
   assert.equal(launchPhase(row('stale')).kind, 'failed');
+  // A run the run store has recorded got past start-up: its baseline failed.
+  const baseline = launchPhase({...row('failed'), task: 'decode'});
+  assert.equal(
+    baseline.kind === 'failed' && baseline.failure.message,
+    'The baseline benchmark failed.',
+  );
 });
 
 test('launch_failed and an unreachable home fail with the tail; other refusals are messages', () => {
@@ -71,7 +77,7 @@ test('launch_failed and an unreachable home fail with the tail; other refusals a
   );
   assert.deepEqual(failed, {
     kind: 'failed',
-    failure: {message: 'exited 1', tail: ['a', 'b'], log: '/l'},
+    failure: {message: 'Exited 1.', tail: ['a', 'b'], log: '/l'},
   });
   assert.equal(launchError(new HomeError('network', 'down', null)).kind, 'failed');
   const live = launchError(

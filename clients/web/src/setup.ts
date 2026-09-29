@@ -217,6 +217,10 @@ export interface Readiness {
   detail: TaskDetail | null;
   catalog: Catalog;
   auth: AuthStatus;
+  /** A folder check is in flight. */
+  checking: boolean;
+  /** The selected provider's key write. */
+  keyWrite: KeyWrite;
 }
 
 function folderBlocker(validation: ProjectValidation): string | null {
@@ -240,8 +244,14 @@ function folderBlocker(validation: ProjectValidation): string | null {
   }
 }
 
-function folderBlockers(path: string, validation: ProjectValidation | null): Blocker[] {
+/** While a check is in flight the folder has no blocker: its field says Checking…, and Start waits. */
+function folderBlockers(
+  path: string,
+  validation: ProjectValidation | null,
+  checking: boolean,
+): Blocker[] {
   if (path.trim() === '') return [{field: 'folder', text: 'Choose a folder'}];
+  if (checking) return [];
   if (validation === null) return [{field: 'folder', text: 'Folder is not checked yet'}];
   const text = folderBlocker(validation);
   return text === null ? [] : [{field: 'folder', text}];
@@ -263,7 +273,7 @@ export function draftBlockers(draft: Draft, creating: boolean): Blocker[] {
   if (draft.result_metric.trim() === '' || draft.result_json_argument.trim() === '') {
     missing.push({field: 'metric', text: 'Metric is incomplete'});
   }
-  return missing.length > 0 ? missing : [{field: 'save', text: 'Save the task'}];
+  return missing.length > 0 ? missing : [{field: 'save', text: 'Task has unsaved changes'}];
 }
 
 function taskBlockers({form, tasks, validation}: Readiness): Blocker[] {
@@ -291,23 +301,28 @@ function runBlockers({form, catalog, detail}: Readiness): Blocker[] {
   return found;
 }
 
-function keyBlockers(provider: string, auth: AuthStatus): Blocker[] {
+/** Named as the key field is. Nothing while a key is saving: the field says Saving…, and Start waits. */
+function keyBlockers(provider: string, auth: AuthStatus, write: KeyWrite): Blocker[] {
   const row = auth.providers.find(item => item.provider === provider);
-  if (row === undefined || row.status !== 'missing') return [];
+  if (row === undefined || row.status !== 'missing' || write.kind === 'saving') return [];
+  const name = row.keys[0]?.name ?? null;
+  if (name === null)
+    return [{field: 'key', text: `Sign in to ${row.display_name} from a terminal`}];
+  const label = keyLabel(name, row.display_name);
   const text =
-    row.keys.length > 0
-      ? `${row.display_name} key is needed`
-      : `Sign in to ${row.display_name} from a terminal`;
+    write.kind === 'rejected'
+      ? `${label} was rejected`
+      : `${label} is needed for ${row.display_name}`;
   return [{field: 'key', text}];
 }
 
 /** Everything that keeps Start disabled, in form order. */
 export function blockers(input: Readiness): Blocker[] {
   return [
-    ...folderBlockers(input.form.path, input.validation),
+    ...folderBlockers(input.form.path, input.validation, input.checking),
     ...taskBlockers(input),
     ...runBlockers(input),
-    ...keyBlockers(input.form.provider, input.auth),
+    ...keyBlockers(input.form.provider, input.auth, input.keyWrite),
   ];
 }
 
@@ -335,7 +350,8 @@ export function resultText(detail: TaskDetail): string {
 }
 
 export interface FolderStatus {
-  tone: 'ok' | 'bad' | 'plain';
+  /** `busy` draws a spinner. */
+  tone: 'ok' | 'bad' | 'plain' | 'busy';
   text: string;
   /** Pending task files can be committed from here. */
   commit: boolean;
@@ -387,7 +403,7 @@ export function folderStatus(
   error: string | null,
 ): FolderStatus | null {
   if (error !== null) return {tone: 'bad', text: error, commit: false};
-  if (checking) return {tone: 'plain', text: 'Checking…', commit: false};
+  if (checking) return {tone: 'busy', text: 'Checking…', commit: false};
   return validation === null ? null : stateStatus(validation);
 }
 
@@ -417,7 +433,6 @@ const PLACEHOLDERS: Record<ProviderAuth['status'], string> = {
   cli_session: 'Or paste a key…',
   key: 'Paste a new key to replace it…',
 };
-const SHADOWED_PLACEHOLDER = 'An environment variable is in use…';
 
 // contract.py's KeyVar/ProviderAuth name neither the key's vendor nor a display label for it (only
 // the variable itself), so the row is labeled from a small map of the allowlisted key variables
@@ -433,14 +448,16 @@ const KEY_SUFFIXES: readonly [suffix: string, kind: string][] = [
   ['_AUTH_TOKEN', 'auth token'],
 ];
 
-/** The row's label: the vendor the key belongs to, not the CLI it authenticates (task 5 review). */
+/**
+ * The row's label: the vendor the key belongs to, not the CLI it authenticates (task 5 review). A
+ * CLI-only provider has no key, only its terminal sign-in.
+ */
 function keyLabel(name: string | null, displayName: string): string {
-  if (name !== null) {
-    for (const [suffix, kind] of KEY_SUFFIXES) {
-      if (name.endsWith(suffix)) {
-        const vendor = KEY_VENDORS[name.slice(0, -suffix.length)];
-        if (vendor !== undefined) return `${vendor} ${kind}`;
-      }
+  if (name === null) return `${displayName} sign-in`;
+  for (const [suffix, kind] of KEY_SUFFIXES) {
+    if (name.endsWith(suffix)) {
+      const vendor = KEY_VENDORS[name.slice(0, -suffix.length)];
+      if (vendor !== undefined) return `${vendor} ${kind}`;
     }
   }
   return `${displayName} key`;
@@ -460,14 +477,17 @@ function writeLine(write: KeyWrite, name: string): {hint: string; tone: Tone} | 
             hint: `Saved, but ${name} in this app's environment wins. Unset it and restart VibeSys.`,
             tone: 'warn',
           }
-        : {hint: 'Saved to .env. Unverified until the first run.', tone: 'ok'};
+        : {hint: 'Saved in .env. Unverified until the first run.', tone: 'ok'};
   }
 }
 
 function statusLine(row: ProviderAuth, cliOnly: boolean): {hint: string; tone: Tone} {
   const shadowed = row.keys.find(key => key.shadowed);
   if (shadowed !== undefined) {
-    return {hint: `${shadowed.name} in this app's environment overrides .env.`, tone: 'warn'};
+    return {
+      hint: `${shadowed.name} in this app's environment overrides .env. Unset it and restart VibeSys to use .env.`,
+      tone: 'warn',
+    };
   }
   switch (row.status) {
     case 'key':
@@ -489,15 +509,28 @@ function statusLine(row: ProviderAuth, cliOnly: boolean): {hint: string; tone: T
 export function keyView(row: ProviderAuth, write: KeyWrite, dotenvPath: string): KeyView {
   const name = row.keys[0]?.name ?? null;
   const line = (name === null ? null : writeLine(write, name)) ?? statusLine(row, name === null);
-  const shadowed = row.keys.some(key => key.shadowed);
   return {
     label: keyLabel(name, row.display_name),
     name,
     where: name === null ? row.login_command : `Written to ${name} in ${dotenvPath}`,
-    placeholder: shadowed ? SHADOWED_PLACEHOLDER : PLACEHOLDERS[row.status],
+    placeholder: PLACEHOLDERS[row.status],
     login: name === null && row.status === 'missing' ? row.login_command : null,
     ...line,
   };
+}
+
+// ponytail: the home server does not report the user's home directory, so it is read off the
+// macOS/Linux path shape. Report it from the server if other layouts matter.
+const HOME_PREFIX = /^\/(?:Users|home)\/[^/]+(?=\/|$)/;
+
+/** A path as shown: the home directory as `~`. The canonical path stays in state and in hints. */
+export const tildePath = (path: string): string => path.replace(HOME_PREFIX, '~');
+
+/** Undoes `tildePath` for a typed path, with the home directory read off a known absolute path. */
+export function untildePath(shown: string, known: string): string {
+  const home = HOME_PREFIX.exec(known)?.[0];
+  const tilde = shown === '~' || shown.startsWith('~/');
+  return home !== undefined && tilde ? `${home}${shown.slice(1)}` : shown;
 }
 
 const blank = (text: string): string | null => (text.trim() === '' ? null : text.trim());

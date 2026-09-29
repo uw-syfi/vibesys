@@ -65,6 +65,7 @@ test('a saved task is a card whose title picks the task; read-only tasks say why
       tasks={TASKS}
       detail={DECODE}
       disabled={false}
+      checking={false}
       onTask={none}
       onEdit={none}
     />,
@@ -90,6 +91,7 @@ test('a saved task is a card whose title picks the task; read-only tasks say why
         read_only_reason: 'The benchmark is an evaluator entrypoint',
       }}
       disabled={false}
+      checking={false}
       onTask={none}
     />,
   );
@@ -103,17 +105,36 @@ test('a saved task is a card whose title picks the task; read-only tasks say why
       tasks={TASKS}
       detail={null}
       disabled={false}
+      checking={false}
       onTask={none}
     />,
   );
   assert.match(creating, /<select id="f-task" class="fld">/);
   const noFolder = renderToStaticMarkup(
-    <TaskRow form={{...FORM, task: null}} tasks={[]} detail={null} disabled onTask={none} />,
+    <TaskRow
+      form={{...FORM, task: null}}
+      tasks={[]}
+      detail={null}
+      disabled
+      checking={false}
+      onTask={none}
+    />,
   );
   assert.match(
     noFolder,
     /disabled=""><option value="" selected="">Choose a folder first<\/option>/,
   );
+  const checking = renderToStaticMarkup(
+    <TaskRow
+      form={{...FORM, task: null}}
+      tasks={[]}
+      detail={null}
+      disabled
+      checking
+      onTask={none}
+    />,
+  );
+  assert.match(checking, /<option value="" selected="">Checking the folder…<\/option>/);
 });
 
 test('per-role models, and effort only where the provider supports it', () => {
@@ -143,9 +164,10 @@ test('the footer lists blockers as links; busy or blocked disables Start', () =>
     <SetupFooter
       blockers={[
         {field: 'folder', text: 'Folder has uncommitted changes'},
-        {field: 'key', text: 'Codex CLI key is needed'},
+        {field: 'key', text: 'OpenAI API key is needed for Codex CLI'},
       ]}
       busy={null}
+      waiting={false}
       error={null}
       cancelHref="/?token=h"
       onFix={none}
@@ -154,7 +176,7 @@ test('the footer lists blockers as links; busy or blocked disables Start', () =>
   );
   assert.match(
     blocked,
-    /<span>2 to fix:<\/span><button type="button" class="linkbtn">Folder has uncommitted changes<\/button>/,
+    /<span class="cnt">2 to fix:<\/span><span class="blk"><button type="button" class="linkbtn">Folder has uncommitted changes<\/button>/,
   );
   assert.match(blocked, /<a class="btn ghost" href="\/\?token=h">Cancel<\/a>/);
   assert.match(
@@ -165,6 +187,7 @@ test('the footer lists blockers as links; busy or blocked disables Start', () =>
     <SetupFooter
       blockers={[]}
       busy="Starting the run…"
+      waiting={false}
       error={null}
       cancelHref="/"
       onFix={none}
@@ -177,6 +200,7 @@ test('the footer lists blockers as links; busy or blocked disables Start', () =>
     <SetupFooter
       blockers={[]}
       busy={null}
+      waiting={false}
       error={null}
       cancelHref="/"
       onFix={none}
@@ -184,6 +208,20 @@ test('the footer lists blockers as links; busy or blocked disables Start', () =>
     />,
   );
   assert.match(ready, /<button type="button" class="btn primary">Start run<\/button>/);
+  // A folder check or key save in flight: nothing to fix, and Start still waits.
+  const waiting = renderToStaticMarkup(
+    <SetupFooter
+      blockers={[]}
+      busy={null}
+      waiting
+      error={null}
+      cancelHref="/"
+      onFix={none}
+      onStart={none}
+    />,
+  );
+  assert.match(waiting, /disabled="">Start run/);
+  assert.doesNotMatch(waiting, /to fix/);
 });
 
 test('provider and model read as one field', () => {

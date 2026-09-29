@@ -451,8 +451,10 @@ class FakeServer {
     if (this.polls < 2 || this.options.hold.includes('attach'))
       return run(runId, 'active', 'starting', 0);
     if (this.options.start !== 'failed') return run(runId, 'active', 'live', 0);
+    // The run store has recorded the run: it failed in its baseline, after start-up.
     return {
       ...run(runId, 'failed', 'failed', 0),
+      task: 'decode',
       gateway: gateway('failed', {stderr_tail: BASELINE_TAIL, stderr_log: STDERR_LOG}),
     };
   }
