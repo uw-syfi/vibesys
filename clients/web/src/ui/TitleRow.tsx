@@ -1,6 +1,8 @@
-import {Pause} from 'lucide-react';
-import type {ReactNode} from 'react';
+import {Ellipsis, Pause, Play} from 'lucide-react';
+import {type ReactNode, type RefObject, useEffect, useRef} from 'react';
+import type {RunControl} from '../model.js';
 import type {RetainedText, StatusLine} from '../rounds.js';
+import type {Menu} from '../ui-state.js';
 
 export interface TitleRowProps {
   title: string;
@@ -20,7 +22,7 @@ export function TitleRow({title, objective, project, leading, children}: TitleRo
       <span className="name" title={objective ?? title}>
         {title}
       </span>
-      {project === null ? null : <span className="proj">{project}</span>}
+      {project === null || project === title ? null : <span className="proj">{project}</span>}
       <span className="sp" />
       {children}
     </header>
@@ -49,6 +51,178 @@ export function Retained({text}: {text: RetainedText}) {
           <span className="lbl"> vs baseline</span>
         </>
       )}
+    </span>
+  );
+}
+
+/** Pause or Resume. Hidden while a transition is pending: the status line says so instead. */
+export function RunControlChip({
+  control,
+  busy,
+  onToggle,
+}: {
+  control: RunControl;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  if (control.kind !== 'action' || busy || control.label === 'Pausing') return null;
+  const Icon = control.action === 'pause' ? Pause : Play;
+  return (
+    <button
+      type="button"
+      className="chip"
+      title={control.tip}
+      disabled={control.disabled}
+      onClick={onToggle}
+    >
+      <Icon size={12} strokeWidth={1.75} aria-hidden />
+      {control.label}
+    </button>
+  );
+}
+
+function Popover({
+  label,
+  onClose,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <>
+      <button
+        type="button"
+        className="popscrim"
+        aria-label="Close"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div className="pop" role="menu" aria-label={label}>
+        {children}
+      </div>
+    </>
+  );
+}
+
+/**
+ * A modal confirmation: the native dialog traps focus and closes on Escape; Cancel takes focus
+ * first, and focus returns to the ••• button whichever way the dialog closes.
+ */
+function StopConfirm({
+  who,
+  trigger,
+  onCancel,
+  onStop,
+}: {
+  who: string;
+  trigger: RefObject<HTMLButtonElement | null>;
+  onCancel: () => void;
+  onStop: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    if (element !== null && !element.open) element.showModal();
+    cancel.current?.focus();
+    return () => trigger.current?.focus();
+  }, [trigger]);
+  return (
+    <dialog
+      ref={dialog}
+      className="confirm"
+      role="alertdialog"
+      aria-labelledby="stop-title"
+      onClose={onCancel}
+    >
+      <h4 id="stop-title">Stop this run?</h4>
+      <p>
+        The {who} finishes its call, then no further rounds start. Kept checkpoints stay in the
+        repository.
+      </p>
+      <div className="row">
+        <button ref={cancel} type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn danger" onClick={onStop}>
+          Stop run
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+export interface MoreMenuProps {
+  menu: Menu;
+  canStop: boolean;
+  /** Who finishes the current call before the run stops: `judge` or `current agent`. */
+  stopWho: string;
+  runId: string | null;
+  onMenu: (menu: Menu) => void;
+  onStop: () => void;
+  /** Menu items placed before Copy run ID. */
+  children?: ReactNode;
+}
+
+export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, children}: MoreMenuProps) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const close = () => onMenu(null);
+  return (
+    <span className="menuwrap">
+      <button
+        ref={trigger}
+        type="button"
+        className={menu === null ? 'iconbtn' : 'iconbtn on'}
+        title="Copy run ID, stop the run"
+        aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={menu === 'more'}
+        onClick={() => onMenu(menu === null ? 'more' : null)}
+      >
+        <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
+      </button>
+      {menu === 'more' ? (
+        <Popover label="Run" onClose={close}>
+          {children}
+          <button
+            type="button"
+            role="menuitem"
+            className="it"
+            disabled={runId === null}
+            onClick={() => {
+              if (runId !== null) void navigator.clipboard.writeText(runId);
+              close();
+            }}
+          >
+            Copy run ID
+          </button>
+          {canStop ? (
+            <>
+              <div className="sepl" />
+              <button
+                type="button"
+                role="menuitem"
+                className="it danger"
+                onClick={() => onMenu('stop')}
+              >
+                Stop run…
+              </button>
+            </>
+          ) : null}
+        </Popover>
+      ) : null}
+      {menu === 'stop' && canStop ? (
+        <StopConfirm who={stopWho} trigger={trigger} onCancel={close} onStop={onStop} />
+      ) : null}
     </span>
   );
 }

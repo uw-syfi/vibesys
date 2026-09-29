@@ -3,7 +3,7 @@
 import type {HypothesisEntry} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
 import {type Dispatch, useEffect, useMemo, useReducer, useState, useSyncExternalStore} from 'react';
-import {latestRound, needsOlder, steersNeedOlder} from './derive.js';
+import {latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type HomeProject, type HomeRun, openRun, sidebarSections} from './home.js';
 import {
   type RetainedText,
@@ -22,12 +22,13 @@ import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js
 import {Banner} from './ui/Banner.js';
 import {Sidebar} from './ui/Sidebar.js';
 import {SteerComposer} from './ui/SteerComposer.js';
-import {Retained, RunStatus, TitleRow} from './ui/TitleRow.js';
+import {MoreMenu, Retained, RunControlChip, RunStatus, TitleRow} from './ui/TitleRow.js';
 import {Transcript, type TranscriptControls} from './ui/Transcript.js';
 import {forRun, INITIAL_UI, type UiAction, type UiState, uiReducer} from './ui-state.js';
 import './window.css';
 
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
+const ACTION_WORDS = {pause: 'Pause', resume: 'Resume', steer: 'Steer', stop: 'Stop'} as const;
 
 export interface AppProps {
   session: WorkspaceSession;
@@ -147,6 +148,20 @@ function transcriptControls(
   };
 }
 
+function toggleRun(session: WorkspaceSession, state: WorkspaceState): void {
+  const control = runControl(state.core, state.captured, state.connection);
+  if (control.kind !== 'action' || control.disabled) return;
+  void session.command(
+    control.action === 'pause'
+      ? {type: 'command.pause', mode: 'after_current_agent_call'}
+      : {type: 'command.resume'},
+  );
+}
+
+function canStop(state: WorkspaceState, view: View): boolean {
+  return !view.ended && state.core.status !== 'stopping' && state.connection === 'connected';
+}
+
 interface SectionProps {
   state: WorkspaceState;
   view: View;
@@ -176,7 +191,12 @@ function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listin
   );
 }
 
-function RunHeader({view}: SectionProps) {
+function RunHeader({state, view, ui, dispatch, session}: SectionProps) {
+  const error = state.command.error;
+  const stop = () => {
+    dispatch({type: 'menu', menu: null});
+    void session.command({type: 'command.stop', mode: 'after_current_agent_call'});
+  };
   return (
     <TitleRow
       title={view.title.title}
@@ -184,12 +204,32 @@ function RunHeader({view}: SectionProps) {
       project={view.title.project}
     >
       <RunStatus line={view.status} />
+      {error !== null && error.action !== 'steer' ? (
+        <span
+          className="cmderr bad"
+          role="alert"
+        >{`${ACTION_WORDS[error.action]} failed: ${error.message}`}</span>
+      ) : null}
+      <RunControlChip
+        control={runControl(state.core, state.captured, state.connection)}
+        busy={view.status.busy}
+        onToggle={() => toggleRun(session, state)}
+      />
       {view.retained === null ? null : (
         <>
           <span className="vsep" />
           <Retained text={view.retained} />
         </>
       )}
+      <span className="vsep" />
+      <MoreMenu
+        menu={ui.menu}
+        canStop={canStop(state, view)}
+        stopWho={view.status.activeKind === 'judge' ? 'judge' : 'current agent'}
+        runId={state.runId}
+        onMenu={menu => dispatch({type: 'menu', menu})}
+        onStop={stop}
+      />
     </TitleRow>
   );
 }

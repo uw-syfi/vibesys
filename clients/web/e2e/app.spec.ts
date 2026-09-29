@@ -62,3 +62,32 @@ test('the replay page runs without a gateway', async ({page}) => {
   await expect(page.locator('.titlebar')).toContainText('Completed');
   await expect(round(page, 7)).toBeVisible();
 });
+
+test('pause waits for the current call, then offers resume', async ({page}) => {
+  const gateway = await mockGateway(page);
+  await page.goto('/?token=e2e');
+  const title = page.locator('.titlebar');
+  await title.getByRole('button', {name: 'Pause'}).click();
+  await expect(title).toContainText('Pausing after the current call…');
+  await expect(title.getByRole('button', {name: 'Pause'})).toHaveCount(0);
+  gateway.setStatus('paused');
+  await expect(title).toContainText('Paused in round 6');
+  await title.getByRole('button', {name: 'Resume'}).click();
+  await expect(title).toContainText('Judging round 6');
+  expect(gateway.requests.map(request => request.type)).toEqual(
+    expect.arrayContaining(['command.pause', 'command.resume']),
+  );
+});
+
+test('stop asks first, names who finishes, and focuses Cancel', async ({page}) => {
+  const gateway = await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: 'More'}).click();
+  await page.getByRole('menuitem', {name: 'Stop run…'}).click();
+  const dialog = page.getByRole('alertdialog', {name: 'Stop this run?'});
+  await expect(dialog).toContainText('The judge finishes its call');
+  await expect(dialog.getByRole('button', {name: 'Cancel'})).toBeFocused();
+  await dialog.getByRole('button', {name: 'Stop run'}).click();
+  await expect(page.locator('.titlebar')).toContainText('Stopping after the current call…');
+  expect(gateway.requests.some(request => request.type === 'command.stop')).toBe(true);
+});

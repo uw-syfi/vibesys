@@ -38,6 +38,29 @@ const SCREENS: Screen[] = [
       await page.getByText('Queued for the next agent call').waitFor();
     },
   },
+  {
+    name: 'pausing',
+    act: async page => {
+      await page.locator('.titlebar').getByRole('button', {name: 'Pause'}).click();
+      await page.getByText('Pausing after the current call…').waitFor();
+    },
+  },
+  {
+    name: 'paused',
+    act: async (page, gateway) => {
+      await page.locator('.titlebar').getByRole('button', {name: 'Pause'}).click();
+      gateway.setStatus('paused');
+      await page.getByText('Paused in round 6').waitFor();
+    },
+  },
+  {
+    name: 'stop',
+    act: async page => {
+      await page.getByRole('button', {name: 'More'}).click();
+      await page.getByRole('menuitem', {name: 'Stop run…'}).click();
+      await page.getByRole('alertdialog').waitFor();
+    },
+  },
 ];
 
 test.describe('screens', () => {

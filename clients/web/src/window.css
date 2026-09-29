@@ -129,3 +129,21 @@ a.run:hover { background: var(--bg-hover); }
 .send.ready { background: var(--accent); color: #fff; }
 .hint { font-size: 12px; line-height: 18px; color: var(--text-2); margin: 6px 0 0 16px; }
 .hint.bad { color: var(--error); }
+
+/* run controls and menus */
+.cmderr { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.menuwrap { position: relative; display: inline-flex; }
+.popscrim { position: fixed; inset: 0; z-index: 39; background: transparent; }
+.pop { position: absolute; top: 34px; right: 0; z-index: 40; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; min-width: 220px; }
+.pop .it { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 10px; border-radius: 6px; color: var(--text-1); }
+.pop .it:hover { background: var(--bg-hover); }
+.pop .it[disabled] { color: var(--text-2); }
+.pop .it.danger { color: var(--error); }
+.pop .sepl { height: 1px; background: var(--border-subtle); margin: 4px 6px; }
+.confirm { padding: 10px 10px 8px; width: 300px; }
+.confirm h4 { margin: 0 0 4px; font-size: 13px; }
+.confirm p { margin: 0 0 12px; color: var(--text-2); font-size: 12px; line-height: 18px; }
+.confirm .row { display: flex; gap: 8px; justify-content: flex-end; }
+dialog { color: var(--text-1); }
+dialog.confirm { width: 300px; padding: 14px 14px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow); }
+dialog::backdrop { background: var(--scrim); }
