@@ -1,5 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
-import {FINISHED, MOCK_ANSWER, mockGateway, ROUND_6_FINISHED} from './gateway.js';
+import {FINISHED, MOCK_ANSWER, mockGateway, mockNotes, ROUND_6_FINISHED} from './gateway.js';
 
 const rounds = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
 const round = (page: Page, n: number) =>
@@ -424,4 +424,61 @@ test('a question that fails returns to the composer', async ({page}) => {
   await box.press('Enter');
   await expect(pane.getByRole('alert')).toContainText('Not answered');
   await expect(box).toHaveValue('Why did round 3 fail the judge?');
+});
+
+const notesPane = async (page: Page) => {
+  await page.getByRole('button', {name: 'More'}).click();
+  await page.getByRole('menuitem', {name: 'Notes'}).click();
+  return page.getByRole('complementary', {name: 'Run details'});
+};
+
+test('Notes load, save as you type, and become a steer or ask draft without sending', async ({
+  page,
+}) => {
+  const gateway = await mockGateway(page);
+  const notes = await mockNotes(page, 'Check p99 before keeping round 7.');
+  await page.goto('/?token=e2e');
+  const pane = await notesPane(page);
+  const editor = pane.getByRole('textbox', {name: 'Notes'});
+  await expect(editor).toHaveValue('Check p99 before keeping round 7.');
+  await editor.fill('Line one\nline two');
+  await expect.poll(() => notes.puts.at(-1)).toBe('Line one\nline two');
+  expect(notes.auth.every(value => value === 'Bearer e2e')).toBe(true);
+  await pane.getByRole('button', {name: 'Use as steer draft'}).click();
+  const steer = page.getByRole('textbox', {name: 'Steer the next agent call'});
+  await expect(steer).toHaveValue('Line one line two');
+  await expect(steer).toBeFocused();
+  await pane.getByRole('button', {name: 'Use as ask draft'}).click();
+  await expect(pane.getByRole('tab', {name: 'Ask'})).toHaveAttribute('aria-selected', 'true');
+  await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toHaveValue(
+    'Line one line two',
+  );
+  expect(
+    gateway.requests.filter(
+      request => request.type === 'command.steer' || request.type === 'query.chat',
+    ),
+  ).toEqual([]);
+});
+
+test('Notes: edits survive a tab switch and are saved', async ({page}) => {
+  await mockGateway(page);
+  const notes = await mockNotes(page, null);
+  await page.goto('/?token=e2e');
+  const pane = await notesPane(page);
+  const editor = pane.getByRole('textbox', {name: 'Notes'});
+  await editor.fill('Typed, then away at once');
+  await pane.getByRole('tab', {name: 'Changes'}).click();
+  await expect.poll(() => notes.puts.at(-1)).toBe('Typed, then away at once');
+  await pane.getByRole('tab', {name: 'Notes'}).click();
+  await expect(editor).toHaveValue('Typed, then away at once');
+});
+
+test('Notes: a note that fails to load is not editable', async ({page}) => {
+  await mockGateway(page);
+  await page.route('**/api/notes/*', route => route.fulfill({status: 404, body: 'Not found'}));
+  await page.goto('/?token=e2e');
+  const pane = await notesPane(page);
+  await expect(pane).toContainText('Could not load the note: Notes are unavailable (HTTP 404)');
+  await expect(pane.getByRole('textbox', {name: 'Notes'})).toHaveCount(0);
+  await expect(pane.getByRole('button', {name: 'Retry'})).toBeVisible();
 });

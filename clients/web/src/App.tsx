@@ -17,6 +17,7 @@ import {copyText} from './clipboard.js';
 import {attachNote, latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
 import {useHome, useNewRunShortcut, usePaletteShortcut} from './home-hooks.js';
+import {asDraft, type NoteController, type NotesApi, useNote} from './notes.js';
 import {type Intent, type PaletteInput, paletteItems} from './palette.js';
 import {
   type RetainedText,
@@ -45,6 +46,7 @@ import {AskTab} from './ui/Ask.js';
 import {Banner} from './ui/Banner.js';
 import {ChangesTab} from './ui/Changes.js';
 import {ExperimentsTab} from './ui/Experiments.js';
+import {NotesTab} from './ui/Notes.js';
 import {Palette} from './ui/Palette.js';
 import {Pane, Placeholder} from './ui/Pane.js';
 import {Resizer} from './ui/Resizer.js';
@@ -82,6 +84,8 @@ export interface AppProps {
   session: WorkspaceSession;
   home: HomeApi;
   links: RunLinks | null;
+  /** The home server's notes API; null when the page was opened without the home token. */
+  notes: NotesApi | null;
 }
 
 interface View {
@@ -443,6 +447,7 @@ interface PaneHostProps extends SectionProps {
   controls: TranscriptControls;
   onAgent: (id: string) => void;
   ask: AskHost;
+  note: NoteController;
 }
 
 function changesTab(props: PaneHostProps) {
@@ -522,12 +527,37 @@ function askTab(props: PaneHostProps) {
   );
 }
 
+function notesTab(props: PaneHostProps) {
+  const {view, dispatch, note, ask} = props;
+  const draft = note.state.phase === 'ready' ? asDraft(note.state.text) : '';
+  const focus = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
+  return (
+    <NotesTab
+      note={note.state}
+      canSteer={!view.ended}
+      harness={ask.view.harness}
+      onEdit={note.edit}
+      onBlur={note.flush}
+      onRetry={note.retry}
+      onSteerDraft={() => {
+        dispatch({type: 'draft', target: 'steer', text: draft});
+        focus('steer');
+      }}
+      onAskDraft={() => {
+        dispatch({type: 'draft', target: 'ask', text: draft});
+        dispatch({type: 'pane', pane: 'ask'});
+        focus('ask');
+      }}
+    />
+  );
+}
+
 function PaneBody(props: PaneHostProps) {
   switch (props.tab) {
     case 'ask':
       return askTab(props);
     case 'notes':
-      return <Placeholder scope="Run" text="Run notes are not available yet." />;
+      return notesTab(props);
     case 'changes':
       return changesTab(props);
     case 'agents':
@@ -634,13 +664,14 @@ function paletteInput(
   };
 }
 
-export function App({session, home, links}: AppProps) {
+export function App({session, home, links, notes}: AppProps) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [ui, dispatch] = useRunUi(state.runId);
   const view = useRunView(state, ui);
   const listing = useHome(home);
   const history = useBackfill(session, state, view.round);
   const ask = useAsk(session, state, ui, dispatch);
+  const note = useNote(notes, state.runId, ui.pane === 'notes');
   usePaletteShortcut(useCallback(() => dispatch({type: 'palette', open: true}), [dispatch]));
   useNewRunShortcut(links?.newRun ?? null);
   const width = useWindowWidth();
@@ -681,6 +712,7 @@ export function App({session, home, links}: AppProps) {
           controls={controls}
           onAgent={selectAgent}
           ask={ask}
+          note={note}
         />
       )}
       {ui.palette ? (

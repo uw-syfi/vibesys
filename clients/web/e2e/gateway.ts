@@ -600,3 +600,27 @@ export async function mockGateway(
     drop: run.drop,
   };
 }
+
+/** [mock] The home server's notes endpoint (plan 2), last write wins. */
+export async function mockNotes(
+  page: Page,
+  text: string | null,
+): Promise<{puts: string[]; auth: string[]}> {
+  const seen = {puts: [] as string[], auth: [] as string[]};
+  let note = text;
+  await page.route('**/api/notes/*', async route => {
+    const request = route.request();
+    seen.auth.push(request.headers()['authorization'] ?? '');
+    const runId = decodeURIComponent(new URL(request.url()).pathname.split('/').at(-1) ?? '');
+    if (request.method() === 'PUT') {
+      note = (request.postDataJSON() as {text: string}).text;
+      seen.puts.push(note);
+    }
+    const record =
+      note === null
+        ? null
+        : {runId, text: note, createdAt: '2026-09-25T14:00:00Z', updatedAt: '2026-09-25T14:05:00Z'};
+    await route.fulfill({json: {note: record}});
+  });
+  return seen;
+}

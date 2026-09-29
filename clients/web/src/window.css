@@ -357,3 +357,11 @@ a.it { text-decoration: none; }
 .pdock .hint { margin-left: 16px; }
 .mchip { height: 28px; padding: 0 8px; border-radius: 14px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); flex: none; }
 .mchip:hover { background: var(--bg-hover); color: var(--text-1); }
+
+/* notes */
+.notesed { flex: 1; min-height: 200px; margin: 0; padding: 14px 16px; border: 0; outline: 0; resize: none; background: transparent; color: var(--text-1); font: 13px/20px var(--sans); }
+.notesed::placeholder { color: var(--text-3); }
+.pfoot { flex: none; display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-subtle); align-items: center; }
+.pfoot .hint { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn[disabled] { color: var(--text-3); background: none; }
+.empty1 > p { margin: 0 0 8px; }

@@ -7,7 +7,7 @@
 import {join} from 'node:path';
 import {type Page, test} from '@playwright/test';
 import {runHref} from '../src/route.js';
-import {FINISHED, type Gateway, mockGateway, ROUND_6_FINISHED} from './gateway.js';
+import {FINISHED, type Gateway, mockGateway, mockNotes, ROUND_6_FINISHED} from './gateway.js';
 import {
   AUTH,
   FINISHED_RUN,
@@ -25,6 +25,7 @@ interface Screen {
   name: string;
   through?: number;
   chat?: 'off' | 'error' | 'held' | 'unanswered';
+  notes?: 'fail';
   act?: (page: Page, gateway: Gateway) => Promise<void>;
 }
 
@@ -46,6 +47,10 @@ const askQuestion = async (page: Page) => {
   await sendQuestion(page);
   await page.getByText(/^Mock reply\./).waitFor();
 };
+
+/** [mock] The mockup's note text. */
+const NOTE =
+  "Round 4 traded peak throughput for the buffer pool that round 5 needed. Check p99 latency before keeping round 7's admission delay.";
 
 const SCREENS: Screen[] = [
   {name: 'live'},
@@ -232,7 +237,14 @@ const SCREENS: Screen[] = [
       await page.getByRole('dialog', {name: 'Search and commands'}).waitFor();
     },
   },
+  {name: 'notes', act: async page => openPane(page, 'Notes')},
+  {name: 'notes-failed', notes: 'fail', act: async page => openPane(page, 'Notes')},
 ];
+
+const mockScreenNotes = (page: Page, screen: Screen) =>
+  screen.notes === 'fail'
+    ? page.route('**/api/notes/*', route => route.fulfill({status: 404, body: 'Not found'}))
+    : mockNotes(page, NOTE);
 
 test.describe('screens', () => {
   test.skip(OUT === undefined, 'Set CAPTURE_DIR to write the frames');
@@ -244,6 +256,7 @@ test.describe('screens', () => {
       });
       await page.clock.setFixedTime(new Date('2026-09-25T14:02:00Z'));
       await page.setViewportSize({width: 1440, height: 900});
+      await mockScreenNotes(page, screen);
       await page.goto('/?token=e2e');
       await page.locator('.titlebar').waitFor();
       await screen.act?.(page, gateway);

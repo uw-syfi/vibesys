@@ -5,6 +5,7 @@ import {WebSocketTransport} from './browser-entry.js';
 import {HomeWindow} from './HomeWindow.js';
 import {fixtureHomeApi, type HomeApi, httpHomeApi} from './home.js';
 import {HomeError, homeClient} from './home-api.js';
+import {httpNotesApi} from './notes.js';
 import {fetchReplay, replayTransport} from './replay.js';
 import {pageParams, type RunLinks, runLinks} from './route.js';
 import {browserLifecycle, WorkspaceSession, webSocketUrlFromLocation} from './session.js';
@@ -18,6 +19,8 @@ if (theme === 'light' || theme === 'dark') document.documentElement.dataset['the
 const page = pageParams(window.location.href);
 const token = page.token;
 const client = token === null ? null : homeClient(token, (url, init) => fetch(url, init));
+// Notes live on the home server, which opened this page with its token; the replay has none.
+const notes = token === null ? null : httpNotesApi(token);
 
 /** The run window: one session per page load, created outside React so a remount cannot close it. */
 const showRun = (home: HomeApi, links: RunLinks | null) => {
@@ -29,7 +32,7 @@ const showRun = (home: HomeApi, links: RunLinks | null) => {
     {lifecycle: browserLifecycle},
   );
   void session.start();
-  root.render(<App session={session} home={home} links={links} />);
+  root.render(<App session={session} home={home} links={links} notes={notes} />);
 };
 
 if (client === null || token === null) {
