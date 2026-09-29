@@ -172,3 +172,25 @@ dialog::backdrop { background: var(--scrim); }
 .fhead .stat { font-size: 12px; }
 .note { padding: 10px 16px 12px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .pbody .diff { border-bottom: 1px solid var(--border-subtle); }
+
+/* agents */
+.graphwrap { position: relative; flex: none; margin: 0; overflow-x: auto; border-bottom: 1px solid var(--border-subtle); min-height: 80px; }
+.ag { width: 140px; height: 44px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-app); display: block; cursor: pointer; }
+.ag:hover { background: var(--bg-hover); }
+.ag.sel { box-shadow: 0 0 0 1px var(--bg-app), 0 0 0 2px var(--text-2); }
+.ag.act { border-color: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent); }
+.ag.act.sel { box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent), 0 0 0 4px var(--text-2); }
+.ag .r { display: flex; align-items: center; gap: 6px; color: var(--text-1); font-size: 12px; line-height: 16px; font-weight: 500; }
+.ag .r > :last-child { margin-left: auto; }
+.ag .m { display: block; font-size: 11px; line-height: 14px; color: var(--text-2); margin-top: 2px; white-space: nowrap; }
+.react-flow { --xy-background-color: transparent; }
+.react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
+.react-flow__attribution { display: none; }
+.detail { padding: 12px 16px 16px; }
+.detail h3 { font-size: 13px; line-height: 20px; margin: 0; font-weight: 600; }
+.detail h3 span { color: var(--text-2); font-weight: 400; margin-left: 6px; }
+.kv { display: grid; grid-template-columns: 96px 1fr; gap: 6px 12px; font-size: 12px; line-height: 18px; margin: 10px 0 0; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.detailacts { display: flex; gap: 4px; margin: 10px 0 0 -6px; flex-wrap: wrap; }
+.detailacts .acts { margin-left: 0; }

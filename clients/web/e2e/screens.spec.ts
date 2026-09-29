@@ -100,6 +100,15 @@ const SCREENS: Screen[] = [
       await page.getByText("Patch truncated at the server's size bound.").waitFor();
     },
   },
+  {
+    name: 'agents',
+    act: async page => {
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByRole('tab', {name: 'Agents'}).click();
+      await page.getByRole('button', {name: /^Implementer/}).click();
+      await page.locator('.filterbar').waitFor();
+    },
+  },
 ];
 
 test.describe('screens', () => {

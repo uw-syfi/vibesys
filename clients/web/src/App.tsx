@@ -2,7 +2,15 @@
 
 import type {HypothesisEntry} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
-import {type Dispatch, useEffect, useMemo, useReducer, useState, useSyncExternalStore} from 'react';
+import {
+  type Dispatch,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type HomeProject, type HomeRun, openRun, sidebarSections} from './home.js';
 import {
@@ -19,6 +27,7 @@ import {
 } from './rounds.js';
 import type {WorkspaceSession, WorkspaceState} from './session.js';
 import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js';
+import {AgentsTab} from './ui/Agents.js';
 import {Banner} from './ui/Banner.js';
 import {ChangesTab} from './ui/Changes.js';
 import {Pane, Placeholder} from './ui/Pane.js';
@@ -329,6 +338,7 @@ interface PaneHostProps extends SectionProps {
   tab: PaneTab;
   width: number;
   controls: TranscriptControls;
+  onAgent: (id: string) => void;
 }
 
 function changesTab(props: PaneHostProps) {
@@ -345,6 +355,22 @@ function changesTab(props: PaneHostProps) {
   );
 }
 
+function agentsTab(props: PaneHostProps) {
+  const {view} = props;
+  if (view.round === null) return <Placeholder scope="Run" text="No round has started yet." />;
+  return (
+    <AgentsTab
+      core={props.state.core}
+      round={view.round}
+      turns={view.transcript?.turns ?? []}
+      selected={props.ui.agent}
+      width={props.width}
+      controls={props.controls}
+      onSelect={props.onAgent}
+    />
+  );
+}
+
 function PaneBody(props: PaneHostProps) {
   const scope = props.view.round === null ? 'Run' : `Round ${props.view.round}`;
   switch (props.tab) {
@@ -355,7 +381,7 @@ function PaneBody(props: PaneHostProps) {
     case 'changes':
       return changesTab(props);
     case 'agents':
-      return <Placeholder scope={scope} text="Not available yet." />;
+      return agentsTab(props);
     case 'experiments':
       return <Placeholder scope={scope} text="Not available yet." />;
   }
@@ -384,6 +410,7 @@ export function App({session, home}: AppProps) {
   const history = useBackfill(session, state, view.round);
   const width = useWindowWidth();
   const layout = frame(width, ui);
+  const selectAgent = useCallback((id: string) => dispatch({type: 'agent', id}), [dispatch]);
   const section: SectionProps = {state, view, ui, dispatch, session};
   const toggleSidebar = () => {
     if (layout.sidebar) return dispatch({type: 'sidebar', open: false});
@@ -409,7 +436,13 @@ export function App({session, home}: AppProps) {
         <RunComposer {...section} />
       </main>
       {ui.pane === null ? null : (
-        <RunPane {...section} tab={ui.pane} width={layout.paneWidth} controls={controls} />
+        <RunPane
+          {...section}
+          tab={ui.pane}
+          width={layout.paneWidth}
+          controls={controls}
+          onAgent={selectAgent}
+        />
       )}
     </div>
   );

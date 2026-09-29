@@ -153,3 +153,25 @@ test('changes: a patch, one the repository cannot produce, a truncated one, a ru
   await round(page, 6).click();
   await expect(pane).toContainText('Changes appear when round 6 finishes.');
 });
+
+test('agents: one card per execution, top to bottom; a card filters the transcript', async ({
+  page,
+}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
+  await page.getByRole('tab', {name: 'Agents'}).click();
+  const pane = page.getByRole('complementary', {name: 'Run details'});
+  const cards = pane.locator('.ag');
+  await expect(cards).toHaveCount(4);
+  const ys = await cards.evaluateAll(elements =>
+    elements.map(element => element.getBoundingClientRect().y),
+  );
+  expect([...ys].sort((left, right) => left - right)).toEqual(ys);
+  await expect(pane).toContainText('4 invocations, order inferred');
+  await pane.getByRole('button', {name: /^Implementer/}).click();
+  await expect(page.locator('.filterbar')).toContainText('Showing only Implementer (attempt 1)');
+  await expect(page.locator('main .turn')).toHaveCount(1);
+  await page.locator('.filterbar').getByRole('button', {name: 'Show all'}).click();
+  await expect(page.locator('main .turn')).toHaveCount(4);
+});
