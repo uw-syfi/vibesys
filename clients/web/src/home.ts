@@ -135,13 +135,21 @@ export interface Listing {
 
 export const EMPTY_LISTING: Listing = {projects: [], runs: []};
 
-/** Every project, and the runs of each project that answered: one failing project drops only its runs. */
-export async function loadListing(home: HomeApi): Promise<Listing> {
-  const projects = await home.projects().catch((): HomeProject[] => []);
+/**
+ * Every project, and the runs of each project that answered. A refresh passes the last listing: a
+ * home server that did not answer keeps it, and a failing project keeps its last runs.
+ */
+export async function loadListing(home: HomeApi, previous = EMPTY_LISTING): Promise<Listing> {
+  const projects = await home.projects().catch(() => null);
+  if (projects === null) return previous;
   const settled = await Promise.allSettled(projects.map(project => home.runs(project.id)));
   return {
     projects,
-    runs: settled.flatMap(result => (result.status === 'fulfilled' ? result.value : [])),
+    runs: settled.flatMap((result, index) =>
+      result.status === 'fulfilled'
+        ? result.value
+        : previous.runs.filter(run => run.projectId === projects[index]?.id),
+    ),
   };
 }
 

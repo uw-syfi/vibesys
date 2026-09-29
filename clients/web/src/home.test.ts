@@ -161,4 +161,9 @@ test('one failing project drops only its own runs', async () => {
   };
   assert.deepEqual(await loadListing(down), {projects: [], runs: []});
   assert.deepEqual(await loadListing(fixtureHomeApi()), {projects: [], runs: []});
+  // A refresh keeps what it last had: all of it when the server is down, a failing project's runs.
+  assert.deepEqual(await loadListing(down, listing), listing);
+  const gone: HomeRun = {...other, id: 'g', projectId: 'p2'};
+  const refreshed = await loadListing(home, {...listing, runs: [kept, gone]});
+  assert.deepEqual(refreshed.runs, [kept, gone]);
 });

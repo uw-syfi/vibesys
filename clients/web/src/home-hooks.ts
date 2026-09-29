@@ -2,15 +2,39 @@
 import {useEffect, useState} from 'react';
 import {EMPTY_LISTING, type HomeApi, type Listing, loadListing} from './home.js';
 
+/** The run list refreshes this often while the page is visible, so run statuses never go stale. */
+const REFRESH_MS = 5_000;
+
 export function useHome(home: HomeApi): Listing {
   const [listing, setListing] = useState(EMPTY_LISTING);
   useEffect(() => {
-    let current = true;
-    void loadListing(home).then(next => {
-      if (current) setListing(next);
-    });
+    let live = true;
+    let ticket = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let last = EMPTY_LISTING;
+    const load = () => {
+      clearTimeout(timer);
+      const mine = ++ticket;
+      void loadListing(home, last).then(next => {
+        if (!live || mine !== ticket) return;
+        last = next;
+        setListing(next);
+        if (document.visibilityState === 'visible') timer = setTimeout(load, REFRESH_MS);
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') load();
+      else {
+        clearTimeout(timer);
+        ticket += 1;
+      }
+    };
+    load();
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      current = false;
+      live = false;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [home]);
   return listing;
