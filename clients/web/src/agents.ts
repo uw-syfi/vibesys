@@ -98,6 +98,38 @@ function wallTime(phase: AgentPhase): string {
   return `${((end - start) / 1000).toFixed(1)}s`;
 }
 
+interface Layout {
+  key: string;
+  /** Top-left corner of each card. */
+  at: Map<string, {x: number; y: number}>;
+  width: number;
+  height: number;
+}
+
+/** The last layout: a live round's event batches rarely change the graph, so dagre rarely reruns. */
+let lastLayout: Layout | null = null;
+
+/** Positions depend only on the node ids and edges (every card has the same size). */
+function layoutOf(ids: string[], edges: readonly AgentEdge[]): Layout {
+  const key = JSON.stringify([ids, edges.map(edge => [edge.source, edge.target])]);
+  if (lastLayout?.key === key) return lastLayout;
+  const graph = new Graph();
+  graph.setGraph({rankdir: 'TB', nodesep: 16, ranksep: 24, marginx: 16, marginy: 16});
+  graph.setDefaultEdgeLabel(() => ({}));
+  for (const id of ids) graph.setNode(id, {...AGENT_NODE});
+  for (const edge of edges) graph.setEdge(edge.source, edge.target);
+  layout(graph);
+  const at = new Map(
+    ids.map(id => {
+      const spot = graph.node(id);
+      return [id, {x: spot.x - AGENT_NODE.width / 2, y: spot.y - AGENT_NODE.height / 2}];
+    }),
+  );
+  const size = graph.graph();
+  lastLayout = {key, at, width: size.width ?? 0, height: size.height ?? 0};
+  return lastLayout;
+}
+
 export function agentGraph(core: CoreState, round: number): AgentGraph {
   const keys = phaseKeys(phasesForRound(core.phases, round));
   if (keys.size === 0) return {nodes: [], edges: [], width: 0, height: 0};
@@ -107,15 +139,9 @@ export function agentGraph(core: CoreState, round: number): AgentGraph {
     source,
     target,
   }));
-  const graph = new Graph();
-  graph.setGraph({rankdir: 'TB', nodesep: 16, ranksep: 24, marginx: 16, marginy: 16});
-  graph.setDefaultEdgeLabel(() => ({}));
-  for (const key of keys.values()) graph.setNode(key, {...AGENT_NODE});
-  for (const edge of edges) graph.setEdge(edge.source, edge.target);
-  layout(graph);
-  const size = graph.graph();
+  const spots = layoutOf([...keys.values()], edges);
   const nodes = [...keys].map(([phase, id]): AgentNode => {
-    const spot = graph.node(id);
+    const spot = spots.at.get(id) ?? {x: 0, y: 0};
     return {
       id,
       role: titleCase(phase.kind),
@@ -125,9 +151,9 @@ export function agentGraph(core: CoreState, round: number): AgentGraph {
       label: phase.roundLabel,
       runtime: runtime(phase),
       wall: wallTime(phase),
-      x: spot.x - AGENT_NODE.width / 2,
-      y: spot.y - AGENT_NODE.height / 2,
+      x: spot.x,
+      y: spot.y,
     };
   });
-  return {nodes, edges, width: size.width ?? 0, height: size.height ?? 0};
+  return {nodes, edges, width: spots.width, height: spots.height};
 }

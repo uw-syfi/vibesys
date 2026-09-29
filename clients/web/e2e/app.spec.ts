@@ -169,6 +169,16 @@ test('agents: one card per execution, top to bottom; a card filters the transcri
   );
   expect([...ys].sort((left, right) => left - right)).toEqual(ys);
   await expect(pane).toContainText('4 invocations, order inferred');
+  // Read-only graph: the cards' buttons are its only tab stops; wrappers and edges take no focus.
+  await expect(pane.locator('.react-flow__edge')).toHaveCount(3);
+  await expect(pane.locator('.react-flow [tabindex]:not([tabindex="-1"])')).toHaveCount(0);
+  await pane.getByRole('button', {name: 'Close pane'}).focus();
+  for (let index = 0; index < 4; index++) {
+    await page.keyboard.press('Tab');
+    await expect(cards.nth(index)).toBeFocused();
+  }
+  await page.keyboard.press('Tab');
+  await expect(pane.locator('.detail button').first()).toBeFocused();
   await pane.getByRole('button', {name: /^Implementer/}).click();
   await expect(page.locator('.filterbar')).toContainText('Showing only Implementer (attempt 1)');
   await expect(page.locator('main .turn')).toHaveCount(1);

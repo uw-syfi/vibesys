@@ -81,11 +81,14 @@ export function Agents({round, graph, selected, width, onSelect, detail}: Agents
         // React Flow turns pointer events off on nodes that are neither draggable nor selectable;
         // the card is a button, so it takes them back.
         style: {pointerEvents: 'all'},
+        // Per element as well as on ReactFlow, whose flags reach its store only after mount.
+        focusable: false,
       })),
     [graph, selected, onSelect],
   );
   const edges = useMemo<Edge[]>(
-    () => graph.edges.map(edge => ({...edge, style: EDGE_STYLE, markerEnd: MARKER})),
+    () =>
+      graph.edges.map(edge => ({...edge, style: EDGE_STYLE, markerEnd: MARKER, focusable: false})),
     [graph],
   );
   const count = `${graph.nodes.length} invocation${graph.nodes.length === 1 ? '' : 's'}`;
@@ -116,6 +119,12 @@ export function Agents({round, graph, selected, width, onSelect, detail}: Agents
               nodesDraggable={false}
               nodesConnectable={false}
               elementsSelectable={false}
+              // Read-only, and each card is its own button: React Flow's focusable wrappers, edges and
+              // "press delete" descriptions would add tab stops and instructions for nothing.
+              nodesFocusable={false}
+              edgesFocusable={false}
+              deleteKeyCode={null}
+              disableKeyboardA11y
               zoomOnScroll={false}
               zoomOnDoubleClick={false}
               zoomOnPinch={false}
