@@ -316,7 +316,7 @@ def _require_no_live(config: HomeConfig, root: Path) -> None:
     """Refuse a launch while a run is live; an ended home-owned gateway is stopped instead."""
     live = _live(config, root)
     if live is not None and _ended(root, live) and _stop(live.record, live.path, group=True):
-        live = None
+        live = _live(config, root)  # an external gateway may still hold the project
     if live is not None:
         message = "this project already has a live run; stop it first"
         raise ApiError(ErrorCode.ALREADY_LIVE, message, details={"run_id": live.run_id})

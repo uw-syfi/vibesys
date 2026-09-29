@@ -179,19 +179,25 @@ export function locationText(root: string | null, location: FileLocation): strin
 }
 
 const POLL_MS = 1_000;
+/** Consecutive unanswered polls (about 30 s) before the home server counts as gone. */
+const MAX_UNANSWERED = 30;
 const IDLE: LaunchState = {kind: 'idle'};
 const sleep = (ms: number) =>
   new Promise<void>(resolve => {
     setTimeout(resolve, ms);
   });
 
-/** One poll; a home server that did not answer leaves the launch waiting. */
-async function poll(client: HomeClient, projectId: string, runId: string): Promise<LaunchPhase> {
+/** One poll; null when the home server did not answer, which leaves the launch waiting. */
+async function poll(
+  client: HomeClient,
+  projectId: string,
+  runId: string,
+): Promise<LaunchPhase | null> {
   try {
     const {runs} = await client.runs(projectId);
     return launchPhase(runs.find(row => row.run_id === runId));
   } catch (error) {
-    if (error instanceof HomeError && error.code === 'network') return WAITING;
+    if (error instanceof HomeError && error.code === 'network') return null;
     throw error;
   }
 }
@@ -199,7 +205,8 @@ async function poll(client: HomeClient, projectId: string, runId: string): Promi
 /**
  * Polls the project's runs until the launched run attaches, fails, or the page leaves. No time
  * cap: a cold start can take minutes, and the home server reports a dead run server as `failed`,
- * `none` or `stale`. `pause` waits between polls; tests pass one that resolves at once.
+ * `none` or `stale`. Only a home server that stops answering for `MAX_UNANSWERED` polls in a row
+ * ends the wait. `pause` waits between polls; tests pass one that resolves at once.
  */
 export async function followLaunch(
   client: HomeClient,
@@ -209,10 +216,18 @@ export async function followLaunch(
   pause: (ms: number) => Promise<void> = sleep,
 ): Promise<LaunchPhase> {
   let phase = gatewayPhase(result.gateway, null);
+  let unanswered = 0;
   while (phase.kind === 'waiting' && alive()) {
     await pause(POLL_MS);
     if (!alive()) break;
-    phase = await poll(client, projectId, result.run_id);
+    const answer = await poll(client, projectId, result.run_id);
+    unanswered = answer === null ? unanswered + 1 : 0;
+    if (unanswered === MAX_UNANSWERED) {
+      return failedWith(
+        'The home server stopped answering. The run may still start; check the home page.',
+      );
+    }
+    phase = answer ?? WAITING;
   }
   return phase;
 }

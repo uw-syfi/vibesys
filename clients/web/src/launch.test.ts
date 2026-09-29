@@ -177,6 +177,59 @@ test('a poll the home server did not answer keeps waiting; the next one attaches
   });
 });
 
+const unreachable = () => {
+  throw new TypeError('Failed to fetch');
+};
+
+test('30 unanswered polls in a row fail the launch; any answer resets the count', async () => {
+  let polls = 0;
+  const gone = homeClient('t', async () => {
+    polls += 1;
+    return unreachable();
+  });
+  assert.deepEqual(await followLaunch(gone, 'p', STARTING, () => true, now), {
+    kind: 'failed',
+    failure: {
+      message: 'The home server stopped answering. The run may still start; check the home page.',
+      tail: [],
+      log: null,
+    },
+  });
+  assert.equal(polls, 30);
+  // 29 misses, a starting answer, 29 more misses, then live: never 30 in a row.
+  const replies = [
+    ...Array<() => Response>(29).fill(unreachable),
+    () => Response.json({runs: [row('starting')]}),
+    ...Array<() => Response>(29).fill(unreachable),
+    () => Response.json({runs: [row('live', {websocket_url: WS})]}),
+  ];
+  const flaky = homeClient('t', async () => {
+    const reply = replies.shift();
+    assert.ok(reply, 'polled after the run attached');
+    return reply();
+  });
+  assert.deepEqual(await followLaunch(flaky, 'p', STARTING, () => true, now), {
+    kind: 'ready',
+    websocketUrl: WS,
+  });
+});
+
+test('29 unanswered polls then an answer attaches', async () => {
+  const replies = [
+    ...Array<() => Response>(29).fill(unreachable),
+    () => Response.json({runs: [row('live', {websocket_url: WS})]}),
+  ];
+  const client = homeClient('t', async () => {
+    const reply = replies.shift();
+    assert.ok(reply, 'polled after the run attached');
+    return reply();
+  });
+  assert.deepEqual(await followLaunch(client, 'p', STARTING, () => true, now), {
+    kind: 'ready',
+    websocketUrl: WS,
+  });
+});
+
 test('a refused poll ends the launch; a page that left stops polling', async () => {
   const refused = homeClient('t', async () =>
     Response.json({error: {code: 'unauthorized', message: 'no', details: null}}, {status: 401}),

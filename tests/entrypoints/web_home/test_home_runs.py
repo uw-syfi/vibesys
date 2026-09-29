@@ -470,7 +470,8 @@ def _stop(home: Home, key: str) -> dict[str, Any]:
 def test_run_list_reports_starting_and_failed_launches(runs_home: Home) -> None:
     key, _ = _project(runs_home)
     started = runs_home.post(f"/api/projects/{key}/runs", START).json()
-    assert _rows(runs_home, key)[started["run_id"]]["gateway"]["state"] == "starting"
+    starting = _rows(runs_home, key)[started["run_id"]]
+    assert (starting["gateway"]["state"], starting["budget"]) == ("starting", None)
     runs_home.delete(f"/api/projects/{key}/live")
     next(iter(runs_home.config.launches.values())).process.wait(timeout=10)
     runs_home.config.environ = {**runs_home.config.environ, "FAKE_RUN_SERVER_FAIL": "1"}
@@ -538,6 +539,23 @@ def test_a_new_run_replaces_an_ended_runs_serving_gateway(runs_home: Home) -> No
 
     assert started.status == 200
     assert started.json()["run_id"] != first
+
+
+def test_an_ended_gateway_is_stopped_but_an_external_live_run_still_refuses(
+    runs_home: Home,
+) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {})
+    _journal(root, "plain-run", {"type": "server_started"}, {"type": "run_finished"})
+    project = Project.open(root)
+    with _external_gateway(project.configuration_path() / "web-gateway.json", root):
+        refused = runs_home.post(f"/api/projects/{key}/runs", START)
+
+    assert refused.status == 409
+    error = refused.json()["error"]
+    assert error["code"] == "already_live"
+    assert error["details"] == {"run_id": project.state.current_run_id()}
 
 
 def test_run_list_shows_a_serving_reopen_beside_the_run(runs_home: Home) -> None:
