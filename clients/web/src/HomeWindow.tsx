@@ -13,7 +13,7 @@ import {type ThemeChoice, useTheme} from './theme.js';
 import {Palette} from './ui/Palette.js';
 import {Resizer} from './ui/Resizer.js';
 import {NewRunRow, SearchRow, Sidebar} from './ui/Sidebar.js';
-import {SidebarToggle, Titlebar, TitleLead} from './ui/TitleRow.js';
+import {HomeMenu, SidebarToggle, Titlebar, TitleLead, TitleTrail} from './ui/TitleRow.js';
 import {SIDE} from './ui-state.js';
 import './window.css';
 
@@ -142,7 +142,9 @@ export function HomeWindow({client, token, theme: opened}: HomeWindowProps) {
         <TitleLead.Provider
           value={sidebar ? null : <SidebarToggle shown={false} onToggle={() => setSidebar(true)} />}
         >
-          <HomeMain view={view} client={client} token={token} listing={listing} />
+          <TitleTrail.Provider value={<HomeMenu theme={theme} onTheme={chooseTheme} />}>
+            <HomeMain view={view} client={client} token={token} listing={listing} />
+          </TitleTrail.Provider>
         </TitleLead.Provider>
       </main>
       {palette ? (

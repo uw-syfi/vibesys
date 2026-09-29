@@ -1,11 +1,12 @@
 import {Check, ChevronDown, Plus} from 'lucide-react';
+import {useRef} from 'react';
 import type {AskMessage, AskView, ModelGroup, ThreadRow} from '../ask.js';
 import type {ProsePart} from '../model.js';
 import type {Menu} from '../ui-state.js';
 import {Composer} from './Composer.js';
 import {PaneHead} from './Pane.js';
 import {Prose} from './Prose.js';
-import {Popover} from './TitleRow.js';
+import {Popover, useReturnFocus} from './TitleRow.js';
 
 type Selection = {provider: string; model: string};
 
@@ -79,10 +80,13 @@ function ThreadHead({view, menu, onMenu, onThread, onNewThread}: AskTabProps) {
   const {current, threads} = view;
   const available = view.harness === 'available';
   const answeredBy = runtime(current);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useReturnFocus(menu === 'thread', trigger);
   return (
     <div className="phead askhead">
       <span className="scope">Run</span>
       <button
+        ref={trigger}
         type="button"
         className={menu === 'thread' ? 'disc on' : 'disc'}
         aria-label={`Thread: ${current.title}`}
@@ -162,7 +166,7 @@ function Exchange({
       {message.error !== null ? (
         <p className="hint bad" role="alert">{`Not answered: ${message.error}`}</p>
       ) : (
-        <div className="answer">
+        <div className="answer" aria-live="polite">
           <div className="who2">{who}</div>
           {message.answer !== null ? (
             <Prose paragraphs={message.answer} />
@@ -191,6 +195,8 @@ function AskDock({
   onSend,
 }: AskTabProps) {
   const {current} = view;
+  const chip = useRef<HTMLButtonElement>(null);
+  useReturnFocus(menu === 'model', chip);
   const pick = (provider: string, model: string) =>
     provider === current.provider && model === current.model
       ? onMenu(null)
@@ -209,9 +215,10 @@ function AskDock({
         onSend={onSend}
       >
         <button
+          ref={chip}
           type="button"
           className="mchip"
-          aria-label="Chat model"
+          aria-label={`Chat model: ${current.model ?? 'run default'}`}
           aria-haspopup="menu"
           aria-expanded={menu === 'model'}
           title="Choosing a model starts a new thread"

@@ -579,3 +579,15 @@ test('the run list refreshes while the page is visible', async ({page}) => {
   await page.clock.runFor(5_000);
   await expect.poll(lists).toBeGreaterThan(before);
 });
+
+test("the home window's ••• switches the theme", async ({page}) => {
+  await mockHome(page);
+  await page.goto(`${HOME}#new`);
+  const more = page.getByRole('button', {name: 'More'});
+  await expect(more).toHaveAttribute('title', 'Theme');
+  await more.click();
+  await page.getByRole('menuitemradio', {name: 'Dark'}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(more).toBeFocused();
+});

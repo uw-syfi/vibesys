@@ -60,7 +60,6 @@ import {
   RunControlChip,
   RunStatus,
   SidebarToggle,
-  ThemeItems,
   TitleRow,
 } from './ui/TitleRow.js';
 import {Transcript, type TranscriptControls} from './ui/Transcript.js';
@@ -396,32 +395,17 @@ function RunHeader(
         canStop={canStop(state, view)}
         stopWho={view.status.activeKind === 'judge' ? 'judge' : 'current agent'}
         runId={state.runId}
+        resume={
+          props.links !== null && view.ended && state.runId !== null
+            ? props.links.resume(state.runId)
+            : null
+        }
+        theme={props.theme}
         onMenu={menu => dispatch({type: 'menu', menu})}
         onStop={stop}
-      >
-        {props.links !== null && view.ended && state.runId !== null ? (
-          <a role="menuitem" className="it" href={props.links.resume(state.runId)}>
-            Resume run…
-          </a>
-        ) : null}
-        <button
-          type="button"
-          role="menuitem"
-          className="it"
-          onClick={() => dispatch({type: 'pane', pane: 'notes'})}
-        >
-          Notes
-        </button>
-        <div className="sepl" />
-        <ThemeItems
-          theme={props.theme}
-          onTheme={choice => {
-            props.onTheme(choice);
-            dispatch({type: 'menu', menu: null});
-          }}
-        />
-        <div className="sepl" />
-      </MoreMenu>
+        onNotes={() => dispatch({type: 'pane', pane: 'notes'})}
+        onTheme={props.onTheme}
+      />
     </TitleRow>
   );
 }

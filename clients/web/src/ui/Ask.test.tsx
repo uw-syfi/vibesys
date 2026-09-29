@@ -59,7 +59,7 @@ test('a thread: its title opens the switcher, questions and answers, the pending
     /<div class="who2">claude-opus-5<\/div><p>On correctness, not performance\.<\/p>/,
   );
   assert.match(html, /Answering…/);
-  assert.match(html, /aria-label="Chat model"[^>]*>claude-opus-5/);
+  assert.match(html, /aria-label="Chat model: claude-opus-5"[^>]*>claude-opus-5/);
   assert.match(html, /class="send" aria-label="Send" title="Waiting for the answer" disabled=""/);
 });
 

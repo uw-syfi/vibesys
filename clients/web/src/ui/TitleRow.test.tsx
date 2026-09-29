@@ -3,7 +3,15 @@ import {test} from 'node:test';
 import {renderToStaticMarkup} from 'react-dom/server';
 import type {RunControl} from '../model.js';
 import type {Menu} from '../ui-state.js';
-import {MoreMenu, Retained, RunControlChip, RunStatus, ThemeItems, TitleRow} from './TitleRow.js';
+import {
+  HomeMenu,
+  MoreMenu,
+  Retained,
+  RunControlChip,
+  RunStatus,
+  ThemeItems,
+  TitleRow,
+} from './TitleRow.js';
 
 const pause: RunControl = {
   kind: 'action',
@@ -88,8 +96,12 @@ test('stop asks first in a popover under ••• and names who finishes; none 
         canStop={canStop}
         stopWho="judge"
         runId="run-1"
+        resume={null}
+        theme="system"
         onMenu={() => {}}
         onStop={() => {}}
+        onNotes={() => {}}
+        onTheme={() => {}}
       />,
     );
   assert.match(
@@ -100,7 +112,13 @@ test('stop asks first in a popover under ••• and names who finishes; none 
   assert.equal(menu(false, 'stop').includes('alertdialog'), false);
   // The run ended with the confirmation open: ••• is no longer pressed.
   assert.match(menu(false, 'stop'), /class="iconbtn"[^>]*aria-expanded="false"/);
-  assert.match(menu(false, 'more'), /title="Notes, copy run ID"/);
+  assert.match(menu(false, 'more'), /title="Notes, copy run ID, theme"/);
+  assert.match(menu(true, 'more'), /title="Notes, copy run ID, theme, stop the run"/);
+  // Run items, then Theme, then Stop.
+  assert.match(
+    menu(true, 'more'),
+    />Notes<.*>Copy run ID<\/button><div class="sepl"><\/div><fieldset class="grp">.*>Dark<.*<div class="sepl"><\/div>.*>Stop run…</,
+  );
   assert.match(menu(true, 'more'), /role="menuitem"[^>]*>Stop run…</);
   assert.equal(menu(false, 'more').includes('Stop run'), false);
   assert.match(menu(false, 'more'), />Copy run ID</);
@@ -132,7 +150,34 @@ test('a failed run says why: the summary in the row, the full diagnostic as its 
 
 test('the theme items: one radio per choice, the current one checked', () => {
   const html = renderToStaticMarkup(<ThemeItems theme="light" onTheme={() => {}} />);
-  assert.match(html, /<div class="gh">Theme<\/div>/);
+  assert.match(html, /<fieldset class="grp"><legend class="gh">Theme<\/legend>/);
   assert.equal(html.match(/role="menuitemradio"/g)?.length, 3);
   assert.match(html, /aria-checked="true" class="it">Light/);
+});
+
+test('an ended run the home can resume: Resume run… leads the menu and the hint', () => {
+  const html = renderToStaticMarkup(
+    <MoreMenu
+      menu="more"
+      canStop={false}
+      stopWho="judge"
+      runId="run-1"
+      resume="/resume"
+      theme="dark"
+      onMenu={() => {}}
+      onStop={() => {}}
+      onNotes={() => {}}
+      onTheme={() => {}}
+    />,
+  );
+  assert.match(html, /title="Resume, notes, copy run ID, theme"/);
+  assert.match(
+    html,
+    /<div class="pop" role="menu" aria-label="Run"><a role="menuitem" class="it" href="\/resume">Resume run…/,
+  );
+});
+
+test("the home window's ••• holds the theme and says so", () => {
+  const html = renderToStaticMarkup(<HomeMenu theme="light" onTheme={() => {}} />);
+  assert.match(html, /title="Theme" aria-label="More" aria-haspopup="menu"/);
 });

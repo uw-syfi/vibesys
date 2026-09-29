@@ -26,6 +26,8 @@ export interface TitleRowProps {
 
 /** Before a home page's title: the Show sidebar button while the sidebar is hidden. */
 export const TitleLead = createContext<ReactNode>(null);
+/** At the end of a home page's title row: its ••• menu. */
+export const TitleTrail = createContext<ReactNode>(null);
 
 /** A home page's title row (empty, New run, reopen, resume). */
 export function Titlebar({children}: {children?: ReactNode}) {
@@ -33,6 +35,7 @@ export function Titlebar({children}: {children?: ReactNode}) {
     <header className="titlebar">
       {useContext(TitleLead)}
       {children}
+      {useContext(TitleTrail)}
     </header>
   );
 }
@@ -187,47 +190,62 @@ function StopConfirm({
   );
 }
 
+/** Whatever closed a menu (an item, Escape, a click outside), focus goes back to its trigger unless the item moved it on purpose. */
+export function useReturnFocus(open: boolean, trigger: RefObject<HTMLElement | null>): void {
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open && document.activeElement === document.body) {
+      trigger.current?.focus();
+    }
+    wasOpen.current = open;
+  }, [open, trigger]);
+}
+
 export interface MoreMenuProps {
   menu: Menu;
   canStop: boolean;
   /** Who finishes the current call before the run stops: `judge` or `current agent`. */
   stopWho: string;
   runId: string | null;
+  /** The Resume run… link of an ended run the home can resume, or null. */
+  resume: string | null;
+  theme: ThemeChoice;
   onMenu: (menu: Menu) => void;
   onStop: () => void;
-  /** Menu items placed before Copy run ID. */
-  children?: ReactNode;
+  onNotes: () => void;
+  onTheme: (choice: ThemeChoice) => void;
 }
 
-export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, children}: MoreMenuProps) {
+/** The ••• hint lists what the menu holds, in its order. */
+function moreHint(resume: boolean, stop: boolean): string {
+  const items = [
+    resume ? 'resume' : null,
+    'notes',
+    'copy run ID',
+    'theme',
+    stop ? 'stop the run' : null,
+  ];
+  const text = items.filter(item => item !== null).join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Run items (Resume run…, Notes, Copy run ID), then Theme, then Stop run…. */
+export function MoreMenu(props: MoreMenuProps) {
+  const {menu, canStop, runId, resume, onMenu} = props;
   const trigger = useRef<HTMLButtonElement>(null);
   // A confirmation for a run that can no longer stop is gone, whatever the stored menu says.
   const shown = menu === 'stop' && !canStop ? null : menu;
   const close = () => onMenu(null);
   // The trigger has no message slot of its own: a failed copy shows as its title until reopened.
   const [copyFailed, setCopyFailed] = useState(false);
-  // Whatever closed the menu (an item, Escape, a click outside), focus goes back to •••
-  // unless the item moved it on purpose.
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (wasOpen.current && shown === null && document.activeElement === document.body) {
-      trigger.current?.focus();
-    }
-    wasOpen.current = shown !== null;
-  }, [shown]);
+  useReturnFocus(shown !== null, trigger);
   return (
     <span className="menuwrap">
       <button
         ref={trigger}
         type="button"
         className={shown === 'more' || shown === 'stop' ? 'iconbtn on' : 'iconbtn'}
-        title={
-          copyFailed
-            ? "Couldn't copy the run ID"
-            : canStop
-              ? 'Notes, theme, copy run ID, stop the run'
-              : 'Notes, copy run ID'
-        }
+        title={copyFailed ? 'Couldn’t copy the run ID' : moreHint(resume !== null, canStop)}
         aria-label="More"
         aria-haspopup="menu"
         aria-expanded={shown === 'more'}
@@ -240,7 +258,14 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
       </button>
       {shown === 'more' ? (
         <Popover role="menu" label={{'aria-label': 'Run'}} onClose={close}>
-          {children}
+          {resume === null ? null : (
+            <a role="menuitem" className="it" href={resume}>
+              Resume run…
+            </a>
+          )}
+          <button type="button" role="menuitem" className="it" onClick={props.onNotes}>
+            Notes
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -253,6 +278,14 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
           >
             Copy run ID
           </button>
+          <div className="sepl" />
+          <ThemeItems
+            theme={props.theme}
+            onTheme={choice => {
+              props.onTheme(choice);
+              close();
+            }}
+          />
           {canStop ? (
             <>
               <div className="sepl" />
@@ -269,7 +302,47 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
         </Popover>
       ) : null}
       {shown === 'stop' ? (
-        <StopConfirm who={stopWho} trigger={trigger} onCancel={close} onStop={onStop} />
+        <StopConfirm who={props.stopWho} trigger={trigger} onCancel={close} onStop={props.onStop} />
+      ) : null}
+    </span>
+  );
+}
+
+/** The home window's •••: the theme, which the run window keeps in its own ••• menu. */
+export function HomeMenu({
+  theme,
+  onTheme,
+}: {
+  theme: ThemeChoice;
+  onTheme: (choice: ThemeChoice) => void;
+}) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  useReturnFocus(open, trigger);
+  return (
+    <span className="menuwrap">
+      <button
+        ref={trigger}
+        type="button"
+        className={open ? 'iconbtn on' : 'iconbtn'}
+        title="Theme"
+        aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
+      </button>
+      {open ? (
+        <Popover role="menu" label={{'aria-label': 'More'}} onClose={() => setOpen(false)}>
+          <ThemeItems
+            theme={theme}
+            onTheme={choice => {
+              onTheme(choice);
+              setOpen(false);
+            }}
+          />
+        </Popover>
       ) : null}
     </span>
   );
@@ -307,8 +380,8 @@ export function ThemeItems({
   onTheme: (choice: ThemeChoice) => void;
 }) {
   return (
-    <>
-      <div className="gh">Theme</div>
+    <fieldset className="grp">
+      <legend className="gh">Theme</legend>
       {THEMES.map(choice => (
         <button
           key={choice}
@@ -324,6 +397,6 @@ export function ThemeItems({
           ) : null}
         </button>
       ))}
-    </>
+    </fieldset>
   );
 }

@@ -192,10 +192,7 @@ export function paletteItems(input: PaletteInput): PaletteItem[] {
   ];
 }
 
-/**
- * The home page's palette: New run (unless it is open), every run the sidebar links, and
- * Appearance (the home page has no ••• menu, so the palette is the only place to change theme).
- */
+/** The home page's palette: New run (unless it is open), every run the sidebar links, and Appearance. */
 export function homePaletteItems(
   sections: readonly ProjectSection[],
   newRun: boolean,
