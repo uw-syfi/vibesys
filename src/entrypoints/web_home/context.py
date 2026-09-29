@@ -1,0 +1,99 @@
+"""Per-server dependencies and the file primitives the endpoints share."""
+
+from __future__ import annotations
+
+import os
+import secrets
+import threading
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, TypeVar
+
+from pydantic import BaseModel, JsonValue, ValidationError
+
+from entrypoints.web_home.contract import ApiError, ErrorCode
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+@dataclass
+class HomeConfig:
+    """Everything the endpoints read from the host; tests inject each field."""
+
+    state_home: Path
+    roots: tuple[Path, ...]
+    dotenv_path: Path
+    assets_dir: Path | None
+    port: int
+    dev_origins: tuple[str, ...] = ()
+    environ: Mapping[str, str] = field(default_factory=lambda: os.environ)
+    clock: Callable[[], datetime] = _utc_now
+    token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    # ponytail: one lock serializes every file write; per-file locks if it contends.
+    write_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def origin(self) -> str:
+        """Return the exact origin the app is served from."""
+        return f"http://127.0.0.1:{self.port}"
+
+
+@dataclass(frozen=True)
+class Request:
+    """One routed API request."""
+
+    config: HomeConfig
+    params: tuple[str, ...]
+    query: dict[str, list[str]]
+    body: bytes
+
+    def arg(self, name: str) -> str | None:
+        """Return the first value of one query parameter."""
+        values = self.query.get(name)
+        return values[0] if values else None
+
+
+def validation_errors(error: ValidationError) -> list[JsonValue]:
+    """Describe validation failures by location and message, never by input value."""
+    return [
+        {"loc": [str(part) for part in item["loc"]], "msg": item["msg"]}
+        for item in error.errors(include_input=False, include_url=False)
+    ]
+
+
+def parse_body(request: Request, model: type[_ModelT]) -> _ModelT:
+    """Validate a JSON body; the error never echoes a submitted value."""
+    try:
+        return model.model_validate_json(request.body or b"{}")
+    except ValidationError as error:
+        message = "request body is invalid"
+        raise ApiError(
+            ErrorCode.INVALID_REQUEST, message, details={"errors": validation_errors(error)}
+        ) from None
+
+
+def atomic_write(path: Path, data: bytes, *, mode: int) -> None:
+    """Replace *path* with *data* by one rename; a symlinked *path* is refused."""
+    if path.is_symlink():
+        message = f"refusing to replace a symlink: {path}"
+        raise ApiError(ErrorCode.SYMLINK_REJECTED, message)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)

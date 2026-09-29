@@ -1,0 +1,304 @@
+"""JSON contract of the home server API: request bodies, responses, and errors.
+
+This module is the one authoritative definition of the contract. Clients
+generate their types from the JSON Schema printed by
+``python -m entrypoints.web_home.contract``.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from enum import StrEnum
+from http import HTTPStatus
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
+
+from vibesys.api import ComputeBackend
+from vs_agent.api import Driver
+
+
+class ErrorCode(StrEnum):
+    """Every typed error the API returns, as ``error.code``."""
+
+    UNAUTHORIZED = "unauthorized"
+    FORBIDDEN_ORIGIN = "forbidden_origin"
+    NOT_FOUND = "not_found"
+    INVALID_REQUEST = "invalid_request"
+    INTERNAL = "internal_error"
+    INVALID_PATH = "invalid_path"
+    OUTSIDE_ROOTS = "outside_roots"
+    PERMISSION_DENIED = "permission_denied"
+    UNKNOWN_PROJECT = "unknown_project"
+    NOT_GIT = "not_git"
+    NO_COMMITS = "no_commits"
+    DIRTY_TREE = "dirty_tree"
+    UNINITIALIZED = "uninitialized"
+    NO_TASKS = "no_tasks"
+    UNKNOWN_PROVIDER = "unknown_provider"
+    INVALID_KEY = "invalid_key"
+    SYMLINK_REJECTED = "symlink_rejected"
+    UNKNOWN_TASK = "unknown_task"
+    TASK_INVALID = "task_invalid"
+    TASK_EXISTS = "task_exists"
+    TASK_CONFLICT = "task_conflict"
+    TASK_READ_ONLY = "task_read_only"
+    COMMIT_FAILED = "commit_failed"
+    UNKNOWN_RUN = "unknown_run"
+    ALREADY_LIVE = "already_live"
+    LAUNCH_FAILED = "launch_failed"
+    PROFILE_GUIDED_UNAVAILABLE = "profile_guided_unavailable"
+    BUDGET_DECREASE = "budget_decrease"
+    NOT_RESUMABLE = "not_resumable"
+
+
+_STATUS: dict[ErrorCode, HTTPStatus] = {
+    ErrorCode.UNAUTHORIZED: HTTPStatus.UNAUTHORIZED,
+    ErrorCode.FORBIDDEN_ORIGIN: HTTPStatus.FORBIDDEN,
+    ErrorCode.NOT_FOUND: HTTPStatus.NOT_FOUND,
+    ErrorCode.INVALID_REQUEST: HTTPStatus.BAD_REQUEST,
+    ErrorCode.INTERNAL: HTTPStatus.INTERNAL_SERVER_ERROR,
+    ErrorCode.INVALID_PATH: HTTPStatus.BAD_REQUEST,
+    ErrorCode.OUTSIDE_ROOTS: HTTPStatus.FORBIDDEN,
+    ErrorCode.PERMISSION_DENIED: HTTPStatus.FORBIDDEN,
+    ErrorCode.UNKNOWN_PROJECT: HTTPStatus.NOT_FOUND,
+    ErrorCode.NOT_GIT: HTTPStatus.CONFLICT,
+    ErrorCode.NO_COMMITS: HTTPStatus.CONFLICT,
+    ErrorCode.DIRTY_TREE: HTTPStatus.CONFLICT,
+    ErrorCode.UNINITIALIZED: HTTPStatus.CONFLICT,
+    ErrorCode.NO_TASKS: HTTPStatus.CONFLICT,
+    ErrorCode.UNKNOWN_PROVIDER: HTTPStatus.NOT_FOUND,
+    ErrorCode.INVALID_KEY: HTTPStatus.BAD_REQUEST,
+    ErrorCode.SYMLINK_REJECTED: HTTPStatus.CONFLICT,
+    ErrorCode.UNKNOWN_TASK: HTTPStatus.NOT_FOUND,
+    ErrorCode.TASK_INVALID: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.TASK_EXISTS: HTTPStatus.CONFLICT,
+    ErrorCode.TASK_CONFLICT: HTTPStatus.CONFLICT,
+    ErrorCode.TASK_READ_ONLY: HTTPStatus.CONFLICT,
+    ErrorCode.COMMIT_FAILED: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.UNKNOWN_RUN: HTTPStatus.NOT_FOUND,
+    ErrorCode.ALREADY_LIVE: HTTPStatus.CONFLICT,
+    ErrorCode.LAUNCH_FAILED: HTTPStatus.BAD_GATEWAY,
+    ErrorCode.PROFILE_GUIDED_UNAVAILABLE: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.BUDGET_DECREASE: HTTPStatus.UNPROCESSABLE_ENTITY,
+    ErrorCode.NOT_RESUMABLE: HTTPStatus.UNPROCESSABLE_ENTITY,
+}
+
+
+class ApiError(Exception):
+    """A typed API failure; the server renders it as an ``ErrorBody``."""
+
+    def __init__(
+        self, code: ErrorCode, message: str, *, details: dict[str, JsonValue] | None = None
+    ) -> None:
+        """Carry the code, a user-facing message, and optional structured details."""
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details = details
+
+    @property
+    def status(self) -> HTTPStatus:
+        """Return the HTTP status this error is sent with."""
+        return _STATUS[self.code]
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class ErrorDetail(_Model):
+    """The ``error`` member of every non-2xx response."""
+
+    code: ErrorCode
+    message: str
+    details: dict[str, JsonValue] | None = None
+
+
+class ErrorBody(_Model):
+    """Every non-2xx response body."""
+
+    error: ErrorDetail
+
+    @classmethod
+    def of(cls, error: ApiError) -> ErrorBody:
+        """Render one ``ApiError``."""
+        return cls(error=ErrorDetail(code=error.code, message=error.message, details=error.details))
+
+
+# Group (a): folders, projects, catalog, auth.
+
+
+class FsEntry(_Model):
+    """One folder the picker can open; ``path`` is canonical (symlinks resolved)."""
+
+    name: str
+    path: str
+    git: bool
+
+
+class FsListing(_Model):
+    """A folder's subfolders; ``path`` is null when listing the granted roots."""
+
+    path: str | None
+    parent: str | None
+    entries: list[FsEntry]
+
+
+class ValidateRequest(_Model):
+    """Body of ``POST /api/projects/validate``."""
+
+    path: str
+
+
+class ProjectState(StrEnum):
+    """Readiness of a folder as a VibeSys project, first blocker wins."""
+
+    MISSING = "missing"
+    NOT_GIT = "not_git"
+    INVALID = "invalid"
+    UNINITIALIZED = "uninitialized"
+    NO_TASKS = "no_tasks"
+    NO_COMMITS = "no_commits"
+    DIRTY_TREE = "dirty_tree"
+    READY = "ready"
+
+
+class ProjectRef(_Model):
+    """A project the API can address by ``id`` in later URLs."""
+
+    id: str
+    root: str
+    name: str
+
+
+class ProjectValidation(_Model):
+    """Response of ``POST /api/projects/validate``."""
+
+    state: ProjectState
+    path: str
+    project: ProjectRef | None = None
+    message: str | None = None
+    tasks: list[str] = Field(default_factory=list)
+    pending: list[str] = Field(default_factory=list)
+
+
+class RecentProject(ProjectRef):
+    """One recent-projects entry, most recent first."""
+
+    last_opened: str
+
+
+class ProjectList(_Model):
+    """Response of ``GET /api/projects`` and the on-disk recent-projects file."""
+
+    projects: list[RecentProject]
+
+
+class DriverOption(_Model):
+    """One agent driver and the providers it runs."""
+
+    driver: Driver
+    providers: list[str]
+    supports_docker: bool
+
+
+class ProviderOption(_Model):
+    """One shipped CLI provider and its model suggestions."""
+
+    provider: str
+    display_name: str
+    supports_reasoning_effort: bool
+    suggested_models: list[str]
+
+
+class LoopBudget(_Model):
+    """The total-budget flag an outer loop takes and its CLI default."""
+
+    flag: Literal["--max-rounds", "--max-generations"]
+    default: int
+
+
+class OuterLoopOption(_Model):
+    """One outer loop the start form offers."""
+
+    id: str
+    budget: LoopBudget
+    requires_profile_guided: bool
+    roles: list[str]
+
+
+class Catalog(_Model):
+    """Response of ``GET /api/agents/catalog``."""
+
+    drivers: list[DriverOption]
+    providers: list[ProviderOption]
+    outer_loops: list[OuterLoopOption]
+    compute_backends: list[ComputeBackend]
+    default_compute_backend: ComputeBackend
+
+
+class KeyVar(_Model):
+    """Where one allowlisted key variable is set; the value is never returned."""
+
+    name: str
+    source: Literal["env", "dotenv", "missing"]
+    shadowed: bool
+
+
+class ProviderAuth(_Model):
+    """Sign-in state of one provider."""
+
+    provider: str
+    display_name: str
+    status: Literal["key", "cli_session", "missing"]
+    keys: list[KeyVar]
+    cli_session: Literal["present", "absent", "unknown"]
+    login_command: str
+
+
+class AuthStatus(_Model):
+    """Response of ``GET /api/auth``."""
+
+    providers: list[ProviderAuth]
+    dotenv_path: str
+
+
+class KeyWrite(_Model):
+    """Body of ``PUT /api/auth/{provider}``; ``value`` never leaves the server."""
+
+    name: str
+    value: SecretStr
+
+
+class KeyWriteResult(_Model):
+    """Response of ``PUT /api/auth/{provider}``."""
+
+    provider: str
+    name: str
+    status: Literal["unverified"]
+    shadowed_by_env: bool
+
+
+SCHEMA_MODELS: tuple[type[BaseModel], ...] = (
+    ErrorBody,
+    FsListing,
+    ValidateRequest,
+    ProjectValidation,
+    ProjectList,
+    Catalog,
+    AuthStatus,
+    KeyWrite,
+    KeyWriteResult,
+)
+
+
+def main() -> None:
+    """Print the JSON Schema of every request and response model."""
+    schema = {model.__name__: model.model_json_schema(by_alias=True) for model in SCHEMA_MODELS}
+    sys.stdout.write(json.dumps(schema, indent=2, sort_keys=True) + "\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -49,6 +49,7 @@ from vibesys.api.store import (
     open_run_store,
 )
 from vibesys.composition import agent_spec_from_config
+from vibesys.config import DOTENV_PATH
 from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import (
     AgentExecutionStartedData,
@@ -80,6 +81,7 @@ from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
 
 __all__ = [
+    "DOTENV_PATH",
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
     "AgentDriver",

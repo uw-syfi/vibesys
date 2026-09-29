@@ -56,6 +56,7 @@ from vs_project._state import (
     StateTransition,
     generate_run_id,
     is_project_state_path,
+    state_home,
 )
 from vs_project.errors import ProjectError
 from vs_project.project import Project
@@ -106,6 +107,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "generate_run_id",
     "is_project_state_path",
+    "state_home",
     "strip_ansi",
     "validate_socket_path",
 ]

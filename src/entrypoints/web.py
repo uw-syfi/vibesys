@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
+from entrypoints.web_home.app import run_home
 from server.runtime import WebInstanceRecord
 from vs_project.api import Project
 
@@ -76,6 +77,26 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--url", required=True, help="capability URL printed by `vibesys web live`")
     tunnel.add_argument("--local-port", type=_port, default=None)
     tunnel.add_argument("--browser-origin", default="http://127.0.0.1:5173")
+
+    home = commands.add_parser("home", help="serve the desktop app and its setup API")
+    home.add_argument(
+        "--port", type=_port, default=None, help="listen port, saved as the new default (8764)"
+    )
+    home.add_argument(
+        "--root",
+        type=Path,
+        action="append",
+        default=[],
+        help="folder the picker may browse; repeatable (default: your home directory)",
+    )
+    home.add_argument(
+        "--dev-origin",
+        action="append",
+        default=[],
+        help="extra exact Origin allowed to call the API, e.g. http://127.0.0.1:5173",
+    )
+    home.add_argument("--assets", type=Path, default=None, help="built app (clients/web/dist)")
+    home.add_argument("--open", action="store_true", help="open the app in a browser")
 
     stop = commands.add_parser("stop", help="stop a detached gateway")
     stop.add_argument("--instance", type=Path, required=True)
@@ -298,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_dev(args, root)
     if args.command == "live":
         return _run_live(args, root)
+    if args.command == "home":
+        return run_home(args, root)
     if args.command == "tunnel":
         return _run_tunnel(args)
     if args.command == "status":

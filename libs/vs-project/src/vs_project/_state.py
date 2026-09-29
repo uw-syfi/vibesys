@@ -1283,6 +1283,14 @@ def _project_id(display_name: str, fingerprint: str) -> str:
     return f"{slug}-{fingerprint[:12]}"
 
 
+def state_home() -> Path:
+    """Return the machine-local VibeSys state root.
+
+    ``$VIBESYS_STATE_HOME`` when set (it must be absolute), else ``~/.vibesys``.
+    """
+    return _state_home()
+
+
 def _state_home() -> Path:
     """Resolve the operator-configurable root for machine-local VibeSys state."""
     configured = os.environ.get(_STATE_HOME_ENV)
