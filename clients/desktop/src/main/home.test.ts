@@ -67,6 +67,12 @@ test('stop kills a server that ignores SIGINT after the grace period', async () 
   assert.equal(await answers(home.origin), false);
 });
 
+test('stop kills the group after its leader exited, while a member still holds stdout', async () => {
+  const home = await startHome(options(['orphaning']));
+  await home.stop();
+  assert.deepEqual(await home.ended, {kind: 'stopped'});
+});
+
 test('a server that dies on its own is a crash, reported with its stderr', async () => {
   const home = await startHome(options(['serve']));
   const pid = Number(await (await fetch(`${home.origin}/pid`)).text());

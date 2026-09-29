@@ -2,11 +2,13 @@
  * Stands in for `vibesys web home` in src/main/home.test.ts. Modes:
  *   serve           announce, answer /health and /pid, exit 0 on SIGINT (as KeyboardInterrupt does)
  *   stubborn        serve, but ignore SIGINT
+ *   orphaning       serve, exit 0 on SIGINT, but leave a SIGINT-proof group member holding stdout
  *   unhealthy       serve, but answer /health with 503
  *   silent          serve, but never announce
  *   announce <url>  print a running home server's URL and exit 0 (run_home's reuse path)
  *   fail            write a traceback to stderr and exit 3
  */
+import {spawn} from 'node:child_process';
 import {createServer} from 'node:http';
 import type {AddressInfo} from 'node:net';
 
@@ -18,7 +20,8 @@ function serve(): void {
     if (path === '/health' && mode === 'unhealthy') response.writeHead(503);
     response.end(path === '/pid' ? String(process.pid) : 'vibesys-ok\n');
   });
-  server.listen(0, '127.0.0.1', () => {
+  server.listen(0, '127.0.0.1', async () => {
+    if (mode === 'orphaning') await spawnHolder();
     const {port} = server.address() as AddressInfo;
     process.stderr.write(`listening on port ${port}\n`);
     process.stdout.write('a stdout line that is not the announcement: token=fake-token\n');
@@ -29,6 +32,16 @@ function serve(): void {
   process.on('SIGINT', () => {
     if (mode !== 'stubborn') process.exit(0);
   });
+}
+
+/** A member of this process group that ignores SIGINT and inherits stdout; resolves once armed. */
+function spawnHolder(): Promise<void> {
+  const holder = spawn(
+    process.execPath,
+    ['-e', "process.on('SIGINT', () => {}); console.error('armed'); setInterval(() => {}, 1e6);"],
+    {stdio: ['ignore', 'inherit', 'pipe']},
+  );
+  return new Promise(resolve => holder.stderr.once('data', () => resolve()));
 }
 
 if (mode === 'announce') {

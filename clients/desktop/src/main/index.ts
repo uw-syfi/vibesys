@@ -1,0 +1,217 @@
+/**
+ * Electron main process: one window over the app that `vibesys web home` serves.
+ *
+ * Owns the home server it starts (stopped on quit; a crash offers a restart), confines the
+ * window to the app origin, and keeps the capability token out of every log line.
+ */
+import {join, resolve} from 'node:path';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  type MenuItemConstructorOptions,
+  nativeTheme,
+  session,
+  type WebContents,
+} from 'electron';
+import {type Home, type HomeEnd, startHome} from './home.js';
+import {
+  allowPermission,
+  homeArguments,
+  isAllowedRequest,
+  isAppUrl,
+  originOf,
+  windowUrl,
+} from './policy.js';
+
+/** `clients/desktop` is the app path; the home server runs from the checkout around it. */
+const REPOSITORY = resolve(app.getAppPath(), '../..');
+/** Main is built as CommonJS next to the preload (electron.vite.config.ts). */
+const PRELOAD = join(__dirname, '../preload/index.cjs');
+/** Set by `electron-vite dev` to the Vite server of clients/web; unset for the built app. */
+const DEV_URL = process.env['ELECTRON_RENDERER_URL'];
+const DEV_ORIGIN = DEV_URL === undefined ? null : new URL(DEV_URL).origin;
+/** The first `uv run` in a checkout syncs its environment before the server starts. */
+const READY_TIMEOUT_MS = 60_000;
+const STOP_GRACE_MS = 5_000;
+
+/** The latest launch; null when it failed. Quit waits for it, so a starting server is stopped too. */
+let home: Promise<Home | null> = Promise.resolve(null);
+let win: BrowserWindow | null = null;
+/** Where the window may navigate and send requests: the home server, or Vite in dev. */
+let appOrigins: readonly string[] = [];
+let quitting = false;
+
+function log(message: string): void {
+  console.error(`vibesys-desktop: ${message}`);
+}
+
+function guard(contents: WebContents): void {
+  const stayInApp = (event: {readonly url: string; preventDefault(): void}): void => {
+    if (isAppUrl(event.url, appOrigins)) return;
+    event.preventDefault();
+    log(`blocked navigation to ${originOf(event.url)}`);
+  };
+  contents.on('will-navigate', stayInApp);
+  contents.on('will-redirect', stayInApp);
+  contents.setWindowOpenHandler(({url}) => {
+    log(`blocked a new window for ${originOf(url)}`);
+    return {action: 'deny'};
+  });
+}
+
+function secureSession(): void {
+  const {webRequest} = session.defaultSession;
+  const urls = ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'];
+  webRequest.onBeforeRequest({urls}, (details, callback) => {
+    const cancel = !isAllowedRequest(details.url, appOrigins);
+    if (cancel) log(`blocked a request to ${originOf(details.url)}`);
+    callback({cancel});
+  });
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) =>
+    callback(allowPermission(permission)),
+  );
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
+    allowPermission(permission),
+  );
+}
+
+function menu(): Menu {
+  const first: MenuItemConstructorOptions =
+    process.platform === 'darwin' ? {role: 'appMenu'} : {role: 'fileMenu'};
+  return Menu.buildFromTemplate([
+    first,
+    {role: 'editMenu'},
+    {role: 'viewMenu'},
+    {role: 'windowMenu'},
+  ]);
+}
+
+function createWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 640,
+    show: false,
+    title: 'VibeSys',
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#111113' : '#fcfcfd',
+    webPreferences: {
+      preload: PRELOAD,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      spellcheck: false,
+    },
+  });
+  window.once('ready-to-show', () => window.show());
+  window.on('closed', () => {
+    win = null;
+  });
+  return window;
+}
+
+async function launch(): Promise<Home | null> {
+  try {
+    return await startHome({
+      command: [
+        'uv',
+        'run',
+        'python',
+        '-m',
+        'entrypoints.web',
+        'home',
+        ...homeArguments(process.env['VIBESYS_HOME_PORT'], DEV_ORIGIN),
+      ],
+      cwd: REPOSITORY,
+      env: process.env,
+      readyTimeoutMs: READY_TIMEOUT_MS,
+      stopGraceMs: STOP_GRACE_MS,
+      onStderr: line => console.error(`[home] ${line}`),
+    });
+  } catch (error) {
+    // A HomeStartError holds a headline and the server's stderr tail; neither carries the token.
+    const detail = error instanceof Error ? error.message : String(error);
+    log(detail.split('\n', 1)[0] ?? detail);
+    dialog.showErrorBox('VibeSys could not start its home server', detail);
+    app.quit();
+    return null;
+  }
+}
+
+async function openHome(): Promise<void> {
+  home = launch();
+  const current = await home;
+  if (current === null || quitting) return;
+  void current.ended.then(onHomeEnded);
+  appOrigins = [DEV_ORIGIN ?? current.origin];
+  win ??= createWindow();
+  // The rejection message quotes the URL, which carries the token: report the origin only.
+  win
+    .loadURL(windowUrl(current, DEV_ORIGIN))
+    .catch(() => log(`could not load the app from ${appOrigins[0]}`));
+}
+
+async function onHomeEnded(end: HomeEnd): Promise<void> {
+  switch (end.kind) {
+    case 'stopped':
+      return;
+    case 'reused':
+      // A home server started elsewhere (e.g. `vibesys web home --open`) rejects Vite's writes
+      // with 403 forbidden_origin unless it was started with --dev-origin.
+      if (DEV_ORIGIN !== null) {
+        log(
+          'reusing a home server that was started without --dev-origin; writes from Vite fail until it is restarted',
+        );
+      }
+      return;
+    case 'crashed': {
+      log(`the home server stopped unexpectedly (${end.detail.split('\n', 1)[0]})`);
+      const {response} = await dialog.showMessageBox({
+        type: 'error',
+        message: 'The VibeSys home server stopped.',
+        detail: end.detail,
+        buttons: ['Restart', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response === 0 && !quitting) await openHome();
+      else app.quit();
+    }
+  }
+}
+
+function main(): void {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => app.quit());
+  app.on('second-instance', () => {
+    if (win === null) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+  app.on('web-contents-created', (_event, contents) => guard(contents));
+  app.on('window-all-closed', () => app.quit());
+  app.on('before-quit', event => {
+    if (quitting) return;
+    quitting = true;
+    event.preventDefault();
+    void home
+      .then(current => current?.stop())
+      // stop() rejects only when signalling fails (e.g. EPERM); the message names no URL.
+      .catch(error => log(`could not stop the home server: ${(error as Error).message}`))
+      .finally(() => app.quit());
+  });
+  void app.whenReady().then(() => {
+    secureSession();
+    Menu.setApplicationMenu(menu());
+    return openHome();
+  });
+}
+
+// One app per state home, as there is one home server per state home.
+const stateHome = process.env['VIBESYS_STATE_HOME'];
+if (stateHome !== undefined && stateHome !== '')
+  app.setPath('userData', join(stateHome, 'desktop'));
+if (app.requestSingleInstanceLock()) main();
+else app.quit();

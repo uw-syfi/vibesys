@@ -64,6 +64,7 @@ module.exports = {
       to: {path: ['^(?:backend-client|core-state|tui|web)/', '/node_modules/@vibesys/']},
     },
     {
+      // The reverse of `desktop-is-standalone`: the clients run in a browser and never load shell code.
       name: 'clients-do-not-depend-on-desktop',
       severity: 'error',
       from: {path: '^(?:backend-client|core-state|tui|web)/'},

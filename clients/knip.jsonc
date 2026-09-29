@@ -42,15 +42,10 @@
       "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts"]
     },
     "desktop": {
-      // electron-vite builds the two process entries. Knip follows `home.test.ts`'s
+      // The electron-vite plugin finds the config and its two process entries; Playwright's
+      // finds playwright.config.ts and e2e/*.spec.ts. Knip follows `home.test.ts`'s
       // `new URL('../../test/fake-home.ts', import.meta.url)` to the fake home on its own.
-      // Playwright's plugin finds playwright.config.ts and e2e/*.spec.ts.
-      "entry": [
-        "src/main/index.ts",
-        "src/preload/index.ts",
-        "src/**/*.test.ts",
-        "electron.vite.config.ts"
-      ],
+      "entry": ["src/**/*.test.ts"],
       "project": ["src/**/*.ts", "test/**/*.ts", "e2e/**/*.ts"]
     }
   }

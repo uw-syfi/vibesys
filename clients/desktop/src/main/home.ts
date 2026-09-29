@@ -20,7 +20,7 @@ export interface HomeAddress {
 }
 
 /** Why the launched process ended: `stop()`, a hand-over to a running home server, or a crash. */
-type HomeEnd =
+export type HomeEnd =
   | {readonly kind: 'stopped'}
   | {readonly kind: 'reused'}
   | {readonly kind: 'crashed'; readonly detail: string};
@@ -70,13 +70,18 @@ export async function startHome(options: HomeOptions): Promise<Home> {
     if (tail.length > TAIL_LINES) tail.shift();
     options.onStderr(line);
   });
+  let closed = false;
   const exit = new Promise<Exit>(resolve => {
     child.once('error', error => resolve({code: null, signal: null, error}));
-    child.once('close', (code, signal) => resolve({code, signal, error: null}));
+    child.once('close', (code, signal) => {
+      closed = true;
+      resolve({code, signal, error: null});
+    });
   });
   const signalGroup = (signal: NodeJS.Signals): void => {
-    // Only while the leader lives: once it is reaped, its pid and group id can be reused.
-    if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+    // Until the group's pipes close, not only while the leader lives: a member that outlives the
+    // leader holds them open and keeps the group id in use, so it cannot have been reused.
+    if (child.pid === undefined || closed) return;
     try {
       process.kill(-child.pid, signal);
     } catch (error) {
@@ -108,9 +113,22 @@ export async function startHome(options: HomeOptions): Promise<Home> {
     async stop() {
       stopping = true;
       signalGroup('SIGINT');
-      const escalate = setTimeout(() => signalGroup('SIGKILL'), options.stopGraceMs);
-      await ended;
-      clearTimeout(escalate);
+      let escalate: NodeJS.Timeout | undefined;
+      // A failed SIGKILL rejects stop(); thrown from the timer it would crash the main process.
+      const killFailed = new Promise<never>((_resolve, reject) => {
+        escalate = setTimeout(() => {
+          try {
+            signalGroup('SIGKILL');
+          } catch (error) {
+            reject(error);
+          }
+        }, options.stopGraceMs);
+      });
+      try {
+        await Promise.race([ended, killFailed]);
+      } finally {
+        clearTimeout(escalate);
+      }
     },
   };
 }

@@ -5,4 +5,5 @@ injectWorkspacePackages: true
 nodeLinker: hoisted
 
 allowBuilds:
+  electron: true
   esbuild: true
