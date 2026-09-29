@@ -10,9 +10,18 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from entrypoints.web_home.context import atomic_write, parse_body, validation_errors
+from entrypoints.web_home.context import (
+    atomic_write,
+    git,
+    parse_body,
+    pending_changes,
+    validation_errors,
+)
 from entrypoints.web_home.contract import (
     ApiError,
+    CommitPreview,
+    CommitRequest,
+    CommitResult,
     ErrorCode,
     ResultContract,
     TaskCreate,
@@ -29,6 +38,9 @@ from vs_project.api import Project, ProjectError, TaskExistsError, TaskNotFoundE
 if TYPE_CHECKING:
     from entrypoints.web_home.context import Request
     from vs_project.api import TaskDirectory
+
+_COMMIT_TAIL_LINES = 20
+
 
 
 def project_of(request: Request) -> Project:
@@ -214,3 +226,61 @@ def edit_task(request: Request) -> TaskDetail:
             message = f"failed to write the task manifest: {error}"
             raise ApiError(ErrorCode.INTERNAL, message) from None
     return detail(project, task)
+
+
+def _preview(project: Project) -> CommitPreview:
+    """Split pending changes; only files under the tasks root are ever committable.
+
+    Other `.vibesys/` content (discovery records with capability tokens, state)
+    is never offered.
+    """
+    pending = pending_changes(project.root)
+    try:
+        prefix = project.tasks_root().path.relative_to(project.root).as_posix() + "/"
+    except ProjectError:
+        return CommitPreview(task_files=[], other=pending)
+    return CommitPreview(
+        task_files=[path for path in pending if path.startswith(prefix)],
+        other=[path for path in pending if not path.startswith(prefix)],
+    )
+
+
+def commit_preview(request: Request) -> CommitPreview:
+    """``GET /api/projects/{id}/commit``: what a commit would include."""
+    return _preview(project_of(request))
+
+
+def _tail(text: str) -> list[str]:
+    return text.splitlines()[-_COMMIT_TAIL_LINES:]
+
+
+def commit(request: Request) -> CommitResult:
+    """``POST /api/projects/{id}/commit``: commit exactly the previewed task files."""
+    body = parse_body(request, CommitRequest)
+    project = project_of(request)
+    with request.config.write_lock:
+        preview = _preview(project)
+        if not preview.task_files or sorted(body.paths) != preview.task_files:
+            message = "the task files changed since the preview; review them again"
+            raise ApiError(
+                ErrorCode.TASK_CONFLICT, message, details={"task_files": list(preview.task_files)}
+            )
+        for arguments in (
+            ("add", "--", *preview.task_files),
+            (
+                "commit",
+                "--quiet",
+                "-m",
+                body.message or "vibesys: add task files",
+                "--",
+                *preview.task_files,
+            ),
+        ):
+            result = git(project.root, *arguments)
+            if result.returncode != 0:
+                message = f"git {arguments[0]} failed"
+                raise ApiError(
+                    ErrorCode.COMMIT_FAILED, message, details={"stderr_tail": _tail(result.stderr)}
+                )
+        head = git(project.root, "rev-parse", "HEAD").stdout.strip()
+    return CommitResult(commit=head, committed=preview.task_files)

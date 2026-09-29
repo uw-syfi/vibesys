@@ -55,6 +55,8 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("GET", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.task_detail),
     ("POST", re.compile(_PROJECT + r"/tasks"), tasks.create_task),
     ("PUT", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.edit_task),
+    ("GET", re.compile(_PROJECT + r"/commit"), tasks.commit_preview),
+    ("POST", re.compile(_PROJECT + r"/commit"), tasks.commit),
 )
 
 

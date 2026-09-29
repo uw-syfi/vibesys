@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.entrypoints.web_home.support import make_project, project_key
+from tests.support import run_test_command
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -194,3 +195,39 @@ def test_editing_a_read_only_task_is_refused(home: Home) -> None:
     reply = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base})
 
     assert reply.json()["error"]["code"] == "task_read_only"
+
+
+def test_commit_previews_then_commits_only_task_files(home: Home) -> None:
+    key, root = _setup(home, tasks=())
+    home.post(f"/api/projects/{key}/tasks", {**FORM, "name": "serve"})
+    (root / "notes.txt").write_text("mine")
+    (root / ".vibesys" / "web-gateway.json").write_text('{"token": "secret"}')
+
+    preview = home.get(f"/api/projects/{key}/commit").json()
+    stale = home.post(f"/api/projects/{key}/commit", {"paths": preview["task_files"][:1]}).json()
+    result = home.post(f"/api/projects/{key}/commit", {"paths": preview["task_files"]}).json()
+
+    assert preview == {
+        "task_files": [
+            ".vibesys/tasks/serve/OBJECTIVE.md",
+            ".vibesys/tasks/serve/vibesys.input.toml",
+        ],
+        "other": [".vibesys/web-gateway.json", "notes.txt"],
+    }
+    assert stale["error"]["code"] == "task_conflict"
+    assert result["committed"] == preview["task_files"]
+    status = run_test_command(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True
+    )
+    assert status.stdout == "?? .vibesys/web-gateway.json\n?? notes.txt\n"
+
+
+def test_commit_works_in_a_repository_without_commits(home: Home) -> None:
+    key, root = _setup(home, commit=False)
+    (root / "README.md").unlink()
+
+    preview = home.get(f"/api/projects/{key}/commit").json()
+    result = home.post(f"/api/projects/{key}/commit", {"paths": preview["task_files"]})
+
+    assert result.status == 200
+    assert home.post("/api/projects/validate", {"path": str(root)}).json()["state"] == "ready"
