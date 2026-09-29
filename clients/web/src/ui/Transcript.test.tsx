@@ -38,6 +38,7 @@ const render = (props: Partial<TranscriptProps> = {}) =>
       follow={false}
       history={{loading: false, error: null, onRetry: () => {}}}
       empty="Waiting for round 1."
+      endline={null}
       controls={controls()}
       only={null}
       onShowAll={() => {}}
@@ -98,4 +99,9 @@ test('a prompt is offered, and shown once disclosed', () => {
 
 test('no round yet: the empty note', () => {
   assert.match(render({round: null, model: null}), /Waiting for round 1\./);
+});
+
+test('a paused run ends the round with what resuming starts', () => {
+  const html = render({endline: 'Round 2 starts when you resume.'});
+  assert.match(html, /<p class="endline">Round 2 starts when you resume\.<\/p><\/div><\/div>$/);
 });

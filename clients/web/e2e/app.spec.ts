@@ -1,5 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
-import {FINISHED, mockGateway} from './gateway.js';
+import {FINISHED, mockGateway, ROUND_6_FINISHED} from './gateway.js';
 
 const rounds = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
 const round = (page: Page, n: number) =>
@@ -70,13 +70,45 @@ test('pause waits for the current call, then offers resume', async ({page}) => {
   await title.getByRole('button', {name: 'Pause'}).click();
   await expect(title).toContainText('Pausing after the current call…');
   await expect(title.getByRole('button', {name: 'Pause'})).toHaveCount(0);
+  // The judge's call finishes, and the round with it; then the pause takes effect.
+  gateway.advance(ROUND_6_FINISHED);
   gateway.setStatus('paused');
-  await expect(title).toContainText('Paused in round 6');
+  await expect(title).toContainText('Paused after round 6');
+  await expect(page.locator('main .endline')).toHaveText('Round 7 starts when you resume.');
+  await expect(page.locator('main .turn .spin')).toHaveCount(0);
+  await expect(round(page, 6).locator('[aria-label="paused"]')).toHaveCount(0);
   await title.getByRole('button', {name: 'Resume'}).click();
-  await expect(title).toContainText('Judging round 6');
+  await expect(title).not.toContainText('Paused');
   expect(gateway.requests.map(request => request.type)).toEqual(
     expect.arrayContaining(['command.pause', 'command.resume']),
   );
+});
+
+test('a refused pause or resume clears its pending state and offers the control again', async ({
+  page,
+}) => {
+  await mockGateway(page, {reject: ['command.pause']});
+  await page.goto('/?token=e2e');
+  const title = page.locator('.titlebar');
+  await title.getByRole('button', {name: 'Pause'}).click();
+  await expect(title).toContainText('Pause failed: The run refused.');
+  await expect(title).toContainText('Judging round 6');
+  await expect(title).not.toContainText('Pausing');
+  await expect(title.getByRole('button', {name: 'Pause'})).toBeEnabled();
+
+  const paused = await page.context().newPage();
+  await mockGateway(paused, {
+    through: ROUND_6_FINISHED,
+    status: 'paused',
+    reject: ['command.resume'],
+  });
+  await paused.goto('/?token=e2e');
+  const pausedTitle = paused.locator('.titlebar');
+  await pausedTitle.getByRole('button', {name: 'Resume'}).click();
+  await expect(pausedTitle).toContainText('Resume failed: The run refused.');
+  await expect(pausedTitle).toContainText('Paused after round 6');
+  await expect(pausedTitle).not.toContainText('Resuming');
+  await expect(pausedTitle.getByRole('button', {name: 'Resume'})).toBeEnabled();
 });
 
 test('stop asks first, names who finishes, and focuses Cancel', async ({page}) => {
@@ -87,6 +119,10 @@ test('stop asks first, names who finishes, and focuses Cancel', async ({page}) =
   const dialog = page.getByRole('alertdialog', {name: 'Stop this run?'});
   await expect(dialog).toContainText('The judge finishes its call');
   await expect(dialog.getByRole('button', {name: 'Cancel'})).toBeFocused();
+  // ⌘K leaves the open confirmation alone.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('dialog', {name: 'Search and commands'})).toHaveCount(0);
   await dialog.getByRole('button', {name: 'Stop run'}).click();
   await expect(page.locator('.titlebar')).toContainText('Stopping after the current call…');
   expect(gateway.requests.some(request => request.type === 'command.stop')).toBe(true);
@@ -149,7 +185,11 @@ test('changes: a patch, one the repository cannot produce, a truncated one, a ru
     'could not produce this patch',
   );
   await round(page, 3).click();
+  const more = pane.getByRole('button', {name: /^\d+ more changed lines$/});
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await more.click();
   await expect(pane).toContainText("Patch truncated at the server's size bound.");
+  await expect(pane.getByRole('button', {name: 'Copy command'})).toBeVisible();
   await round(page, 6).click();
   await expect(pane).toContainText('Changes appear when round 6 finishes.');
 });
@@ -227,4 +267,33 @@ test('⌘K opens the palette; a command runs and closes it; Escape closes it', a
   await page.keyboard.press('ControlOrMeta+k');
   await page.keyboard.press('Escape');
   await expect(palette).toHaveCount(0);
+});
+
+test('closing the palette returns focus to what opened it', async ({page}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  const steer = page.getByRole('textbox', {name: 'Steer the next agent call'});
+  await steer.focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  const palette = page.getByRole('dialog', {name: 'Search and commands'});
+  await expect(palette.getByRole('combobox')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await expect(steer).toBeFocused();
+  const opener = page.getByRole('button', {name: /Search and commands/});
+  await opener.click();
+  await expect(palette).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(opener).toBeFocused();
+});
+
+test('a long palette list fades at its end and says it scrolls', async ({page}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: /Search and commands/}).click();
+  const palette = page.getByRole('dialog', {name: 'Search and commands'});
+  await expect(palette.locator('.list')).toHaveClass(/\bmore\b/);
+  await expect(palette.locator('.count')).toContainText(', scroll for more');
+  await page.keyboard.type('round 3');
+  await expect(palette.locator('.count')).not.toContainText('scroll for more');
 });

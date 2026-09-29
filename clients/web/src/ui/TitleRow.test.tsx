@@ -78,7 +78,7 @@ test('the run control: Pause while running; nothing while pending or after the e
   );
 });
 
-test('stop asks first in a modal dialog and names who finishes; none once the run cannot stop', () => {
+test('stop asks first in a popover under ••• and names who finishes; none once the run cannot stop', () => {
   const menu = (canStop: boolean, open: Menu) =>
     renderToStaticMarkup(
       <MoreMenu
@@ -92,10 +92,10 @@ test('stop asks first in a modal dialog and names who finishes; none once the ru
     );
   assert.match(
     menu(true, 'stop'),
-    /<dialog class="confirm" role="alertdialog" aria-labelledby="stop-title">/,
+    /<div class="pop" role="alertdialog" aria-labelledby="stop-title"><div class="confirm">/,
   );
   assert.match(menu(true, 'stop'), /The judge finishes its call, then no further rounds start\./);
-  assert.equal(menu(false, 'stop').includes('<dialog'), false);
+  assert.equal(menu(false, 'stop').includes('alertdialog'), false);
   assert.match(menu(true, 'more'), /role="menuitem"[^>]*>Stop run…</);
   assert.equal(menu(false, 'more').includes('Stop run'), false);
   assert.match(menu(false, 'more'), />Copy run ID</);

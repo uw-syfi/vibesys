@@ -5,7 +5,7 @@
  */
 import {join} from 'node:path';
 import {type Page, test} from '@playwright/test';
-import {FINISHED, type Gateway, mockGateway} from './gateway.js';
+import {FINISHED, type Gateway, mockGateway, ROUND_6_FINISHED} from './gateway.js';
 
 const OUT = process.env['CAPTURE_DIR'];
 
@@ -49,8 +49,10 @@ const SCREENS: Screen[] = [
     name: 'paused',
     act: async (page, gateway) => {
       await page.locator('.titlebar').getByRole('button', {name: 'Pause'}).click();
+      // As at runtime: the judge's call finishes, then the pause takes effect.
+      gateway.advance(ROUND_6_FINISHED);
       gateway.setStatus('paused');
-      await page.getByText('Paused in round 6').waitFor();
+      await page.getByText('Paused after round 6').waitFor();
     },
   },
   {
@@ -97,6 +99,7 @@ const SCREENS: Screen[] = [
         .getByRole('button', {name: /^Round 3,/})
         .click();
       await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByRole('button', {name: /more changed lines$/}).click();
       await page.getByText("Patch truncated at the server's size bound.").waitFor();
     },
   },

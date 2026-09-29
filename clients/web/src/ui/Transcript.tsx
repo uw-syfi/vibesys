@@ -23,6 +23,8 @@ export interface TranscriptProps {
   follow: boolean;
   history: {loading: boolean; error: string | null; onRetry: () => void};
   empty: string;
+  /** The last line of the round, after every turn: what happens next (a paused run). */
+  endline: string | null;
   controls: TranscriptControls;
   /** The execution the transcript is filtered to (Agents pane); null shows every turn. */
   only: string | null;
@@ -66,7 +68,7 @@ function useFollow(round: number | null, model: RoundTranscript | null, follow: 
 }
 
 export function Transcript(props: TranscriptProps) {
-  const {round, row, result, model, history, empty, controls, only, onShowAll} = props;
+  const {round, row, result, model, history, empty, endline, controls, only, onShowAll} = props;
   const follow = useFollow(round, model, props.follow);
   if (round === null || model === null) {
     return (
@@ -111,6 +113,7 @@ export function Transcript(props: TranscriptProps) {
         {model.queued.map(steer => (
           <Steer key={steer.id} text={steer.text} applied={false} />
         ))}
+        {endline === null ? null : <p className="endline">{endline}</p>}
       </div>
     </div>
   );

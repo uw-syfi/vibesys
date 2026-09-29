@@ -33,7 +33,9 @@ export function RunStatus({line}: {line: StatusLine}) {
   return (
     <span className="status" aria-live="polite">
       {line.busy ? <span className="spin" /> : null}
-      {line.paused ? <Pause size={12} strokeWidth={1.75} className="warn" aria-hidden /> : null}
+      {line.paused ? (
+        <Pause size={12} strokeWidth={1.75} fill="currentColor" className="warn" aria-hidden />
+      ) : null}
       {line.text}
     </span>
   );
@@ -75,18 +77,21 @@ export function RunControlChip({
       disabled={control.disabled}
       onClick={onToggle}
     >
-      <Icon size={12} strokeWidth={1.75} aria-hidden />
+      <Icon size={12} strokeWidth={1.75} fill="currentColor" aria-hidden />
       {control.label}
     </button>
   );
 }
 
+/** A popover under the ••• button: Escape or a click outside closes it. */
 function Popover({
+  role,
   label,
   onClose,
   children,
 }: {
-  label: string;
+  role: 'menu' | 'alertdialog';
+  label: {'aria-label': string} | {'aria-labelledby': string};
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -106,7 +111,7 @@ function Popover({
         tabIndex={-1}
         onClick={onClose}
       />
-      <div className="pop" role="menu" aria-label={label}>
+      <div className="pop" role={role} {...label}>
         {children}
       </div>
     </>
@@ -114,8 +119,8 @@ function Popover({
 }
 
 /**
- * A modal confirmation: the native dialog traps focus and closes on Escape; Cancel takes focus
- * first, and focus returns to the ••• button whichever way the dialog closes.
+ * The Stop confirmation, anchored under the ••• button so the transcript stays readable. Cancel
+ * takes focus first, and focus returns to the ••• button whichever way it closes.
  */
 function StopConfirm({
   who,
@@ -128,36 +133,29 @@ function StopConfirm({
   onCancel: () => void;
   onStop: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const element = dialog.current;
-    if (element !== null && !element.open) element.showModal();
     cancel.current?.focus();
     return () => trigger.current?.focus();
   }, [trigger]);
   return (
-    <dialog
-      ref={dialog}
-      className="confirm"
-      role="alertdialog"
-      aria-labelledby="stop-title"
-      onClose={onCancel}
-    >
-      <h4 id="stop-title">Stop this run?</h4>
-      <p>
-        The {who} finishes its call, then no further rounds start. Kept checkpoints stay in the
-        repository.
-      </p>
-      <div className="row">
-        <button ref={cancel} type="button" className="btn ghost" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onStop}>
-          Stop run
-        </button>
+    <Popover role="alertdialog" label={{'aria-labelledby': 'stop-title'}} onClose={onCancel}>
+      <div className="confirm">
+        <h4 id="stop-title">Stop this run?</h4>
+        <p>
+          The {who} finishes its call, then no further rounds start. Kept checkpoints stay in the
+          repository.
+        </p>
+        <div className="row">
+          <button ref={cancel} type="button" className="btn ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="btn danger" onClick={onStop}>
+            Stop run
+          </button>
+        </div>
       </div>
-    </dialog>
+    </Popover>
   );
 }
 
@@ -191,7 +189,7 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
         <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
       </button>
       {menu === 'more' ? (
-        <Popover label="Run" onClose={close}>
+        <Popover role="menu" label={{'aria-label': 'Run'}} onClose={close}>
           {children}
           <button
             type="button"

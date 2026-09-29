@@ -28,7 +28,14 @@ import {
   statusLine,
 } from './rounds.js';
 import type {WorkspaceSession, WorkspaceState} from './session.js';
-import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js';
+import {
+  type LineStat,
+  type RoundEdits,
+  type RoundTranscript,
+  roundEdits,
+  roundTranscript,
+  toolDetail,
+} from './transcript.js';
 import {AgentsTab} from './ui/Agents.js';
 import {Banner} from './ui/Banner.js';
 import {ChangesTab} from './ui/Changes.js';
@@ -62,6 +69,7 @@ import './window.css';
 
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
 const NO_DESIGN: DesignRound[] = [];
+const NO_EDITS: ReadonlyMap<string, LineStat> = new Map();
 const ACTION_WORDS = {pause: 'Pause', resume: 'Resume', steer: 'Steer', stop: 'Stop'} as const;
 
 export interface AppProps {
@@ -75,6 +83,7 @@ interface View {
   round: number | null;
   row: RoundRow | undefined;
   transcript: RoundTranscript | null;
+  edits: RoundEdits;
   title: RunTitle;
   status: StatusLine;
   retained: RetainedText | null;
@@ -108,12 +117,14 @@ function useRunView(state: WorkspaceState, ui: UiState): View {
     () => (round === null ? null : roundTranscript({core, captured, sent, round, runId})),
     [core, captured, sent, round, runId],
   );
+  const edits = useMemo(() => roundEdits(core, runId), [core, runId]);
   return {
     summary,
     live,
     round,
     row: summary.rows.find(row => row.round === round),
     transcript,
+    edits,
     title: runTitle(context, captured, runId),
     status: statusLine(core, state.command.sending),
     retained: retainedText(summary),
@@ -182,6 +193,8 @@ function usePaletteShortcut(dispatch: Dispatch<UiAction>): void {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        // An open dialog (the palette, the Stop confirmation) keeps the keyboard.
+        if (document.querySelector('dialog[open], [role="alertdialog"]') !== null) return;
         dispatch({type: 'palette', open: true});
       }
     };
@@ -330,6 +343,14 @@ function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: 
   );
 }
 
+/** A paused run whose latest round finished says what resuming starts. */
+function resumeLine(state: WorkspaceState, view: View): string | null {
+  const {row, round, live} = view;
+  if (state.core.status !== 'paused' || round === null || round !== live) return null;
+  if (row === undefined || row.state === 'running') return null;
+  return `Round ${round + 1} starts when you resume.`;
+}
+
 function RunTranscript({state, view, ui, dispatch, history}: SectionProps & {history: History}) {
   const connecting = state.core.status === 'connecting' && state.core.sequence === 0;
   const {row, summary} = view;
@@ -342,6 +363,7 @@ function RunTranscript({state, view, ui, dispatch, history}: SectionProps & {his
       follow={!view.ended && view.round === view.live}
       history={history}
       empty={connecting ? 'Connecting…' : 'Waiting for round 1.'}
+      endline={resumeLine(state, view)}
       controls={transcriptControls(state, ui, dispatch)}
       only={ui.agent}
       onShowAll={() => dispatch({type: 'agent', id: null})}
@@ -380,6 +402,9 @@ function changesTab(props: PaneHostProps) {
       error={design.error}
       onRetry={() => void props.session.load('design')}
       loadPatch={props.session.designPatch}
+      edits={
+        (props.view.round === null ? undefined : props.view.edits.get(props.view.round)) ?? NO_EDITS
+      }
     />
   );
 }
@@ -409,6 +434,7 @@ function experimentsTab(props: PaneHostProps) {
       experiments={state.queries.experiments.response?.experiments ?? NO_EXPERIMENTS}
       designRounds={state.queries.design.response?.design ?? NO_DESIGN}
       captured={state.captured}
+      edits={view.edits}
       maxRounds={state.core.maxRounds}
       view={props.ui.experimentsView}
       open={props.ui.evidence}

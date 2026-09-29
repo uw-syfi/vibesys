@@ -1,4 +1,4 @@
-import {type KeyboardEvent, useEffect, useRef, useState} from 'react';
+import {type KeyboardEvent, type RefObject, useEffect, useRef, useState} from 'react';
 import {filterPalette, type PaletteItem} from '../palette.js';
 
 const GROUPS: ReadonlyArray<PaletteItem['group']> = ['Run', 'Go to', 'Agent'];
@@ -28,19 +28,45 @@ function useModal() {
   return {dialog, input};
 }
 
+/** Whether rows sit below the list's visible end: the list fades there and the count says so. */
+function useMore(list: RefObject<HTMLDivElement | null>, shown: readonly PaletteItem[]) {
+  const [more, setMore] = useState(false);
+  const measure = () => {
+    const node = list.current;
+    if (node !== null) setMore(node.scrollHeight - node.scrollTop - node.clientHeight > 1);
+  };
+  // After the modal opens (its effect runs first): a closed dialog has no height to measure.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new result set changes the height.
+  useEffect(measure, [shown]);
+  return {more, measure};
+}
+
 function PaletteList({
+  list,
+  more,
+  onScroll,
   shown,
   current,
   onActive,
   onRun,
 }: {
+  list: RefObject<HTMLDivElement | null>;
+  more: boolean;
+  onScroll: () => void;
   shown: PaletteItem[];
   current: PaletteItem | undefined;
   onActive: (index: number) => void;
   onRun: (item: PaletteItem) => void;
 }) {
   return (
-    <div id="palette-list" className="list" role="listbox" aria-label="Commands">
+    <div
+      ref={list}
+      id="palette-list"
+      className={more ? 'list more' : 'list'}
+      role="listbox"
+      aria-label="Commands"
+      onScroll={onScroll}
+    >
       {GROUPS.map(group => {
         const members = shown.filter(entry => entry.group === group);
         if (members.length === 0) return null;
@@ -77,6 +103,8 @@ export function Palette({items, onRun, onClose}: PaletteProps) {
   const [active, setActive] = useState(0);
   const modal = useModal();
   const shown = filterPalette(items, query);
+  const list = useRef<HTMLDivElement>(null);
+  const {more, measure} = useMore(list, shown);
   const current = shown[Math.min(active, shown.length - 1)];
   useEffect(() => {
     if (current !== undefined)
@@ -107,12 +135,22 @@ export function Palette({items, onRun, onClose}: PaletteProps) {
         }}
         onKeyDown={onKeyDown}
       />
-      <PaletteList shown={shown} current={current} onActive={setActive} onRun={onRun} />
+      <PaletteList
+        list={list}
+        more={more}
+        onScroll={measure}
+        shown={shown}
+        current={current}
+        onActive={setActive}
+        onRun={onRun}
+      />
       <div className="foot">
         <span className="kbd">↑↓ move</span>
         <span className="kbd">↵ run</span>
         <span className="kbd">esc close</span>
-        <span className="kbd count">{shown.length} results</span>
+        <span className="kbd count">
+          {shown.length} results{more ? ', scroll for more' : ''}
+        </span>
       </div>
     </dialog>
   );
