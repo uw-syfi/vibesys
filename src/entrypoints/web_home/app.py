@@ -45,6 +45,8 @@ _SECURITY_HEADERS = (
 _STATE_CHANGING = frozenset({"POST", "PUT", "DELETE"})
 _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...] = (
     ("GET", re.compile(r"/api/fs"), projects.list_directory),
+    ("POST", re.compile(r"/api/projects/validate"), projects.validate),
+    ("GET", re.compile(r"/api/projects"), projects.recent),
 )
 
 

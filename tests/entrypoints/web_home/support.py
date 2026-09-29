@@ -8,6 +8,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from tests.support import run_test_command
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
@@ -63,3 +65,46 @@ class Home:
 
     def delete(self, path: str) -> Reply:
         return self.send("DELETE", path)
+
+
+MANIFEST = """version = 1
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "check.py"]
+
+[benchmark]
+command = ["python", "bench.py"]
+
+[benchmark.result]
+json_argument = "--json"
+metric = "throughput"
+"""
+
+
+def make_project(root: Path, *, tasks: tuple[str, ...] = ("bench",), commit: bool = True) -> Path:
+    """Create a git work tree with repository-native tasks, committed unless told not to."""
+    root.mkdir(parents=True, exist_ok=True)
+    run_test_command(["git", "init", "-q"], cwd=root, check=True)
+    run_test_command(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    run_test_command(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
+    run_test_command(["git", "config", "commit.gpgsign", "false"], cwd=root, check=True)
+    for name in tasks:
+        task = root / ".vibesys" / "tasks" / name
+        task.mkdir(parents=True)
+        (task / "OBJECTIVE.md").write_text(f"Make {name} faster.\n")
+        (task / "vibesys.input.toml").write_text(MANIFEST)
+    (root / "README.md").write_text("project\n")
+    if commit:
+        run_test_command(["git", "add", "-A"], cwd=root, check=True)
+        run_test_command(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+    return root.resolve()
+
+
+def project_key(home: Home, root: Path) -> str:
+    """Validate *root* through the API and return its project id."""
+    reply = home.post("/api/projects/validate", {"path": str(root)})
+    assert reply.status == 200, reply.body
+    return reply.json()["project"]["id"]

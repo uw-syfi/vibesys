@@ -1,9 +1,11 @@
-"""Per-server dependencies and the file primitives the endpoints share."""
+"""Per-server dependencies and the file and git primitives the endpoints share."""
 
 from __future__ import annotations
 
 import os
 import secrets
+import shutil
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,6 +20,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
+_GIT_TIMEOUT_SECONDS = 60
+_GIT_OVERRIDES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"})
+_PORCELAIN_STATUS_WIDTH = len("XY ")
 
 
 def _utc_now() -> datetime:
@@ -97,3 +102,45 @@ def atomic_write(path: Path, data: bytes, *, mode: int) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run one git command in *root* without a shell or inherited repository overrides."""
+    executable = shutil.which("git")
+    if executable is None:
+        message = "git is not installed"
+        raise ApiError(ErrorCode.NOT_GIT, message)
+    environment = {key: value for key, value in os.environ.items() if key not in _GIT_OVERRIDES}
+    return subprocess.run(  # noqa: S603  # lint-waiver: LW-101302 [S603]; git argv is built here from fixed subcommands and validated paths, never a shell string.
+        # > Routing through GitTracker needs a run id and state integration the
+        # > setup API does not have; shell=True would weaken argv safety.
+        [executable, *arguments],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_GIT_TIMEOUT_SECONDS,
+    )
+
+
+def pending_changes(root: Path) -> list[str]:
+    """Return changed and untracked paths under *root*, relative to it.
+
+    Same query as ``GitTracker.pending_changes``, which launch uses to reject a
+    dirty tree, so the setup API and launch agree on what "dirty" means.
+    """
+    prefix = git(root, "rev-parse", "--show-prefix").stdout.strip()
+    records = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
+    fields = records.stdout.split("\0")
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        record = fields[index]
+        index += 1
+        if len(record) <= _PORCELAIN_STATUS_WIDTH:
+            continue
+        paths.append(record[_PORCELAIN_STATUS_WIDTH:].removeprefix(prefix))
+        if record[0] in "RC":
+            index += 1
+    return sorted(paths)
