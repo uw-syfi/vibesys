@@ -11,6 +11,7 @@ contents remain outside this package.
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -364,8 +365,12 @@ class ProjectLayout:
             lexical_path.mkdir()
         except FileExistsError as exc:
             raise TaskExistsError.existing(name) from exc
-        (lexical_path / _OBJECTIVE_FILE_NAME).write_text(objective, encoding="utf-8")
-        (lexical_path / _MANIFEST_FILE_NAME).write_text(manifest, encoding="utf-8")
+        try:
+            (lexical_path / _OBJECTIVE_FILE_NAME).write_text(objective, encoding="utf-8")
+            (lexical_path / _MANIFEST_FILE_NAME).write_text(manifest, encoding="utf-8")
+        except OSError:
+            shutil.rmtree(lexical_path)
+            raise
         return self._load_task(tasks_root, name, lexical_path)
 
     def _load_task(
