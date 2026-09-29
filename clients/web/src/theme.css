@@ -26,7 +26,7 @@
   --tint-del: light-dark(#f8e5e6, #302224);
   --shadow: 0 10px 32px -6px light-dark(rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.6)),
     0 2px 6px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.3));
-  --scrim: light-dark(rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.45));
+  --scrim: light-dark(rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.7));
   --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, system-ui, sans-serif;
   --mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
 }

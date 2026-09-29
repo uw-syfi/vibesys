@@ -1,6 +1,6 @@
 /** Choose a project folder from the directories the home server may open. */
 import {CornerLeftUp, Folder} from 'lucide-react';
-import {useEffect, useRef} from 'react';
+import {type KeyboardEvent, useEffect, useRef} from 'react';
 import type {FsListing} from '../home-api.js';
 
 export interface FolderPickerProps {
@@ -13,19 +13,42 @@ export interface FolderPickerProps {
   onClose: () => void;
 }
 
-export function FolderPicker({listing, error, onOpen, onChoose, onClose}: FolderPickerProps) {
+/**
+ * Opens as a native modal dialog: focus is trapped and Escape (the dialog's own cancel) closes it. Focus returns to
+ * the element that had it when the picker opened, whether the dialog closes natively or the caller unmounts it.
+ */
+function useModal() {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
+    const opener = document.activeElement;
     const node = dialog.current;
     if (node !== null && !node.open) node.showModal();
+    return () => {
+      if (document.activeElement === document.body && opener instanceof HTMLElement) opener.focus();
+    };
   }, []);
+  return dialog;
+}
+
+/** Arrow keys move focus between the row buttons; Enter/Space activate the focused one natively. */
+function onRowsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  event.preventDefault();
+  const rows = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button.pit'));
+  const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const step = event.key === 'ArrowDown' ? 1 : -1;
+  rows[Math.min(rows.length - 1, Math.max(0, index + step))]?.focus();
+}
+
+export function FolderPicker({listing, error, onOpen, onChoose, onClose}: FolderPickerProps) {
+  const dialog = useModal();
   const here = listing?.path ?? null;
   return (
     <dialog ref={dialog} className="picker" aria-labelledby="picker-title" onClose={onClose}>
       <h4 id="picker-title" className="mono" title={here ?? undefined}>
         {here ?? 'Folders you can open'}
       </h4>
-      <div className="plist">
+      <div className="plist" role="toolbar" aria-orientation="vertical" onKeyDown={onRowsKeyDown}>
         {here === null ? null : (
           <button
             type="button"
@@ -69,7 +92,9 @@ export function FolderPicker({listing, error, onOpen, onChoose, onClose}: Folder
           className="btn primary"
           disabled={here === null}
           onClick={() => {
-            if (here !== null) onChoose(here);
+            if (here === null) return;
+            dialog.current?.close();
+            onChoose(here);
           }}
         >
           Choose this folder

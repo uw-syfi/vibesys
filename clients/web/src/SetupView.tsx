@@ -266,15 +266,23 @@ interface PickerState {
   error: string | null;
 }
 
+/** Each open takes a ticket; a listing or error whose ticket is no longer current is dropped. */
 function usePicker(client: HomeClient) {
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const ticket = useRef(0);
   const open = useCallback(
     (path: string | null) => {
+      const mine = ++ticket.current;
       setPicker(current => ({listing: current?.listing ?? null, error: null}));
       client.fs(path).then(
-        listing => setPicker(current => (current === null ? null : {listing, error: null})),
-        (reason: unknown) =>
-          setPicker(current => (current === null ? null : {...current, error: errorText(reason)})),
+        listing => {
+          if (mine !== ticket.current) return;
+          setPicker(current => (current === null ? null : {listing, error: null}));
+        },
+        (reason: unknown) => {
+          if (mine !== ticket.current) return;
+          setPicker(current => (current === null ? null : {...current, error: errorText(reason)}));
+        },
       );
     },
     [client],

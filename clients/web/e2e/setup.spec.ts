@@ -253,3 +253,70 @@ test('Browse… walks folders and checks the chosen one', async ({page}) => {
     `/api/fs?path=${encodeURIComponent(OTHER_ROOT)}`,
   ]);
 });
+
+test('a slow listing for a folder left behind is ignored once a newer one has landed', async ({
+  page,
+}) => {
+  // ROOT is used for the initial (fast) load, so the slow path must be one only reached mid-navigation.
+  const home = await mockHome(page, {slowFs: [OTHER_ROOT]});
+  await page.goto(NEW);
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  await page.getByRole('button', {name: 'Browse…'}).click();
+  const picker = page.getByRole('dialog');
+  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await picker.getByRole('button', {name: 'Up'}).click();
+  await expect(picker.locator('h4')).toHaveText('/Users/me/src');
+  // Fires the slow fs(OTHER_ROOT); the displayed listing stays at /Users/me/src while it hangs.
+  await picker.getByRole('button', {name: /tokenizer-rs/}).click();
+  await picker.getByRole('button', {name: /llm-serve/}).click();
+  await expect(picker.locator('h4')).toHaveText(ROOT);
+  home.releaseFs(OTHER_ROOT);
+  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await expect(picker.getByText('No folders here.')).toBeVisible();
+});
+
+test('closing the picker returns focus to Browse…, on cancel, escape, and choose', async ({
+  page,
+}) => {
+  await mockHome(page);
+  await page.goto(NEW);
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  const browse = page.getByRole('button', {name: 'Browse…'});
+  const picker = page.getByRole('dialog');
+
+  await browse.click();
+  await expect(picker).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+  await expect(browse).toBeFocused();
+
+  await browse.click();
+  await picker.getByRole('button', {name: 'Cancel'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(browse).toBeFocused();
+
+  await browse.click();
+  await picker.getByRole('button', {name: 'Up'}).click();
+  await picker.getByRole('button', {name: /tokenizer-rs/}).click();
+  await picker.getByRole('button', {name: 'Choose this folder'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(browse).toBeFocused();
+});
+
+test('arrow keys move focus over the picker rows; Enter opens the focused one', async ({page}) => {
+  await mockHome(page);
+  await page.goto(NEW);
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  await page.getByRole('button', {name: 'Browse…'}).click();
+  const picker = page.getByRole('dialog');
+  await picker.getByRole('button', {name: 'Up'}).click();
+  await expect(picker.locator('h4')).toHaveText('/Users/me/src');
+  await page.keyboard.press('ArrowDown');
+  await expect(picker.getByRole('button', {name: /llm-serve/})).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(picker.getByRole('button', {name: /tokenizer-rs/})).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(picker.getByRole('button', {name: /llm-serve/})).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(picker.locator('h4')).toHaveText(ROOT);
+});

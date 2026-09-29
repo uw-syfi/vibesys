@@ -83,6 +83,8 @@ export interface HomeOptions {
   recordedBudget: number;
   /** Folders whose validation waits for `release(path)`. */
   slow: string[];
+  /** Folder listings (by the requested `path`, `''` for the granted roots) that wait for `releaseFs(path)`. */
+  slowFs: string[];
   /** Calls that never answer: `open`, `attach` (a launch stays starting), `key` (a key write). */
   hold: Hold[];
 }
@@ -92,6 +94,8 @@ export interface FakeHome {
   requests: {method: string; path: string; body: unknown}[];
   /** Answers the held validation of `path`. */
   release(path: string): void;
+  /** Answers the held folder listing of `path` (`''` for the granted roots). */
+  releaseFs(path: string): void;
 }
 
 const DEFAULTS: HomeOptions = {
@@ -102,6 +106,7 @@ const DEFAULTS: HomeOptions = {
   rejectKey: false,
   recordedBudget: 12,
   slow: [],
+  slowFs: [],
   hold: [],
 };
 
@@ -238,6 +243,12 @@ class FakeServer {
     this.waiting.delete(path);
   }
 
+  releaseFs(path: string): void {
+    const key = `fs:${path}`;
+    this.waiting.get(key)?.();
+    this.waiting.delete(key);
+  }
+
   async answer(route: Route): Promise<void> {
     const request = route.request();
     const url = new URL(request.url());
@@ -269,7 +280,7 @@ class FakeServer {
       new RegExp(`^${method} /api/projects/([^/]+)${suffix}$`);
     return [
       [/^GET \/api\/projects$/, () => ok({projects: PROJECTS})],
-      [/^GET \/api\/fs$/, (_match, _body, search) => ok(listing(search.get('path')))],
+      [/^GET \/api\/fs$/, (_match, _body, search) => this.fs(search.get('path'))],
       [
         /^POST \/api\/projects\/validate$/,
         (_match, body) => this.validate(String(field(body, 'path') ?? '')),
@@ -300,6 +311,13 @@ class FakeServer {
     const answer = (): Reply => ok(this.validationOf(path));
     if (!this.options.slow.includes(path)) return answer();
     return new Promise(resolve => this.waiting.set(path, () => resolve(answer())));
+  }
+
+  private fs(path: string | null): Answer {
+    const key = path ?? '';
+    const answer = (): Reply => ok(listing(path));
+    if (!this.options.slowFs.includes(key)) return answer();
+    return new Promise(resolve => this.waiting.set(`fs:${key}`, () => resolve(answer())));
   }
 
   private validationOf(path: string): ProjectValidation {
@@ -451,5 +469,9 @@ class FakeServer {
 export async function mockHome(page: Page, options: Partial<HomeOptions> = {}): Promise<FakeHome> {
   const server = new FakeServer({...DEFAULTS, ...options});
   await page.route(/\/api\//, route => server.answer(route));
-  return {requests: server.requests, release: path => server.release(path)};
+  return {
+    requests: server.requests,
+    release: path => server.release(path),
+    releaseFs: path => server.releaseFs(path),
+  };
 }
