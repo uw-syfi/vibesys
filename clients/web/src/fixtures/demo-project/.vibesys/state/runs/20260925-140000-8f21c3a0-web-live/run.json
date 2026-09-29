@@ -1,0 +1,53 @@
+{
+  "branch": "vibesys-runs/20260925-140000-8f21c3a0-web-live",
+  "created_at": "2026-09-29T02:56:18.431893Z",
+  "display_name": "llm-serve",
+  "execution": {
+    "agent_backend": "stub",
+    "agent_driver": null,
+    "agent_roles": {},
+    "cli_provider": null,
+    "cli_timeout": null,
+    "compute_backend": "cpu",
+    "default_reasoning_effort": null,
+    "model": "demo-model",
+    "requested_profiler": "none",
+    "resolved_profiler": "none",
+    "skills_dirs": [],
+    "thinking_budget": null
+  },
+  "input_fingerprint": "0a55f64571a87bf1f505ffdc0cfb3d273b109c43007eb63a56a4e4071b20fe51",
+  "orchestration": {
+    "config_version": 1,
+    "id": "single-agent",
+    "options": {
+      "interface": "inprocess",
+      "judge_every": 1,
+      "max_retries_per_round": 1,
+      "max_rounds": 12,
+      "metric_space": {
+        "objectives": [],
+        "relative_noise": 0.0
+      },
+      "modality": null,
+      "official_eval_every": 1,
+      "operator_constraints": [],
+      "profile_guided": null
+    }
+  },
+  "project_id": "llm-serve-0a55f64571a8",
+  "run_environment": {
+    "app": null,
+    "config_path": null,
+    "gpu": null,
+    "image": null,
+    "model_volume": null,
+    "name": "local",
+    "resources": null
+  },
+  "run_id": "20260925-140000-8f21c3a0-web-live",
+  "schema_version": 5,
+  "task_name": null,
+  "trusted_input_baseline": "0000000000000000000000000000000000000000",
+  "vibesys_version": "0.0.0-demo"
+}

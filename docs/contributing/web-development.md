@@ -37,8 +37,11 @@ server or a WebSocket connection until a capability URL is submitted.
 
 ## Live demo mode
 
-The demo serves the repository's deterministic recorded run through the real
-HTTP and WebSocket gateway:
+The demo reopens the repository's recorded run through the real HTTP and
+WebSocket gateway. The bundle is the event journal
+`clients/web/src/fixtures/demo-run.jsonl` plus the recorded project
+`clients/web/src/fixtures/demo-project`, so experiment and performance queries
+return the recorded data:
 
 ```bash
 uv run python -m entrypoints.web live --demo --open

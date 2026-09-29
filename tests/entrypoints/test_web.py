@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING, cast
 
@@ -14,12 +15,15 @@ from tests.server.support import build_server_parts
 from entrypoints import web
 from entrypoints.web import (
     _DEMO_LOG,
+    _DEMO_PROJECT,
+    _DEMO_RUN_ID,
     _browser_url,
     _live_command,
     _local_url,
     _parser,
     _pnpm,
     _port,
+    _repository_root,
     _run_dev,
     _run_live,
     _run_status,
@@ -28,7 +32,10 @@ from entrypoints.web import (
     _ssh,
     _wait_for_record,
 )
+from server.api.protocol import DesignQuery, ExperimentQuery, PerformanceQuery
 from server.transport.websocket import WebSocketGateway
+from vibesys.api import open_run_store
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,10 +53,40 @@ def _record() -> web.WebInstanceRecord:
     )
 
 
+def test_demo_bundle_reopens_with_the_recorded_experiments(tmp_path: Path) -> None:
+    root = _repository_root()
+    project_root = tmp_path / "project"
+    shutil.copytree(root / _DEMO_PROJECT, project_root)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    shutil.copy2(root / _DEMO_LOG, log_dir / "run-events.jsonl")
+    journal = [json.loads(line) for line in (root / _DEMO_LOG).read_text().splitlines() if line]
+    measured = [
+        (int(event["round_label"].split("-")[1]), float(event["data"]["perf_metric"]))
+        for event in journal
+        if event["type"] == "round_finished" and event["data"]["perf_metric"] is not None
+    ]
+
+    record = open_run_store(Project.open(project_root)).get_record(_DEMO_RUN_ID)
+    reader = build_server_parts()
+    reader.controller.attach_read_only(log_dir, record=record)
+    experiments = reader.api.execute(ExperimentQuery()).experiments
+    performance = reader.api.execute(PerformanceQuery()).performance
+    design = reader.api.execute(DesignQuery())
+    reader.close()
+
+    assert journal[0]["run_id"] == _DEMO_RUN_ID
+    assert [entry.hypothesis_id for entry in experiments] == [f"H-0{n}" for n in range(1, 8)]
+    assert [(item.round, item.perf_metric) for item in performance] == measured
+    assert design.design_ready is True
+    assert [item.round for item in design.design] == list(range(1, 8))
+
+
 def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path: Path) -> None:
-    replay_log = tmp_path / "framework-events.jsonl"
+    replay_log = tmp_path / "run-events.jsonl"
+    project = tmp_path / "project"
     command = _live_command(
-        project=None,
+        project=project,
         replay_log=replay_log,
         task=None,
         port=8765,
@@ -58,7 +95,14 @@ def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path: Path) -> 
         browser_origins=(),
     )
 
-    assert command[-2:] == ["--web-reopen", str(replay_log)]
+    assert command[-6:] == [
+        "--project",
+        str(project),
+        "--web-reopen",
+        str(replay_log),
+        "--web-reopen-run",
+        _DEMO_RUN_ID,
+    ]
     assert "--stub-agent" not in command
     assert command[1:4] == ["-m", "entrypoints.server", "--web"]
 
@@ -244,6 +288,9 @@ def test_run_live_demo_stages_replay_log_for_gateway(
     replay_source = tmp_path / _DEMO_LOG
     replay_source.parent.mkdir(parents=True)
     replay_source.write_text('{"type":"run_finished"}\n')
+    demo_source = tmp_path / _DEMO_PROJECT
+    demo_source.mkdir(parents=True)
+    (demo_source / "OBJECTIVE.md").write_text("demo\n")
     captured: dict[str, object] = {}
 
     def live_command(**kwargs: object) -> list[str]:
@@ -277,7 +324,9 @@ def test_run_live_demo_stages_replay_log_for_gateway(
     replay_log = cast("Path", captured["replay_log"])
     assert replay_log.name == "run-events.jsonl"
     assert replay_log.read_text() == replay_source.read_text()
-    assert captured["project"] is None
+    staged_project = cast("Path", captured["project"])
+    assert (staged_project / "OBJECTIVE.md").read_text() == "demo\n"
+    assert staged_project.parent == replay_log.parent
     assert captured["task"] is None
 
 

@@ -25,6 +25,8 @@ _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
 _DEMO_LOG = Path("clients/web/src/fixtures/demo-run.jsonl")
+_DEMO_PROJECT = Path("clients/web/src/fixtures/demo-project")
+_DEMO_RUN_ID = "20260925-140000-8f21c3a0-web-live"
 
 
 def _repository_root() -> Path:
@@ -128,9 +130,18 @@ def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep in
         str(instance),
     ]
     if replay_log is not None:
-        if project is not None:
+        if project is None:
             raise AssertionError
-        command.extend(("--web-reopen", str(replay_log)))
+        command.extend(
+            (
+                "--project",
+                str(project),
+                "--web-reopen",
+                str(replay_log),
+                "--web-reopen-run",
+                _DEMO_RUN_ID,
+            )
+        )
     elif project is not None:
         command.extend(("--project", str(project)))
         if task is not None:
@@ -161,12 +172,14 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         raise SystemExit("vibesys web live: pass --project or use --demo")  # noqa: TRY003  # lint-waiver: LW-101080 [TRY003]; require an explicit project for non-demo live mode
     if args.demo:
         replay_source = (root / _DEMO_LOG).resolve()
-        if not replay_source.is_file():
-            raise SystemExit(f"vibesys web: demo event log does not exist: {replay_source}")  # noqa: TRY003  # lint-waiver: LW-101104 [TRY003]; report an incomplete source checkout before gateway startup
+        demo_source = (root / _DEMO_PROJECT).resolve()
+        if not replay_source.is_file() or not demo_source.is_dir():
+            raise SystemExit(f"vibesys web: demo bundle is incomplete under {root}")  # noqa: TRY003  # lint-waiver: LW-101104 [TRY003]; report an incomplete source checkout before gateway startup
         demo_dir = Path(tempfile.mkdtemp(prefix="vibesys-web-demo-"))
         replay_log = demo_dir / "run-events.jsonl"
         shutil.copy2(replay_source, replay_log)
-        project = None
+        project = demo_dir / "project"
+        shutil.copytree(demo_source, project)
         default_instance = demo_dir / "web-gateway.json"
     else:
         replay_log = None
