@@ -19,7 +19,7 @@ export function NotesTab(props: NotesTabProps) {
   return (
     <>
       <PaneHead scope="Run">
-        <span>never sent to agents</span>
+        {props.note.phase === 'ready' ? <span>never sent to agents</span> : null}
       </PaneHead>
       <NoteBody {...props} />
     </>
@@ -39,12 +39,17 @@ function NoteBody(props: NotesTabProps) {
       return <p className="empty1">Loading…</p>;
     case 'failed':
       return (
-        <div className="empty1">
-          <p className="bad" role="alert">{`Could not load the note: ${note.message}`}</p>
-          <button type="button" className="btn" onClick={props.onRetry}>
+        <p className="empty1" role="alert" title={note.message}>
+          Couldn’t load notes.{' '}
+          <button
+            type="button"
+            className="linkish"
+            title="Load the note again"
+            onClick={props.onRetry}
+          >
             Retry
           </button>
-        </div>
+        </p>
       );
     case 'ready':
       return <Editor {...props} text={note.text} error={note.error} />;
@@ -87,7 +92,7 @@ function Editor(props: NotesTabProps & {text: string; error: string | null}) {
               : harness === 'checking'
                 ? 'Checking the chat harness…'
                 : harness === 'failed'
-                  ? "Couldn't check the chat harness"
+                  ? 'Couldn’t check the chat harness'
                   : 'This run offers no chat harness'
           }
           onClick={props.onAskDraft}

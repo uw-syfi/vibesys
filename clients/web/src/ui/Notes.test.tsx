@@ -48,7 +48,7 @@ test('empty or ended: the draft buttons are off and say why on hover; a failed s
   const checking = renderToStaticMarkup(<NotesTab {...props({harness: 'checking'})} />);
   assert.match(checking, /disabled="" title="Checking the chat harness…">Use as ask draft/);
   const failed = renderToStaticMarkup(<NotesTab {...props({harness: 'failed'})} />);
-  assert.match(failed, /disabled="" title="Couldn&#x27;t check the chat harness">Use as ask draft/);
+  assert.match(failed, /disabled="" title="Couldn’t check the chat harness">Use as ask draft/);
   assert.match(ended, /role="alert">Not saved: offline</);
 });
 
@@ -60,8 +60,8 @@ test('loading, failed with Retry, and no home server', () => {
   const failed = renderToStaticMarkup(
     <NotesTab {...props({note: {phase: 'failed', runId: 'r1', message: 'HTTP 500'}})} />,
   );
-  assert.match(failed, /role="alert">Could not load the note: HTTP 500</);
-  assert.match(failed, />Retry</);
+  assert.match(failed, /role="alert" title="HTTP 500">Couldn’t load notes\. <button[^>]*>Retry</);
+  assert.doesNotMatch(failed, /never sent to agents/);
   assert.doesNotMatch(failed, /textarea/);
   assert.match(
     renderToStaticMarkup(<NotesTab {...props({note: {phase: 'unavailable'}})} />),

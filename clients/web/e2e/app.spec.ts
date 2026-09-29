@@ -505,7 +505,11 @@ test('Notes: a note that fails to load is not editable', async ({page}) => {
   await page.route('**/api/notes/*', route => route.fulfill({status: 404, body: 'Not found'}));
   await page.goto(HOME_RUN);
   const pane = await notesPane(page);
-  await expect(pane).toContainText('Could not load the note: Notes are unavailable (HTTP 404)');
+  await expect(pane.getByRole('alert')).toHaveText('Couldn’t load notes. Retry');
+  await expect(pane.getByRole('alert')).toHaveAttribute(
+    'title',
+    'Notes are unavailable (HTTP 404)',
+  );
   await expect(pane.getByRole('textbox', {name: 'Notes'})).toHaveCount(0);
   await expect(pane.getByRole('button', {name: 'Retry'})).toBeVisible();
 });
