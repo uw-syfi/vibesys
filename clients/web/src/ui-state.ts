@@ -62,7 +62,7 @@ const clamp = (value: number, low: number, high: number) => Math.min(high, Math.
 
 /**
  * The state as it applies to `runId`: selection, open rows, disclosures, the agent filter, open
- * evidence and menus belong to one run and reset when the session replaces it (a reconnect that
+ * evidence, menus and the palette belong to one run and reset when the session replaces it (a reconnect that
  * lands on a new run). Layout (pane, sidebar, widths, view) carries over.
  */
 export function forRun(state: UiState, runId: string | null): UiState {
@@ -75,6 +75,7 @@ export function forRun(state: UiState, runId: string | null): UiState {
     disclosed: {},
     agent: null,
     menu: null,
+    palette: false,
     evidence: null,
   };
 }

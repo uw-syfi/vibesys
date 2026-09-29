@@ -56,14 +56,23 @@ test('selection belongs to one run: a replaced run starts clean and keeps the la
     disclosed: {'x1:prompt': true},
     agent: 'x1',
     evidence: 3,
+    palette: true,
     pane: 'agents' as const,
     sideWidth: 300,
   };
   assert.equal(forRun(busy, 'run-1'), busy);
   const next = forRun(busy, 'run-2');
   assert.deepEqual(
-    [next.runId, next.round, next.expanded, next.disclosed, next.agent, next.evidence],
-    ['run-2', null, null, {}, null, null],
+    [
+      next.runId,
+      next.round,
+      next.expanded,
+      next.disclosed,
+      next.agent,
+      next.evidence,
+      next.palette,
+    ],
+    ['run-2', null, null, {}, null, null, false],
   );
   assert.deepEqual([next.pane, next.sideWidth], ['agents', 300]);
   assert.deepEqual(uiReducer(busy, {type: 'run', runId: 'run-2'}), next);

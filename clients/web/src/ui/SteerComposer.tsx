@@ -18,10 +18,13 @@ export function SteerComposer({disabled, reason, error, onSend}: SteerComposerPr
     if (!ready) return;
     const submitted = draft;
     setSending(true);
-    const sent = await onSend(submitted.trim());
-    setSending(false);
-    // Text typed while the acknowledgment was pending stays.
-    if (sent) setDraft(current => (current === submitted ? '' : current));
+    try {
+      const sent = await onSend(submitted.trim());
+      // Text typed while the acknowledgment was pending stays.
+      if (sent) setDraft(current => (current === submitted ? '' : current));
+    } finally {
+      setSending(false);
+    }
   }
   return (
     <div className="dock">

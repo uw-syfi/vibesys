@@ -254,8 +254,9 @@ export function DisclosureBodies({turn, controls}: {turn: Turn; controls: Transc
       {todos.length === 0 ? null : (
         <div className="block">
           <div className="bh">Todos</div>
-          {todos.map(todo => (
-            <div className="todo" key={todo.content}>
+          {todos.map((todo, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: stateless rows; the todo list is replaced wholesale, and two todos can share a text.
+            <div className="todo" key={index}>
               {todo.status === 'completed' ? (
                 <Check size={12} strokeWidth={1.75} className="ok" role="img" aria-label="done" />
               ) : (
