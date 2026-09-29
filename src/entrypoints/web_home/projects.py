@@ -15,19 +15,23 @@ def confine(config: HomeConfig, raw: str) -> Path:
     """Return the canonical form of absolute *raw*, or reject it outside the granted roots.
 
     Symlinks are resolved before the containment check, so a link inside a
-    root that points outside it is rejected like the target itself.
+    root that points outside it is rejected like the target itself. The
+    empty/NUL/absolute checks run before any expansion, so a malformed
+    home-relative input (``~unknownuser``, a ``~`` followed by a NUL byte)
+    is rejected as ``invalid_path`` instead of raising out of ``expanduser()``.
     """
-    lexical = Path(raw).expanduser()
-    if not raw or "\0" in raw or not lexical.is_absolute():
+    if not raw or "\0" in raw or not Path(raw).is_absolute():
         message = "path must be an absolute path"
         raise ApiError(ErrorCode.INVALID_PATH, message)
     try:
-        path = lexical.resolve()
-    except OSError as error:
-        message = f"cannot resolve {lexical}: {error.strerror}"
+        path = Path(raw).resolve()
+    except (OSError, RuntimeError):
+        # RuntimeError: a symlink loop. Path.resolve() raises RuntimeError for
+        # this on Python 3.12 (our floor); only 3.13+ raises OSError.
+        message = "path cannot be resolved"
         raise ApiError(ErrorCode.INVALID_PATH, message) from None
     if not _within_roots(config, path):
-        message = f"{path} is outside the folders this app may open"
+        message = "path is outside the folders this app may open"
         raise ApiError(ErrorCode.OUTSIDE_ROOTS, message)
     return path
 
@@ -73,7 +77,8 @@ def _entry(config: HomeConfig, child: Path) -> FsEntry | None:
         if not target.is_dir() or not _within_roots(config, target):
             return None
         return FsEntry(name=child.name, path=str(target), git=_is_git(target))
-    except OSError:
+    except (OSError, RuntimeError):
+        # RuntimeError: a symlink loop (see confine); drop just this entry.
         return None
 
 
