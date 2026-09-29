@@ -274,3 +274,22 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
             assert response.read() == b"vibesys-ok\n"
 
     assert not instance_path.exists()
+
+
+def test_gateway_record_carries_run_identity_and_mode(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    instance_path = tmp_path / ".vibesys" / "web-gateway-queue-run.json"
+
+    with WebSocketGateway(
+        parts.api,
+        instance_path=instance_path,
+        project_root=tmp_path / "project",
+        run_id="queue-run",
+        mode="reopen",
+    ):
+        record = WebInstanceRecord.discover(instance_path)
+        assert record is not None
+        assert (record.run_id, record.mode) == ("queue-run", "reopen")
+        assert record.project_root == str((tmp_path / "project").resolve())
+
+    assert not instance_path.exists()

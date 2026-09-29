@@ -514,3 +514,110 @@ def test_web_reopen_run_rejects_a_missing_value_before_discovery(
 
     with pytest.raises(ConfigurationError, match="requires a non-empty run ID"):
         main(["--web", "--detach", "--project", str(tmp_path), "--web-reopen-run"])
+
+
+def test_reopen_instance_records_are_run_specific(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    live = _web_instance_from_argv(["--web"])
+    by_run = _web_instance_from_argv(["--web-reopen-run", "queue-run"])
+    sibling_a = _web_instance_from_argv(["--web-reopen", str(tmp_path / "run-a")])
+    sibling_b = _web_instance_from_argv(["--web-reopen", str(tmp_path / "run-b")])
+
+    assert live == project.resolve() / ".vibesys" / "web-gateway.json"
+    assert by_run.name == "web-gateway-queue-run.json"
+    assert sibling_a.name.startswith("web-gateway-log-")
+    assert sibling_a == _web_instance_from_argv(["--web-reopen", str(tmp_path / "run-a")])
+    assert len({live, by_run, sibling_a, sibling_b}) == 4
+
+
+def test_reopen_never_reuses_the_live_project_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, run_id, _log_dir = finished_run(tmp_path / "project")
+    discovered: list[Path] = []
+    spawned: list[Path] = []
+
+    def discover(path: Path) -> None:
+        discovered.append(path)
+
+    # test-isolation: observe which record the launcher consults instead of probing a real gateway
+    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", discover)
+    # test-isolation: observe the detached launch instead of starting a child process
+    monkeypatch.setattr(
+        server_entrypoint, "_spawn_detached", lambda _arguments, path: spawned.append(path)
+    )
+
+    main(["--web", "--detach", "--web-reopen-run", run_id, "--project", str(project.root)])
+
+    expected = (project.configuration_path() / f"web-gateway-{run_id}.json").resolve()
+    assert discovered == [expected]
+    assert spawned == [expected]
+    assert expected != (project.configuration_path() / "web-gateway.json").resolve()
+
+
+def test_launcher_refuses_to_reuse_a_gateway_serving_another_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, run_id, _log_dir = finished_run(tmp_path / "project")
+    live = WebInstanceRecord(
+        pid=123,
+        port=43_211,
+        token=f"{'capability'}-{'token'}",
+        url="http://127.0.0.1:43211/?token=capability-token",
+        project_root=str(project.root),
+        started_at=1.0,
+    )
+    opened: list[str] = []
+    # test-isolation: inject a live gateway at the explicitly shared record path
+    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", lambda _path: live)
+    # test-isolation: capture browser opening so a wrong reuse is observable and headless
+    monkeypatch.setattr(
+        server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
+    )
+
+    with pytest.raises(ConfigurationError, match="held by a live gateway"):
+        main(
+            [
+                "--web",
+                "--web-instance",
+                str(tmp_path / "shared.json"),
+                "--web-reopen-run",
+                run_id,
+                "--project",
+                str(project.root),
+            ]
+        )
+    assert opened == []
+
+
+def test_web_runtime_records_the_requested_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, run_id, _log_dir = finished_run(tmp_path / "project")
+    observed: dict[str, object] = {}
+
+    class FakeRuntime:
+        def __init__(self, *, socket_path: Path, **options: object) -> None:
+            del socket_path
+            observed.update(options)
+
+        def run(self, callback: Callable[[], object]) -> object:
+            return callback()
+
+    monkeypatch.setenv("VIBESYS_DETACHED_CHILD", "1")
+    # test-isolation: replace the dynamic runtime import to observe gateway metadata wiring
+    monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
+
+    main(["--web-reopen-run", run_id, "--project", str(project.root)])
+
+    assert observed["project_root"] == project.root.resolve()
+
+
+def test_web_launch_with_a_missing_project_is_a_configuration_error(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="Project root does not exist"):
+        main(["--web", "--project", str(tmp_path / "missing")])

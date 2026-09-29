@@ -1,4 +1,4 @@
-"""Crash-safe discovery for one project-local web gateway."""
+"""Crash-safe discovery for project-local web gateways."""
 
 from __future__ import annotations
 
@@ -12,12 +12,15 @@ from dataclasses import dataclass
 from pathlib import (
     Path,  # noqa: TC003  # lint-waiver: LW-101048 [TC003]; retain the runtime annotation type used by the discovery record API
 )
-from typing import Any
+from typing import Any, Literal
 
 try:
     import fcntl
 except ImportError:  # pragma: no cover - VibeSys currently targets Unix hosts.
     fcntl = None  # type: ignore[assignment]
+
+WebInstanceMode = Literal["live", "reopen"]
+_MODES: dict[object, WebInstanceMode] = {"live": "live", "reopen": "reopen"}
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,8 @@ class WebInstanceRecord:
     url: str
     project_root: str
     started_at: float
+    run_id: str | None = None
+    mode: WebInstanceMode = "live"
 
     @classmethod
     def discover(cls, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
@@ -44,8 +49,17 @@ class WebInstanceRecord:
         return None
 
     @classmethod
-    def from_gateway(
-        cls, *, pid: int, port: int, token: str, project_root: Path
+    def from_gateway(  # noqa: PLR0913  # lint-waiver: LW-101105 [PLR0913]; the factory takes one keyword per persisted discovery fact
+        # > A parameter object was rejected: it would duplicate WebInstanceRecord's own
+        # > fields, and the record itself cannot be built before the URL is derived.
+        cls,
+        *,
+        pid: int,
+        port: int,
+        token: str,
+        project_root: Path,
+        run_id: str | None = None,
+        mode: WebInstanceMode = "live",
     ) -> WebInstanceRecord:
         """Build a record only after the gateway has successfully bound."""
         return cls(
@@ -55,6 +69,8 @@ class WebInstanceRecord:
             url=f"http://127.0.0.1:{port}/?token={token}",
             project_root=str(project_root.resolve()),
             started_at=time.time(),
+            run_id=run_id,
+            mode=mode,
         )
 
     def write(self, path: Path) -> None:
@@ -143,6 +159,8 @@ def _read_record(path: Path) -> WebInstanceRecord | None:
             url=_nonempty_string(raw["url"]),
             project_root=_nonempty_string(raw["project_root"]),
             started_at=float(raw["started_at"]),
+            run_id=None if raw.get("run_id") is None else _nonempty_string(raw["run_id"]),
+            mode=_MODES[raw.get("mode", "live")],
         )
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         return None

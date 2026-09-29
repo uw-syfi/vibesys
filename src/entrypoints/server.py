@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -105,11 +106,14 @@ def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
 
 def _web_instance_from_argv(argv: list[str]) -> Path:
     value = cli._option_from_argv(argv, "--web-instance")  # noqa: SLF001  # lint-waiver: LW-101042 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
-    return (
-        Path(value).expanduser().resolve()
-        if value is not None
-        else (Project.open(Path.cwd()).configuration_path() / "web-gateway.json").resolve()
-    )
+    if value is not None:
+        return Path(value).expanduser().resolve()
+    run_id = cli.option_from_argv(argv, "--web-reopen-run") or None
+    log_dir = _read_only_log_from_argv(argv)
+    if run_id is None and log_dir is not None:
+        run_id = "log-" + hashlib.sha256(str(log_dir).encode()).hexdigest()[:12]
+    name = "web-gateway.json" if run_id is None else f"web-gateway-{run_id}.json"
+    return (Project.open(_project_root_from_argv(argv)).configuration_path() / name).resolve()
 
 
 def _read_only_log_from_argv(argv: list[str]) -> Path | None:
@@ -383,6 +387,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
         existing = _discover_web_instance(instance_path)
         if existing is not None:
+            requested = (
+                "live" if read_only_log is None else "reopen",
+                read_only_record.run_id if read_only_record is not None else None,
+            )
+            if (existing.mode, existing.run_id) != requested:
+                cli.configuration_error(
+                    f"{instance_path} is held by a {existing.mode} gateway for run "
+                    f"{existing.run_id}",
+                    code="invalid_arguments",
+                    stage="argument_parsing",
+                )
             print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
             webbrowser.open(existing.url, new=2)
             return
@@ -423,6 +438,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
                 detach=detach,
                 read_only_log=read_only_log,
                 read_only_record=read_only_record,
+                project_root=_project_root_from_argv(arguments),
             )
         else:
             runtime = server_runtime(

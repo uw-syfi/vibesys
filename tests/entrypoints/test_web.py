@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.server.support import build_server_parts
 
 from entrypoints import web
 from entrypoints.web import (
@@ -25,6 +28,7 @@ from entrypoints.web import (
     _ssh,
     _wait_for_record,
 )
+from server.transport.websocket import WebSocketGateway
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -442,3 +446,35 @@ def test_main_dispatches_each_web_command(monkeypatch: pytest.MonkeyPatch) -> No
     for command in commands:
         assert web.main(command) == 0
     assert len(calls) == len(commands)
+
+
+def test_status_and_stop_accept_old_and_new_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    instance = tmp_path / "web-gateway-queue-run.json"
+    signalled: list[int] = []
+
+    def fake_kill(pid: int, sig: int) -> None:
+        # `os` is one shared module: this also intercepts discover()'s own
+        # liveness probe (signal 0), which every _run_status/_run_stop call
+        # makes against this same in-process gateway. Only a real stop signal
+        # is the "stop must not signal the test process" fact under test.
+        if sig != 0:
+            signalled.append(pid)
+
+    # test-isolation: stop must not signal the test process that hosts the gateway
+    monkeypatch.setattr(web.os, "kill", fake_kill)
+    # test-isolation: a fake stop leaves the record; skip the bounded removal wait
+    monkeypatch.setattr(web, "_RECORD_WAIT_SECONDS", 0.0)
+
+    with WebSocketGateway(parts.api, instance_path=instance, run_id="queue-run", mode="reopen"):
+        current = json.loads(instance.read_text())
+        legacy = {key: value for key, value in current.items() if key not in {"run_id", "mode"}}
+        for payload in (current, legacy):
+            instance.write_text(json.dumps(payload))
+            assert _run_status(argparse.Namespace(instance=instance)) == 0
+            assert _run_stop(argparse.Namespace(instance=instance)) == 0
+
+    assert signalled == [os.getpid(), os.getpid()]
+    assert capsys.readouterr().out.count("Stopped VibeSys web gateway") == 2

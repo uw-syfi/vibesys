@@ -96,11 +96,16 @@ last-subscriber teardown remain unchanged.
 
 The detached gateway publishes `.vibesys/web-gateway.json` by default. The record is written by
 temporary-file replacement, has owner-only permissions, and contains the PID, loopback port,
-capability token, and project root. Discovery requires both a live PID and a token-authenticated
-`/health` response. A failed probe removes only the matching stale record. The path can be
-overridden with `--web-instance`; it is project-local, so two working directories do not share
-gateway state. The default port remains ephemeral across restarts. Use `--web-port` when a stable
-bookmarkable port is required.
+capability token, the requested project root, `mode` (`live` or `reopen`), and, for a reopen, the
+`run_id`. Both keys are optional under `version: 1`; readers treat a record without them as `live`.
+A reopen publishes `.vibesys/web-gateway-<run-id>.json` (or `web-gateway-log-<hash>.json` for a
+journal given without a run ID), so it never reuses the live gateway, and the launcher refuses to
+reuse any record whose mode or run differs from the request. A live launch with `--project` now
+publishes its record under that project, not the working directory. Discovery requires both a live
+PID and a token-authenticated `/health` response. A failed probe removes only the matching stale
+record. The path can be overridden with `--web-instance`; it is project-local, so two working
+directories do not share gateway state. The default port remains ephemeral across restarts. Use
+`--web-port` when a stable bookmarkable port is required.
 
 `vibesys --web --web-reopen PATH` serves a completed `run-events.jsonl` through the same API and
 WebSocket transport without attaching a project writer. Event history and indexed state are read

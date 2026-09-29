@@ -70,6 +70,7 @@ class ServerRuntime:
         detach: bool = False,
         read_only_log: Path | None = None,
         read_only_record: RunRecord | None = None,
+        project_root: Path | None = None,
     ) -> None:
         """Compose all server components around one shared condition."""
         self.socket_path = socket_path
@@ -81,6 +82,7 @@ class ServerRuntime:
         self.detach = detach
         self.read_only_log = read_only_log
         self.read_only_record = read_only_record
+        self.project_root = project_root
         self._shutdown = threading.Event()
         self.condition = threading.Condition(threading.RLock())
         self.journal = WireJournal(self.condition)
@@ -184,6 +186,13 @@ class ServerRuntime:
                             allowed_origins=self.web_origins,
                             subscriptions=subscriptions,
                             instance_path=self.instance_path,
+                            project_root=self.project_root,
+                            run_id=(
+                                self.read_only_record.run_id
+                                if self.read_only_record is not None
+                                else None
+                            ),
+                            mode="live" if self.read_only_log is None else "reopen",
                         )
                     )
                     if self.web

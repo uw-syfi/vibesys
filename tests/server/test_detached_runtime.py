@@ -23,7 +23,7 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.runtime import ServerRuntime
-from server.transport.discovery import WebInstanceRecord
+from server.transport.discovery import WebInstanceRecord, _read_record
 from vs_project.api import Project
 
 
@@ -160,3 +160,58 @@ def test_stale_instance_record_is_removed(tmp_path: Path) -> None:
 
     assert WebInstanceRecord.discover(path) is None
     assert not path.exists()
+
+
+def test_instance_record_round_trips_run_identity_and_mode(tmp_path: Path) -> None:
+    path = tmp_path / "web-gateway-queue-run.json"
+    record = WebInstanceRecord.from_gateway(
+        pid=1234,
+        port=43_212,
+        token=f"{'capability'}-{'token'}",
+        project_root=tmp_path,
+        run_id="queue-run",
+        mode="reopen",
+    )
+    record.write(path)
+
+    written = json.loads(path.read_text())
+    assert (written["version"], written["run_id"], written["mode"]) == (1, "queue-run", "reopen")
+    assert _read_record(path) == record
+
+    legacy = {key: value for key, value in written.items() if key not in {"run_id", "mode"}}
+    path.write_text(json.dumps(legacy))
+    upgraded = _read_record(path)
+    assert upgraded is not None
+    assert (upgraded.run_id, upgraded.mode) == (None, "live")
+
+    path.write_text(json.dumps({**written, "mode": "paused"}))
+    assert _read_record(path) is None
+
+
+def test_runtime_reopen_publishes_its_own_record_and_serves_data(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    project, run_id, log_dir = finished_run(tmp_path / "project")
+    instance = tmp_path / f"web-gateway-{run_id}.json"
+    runtime = ServerRuntime(
+        socket_path=socket_dir / "control.sock",
+        web=True,
+        instance_path=instance,
+        read_only_log=log_dir,
+        read_only_record=run_record(project, run_id),
+        project_root=project.root,
+    )
+    thread = threading.Thread(target=lambda: runtime.run(lambda: None))
+    thread.start()
+    try:
+        _wait_for(instance)
+        written = json.loads(instance.read_text())
+        assert (written["mode"], written["run_id"]) == ("reopen", run_id)
+        assert written["project_root"] == str(project.root.resolve())
+        experiments = runtime.api.execute(ExperimentQuery()).experiments
+        assert [entry.hypothesis_id for entry in experiments] == ["H-01"]
+    finally:
+        runtime.shutdown()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert not instance.exists()

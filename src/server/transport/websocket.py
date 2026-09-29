@@ -23,7 +23,7 @@ from server.api.protocol import (
     SubscribedMessage,
     SubscribeRequest,
 )
-from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
+from server.transport.discovery import WebInstanceClaim, WebInstanceMode, WebInstanceRecord
 from server.transport.subscriptions import SubscriptionTracker
 
 if TYPE_CHECKING:
@@ -63,6 +63,8 @@ class WebSocketGateway:
         instance_path: Path | None = None,
         project_root: Path | None = None,
         allowed_origins: Sequence[str] = (),
+        run_id: str | None = None,
+        mode: WebInstanceMode = "live",
     ) -> None:
         """Create a loopback gateway around a shared run API."""
         self.api = api
@@ -72,6 +74,8 @@ class WebSocketGateway:
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
         self.allowed_origins = frozenset(allowed_origins)
+        self.run_id = run_id
+        self.mode = mode
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._claim: WebInstanceClaim | None = None
         self._instance_record: WebInstanceRecord | None = None
@@ -198,6 +202,8 @@ class WebSocketGateway:
                     port=self._bound_port,
                     token=self.token,
                     project_root=self.project_root,
+                    run_id=self.run_id,
+                    mode=self.mode,
                 )
                 self._instance_record.write(self.instance_path)
             self._ready.set()
