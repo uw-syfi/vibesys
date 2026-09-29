@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import re
+import signal
 import subprocess
 import threading
 import time
@@ -34,7 +37,7 @@ from entrypoints.web_home.projects import inspect_project, project_id, resolve_p
 from entrypoints.web_home.tasks import select_task
 from server.runtime import WebInstanceRecord
 from vibesys.api import Config
-from vibesys.api.request import generate_experiment_name, load_project_task
+from vibesys.api.request import generate_experiment_name, load_project_task, orchestration_roles
 from vs_agent.api import SHIPPED_PROVIDERS, agent_catalog
 from vs_project.api import Project, ProjectError
 
@@ -47,6 +50,7 @@ _RECORD_POLL_SECONDS = 0.05
 _REAP_SECONDS = 5.0
 _STDERR_TAIL_BYTES = 16_384
 _STDERR_TAIL_LINES = 40
+_TOML_FORBIDDEN_CONTROL = re.compile(r"[\x7f-\x9f]")
 _BLOCKERS = {
     ProjectState.MISSING: ErrorCode.INVALID_PATH,
     ProjectState.NOT_GIT: ErrorCode.NOT_GIT,
@@ -138,12 +142,18 @@ def _failure(log: Path, message: str) -> ApiError:
     return ApiError(ErrorCode.LAUNCH_FAILED, message, details=details)
 
 
+def _signal_group(process: subprocess.Popen[bytes], signum: signal.Signals) -> None:
+    # The child is a session leader (start_new_session), so its pid is its process group.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signum)
+
+
 def _reap(process: subprocess.Popen[bytes]) -> None:
-    process.terminate()
+    _signal_group(process, signal.SIGTERM)
     try:
         process.wait(timeout=_REAP_SECONDS)
     except subprocess.TimeoutExpired:
-        process.kill()
+        _signal_group(process, signal.SIGKILL)
         process.wait()
 
 
@@ -169,21 +179,30 @@ def _spawn(
     # re-spawning with stderr discarded; BROWSER=true stops it opening a browser tab.
     environment = {**config.environ, "VIBESYS_DETACHED_CHILD": "1", "BROWSER": "true"}
     log = record_path.with_suffix(".stderr.log")
-    with log.open("wb") as stderr:
-        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101308 [S603]; argv is the fixed run-server command plus validated flags, never a shell string.
-            # > `entrypoints.server --detach` re-spawns with stderr discarded, and the
-            # > launch_failed contract returns that stderr; shell=True weakens argv safety.
-            argv,
-            cwd=root,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=stderr,
-            start_new_session=True,
-        )
+    try:
+        with log.open("wb") as stderr:
+            process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101308 [S603]; argv is the fixed run-server command plus validated flags, never a shell string.
+                # > `entrypoints.server --detach` re-spawns with stderr discarded, and the
+                # > launch_failed contract returns that stderr; shell=True weakens argv safety.
+                argv,
+                cwd=root,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=stderr,
+                start_new_session=True,
+            )
+    except OSError as error:
+        raise _failure(log, f"the run server could not start: {error.strerror}") from None
     threading.Thread(target=process.wait, name=f"reap-{process.pid}", daemon=True).start()
     owner = Owner(run_id=run_id, pid=process.pid, origin=config.origin)
-    atomic_write(_owner_path(record_path), owner.model_dump_json().encode(), mode=0o600)
+    try:
+        atomic_write(_owner_path(record_path), owner.model_dump_json().encode(), mode=0o600)
+    except (OSError, ApiError) as error:
+        # An untracked child would hold the gateway and block every retry.
+        _signal_group(process, signal.SIGKILL)
+        process.wait()
+        raise _failure(log, f"the launch owner record could not be written: {error}") from None
     config.launches[record_path] = Launch(run_id=run_id, process=process, stderr_log=log)
     deadline = time.monotonic() + config.launch_timeout
     while time.monotonic() < deadline:
@@ -230,9 +249,16 @@ def _require_ready(root: Path) -> None:
         )
 
 
+def _toml_string(value: str) -> str:
+    # Mirrors vibesys.inputs._manifest._toml_string (private there): json.dumps escapes
+    # C0 controls but leaves DEL and C1 literal, which TOML basic strings forbid.
+    encoded = json.dumps(value, ensure_ascii=False)
+    return _TOML_FORBIDDEN_CONTROL.sub(lambda match: f"\\u{ord(match.group()):04x}", encoded)
+
+
 def render_run_config(body: StartRun) -> str:
     """Render the run-owned agent TOML passed with ``--config``, validated as ``Config``."""
-    agent: dict[str, object] = {"backend": "cli", "cli_provider": body.provider}
+    agent: dict[str, str] = {"backend": "cli", "cli_provider": body.provider}
     if body.driver is not None:
         agent["driver"] = body.driver.value
     roles = {
@@ -250,19 +276,23 @@ def render_run_config(body: StartRun) -> str:
         raise ApiError(
             ErrorCode.INVALID_REQUEST, message, details={"errors": validation_errors(error)}
         ) from None
-    lines = ["[model]", f"name = {json.dumps(body.model)}"]
+    lines = ["[model]", f"name = {_toml_string(body.model)}"]
     if body.reasoning_effort is not None:
-        lines += ["", "[thinking]", f"level = {json.dumps(body.reasoning_effort)}"]
-    lines += ["", "[agent]", *(f"{key} = {json.dumps(value)}" for key, value in agent.items())]
+        lines += ["", "[thinking]", f"level = {_toml_string(body.reasoning_effort)}"]
+    lines += ["", "[agent]", *(f"{key} = {_toml_string(value)}" for key, value in agent.items())]
     for role, fields in roles.items():
-        lines += ["", f"[agent.roles.{json.dumps(role)}]"]
-        lines += [f"{key} = {json.dumps(value)}" for key, value in fields.items()]
+        lines += ["", f"[agent.roles.{_toml_string(role)}]"]
+        lines += [f"{key} = {_toml_string(value)}" for key, value in fields.items()]
     return "\n".join(lines) + "\n"
 
 
 def _check_start(body: StartRun) -> None:
     if body.outer_loop not in LOOPS:
         message = f"unknown outer loop {body.outer_loop!r}; choose from {', '.join(LOOPS)}"
+        raise ApiError(ErrorCode.INVALID_REQUEST, message)
+    roles = orchestration_roles(LOOPS[body.outer_loop][2])
+    if unknown := sorted(set(body.roles) - set(roles)):
+        message = f"unknown roles {unknown} for {body.outer_loop}; choose from {', '.join(roles)}"
         raise ApiError(ErrorCode.INVALID_REQUEST, message)
     providers = (
         agent_catalog()[body.driver].providers if body.driver is not None else SHIPPED_PROVIDERS

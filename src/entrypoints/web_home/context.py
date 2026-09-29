@@ -81,6 +81,7 @@ class HomeConfig:
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     # ponytail: one lock serializes every file write; per-file locks if it contends.
     write_lock: threading.Lock = field(default_factory=threading.Lock)
+    # ponytail: one global launch_lock, per-project locks if concurrent starts across projects matter.
     launch_lock: threading.Lock = field(default_factory=threading.Lock)
     launch_timeout: float = 30.0
     launches: dict[Path, Launch] = field(default_factory=dict)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import tomllib
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.entrypoints.web_home.support import make_project, project_key
 
+from entrypoints.web_home import runs
 from entrypoints.web_home.contract import StartRun
 from entrypoints.web_home.runs import render_run_config
 from vibesys.api import Config
@@ -125,6 +127,8 @@ def test_a_timed_out_launch_is_reaped_and_the_retry_owns_the_gateway(runs_home: 
     second = runs_home.post(f"/api/projects/{key}/runs", START).json()
 
     assert first["error"]["code"] == "launch_failed"
+    assert first["error"]["details"]["stderr_log"].endswith("live.stderr.log")
+    assert isinstance(first["error"]["details"]["stderr_tail"], list)
     assert hung.poll() is not None
     gateways = runs_home.config.state_home / "web" / "gateways"
     owner = json.loads(next(gateways.glob("*/live.owner.json")).read_text())
@@ -159,6 +163,7 @@ def test_the_gateway_accepts_the_app_origins_only(runs_home: Home) -> None:
         ({"outer_loop": "profile-guided"}, "profile_guided_unavailable"),
         ({"roles": {"implementer": {"model": ""}}}, "invalid_request"),
         ({"budget": 0}, "invalid_request"),
+        ({"roles": {"bogus-role": {"model": "m"}}}, "invalid_request"),
     ],
 )
 def test_start_rejects_bad_requests_before_spawning(
@@ -194,3 +199,50 @@ def test_run_config_is_a_valid_agent_config() -> None:
     )
     assert config.thinking.level == "low"
     assert config.agent.roles["implementer"].reasoning_effort == "high"
+
+
+def test_a_run_server_that_cannot_start_is_a_typed_launch_failure(runs_home: Home) -> None:
+    key, _ = _project(runs_home)
+    runs_home.config.run_server_argv = (str(runs_home.workspace / "missing-server"),)
+
+    reply = runs_home.post(f"/api/projects/{key}/runs", START)
+
+    assert (reply.status, reply.json()["error"]["code"]) == (502, "launch_failed")
+
+
+def test_a_failed_owner_write_kills_the_spawned_child(
+    runs_home: Home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key, _ = _project(runs_home)
+    runs_home.config.environ = {**runs_home.config.environ, "FAKE_RUN_SERVER_HANG": "1"}
+    spawned: list[int] = []
+    write = runs.atomic_write
+
+    def failing_owner_write(path: Path, data: bytes, *, mode: int) -> None:
+        if not path.name.endswith(".owner.json"):
+            write(path, data, mode=mode)
+            return
+        spawned.append(json.loads(data)["pid"])
+        raise OSError(28, "No space left on device")
+
+    # test-isolation: a disk-full sidecar write after spawn is not reproducible without faking it.
+    monkeypatch.setattr(runs, "atomic_write", failing_owner_write)
+
+    reply = runs_home.post(f"/api/projects/{key}/runs", START)
+
+    assert (reply.status, reply.json()["error"]["code"]) == (502, "launch_failed")
+    with pytest.raises(ProcessLookupError):
+        os.kill(spawned[0], 0)
+    assert runs_home.config.launches == {}
+
+
+def test_run_config_escapes_non_bmp_and_control_characters() -> None:
+    model = "gpt-\U0001f600-\x7f-\x85"
+    body = StartRun.model_validate(
+        {**START, "model": model, "roles": {"implementer": {"reasoning_effort": "\U0001f600"}}}
+    )
+
+    config = tomllib.loads(render_run_config(body))
+
+    assert config["model"]["name"] == model
+    assert config["agent"]["roles"]["implementer"]["reasoning_effort"] == "\U0001f600"
