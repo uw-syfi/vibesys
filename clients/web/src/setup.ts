@@ -250,7 +250,7 @@ function folderBlockers(path: string, validation: ProjectValidation | null): Blo
 export function draftBlockers(draft: Draft, creating: boolean): Blocker[] {
   const missing: Blocker[] = [];
   if (creating && !TASK_NAME.test(draft.name)) {
-    const text = draft.name === '' ? 'Task name is empty' : 'Task name needs a-z, 0-9, . _ or -';
+    const text = draft.name === '' ? 'Task name is empty' : 'Task name is invalid';
     missing.push({field: 'name', text});
   }
   if (draft.objective.trim() === '') missing.push({field: 'objective', text: 'Objective is empty'});

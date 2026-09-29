@@ -285,6 +285,9 @@ a.nav { text-decoration: none; }
 .fld.effort { width: 96px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary[disabled] { background: var(--bg-selected); border-color: var(--border); color: var(--text-2); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:not(.primary):not(.ghost):disabled:hover { background: var(--bg-raised); }
+.btn.ghost:disabled:hover { background: none; color: var(--text-2); }
 a.btn { text-decoration: none; }
 .sheetfoot { flex: none; border-top: 1px solid var(--border-subtle); padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
 .sheetfoot .sp { flex: 1; }
