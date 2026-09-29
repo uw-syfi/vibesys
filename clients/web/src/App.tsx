@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -163,7 +164,7 @@ function useAsk(
   dispatch: Dispatch<UiAction>,
 ): AskHost {
   const {core, captured, asks} = state;
-  const {options, checking} = chatOffer(state.queries.chat_options);
+  const {options, checking, failed} = chatOffer(state.queries.chat_options);
   const view = useMemo(
     () =>
       askView({
@@ -173,9 +174,10 @@ function useAsk(
         asks,
         options,
         checking,
+        failed,
         selected: ui.thread,
       }),
-    [core.chatThreads, core.chatTranscripts, captured, asks, options, checking, ui.thread],
+    [core.chatThreads, core.chatTranscripts, captured, asks, options, checking, failed, ui.thread],
   );
   // Options are asked for where they show (Ask, Notes, the palette), again as the run's status
   // moves (a run still starting reports none yet), and when the connection returns (which also
@@ -187,6 +189,16 @@ function useAsk(
     if (wanted && !offered && connected && core.status !== 'connecting')
       void session.load('chat_options');
   }, [session, wanted, offered, connected, core.status]);
+  // A question that failed goes back into an empty composer, to resend without retyping.
+  const settled = useRef(new Set<string>());
+  const draft = ui.drafts.ask;
+  useEffect(() => {
+    for (const ask of asks) {
+      if (ask.error === null || settled.current.has(ask.id)) continue;
+      settled.current.add(ask.id);
+      if (draft === '') dispatch({type: 'draft', target: 'ask', text: ask.text});
+    }
+  }, [asks, draft, dispatch]);
   const [failure, setFailure] = useState<{runId: string | null; message: string} | null>(null);
   // A thread error belongs to the run it happened in.
   const error = failure !== null && failure.runId === state.runId ? failure.message : null;
@@ -505,6 +517,7 @@ function askTab(props: PaneHostProps) {
       onNewThread={ask.start}
       onDraft={text => dispatch({type: 'draft', target: 'ask', text})}
       onSend={text => Promise.resolve(session.ask(text, ask.view.current.id))}
+      onRetry={() => void session.load('chat_options')}
     />
   );
 }

@@ -218,14 +218,22 @@ test('Ask offers chat once a starting run reports its options', async ({page}) =
   await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toBeVisible();
 });
 
-test('a failed options query keeps checking and asks again when the connection returns', async ({
-  page,
-}) => {
+test('a failed options query says so; Retry asks again', async ({page}) => {
   const gateway = await mockGateway(page, {chat: 'error'});
   await page.goto('/?token=e2e');
   const pane = await askPane(page);
-  await expect(pane).toContainText('Checking the chat harness…');
+  await expect(pane).toContainText('Couldn’t check the chat harness.');
   await expect(pane).not.toContainText('This run offers no chat harness.');
+  await pane.getByRole('button', {name: 'Retry'}).click();
+  await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toBeVisible();
+  expect(gateway.requests.filter(request => request.type === 'query.chat_options')).toHaveLength(2);
+});
+
+test('a failed options query is asked again when the connection returns', async ({page}) => {
+  const gateway = await mockGateway(page, {chat: 'error'});
+  await page.goto('/?token=e2e');
+  const pane = await askPane(page);
+  await expect(pane).toContainText('Couldn’t check the chat harness.');
   gateway.drop();
   await expect(pane.getByRole('textbox', {name: 'Ask about this run'})).toBeVisible();
   expect(gateway.requests.filter(request => request.type === 'query.chat_options')).toHaveLength(2);
@@ -405,4 +413,15 @@ test('a failed run says why in the title row, the full diagnostic on hover', asy
     'cargo bench exited with status 137 after 41.7s (killed by the OOM killer).',
   );
   await expect(page.locator('.titlebar').getByRole('button', {name: 'Pause'})).toHaveCount(0);
+});
+
+test('a question that fails returns to the composer', async ({page}) => {
+  await mockGateway(page, {reject: ['query.chat']});
+  await page.goto('/?token=e2e');
+  const pane = await askPane(page);
+  const box = pane.getByRole('textbox', {name: 'Ask about this run'});
+  await box.fill('Why did round 3 fail the judge?');
+  await box.press('Enter');
+  await expect(pane.getByRole('alert')).toContainText('Not answered');
+  await expect(box).toHaveValue('Why did round 3 fail the judge?');
 });

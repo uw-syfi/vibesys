@@ -68,6 +68,7 @@ const BASE: AskInput = {
   asks: [],
   options: OPTIONS,
   checking: false,
+  failed: false,
   selected: DEFAULT_CHAT_THREAD_ID,
 };
 
@@ -181,17 +182,18 @@ test('the harness: available with a provider, checking until the options query a
   assert.equal(askView({...BASE, options: null}).current.model, null);
 });
 
-test('a failed options query reads as checking, never as no harness', () => {
+test('the options query: unanswered is checking, a failure says so, a re-check keeps the last verdict', () => {
   const EMPTY = {request_id: 'q', ok: true} as const;
   const harness = (query: Parameters<typeof chatOffer>[0]) =>
     askView({...BASE, ...chatOffer(query)}).harness;
-  assert.equal(harness({response: null, loading: false, error: null}), 'checking');
-  assert.equal(harness({response: null, loading: false, error: 'socket closed'}), 'checking');
-  assert.equal(harness({response: EMPTY, loading: false, error: 'socket closed'}), 'checking');
-  assert.equal(harness({response: EMPTY, loading: true, error: null}), 'checking');
+  assert.equal(harness({response: null, loading: true, error: null}), 'checking');
+  assert.equal(harness({response: null, loading: false, error: 'socket closed'}), 'failed');
+  assert.equal(harness({response: EMPTY, loading: false, error: 'socket closed'}), 'failed');
+  // Re-asked as the run's status moves: the settled "none" holds instead of flickering.
+  assert.equal(harness({response: EMPTY, loading: true, error: null}), 'none');
   assert.equal(harness({response: EMPTY, loading: false, error: null}), 'none');
   assert.equal(
-    harness({response: {...EMPTY, chat_options: OPTIONS}, loading: false, error: null}),
+    harness({response: {...EMPTY, chat_options: OPTIONS}, loading: false, error: 'socket closed'}),
     'available',
   );
 });

@@ -32,7 +32,7 @@ export interface ModelGroup {
 }
 
 export interface AskView {
-  harness: 'available' | 'checking' | 'none';
+  harness: 'available' | 'checking' | 'failed' | 'none';
   threads: ThreadRow[];
   current: ThreadRow;
   messages: AskMessage[];
@@ -51,6 +51,8 @@ export interface AskInput {
   options: ChatOptions | null;
   /** The options query has not answered yet. */
   checking: boolean;
+  /** The options query's last attempt failed. */
+  failed: boolean;
   selected: string;
 }
 
@@ -139,11 +141,15 @@ function modelGroups(options: ChatOptions | null): ModelGroup[] {
     .filter(group => group.models.length > 0);
 }
 
-/** The options query as Ask reads it: a failed query has not answered, so it is never "none offered". */
-export function chatOffer(query: QueryState): Pick<AskInput, 'options' | 'checking'> {
+/**
+ * The options query as Ask reads it. A failure is never "none offered"; a re-check keeps the last
+ * answer on screen until the new one lands.
+ */
+export function chatOffer(query: QueryState): Pick<AskInput, 'options' | 'checking' | 'failed'> {
   return {
     options: query.response?.chat_options ?? null,
-    checking: query.loading || query.response === null || query.error !== null,
+    checking: query.response === null,
+    failed: query.error !== null && !query.loading,
   };
 }
 
@@ -162,7 +168,7 @@ export function askView(input: AskInput): AskView {
   const streamed = pending && open?.kind === 'assistant' && open.turnId !== undefined;
   const offered = (input.options?.providers ?? []).length > 0;
   return {
-    harness: offered ? 'available' : input.checking ? 'checking' : 'none',
+    harness: offered ? 'available' : input.failed ? 'failed' : input.checking ? 'checking' : 'none',
     threads: threads.map(thread => rowOf(input, thread)),
     current: rowOf(input, selected),
     messages: messagesOf(input, selected.id),

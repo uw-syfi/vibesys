@@ -116,9 +116,9 @@ export const MOCK_ANSWER =
   'Mock reply. This gateway replays a recorded run; there is no agent behind it.';
 /**
  * `late` offers nothing on the first ask and `error` fails it; both offer after that. `held`
- * offers chat but never answers a question.
+ * offers chat but never answers a question; `unanswered` never answers the options query.
  */
-type ChatMode = 'on' | 'off' | 'late' | 'error' | 'held';
+type ChatMode = 'on' | 'off' | 'late' | 'error' | 'held' | 'unanswered';
 
 const roundOf = (label: string | null | undefined): number =>
   Number(/round-(\d+)/.exec(label ?? '')?.[1] ?? 0);
@@ -518,6 +518,7 @@ class DemoRun {
       this.chat === 'error' && request.type === 'query.chat_options' && this.optionsAsked === 0;
     if (failed) this.optionsAsked += 1;
     if (this.chat === 'held' && request.type === 'query.chat') return;
+    if (this.chat === 'unanswered' && request.type === 'query.chat_options') return;
     if (this.rejects.has(request.type) || failed) {
       ws.send(
         JSON.stringify({

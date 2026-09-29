@@ -45,6 +45,7 @@ const props = (overrides: Partial<AskTabProps> = {}): AskTabProps => ({
   onNewThread: () => {},
   onDraft: () => {},
   onSend: async () => true,
+  onRetry: () => {},
   ...overrides,
 });
 
@@ -65,6 +66,8 @@ test('a thread: its title opens the switcher, questions and answers, the pending
 test('menus: threads with their counts, models grouped by harness with the current one checked', () => {
   const threads = renderToStaticMarkup(<AskTab {...props({menu: 'thread'})} />);
   assert.match(threads, /<div class="gh">2 threads<\/div>/);
+  // The head's + is the one New thread control.
+  assert.doesNotMatch(threads, /role="menuitem"|class="sepl"/);
   assert.match(
     threads,
     /role="menuitemradio" aria-checked="true" aria-label="Why did round 3 fail the judge\?, 2 questions"/,
@@ -94,4 +97,25 @@ test('without a chat harness the tab says so; recorded threads stay readable', (
   assert.match(history, /class="human"/);
   assert.match(history, /This run offers no chat harness\./);
   assert.doesNotMatch(history, /aria-label="New thread"/);
+});
+
+test('an options query that failed says so with a Retry; history keeps the status line', () => {
+  const empty = row('default', 'New thread', 0);
+  const failed: AskView = {
+    ...VIEW,
+    harness: 'failed',
+    threads: [empty],
+    current: empty,
+    messages: [],
+    pending: false,
+  };
+  const html = renderToStaticMarkup(<AskTab {...props({view: failed})} />);
+  assert.match(html, /Couldn’t check the chat harness\./);
+  assert.match(html, /<button type="button" class="linkish"[^>]*>Retry<\/button>/);
+  const history = renderToStaticMarkup(
+    <AskTab {...props({view: {...VIEW, harness: 'checking', pending: false}})} />,
+  );
+  assert.match(history, /class="human"/);
+  assert.match(history, /Checking the chat harness…/);
+  assert.doesNotMatch(history, /Ask about this run/);
 });

@@ -24,7 +24,7 @@ const OUT = process.env['CAPTURE_DIR'];
 interface Screen {
   name: string;
   through?: number;
-  chat?: 'off' | 'error' | 'held';
+  chat?: 'off' | 'error' | 'held' | 'unanswered';
   act?: (page: Page, gateway: Gateway) => Promise<void>;
 }
 
@@ -152,10 +152,18 @@ const SCREENS: Screen[] = [
   },
   {
     name: 'ask-checking',
-    chat: 'error',
+    chat: 'unanswered',
     act: async page => {
       await openPane(page, 'Ask');
       await page.getByText('Checking the chat harness…').waitFor();
+    },
+  },
+  {
+    name: 'ask-failed',
+    chat: 'error',
+    act: async page => {
+      await openPane(page, 'Ask');
+      await page.getByText('Couldn’t check the chat harness.').waitFor();
     },
   },
   {

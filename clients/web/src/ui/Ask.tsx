@@ -22,6 +22,8 @@ export interface AskTabProps {
   onNewThread: (selection: Selection | null) => void;
   onDraft: (text: string) => void;
   onSend: (text: string) => Promise<boolean>;
+  /** Asks the run again for its chat models after a failed check. */
+  onRetry: () => void;
 }
 
 const NO_HARNESS = 'This run offers no chat harness.';
@@ -35,9 +37,7 @@ export function AskTab(props: AskTabProps) {
     return (
       <>
         <PaneHead scope="Run" />
-        <p className="empty1">
-          {view.harness === 'checking' ? 'Checking the chat harness…' : NO_HARNESS}
-        </p>
+        <HarnessLine harness={view.harness} onRetry={props.onRetry} />
       </>
     );
   }
@@ -45,9 +45,33 @@ export function AskTab(props: AskTabProps) {
     <>
       <ThreadHead {...props} />
       <Thread view={view} />
-      {view.harness === 'available' ? <AskDock {...props} /> : null}
-      {view.harness === 'none' ? <p className="empty1">{NO_HARNESS}</p> : null}
+      {view.harness === 'available' ? (
+        <AskDock {...props} />
+      ) : (
+        <HarnessLine harness={view.harness} onRetry={props.onRetry} />
+      )}
     </>
+  );
+}
+
+/** Why there is no composer: the harness is being checked, the check failed, or there is none. */
+function HarnessLine({harness, onRetry}: {harness: AskView['harness']; onRetry: () => void}) {
+  if (harness === 'failed')
+    return (
+      <p className="empty1">
+        Couldn’t check the chat harness.{' '}
+        <button
+          type="button"
+          className="linkish"
+          title="Check the chat harness again"
+          onClick={onRetry}
+        >
+          Retry
+        </button>
+      </p>
+    );
+  return (
+    <p className="empty1">{harness === 'checking' ? 'Checking the chat harness…' : NO_HARNESS}</p>
   );
 }
 
@@ -103,20 +127,6 @@ function ThreadHead({view, menu, onMenu, onThread, onNewThread}: AskTabProps) {
               <span className="d">{thread.count}</span>
             </button>
           ))}
-          {available ? (
-            <>
-              <div className="sepl" />
-              <button
-                type="button"
-                role="menuitem"
-                className="it"
-                onClick={() => onNewThread(null)}
-              >
-                <Plus size={14} strokeWidth={1.5} aria-hidden />
-                New thread
-              </button>
-            </>
-          ) : null}
         </Popover>
       ) : null}
     </div>
