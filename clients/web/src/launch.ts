@@ -2,7 +2,15 @@
  * Launching a run (start, resume, reopen): what a gateway state means for the page waiting on it,
  * how a refusal reads, and the file locations in a failed run server's stderr.
  */
-import {type Gateway, HomeError, type RunRow} from './home-api.js';
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {
+  type Gateway,
+  type HomeClient,
+  HomeError,
+  type LaunchResult,
+  type RunRow,
+} from './home-api.js';
+import {runHref} from './route.js';
 
 export interface LaunchFailure {
   message: string;
@@ -145,4 +153,77 @@ export function locationText(root: string | null, location: FileLocation): strin
   const path =
     location.path.startsWith('/') || root === null ? location.path : `${root}/${location.path}`;
   return `${path}:${location.line}${location.column === null ? '' : `:${location.column}`}`;
+}
+const POLL_MS = 1_000;
+/** Two minutes of polls; a run server that has not attached by then is treated as stuck. */
+const MAX_POLLS = 120;
+const IDLE: LaunchState = {kind: 'idle'};
+const pause = (ms: number) =>
+  new Promise<void>(resolve => {
+    setTimeout(resolve, ms);
+  });
+
+/** Polls the project's runs until the launched run attaches, fails, or the page leaves. */
+async function follow(
+  client: HomeClient,
+  projectId: string,
+  result: LaunchResult,
+  alive: () => boolean,
+): Promise<LaunchPhase> {
+  let phase = gatewayPhase(result.gateway, null);
+  for (let polls = 0; phase.kind === 'waiting' && alive(); polls += 1) {
+    if (polls === MAX_POLLS) {
+      return failedWith(
+        'The run has not attached after two minutes. It may still start; check the home page.',
+      );
+    }
+    await pause(POLL_MS);
+    if (!alive()) break;
+    const {runs} = await client.runs(projectId);
+    phase = launchPhase(runs.find(row => row.run_id === result.run_id));
+  }
+  return phase;
+}
+
+export interface Launch {
+  state: LaunchState;
+  /** Sends a start, resume or open; once the run attaches, opens its page. */
+  start: (projectId: string, send: () => Promise<LaunchResult>) => void;
+  reset: () => void;
+}
+
+export function useLaunch(client: HomeClient, token: string): Launch {
+  const [state, setState] = useState<LaunchState>(IDLE);
+  const active = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const start = useCallback(
+    (projectId: string, send: () => Promise<LaunchResult>) => {
+      // One launch at a time: a second Start click before the first settles sends nothing.
+      if (active.current) return;
+      active.current = true;
+      setState({kind: 'sending'});
+      const settle = (next: LaunchState) => {
+        active.current = false;
+        if (mounted.current) setState(next);
+      };
+      send()
+        .then(async result => {
+          if (mounted.current) setState({kind: 'starting', runId: result.run_id});
+          const phase = await follow(client, projectId, result, () => mounted.current);
+          if (phase.kind === 'ready')
+            window.location.assign(runHref(token, projectId, phase.websocketUrl));
+          if (phase.kind === 'failed') settle({kind: 'failed', failure: phase.failure});
+        })
+        .catch((error: unknown) => settle(launchError(error)));
+    },
+    [client, token],
+  );
+  const reset = useCallback(() => setState(IDLE), []);
+  return {state, start, reset};
 }

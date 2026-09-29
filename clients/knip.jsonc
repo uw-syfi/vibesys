@@ -41,8 +41,9 @@
       // home-api.ts's wire types mirror plan 2's contract.py in full; setup-UI pages (later
       // tasks) consume only part of it at a time. setup.ts and launch.ts are this task's form
       // and launch models; the SetupView task that renders them lands later and will consume
-      // the rest of their surface.
-      "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts", "src/home-api.ts", "src/setup.ts", "src/launch.ts"]
+      // the rest of their surface. ui/Setup.tsx's Row and Hint serve the key and task-form rows
+      // of later tasks.
+      "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts", "src/home-api.ts", "src/setup.ts", "src/launch.ts", "src/ui/Setup.tsx"]
     }
   }
 }

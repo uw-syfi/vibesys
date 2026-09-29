@@ -6,6 +6,7 @@ import type {HomeClient} from './home-api.js';
 import {useHome, useNewRunShortcut} from './home-hooks.js';
 import {runSummary} from './rounds.js';
 import {type HomeView, homeHref, homeView} from './route.js';
+import {SetupView} from './SetupView.js';
 import {NewRunRow, Sidebar} from './ui/Sidebar.js';
 import {SIDE} from './ui-state.js';
 import './window.css';
@@ -32,6 +33,15 @@ function EmptyHome() {
   );
 }
 
+function HomeMain({view, client, token}: {view: HomeView; client: HomeClient; token: string}) {
+  switch (view.kind) {
+    case 'new':
+      return <SetupView client={client} token={token} />;
+    default:
+      return <EmptyHome />;
+  }
+}
+
 export interface HomeWindowProps {
   client: HomeClient;
   token: string;
@@ -56,7 +66,7 @@ export function HomeWindow({client, token}: HomeWindowProps) {
         nav={<NewRunRow href={newRun} on={view.kind === 'new'} />}
       />
       <main className="main">
-        <EmptyHome />
+        <HomeMain view={view} client={client} token={token} />
       </main>
     </div>
   );
