@@ -212,6 +212,10 @@ const RULE_CASES = [
     rule: 'desktop-is-standalone',
     files: {'desktop/src/main.ts': "import '../../web/src/index.js';\n"},
   },
+  {
+    rule: 'clients-do-not-depend-on-desktop',
+    files: {'web/src/index.ts': "import '../../desktop/src/main.js';\n"},
+  },
 ];
 
 async function violatedRules(files) {

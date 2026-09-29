@@ -16,8 +16,11 @@ function replayFixturePlugin(): Plugin {
   };
 }
 
-/** The home server (sub-project 2) listens here; `vibesys web home --port` changes it. */
-const HOME_PORT = process.env['VIBESYS_HOME_PORT'] ?? '8764';
+/**
+ * The home server (sub-project 2) listens here; `vibesys web home --port` changes it.
+ * An empty VIBESYS_HOME_PORT counts as unset, as in the desktop shell's launch policy.
+ */
+const HOME_PORT = process.env['VIBESYS_HOME_PORT'] || '8764';
 
 export default defineConfig({
   plugins: [react(), replayFixturePlugin()],

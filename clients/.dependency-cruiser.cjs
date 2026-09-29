@@ -64,6 +64,12 @@ module.exports = {
       to: {path: ['^(?:backend-client|core-state|tui|web)/', '/node_modules/@vibesys/']},
     },
     {
+      name: 'clients-do-not-depend-on-desktop',
+      severity: 'error',
+      from: {path: '^(?:backend-client|core-state|tui|web)/'},
+      to: {path: ['^desktop/', '/node_modules/@vibesys/desktop/']},
+    },
+    {
       // `tui/dev/` is the development replay harness. It is kept out of
       // `dist` by `rootDir: "src"`, but `tsconfig.check.json` widens the root so
       // the harness itself is typechecked, and that widening makes a src -> dev
