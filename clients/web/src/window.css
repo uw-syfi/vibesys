@@ -239,3 +239,8 @@ dialog.pal { padding: 0; margin: 12vh auto auto; }
 .pal .it.on { background: var(--bg-selected); }
 .pal .foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border-subtle); flex: none; }
 .pal .foot .count { margin-left: auto; }
+
+/* home (mockup #home) */
+a.nav { text-decoration: none; }
+.nav.on { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
+.empty { flex: 1; display: grid; place-items: center; color: var(--text-2); margin: 0; }

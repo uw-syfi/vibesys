@@ -36,12 +36,13 @@
     "web": {
       // The package's public surface. Vite (index.html -> src/main.tsx) and Playwright
       // (playwright.config.ts -> e2e/*.spec.ts) entries come from knip's plugins.
-      // e2e/gateway.ts is the harness's own public surface: specs use only part of it today.
+      // e2e/gateway.ts and e2e/home.ts are the harness's own public surface: specs use only part
+      // of it today (the setup screens' specs, later tasks, consume the rest of home.ts).
       // home-api.ts's wire types mirror plan 2's contract.py in full; setup-UI pages (later
       // tasks) consume only part of it at a time. setup.ts and launch.ts are this task's form
       // and launch models; the SetupView task that renders them lands later and will consume
       // the rest of their surface.
-      "entry": ["src/index.ts", "e2e/gateway.ts", "src/home-api.ts", "src/setup.ts", "src/launch.ts"]
+      "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts", "src/home-api.ts", "src/setup.ts", "src/launch.ts"]
     }
   }
 }

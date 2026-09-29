@@ -1,5 +1,5 @@
 /** Pure helpers shared by the view modules: formatting, prose, steers, backfill, run control. */
-import type {RunEvent} from '@vibesys/backend-client';
+import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
 import {
   type CoreState,
   hasRunEnded,
@@ -242,4 +242,13 @@ export function objectiveText(
   // ponytail: an abbreviation such as "e.g." ends the sentence early; the tooltip has the rest.
   const first = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
   return {first, full};
+}
+
+/**
+ * The open run's rounds note while the experiments query says the project has not attached: the
+ * run waits for it, or ended without it.
+ */
+export function attachNote(experiments: ProtocolResponse | null, ended: boolean): string | null {
+  if (experiments?.experiments_ready !== false) return null;
+  return ended ? 'The run ended before the project attached' : 'Waiting for the project to attach';
 }

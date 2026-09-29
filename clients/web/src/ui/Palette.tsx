@@ -87,6 +87,7 @@ function PaletteList({
               >
                 <span className="lbl">{entry.label}</span>
                 {entry.detail === '' ? null : <span className="d">{entry.detail}</span>}
+                {entry.keys === undefined ? null : <span className="kbd">{entry.keys}</span>}
               </button>
             ))}
           </div>

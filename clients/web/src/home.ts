@@ -1,20 +1,12 @@
 /**
- * Projects and runs for the sidebar. `HomeApi` mirrors the home server's `GET /api/projects` and
- * `GET /api/projects/{id}/runs` (sub-project 2); until it exists the fixture answers, and the open
- * run always appears because the page's own session supplies it.
+ * Projects and runs for the sidebar. `HomeApi` is the home server's `GET /api/projects` and
+ * `GET /api/projects/{id}/runs`; `fixtureHomeApi` answers on pages without a home server (replay,
+ * a gateway's own page), where the open run is listed from the page's own session.
  */
 import type {CoreRunStatus} from '@vibesys/core-state';
+import type {GatewayState, HomeClient, RunRow} from './home-api.js';
+import {homeHref, runHref} from './route.js';
 
-/** Plan 2's `GatewayState` for `GET /api/projects/{id}/runs`, verbatim. */
-type GatewayState =
-  | 'live'
-  | 'starting'
-  | 'ended_serving'
-  | 'failed'
-  | 'stale'
-  | 'external'
-  | 'reopened'
-  | 'none';
 type RunOutcome = 'running' | 'paused' | 'completed' | 'failed' | 'stopped' | null;
 
 export interface HomeProject {
@@ -131,4 +123,89 @@ export function relativeTime(iso: string, now: Date): string {
     if (seconds >= size) return `${Math.floor(seconds / size)}${unit}`;
   }
   return 'now';
+}
+
+export interface Listing {
+  projects: HomeProject[];
+  runs: HomeRun[];
+}
+
+export const EMPTY_LISTING: Listing = {projects: [], runs: []};
+
+/** Every project, and the runs of each project that answered: one failing project drops only its runs. */
+export async function loadListing(home: HomeApi): Promise<Listing> {
+  const projects = await home.projects().catch((): HomeProject[] => []);
+  const settled = await Promise.allSettled(projects.map(project => home.runs(project.id)));
+  return {
+    projects,
+    runs: settled.flatMap(result => (result.status === 'fulfilled' ? result.value : [])),
+  };
+}
+
+const LOOP_TITLES: Readonly<Record<string, string>> = {
+  agent: 'Agent run',
+  'profile-guided': 'Profile-guided run',
+  dynamic: 'Dynamic run',
+  plain: 'Plain run',
+  evolve: 'Evolve run',
+};
+
+/** The objective's first line, as the run page titles itself; else the task; else the loop. */
+function rowTitle(row: RunRow): string {
+  const first = row.objective?.split('\n', 1)[0]?.trim() ?? '';
+  if (first !== '') return first;
+  if (row.task !== null) return row.task;
+  return (row.loop === null ? undefined : LOOP_TITLES[row.loop]) ?? 'Run';
+}
+
+const ROW_OUTCOMES: Record<RunRow['status'], RunOutcome> = {
+  active: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  unknown: null,
+};
+
+/**
+ * Where a row leads: a gateway this origin may use opens the run page; an external gateway only
+ * accepts its own page; a finished run without one reopens; a launch in flight or a failed launch
+ * has nothing to open yet.
+ */
+function rowUrl(row: RunRow, projectId: string, token: string): string | null {
+  if (row.gateway.state === 'external') return row.gateway.url;
+  const serving = [row.gateway, row.reopen].find(
+    gateway =>
+      gateway !== null &&
+      gateway.websocket_url !== null &&
+      !gateway.origin_mismatch &&
+      gateway.state !== 'failed' &&
+      gateway.state !== 'stale',
+  );
+  if (serving?.websocket_url != null) return runHref(token, projectId, serving.websocket_url);
+  if (row.status === 'active' || row.gateway.state === 'failed') return null;
+  return homeHref(token, {kind: 'open', projectId, runId: row.run_id});
+}
+
+export function homeRun(row: RunRow, projectId: string, token: string): HomeRun {
+  return {
+    id: row.run_id,
+    projectId,
+    title: rowTitle(row),
+    gateway: row.gateway.state,
+    outcome: ROW_OUTCOMES[row.status],
+    updatedAt: row.created_at ?? '',
+    url: rowUrl(row, projectId, token),
+  };
+}
+
+export function httpHomeApi(client: HomeClient, token: string): HomeApi {
+  return {
+    projects: async () =>
+      (await client.projects()).projects.map(project => ({
+        id: project.id,
+        name: project.name,
+        path: project.root,
+      })),
+    runs: async projectId =>
+      (await client.runs(projectId)).runs.map(row => homeRun(row, projectId, token)),
+  };
 }

@@ -9,7 +9,8 @@ export type Intent =
   | {kind: 'copyRunId'}
   | {kind: 'steer'}
   | {kind: 'sidebar'}
-  | {kind: 'reveal'; key: string; turn: string};
+  | {kind: 'reveal'; key: string; turn: string}
+  | {kind: 'newRun'};
 
 export interface PaletteItem {
   id: string;
@@ -17,6 +18,8 @@ export interface PaletteItem {
   label: string;
   detail: string;
   intent: Intent;
+  /** The item's own keyboard shortcut, shown at the row's end. */
+  keys?: string;
 }
 
 export interface PaletteInput {
@@ -32,6 +35,8 @@ export interface PaletteInput {
   selected: number | null;
   pane: PaneTab | null;
   sidebarShown: boolean;
+  /** The page came from the home server: the sidebar shows New run. */
+  newRun: boolean;
   /** The selected round's latest turn that recorded a prompt. */
   prompt: {turn: string; detail: string} | null;
   /** The selected round's latest turn that recorded todos. */
@@ -81,6 +86,8 @@ function runItems(input: PaletteInput): PaletteItem[] {
       item('run-steer', 'Run', 'Steer the next agent call', 'focus the composer', {kind: 'steer'}),
     );
   if (input.hasRunId) items.push(item('run-copy', 'Run', 'Copy run ID', '', {kind: 'copyRunId'}));
+  if (input.newRun)
+    items.push({...item('run-new', 'Run', 'New run', '', {kind: 'newRun'}), keys: '⌘N'});
   return items;
 }
 

@@ -4,6 +4,7 @@ import {test} from 'node:test';
 import type {RunEvent} from '@vibesys/backend-client';
 import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/core-state';
 import {
+  attachNote,
   endedWord,
   needsOlder,
   pathShortener,
@@ -184,4 +185,13 @@ test('tool durations: one decimal under a minute, then minutes and zero-padded s
     '1m 00s',
     '1m 05s',
   ]);
+});
+
+test('attach note: waiting until the project attaches, or saying the run ended first', () => {
+  const experiments = (ready: boolean) => ({request_id: 'q', ok: true, experiments_ready: ready});
+  assert.equal(attachNote(null, false), null, 'not loaded yet');
+  assert.equal(attachNote(experiments(false), false), 'Waiting for the project to attach');
+  assert.equal(attachNote(experiments(false), true), 'The run ended before the project attached');
+  assert.equal(attachNote(experiments(true), true), null);
+  assert.equal(attachNote(experiments(true), false), null);
 });

@@ -1,4 +1,4 @@
-import {Check, Pause, Square, Undo2} from 'lucide-react';
+import {Check, Pause, Plus, Square, Undo2} from 'lucide-react';
 import type {ReactNode} from 'react';
 import {type HomeRun, type ProjectSection, relativeTime} from '../home.js';
 import {type RoundRow, type RunSummary, signed} from '../rounds.js';
@@ -72,6 +72,8 @@ export interface SidebarProps {
   /** The page's own run: it lists its rounds. */
   current: string | null;
   summary: RunSummary;
+  /** A line under the open run's rounds, in place of the planned count (the project has not attached). */
+  note?: string | null;
   selected: number | null;
   now: Date;
   onRound: (round: number) => void;
@@ -87,6 +89,7 @@ export function Sidebar({
   sections,
   current,
   summary,
+  note = null,
   selected,
   now,
   onRound,
@@ -108,6 +111,7 @@ export function Sidebar({
                   key={run.id}
                   run={run}
                   summary={summary}
+                  note={note}
                   selected={selected}
                   now={now}
                   onRound={onRound}
@@ -127,12 +131,14 @@ export function Sidebar({
 function CurrentRun({
   run,
   summary,
+  note,
   selected,
   now,
   onRound,
 }: {
   run: HomeRun;
   summary: RunSummary;
+  note: string | null;
   selected: number | null;
   now: Date;
   onRound: (round: number) => void;
@@ -163,7 +169,11 @@ function CurrentRun({
             <span className="d">{row.delta === null ? '' : signed(row.delta)}</span>
           </button>
         ))}
-        {summary.planned ? <div className="rnd more">{summary.planned} more planned</div> : null}
+        {note !== null ? (
+          <div className="rnd more">{note}</div>
+        ) : summary.planned ? (
+          <div className="rnd more">{summary.planned} more planned</div>
+        ) : null}
       </div>
     </>
   );
@@ -194,6 +204,17 @@ function OtherRun({run, now}: {run: HomeRun; now: Date}) {
   return (
     <a className="run" href={run.url} title={runHint(run)}>
       {body}
+    </a>
+  );
+}
+
+/** The sidebar's first row: start another run (mockup `#home`). */
+export function NewRunRow({href, on}: {href: string; on: boolean}) {
+  return (
+    <a className={on ? 'nav on' : 'nav'} href={href} aria-current={on ? 'page' : undefined}>
+      <Plus size={16} strokeWidth={1.5} aria-hidden />
+      New run
+      <span className="kbd">⌘N</span>
     </a>
   );
 }

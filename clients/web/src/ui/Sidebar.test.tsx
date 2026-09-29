@@ -52,3 +52,27 @@ test('the sidebar lists the open run with its rounds, verdict glyphs and deltas'
   assert.match(html, /6 more planned/);
   assert.match(html, /<span class="meta">now<\/span>/);
 });
+
+test('the open run says when its project has not attached, in place of planned rounds', () => {
+  const summary = runSummary(initialCoreState(), [], [], null);
+  const open = openRun({
+    runId: 'run-1',
+    title: 'Increase decode throughput',
+    project: 'llm-serve',
+    status: 'running',
+    updatedAt: null,
+  });
+  const html = renderToStaticMarkup(
+    <Sidebar
+      width={276}
+      sections={sidebarSections([], [], open)}
+      current="run-1"
+      summary={summary}
+      note="Waiting for the project to attach"
+      selected={null}
+      now={new Date('2026-09-25T14:02:00Z')}
+      onRound={() => {}}
+    />,
+  );
+  assert.match(html, /<div class="rnd more">Waiting for the project to attach<\/div>/);
+});

@@ -31,6 +31,7 @@ const BASE: PaletteInput = {
   selected: null,
   pane: null,
   sidebarShown: true,
+  newRun: false,
   prompt: {turn: 'x1', detail: 'round 2, attempt 1'},
   todos: {turn: 'x1', detail: 'round 2'},
 };
@@ -97,4 +98,18 @@ test('filtering matches group, label and detail, ignoring case', () => {
     ['Show the prompt'],
   );
   assert.equal(filterPalette(items, '  ').length, items.length);
+});
+
+test('New run is offered with its shortcut only when the sidebar shows it', () => {
+  const entry = paletteItems({...BASE, newRun: true}).find(item => item.id === 'run-new');
+  assert.deepEqual(
+    entry && {group: entry.group, label: entry.label, keys: entry.keys, intent: entry.intent},
+    {
+      group: 'Run',
+      label: 'New run',
+      keys: '⌘N',
+      intent: {kind: 'newRun'},
+    },
+  );
+  assert.equal(labels(BASE).includes('Run: New run'), false);
 });

@@ -9,11 +9,11 @@ import {
   useEffect,
   useMemo,
   useReducer,
-  useState,
   useSyncExternalStore,
 } from 'react';
-import {latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
-import {type HomeApi, type HomeProject, type HomeRun, openRun, sidebarSections} from './home.js';
+import {attachNote, latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
+import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
+import {useHome, useNewRunShortcut} from './home-hooks.js';
 import {type Intent, type PaletteInput, paletteItems} from './palette.js';
 import {
   type RetainedText,
@@ -27,6 +27,7 @@ import {
   type StatusLine,
   statusLine,
 } from './rounds.js';
+import type {RunLinks} from './route.js';
 import type {WorkspaceSession, WorkspaceState} from './session.js';
 import {
   type LineStat,
@@ -43,7 +44,7 @@ import {ExperimentsTab} from './ui/Experiments.js';
 import {Palette} from './ui/Palette.js';
 import {Pane, Placeholder} from './ui/Pane.js';
 import {Resizer} from './ui/Resizer.js';
-import {Sidebar} from './ui/Sidebar.js';
+import {NewRunRow, Sidebar} from './ui/Sidebar.js';
 import {SteerComposer} from './ui/SteerComposer.js';
 import {
   MoreMenu,
@@ -76,6 +77,7 @@ const ACTION_WORDS = {pause: 'Pause', resume: 'Resume', steer: 'Steer', stop: 'S
 export interface AppProps {
   session: WorkspaceSession;
   home: HomeApi;
+  links: RunLinks | null;
 }
 
 interface View {
@@ -96,13 +98,6 @@ interface History {
   error: string | null;
   onRetry: () => void;
 }
-
-interface Listing {
-  projects: HomeProject[];
-  runs: HomeRun[];
-}
-
-const EMPTY_LISTING: Listing = {projects: [], runs: []};
 
 function useRunView(state: WorkspaceState, ui: UiState): View {
   const {core, captured, runId, queries, sent} = state;
@@ -131,25 +126,6 @@ function useRunView(state: WorkspaceState, ui: UiState): View {
     retained: retainedText(summary),
     ended: hasRunEnded(core),
   };
-}
-
-function useHome(home: HomeApi): Listing {
-  const [listing, setListing] = useState(EMPTY_LISTING);
-  useEffect(() => {
-    let current = true;
-    home
-      .projects()
-      .then(async projects => {
-        const runs = (await Promise.all(projects.map(project => home.runs(project.id)))).flat();
-        if (current) setListing({projects, runs});
-      })
-      // ponytail: a failed listing leaves the open run only; sub-project 4 adds its error state.
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, [home]);
-  return listing;
 }
 
 /** Backfills older events while the selected round (or a steer it consumed) sits below the floor. */
@@ -243,9 +219,17 @@ interface SectionProps {
   ui: UiState;
   dispatch: Dispatch<UiAction>;
   session: WorkspaceSession;
+  links: RunLinks | null;
 }
 
-function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listing: Listing}) {
+function RunSidebar({
+  state,
+  view,
+  ui,
+  dispatch,
+  links,
+  listing,
+}: SectionProps & {listing: Listing}) {
   const open = openRun({
     runId: state.runId,
     title: view.title.title,
@@ -259,20 +243,24 @@ function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listin
       sections={sidebarSections(listing.projects, listing.runs, open)}
       current={state.runId}
       summary={view.summary}
+      note={attachNote(state.queries.experiments.response, view.ended)}
       selected={view.round}
       now={new Date()}
       onRound={round => dispatch({type: 'round', round, live: view.live})}
       head={<SidebarToggle shown onToggle={() => dispatch({type: 'sidebar', open: false})} />}
       nav={
-        <button
-          type="button"
-          className="nav"
-          onClick={() => dispatch({type: 'palette', open: true})}
-        >
-          <Search size={16} strokeWidth={1.5} aria-hidden />
-          Search and commands
-          <span className="kbd">⌘K</span>
-        </button>
+        <>
+          {links === null ? null : <NewRunRow href={links.newRun} on={false} />}
+          <button
+            type="button"
+            className="nav"
+            onClick={() => dispatch({type: 'palette', open: true})}
+          >
+            <Search size={16} strokeWidth={1.5} aria-hidden />
+            Search and commands
+            <span className="kbd">⌘K</span>
+          </button>
+        </>
       }
       resizer={
         <Resizer
@@ -493,6 +481,7 @@ interface IntentContext {
   session: WorkspaceSession;
   state: WorkspaceState;
   toggleSidebar: () => void;
+  links: RunLinks | null;
 }
 
 function runIntent(intent: Intent, context: IntentContext): void {
@@ -522,6 +511,9 @@ function runIntent(intent: Intent, context: IntentContext): void {
           ?.scrollIntoView({block: 'start'}),
       );
       return;
+    case 'newRun':
+      if (context.links !== null) window.location.assign(context.links.newRun);
+      return;
   }
 }
 
@@ -531,6 +523,7 @@ function paletteInput(
   view: View,
   ui: UiState,
   sidebarShown: boolean,
+  newRun: boolean,
 ): PaletteInput {
   const only = agentFilter(ui, view.round);
   const visible = (view.transcript?.turns ?? []).filter(turn => only === null || turn.id === only);
@@ -549,26 +542,28 @@ function paletteInput(
     selected: view.round,
     pane: ui.pane,
     sidebarShown,
+    newRun,
     prompt:
       withPrompt === undefined ? null : {turn: withPrompt.id, detail: where(withPrompt.phase)},
     todos: withTodos === undefined ? null : {turn: withTodos.id, detail: where(withTodos.phase)},
   };
 }
 
-export function App({session, home}: AppProps) {
+export function App({session, home, links}: AppProps) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [ui, dispatch] = useRunUi(state.runId);
   const view = useRunView(state, ui);
   const listing = useHome(home);
   const history = useBackfill(session, state, view.round);
   usePaletteShortcut(dispatch);
+  useNewRunShortcut(links?.newRun ?? null);
   const width = useWindowWidth();
   const layout = frame(width, ui);
   const selectAgent = useCallback(
     (id: string) => dispatch({type: 'agent', id, round: view.round}),
     [dispatch, view.round],
   );
-  const section: SectionProps = {state, view, ui, dispatch, session};
+  const section: SectionProps = {state, view, ui, dispatch, session, links};
   const toggleSidebar = () => {
     if (layout.sidebar) return dispatch({type: 'sidebar', open: false});
     dispatch({type: 'sidebar', open: true});
@@ -603,8 +598,8 @@ export function App({session, home}: AppProps) {
       )}
       {ui.palette ? (
         <Palette
-          items={paletteItems(paletteInput(state, view, ui, layout.sidebar))}
-          onRun={entry => runIntent(entry.intent, {dispatch, session, state, toggleSidebar})}
+          items={paletteItems(paletteInput(state, view, ui, layout.sidebar, links !== null))}
+          onRun={entry => runIntent(entry.intent, {dispatch, session, state, toggleSidebar, links})}
           onClose={() => dispatch({type: 'palette', open: false})}
         />
       ) : null}
