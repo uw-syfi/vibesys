@@ -5,9 +5,7 @@ import type {
   ServerTransport,
 } from '@vibesys/backend-client';
 
-export async function fetchReplay(
-  url = '/__vibesys/fixtures/framework-events.jsonl',
-): Promise<string> {
+export async function fetchReplay(url = '/__vibesys/fixtures/demo-run.jsonl'): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Replay fixture request failed with ${response.status}`);
   return response.text();

@@ -25,8 +25,8 @@ See [Web UI development](../../docs/contributing/web-development.md) for replay,
 real-project, and remote-host workflows.
 
 Without a gateway (`vibesys web dev`, or `pnpm --filter @vibesys/web dev`),
-the page replays `clients/tui/dev/fixtures/framework-events.jsonl` in the
-browser and offers a form to connect to a live gateway URL.
+the page replays `src/fixtures/demo-run.jsonl` in the browser and offers a
+form to connect to a live gateway URL.
 
 ## Behavior
 
@@ -55,12 +55,10 @@ browser and offers a form to connect to a live gateway URL.
 pnpm --dir clients --filter @vibesys/web check
 pnpm --dir clients --filter @vibesys/web test
 pnpm --dir clients --filter @vibesys/web build
-node clients/web/scripts/capture.mjs --out /tmp/vs-web-frames --strict
+pnpm --dir clients --filter @vibesys/web test:e2e
+CAPTURE_DIR=/tmp/vs-web-frames pnpm --dir clients --filter @vibesys/web exec playwright test screens
 ```
 
-The capture script serves `dist` with `vite preview`, replays
-`clients/tui/dev/fixtures/queue-rs-payloads.jsonl` and
-`src/fixtures/stub-run.jsonl` through a mocked `/ws` gateway, and writes each
-state at 1440, 1024, 900, and 390 px in dark and light. `--live <url>` drives
-a running gateway's capability URL instead. A PASS checks text and layout
-overflow only; review the frames by eye.
+`e2e/gateway.ts` mocks the gateway's `/ws` socket over `src/fixtures/demo-run.jsonl`.
+`app.spec.ts` checks behaviour; `screens.spec.ts` writes each screen at 1440 and 1024
+in dark and light when `CAPTURE_DIR` is set. Review every PNG by eye.

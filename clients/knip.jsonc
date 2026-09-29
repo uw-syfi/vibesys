@@ -34,8 +34,10 @@
       "project": ["src/**/*.ts", "dev/**/*.ts", "benchmarks/**/*.ts"]
     },
     "web": {
-      // The package's public surface, and the hand-run screenshot capture (`node web/scripts/capture.mjs`).
-      "entry": ["src/index.ts", "scripts/*.mjs"]
+      // The package's public surface. Vite (index.html -> src/main.tsx) and Playwright
+      // (playwright.config.ts -> e2e/*.spec.ts) entries come from knip's plugins.
+      // e2e/gateway.ts is the harness's own public surface: specs use only part of it today.
+      "entry": ["src/index.ts", "e2e/gateway.ts"]
     }
   }
 }
