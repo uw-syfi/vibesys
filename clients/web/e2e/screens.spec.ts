@@ -341,6 +341,15 @@ const SETUP_SCREENS: SetupScreen[] = [
     url: HOME,
     act: page => see(page, 'Select a run, or choose New run in the sidebar'),
   },
+  {
+    name: 'home-menu',
+    url: HOME,
+    act: async page => {
+      await see(page, 'Select a run, or choose New run in the sidebar');
+      await page.getByRole('button', {name: 'More'}).click();
+      await page.getByRole('menuitemradio', {name: 'System'}).waitFor();
+    },
+  },
   {name: 'setup', url: NEW, act: ready},
   {name: 'checking', url: NEW, options: {slow: [ROOT]}, act: page => see(page, 'Checking…')},
   {

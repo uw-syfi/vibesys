@@ -348,7 +348,7 @@ a.it { text-decoration: none; }
 .pop .gh { font-size: 11px; color: var(--text-3); padding: 6px 10px 2px; }
 .pop .grp { border: 0; margin: 0; padding: 0; min-width: 0; }
 .pop .it .d { margin-left: auto; color: var(--text-2); font-size: 12px; }
-.pop .it.on { background: var(--bg-hover); }
+.pop .it.on { background: var(--bg-selected); }
 .thread { flex: 1; overflow: auto; padding: 16px; }
 .thread .human { margin-top: 0; }
 .answer { margin: 8px 0 18px; }
