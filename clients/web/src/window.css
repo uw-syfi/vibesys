@@ -323,3 +323,5 @@ dialog.commit { width: 440px; padding: 14px; border: 1px solid var(--border); bo
 .linkish { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
 .logline { margin: 0 0 12px; font-size: 12px; color: var(--text-2); }
 .failacts { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+
+a.it { text-decoration: none; }

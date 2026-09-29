@@ -1,6 +1,6 @@
 import {expect, type Page, test} from '@playwright/test';
 import {runHref} from '../src/route.js';
-import {mockGateway} from './gateway.js';
+import {FINISHED, mockGateway} from './gateway.js';
 import {
   type FakeHome,
   FINISHED_RUN,
@@ -487,4 +487,45 @@ test('a run server that dies while starting shows its stderr tail', async ({page
     `Copy ${ROOT}/benches/decode.rs:41:14`,
   );
   await expect(page).not.toHaveURL(/gateway=/);
+});
+
+test('a finished run in the sidebar reopens read-only', async ({page}) => {
+  const home = await mockHome(page);
+  await mockGateway(page, {through: FINISHED});
+  await page.goto(HOME);
+  await sidebar(page)
+    .getByRole('link', {name: /Reduce p99 prefill latency/})
+    .click();
+  await expect(page).toHaveURL(/gateway=/);
+  await expect(page.locator('.titlebar')).toContainText('Completed');
+  expect(posts(home, `/api/projects/${PROJECT_ID}/runs/${FINISHED_RUN}/open`)).toHaveLength(1);
+});
+
+test("Resume… from a finished run's menu resumes it; a smaller budget is refused", async ({
+  page,
+}) => {
+  const home = await mockHome(page);
+  await mockGateway(page, {through: FINISHED});
+  await page.goto(runHref('home', PROJECT_ID, GATEWAY_WS));
+  await expect(page.locator('.titlebar')).toContainText('Completed');
+  await page.getByRole('button', {name: 'More'}).click();
+  await page.getByRole('menuitem', {name: 'Resume run…'}).click();
+  await expect(page).toHaveURL(new RegExp(`#resume=${PROJECT_ID}/`));
+  await page.getByLabel('Budget').fill('6');
+  await page.getByRole('button', {name: 'Resume run'}).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'The run already has a budget of 12; resume with at least that.',
+  );
+  await page.getByLabel('Budget').fill('20');
+  await page.getByRole('button', {name: 'Resume run'}).click();
+  await expect(page).toHaveURL(/gateway=/);
+  expect(posts(home, '/resume').map(request => request.body)).toEqual([{budget: 6}, {budget: 20}]);
+});
+
+test('a live run offers no Resume', async ({page}) => {
+  await mockHome(page);
+  await mockGateway(page);
+  await page.goto(runHref('home', PROJECT_ID, GATEWAY_WS));
+  await page.getByRole('button', {name: 'More'}).click();
+  await expect(page.getByRole('menuitem', {name: 'Resume run…'})).toHaveCount(0);
 });

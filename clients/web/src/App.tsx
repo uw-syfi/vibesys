@@ -302,6 +302,11 @@ function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: 
         onMenu={menu => dispatch({type: 'menu', menu})}
         onStop={stop}
       >
+        {props.links !== null && view.ended && state.runId !== null ? (
+          <a role="menuitem" className="it" href={props.links.resume(state.runId)}>
+            Resume run…
+          </a>
+        ) : null}
         <button
           type="button"
           role="menuitem"
