@@ -292,6 +292,7 @@ def _persist_run(root: Path, run_id: str, *, max_rounds: int = 3) -> None:
 def test_resume_keeps_the_recorded_loop_and_refuses_a_smaller_budget(runs_home: Home) -> None:
     key, root = _project(runs_home)
     _persist_run(root, "plain-run", max_rounds=3)
+    assert _rows(runs_home, key)["plain-run"]["budget"] == 3
 
     smaller = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {"budget": 2}).json()
     resumed = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {"budget": 5}).json()

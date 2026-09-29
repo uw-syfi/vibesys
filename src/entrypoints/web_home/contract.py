@@ -192,9 +192,13 @@ class RecentProject(ProjectRef):
 
 
 class ProjectList(_Model):
-    """Response of ``GET /api/projects`` and the on-disk recent-projects file."""
+    """Response of ``GET /api/projects`` and the on-disk recent-projects file.
+
+    ``home`` is the user's home directory, for display only; the file omits it.
+    """
 
     projects: list[RecentProject]
+    home: str | None = None
 
 
 class DriverOption(_Model):
@@ -397,7 +401,10 @@ class Gateway(_Model):
 
 
 class RunRow(_Model):
-    """One run, newest first; ``reopen`` is its read-only gateway when one is serving."""
+    """One run, newest first; ``reopen`` is its read-only gateway when one is serving.
+
+    ``budget`` is the recorded total of the run's loop budget flag, the floor for a resume.
+    """
 
     run_id: str
     loop: str | None
@@ -405,6 +412,7 @@ class RunRow(_Model):
     rounds: int
     gateway: Gateway
     reopen: Gateway | None = None
+    budget: int | None = None
     error: str | None = None
     task: str | None = None
     objective: str | None = None

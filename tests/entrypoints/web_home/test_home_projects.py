@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from tests.entrypoints.web_home.support import make_project
@@ -58,10 +59,14 @@ def test_validated_git_work_trees_become_recent_projects(home: Home) -> None:
     for path in (first, second, home.workspace / "plain", first):
         home.post("/api/projects/validate", {"path": str(path)})
 
-    projects = home.get("/api/projects").json()["projects"]
+    listing = home.get("/api/projects").json()
+    projects = listing["projects"]
 
     assert [p["root"] for p in projects] == [str(first), str(second)]
     assert projects[0]["last_opened"] == "2026-09-28T12:00:00+00:00"
+    assert listing["home"] == home.config.environ["HOME"]
+    stored = next((home.config.state_home / "web").glob("*recent*.json")).read_text()
+    assert "home" not in json.loads(stored)
 
 
 def test_validate_rejects_paths_outside_the_roots(home: Home) -> None:

@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
     from entrypoints.web_home.context import HomeConfig, Request
     from vibesys.api import RunStore
-    from vs_project.api import OrchestrationRunManifest
+    from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest
 
 _RECORD_POLL_SECONDS = 0.05
 _REAP_SECONDS = 5.0
@@ -462,6 +462,15 @@ def _live_gateway(root: Path, live: _Live) -> Gateway:
     return _connected(live.record, state)
 
 
+def _recorded_budget(descriptor: OrchestrationDescriptor) -> int | None:
+    """Return the run's recorded loop budget total, or ``None`` if the app cannot resume it."""
+    selection = _POLICY_CLI_SELECTION.get(descriptor.id)
+    if selection is None:
+        return None
+    recorded = descriptor.options.get(budget_destination(LOOPS[selection[0]][0]))
+    return recorded if isinstance(recorded, int) else None
+
+
 def resume_run(request: Request) -> LaunchResult:
     """``POST .../runs/{run}/resume``: resume; the CLI restores the recorded configuration.
 
@@ -487,8 +496,8 @@ def resume_run(request: Request) -> LaunchResult:
             raise ApiError(ErrorCode.NOT_RESUMABLE, message)
         loop = _POLICY_CLI_SELECTION[descriptor.id][0]
         flag = LOOPS[loop][0]
-        recorded = descriptor.options.get(budget_destination(flag))
-        if body.budget is not None and isinstance(recorded, int) and body.budget < recorded:
+        recorded = _recorded_budget(descriptor)
+        if body.budget is not None and recorded is not None and body.budget < recorded:
             message = f"{flag} is the run's total limit and cannot go below {recorded}"
             raise ApiError(ErrorCode.BUDGET_DECREASE, message, details={"recorded": recorded})
         _require_no_live(config, root)
@@ -742,6 +751,7 @@ def _row(
         rounds=len(view.rounds),
         gateway=gateway,
         reopen=reopen,
+        budget=_recorded_budget(manifest.orchestration),
         objective=objective,
         **identity,
     )
