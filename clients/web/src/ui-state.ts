@@ -29,6 +29,8 @@ export interface UiState {
   experimentsView: 'hypotheses' | 'design';
   /** The Ask thread on screen. */
   thread: string;
+  /** The model a thread created here was started on, shown until the thread's record arrives. */
+  threadModel: {provider: string; model: string} | null;
   /** Unsent composer text; a note can replace either (drafts only, nothing is sent). */
   drafts: {steer: string; ask: string};
 }
@@ -47,7 +49,7 @@ export type UiAction =
   | {type: 'palette'; open: boolean}
   | {type: 'evidence'; round: number}
   | {type: 'experimentsView'; view: 'hypotheses' | 'design'}
-  | {type: 'thread'; id: string}
+  | {type: 'thread'; id: string; model?: {provider: string; model: string} | null}
   | {type: 'draft'; target: 'steer' | 'ask'; text: string};
 
 export const SIDE = {min: 220, max: 380, initial: 276} as const;
@@ -69,6 +71,7 @@ export const INITIAL_UI: UiState = {
   evidence: null,
   experimentsView: 'hypotheses',
   thread: DEFAULT_CHAT_THREAD_ID,
+  threadModel: null,
   drafts: {steer: '', ask: ''},
 };
 
@@ -102,6 +105,7 @@ export function forRun(state: UiState, runId: string | null): UiState {
     palette: false,
     evidence: null,
     thread: DEFAULT_CHAT_THREAD_ID,
+    threadModel: null,
     drafts: INITIAL_UI.drafts,
   };
 }
@@ -152,7 +156,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
     case 'experimentsView':
       return {...state, experimentsView: action.view};
     case 'thread':
-      return {...state, thread: action.id, menu: null};
+      return {...state, thread: action.id, threadModel: action.model ?? null, menu: null};
     case 'draft':
       return {...state, drafts: {...state.drafts, [action.target]: action.text}};
   }

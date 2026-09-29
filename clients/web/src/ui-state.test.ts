@@ -96,8 +96,18 @@ test('drafts and the Ask thread belong to one run', () => {
     [state.drafts, state.thread, state.menu],
     [{steer: 'Measure first.', ask: 'Why?'}, 't2', null],
   );
-  const next = forRun(state, 'run-2');
-  assert.deepEqual([next.drafts, next.thread], [{steer: '', ask: ''}, 'default']);
+  const created = uiReducer(state, {
+    type: 'thread',
+    id: 't3',
+    model: {provider: 'claude', model: 'sonnet'},
+  });
+  assert.deepEqual(created.threadModel, {provider: 'claude', model: 'sonnet'});
+  assert.equal(uiReducer(created, {type: 'thread', id: 't2'}).threadModel, null);
+  const next = forRun(created, 'run-2');
+  assert.deepEqual(
+    [next.drafts, next.thread, next.threadModel],
+    [{steer: '', ask: ''}, 'default', null],
+  );
 });
 
 test('the sidebar yields before the transcript drops below 560px', () => {

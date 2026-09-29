@@ -396,7 +396,13 @@ export class WorkspaceSession {
       }
     } catch (error) {
       if (generation !== this.#runGeneration) return;
-      this.#settleAsk(sent.id, {error: commandMessage(error)});
+      // The stream delivered the recorded answer before the connection dropped: the thread shows
+      // it, so the question is answered, not failed (a failed one goes back into the composer).
+      if (recordedAfter(this.#state.captured, sent)) {
+        this.#set({asks: this.#state.asks.filter(ask => ask.id !== sent.id)});
+      } else {
+        this.#settleAsk(sent.id, {error: commandMessage(error)});
+      }
     }
   }
 
@@ -570,6 +576,17 @@ export const browserLifecycle: BrowserLifecycle = {
     window.removeEventListener(type, listener);
   },
 };
+
+/** A `chat` event recorded for `sent`: same thread and text, after it was sent. */
+function recordedAfter(captured: readonly RunEvent[], sent: SentAsk): boolean {
+  return captured.some(
+    event =>
+      event.type === 'chat' &&
+      event.text === sent.text &&
+      (event.sequence ?? 0) > sent.afterSequence &&
+      (event.chat_thread_id ?? DEFAULT_CHAT_THREAD_ID) === sent.threadId,
+  );
+}
 
 /** Adds captured event types not yet held, keeping sequence order. Returns `held` when nothing is new. */
 function capture(held: readonly RunEvent[], events: readonly RunEvent[]): readonly RunEvent[] {

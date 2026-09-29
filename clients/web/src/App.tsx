@@ -184,8 +184,19 @@ function useAsk(
         checking,
         failed,
         selected: ui.thread,
+        picked: ui.threadModel,
       }),
-    [core.chatThreads, core.chatTranscripts, captured, asks, options, checking, failed, ui.thread],
+    [
+      core.chatThreads,
+      core.chatTranscripts,
+      captured,
+      asks,
+      options,
+      checking,
+      failed,
+      ui.thread,
+      ui.threadModel,
+    ],
   );
   // Options are asked for where they show (Ask, Notes, the palette), again as the run's status
   // moves (a run still starting reports none yet), and when the connection returns (which also
@@ -215,7 +226,7 @@ function useAsk(
     setFailure(null);
     dispatch({type: 'menu', menu: null});
     session.createThread(selection).then(
-      id => dispatch({type: 'thread', id}),
+      id => dispatch({type: 'thread', id, model: selection}),
       (reason: unknown) =>
         setFailure({
           runId,

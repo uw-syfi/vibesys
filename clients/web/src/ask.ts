@@ -54,6 +54,8 @@ export interface AskInput {
   /** The options query's last attempt failed. */
   failed: boolean;
   selected: string;
+  /** The model the selected thread was created on here, until its record arrives. */
+  picked: {provider: string; model: string} | null;
 }
 
 const HARNESS_NAMES: Readonly<Record<string, string>> = {
@@ -158,8 +160,8 @@ export function askView(input: AskInput): AskView {
     id: input.selected,
     title: '',
     driver: null,
-    provider: null,
-    model: null,
+    provider: input.picked?.provider ?? null,
+    model: input.picked?.model ?? null,
   };
   // A thread created a moment ago can be selected before its record reaches the page.
   const threads = input.threads.includes(selected) ? input.threads : [...input.threads, selected];

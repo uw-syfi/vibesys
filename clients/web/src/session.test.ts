@@ -910,6 +910,26 @@ test('an unrecorded answer stays on its ask; a failure keeps its message; a new 
   await session.close();
 });
 
+test('a question whose answer was recorded before the connection dropped is answered, not failed', async () => {
+  const client = new FakeClient();
+  let fail: (error: Error) => void = () => {};
+  const previous = client.replies;
+  client.replies = input =>
+    input.type === 'query.chat'
+      ? new Promise((_, reject) => {
+          fail = reject;
+        })
+      : previous(input);
+  const session = new WorkspaceSession(client);
+  await session.start();
+  session.ask('Why?', 'default');
+  client.emit({type: 'event', event: chatEvent(5, 'Why?', 'Because.')});
+  fail(new Error('Server disconnected during chat'));
+  await settle();
+  assert.deepEqual(session.getSnapshot().asks, []);
+  await session.close();
+});
+
 test('threads are created with the chosen model, or the run default without one', async () => {
   const client = new FakeClient();
   const previous = client.replies;

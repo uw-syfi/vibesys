@@ -70,6 +70,7 @@ const BASE: AskInput = {
   checking: false,
   failed: false,
   selected: DEFAULT_CHAT_THREAD_ID,
+  picked: null,
 };
 
 test('threads: questions and answers per thread, titles from the first question, the implicit thread on the run default', () => {
@@ -173,6 +174,8 @@ test('a thread created a moment ago is current before its record arrives', () =>
     view.threads.map(row => row.id),
     ['default', 't2', 't9'],
   );
+  const picked = askView({...BASE, selected: 't9', picked: {provider: 'claude', model: 'sonnet'}});
+  assert.deepEqual([picked.current.provider, picked.current.model], ['claude', 'sonnet']);
 });
 
 test('the harness: available with a provider, checking until the options query answers, none otherwise', () => {
