@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -309,26 +310,83 @@ def test_open_serves_a_run_read_only_beside_the_live_one(runs_home: Home) -> Non
     assert (missing.status, missing.json()["error"]["code"]) == (404, "unknown_run")
 
 
-def test_a_reopen_published_by_another_launcher_is_reused(runs_home: Home) -> None:
-    key, root = _project(runs_home)
-    _persist_run(root, "plain-run")
-    record = Project.open(root).configuration_path() / "web-gateway-plain-run.json"
+@contextlib.contextmanager
+def _external_gateway(
+    record: Path, cwd: Path, *arguments: str
+) -> Iterator[subprocess.Popen[bytes]]:
+    """Run the fake gateway in the test's own process group, as another launcher would."""
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101311 [S603]; the test starts its own fake gateway script with fixed arguments.
         # > run_test_command waits for exit, but this gateway must keep serving while the
         # > test queries the API; a shell wrapper would add quoting for no gain.
-        [sys.executable, str(FAKE), "--web-instance", str(record), "--web-reopen-run", "plain-run"],
-        cwd=root,
+        [sys.executable, str(FAKE), "--web-instance", str(record), *arguments],
+        cwd=cwd,
         stdout=subprocess.PIPE,
     )
     try:
         assert process.stdout is not None
         assert process.stdout.readline() == b"ready\n"
-        opened = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
-        assert opened["gateway"]["url"] == json.loads(record.read_text())["url"]
-        assert runs_home.config.launches == {}
+        yield process
     finally:
         process.terminate()
         process.wait(timeout=10)
+
+
+def test_a_reopen_published_by_another_launcher_is_reused(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    record = Project.open(root).configuration_path() / "web-gateway-plain-run.json"
+    with _external_gateway(record, root, "--web-reopen-run", "plain-run"):
+        opened = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+        assert opened["gateway"]["url"] == json.loads(record.read_text())["url"]
+        assert runs_home.config.launches == {}
+
+
+def test_a_stale_reopen_record_is_replaced_by_a_new_gateway(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    first = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+    old = next(iter(runs_home.config.launches.values())).process
+    record = next(
+        (runs_home.config.state_home / "web" / "gateways").glob("*/reopen-plain-run.json")
+    )
+    stale = record.read_bytes()
+    old.kill()
+    old.wait(timeout=10)
+    record.write_bytes(stale)
+
+    again = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+
+    assert again["gateway"]["state"] == "reopened"
+    assert again["gateway"]["url"] != first["gateway"]["url"]
+    assert json.loads(record.read_text())["pid"] != old.pid
+
+
+def test_a_reopen_for_an_old_home_origin_is_restarted(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    first = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+    old = next(iter(runs_home.config.launches.values())).process
+    owner = next(
+        (runs_home.config.state_home / "web" / "gateways").glob("*/reopen-plain-run.owner.json")
+    )
+    owner.write_text(json.dumps({**json.loads(owner.read_text()), "origin": "http://127.0.0.1:1"}))
+
+    again = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+
+    assert old.wait(timeout=10) is not None
+    assert again["gateway"]["url"] != first["gateway"]["url"]
+    assert json.loads(owner.read_text())["origin"] == runs_home.config.origin
+
+
+def test_stop_sends_an_external_gateway_a_plain_sigterm(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    record = Project.open(root).configuration_path() / "web-gateway.json"
+    # Not a session leader: killpg(pid) would find no such group and signal nothing.
+    with _external_gateway(record, root) as process:
+        stopped = runs_home.delete(f"/api/projects/{key}/live").json()
+
+        assert stopped["stopped"] is True
+        assert process.wait(timeout=10) == 0
 
 
 def test_stop_terminates_the_live_gateway_once(runs_home: Home) -> None:

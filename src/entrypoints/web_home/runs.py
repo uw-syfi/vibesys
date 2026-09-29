@@ -373,20 +373,25 @@ def _load_run(root: Path, run_id: str) -> OrchestrationRunManifest:
         raise ApiError(ErrorCode.UNKNOWN_RUN, message) from None
 
 
-def _stop(record: WebInstanceRecord, path: Path, *, group: bool) -> None:
-    """SIGTERM a gateway, its whole process group when home-owned; wait for it to go.
+def _stop(record: WebInstanceRecord, path: Path, *, group: bool) -> bool:
+    """SIGTERM a gateway; return whether it is gone once the wait ends.
 
-    An external gateway (the TUI's) gets a plain SIGTERM, as ``web stop`` sends:
-    its group may be the operator's shell job.
+    The whole process group is signalled only for a home-owned gateway whose owner
+    sidecar names the same pid (a session leader this home spawned). Anything else,
+    including an external gateway (the TUI's), gets a plain SIGTERM, as ``web stop``
+    sends: its group may be the operator's shell job. No SIGKILL: SIGTERM lets the
+    run journal ``RUN_INTERRUPTED`` and tear down.
     """
+    owner = _read_owner(path) if group else None
     with contextlib.suppress(ProcessLookupError):
-        if group:
+        if owner is not None and owner.pid == record.pid:
             os.killpg(record.pid, signal.SIGTERM)
         else:
             os.kill(record.pid, signal.SIGTERM)
     deadline = time.monotonic() + _REAP_SECONDS
     while WebInstanceRecord.discover(path) is not None and time.monotonic() < deadline:
         time.sleep(_RECORD_POLL_SECONDS)
+    return WebInstanceRecord.discover(path) is None
 
 
 def resume_run(request: Request) -> LaunchResult:
@@ -468,12 +473,16 @@ def open_run(request: Request) -> LaunchResult:
 
 
 def stop_live(request: Request) -> StopResult:
-    """``DELETE /api/projects/{id}/live``: SIGTERM the live gateway; a no-op once it is gone."""
+    """``DELETE /api/projects/{id}/live``: SIGTERM the live gateway; a no-op once it is gone.
+
+    ``stopped`` is whether the gateway is gone; a slow teardown reports false and a
+    later call signals it again.
+    """
     config = request.config
     root = resolve_project(config, request.params[0])
     with config.launch_lock:
         live = _live(config, root)
         if live is None:
             return StopResult(stopped=False, run_id=None)
-        _stop(live.record, live.path, group=not live.external)
-    return StopResult(stopped=True, run_id=live.run_id)
+        stopped = _stop(live.record, live.path, group=not live.external)
+    return StopResult(stopped=stopped, run_id=live.run_id)
