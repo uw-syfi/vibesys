@@ -134,6 +134,7 @@ a.run:hover { background: var(--bg-hover); }
 .send.ready { background: var(--accent); color: #fff; }
 .hint { font-size: 12px; line-height: 18px; color: var(--text-2); margin: 6px 0 0 16px; }
 .hint.bad { color: var(--error); }
+.hint.warn { color: var(--warn); }
 
 /* run controls and menus */
 .cmderr { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

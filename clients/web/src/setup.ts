@@ -391,6 +391,34 @@ const PLACEHOLDERS: Record<ProviderAuth['status'], string> = {
   cli_session: 'Or paste a key…',
   key: 'Paste a new key to replace it…',
 };
+const SHADOWED_PLACEHOLDER = 'An environment variable is in use…';
+
+// contract.py's KeyVar/ProviderAuth name neither the key's vendor nor a display label for it (only
+// the variable itself), so the row is labeled from a small map of the allowlisted key variables
+// (`_KEY_SUFFIXES` in entrypoints/web_home/keys.py) to the vendor that issues them.
+const KEY_VENDORS: Record<string, string> = {
+  OPENAI: 'OpenAI',
+  ANTHROPIC: 'Anthropic',
+  GEMINI: 'Gemini',
+  GOOGLE: 'Google',
+};
+const KEY_SUFFIXES: readonly [suffix: string, kind: string][] = [
+  ['_API_KEY', 'API key'],
+  ['_AUTH_TOKEN', 'auth token'],
+];
+
+/** The row's label: the vendor the key belongs to, not the CLI it authenticates (task 5 review). */
+function keyLabel(name: string | null, displayName: string): string {
+  if (name !== null) {
+    for (const [suffix, kind] of KEY_SUFFIXES) {
+      if (name.endsWith(suffix)) {
+        const vendor = KEY_VENDORS[name.slice(0, -suffix.length)];
+        if (vendor !== undefined) return `${vendor} ${kind}`;
+      }
+    }
+  }
+  return `${displayName} key`;
+}
 
 function writeLine(write: KeyWrite, name: string): {hint: string; tone: Tone} | null {
   switch (write.kind) {
@@ -435,11 +463,12 @@ function statusLine(row: ProviderAuth, cliOnly: boolean): {hint: string; tone: T
 export function keyView(row: ProviderAuth, write: KeyWrite, dotenvPath: string): KeyView {
   const name = row.keys[0]?.name ?? null;
   const line = (name === null ? null : writeLine(write, name)) ?? statusLine(row, name === null);
+  const shadowed = row.keys.some(key => key.shadowed);
   return {
-    label: `${row.display_name} key`,
+    label: keyLabel(name, row.display_name),
     name,
     where: name === null ? row.login_command : `Written to ${name} in ${dotenvPath}`,
-    placeholder: PLACEHOLDERS[row.status],
+    placeholder: shadowed ? SHADOWED_PLACEHOLDER : PLACEHOLDERS[row.status],
     login: name === null && row.status === 'missing' ? row.login_command : null,
     ...line,
   };

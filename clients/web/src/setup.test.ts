@@ -225,7 +225,8 @@ test('key rows: present, missing, CLI-only, saving, saved, rejected, shadowed', 
   assert.deepEqual(
     [claude.label, claude.name, claude.tone, claude.hint, claude.where],
     [
-      'Claude Code key',
+      // Labeled by the vendor the key belongs to, not the CLI it authenticates (Claude Code -> Anthropic).
+      'Anthropic API key',
       'ANTHROPIC_API_KEY',
       'ok',
       'Saved in .env. Unverified until the first run.',
@@ -233,9 +234,18 @@ test('key rows: present, missing, CLI-only, saving, saved, rejected, shadowed', 
     ],
   );
   const codex = keyView(provider('codex'), {kind: 'idle'}, where);
-  assert.deepEqual([codex.placeholder, codex.tone, codex.login], ['Paste a key…', 'plain', null]);
+  assert.deepEqual(
+    [codex.label, codex.placeholder, codex.tone, codex.login],
+    ['OpenAI API key', 'Paste a key…', 'plain', null],
+  );
+  const gemini = keyView(provider('gemini'), {kind: 'idle'}, where);
+  assert.equal(gemini.label, 'Gemini API key');
   const opencode = keyView(provider('opencode'), {kind: 'idle'}, where);
-  assert.deepEqual([opencode.name, opencode.login], [null, 'opencode auth login']);
+  // No key variable to derive a vendor from: falls back to the provider's own display name.
+  assert.deepEqual(
+    [opencode.label, opencode.name, opencode.login],
+    ['OpenCode key', null, 'opencode auth login'],
+  );
   assert.equal(keyView(provider('codex'), {kind: 'saving'}, where).hint, 'Saving…');
   assert.deepEqual(
     [
@@ -256,8 +266,13 @@ test('key rows: present, missing, CLI-only, saving, saved, rejected, shadowed', 
     where,
   );
   assert.deepEqual(
-    [shadowed.tone, shadowed.hint],
-    ['warn', "ANTHROPIC_API_KEY in this app's environment overrides .env."],
+    [shadowed.tone, shadowed.hint, shadowed.placeholder],
+    [
+      'warn',
+      "ANTHROPIC_API_KEY in this app's environment overrides .env.",
+      // Must not invite pasting a key that the environment variable would still override.
+      'An environment variable is in use…',
+    ],
   );
 });
 

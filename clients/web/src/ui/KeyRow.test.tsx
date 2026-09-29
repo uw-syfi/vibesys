@@ -29,7 +29,7 @@ const render = (provider: string, value: string, saving = false) =>
 
 test('a key field is a write-only password input with the variable and .env path on hover', () => {
   const html = render('codex', '');
-  assert.match(html, /<label for="f-key">Codex CLI key<\/label>/);
+  assert.match(html, /<label for="f-key">OpenAI API key<\/label>/);
   assert.match(
     html,
     /<div class="fld keyfld" title="Written to OPENAI_API_KEY in \/e\/.env"><input id="f-key" type="password" autoComplete="new-password" spellCheck="false" placeholder="Paste a key…" value=""\/>/,
