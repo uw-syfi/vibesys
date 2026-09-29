@@ -53,6 +53,8 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("PUT", re.compile(r"/api/auth/([^/]+)"), keys.write_key),
     ("GET", re.compile(_PROJECT + r"/tasks"), tasks.task_list),
     ("GET", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.task_detail),
+    ("POST", re.compile(_PROJECT + r"/tasks"), tasks.create_task),
+    ("PUT", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.edit_task),
 )
 
 

@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import shutil
+import tomllib
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.entrypoints.web_home.support import make_project, project_key
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.entrypoints.web_home.support import Home
+
+FORM = {
+    "objective": "Raise throughput.\n",
+    "domain": "generic",
+    "accuracy_command": "python check.py --strict",
+    "benchmark_command": "python 'bench suite.py'",
+    "result_json_argument": "--json",
+    "result_metric": "tokens_per_s",
+}
 
 
 def _setup(
@@ -94,3 +105,75 @@ def test_protocol_tasks_are_read_only(home: Home) -> None:
     }
     assert detail["editable"] is False
     assert "[benchmark.result]" in detail["read_only_reason"]
+
+
+def test_create_writes_both_files_and_the_task_loads(home: Home) -> None:
+    key, root = _setup(home, tasks=())
+
+    created = home.post(f"/api/projects/{key}/tasks", {**FORM, "name": "serve"}).json()
+
+    assert created["benchmark_command"] == "python 'bench suite.py'"
+    assert (root / ".vibesys" / "tasks" / "serve" / "OBJECTIVE.md").read_text() == FORM["objective"]
+    manifest = tomllib.loads(
+        (root / ".vibesys" / "tasks" / "serve" / "vibesys.input.toml").read_text()
+    )
+    assert manifest["benchmark"]["result"] == {"json_argument": "--json", "metric": "tokens_per_s"}
+    again = home.post(f"/api/projects/{key}/tasks", {**FORM, "name": "serve"}).json()
+    assert again["error"]["code"] == "task_exists"
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ({"name": "Bad Name"}, "task_invalid"),
+        ({"name": "ok", "benchmark_command": "   "}, "task_invalid"),
+        ({"name": "ok", "accuracy_command": "python 'unterminated"}, "task_invalid"),
+        ({"name": "ok", "result_json_argument": "json"}, "task_invalid"),
+        ({"name": "ok", "domain": "astrology"}, "invalid_request"),
+    ],
+)
+def test_create_rejects_invalid_forms(home: Home, change: dict[str, str], code: str) -> None:
+    key, _ = _setup(home, tasks=())
+
+    reply = home.post(f"/api/projects/{key}/tasks", {**FORM, **change})
+
+    assert reply.json()["error"]["code"] == code
+
+
+def test_edit_needs_the_current_hash(home: Home) -> None:
+    key, root = _setup(home)
+    base = home.get(f"/api/projects/{key}/tasks/bench").json()["content_hash"]
+
+    edited = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base}).json()
+    stale = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base}).json()
+
+    assert edited["objective"] == FORM["objective"]
+    assert edited["content_hash"] != base
+    assert stale["error"]["code"] == "task_conflict"
+    assert (root / ".vibesys" / "tasks" / "bench" / "OBJECTIVE.md").read_text() == FORM["objective"]
+
+
+def test_edit_keeps_manifest_settings_the_form_does_not_show(home: Home) -> None:
+    key, root = _setup(home)
+    manifest = root / ".vibesys" / "tasks" / "bench" / "vibesys.input.toml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            'command = ["python", "bench.py"]',
+            'command = ["python", "bench.py"]\ntimeout_seconds = 90',
+        )
+    )
+    base = home.get(f"/api/projects/{key}/tasks/bench").json()["content_hash"]
+
+    home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base})
+
+    assert tomllib.loads(manifest.read_text())["benchmark"]["timeout_seconds"] == 90
+
+
+def test_editing_a_read_only_task_is_refused(home: Home) -> None:
+    key, root = _setup(home)
+    _make_protocol_task(root)
+    base = home.get(f"/api/projects/{key}/tasks/bench").json()["content_hash"]
+
+    reply = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base})
+
+    assert reply.json()["error"]["code"] == "task_read_only"

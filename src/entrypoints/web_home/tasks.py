@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
 import tomllib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
+from entrypoints.web_home.context import atomic_write, parse_body, validation_errors
 from entrypoints.web_home.contract import (
     ApiError,
     ErrorCode,
     ResultContract,
+    TaskCreate,
     TaskDetail,
+    TaskEdit,
+    TaskForm,
     TaskList,
     TaskSummary,
 )
 from entrypoints.web_home.projects import resolve_project
 from vibesys.api.request import InputManifest, load_project_task, render_input_manifest
-from vs_project.api import Project, ProjectError, TaskNotFoundError
+from vs_project.api import Project, ProjectError, TaskExistsError, TaskNotFoundError
 
 if TYPE_CHECKING:
     from entrypoints.web_home.context import Request
@@ -120,3 +127,74 @@ def task_detail(request: Request) -> TaskDetail:
     """``GET /api/projects/{id}/tasks/{name}``."""
     project = project_of(request)
     return detail(project, select_task(project, request.params[1]))
+
+
+def _argv(raw: str, field: str) -> list[str]:
+    try:
+        parts = shlex.split(raw)
+    except ValueError as error:
+        message = f"{field}: {error}"
+        raise ApiError(ErrorCode.TASK_INVALID, message) from None
+    if not parts:
+        message = f"{field} must contain a command"
+        raise ApiError(ErrorCode.TASK_INVALID, message)
+    return parts
+
+
+def build_manifest(form: TaskForm, base: InputManifest | None) -> InputManifest:
+    """Apply the form to *base* (or a new scalar-metric task) and validate the result."""
+    data: dict[str, Any] = (
+        base.model_dump(mode="json", exclude_none=True) if base is not None else {"version": 1}
+    )
+    data["agent"] = {"domain": form.domain.value}
+    data["accuracy"] = {
+        **data.get("accuracy", {}),
+        "command": _argv(form.accuracy_command, "accuracy_command"),
+    }
+    data["benchmark"] = {
+        **data.get("benchmark", {}),
+        "command": _argv(form.benchmark_command, "benchmark_command"),
+        "result": {"json_argument": form.result_json_argument, "metric": form.result_metric},
+    }
+    try:
+        return InputManifest.model_validate(data)
+    except ValidationError as error:
+        message = "the task manifest is invalid"
+        raise ApiError(
+            ErrorCode.TASK_INVALID, message, details={"errors": validation_errors(error)}
+        ) from None
+
+
+def create_task(request: Request) -> TaskDetail:
+    """``POST /api/projects/{id}/tasks``: write OBJECTIVE.md and vibesys.input.toml."""
+    body = parse_body(request, TaskCreate)
+    project = project_of(request)
+    manifest = render_input_manifest(build_manifest(body, None))
+    with request.config.write_lock:
+        try:
+            task = project.create_task(body.name, objective=body.objective, manifest=manifest)
+        except TaskExistsError as error:
+            raise ApiError(ErrorCode.TASK_EXISTS, str(error)) from None
+        except (ProjectError, ValueError) as error:
+            raise ApiError(ErrorCode.TASK_INVALID, str(error)) from None
+    return detail(project, task)
+
+
+def edit_task(request: Request) -> TaskDetail:
+    """``PUT /api/projects/{id}/tasks/{name}``: replace both files if nothing changed since."""
+    body = parse_body(request, TaskEdit)
+    project = project_of(request)
+    with request.config.write_lock:
+        task = select_task(project, request.params[1])
+        current = detail(project, task)
+        if current.content_hash != body.base_hash:
+            message = "the task changed on disk since it was loaded; reload it"
+            raise ApiError(ErrorCode.TASK_CONFLICT, message)
+        if current.read_only_reason is not None:
+            raise ApiError(ErrorCode.TASK_READ_ONLY, current.read_only_reason)
+        manifest = build_manifest(body, load_project_task(project, task).manifest)
+        atomic_write(task.objective_path, body.objective.encode("utf-8"), mode=0o644)
+        atomic_write(
+            task.manifest_path, render_input_manifest(manifest).encode("utf-8"), mode=0o644
+        )
+    return detail(project, task)
