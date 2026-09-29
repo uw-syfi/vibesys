@@ -388,6 +388,13 @@ export class SocketSessionController implements SessionController {
       }),
     ]);
     this.#streamConnected = this.#state.eventStreamAvailable;
+    // The experiments answer can land before the snapshot when the run already ended
+    // without attaching: it sees an unended run and stays pending, and no
+    // `experiments_changed` event ever arrives to settle it. Ask once more now that
+    // both have landed.
+    if (this.#state.experimentLog?.pending === true && hasRunEnded(this.#state.core)) {
+      void this.#loadExperiments();
+    }
   }
 
   #onConnectionState(state: StreamConnectionState): void {

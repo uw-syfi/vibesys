@@ -858,15 +858,6 @@ class ProjectState:
         return cls._log_directory_path(project_root, run_id, state_home)
 
     @classmethod
-    def log_directory_path_for(cls, project_root: Path | str, run_id: str) -> Path:
-        """Return a run log destination without preparing machine-local storage.
-
-        For read-only lookups (a reopen): callers that need to write should use
-        `log_directory_for`, which prepares the state home before returning.
-        """
-        return cls._log_directory_path(project_root, run_id, _state_home())
-
-    @classmethod
     def _log_directory_path(cls, project_root: Path | str, run_id: str, state_home: Path) -> Path:
         root = Path(project_root).expanduser().resolve()
         if root.exists() and not root.is_dir():
@@ -898,7 +889,7 @@ class ProjectState:
     def log_directory_path(self, run_id: str) -> Path:
         """Return the machine-local log directory for one run without preparing storage."""
         self._validate_storage_roots()
-        return self.log_directory_path_for(self.project_root, run_id)
+        return self._log_directory_path(self.project_root, run_id, _state_home())
 
     def model_cache_directory(self, name: str) -> Path:
         """Return a named machine-local model cache directory."""
