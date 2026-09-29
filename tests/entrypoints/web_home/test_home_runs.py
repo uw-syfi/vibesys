@@ -10,7 +10,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.entrypoints.web_home.support import make_project, project_key
@@ -23,7 +23,7 @@ from vibesys.api import Config
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from tests.entrypoints.web_home.support import Home
 
@@ -138,6 +138,7 @@ def test_a_timed_out_launch_is_reaped_and_the_retry_owns_the_gateway(runs_home: 
     owner = json.loads(next(gateways.glob("*/live.owner.json")).read_text())
     record = json.loads(next(gateways.glob("*/live.json")).read_text())
     assert (owner["run_id"], owner["pid"]) == (second["run_id"], record["pid"])
+    assert _state(runs_home, key, second["run_id"]) == ("active", "starting")
 
 
 def test_the_gateway_accepts_the_app_origins_only(runs_home: Home) -> None:
@@ -427,3 +428,139 @@ def test_a_new_launch_prunes_launches_that_have_exited(runs_home: Home) -> None:
     runs_home.post(f"/api/projects/{key}/runs/plain-run/open")
 
     assert [path.name for path in runs_home.config.launches] == ["reopen-plain-run.json"]
+
+
+def _rows(home: Home, key: str) -> dict[str, dict[str, Any]]:
+    return {row["run_id"]: row for row in home.get(f"/api/projects/{key}/runs").json()["runs"]}
+
+
+def _journal(root: Path, run_id: str, *events: Mapping[str, object]) -> None:
+    journal = Project.log_directory_for(root, run_id) / "run-events.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    with journal.open("a") as stream:
+        stream.writelines(json.dumps(event) + "\n" for event in events)
+
+
+def _state(home: Home, key: str, run_id: str) -> tuple[str, str]:
+    row = _rows(home, key)[run_id]
+    return row["status"], row["gateway"]["state"]
+
+
+def _stop(home: Home, key: str) -> dict[str, Any]:
+    stopped = home.delete(f"/api/projects/{key}/live").json()
+    for launch in home.config.launches.values():
+        launch.process.wait(timeout=10)
+    return stopped
+
+
+def test_run_list_reports_starting_and_failed_launches(runs_home: Home) -> None:
+    key, _ = _project(runs_home)
+    started = runs_home.post(f"/api/projects/{key}/runs", START).json()
+    assert _rows(runs_home, key)[started["run_id"]]["gateway"]["state"] == "starting"
+    runs_home.delete(f"/api/projects/{key}/live")
+    next(iter(runs_home.config.launches.values())).process.wait(timeout=10)
+    runs_home.config.environ = {**runs_home.config.environ, "FAKE_RUN_SERVER_FAIL": "1"}
+
+    runs_home.post(f"/api/projects/{key}/runs", START)
+
+    [row] = runs_home.get(f"/api/projects/{key}/runs").json()["runs"]
+    assert (row["status"], row["gateway"]["state"]) == ("failed", "failed")
+    assert row["gateway"]["stderr_tail"][-1] == "ConfigurationError: bad run"
+    assert row["gateway"]["stderr_log"].endswith("live.stderr.log")
+
+
+def test_run_list_follows_the_latest_attempt_in_the_journal(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    assert _state(runs_home, key, "plain-run") == ("unknown", "none")
+
+    runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {})
+    assert _state(runs_home, key, "plain-run") == ("active", "starting")
+    attached = {"type": "experiments_changed", "data": {"reason": "project_attached"}}
+    _journal(root, "plain-run", {"type": "server_started"}, {"type": "run_started"}, attached)
+    assert _state(runs_home, key, "plain-run") == ("active", "live")
+    _journal(root, "plain-run", {"type": "run_finished", "status": "completed"})
+    assert _state(runs_home, key, "plain-run") == ("completed", "ended_serving")
+
+    assert _stop(runs_home, key) == {"stopped": True, "run_id": "plain-run"}
+    assert _state(runs_home, key, "plain-run") == ("completed", "none")
+    assert _stop(runs_home, key) == {"stopped": False, "run_id": None}
+
+    runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {"budget": 4})
+    _journal(root, "plain-run", {"type": "server_started"})
+    assert _state(runs_home, key, "plain-run") == ("active", "starting")
+    _journal(root, "plain-run", attached)
+    assert _state(runs_home, key, "plain-run") == ("active", "live")
+    _journal(root, "plain-run", {"type": "run_failed", "status": "failed"})
+    assert _state(runs_home, key, "plain-run") == ("failed", "ended_serving")
+    _stop(runs_home, key)
+    assert _state(runs_home, key, "plain-run") == ("failed", "none")
+
+
+def test_run_list_shows_a_serving_reopen_beside_the_run(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+
+    runs_home.post(f"/api/projects/{key}/runs/plain-run/open")
+
+    row = _rows(runs_home, key)["plain-run"]
+    assert (row["loop"], row["gateway"]["state"], row["reopen"]["state"]) == (
+        "plain",
+        "none",
+        "reopened",
+    )
+    # The setup UI titles sidebar rows from these (plan 4); a stored run always has a manifest time.
+    assert row["created_at"] is not None
+    assert {"task", "objective"} <= row.keys()
+
+
+def test_a_reopen_serving_an_old_home_origin_is_restarted(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    first = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()["gateway"]
+    gateways = runs_home.config.state_home / "web" / "gateways"
+    owner_path = next(gateways.glob("*/reopen-plain-run.owner.json"))
+    owner = json.loads(owner_path.read_text())
+    owner_path.write_text(json.dumps({**owner, "origin": "http://127.0.0.1:1"}))
+    assert _rows(runs_home, key)["plain-run"]["reopen"]["origin_mismatch"] is True
+
+    second = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()["gateway"]
+
+    assert second["url"] != first["url"]
+    assert _rows(runs_home, key)["plain-run"]["reopen"]["origin_mismatch"] is False
+
+
+def test_an_external_gateway_and_a_stale_record_are_reported(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    external = Project.open(root).configuration_path() / "web-gateway.json"
+    process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101306 [S603]; the test starts its own fake gateway script with fixed arguments.
+        # > run_test_command waits for exit, but this gateway must keep serving while the
+        # > test queries the API; a shell wrapper would add quoting for no gain.
+        [sys.executable, str(FAKE), "--web-instance", str(external), "--exp-name", "plain-run"],
+        cwd=root,
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline() == b"ready\n"
+        assert _rows(runs_home, key)["plain-run"]["gateway"]["state"] == "external"
+        assert (
+            runs_home.post(f"/api/projects/{key}/runs", START).json()["error"]["code"]
+            == "already_live"
+        )
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    stale = {
+        "version": 1,
+        "pid": 999_999,
+        "port": 9,
+        "token": "t",
+        "url": "http://127.0.0.1:9/?token=t",
+        "project_root": str(root),
+        "started_at": 0,
+        "mode": "live",
+    }
+    external.write_text(json.dumps(stale))
+    assert _rows(runs_home, key)["plain-run"]["gateway"]["state"] == "stale"

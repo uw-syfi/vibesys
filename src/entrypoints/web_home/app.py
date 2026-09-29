@@ -57,6 +57,7 @@ _ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...]
     ("PUT", re.compile(_PROJECT + r"/tasks/([^/]+)"), tasks.edit_task),
     ("GET", re.compile(_PROJECT + r"/commit"), tasks.commit_preview),
     ("POST", re.compile(_PROJECT + r"/commit"), tasks.commit),
+    ("GET", re.compile(_PROJECT + r"/runs"), runs.list_runs),
     ("POST", re.compile(_PROJECT + r"/runs"), runs.start_run),
     ("POST", re.compile(_PROJECT + r"/runs/([^/]+)/open"), runs.open_run),
     ("POST", re.compile(_PROJECT + r"/runs/([^/]+)/resume"), runs.resume_run),
@@ -284,8 +285,11 @@ def run_home(args: argparse.Namespace, repository_root: Path) -> int:
             "gateways started for the old one reject the app until reopened."
         )
         raise SystemExit(message) from None
-    if config.port != saved_port(web_dir):
+    previous = saved_port(web_dir)
+    if config.port != previous:
         save_port(web_dir, config.port)
+        for gateway in runs.origin_mismatches(config):
+            _LOG.warning("gateway %s allows only the old origin; stop and reopen it", gateway)
     record = WebInstanceRecord.from_gateway(
         pid=os.getpid(), port=config.port, token=config.token, project_root=web_dir
     )

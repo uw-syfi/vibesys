@@ -33,13 +33,15 @@ from entrypoints.web_home.contract import (
     LaunchResult,
     ProjectState,
     ResumeRun,
+    RunList,
+    RunRow,
     StartRun,
     StopResult,
 )
 from entrypoints.web_home.projects import inspect_project, project_id, resolve_project
 from entrypoints.web_home.tasks import select_task
 from server.runtime import WebInstanceRecord
-from vibesys.api import Config
+from vibesys.api import Config, RunRecordReadError, RunStatus, open_run_store
 from vibesys.api.request import generate_experiment_name, load_project_task, orchestration_roles
 from vs_agent.api import SHIPPED_PROVIDERS, agent_catalog
 from vs_project.api import Project, ProjectError
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from entrypoints.web_home.context import HomeConfig, Request
+    from vibesys.api import RunStore
     from vs_project.api import OrchestrationRunManifest
 
 _RECORD_POLL_SECONDS = 0.05
@@ -63,6 +66,20 @@ _BLOCKERS = {
     ProjectState.NO_TASKS: ErrorCode.NO_TASKS,
     ProjectState.NO_COMMITS: ErrorCode.NO_COMMITS,
     ProjectState.DIRTY_TREE: ErrorCode.DIRTY_TREE,
+}
+_HISTORY_TAIL_BYTES = 262_144
+_ATTEMPT_MARKERS = (
+    b'"server_started"',
+    b'"experiments_changed"',
+    b'"run_finished"',
+    b'"run_failed"',
+    b'"run_interrupted"',
+)
+# The controller records a failed run as `run_failed`, not `run_finished` with a failed status.
+_TERMINAL = {
+    "run_finished": RunStatus.COMPLETED,
+    "run_failed": RunStatus.FAILED,
+    "run_interrupted": RunStatus.FAILED,
 }
 
 
@@ -486,3 +503,223 @@ def stop_live(request: Request) -> StopResult:
             return StopResult(stopped=False, run_id=None)
         stopped = _stop(live.record, live.path, group=not live.external)
     return StopResult(stopped=stopped, run_id=live.run_id)
+
+
+@dataclass(frozen=True)
+class _Published:
+    """One live discovery record file; ``record`` is ``None`` when its gateway does not answer."""
+
+    path: Path
+    record: WebInstanceRecord | None
+    run_id: str | None
+    external: bool
+    origin_mismatch: bool
+
+
+def origin_mismatches(config: HomeConfig) -> list[str]:
+    """Describe serving home-launched gateways that only accept another home origin."""
+    found: list[str] = []
+    for owner_path in sorted((config.state_home / "web" / "gateways").glob("*/*.owner.json")):
+        record_path = owner_path.with_name(owner_path.name.removesuffix(".owner.json") + ".json")
+        owner = _read_owner(record_path)
+        record = WebInstanceRecord.discover(record_path, cleanup_stale=False)
+        if owner is not None and record is not None and owner.origin != config.origin:
+            found.append(f"{record.project_root} run {owner.run_id} ({owner.origin})")
+    return found
+
+
+def _published(config: HomeConfig, root: Path, project: Project) -> list[_Published]:
+    items: list[_Published] = []
+    for path, external in ((_live_record(config, root), False), (_external_record(project), True)):
+        if not path.exists():
+            continue
+        record = WebInstanceRecord.discover(path, cleanup_stale=False)
+        if record is not None and record.mode != "live":
+            continue
+        owner = None if external else _read_owner(path)
+        items.append(
+            _Published(
+                path=path,
+                record=record,
+                run_id=_owner_run(path, record, project, external=external),
+                external=external,
+                origin_mismatch=owner is not None and owner.origin != config.origin,
+            )
+        )
+    return items
+
+
+def _attempt(
+    root: Path, run_id: str, *, tail_bytes: int | None = None
+) -> tuple[bool, RunStatus | None]:
+    """Return (record attached, terminal status) of the journal's latest server attempt.
+
+    Every run server starts its journal segment with ``server_started`` (a resume
+    appends a new one), so earlier attempts' ``run_finished`` never count. The run
+    is attached once ``experiments_changed`` reports ``project_attached``
+    (sub-project 1 emits it after the run record attaches).
+    """
+    # ponytail: rescans the journal per call (the live run full, history rows the tail);
+    # keep a per-journal byte offset if large journals make polling slow.
+    attached, terminal = False, None
+    try:
+        # ponytail: log_directory_for prepares the state home on every run list; harmless
+        # (idempotent mkdir), switch to a read-only path lookup if it ever shows up in profiles.
+        journal = Project.log_directory_for(root, run_id) / "run-events.jsonl"
+        size = journal.stat().st_size
+        with journal.open("rb") as stream:
+            start = 0 if tail_bytes is None else max(0, size - tail_bytes)
+            stream.seek(start)
+            lines = stream.read().splitlines()
+    except (OSError, ProjectError):
+        return False, None
+    for line in lines[1:] if start else lines:
+        if not any(marker in line for marker in _ATTEMPT_MARKERS):
+            continue
+        event = _event(line)
+        kind = event.get("type")
+        if kind == "server_started":
+            attached, terminal = False, None
+        elif kind == "experiments_changed":
+            data = event.get("data")
+            attached = attached or (
+                isinstance(data, dict) and data.get("reason") == "project_attached"
+            )
+        elif isinstance(kind, str) and kind in _TERMINAL:
+            terminal = _TERMINAL[kind]
+    return attached, terminal
+
+
+def _event(line: bytes) -> dict[str, object]:
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return {}
+    return event if isinstance(event, dict) else {}
+
+
+def _published_gateway(item: _Published, root: Path, run_id: str) -> Gateway:
+    if item.record is None:
+        return Gateway(state=GatewayState.STALE)
+    if item.external:
+        return _connected(item.record, GatewayState.EXTERNAL)
+    attached, terminal = _attempt(root, run_id)
+    if terminal is not None:
+        state = GatewayState.ENDED_SERVING
+    else:
+        state = GatewayState.LIVE if attached else GatewayState.STARTING
+    return _connected(item.record, state, mismatch=item.origin_mismatch)
+
+
+def _launch_gateway(config: HomeConfig, root: Path, run_id: str) -> Gateway:
+    launch = config.launches.get(_live_record(config, root))
+    if launch is None or launch.run_id != run_id:
+        return Gateway(state=GatewayState.NONE)
+    code = launch.process.poll()
+    if code is None:
+        return Gateway(state=GatewayState.STARTING)
+    # A positive status is the run server failing; a negative one is a signal, e.g. our SIGTERM.
+    if code > 0:
+        return Gateway(
+            state=GatewayState.FAILED,
+            stderr_tail=stderr_tail(launch.stderr_log),
+            stderr_log=str(launch.stderr_log),
+        )
+    return Gateway(state=GatewayState.NONE)
+
+
+def _gateway(config: HomeConfig, root: Path, run_id: str, published: list[_Published]) -> Gateway:
+    for item in published:
+        if item.run_id == run_id:
+            return _published_gateway(item, root, run_id)
+    return _launch_gateway(config, root, run_id)
+
+
+def _reopen_gateway(config: HomeConfig, root: Path, run_id: str) -> Gateway | None:
+    serving = _serving_reopen(config, root, run_id)
+    if serving is None:
+        return None
+    return _connected(serving[0], GatewayState.REOPENED, mismatch=serving[1])
+
+
+def _status(root: Path, run_id: str, gateway: Gateway) -> RunStatus:
+    """Derive lifecycle from the journal and the gateway; the store always says unknown."""
+    if gateway.state is GatewayState.FAILED:
+        return RunStatus.FAILED
+    if gateway.state in {GatewayState.LIVE, GatewayState.STARTING, GatewayState.EXTERNAL}:
+        return RunStatus.ACTIVE
+    terminal = _attempt(root, run_id, tail_bytes=_HISTORY_TAIL_BYTES)[1]
+    return terminal or RunStatus.UNKNOWN
+
+
+def _row(
+    config: HomeConfig,
+    root: Path,
+    store: RunStore,
+    manifest: OrchestrationRunManifest,
+    published: list[_Published],
+) -> RunRow:
+    run_id = manifest.run_id
+    gateway = _gateway(config, root, run_id, published)
+    reopen = _reopen_gateway(config, root, run_id)
+    status = _status(root, run_id, gateway)
+    identity = {"task": manifest.task_name, "created_at": manifest.created_at.isoformat()}
+    try:
+        view = store.get_run(run_id)
+        objective = store.get_record(run_id).facts().effective_objective
+    except (RunRecordReadError, ProjectError, ValueError) as error:
+        return RunRow(
+            run_id=run_id,
+            loop=None,
+            status=status,
+            rounds=0,
+            gateway=gateway,
+            reopen=reopen,
+            error=str(error),
+            **identity,
+        )
+    return RunRow(
+        run_id=run_id,
+        loop=view.loop,
+        status=status,
+        rounds=len(view.rounds),
+        gateway=gateway,
+        reopen=reopen,
+        objective=objective,
+        **identity,
+    )
+
+
+def list_runs(request: Request) -> RunList:
+    """``GET /api/projects/{id}/runs``: runs newest first, each with its gateway state."""
+    config = request.config
+    root = resolve_project(config, request.params[0])
+    project = Project.open(root)
+    published = _published(config, root, project)
+    try:
+        manifests = project.state.list_runs()
+    except ProjectError:
+        manifests = []
+    store = open_run_store(project)
+    rows = [
+        _row(config, root, store, manifest, published) for manifest in reversed(manifests)
+    ]
+    known = {row.run_id for row in rows}
+    launch = config.launches.get(_live_record(config, root))
+    candidates = [item.run_id for item in published] + ([launch.run_id] if launch else [])
+    pending = [run_id for run_id in dict.fromkeys(candidates) if run_id and run_id not in known]
+    gateways = [(run_id, _gateway(config, root, run_id, published)) for run_id in pending]
+    # Launches not yet in the run store have no manifest or record, so task, objective
+    # and created_at stay None.
+    starting = [
+        RunRow(
+            run_id=run_id,
+            loop=None,
+            status=RunStatus.FAILED if gateway.state is GatewayState.FAILED else RunStatus.ACTIVE,
+            rounds=0,
+            gateway=gateway,
+        )
+        for run_id, gateway in gateways
+        if gateway.state is not GatewayState.NONE
+    ]
+    return RunList(runs=[*starting, *rows])
