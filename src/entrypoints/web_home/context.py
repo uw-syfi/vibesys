@@ -111,17 +111,21 @@ def git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         message = "git is not installed"
         raise ApiError(ErrorCode.NOT_GIT, message)
     environment = {key: value for key, value in os.environ.items() if key not in _GIT_OVERRIDES}
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-101302 [S603]; git argv is built here from fixed subcommands and validated paths, never a shell string.
-        # > Routing through GitTracker needs a run id and state integration the
-        # > setup API does not have; shell=True would weaken argv safety.
-        [executable, *arguments],
-        cwd=root,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=_GIT_TIMEOUT_SECONDS,
-    )
+    try:
+        return subprocess.run(  # noqa: S603  # lint-waiver: LW-101302 [S603]; git argv is built here from fixed subcommands and validated paths, never a shell string.
+            # > Routing through GitTracker needs a run id and state integration the
+            # > setup API does not have; shell=True would weaken argv safety.
+            [executable, *arguments],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        message = f"git {' '.join(arguments)} timed out after {_GIT_TIMEOUT_SECONDS}s"
+        raise ApiError(ErrorCode.NOT_GIT, message) from None
 
 
 def pending_changes(root: Path) -> list[str]:
