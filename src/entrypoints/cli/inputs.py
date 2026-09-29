@@ -21,7 +21,7 @@ from vibesys.api.request import (
     synthesize_input_bundle,
     validate_experiment_name,
 )
-from vs_project.api import Project, ProjectLayoutError
+from vs_project.api import Project, ProjectLayoutError, validate_run_id
 
 if TYPE_CHECKING:
     import argparse
@@ -157,6 +157,22 @@ def _synthesize_standalone_input(args: argparse.Namespace) -> Path:
         return synthesize_input_bundle(spec, destination)
     except InputSynthesisError as exc:
         _configuration_error(str(exc), code="invalid_input", stage="input_loading")
+
+
+def _validate_run_id_arg(args: argparse.Namespace) -> None:
+    """Reject ``--run-id`` with ``--resume`` or in a shape ``generate_run_id`` never produces."""
+    if args.run_id is None:
+        return
+    if args.resume is not None:
+        _configuration_error(
+            "Error: --run-id names a fresh run and cannot be combined with --resume.",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
+    try:
+        validate_run_id(args.run_id)
+    except ValueError as exc:
+        _configuration_error(str(exc), code="invalid_run_id", stage="argument_parsing")
 
 
 def _validate_target_inputs(args: argparse.Namespace) -> None:

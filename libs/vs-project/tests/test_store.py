@@ -28,6 +28,7 @@ from vs_project.api import (
     StateSnapshot,
     generate_run_id,
     is_project_state_path,
+    validate_run_id,
 )
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
@@ -193,6 +194,15 @@ def test_generate_run_id_is_sortable_safe_and_deterministic() -> None:
 
     assert run_id == "20260811-123456-12345678-queue-spsc"
     assert "/" not in run_id
+
+
+def test_validate_run_id_accepts_exactly_the_generated_shape() -> None:
+    for name in ("queue", "", "x" * 200, "  Quéúe / SPSC?!  "):
+        run_id = generate_run_id(name, now=NOW, unique=UNIQUE)
+        assert validate_run_id(run_id) == run_id
+    for bad in ("queue", "20260811-123456-12345678-", "20260811-123456-1234567g-q", "../x"):
+        with pytest.raises(ValueError, match="invalid run id"):
+            validate_run_id(bad)
 
 
 def test_generate_run_id_rejects_naive_time() -> None:

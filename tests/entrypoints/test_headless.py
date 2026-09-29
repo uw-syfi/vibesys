@@ -2058,3 +2058,38 @@ def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) 
 
     invocation = parse_cli_invocation(["--input", str(project)])
     assert invocation.args.profiler is ProfilerKind.AUTO
+
+
+def test_run_id_reaches_the_run_request_for_a_fresh_run(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+    run_id = "20260929-122922-452d39b1-queue"
+    invocation = parse_cli_invocation(
+        [
+            "--outer-loop",
+            "plain",
+            "--input",
+            str(project),
+            "--exp-name",
+            "queue",
+            "--run-id",
+            run_id,
+        ]
+    )
+
+    assert build_run_request(invocation).run_id == run_id
+
+
+@pytest.mark.parametrize(
+    ("extra", "match"),
+    [
+        (["--run-id", "Not-A-Run"], "invalid run id"),
+        (["--run-id", "queue"], "invalid run id"),
+        (["--run-id", "20260929-122922-452d39b1-queue", "--resume", "x"], "cannot be combined"),
+    ],
+)
+def test_run_id_must_be_generated_shape_and_fresh(
+    tmp_path: Path, extra: list[str], match: str
+) -> None:
+    project = _write_input_project(tmp_path)
+    with pytest.raises(ConfigurationError, match=match):
+        parse_cli_invocation(["--outer-loop", "plain", "--input", str(project), *extra])

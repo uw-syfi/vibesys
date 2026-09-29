@@ -58,6 +58,7 @@ from vs_project._state import (
     generate_run_id,
     is_project_state_path,
     state_home,
+    validate_run_id,
 )
 from vs_project.errors import ProjectError
 from vs_project.project import Project
@@ -111,5 +112,6 @@ __all__ = [
     "is_project_state_path",
     "state_home",
     "strip_ansi",
+    "validate_run_id",
     "validate_socket_path",
 ]

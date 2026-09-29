@@ -235,6 +235,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Experiment name; generated from the input bundle when omitted.",
     )
     parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Exact id for a fresh run, for launchers; derived from --exp-name when omitted.",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         default=None,

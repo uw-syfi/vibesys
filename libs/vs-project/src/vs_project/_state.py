@@ -791,6 +791,17 @@ def generate_run_id(
     return f"{timestamp:%Y%m%d-%H%M%S}-{suffix}-{slug}"
 
 
+_GENERATED_RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{8}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
+
+
+def validate_run_id(run_id: str) -> str:
+    """Return *run_id* if it has the shape ``generate_run_id`` produces, else raise ``ValueError``."""
+    if _GENERATED_RUN_ID.fullmatch(run_id) is None:
+        message = f"invalid run id {run_id!r}: expected YYYYMMDD-HHMMSS-<8 hex>-<slug>"
+        raise ValueError(message)
+    return run_id
+
+
 class ProjectState:
     """Internal persistence implementation exposed through ``Project.state``."""
 
