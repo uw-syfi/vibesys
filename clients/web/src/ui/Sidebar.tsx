@@ -3,20 +3,14 @@ import type {ReactNode} from 'react';
 import {type HomeRun, type ProjectSection, relativeTime} from '../home.js';
 import {type RoundRow, type RunSummary, signed} from '../rounds.js';
 
-const GLYPH = {size: 12, strokeWidth: 1.75} as const;
+/** Bold enough that kept and reverted read apart at a glance (a 12px stroke thinner than this greys out). */
+const GLYPH = {size: 12, strokeWidth: 2.5} as const;
 
 function RoundGlyph({state}: {state: RoundRow['state']}) {
   if (state === 'running') {
     return (
       <span className="gl">
         <span className="dot live" role="img" aria-label="running" />
-      </span>
-    );
-  }
-  if (state === 'paused') {
-    return (
-      <span className="gl">
-        <Pause {...GLYPH} className="warn" role="img" aria-label="paused" />
       </span>
     );
   }
@@ -46,7 +40,7 @@ function RunGlyph({outcome}: {outcome: HomeRun['outcome']}) {
     case 'paused':
       return (
         <span className="gl">
-          <Pause {...GLYPH} className="warn" role="img" aria-label="paused" />
+          <Pause {...GLYPH} fill="currentColor" className="warn" role="img" aria-label="paused" />
         </span>
       );
     case 'failed':

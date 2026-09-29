@@ -14,7 +14,7 @@ import {
 import {formatValue, latestRound, objectiveText, titleCase} from './derive.js';
 import type {CommandAction} from './session.js';
 
-type RoundState = 'running' | 'paused' | 'kept' | 'reverted' | 'failed';
+type RoundState = 'running' | 'kept' | 'reverted' | 'failed';
 
 /** A kept result. Round 0 is the baseline; `value` is null when the run recorded none. */
 interface Checkpoint {
@@ -130,7 +130,8 @@ function roundState(
   if (!done) {
     // A round the run ended inside never finishes.
     if (hasRunEnded(core)) return 'failed';
-    return core.status === 'paused' ? 'paused' : 'running';
+    // A paused run shows once, on its run row and title; the round keeps its own state.
+    return 'running';
   }
   const verdict = fact?.judge_verdict ?? finished?.judge_verdict ?? null;
   if (verdict === 'fail' || fact?.candidate_disposition === 'discard') return 'reverted';
@@ -261,7 +262,7 @@ export function resultParts(
   const label = row.before.round === 0 ? 'Baseline' : 'Retained';
   const before =
     row.before.value === null ? [] : [part(`${label} ${formatValue(row.before.value)}`)];
-  if (row.state === 'running' || row.state === 'paused') {
+  if (row.state === 'running') {
     const attempt =
       row.value === null
         ? 'Not measured yet'
@@ -333,7 +334,10 @@ export function statusLine(core: CoreState, sending: CommandAction | null): Stat
   const pending = pendingText(core, sending);
   if (pending !== null) return line(pending, true);
   if (core.status === 'paused') {
-    return line(round === null ? 'Paused' : `Paused in round ${round}`, false, true);
+    if (round === null) return line('Paused', false, true);
+    const done = core.rounds.find(candidate => candidate.number === round)?.status;
+    const where = done === 'completed' || done === 'failed' ? 'after' : 'in';
+    return line(`Paused ${where} round ${round}`, false, true);
   }
   if (core.status !== 'running') return line('Starting', true);
   if (round === null) return line('Running');
@@ -380,6 +384,21 @@ export interface RunTitle {
   project: string | null;
 }
 
+const CLAUSE = /,? (?:of|without|while|by) |, /g;
+const TITLE_ROOM = 40;
+
+/**
+ * A scannable run name from the objective's first sentence: no closing punctuation, and past
+ * `TITLE_ROOM` characters cut at the first clause break. The title's hint keeps the whole objective.
+ */
+export function shortTitle(sentence: string): string {
+  const bare = sentence.replace(/[.!?]+$/, '');
+  if (bare.length <= TITLE_ROOM) return bare;
+  // ponytail: a break in the first dozen characters would leave a stub, so those are skipped.
+  const cut = [...bare.matchAll(CLAUSE)].find(match => match.index >= 12)?.index;
+  return cut === undefined ? bare : bare.slice(0, cut);
+}
+
 export function runTitle(
   context: PerformanceContext | null,
   captured: readonly RunEvent[],
@@ -390,7 +409,7 @@ export function runTitle(
   const project = input?.split('/').filter(Boolean).at(-1) ?? null;
   const objective = objectiveText(context?.objective_description);
   return {
-    title: objective?.first ?? project ?? runId ?? 'Run',
+    title: (objective === null ? null : shortTitle(objective.first)) ?? project ?? runId ?? 'Run',
     objective: objective?.full ?? null,
     project,
   };

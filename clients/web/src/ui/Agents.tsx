@@ -19,14 +19,14 @@ import {DisclosureBodies, Disclosures, type TranscriptControls} from './Transcri
 type CardData = {node: AgentNode; selected: boolean; onSelect: (id: string) => void};
 type CardNode = Node<CardData, 'agent'>;
 
-const EDGE_STYLE = {stroke: 'var(--line)', strokeWidth: 1.25, strokeDasharray: '4 3'};
+const EDGE_STYLE = {stroke: 'var(--line)', strokeWidth: 1.5, strokeDasharray: '3 3'};
 const MARKER = {type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'var(--line)'};
 const BROKEN = new Set(['failed', 'cancelled', 'interrupted']);
 
 function NodeGlyph({status}: {status: AgentNode['status']}) {
   if (status === 'active') return <span className="dot live" role="img" aria-label="active" />;
   if (BROKEN.has(status)) return <span className="dot err" role="img" aria-label={status} />;
-  return <Check size={12} strokeWidth={1.75} className="t2" role="img" aria-label={status} />;
+  return <Check size={12} strokeWidth={2.5} className="t2" role="img" aria-label={status} />;
 }
 
 /** A card is a button, so the graph is reachable by keyboard; clicking it filters the transcript. */

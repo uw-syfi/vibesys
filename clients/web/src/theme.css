@@ -53,6 +53,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .dot.err { background: var(--error); }
 .dot.okd { background: var(--success); }
 .gl { display: grid; place-items: center; width: 14px; height: 20px; }
-.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--text-1); animation: rot 0.9s linear infinite; flex: none; display: inline-block; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--text-2); border-right-color: var(--text-2); animation: rot 0.9s linear infinite; flex: none; display: inline-block; }
 @keyframes rot { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

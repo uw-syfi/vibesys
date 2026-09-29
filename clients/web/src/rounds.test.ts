@@ -9,6 +9,7 @@ import {
   retainedText,
   runSummary,
   runTitle,
+  shortTitle,
   signed,
   statusLine,
 } from './rounds.js';
@@ -142,11 +143,38 @@ test('retained text: the kept checkpoint against the baseline, with a hint', () 
 
 test('run title: first sentence of the objective, project from the run input', () => {
   assert.deepEqual(runTitle(CONTEXT, captured(LIVE), 'run-1'), {
-    title: 'Increase decode throughput of the batch inference server without changing outputs.',
+    title: 'Increase decode throughput',
     objective: CONTEXT.objective_description,
     project: 'llm-serve',
   });
   assert.equal(runTitle(null, [], 'run-1').title, 'run-1');
+});
+
+test('short title: no closing punctuation; a long sentence stops at its first clause break', () => {
+  assert.equal(shortTitle('Cut p99 latency.'), 'Cut p99 latency');
+  assert.equal(
+    shortTitle('Reduce allocator churn in the tokenizer, keeping every output identical!'),
+    'Reduce allocator churn in the tokenizer',
+  );
+  const unbroken = 'Speed up the BPE merge loop in the tokenizer crate substantially';
+  assert.equal(shortTitle(unbroken), unbroken);
+});
+
+test('the status line: paused after a finished round, in one that has not finished', () => {
+  const paused = (events: RunEvent[]) =>
+    reduceEventBatch(initialCoreState(), [
+      ...events,
+      {
+        sequence: 10_000,
+        type: 'run_status_changed',
+        timestamp: '2026-09-25T14:02:00Z',
+        data: {kind: 'run_status_changed', status: 'paused', previous: 'pausing'},
+      },
+    ]);
+  assert.equal(statusLine(paused(LIVE), null).text, 'Paused in round 6');
+  assert.equal(statusLine(paused(upTo(237)), null).text, 'Paused after round 6');
+  const summary = runSummary(paused(LIVE), captured(LIVE), [], CONTEXT);
+  assert.equal(rowOf(summary.rows, 6).state, 'running');
 });
 
 test('signed values use a real minus sign', () => {
