@@ -116,6 +116,7 @@ export function HomeWindow({client, token}: HomeWindowProps) {
       {palette ? (
         <Palette
           items={homePaletteItems(sections, view.kind !== 'new')}
+          placeholder="Search commands and runs…"
           onRun={onRun}
           onClose={() => setPalette(false)}
         />

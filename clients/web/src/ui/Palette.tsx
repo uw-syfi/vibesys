@@ -5,6 +5,8 @@ const GROUPS: ReadonlyArray<PaletteItem['group']> = ['Run', 'Go to', 'Agent'];
 
 export interface PaletteProps {
   items: PaletteItem[];
+  /** Names what the window's items search: the run window's rounds and views, the home page's runs. */
+  placeholder: string;
   onRun: (item: PaletteItem) => void;
   onClose: () => void;
 }
@@ -98,7 +100,7 @@ function PaletteList({
   );
 }
 
-export function Palette({items, onRun, onClose}: PaletteProps) {
+export function Palette({items, placeholder, onRun, onClose}: PaletteProps) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const modal = useModal();
@@ -127,7 +129,7 @@ export function Palette({items, onRun, onClose}: PaletteProps) {
         aria-expanded="true"
         aria-controls="palette-list"
         aria-activedescendant={current === undefined ? undefined : `pal-${current.id}`}
-        placeholder="Search commands, rounds and views…"
+        placeholder={placeholder}
         value={query}
         onChange={event => {
           setQuery(event.target.value);

@@ -22,7 +22,9 @@ const ITEMS: PaletteItem[] = [
 ];
 
 test('the palette: a modal dialog with a combobox over grouped options, the first one active, a result count', () => {
-  const html = renderToStaticMarkup(<Palette items={ITEMS} onRun={() => {}} onClose={() => {}} />);
+  const html = renderToStaticMarkup(
+    <Palette items={ITEMS} placeholder="Search" onRun={() => {}} onClose={() => {}} />,
+  );
   assert.match(html, /<dialog class="pal" aria-label="Search and commands">/);
   assert.match(html, /role="combobox"[^>]*aria-activedescendant="pal-run-toggle"/);
   assert.match(html, /<div class="gh">Run<\/div>/);

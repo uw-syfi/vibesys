@@ -590,6 +590,7 @@ export function App({session, home, links}: AppProps) {
       {ui.palette ? (
         <Palette
           items={paletteItems(paletteInput(state, view, ui, layout.sidebar, links))}
+          placeholder="Search commands, rounds and views…"
           onRun={entry => runIntent(entry.intent, {dispatch, session, state, toggleSidebar, links})}
           onClose={() => dispatch({type: 'palette', open: false})}
         />
