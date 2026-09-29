@@ -259,9 +259,9 @@ a.nav { text-decoration: none; }
 .fld.budget { width: 80px; }
 /* Resume's budget field carries the "As recorded" placeholder, which the plain 80px clips. */
 .fld.budget.resume { width: 140px; }
-.sel { position: relative; display: block; }
-.sel > select { appearance: none; padding-right: 28px; }
-.sel > svg { position: absolute; right: 10px; top: 50%; translate: 0 -50%; color: var(--text-2); pointer-events: none; }
+.selbox { position: relative; display: block; }
+.selbox > select { appearance: none; padding-right: 28px; }
+.selbox > svg { position: absolute; right: 10px; top: 50%; translate: 0 -50%; color: var(--text-2); pointer-events: none; }
 .fld.model { display: flex; align-items: center; gap: 8px; }
 .fld.model > select { field-sizing: content; appearance: none; border: 0; background: none; padding: 0; width: auto; font: inherit; color: var(--text-1); outline: none; }
 .fld.model > input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; padding: 0; font: inherit; color: var(--text-2); outline: none; }
@@ -270,9 +270,9 @@ a.nav { text-decoration: none; }
 .row2 > .fld { flex: 1; }
 .form .hint { margin: 6px 0 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .summary { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
-.summary > .sel { justify-self: start; max-width: 100%; }
+.summary > .selbox { justify-self: start; max-width: 100%; }
 .summary select.t { field-sizing: content; font: 500 13px/20px var(--sans); color: var(--text-1); background: none; border: 0; padding: 0 18px 0 0; max-width: 100%; }
-.summary .sel > svg { right: 0; }
+.summary .selbox > svg { right: 0; }
 .summary .m .mono { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .summary .nw { white-space: nowrap; }
 .summary .m { font-size: 12px; color: var(--text-2); grid-column: 1; }

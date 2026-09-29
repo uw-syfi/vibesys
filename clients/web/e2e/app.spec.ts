@@ -11,6 +11,8 @@ test('the live round: the acting judge, the kept checkpoint, the sidebar rounds'
   await mockGateway(page);
   await page.goto('/?token=e2e');
   await expect(round(page, 6)).toHaveAttribute('aria-current', 'true');
+  // The selected row keeps its grid (a setup `.sel` wrapper once reset it to block).
+  await expect(round(page, 6)).toHaveCSS('display', 'grid');
   await expect(rounds(page).getByText('6 more planned')).toBeVisible();
   await expect(page.locator('.titlebar')).toContainText('Judging round 6');
   await expect(page.locator('.titlebar .kept')).toContainText('Retained 1,230');

@@ -69,7 +69,7 @@ test('a saved task is a card whose title picks the task; read-only tasks say why
       onEdit={none}
     />,
   );
-  assert.match(html, /<div class="summary"><span class="sel"><select id="f-task" class="t">/);
+  assert.match(html, /<div class="summary"><span class="selbox"><select id="f-task" class="t">/);
   assert.match(
     html,
     /<option value="broken" disabled="" title="bad key">broken \(invalid\)<\/option>/,

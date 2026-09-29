@@ -63,7 +63,7 @@ export function Hint({tone, children}: {tone: Tone; children: ReactNode}) {
 /** A native select drawn as a field, with the form's own chevron. */
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <span className="sel">
+    <span className="selbox">
       <select {...props} />
       <ChevronDown size={14} strokeWidth={1.5} aria-hidden />
     </span>
