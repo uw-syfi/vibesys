@@ -25,7 +25,11 @@ if TYPE_CHECKING:
 
 def project_of(request: Request) -> Project:
     """Open the project named by the first path parameter."""
-    return Project.open(resolve_project(request.config, request.params[0]))
+    root = resolve_project(request.config, request.params[0])
+    try:
+        return Project.open(root)
+    except ProjectError as error:
+        raise ApiError(ErrorCode.UNKNOWN_PROJECT, str(error)) from None
 
 
 def select_task(project: Project, name: str) -> TaskDirectory:

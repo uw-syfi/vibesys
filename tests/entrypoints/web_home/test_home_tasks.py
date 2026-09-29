@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from typing import TYPE_CHECKING
 
 from tests.entrypoints.web_home.support import make_project, project_key
@@ -45,6 +46,27 @@ def test_unknown_project_and_task_are_typed_errors(home: Home) -> None:
 
     assert home.get("/api/projects/0000/tasks").json()["error"]["code"] == "unknown_project"
     assert home.get(f"/api/projects/{key}/tasks/nope").json()["error"]["code"] == "unknown_task"
+
+
+def test_removed_project_root_is_a_typed_error(home: Home) -> None:
+    key, root = _setup(home)
+    shutil.rmtree(root)
+
+    reply = home.get(f"/api/projects/{key}/tasks")
+
+    assert reply.status < 500
+    assert reply.json()["error"]["code"] == "unknown_project"
+
+
+def test_malformed_task_file_is_a_typed_error(home: Home) -> None:
+    key, root = _setup(home)
+    manifest = root / ".vibesys" / "tasks" / "bench" / "vibesys.input.toml"
+    manifest.write_text("this is not [ valid toml")
+
+    reply = home.get(f"/api/projects/{key}/tasks/bench")
+
+    assert reply.status < 500
+    assert reply.json()["error"]["code"] == "task_invalid"
 
 
 def _make_protocol_task(root: Path) -> None:
