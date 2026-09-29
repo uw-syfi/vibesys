@@ -511,12 +511,12 @@ test("Resume… from a finished run's menu resumes it; a smaller budget is refus
   await page.getByRole('button', {name: 'More'}).click();
   await page.getByRole('menuitem', {name: 'Resume run…'}).click();
   await expect(page).toHaveURL(new RegExp(`#resume=${PROJECT_ID}/`));
-  await page.getByLabel('Budget').fill('6');
+  await page.getByLabel('Rounds').fill('6');
   await page.getByRole('button', {name: 'Resume run'}).click();
   await expect(page.getByRole('alert')).toContainText(
     'The run already has a budget of 12; resume with at least that.',
   );
-  await page.getByLabel('Budget').fill('20');
+  await page.getByLabel('Rounds').fill('20');
   await page.getByRole('button', {name: 'Resume run'}).click();
   await expect(page).toHaveURL(/gateway=/);
   expect(posts(home, '/resume').map(request => request.body)).toEqual([{budget: 6}, {budget: 20}]);
@@ -528,4 +528,12 @@ test('a live run offers no Resume', async ({page}) => {
   await page.goto(runHref('home', PROJECT_ID, GATEWAY_WS));
   await page.getByRole('button', {name: 'More'}).click();
   await expect(page.getByRole('menuitem', {name: 'Resume run…'})).toHaveCount(0);
+});
+
+test('a 404 unknown_run, from a stale sidebar link, reads as a clear one-line message', async ({
+  page,
+}) => {
+  await mockHome(page, {unknownRun: true});
+  await page.goto(`${HOME}#open=${PROJECT_ID}/${FINISHED_RUN}`);
+  await expect(page.getByRole('alert')).toHaveText('This run no longer exists.');
 });

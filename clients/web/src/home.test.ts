@@ -28,6 +28,7 @@ const other: HomeRun = {
   outcome: 'completed',
   updatedAt: '2026-09-23T14:00:00Z',
   url: null,
+  loop: 'agent',
 };
 
 test('the open run is listed even when the home API knows nothing', () => {
@@ -111,6 +112,7 @@ test('home runs: serving gateways open directly, finished runs reopen, launches 
     outcome: 'running',
     updatedAt: '2026-09-25T14:01:00+00:00',
     url: runHref('h', 'p1', WS),
+    loop: 'agent',
   });
   const finished = homeRun(row({}), 'p1', 'h');
   assert.deepEqual(

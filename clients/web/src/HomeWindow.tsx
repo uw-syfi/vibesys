@@ -61,6 +61,7 @@ function HomeMain({view, client, token, listing}: HomeMainProps) {
         runId,
         title: run?.title ?? runId,
         root: project?.path ?? null,
+        loop: run?.loop ?? null,
       };
       const key = `${view.kind}:${projectId}/${runId}`;
       return view.kind === 'open' ? (

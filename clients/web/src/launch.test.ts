@@ -85,6 +85,8 @@ test('launch_failed and an unreachable home fail with the tail; other refusals a
     launchLine(smaller).error,
     'The run already has a budget of 12; resume with at least that.',
   );
+  const gone = launchError(new HomeError('unknown_run', 'no run r0', null));
+  assert.equal(launchLine(gone).error, 'This run no longer exists.');
   assert.deepEqual(launchLine({kind: 'sending'}), {busy: 'Launching the run server…', error: null});
   assert.deepEqual(launchLine({kind: 'starting', runId: 'r1'}), {
     busy: 'Starting the run…',

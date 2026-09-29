@@ -32,6 +32,7 @@ const BASE: PaletteInput = {
   pane: null,
   sidebarShown: true,
   newRun: false,
+  resumeHref: null,
   prompt: {turn: 'x1', detail: 'round 2, attempt 1'},
   todos: {turn: 'x1', detail: 'round 2'},
 };
@@ -114,6 +115,18 @@ test('New run is offered with its shortcut only when the sidebar shows it', () =
   assert.equal(labels(BASE).includes('Run: New run'), false);
 });
 
+test('Resume run… mirrors the ••• menu: offered only with a resume link', () => {
+  const entry = paletteItems({...BASE, resumeHref: '/?token=h#resume=p1/r1'}).find(
+    item => item.id === 'run-resume',
+  );
+  assert.deepEqual(entry && {group: entry.group, label: entry.label, intent: entry.intent}, {
+    group: 'Run',
+    label: 'Resume run…',
+    intent: {kind: 'open', href: '/?token=h#resume=p1/r1'},
+  });
+  assert.equal(labels(BASE).includes('Run: Resume run…'), false);
+});
+
 test('the home palette: New run unless it is open, and every run the sidebar links', () => {
   const run = (id: string, url: string | null) => ({
     id,
@@ -123,6 +136,7 @@ test('the home palette: New run unless it is open, and every run the sidebar lin
     outcome: 'completed' as const,
     updatedAt: '2026-09-28T12:00:00Z',
     url,
+    loop: 'agent',
   });
   const sections = [
     {id: 'p1', name: 'llm-serve', runs: [run('a', '/?token=h#open=p1/a'), run('b', null)]},

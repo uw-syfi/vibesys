@@ -39,6 +39,8 @@ export interface PaletteInput {
   sidebarShown: boolean;
   /** The page came from the home server: the sidebar shows New run. */
   newRun: boolean;
+  /** The page came from the home server and the run has ended: null hides Resume run…. */
+  resumeHref: string | null;
   /** The selected round's latest turn that recorded a prompt. */
   prompt: {turn: string; detail: string} | null;
   /** The selected round's latest turn that recorded todos. */
@@ -88,6 +90,11 @@ function runItems(input: PaletteInput): PaletteItem[] {
       item('run-steer', 'Run', 'Steer the next agent call', 'focus the composer', {kind: 'steer'}),
     );
   if (input.hasRunId) items.push(item('run-copy', 'Run', 'Copy run ID', '', {kind: 'copyRunId'}));
+  if (input.resumeHref !== null) {
+    items.push(
+      item('run-resume', 'Run', 'Resume run…', '', {kind: 'open', href: input.resumeHref}),
+    );
+  }
   if (input.newRun)
     items.push({...item('run-new', 'Run', 'New run', '', {kind: 'newRun'}), keys: '⌘N'});
   return items;

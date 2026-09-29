@@ -97,6 +97,7 @@ export function rejectionText(error: HomeError): string {
   if (error.code === 'budget_decrease' && typeof recorded === 'number') {
     return `The run already has a budget of ${recorded}; resume with at least that.`;
   }
+  if (error.code === 'unknown_run') return 'This run no longer exists.';
   return error.message;
 }
 

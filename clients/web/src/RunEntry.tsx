@@ -1,8 +1,9 @@
 /** Reopening a finished run read-only, and resuming one with its recorded configuration. */
 import {useCallback, useEffect, useState} from 'react';
-import type {HomeClient} from './home-api.js';
+import type {Catalog, HomeClient} from './home-api.js';
 import {launchLine, useLaunch} from './launch.js';
 import {homeHref} from './route.js';
+import {budgetLabel} from './setup.js';
 import {Hint, Row} from './ui/Setup.js';
 import {StartFailure} from './ui/StartFailure.js';
 
@@ -13,6 +14,8 @@ export interface RunEntryProps {
   runId: string;
   title: string;
   root: string | null;
+  /** The run's outer loop, matched against the catalog for the budget field's wording. */
+  loop: string | null;
 }
 
 const WHOLE = /^[1-9]\d*$/;
@@ -67,9 +70,23 @@ export function ReopenView({client, token, projectId, runId, title, root}: RunEn
   );
 }
 
-export function ResumeView({client, token, projectId, runId, title, root}: RunEntryProps) {
+export function ResumeView({client, token, projectId, runId, title, root, loop}: RunEntryProps) {
   const {state, start, reset} = useLaunch(client, token);
   const [budget, setBudget] = useState('');
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  useEffect(() => {
+    let live = true;
+    client.catalog().then(
+      next => {
+        if (live) setCatalog(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [client]);
+  const label = budgetLabel(catalog?.outer_loops.find(option => option.id === loop));
   const trimmed = budget.trim();
   const valid = trimmed === '' || WHOLE.test(trimmed);
   const resume = () =>
@@ -99,7 +116,7 @@ export function ResumeView({client, token, projectId, runId, title, root}: RunEn
       </header>
       <div className="scroll">
         <div className="form">
-          <Row label="Budget" htmlFor="f-budget">
+          <Row label={label} htmlFor="f-budget">
             <input
               id="f-budget"
               className={line.error === null ? 'fld num budget' : 'fld num budget bad'}
@@ -109,12 +126,12 @@ export function ResumeView({client, token, projectId, runId, title, root}: RunEn
               inputMode="numeric"
               value={budget}
               placeholder="As recorded"
-              title="Total rounds (or generations) for the run; only a larger total adds any"
+              title={`Total ${label.toLowerCase()} for the run; only a larger total adds any`}
               onChange={event => setBudget(event.target.value)}
             />
             <Hint tone={line.error === null ? 'plain' : 'bad'}>
               {line.error ??
-                'Runs again with the recorded configuration. A larger total adds rounds.'}
+                `Runs again with the recorded configuration. A larger total adds ${label.toLowerCase()}.`}
             </Hint>
           </Row>
         </div>

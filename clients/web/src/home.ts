@@ -24,6 +24,8 @@ export interface HomeRun {
   updatedAt: string;
   /** Capability URL of a reachable gateway; null when the run cannot be opened from here. */
   url: string | null;
+  /** The outer loop the run started with; null when the run store has not recorded it yet. */
+  loop: string | null;
 }
 
 export interface HomeApi {
@@ -77,6 +79,7 @@ export function openRun(input: {
       outcome,
       updatedAt: input.updatedAt ?? '',
       url: null,
+      loop: null,
     },
   };
 }
@@ -194,6 +197,7 @@ export function homeRun(row: RunRow, projectId: string, token: string): HomeRun 
     outcome: ROW_OUTCOMES[row.status],
     updatedAt: row.created_at ?? '',
     url: rowUrl(row, projectId, token),
+    loop: row.loop,
   };
 }
 

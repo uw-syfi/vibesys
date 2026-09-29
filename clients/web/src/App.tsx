@@ -512,7 +512,7 @@ function paletteInput(
   view: View,
   ui: UiState,
   sidebarShown: boolean,
-  newRun: boolean,
+  links: RunLinks | null,
 ): PaletteInput {
   const only = agentFilter(ui, view.round);
   const visible = (view.transcript?.turns ?? []).filter(turn => only === null || turn.id === only);
@@ -531,7 +531,9 @@ function paletteInput(
     selected: view.round,
     pane: ui.pane,
     sidebarShown,
-    newRun,
+    newRun: links !== null,
+    resumeHref:
+      links !== null && view.ended && state.runId !== null ? links.resume(state.runId) : null,
     prompt:
       withPrompt === undefined ? null : {turn: withPrompt.id, detail: where(withPrompt.phase)},
     todos: withTodos === undefined ? null : {turn: withTodos.id, detail: where(withTodos.phase)},
@@ -587,7 +589,7 @@ export function App({session, home, links}: AppProps) {
       )}
       {ui.palette ? (
         <Palette
-          items={paletteItems(paletteInput(state, view, ui, layout.sidebar, links !== null))}
+          items={paletteItems(paletteInput(state, view, ui, layout.sidebar, links))}
           onRun={entry => runIntent(entry.intent, {dispatch, session, state, toggleSidebar, links})}
           onClose={() => dispatch({type: 'palette', open: false})}
         />

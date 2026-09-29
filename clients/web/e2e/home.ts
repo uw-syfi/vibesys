@@ -81,6 +81,8 @@ export interface HomeOptions {
   rejectKey: boolean;
   /** POST .../resume answers budget_decrease below this. */
   recordedBudget: number;
+  /** POST .../open and .../resume answer unknown_run instead of launching. */
+  unknownRun: boolean;
   /** Folders whose validation waits for `release(path)`. */
   slow: string[];
   /** Folder listings (by the requested `path`, `''` for the granted roots) that wait for `releaseFs(path)`. */
@@ -109,6 +111,7 @@ const DEFAULTS: HomeOptions = {
   start: 'live',
   rejectKey: false,
   recordedBudget: 12,
+  unknownRun: false,
   slow: [],
   slowFs: [],
   hold: [],
@@ -471,12 +474,14 @@ class FakeServer {
   }
 
   private open(runId: string): Reply | null {
+    if (this.options.unknownRun) return fail(404, 'unknown_run', `no run ${runId}`);
     return this.options.hold.includes('open')
       ? null
       : ok({run_id: runId, gateway: gateway('reopened')});
   }
 
   private resume(runId: string, budget: unknown): Reply {
+    if (this.options.unknownRun) return fail(404, 'unknown_run', `no run ${runId}`);
     if (typeof budget === 'number' && budget < this.options.recordedBudget) {
       return fail(422, 'budget_decrease', 'The budget is below the recorded total', {
         recorded: this.options.recordedBudget,
