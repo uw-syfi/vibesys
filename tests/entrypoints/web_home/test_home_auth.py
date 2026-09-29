@@ -108,6 +108,16 @@ def test_writing_a_key_is_write_only_private_and_preserves_other_entries(home: H
     assert _provider(home, "codex")["status"] == "key"
 
 
+def test_writing_a_key_strips_surrounding_whitespace(home: Home) -> None:
+    path = home.config.dotenv_path
+    path.parent.mkdir(parents=True)
+
+    reply = home.put("/api/auth/codex", {"name": "OPENAI_API_KEY", "value": f"  {SAMPLE_KEY}\t"})
+
+    assert reply.status == 200
+    assert path.read_text() == f"OPENAI_API_KEY='{SAMPLE_KEY}'\n"
+
+
 @pytest.mark.parametrize("inherited", ["sk-stale", ""])
 def test_an_inherited_variable_shadows_the_saved_key_even_when_empty(
     home: Home, inherited: str
@@ -136,6 +146,9 @@ def test_an_inherited_variable_shadows_the_saved_key_even_when_empty(
         ("codex", {"name": "OPENAI_API_KEY", "value": "sk'x"}, "invalid_key"),
         ("codex", {"name": "OPENAI_API_KEY", "value": "sk${HOME}"}, "invalid_key"),
         ("codex", {"name": "OPENAI_API_KEY", "value": 'sk"x'}, "invalid_key"),
+        ("codex", {"name": "OPENAI_API_KEY", "value": "sk" + chr(0x2028) + "x"}, "invalid_key"),
+        ("codex", {"name": "OPENAI_API_KEY", "value": "sk" + chr(0xE9)}, "invalid_key"),
+        ("codex", {"name": SAMPLE_KEY, "value": SAMPLE_KEY}, "invalid_key"),
         ("codex", {"name": "OPENAI_API_KEY", "value": SAMPLE_KEY, "extra": 1}, "invalid_request"),
         ("codex", {"name": "OPENAI_API_KEY", "value": 12345}, "invalid_request"),
     ],
@@ -196,16 +209,18 @@ def test_writing_a_key_leaves_this_process_environment_alone(home: Home) -> None
 
 
 def test_the_home_server_never_imports_the_dotenv_loaders() -> None:
+    # Catches both `from dotenv import load_dotenv` and `import dotenv; dotenv.load_dotenv(...)`.
+    forbidden = {"load_dotenv", "load_config", "find_dotenv"}
     package = Path(__file__).parents[3] / "src" / "entrypoints" / "web_home"
-    imported = {
-        alias.name
-        for path in package.glob("*.py")
-        for node in ast.walk(ast.parse(path.read_text()))
-        if isinstance(node, ast.ImportFrom)
-        for alias in node.names
-    }
+    names: set[str] = set()
+    for path in package.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom):
+                names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
 
-    assert imported.isdisjoint({"load_dotenv", "load_config", "find_dotenv"})
+    assert names.isdisjoint(forbidden)
 
 
 _NAMES = st.from_regex(r"[A-Z][A-Z0-9_]{0,8}", fullmatch=True).filter(

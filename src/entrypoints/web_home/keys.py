@@ -9,7 +9,7 @@ this process.
 from __future__ import annotations
 
 import io
-import unicodedata
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -40,6 +40,10 @@ _KEY_SUFFIXES = ("_API_KEY", "_AUTH_TOKEN")
 _LOGIN_COMMANDS = {"codex": "codex login", "opencode": "opencode auth login"}
 # Claude Code on macOS keeps its login in the keychain instead of `.credentials.json`.
 _KEYCHAIN_SERVICES = {"claude": "Claude Code-credentials"}
+# Visible ASCII only: excludes space (a stored key is stripped, not internally spaced),
+# every control character, and every non-ASCII code point (U+2028/U+2029 included), so a
+# key can never break a line-oriented reader of the file it lands in.
+_PRINTABLE_ASCII = re.compile(r"[\x21-\x7e]+")
 
 
 def key_variables(profile: ProviderProfile) -> tuple[str, ...]:
@@ -109,11 +113,11 @@ def auth_status(request: Request) -> AuthStatus:
 
 
 def _check_value(value: str) -> None:
-    if not value.strip():
+    if not value:
         message = "the key is empty"
         raise ApiError(ErrorCode.INVALID_KEY, message)
-    if any(unicodedata.category(character) == "Cc" for character in value):
-        message = "the key contains a control character"
+    if not _PRINTABLE_ASCII.fullmatch(value):
+        message = "the key must be printable ASCII with no whitespace"
         raise ApiError(ErrorCode.INVALID_KEY, message)
     if any(character in value for character in "'\"\\$"):
         message = "the key contains a quote, backslash, or `$`"
@@ -151,10 +155,11 @@ def write_key(request: Request) -> KeyWriteResult:
     body = parse_body(request, KeyWrite)
     allowed = key_variables(provider_profile(provider))
     if body.name not in allowed:
+        # The message never echoes body.name: a user could paste the key into the name field.
         expected = ", ".join(allowed) or "none; sign in with the provider's CLI"
-        message = f"{body.name!r} is not a key variable for {provider} (expected: {expected})"
+        message = f"not an allowlisted key variable for {provider} (expected: {expected})"
         raise ApiError(ErrorCode.INVALID_KEY, message)
-    value = body.value.get_secret_value()
+    value = body.value.get_secret_value().strip()
     _check_value(value)
     config = request.config
     with config.write_lock:
