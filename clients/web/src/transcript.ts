@@ -290,6 +290,26 @@ function lineCount(text: unknown): number | null {
   return typeof text === 'string' ? text.replace(/\n$/, '').split('\n').length : null;
 }
 
+/** What an edit changed, without the lines its old and new text share at either end. */
+function editCounts(before: unknown, after: unknown): Pick<ToolDescription, 'added' | 'removed'> {
+  if (typeof before !== 'string' || typeof after !== 'string') {
+    return {added: lineCount(after), removed: lineCount(before)};
+  }
+  const lines = lineDiff(before, after);
+  return {
+    added: lines.filter(line => line.tone === 'add').length,
+    removed: lines.filter(line => line.tone === 'del').length,
+  };
+}
+
+/** A write's own report of its size (`Wrote src/q.rs (54 lines added)`), else its argument's lines. */
+function writtenLines(entry: TranscriptEntry, content: unknown): number | null {
+  const reported = /\((\d+) lines? added\)/.exec(
+    entry.toolResult?.content ?? entry.toolResponse ?? '',
+  )?.[1];
+  return reported === undefined ? lineCount(content) : Number(reported);
+}
+
 type Describe = (
   verb: string,
   object: string | null,
@@ -327,12 +347,13 @@ export function describeTool(entry: TranscriptEntry, short: Short): ToolDescript
       return describeCommand(text('command'), describe);
     case 'Edit':
     case 'MultiEdit':
-      return describe('Edited', text('file_path'), {
-        added: lineCount(args['new_string']),
-        removed: lineCount(args['old_string']),
-      });
+      return describe(
+        'Edited',
+        text('file_path'),
+        editCounts(args['old_string'], args['new_string']),
+      );
     case 'Write':
-      return describe('Wrote', text('file_path'), {added: lineCount(args['content'])});
+      return describe('Wrote', text('file_path'), {added: writtenLines(entry, args['content'])});
     case 'Read':
       return describe('Read', text('file_path'));
     case 'Grep':
@@ -353,6 +374,39 @@ export function describeTool(entry: TranscriptEntry, short: Short): ToolDescript
   }
 }
 
+export interface LineStat {
+  added: number;
+  removed: number;
+}
+
+/** Each round's edits: changed lines per file, as the tool calls name the file. */
+export type RoundEdits = ReadonlyMap<number, ReadonlyMap<string, LineStat>>;
+
+/**
+ * The lines each round's edits and writes changed, per file (the run workspace prefix stripped):
+ * the same counts the transcript rows show, summed.
+ */
+export function roundEdits(core: CoreState, runId: string | null): RoundEdits {
+  const short = pathShortener(runId);
+  const rounds = new Map<number, Map<string, LineStat>>();
+  for (const entry of core.transcript) {
+    if (entry.kind !== 'tool' || entry.roundNumber === undefined) continue;
+    const {verb, object, added, removed} = describeTool(entry, short);
+    if (object === null || (verb !== 'Edited' && verb !== 'Wrote')) continue;
+    const stats = rounds.get(entry.roundNumber) ?? new Map<string, LineStat>();
+    const stat = stats.get(object) ?? {added: 0, removed: 0};
+    stats.set(object, {added: stat.added + (added ?? 0), removed: stat.removed + (removed ?? 0)});
+    rounds.set(entry.roundNumber, stats);
+  }
+  return rounds;
+}
+
+/** The stat of `path` (repository-relative) among a round's edits, which may name it absolutely. */
+export function statFor(edits: ReadonlyMap<string, LineStat>, path: string): LineStat | null {
+  for (const [file, stat] of edits) if (file === path || file.endsWith(`/${path}`)) return stat;
+  return null;
+}
+
 function finishTurns(
   input: TranscriptInput,
   turns: Turn[],
@@ -366,6 +420,8 @@ function finishTurns(
       .filter(([phase]) => phase.status === 'active')
       .map(([, key]) => key),
   );
+  // Pause takes effect after the current call, so a paused run has no call in flight.
+  const running = live && core.status !== 'paused';
   for (const turn of turns) {
     const record = records.get(turn.id);
     turn.prompt = record?.prompt ?? null;
@@ -374,7 +430,7 @@ function finishTurns(
     if (note !== null && !turn.items.some(item => item.kind === 'prose')) {
       turn.items.unshift({kind: 'prose', id: `result-${turn.id}`, paragraphs: prose(note)});
     }
-    turn.active = live && acting.has(turn.id);
+    turn.active = running && acting.has(turn.id);
     turn.working = turn.active ? workingOf(turn, passCriteria) : null;
   }
   attachVerdicts(captured, round, turns);
@@ -455,10 +511,15 @@ function attachSteers(captured: readonly RunEvent[], round: number, turns: Turn[
     if (steer.round !== round) continue;
     const named =
       steer.executionId === null ? undefined : keys.key(steer.executionId, '', null, false);
+    // A named execution that matches no turn falls back to the round's last turn, never to
+    // another execution that shares its label.
     const byExecution = turns.find(candidate => candidate.id === named);
-    const byLabel = turns.filter(
-      candidate => candidate.kind === steer.agentKind && candidate.label === steer.roundLabel,
-    );
+    const byLabel =
+      named === undefined
+        ? turns.filter(
+            candidate => candidate.kind === steer.agentKind && candidate.label === steer.roundLabel,
+          )
+        : [];
     const turn = byExecution ?? byLabel.at(-1) ?? turns.at(-1);
     turn?.items.push({kind: 'steer', id: steer.id, text: steer.text});
   }

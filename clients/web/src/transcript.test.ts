@@ -8,6 +8,7 @@ import {
   describeTool,
   lineDiff,
   queuedSteers,
+  roundEdits,
   roundTranscript,
   type ToolRow,
   type Turn,
@@ -307,6 +308,17 @@ test('entries whose phase events fell below the floor still form turns', () => {
   );
 });
 
+test('a paused run has no call in flight: no acting turn, no working line', () => {
+  const pausedAt = ev(10_000, 'run_status_changed', {
+    data: {kind: 'run_status_changed', status: 'paused', previous: 'pausing'},
+  });
+  const {model} = at([...upTo(232), pausedAt], 6);
+  assert.equal(
+    model.turns.some(turn => turn.active || turn.working !== null),
+    false,
+  );
+});
+
 test('steers: applied inside the consuming turn, queued until consumed', () => {
   const label = 'round-1-retry-1-judge';
   const events = [
@@ -367,6 +379,62 @@ test('a consumed steer lands in the execution its control event names', () => {
       ['b', 'prose'],
     ],
   );
+});
+
+test('a steer naming an execution no turn has falls back to the last turn, not to its label', () => {
+  const label = 'round-1-retry-1-implementer';
+  const events = [
+    phase(1, label, 'implementer', 'a'),
+    say(2, label, 'implementer', 'From a.', 'a'),
+    phase(3, 'round-1-retry-1-judge', 'judge', 'j'),
+    say(4, 'round-1-retry-1-judge', 'judge', 'Judging.', 'j'),
+    ev(5, 'control', {
+      status: 'pending',
+      text: '/steer: Somewhere',
+      agent_kind: 'implementer',
+      round_label: label,
+    }),
+    ev(6, 'control', {
+      status: 'consumed',
+      text: '/steer',
+      agent_kind: 'implementer',
+      round_label: label,
+      execution_id: 'gone',
+    }),
+  ];
+  const {model} = at(events, 1);
+  assert.deepEqual(
+    model.turns.map(turn => [turn.id, turn.items.at(-1)?.kind]),
+    [
+      ['a', 'prose'],
+      ['j', 'steer'],
+    ],
+  );
+});
+
+test('a write counts the lines its result reports; edits count only what changed', () => {
+  const {core} = at(DEMO, 6);
+  const write = core.transcript.find(
+    entry => entry.toolName === 'Write' && entry.roundNumber === 6,
+  );
+  assert.ok(write);
+  assert.equal(describeTool(write, text => text).added, 54);
+  assert.deepEqual(roundEdits(core, null).get(6)?.get('src/queue.rs'), {added: 54, removed: 0});
+  const edit = describeTool(
+    {
+      id: '1',
+      kind: 'tool',
+      content: '',
+      toolName: 'Edit',
+      toolArguments: {
+        file_path: 'a.rs',
+        old_string: 'fn a() {\n  x\n}',
+        new_string: 'fn a() {\n  y\n}',
+      },
+    },
+    text => text,
+  );
+  assert.deepEqual([edit.added, edit.removed], [1, 1]);
 });
 
 test('repeated identical steers keep one identity each, whatever arrives first', () => {

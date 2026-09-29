@@ -11,6 +11,7 @@ import {
   runControl,
   steers,
   steersNeedOlder,
+  toolDuration,
 } from './derive.js';
 import {CAPTURED_TYPES} from './session.js';
 
@@ -156,4 +157,28 @@ test('prose keeps paragraphs, inline code, and bold; paths shorten at word start
   const short = pathShortener('run-7');
   assert.equal(short("cat '/w/run-7/src/a.rs' /x/run-7/b"), "cat 'src/a.rs' b");
   assert.equal(short('cat .vibesys/runs/run-7/x'), 'cat .vibesys/runs/run-7/x');
+});
+
+test('tool durations: one decimal under a minute, then minutes and zero-padded seconds', () => {
+  const timed = (duration: number) =>
+    toolDuration({
+      id: '1',
+      kind: 'tool',
+      content: '',
+      toolResult: {
+        tool: 'Bash',
+        content: '',
+        is_error: false,
+        payload: {kind: 'command', stdout: '', stderr: '', exit_code: 0, duration},
+      },
+    });
+  assert.deepEqual([0.04, 0.4, 7.9, 12.2, 41.7, 59.99, 65.2].map(timed), [
+    '<0.1s',
+    '0.4s',
+    '7.9s',
+    '12.2s',
+    '41.7s',
+    '1m 00s',
+    '1m 05s',
+  ]);
 });

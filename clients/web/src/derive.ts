@@ -24,16 +24,6 @@ export function formatValue(value: number): string {
   return Math.abs(value) < 100_000 ? grouped.format(value) : compact.format(value);
 }
 
-function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor(total / 60) % 60;
-  const seconds = String(total % 60).padStart(2, '0');
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
-    : `${minutes}:${seconds}`;
-}
-
 /** The latest round the run has started, or null before round 1. */
 export function latestRound(core: CoreState): number | null {
   return core.rounds.filter(round => round.status !== 'planned').at(-1)?.number ?? null;
@@ -105,17 +95,18 @@ export function pathShortener(runId: string | null): (text: string) => string {
 
 /**
  * How long the call took. The command payload is the only one that reports it, whatever tool
- * produced that payload, so most timed rows are Bash and a few are not. Tenths under ten
- * seconds, whole seconds under a minute, `m:ss` above: `0:00` would say nothing about the 40 ms
- * reads that are most of a round, and `0.0s` would claim a call took no time at all.
+ * produced that payload, so most timed rows are Bash and a few are not. One decimal under a
+ * minute, so a right-aligned column of times lines up (`7.9s`, `12.2s`), then `1m 05s`. `<0.1s`
+ * for the 40 ms reads that are most of a round: `0.0s` would claim a call took no time at all.
  */
 export function toolDuration(entry: TranscriptEntry): string | null {
   const payload = entry.toolResult?.payload;
   const seconds = payload?.kind === 'command' ? payload.duration : null;
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;
   if (seconds < 0.1) return '<0.1s';
-  if (seconds < 10) return `${seconds.toFixed(1)}s`;
-  return seconds < 60 ? `${Math.round(seconds)}s` : formatDuration(seconds * 1000);
+  if (seconds < 59.95) return `${seconds.toFixed(1)}s`;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, '0')}s`;
 }
 
 /**
