@@ -86,7 +86,11 @@ test('a server that dies on its own is a crash, reported with its stderr', async
 });
 
 test('a launcher that hands over to a running home server is reused, and stop leaves that server alone', async () => {
-  const running = createServer((_request, response) => response.end('vibesys-ok\n'));
+  const running = createServer((request, response) => {
+    const authorized = request.url === '/health?token=theirs';
+    response.writeHead(authorized ? 200 : 401);
+    response.end(authorized ? 'vibesys-ok\n' : 'unauthorized');
+  });
   await new Promise<void>(resolve => running.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(running.address() as AddressInfo).port}`;
   try {
@@ -94,7 +98,7 @@ test('a launcher that hands over to a running home server is reused, and stop le
     assert.deepEqual({origin: home.origin, token: home.token}, {origin, token: 'theirs'});
     assert.deepEqual(await home.ended, {kind: 'reused'});
     await home.stop();
-    assert.equal(await answers(origin), true);
+    assert.equal((await fetch(`${origin}/health?token=theirs`)).status, 200);
   } finally {
     running.closeAllConnections();
     running.close();
@@ -110,6 +114,48 @@ test('a server that exits before announcing fails the start with its stderr tail
     );
     return true;
   });
+});
+
+test('an occupied address without discovery stays running and names explicit recovery steps', async () => {
+  for (const status of [200, 401, 403]) {
+    const running = createServer((_request, response) => {
+      response.writeHead(status);
+      response.end('vibesys-ok\n');
+    });
+    await new Promise<void>(resolve => running.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${(running.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(startHome(options(['bind', origin])), (error: unknown) => {
+        assert.ok(error instanceof HomeStartError);
+        assert.equal(
+          error.message.split('\n')[0],
+          `The home server address ${origin} is already in use.`,
+        );
+        assert.match(error.message, /Stop the process using it and restart VibeSys/);
+        assert.match(error.message, /VIBESYS_HOME_PORT/);
+        assert.match(error.message, /reopen existing runs/);
+        assert.ok(!error.message.includes('token='));
+        return true;
+      });
+      assert.equal((await fetch(`${origin}/health`)).status, status);
+    } finally {
+      running.closeAllConnections();
+      await new Promise<void>(resolve => running.close(() => resolve()));
+    }
+  }
+});
+
+test('other bind errors keep their original diagnostic', async () => {
+  await assert.rejects(
+    startHome(options(['denied', 'http://127.0.0.1:9123'])),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeStartError);
+      assert.match(error.message, /^the home server exited with code 1 before it was ready\n/);
+      assert.match(error.message, /Permission denied/);
+      assert.ok(!error.message.includes('already in use'));
+      return true;
+    },
+  );
 });
 
 test('a server that never announces is killed at the ready timeout', async () => {

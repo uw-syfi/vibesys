@@ -7,6 +7,8 @@
  *   silent          serve, but never announce
  *   announce <url>  print a running home server's URL and exit 0 (run_home's reuse path)
  *   fail            write a traceback to stderr and exit 3
+ *   bind <origin>   attempt the configured port; report the Python bind failure on stderr
+ *   denied <origin> report a non-conflict Python bind failure
  */
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:http';
@@ -46,6 +48,16 @@ function spawnHolder(): Promise<void> {
 
 if (mode === 'announce') {
   process.stdout.write(`VibeSys home: ${url}\n`);
+} else if (mode === 'bind') {
+  const server = createServer();
+  server.on('error', () => {
+    process.stderr.write(`vibesys web home: cannot listen on ${url} (Address already in use).\n`);
+    process.exitCode = 1;
+  });
+  server.listen(Number(new URL(url).port), '127.0.0.1');
+} else if (mode === 'denied') {
+  process.stderr.write(`vibesys web home: cannot listen on ${url} (Permission denied).\n`);
+  process.exitCode = 1;
 } else if (mode === 'fail') {
   process.stderr.write(
     'Traceback (most recent call last):\nOSError: [Errno 48] Address already in use\n',

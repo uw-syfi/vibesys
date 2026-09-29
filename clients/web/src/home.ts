@@ -13,6 +13,8 @@ export interface HomeProject {
   id: string;
   name: string;
   path: string;
+  /** The folder is unavailable; fixtures without this flag are available. */
+  missing?: boolean;
 }
 
 export interface HomeRun {
@@ -140,18 +142,20 @@ export const EMPTY_LISTING: Listing = {projects: [], runs: []};
 
 /**
  * Every project, and the runs of each project that answered. A refresh passes the last listing: a
- * home server that did not answer keeps it, and a failing project keeps its last runs.
+ * home server that did not answer keeps it, and a failing project keeps its last runs. Missing
+ * folders stay listed without polling or retaining their unavailable runs.
  */
 export async function loadListing(home: HomeApi, previous = EMPTY_LISTING): Promise<Listing> {
   const projects = await home.projects().catch(() => null);
   if (projects === null) return previous;
-  const settled = await Promise.allSettled(projects.map(project => home.runs(project.id)));
+  const available = projects.filter(project => !project.missing);
+  const settled = await Promise.allSettled(available.map(project => home.runs(project.id)));
   return {
     projects,
     runs: settled.flatMap((result, index) =>
       result.status === 'fulfilled'
         ? result.value
-        : previous.runs.filter(run => run.projectId === projects[index]?.id),
+        : previous.runs.filter(run => run.projectId === available[index]?.id),
     ),
   };
 }
@@ -220,6 +224,7 @@ export function httpHomeApi(client: HomeClient, token: string): HomeApi {
         id: project.id,
         name: project.name,
         path: project.root,
+        missing: project.missing,
       })),
     runs: async projectId =>
       (await client.runs(projectId)).runs.map(row => homeRun(row, projectId, token)),

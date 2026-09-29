@@ -42,11 +42,18 @@ export function homeArguments(port: string | undefined, devOrigin: string | null
   ];
 }
 
-/** The app URL with the home capability, on the home origin or (dev) the Vite origin. */
+/** The capability URL; dev rejects a home outside the configured Vite proxy before exposing it. */
 export function windowUrl(
   home: {readonly origin: string; readonly token: string},
   devOrigin: string | null,
+  port?: string,
 ): string {
+  const proxy = originOf(`http://127.0.0.1:${port || DEV_PROXY_PORT}`);
+  if (devOrigin !== null && originOf(home.origin) !== proxy) {
+    throw new Error(
+      `The home server at ${originOf(home.origin)} does not match the Vite API proxy at ${proxy}. Restart the home server on the proxy port, or restart desktop dev with VIBESYS_HOME_PORT set to the running home server's port.`,
+    );
+  }
   const url = new URL('/', devOrigin ?? home.origin);
   url.searchParams.set('token', home.token);
   return url.href;

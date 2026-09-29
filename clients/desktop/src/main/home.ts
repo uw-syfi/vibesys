@@ -97,7 +97,17 @@ export async function startHome(options: HomeOptions): Promise<Home> {
   } catch (error) {
     signalGroup('SIGKILL');
     await exit;
-    if (error instanceof HomeStartError) throw new HomeStartError(report(error.message, tail));
+    if (error instanceof HomeStartError) {
+      const occupied =
+        /^vibesys web home: cannot listen on (http:\/\/127\.0\.0\.1:\d{1,5}) \(Address already in use\)\./m.exec(
+          tail.join('\n'),
+        )?.[1];
+      const headline =
+        occupied === undefined
+          ? error.message
+          : `The home server address ${occupied} is already in use.\nStop the process using it and restart VibeSys, or explicitly set VIBESYS_HOME_PORT to another port and reopen existing runs for the changed app origin.`;
+      throw new HomeStartError(report(headline, tail));
+    }
     throw error;
   }
   let stopping = false;

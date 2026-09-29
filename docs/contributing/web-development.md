@@ -146,7 +146,16 @@ opens the app in a native window. Run these from `clients/`:
 | `pnpm --filter @vibesys/desktop test:e2e` | Launches the built app with Playwright on a temporary state home and screenshots the window. Needs `uv`. |
 
 `VIBESYS_HOME_PORT` sets the home server's port (the Vite proxy reads it too).
+When unset or empty, dev uses 8764; production uses the saved home port (8764 initially).
 `VIBESYS_STATE_HOME` moves the home server's state and the shell's profile; one app runs per
 state home. Quitting stops the home server the app started; run servers keep running and are
 listed again on the next launch. A home server that was already running (for example
 `vibesys web home --open`) is reused and left running. There is no packaged build yet.
+
+Reuse requires the capability in the state home's `web/home.json` and an authenticated
+health check. If that file is missing, the shell cannot authenticate an existing server.
+An occupied address is reported without stopping its owner or automatically changing ports.
+Stop the process using the address and restart VibeSys, or explicitly choose another
+`VIBESYS_HOME_PORT`. Changing the app origin requires reopening existing run gateways.
+Desktop dev also requires the reused home's port to match the Vite API proxy: set
+`VIBESYS_HOME_PORT` to that port when restarting dev, or restart the home on the proxy port.

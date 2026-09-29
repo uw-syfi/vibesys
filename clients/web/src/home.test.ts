@@ -5,12 +5,13 @@ import {
   type HomeApi,
   type HomeRun,
   homeRun,
+  httpHomeApi,
   loadListing,
   openRun,
   relativeTime,
   sidebarSections,
 } from './home.js';
-import type {Gateway, RunRow} from './home-api.js';
+import {type Gateway, homeClient, type RunRow} from './home-api.js';
 import {runHref} from './route.js';
 
 const open = openRun({
@@ -169,4 +170,60 @@ test('one failing project drops only its own runs', async () => {
   const gone: HomeRun = {...other, id: 'g', projectId: 'p2'};
   const refreshed = await loadListing(home, {...listing, runs: [kept, gone]});
   assert.deepEqual(refreshed.runs, [kept, gone]);
+});
+
+test('HTTP listings skip missing folders and resume polling when each folder returns', async () => {
+  const projects = [
+    {id: 'p1', name: 'first', root: '/a', last_opened: '', missing: false},
+    {id: 'p2', name: 'second', root: '/b', last_opened: '', missing: false},
+  ];
+  const requests: string[] = [];
+  const client = homeClient('home-token', async url => {
+    requests.push(url);
+    if (url === '/api/projects') return Response.json({projects, home: null});
+    const project = projects.find(item => url === `/api/projects/${item.id}/runs`);
+    assert.ok(project !== undefined);
+    return project.missing
+      ? Response.json({error: {code: 'unknown_project', message: 'missing'}}, {status: 404})
+      : Response.json({runs: [row({run_id: project.id})]});
+  });
+  const home = httpHomeApi(client, 'home-token');
+  let previous = await loadListing(home);
+  // Every availability combination, including both transition directions and reordered projects.
+  for (const mask of [1, 3, 2, 0, 2, 1, 0]) {
+    for (const project of projects) {
+      project.missing = Boolean(mask & (project.id === 'p1' ? 1 : 2));
+    }
+    projects.reverse();
+    requests.length = 0;
+    const listing = await loadListing(home, previous);
+    const available = projects.filter(project => !project.missing);
+    assert.deepEqual(requests, [
+      '/api/projects',
+      ...available.map(project => `/api/projects/${project.id}/runs`),
+    ]);
+    assert.deepEqual(
+      listing.projects.map(project => project.missing),
+      projects.map(p => p.missing),
+    );
+    assert.deepEqual(
+      listing.runs.map(run => run.projectId),
+      available.map(project => project.id),
+    );
+    assert.equal(sidebarSections(listing.projects, listing.runs, null).length, 2);
+    previous = listing;
+  }
+  const failed: HomeApi = {
+    projects: async () => [
+      {id: 'p1', name: 'first', path: '/a', missing: true},
+      {id: 'p2', name: 'second', path: '/b', missing: false},
+    ],
+    runs: async () => {
+      throw new Error('temporarily unavailable');
+    },
+  };
+  assert.deepEqual(
+    (await loadListing(failed, previous)).runs,
+    previous.runs.filter(run => run.projectId === 'p2'),
+  );
 });

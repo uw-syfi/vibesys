@@ -146,7 +146,7 @@ async function launch(): Promise<Home | null> {
     const detail = error instanceof Error ? error.message : String(error);
     log(detail.split('\n', 1)[0] ?? detail);
     if (quit === 'running') {
-      dialog.showErrorBox('VibeSys could not start its home server', detail);
+      dialog.showErrorBox('VibeSys home server unavailable', detail);
       app.quit();
     }
     return null;
@@ -157,15 +157,23 @@ async function openHome(): Promise<void> {
   home = launch();
   const current = await home;
   if (current === null || quit !== 'running') return;
+  let target: string;
+  try {
+    target = windowUrl(current, DEV_ORIGIN, process.env['VIBESYS_HOME_PORT']);
+  } catch (error) {
+    const detail = (error as Error).message;
+    log(detail);
+    dialog.showErrorBox('VibeSys home server unavailable', detail);
+    app.quit();
+    return;
+  }
   void current.ended
     .then(onHomeEnded)
     .catch(error => log(`could not handle the home server's exit: ${(error as Error).message}`));
   appOrigins = [DEV_ORIGIN ?? current.origin];
   win ??= createWindow();
   // The rejection message quotes the URL, which carries the token: report the origin only.
-  win
-    .loadURL(windowUrl(current, DEV_ORIGIN))
-    .catch(() => log(`could not load the app from ${appOrigins[0]}`));
+  win.loadURL(target).catch(() => log(`could not load the app from ${appOrigins[0]}`));
 }
 
 async function onHomeEnded(end: HomeEnd): Promise<void> {

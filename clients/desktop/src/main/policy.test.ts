@@ -72,6 +72,30 @@ test('the window opens the app on the mode origin with the home capability', () 
   assert.equal(windowUrl(home, VITE), `${VITE}/?token=abc_-9`);
 });
 
+test('dev refuses a reused home outside the exact Vite proxy origin before exposing its capability', () => {
+  const home = {origin: 'http://127.0.0.1:9123', token: 'private-capability'};
+  for (const port of [undefined, '', '8764', '9124']) {
+    assert.throws(
+      () => windowUrl(home, VITE, port),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /does not match the Vite API proxy/);
+        assert.match(error.message, /VIBESYS_HOME_PORT/);
+        assert.ok(!error.message.includes(home.token));
+        return true;
+      },
+    );
+  }
+  assert.equal(windowUrl(home, VITE, '9123'), `${VITE}/?token=private-capability`);
+  assert.equal(windowUrl(home, VITE, '09123'), `${VITE}/?token=private-capability`);
+  assert.equal(windowUrl(home, null, '8764'), `${home.origin}/?token=private-capability`);
+});
+
+test('dev matches an announced home on the default HTTP port after origin normalization', () => {
+  const home = {origin: 'http://127.0.0.1:80', token: 'home-capability'};
+  assert.equal(windowUrl(home, VITE, '80'), `${VITE}/?token=home-capability`);
+});
+
 test('the dev origin is exactly the Vite origin, and only in a dev build', () => {
   assert.equal(devOrigin(VITE, true), VITE);
   assert.equal(devOrigin(VITE, false), null);
