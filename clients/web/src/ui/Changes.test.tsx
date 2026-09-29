@@ -36,7 +36,8 @@ test('unavailable and truncated patches offer the reproduction command; loading 
     /<span class="scope">Round 3<\/span><span>against the round 2 checkpoint<\/span>/,
   );
   assert.match(html, /The workspace repository could not produce this patch\./);
-  assert.match(html, /Copy <span class="mono">git diff b h -- src\/a.rs<\/span>/);
+  assert.match(html, /title="git diff b h -- src\/a\.rs"[^>]*>Reproduce</);
+  assert.doesNotMatch(html, /git diff b h -- src\/a\.rs<\/button>/);
   assert.match(html, /Patch truncated at the server&#x27;s size bound\./);
   assert.match(html, /<div class="add">/);
   assert.match(html, /Loading patch…/);

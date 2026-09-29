@@ -20,6 +20,7 @@ interface FileProps {
   onCopy: (command: string) => void;
 }
 
+/** The full command is secondary detail: it lives only in the `title` hint, never inline. */
 function Reproduce({text, file, copied, onCopy}: FileProps & {text: string}) {
   return (
     <div className="note">
@@ -30,13 +31,7 @@ function Reproduce({text, file, copied, onCopy}: FileProps & {text: string}) {
         title={file.command}
         onClick={() => onCopy(file.command)}
       >
-        {copied === file.command ? (
-          'Copied'
-        ) : (
-          <>
-            Copy <span className="mono">{file.command}</span>
-          </>
-        )}
+        {copied === file.command ? 'Copied' : 'Reproduce'}
       </button>
     </div>
   );
