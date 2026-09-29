@@ -2,6 +2,7 @@
 
 import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
+import {Search} from 'lucide-react';
 import {
   type Dispatch,
   useCallback,
@@ -13,6 +14,7 @@ import {
 } from 'react';
 import {latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type HomeProject, type HomeRun, openRun, sidebarSections} from './home.js';
+import {type Intent, type PaletteInput, paletteItems} from './palette.js';
 import {
   type RetainedText,
   type RoundRow,
@@ -31,6 +33,7 @@ import {AgentsTab} from './ui/Agents.js';
 import {Banner} from './ui/Banner.js';
 import {ChangesTab} from './ui/Changes.js';
 import {ExperimentsTab} from './ui/Experiments.js';
+import {Palette} from './ui/Palette.js';
 import {Pane, Placeholder} from './ui/Pane.js';
 import {Resizer} from './ui/Resizer.js';
 import {Sidebar} from './ui/Sidebar.js';
@@ -174,6 +177,19 @@ function useWindowWidth(): number {
   return useSyncExternalStore(subscribeWidth, () => innerWidth);
 }
 
+function usePaletteShortcut(dispatch: Dispatch<UiAction>): void {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        dispatch({type: 'palette', open: true});
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [dispatch]);
+}
+
 function transcriptControls(
   state: WorkspaceState,
   ui: UiState,
@@ -228,6 +244,17 @@ function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listin
       now={new Date()}
       onRound={round => dispatch({type: 'round', round, live: view.live})}
       head={<SidebarToggle shown onToggle={() => dispatch({type: 'sidebar', open: false})} />}
+      nav={
+        <button
+          type="button"
+          className="nav"
+          onClick={() => dispatch({type: 'palette', open: true})}
+        >
+          <Search size={16} strokeWidth={1.5} aria-hidden />
+          Search and commands
+          <span className="kbd">⌘K</span>
+        </button>
+      }
       resizer={
         <Resizer
           label="Resize the sidebar"
@@ -426,12 +453,79 @@ function RunPane(props: PaneHostProps) {
   );
 }
 
+interface IntentContext {
+  dispatch: Dispatch<UiAction>;
+  session: WorkspaceSession;
+  state: WorkspaceState;
+  toggleSidebar: () => void;
+}
+
+function runIntent(intent: Intent, context: IntentContext): void {
+  const {dispatch} = context;
+  dispatch({type: 'palette', open: false});
+  switch (intent.kind) {
+    case 'ui':
+      dispatch(intent.action);
+      return;
+    case 'toggleRun':
+      toggleRun(context.session, context.state);
+      return;
+    case 'copyRunId':
+      if (context.state.runId !== null) void navigator.clipboard.writeText(context.state.runId);
+      return;
+    case 'sidebar':
+      context.toggleSidebar();
+      return;
+    case 'steer':
+      requestAnimationFrame(() => document.getElementById('steer')?.focus());
+      return;
+    case 'reveal':
+      dispatch({type: 'disclose', key: intent.key, open: true});
+      requestAnimationFrame(() =>
+        document
+          .querySelector(`[data-turn="${CSS.escape(intent.turn)}"]`)
+          ?.scrollIntoView({block: 'start'}),
+      );
+      return;
+  }
+}
+
+/** Palette items from what the window shows now: the agent filter's turns only, so none is a no-op. */
+function paletteInput(
+  state: WorkspaceState,
+  view: View,
+  ui: UiState,
+  sidebarShown: boolean,
+): PaletteInput {
+  const visible = (view.transcript?.turns ?? []).filter(
+    turn => ui.agent === null || turn.id === ui.agent,
+  );
+  const withPrompt = visible.filter(turn => turn.prompt !== null).at(-1);
+  const withTodos = visible.filter(turn => turn.todos.length > 0).at(-1);
+  const where = (phase: string) =>
+    [`round ${view.round ?? ''}`, phase.toLowerCase()].filter(Boolean).join(', ');
+  return {
+    control: runControl(state.core, state.captured, state.connection),
+    pending: view.status.busy,
+    canStop: canStop(state, view),
+    canSteer: !view.ended && state.connection === 'connected',
+    hasRunId: state.runId !== null,
+    rows: view.summary.rows,
+    live: view.live,
+    sidebarShown,
+    prompt:
+      withPrompt === undefined ? null : {turn: withPrompt.id, detail: where(withPrompt.phase)},
+    todos: withTodos === undefined ? null : {turn: withTodos.id, detail: where(withTodos.phase)},
+  };
+}
+
 export function App({session, home}: AppProps) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [ui, dispatch] = useRunUi(state.runId);
   const view = useRunView(state, ui);
   const listing = useHome(home);
   const history = useBackfill(session, state, view.round);
+  usePaletteShortcut(dispatch);
   const width = useWindowWidth();
   const layout = frame(width, ui);
   const selectAgent = useCallback((id: string) => dispatch({type: 'agent', id}), [dispatch]);
@@ -468,6 +562,13 @@ export function App({session, home}: AppProps) {
           onAgent={selectAgent}
         />
       )}
+      {ui.palette ? (
+        <Palette
+          items={paletteItems(paletteInput(state, view, ui, layout.sidebar))}
+          onRun={entry => runIntent(entry.intent, {dispatch, session, state, toggleSidebar})}
+          onClose={() => dispatch({type: 'palette', open: false})}
+        />
+      ) : null}
     </div>
   );
 }

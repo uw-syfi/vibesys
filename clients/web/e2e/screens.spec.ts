@@ -128,6 +128,13 @@ const SCREENS: Screen[] = [
       await page.getByRole('button', {name: 'Design'}).click();
     },
   },
+  {
+    name: 'palette',
+    act: async page => {
+      await page.getByRole('button', {name: /Search and commands/}).click();
+      await page.getByRole('dialog', {name: 'Search and commands'}).waitFor();
+    },
+  },
 ];
 
 test.describe('screens', () => {

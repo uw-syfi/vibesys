@@ -214,3 +214,18 @@ dialog::backdrop { background: var(--scrim); }
 .ev { padding: 4px 16px 14px 46px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-sidebar); }
 .evacts { margin-top: 8px; display: flex; gap: 12px; }
 .evlist { list-style: none; margin: 0; padding: 0; }
+
+/* palette */
+dialog.pal { padding: 0; margin: 12vh auto auto; }
+.pal { width: min(580px, calc(100vw - 32px)); background: var(--bg-raised); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; max-height: 76vh; }
+.pal input { width: 100%; height: 48px; border: 0; outline: 0; padding: 0 16px; font: 14px var(--sans); background: transparent; color: var(--text-1); border-bottom: 1px solid var(--border-subtle); flex: none; }
+.pal input::placeholder { color: var(--text-3); }
+.pal .list { overflow: auto; padding: 6px; max-height: 392px; }
+.pal .gh { font-size: 11px; color: var(--text-3); padding: 10px 10px 4px; }
+.pal .it { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; width: 100%; color: var(--text-1); }
+.pal .it .lbl { white-space: nowrap; }
+.pal .it .d { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pal .it .kbd { margin-left: auto; }
+.pal .it.on { background: var(--bg-selected); }
+.pal .foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border-subtle); flex: none; }
+.pal .foot .count { margin-left: auto; }

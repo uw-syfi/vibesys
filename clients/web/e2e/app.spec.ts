@@ -205,3 +205,23 @@ test('experiments: chart with legend, evidence per round, design summary', async
   await pane.getByRole('button', {name: 'Design'}).click();
   await expect(pane).toContainText('src/sampler.rs');
 });
+
+test('⌘K opens the palette; a command runs and closes it; Escape closes it', async ({page}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.locator('.titlebar').click();
+  await page.keyboard.press('ControlOrMeta+k');
+  const palette = page.getByRole('dialog', {name: 'Search and commands'});
+  await expect(palette).toBeVisible();
+  await page.keyboard.type('round 3');
+  await page.keyboard.press('Enter');
+  await expect(palette).toHaveCount(0);
+  await expect(page.locator('.sticky')).toContainText('Round 3');
+  await page.getByRole('button', {name: /Search and commands/}).click();
+  await page.keyboard.type('experiments');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('tab', {name: 'Experiments'})).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+});
