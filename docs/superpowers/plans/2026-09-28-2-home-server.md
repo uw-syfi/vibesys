@@ -253,7 +253,7 @@ Returns once the run server's discovery record exists (gateway ready); poll `GET
 ```ts
 type NoteResponse = { note: { runId: string; text: string; createdAt: string; updatedAt: string } | null };  // TUI NoteRecord, camelCase
 ```
-Last write wins; `createdAt` is kept across writes. Errors: `invalid_request` (empty or over 256 characters run id).
+Last write wins; `createdAt` is kept across writes. Errors: `invalid_request` (empty run id, or over 200 characters once sanitized, a non-BMP character counting twice).
 
 ---
 
@@ -5229,7 +5229,7 @@ Expected: `ready`; a `LaunchResult` whose `websocket_url` accepts a WebSocket wi
 11. **Editability.** Beyond the spec's round-trip rule, the form edits only `command` argv tasks with `[benchmark.result]`; protocol, entrypoint, and metric-less tasks are read-only. Edits apply onto the existing manifest, keeping timeouts and other sections.
 12. **Key allowlist.** Profile `auth_env_vars` ending in `_API_KEY` or `_AUTH_TOKEN` (so `OPENAI_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS` are not writable). Values are written single-quoted, and `'`, `"`, `\` and `$` are rejected: python-dotenv interpolates `${VAR}` even inside single quotes, so only a `$`-free value round-trips through `dotenv_values`/`load_dotenv` unchanged (the Hypothesis test checks the round trip). An inherited variable, even empty, shadows `.env`, so shadowing is reported by membership.
 13. **CLI session.** `present`/`absent`/`unknown`, never verified: the profile's primary credential file (`auth_files[0]`, relocated through `state_root_env`), else for Claude the macOS keychain item `Claude Code-credentials` checked with `security find-generic-password -s` (no `-w`, 2 s timeout; exit 44 is absent, other failures unknown).
-14. **Run config.** A run-owned `<run>.agent.toml` beside the gateway record, validated as `Config` before launch. Resume passes no config: the CLI restores the recorded settings. `--exp-name` is generated up front so the run id is known before the gateway exists.
+14. **Run config.** A run-owned `<run>.agent.toml` beside the gateway record, validated as `Config` before launch. Resume passes no config: the CLI restores the recorded settings. `--run-id` is generated up front with `generate_run_id` (beside a readable `--exp-name`), so the id the reply returns is the id the run store records, known before the gateway exists.
 15. **Stop.** SIGTERMs the home-launched live gateway, else the external one, as `web stop` does; it returns without waiting.
 16. **Notes sanitization.** Matches the TUI per UTF-16 code unit (a non-BMP character becomes two underscores).
 17. **Default compute backend.** Reported by the catalog (`metal` on Apple silicon, else `cuda`/`rocm` if their CLI exists, else `cpu`), so the setup UI does not guess.

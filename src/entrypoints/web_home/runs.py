@@ -12,7 +12,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import signal
 import subprocess
 import threading
@@ -42,9 +41,14 @@ from entrypoints.web_home.projects import inspect_project, project_id, resolve_p
 from entrypoints.web_home.tasks import select_task
 from server.runtime import WebInstanceRecord
 from vibesys.api import Config, RunRecordReadError, RunStatus, open_run_store
-from vibesys.api.request import generate_experiment_name, load_project_task, orchestration_roles
+from vibesys.api.request import (
+    generate_experiment_name,
+    load_project_task,
+    orchestration_roles,
+    toml_string,
+)
 from vs_agent.api import SHIPPED_PROVIDERS, agent_catalog
-from vs_project.api import Project, ProjectError
+from vs_project.api import Project, ProjectError, generate_run_id
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -57,7 +61,6 @@ _RECORD_POLL_SECONDS = 0.05
 _REAP_SECONDS = 5.0
 _STDERR_TAIL_BYTES = 16_384
 _STDERR_TAIL_LINES = 40
-_TOML_FORBIDDEN_CONTROL = re.compile(r"[\x7f-\x9f]")
 _BLOCKERS = {
     ProjectState.MISSING: ErrorCode.INVALID_PATH,
     ProjectState.NOT_GIT: ErrorCode.NOT_GIT,
@@ -204,9 +207,12 @@ def _spawn(
     # VIBESYS_DETACHED_CHILD makes entrypoints.server serve in this child instead of
     # re-spawning with stderr discarded; BROWSER=true stops it opening a browser tab.
     environment = {**config.environ, "VIBESYS_DETACHED_CHILD": "1", "BROWSER": "true"}
+    # One log per record, truncated per attempt: `stderr_log` shows the latest attempt.
     log = record_path.with_suffix(".stderr.log")
     try:
-        with log.open("wb") as stderr:
+        descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as stderr:
+            os.fchmod(stderr.fileno(), 0o600)  # a log from an older home may be 0644
             process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101308 [S603]; argv is the fixed run-server command plus validated flags, never a shell string.
                 # > `entrypoints.server --detach` re-spawns with stderr discarded, and the
                 # > launch_failed contract returns that stderr; shell=True weakens argv safety.
@@ -232,7 +238,7 @@ def _spawn(
     config.launches[record_path] = Launch(run_id=run_id, process=process, stderr_log=log)
     deadline = time.monotonic() + config.launch_timeout
     while time.monotonic() < deadline:
-        record = WebInstanceRecord.discover(record_path, cleanup_stale=False)
+        record = _discover(record_path)
         if record is not None and record.pid == process.pid:
             return record
         if process.poll() is not None:
@@ -264,11 +270,25 @@ class _Live:
     external: bool
 
 
+def _open(root: Path) -> Project:
+    """Open a project whose root may have been deleted or moved since it was validated."""
+    try:
+        return Project.open(root)
+    except ProjectError as error:
+        raise ApiError(ErrorCode.UNKNOWN_PROJECT, str(error)) from None
+
+
+def _discover(path: Path) -> WebInstanceRecord | None:
+    # Never cleanup_stale: a live gateway that misses one 0.4 s /health probe must keep
+    # its record (the TUI's is a file the home did not create); `stale` reports it instead.
+    return WebInstanceRecord.discover(path, cleanup_stale=False)
+
+
 def _live(config: HomeConfig, root: Path) -> _Live | None:
     """Return the project's serving live gateway, home-owned first, then external."""
-    project = Project.open(root)
+    project = _open(root)
     for path, external in ((_live_record(config, root), False), (_external_record(project), True)):
-        record = WebInstanceRecord.discover(path)
+        record = _discover(path)
         if record is not None:
             run_id = _owner_run(path, record, project, external=external)
             return _Live(path=path, record=record, run_id=run_id, external=external)
@@ -288,13 +308,6 @@ def _require_ready(root: Path) -> None:
         raise ApiError(
             _BLOCKERS[validation.state], message, details={"pending": [*validation.pending]}
         )
-
-
-def _toml_string(value: str) -> str:
-    # Mirrors vibesys.inputs._manifest._toml_string (private there): json.dumps escapes
-    # C0 controls but leaves DEL and C1 literal, which TOML basic strings forbid.
-    encoded = json.dumps(value, ensure_ascii=False)
-    return _TOML_FORBIDDEN_CONTROL.sub(lambda match: f"\\u{ord(match.group()):04x}", encoded)
 
 
 def render_run_config(body: StartRun) -> str:
@@ -317,20 +330,17 @@ def render_run_config(body: StartRun) -> str:
         raise ApiError(
             ErrorCode.INVALID_REQUEST, message, details={"errors": validation_errors(error)}
         ) from None
-    lines = ["[model]", f"name = {_toml_string(body.model)}"]
+    lines = ["[model]", f"name = {toml_string(body.model)}"]
     if body.reasoning_effort is not None:
-        lines += ["", "[thinking]", f"level = {_toml_string(body.reasoning_effort)}"]
-    lines += ["", "[agent]", *(f"{key} = {_toml_string(value)}" for key, value in agent.items())]
+        lines += ["", "[thinking]", f"level = {toml_string(body.reasoning_effort)}"]
+    lines += ["", "[agent]", *(f"{key} = {toml_string(value)}" for key, value in agent.items())]
     for role, fields in roles.items():
-        lines += ["", f"[agent.roles.{_toml_string(role)}]"]
-        lines += [f"{key} = {_toml_string(value)}" for key, value in fields.items()]
+        lines += ["", f"[agent.roles.{toml_string(role)}]"]
+        lines += [f"{key} = {toml_string(value)}" for key, value in fields.items()]
     return "\n".join(lines) + "\n"
 
 
 def _check_start(body: StartRun) -> None:
-    if body.outer_loop not in LOOPS:
-        message = f"unknown outer loop {body.outer_loop!r}; choose from {', '.join(LOOPS)}"
-        raise ApiError(ErrorCode.INVALID_REQUEST, message)
     roles = orchestration_roles(LOOPS[body.outer_loop][2])
     if unknown := sorted(set(body.roles) - set(roles)):
         message = f"unknown roles {unknown} for {body.outer_loop}; choose from {', '.join(roles)}"
@@ -343,10 +353,12 @@ def _check_start(body: StartRun) -> None:
         raise ApiError(ErrorCode.UNKNOWN_PROVIDER, message)
 
 
-def _start_arguments(body: StartRun, root: Path, run_id: str, run_config: Path) -> list[str]:
+def _start_arguments(
+    body: StartRun, root: Path, exp_name: str, run_id: str, run_config: Path
+) -> list[str]:
     arguments = [
         *("--project", str(root), "--task", body.task, "--outer-loop", body.outer_loop),
-        *("--exp-name", run_id, "--config", str(run_config)),
+        *("--exp-name", exp_name, "--run-id", run_id, "--config", str(run_config)),
         *("--backend", body.compute_backend.value, "--cli-provider", body.provider),
     ]
     if body.budget is not None:
@@ -361,6 +373,8 @@ def start_run(request: Request) -> LaunchResult:
     config = request.config
     root = resolve_project(config, request.params[0])
     with config.launch_lock:
+        if not root.is_dir():
+            _require_ready(root)  # `invalid_path`; other blockers yield to `already_live`
         _require_no_live(config, root)
         _require_ready(root)
         project = Project.open(root)
@@ -370,11 +384,18 @@ def start_run(request: Request) -> LaunchResult:
                 "the profile-guided loop needs a [profile_guided] section in the task manifest"
             )
             raise ApiError(ErrorCode.PROFILE_GUIDED_UNAVAILABLE, message)
-        run_id = generate_experiment_name(root)
+        # The store's id is fixed here, so the reply, owner sidecar and run list agree.
+        exp_name = generate_experiment_name(root)
+        run_id = generate_run_id(exp_name)
         run_config = _run_config(config, root, run_id)
         atomic_write(run_config, render_run_config(body).encode("utf-8"), mode=0o600)
-        arguments = _start_arguments(body, root, run_id, run_config)
-        record = _spawn(config, root, _live_record(config, root), run_id, arguments)
+        arguments = _start_arguments(body, root, exp_name, run_id, run_config)
+        try:
+            record = _spawn(config, root, _live_record(config, root), run_id, arguments)
+        except ApiError:
+            # ponytail: a launched run's config stays beside its record; the run may reread it.
+            run_config.unlink(missing_ok=True)
+            raise
     return LaunchResult(run_id=run_id, gateway=_connected(record, GatewayState.STARTING))
 
 
@@ -406,9 +427,14 @@ def _stop(record: WebInstanceRecord, path: Path, *, group: bool) -> bool:
         else:
             os.kill(record.pid, signal.SIGTERM)
     deadline = time.monotonic() + _REAP_SECONDS
-    while WebInstanceRecord.discover(path) is not None and time.monotonic() < deadline:
+    while _discover(path) is not None and time.monotonic() < deadline:
         time.sleep(_RECORD_POLL_SECONDS)
-    return WebInstanceRecord.discover(path) is None
+    return _discover(path) is None
+
+
+def _live_gateway(live: _Live) -> Gateway:
+    # An external (TUI) gateway accepts only its own origin, so the app cannot attach to it.
+    return _connected(live.record, GatewayState.EXTERNAL if live.external else GatewayState.LIVE)
 
 
 def resume_run(request: Request) -> LaunchResult:
@@ -423,7 +449,7 @@ def resume_run(request: Request) -> LaunchResult:
     with config.launch_lock:
         live = _live(config, root)
         if live is not None and live.run_id == run_id and body.budget is None:
-            return LaunchResult(run_id=run_id, gateway=_connected(live.record, GatewayState.LIVE))
+            return LaunchResult(run_id=run_id, gateway=_live_gateway(live))
         descriptor = _load_run(root, run_id).orchestration
         if descriptor.id not in _POLICY_CLI_SELECTION:
             message = f"the app cannot resume orchestration {descriptor.id!r}"
@@ -454,9 +480,9 @@ def _serving_reopen(
 
     Ours is checked first, then plan 1's default record from another launcher.
     """
-    external = _external_record(Project.open(root)).with_name(f"web-gateway-{run_id}.json")
+    external = _external_record(_open(root)).with_name(f"web-gateway-{run_id}.json")
     for path in (_reopen_record(config, root, run_id), external):
-        record = WebInstanceRecord.discover(path) if path.exists() else None
+        record = _discover(path) if path.exists() else None
         if record is not None and (record.mode, record.run_id) == ("reopen", run_id):
             owner = _read_owner(path) if path != external else None
             return record, owner is not None and owner.origin != config.origin
@@ -475,7 +501,7 @@ def open_run(request: Request) -> LaunchResult:
     with config.launch_lock:
         live = _live(config, root)
         if live is not None and live.run_id == run_id:
-            return LaunchResult(run_id=run_id, gateway=_connected(live.record, GatewayState.LIVE))
+            return LaunchResult(run_id=run_id, gateway=_live_gateway(live))
         _load_run(root, run_id)
         path = _reopen_record(config, root, run_id)
         serving = _serving_reopen(config, root, run_id)
@@ -522,7 +548,7 @@ def origin_mismatches(config: HomeConfig) -> list[str]:
     for owner_path in sorted((config.state_home / "web" / "gateways").glob("*/*.owner.json")):
         record_path = owner_path.with_name(owner_path.name.removesuffix(".owner.json") + ".json")
         owner = _read_owner(record_path)
-        record = WebInstanceRecord.discover(record_path, cleanup_stale=False)
+        record = _discover(record_path)
         if owner is not None and record is not None and owner.origin != config.origin:
             found.append(f"{record.project_root} run {owner.run_id} ({owner.origin})")
     return found
@@ -533,7 +559,7 @@ def _published(config: HomeConfig, root: Path, project: Project) -> list[_Publis
     for path, external in ((_live_record(config, root), False), (_external_record(project), True)):
         if not path.exists():
             continue
-        record = WebInstanceRecord.discover(path, cleanup_stale=False)
+        record = _discover(path)
         if record is not None and record.mode != "live":
             continue
         owner = None if external else _read_owner(path)
@@ -694,7 +720,7 @@ def list_runs(request: Request) -> RunList:
     """``GET /api/projects/{id}/runs``: runs newest first, each with its gateway state."""
     config = request.config
     root = resolve_project(config, request.params[0])
-    project = Project.open(root)
+    project = _open(root)
     published = _published(config, root, project)
     try:
         manifests = project.state.list_runs()

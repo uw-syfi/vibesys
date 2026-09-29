@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 from entrypoints.cli.constants import _OUTER_LOOPS
+from entrypoints.web_home.contract import OuterLoop
 from vibesys.api import ComputeBackend
 from vs_agent.api import SHIPPED_PROVIDERS
 
@@ -14,7 +15,7 @@ def test_catalog_offers_every_cli_loop_with_its_budget_flag(home: Home) -> None:
     catalog = home.get("/api/agents/catalog").json()
     loops = {loop["id"]: loop for loop in catalog["outer_loops"]}
 
-    assert list(loops) == list(_OUTER_LOOPS)
+    assert list(loops) == list(_OUTER_LOOPS) == list(get_args(OuterLoop))
     assert loops["agent"]["budget"] == {"flag": "--max-rounds", "default": 24}
     assert loops["plain"]["budget"] == {"flag": "--max-rounds", "default": 5}
     assert loops["evolve"]["budget"] == {"flag": "--max-generations", "default": 8}

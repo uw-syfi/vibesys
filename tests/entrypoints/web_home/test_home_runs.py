@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -16,6 +18,8 @@ import pytest
 from tests.entrypoints.web_home.support import make_project, project_key
 from tests.support.run_execution import run_execution_record
 
+from entrypoints.cli import parse_cli_invocation
+from entrypoints.server import _headless_argv
 from entrypoints.web_home import runs
 from entrypoints.web_home.contract import StartRun
 from entrypoints.web_home.runs import render_run_config
@@ -78,9 +82,14 @@ def test_start_returns_the_gateway_and_passes_the_launch_contract(runs_home: Hom
         ("--max-rounds", "4"),
         ("--backend", "cpu"),
         ("--cli-provider", "codex"),
-        ("--exp-name", reply["run_id"]),
+        ("--run-id", reply["run_id"]),
     ):
         assert argv[argv.index(flag) + 1] == value
+    exp_name = argv[argv.index("--exp-name") + 1]
+    assert re.fullmatch(rf"\d{{8}}-\d{{6}}-[0-9a-f]{{8}}-{re.escape(exp_name)}", reply["run_id"])
+    # The real CLI accepts the launch argv and runs under exactly the returned id.
+    args = parse_cli_invocation(_headless_argv(argv)).args
+    assert (args.run_id, args.exp_name) == (reply["run_id"], exp_name)
     config = tomllib.loads(Path(argv[argv.index("--config") + 1]).read_text())
     assert config["agent"]["roles"]["implementer"] == {
         "model": "gpt-5.6-sol",
@@ -116,6 +125,8 @@ def test_a_failed_launch_returns_the_stderr_tail(runs_home: Home) -> None:
     log = Path(body["error"]["details"]["stderr_log"])
     assert log.name == "live.stderr.log"
     assert "bad run" in log.read_text()
+    assert log.stat().st_mode & 0o777 == 0o600
+    assert list(log.parent.glob("*.agent.toml")) == []
 
 
 def test_a_timed_out_launch_is_reaped_and_the_retry_owns_the_gateway(runs_home: Home) -> None:
@@ -259,6 +270,7 @@ def _persist_run(root: Path, run_id: str, *, max_rounds: int = 3) -> None:
     manifest = project.state.new_run_manifest(
         run_id,
         run_id=run_id,
+        task_name="bench",
         branch=f"vibesys-runs/{run_id}",
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="local"),
@@ -313,7 +325,7 @@ def test_open_serves_a_run_read_only_beside_the_live_one(runs_home: Home) -> Non
 
 @contextlib.contextmanager
 def _external_gateway(
-    record: Path, cwd: Path, *arguments: str
+    record: Path, cwd: Path, *arguments: str, environ: Mapping[str, str] | None = None
 ) -> Iterator[subprocess.Popen[bytes]]:
     """Run the fake gateway in the test's own process group, as another launcher would."""
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101311 [S603]; the test starts its own fake gateway script with fixed arguments.
@@ -321,6 +333,7 @@ def _external_gateway(
         # > test queries the API; a shell wrapper would add quoting for no gain.
         [sys.executable, str(FAKE), "--web-instance", str(record), *arguments],
         cwd=cwd,
+        env=environ,
         stdout=subprocess.PIPE,
     )
     try:
@@ -528,6 +541,71 @@ def test_a_reopen_serving_an_old_home_origin_is_restarted(runs_home: Home) -> No
 
     assert second["url"] != first["url"]
     assert _rows(runs_home, key)["plain-run"]["reopen"]["origin_mismatch"] is False
+
+
+def test_a_started_run_goes_live_under_the_id_start_returned(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    started = runs_home.post(f"/api/projects/{key}/runs", START).json()
+    run_id = started["run_id"]
+    assert _state(runs_home, key, run_id) == ("active", "starting")
+
+    attached = {"type": "experiments_changed", "data": {"reason": "project_attached"}}
+    _journal(root, run_id, {"type": "server_started"}, attached)
+    assert _state(runs_home, key, run_id) == ("active", "live")
+    _persist_run(root, run_id)
+
+    [row] = runs_home.get(f"/api/projects/{key}/runs").json()["runs"]
+    assert (row["run_id"], row["gateway"]["state"], row["task"]) == (run_id, "live", "bench")
+    assert row["created_at"] is not None
+
+
+def test_a_removed_project_root_is_a_typed_error_on_every_runs_endpoint(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    shutil.rmtree(root)
+
+    replies = {
+        "list": runs_home.get(f"/api/projects/{key}/runs"),
+        "start": runs_home.post(f"/api/projects/{key}/runs", START),
+        "open": runs_home.post(f"/api/projects/{key}/runs/plain-run/open"),
+        "resume": runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {}),
+        "stop": runs_home.delete(f"/api/projects/{key}/live"),
+    }
+
+    codes = {name: (reply.status, reply.json()["error"]["code"]) for name, reply in replies.items()}
+    assert codes == {
+        "list": (404, "unknown_project"),
+        "start": (400, "invalid_path"),
+        "open": (404, "unknown_project"),
+        "resume": (404, "unknown_project"),
+        "stop": (404, "unknown_project"),
+    }
+
+
+def test_a_gateway_that_misses_the_health_probe_keeps_its_record(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    record = Project.open(root).configuration_path() / "web-gateway.json"
+    deaf = {**os.environ, "FAKE_RUN_SERVER_DEAF": "1"}
+    with _external_gateway(record, root, environ=deaf):
+        assert _rows(runs_home, key)["plain-run"]["gateway"]["state"] == "stale"
+        runs_home.delete(f"/api/projects/{key}/live")
+        runs_home.post(f"/api/projects/{key}/runs/plain-run/open")
+        runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {})
+        assert record.exists()
+
+
+def test_open_and_resume_report_an_external_gateway_as_external(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    Project.open(root).state.set_current_run("plain-run")
+    record = Project.open(root).configuration_path() / "web-gateway.json"
+    with _external_gateway(record, root):
+        opened = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+        resumed = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {}).json()
+
+    assert opened["gateway"]["state"] == "external"
+    assert resumed["gateway"] == opened["gateway"]
+    assert runs_home.config.launches == {}
 
 
 def test_an_external_gateway_and_a_stale_record_are_reported(runs_home: Home) -> None:

@@ -7,7 +7,8 @@ exact `Origin` from `--web-origin` or its own origin. It records its argv next
 to the record and removes the record on SIGTERM.
 
 `FAKE_RUN_SERVER_FAIL=1` writes to stderr and exits 2; `FAKE_RUN_SERVER_HANG=1`
-never publishes a record.
+never publishes a record; `FAKE_RUN_SERVER_DEAF=1` publishes, then never answers
+(a gateway too busy for the 0.4 s `/health` probe).
 """
 
 from __future__ import annotations
@@ -98,6 +99,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, stop)
     sys.stdout.write("ready\n")
     sys.stdout.flush()
+    if os.environ.get("FAKE_RUN_SERVER_DEAF") == "1":
+        signal.pause()
     server.serve_forever()
 
 

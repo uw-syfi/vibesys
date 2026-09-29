@@ -424,11 +424,14 @@ class RoleOverride(_Model):
     reasoning_effort: str | None = Field(default=None, min_length=1, max_length=256)
 
 
+OuterLoop = Literal["agent", "profile-guided", "dynamic", "plain", "evolve"]
+
+
 class StartRun(_Model):
     """Body of ``POST /api/projects/{id}/runs``."""
 
     task: str
-    outer_loop: str
+    outer_loop: OuterLoop
     budget: int | None = Field(default=None, ge=1)
     compute_backend: ComputeBackend
     driver: Driver | None = None
