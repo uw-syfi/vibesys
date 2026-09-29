@@ -305,8 +305,19 @@ def _live(config: HomeConfig, root: Path) -> _Live | None:
     return None
 
 
+def _ended(root: Path, live: _Live) -> bool:
+    """Whether a home-owned live gateway's run has ended and the gateway only serves it."""
+    return (
+        not live.external and live.run_id is not None and _attempt(root, live.run_id)[1] is not None
+    )
+
+
 def _require_no_live(config: HomeConfig, root: Path) -> None:
-    if (live := _live(config, root)) is not None:
+    """Refuse a launch while a run is live; an ended home-owned gateway is stopped instead."""
+    live = _live(config, root)
+    if live is not None and _ended(root, live) and _stop(live.record, live.path, group=True):
+        live = None
+    if live is not None:
         message = "this project already has a live run; stop it first"
         raise ApiError(ErrorCode.ALREADY_LIVE, message, details={"run_id": live.run_id})
 
@@ -443,15 +454,19 @@ def _stop(record: WebInstanceRecord, path: Path, *, group: bool) -> bool:
     return not WebInstanceClaim.is_held(path)
 
 
-def _live_gateway(live: _Live) -> Gateway:
+def _live_gateway(root: Path, live: _Live) -> Gateway:
     # An external (TUI) gateway accepts only its own origin, so the app cannot attach to it.
-    return _connected(live.record, GatewayState.EXTERNAL if live.external else GatewayState.LIVE)
+    if live.external:
+        return _connected(live.record, GatewayState.EXTERNAL)
+    state = GatewayState.ENDED_SERVING if _ended(root, live) else GatewayState.LIVE
+    return _connected(live.record, state)
 
 
 def resume_run(request: Request) -> LaunchResult:
     """``POST .../runs/{run}/resume``: resume; the CLI restores the recorded configuration.
 
-    Resuming the run that is already live returns its gateway instead of a second backend.
+    Resuming the run that is already live returns its gateway instead of a second backend;
+    a gateway still serving the ended run is stopped and a new attempt launched.
     """
     body = parse_body(request, ResumeRun)
     config = request.config
@@ -459,8 +474,13 @@ def resume_run(request: Request) -> LaunchResult:
     run_id = request.params[1]
     with config.launch_lock:
         live = _live(config, root)
-        if live is not None and live.run_id == run_id and body.budget is None:
-            return LaunchResult(run_id=run_id, gateway=_live_gateway(live))
+        if (
+            live is not None
+            and live.run_id == run_id
+            and body.budget is None
+            and not _ended(root, live)
+        ):
+            return LaunchResult(run_id=run_id, gateway=_live_gateway(root, live))
         descriptor = _load_run(root, run_id).orchestration
         if descriptor.id not in _POLICY_CLI_SELECTION:
             message = f"the app cannot resume orchestration {descriptor.id!r}"
@@ -512,7 +532,7 @@ def open_run(request: Request) -> LaunchResult:
     with config.launch_lock:
         live = _live(config, root)
         if live is not None and live.run_id == run_id:
-            return LaunchResult(run_id=run_id, gateway=_live_gateway(live))
+            return LaunchResult(run_id=run_id, gateway=_live_gateway(root, live))
         _load_run(root, run_id)
         path = _reopen_record(config, root, run_id)
         serving = _serving_reopen(config, root, run_id)

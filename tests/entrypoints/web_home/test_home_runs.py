@@ -510,6 +510,35 @@ def test_run_list_follows_the_latest_attempt_in_the_journal(runs_home: Home) -> 
     assert _state(runs_home, key, "plain-run") == ("failed", "none")
 
 
+def test_resume_after_the_run_ended_replaces_its_serving_gateway(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    _persist_run(root, "plain-run")
+    first = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {}).json()
+    old = next(iter(runs_home.config.launches.values())).process
+    attached = {"type": "experiments_changed", "data": {"reason": "project_attached"}}
+    _journal(root, "plain-run", {"type": "server_started"}, attached)
+    _journal(root, "plain-run", {"type": "run_finished", "status": "completed"})
+
+    opened = runs_home.post(f"/api/projects/{key}/runs/plain-run/open").json()
+    resumed = runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {}).json()
+
+    assert opened["gateway"] == {**first["gateway"], "state": "ended_serving"}
+    assert old.wait(timeout=10) == 0
+    assert resumed["gateway"]["state"] == "starting"
+    assert resumed["gateway"]["url"] != first["gateway"]["url"]
+
+
+def test_a_new_run_replaces_an_ended_runs_serving_gateway(runs_home: Home) -> None:
+    key, root = _project(runs_home)
+    first = runs_home.post(f"/api/projects/{key}/runs", START).json()["run_id"]
+    _journal(root, first, {"type": "server_started"}, {"type": "run_failed"})
+
+    started = runs_home.post(f"/api/projects/{key}/runs", START)
+
+    assert started.status == 200
+    assert started.json()["run_id"] != first
+
+
 def test_run_list_shows_a_serving_reopen_beside_the_run(runs_home: Home) -> None:
     key, root = _project(runs_home)
     _persist_run(root, "plain-run")
