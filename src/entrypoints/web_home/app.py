@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import secrets
 import webbrowser
 from http import HTTPStatus
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast, override
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from entrypoints.web_home import projects
 from entrypoints.web_home.context import HomeConfig, Request, atomic_write
 from entrypoints.web_home.contract import ApiError, ErrorBody, ErrorCode
 from server.runtime import WebInstanceClaim, WebInstanceRecord
@@ -22,7 +24,6 @@ from vs_project.api import state_home
 
 if TYPE_CHECKING:
     import argparse
-    import re
     from collections.abc import Callable
 
     from pydantic import BaseModel
@@ -42,7 +43,9 @@ _SECURITY_HEADERS = (
     ("Cross-Origin-Resource-Policy", "same-origin"),
 )
 _STATE_CHANGING = frozenset({"POST", "PUT", "DELETE"})
-_ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...] = ()
+_ROUTES: tuple[tuple[str, re.Pattern[str], Callable[[Request], BaseModel]], ...] = (
+    ("GET", re.compile(r"/api/fs"), projects.list_directory),
+)
 
 
 def _route(method: str, path: str) -> tuple[Callable[[Request], BaseModel], tuple[str, ...]]:
