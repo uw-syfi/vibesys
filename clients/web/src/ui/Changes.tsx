@@ -11,14 +11,21 @@ import {
   type PatchSlot,
   patchRequests,
 } from '../changes.js';
+import {copyText} from '../clipboard.js';
 import type {RoundRow} from '../rounds.js';
 import type {LineStat} from '../transcript.js';
 import {Diff} from './Diff.js';
 import {PaneHead} from './Pane.js';
 
+/** The last command a Copy button sent to the clipboard, and whether it landed. */
+export interface Copied {
+  command: string;
+  ok: boolean;
+}
+
 interface FileProps {
   file: FileChanges;
-  copied: string | null;
+  copied: Copied | null;
   onCopy: (command: string) => void;
 }
 
@@ -36,7 +43,11 @@ function Reproduce({text, file, copied, onCopy}: FileProps & {text: string}) {
         title={file.command}
         onClick={() => onCopy(file.command)}
       >
-        {copied === file.command ? 'Copied' : 'Copy command'}
+        {copied?.command === file.command
+          ? copied.ok
+            ? 'Copied'
+            : "Couldn't copy"
+          : 'Copy command'}
       </button>
     </div>
   );
@@ -110,7 +121,7 @@ export function Changes({
   onCopy,
 }: {
   model: ChangesModel;
-  copied: string | null;
+  copied: Copied | null;
   onCopy: (command: string) => void;
 }) {
   switch (model.kind) {
@@ -203,7 +214,7 @@ export function ChangesTab({
 }: ChangesTabProps) {
   const requests = useMemo(() => patchRequests(design), [design]);
   const patches = usePatches(requests, loadPatch);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [copied, setCopied] = useState<Copied | null>(null);
   const scope = row === undefined ? 'Run' : `Round ${row.round}`;
   if (design === undefined && error !== null) {
     return (
@@ -227,7 +238,7 @@ export function ChangesTab({
     );
   }
   const copy = (command: string) => {
-    void navigator.clipboard.writeText(command).then(() => setCopied(command));
+    void copyText(command).then(ok => setCopied({command, ok}));
   };
   return (
     <Changes model={changesModel(row, design, patches, edits)} copied={copied} onCopy={copy} />

@@ -1,5 +1,6 @@
 /** Why a run did not start (mockup #startfail): the message, the run server's stderr, Retry. */
 import {useState} from 'react';
+import {copyText} from '../clipboard.js';
 import {type FileLocation, type LaunchFailure, locationText, tailParts} from '../launch.js';
 
 export interface StartFailureProps {
@@ -44,9 +45,9 @@ function TailLine({line, root, onCopy}: {line: string; root: string | null; onCo
 }
 
 export function StartFailure({failure, root, backLabel, onRetry, onBack}: StartFailureProps) {
-  const [copied, setCopied] = useState<string | null>(null);
+  const [copied, setCopied] = useState<{text: string; ok: boolean} | null>(null);
   const copy: Copy = text => {
-    void navigator.clipboard.writeText(text).then(() => setCopied(text));
+    void copyText(text).then(ok => setCopied({text, ok}));
   };
   const log = failure.log;
   return (
@@ -84,7 +85,11 @@ export function StartFailure({failure, root, backLabel, onRetry, onBack}: StartF
             {backLabel}
           </button>
           <span className="t2" aria-live="polite">
-            {copied === null ? '' : `Copied ${copied}`}
+            {copied === null
+              ? ''
+              : copied.ok
+                ? `Copied ${copied.text}`
+                : `Couldn't copy ${copied.text}`}
           </span>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import {Ellipsis, PanelLeft, PanelRight, Pause, Play} from 'lucide-react';
-import {type ReactNode, type RefObject, useEffect, useRef} from 'react';
+import {type ReactNode, type RefObject, useEffect, useRef, useState} from 'react';
+import {copyText} from '../clipboard.js';
 import type {RunControl} from '../model.js';
 import type {RetainedText, StatusLine} from '../rounds.js';
 import type {Menu} from '../ui-state.js';
@@ -181,6 +182,8 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
   // A confirmation for a run that can no longer stop is gone, whatever the stored menu says.
   const shown = menu === 'stop' && !canStop ? null : menu;
   const close = () => onMenu(null);
+  // The trigger has no message slot of its own: a failed copy shows as its title until reopened.
+  const [copyFailed, setCopyFailed] = useState(false);
   // Whatever closed the menu (an item, Escape, a click outside), focus goes back to •••
   // unless the item moved it on purpose.
   const wasOpen = useRef(false);
@@ -196,11 +199,20 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
         ref={trigger}
         type="button"
         className={shown === null ? 'iconbtn' : 'iconbtn on'}
-        title={canStop ? 'Notes, copy run ID, stop the run' : 'Notes, copy run ID'}
+        title={
+          copyFailed
+            ? "Couldn't copy the run ID"
+            : canStop
+              ? 'Notes, copy run ID, stop the run'
+              : 'Notes, copy run ID'
+        }
         aria-label="More"
         aria-haspopup="menu"
         aria-expanded={shown === 'more'}
-        onClick={() => onMenu(shown === null ? 'more' : null)}
+        onClick={() => {
+          setCopyFailed(false);
+          onMenu(shown === null ? 'more' : null);
+        }}
       >
         <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
       </button>
@@ -213,7 +225,7 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
             className="it"
             disabled={runId === null}
             onClick={() => {
-              if (runId !== null) void navigator.clipboard.writeText(runId);
+              if (runId !== null) void copyText(runId).then(ok => setCopyFailed(!ok));
               close();
             }}
           >

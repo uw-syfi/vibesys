@@ -10,6 +10,7 @@ import {
   useReducer,
   useSyncExternalStore,
 } from 'react';
+import {copyText} from './clipboard.js';
 import {attachNote, latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
 import {useHome, useNewRunShortcut, usePaletteShortcut} from './home-hooks.js';
@@ -471,7 +472,11 @@ function runIntent(intent: Intent, context: IntentContext): void {
       toggleRun(context.session, context.state);
       return;
     case 'copyRunId':
-      if (context.state.runId !== null) void navigator.clipboard.writeText(context.state.runId);
+      // No message slot here (the palette has already closed): a failure is silent past this log.
+      if (context.state.runId !== null)
+        void copyText(context.state.runId).then(ok => {
+          if (!ok) console.error("Couldn't copy the run ID to the clipboard.");
+        });
       return;
     case 'sidebar':
       context.toggleSidebar();
