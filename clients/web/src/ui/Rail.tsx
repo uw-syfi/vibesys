@@ -38,6 +38,29 @@ const STATUS: Record<RoundStatus, {word: string; Icon: LucideIcon}> = {
 const OFFICIAL = 'Official. Unmarked values are provisional.';
 const INCUMBENT = 'Incumbent: the best result so far. New rounds are compared against it.';
 
+const RAIL_NOTES: Partial<Record<RailState, string>> = {
+  unattached: 'Waiting for the project to attach',
+  'ended-unattached': 'The run ended before the project attached',
+};
+
+/** The rail's loading skeleton or placeholder note; null once rounds should render instead. */
+function RailNote({state, rowCount}: {state: RailState; rowCount: number}) {
+  if (state === 'loading') {
+    return (
+      <ol className="rail-rows" aria-hidden="true">
+        {['a', 'b', 'c', 'd'].map(key => (
+          <li key={key}>
+            <span className="rrow skel" />
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  const note =
+    RAIL_NOTES[state] ?? (state === 'ready' && rowCount === 0 ? 'No rounds started yet' : null);
+  return note === null ? null : <p className="rail-note">{note}</p>;
+}
+
 export function Rail({state, model, selected, error, hint, onSelect, onRetry}: RailProps) {
   const list = useRef<HTMLOListElement>(null);
   // Keyboard selection moves focus with it, and the selected row scrolls into view once the rows
@@ -79,21 +102,7 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
           <span className="left">{model.roundsLeft} left</span>
         ) : null}
       </h2>
-      {state === 'error' ? null : state === 'loading' ? (
-        <ol className="rail-rows" aria-hidden="true">
-          {['a', 'b', 'c', 'd'].map(key => (
-            <li key={key}>
-              <span className="rrow skel" />
-            </li>
-          ))}
-        </ol>
-      ) : state === 'unattached' ? (
-        <p className="rail-note">Waiting for the project to attach</p>
-      ) : state === 'ended-unattached' ? (
-        <p className="rail-note">The run ended before the project attached</p>
-      ) : model.rows.length === 0 ? (
-        <p className="rail-note">No rounds started yet</p>
-      ) : (
+      {state === 'error' ? null : state === 'ready' && model.rows.length > 0 ? (
         <ol className="rail-rows" ref={list}>
           {model.rows.map(row => (
             <li key={row.round}>
@@ -106,6 +115,8 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
             </li>
           ))}
         </ol>
+      ) : (
+        <RailNote state={state} rowCount={model.rows.length} />
       )}
       {hint && state === 'ready' && model.rows.length > 0 ? (
         <p className="rail-hint">Tap the selected round for details</p>
