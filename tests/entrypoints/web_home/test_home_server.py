@@ -114,7 +114,9 @@ def test_the_home_server_refuses_a_port_another_listener_holds(tmp_path: Path) -
 def test_error_responses_carry_the_same_security_headers(home: Home) -> None:
     connection = http.client.HTTPConnection("127.0.0.1", home.config.port, timeout=30)
     try:
-        connection.request("HEAD", "/", headers={"Host": home.config.origin.removeprefix("http://")})
+        connection.request(
+            "HEAD", "/", headers={"Host": home.config.origin.removeprefix("http://")}
+        )
         response = connection.getresponse()
         response.read()
         assert response.status == 501

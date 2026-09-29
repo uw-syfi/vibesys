@@ -61,9 +61,7 @@ def test_symlinks_that_leave_the_roots_are_hidden_and_refused(home: Home, tmp_pa
         ("/etc", "outside_roots"),
     ],
 )
-def test_paths_outside_the_roots_or_relative_are_rejected(
-    home: Home, path: str, code: str
-) -> None:
+def test_paths_outside_the_roots_or_relative_are_rejected(home: Home, path: str, code: str) -> None:
     assert home.get(f"/api/fs?path={path}").json()["error"]["code"] == code
 
 
