@@ -12,6 +12,7 @@ import {
 import {replayTransport} from './replay.js';
 import {
   type BrowserLifecycle,
+  CAPTURED_TYPES,
   type WorkspaceClient,
   WorkspaceSession,
   webSocketUrlFromLocation,
@@ -120,7 +121,7 @@ test('replays and deduplicates events; command acknowledgment never changes life
     await session.command({type: 'command.pause', mode: 'after_current_agent_call'}),
     true,
   );
-  assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
+  assert.deepEqual(session.getSnapshot().command, {sending: null, error: null});
   assert.equal(session.getSnapshot().core.status, 'running');
   client.emit({type: 'event', event: status(3, 'paused')});
   assert.equal(session.getSnapshot().core.status, 'paused');
@@ -383,7 +384,7 @@ for (const failOldRequests of [false, true]) {
     );
     assert.equal(session.getSnapshot().runId, 'run-2');
     assert.equal(session.getSnapshot().core.sequence, 3);
-    assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
+    assert.deepEqual(session.getSnapshot().command, {sending: null, error: null});
 
     for (const request of pending) {
       if (failOldRequests) request.reject(new Error('old run failed'));
@@ -413,7 +414,7 @@ for (const failOldRequests of [false, true]) {
     assert.equal(state.queries.design.response?.design?.[0]?.files?.[0]?.path, 'new.ts');
     assert.equal(state.snapshotError, null);
     assert.equal(state.historyError, null);
-    assert.deepEqual(state.command, {sending: false, error: null});
+    assert.deepEqual(state.command, {sending: null, error: null});
     for (const query of Object.values(state.queries)) assert.equal(query.error, null);
     await session.close();
   });
@@ -643,11 +644,11 @@ test('a failed command keeps its diagnostic summary until the next command', asy
     false,
   );
   assert.deepEqual(session.getSnapshot().command, {
-    sending: false,
+    sending: null,
     error: {action: 'pause', message: 'The run is not running.'},
   });
   assert.equal(await session.command({type: 'command.steer', text: 'Keep going'}), true);
-  assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
+  assert.deepEqual(session.getSnapshot().command, {sending: null, error: null});
   await session.close();
 });
 
@@ -743,4 +744,73 @@ test('the replay transport folds the recorded run and refuses commands', async (
   assert.ok(core.transcript.some(entry => entry.content === 'PASS'));
   await assert.rejects(transport.request({type: 'command.resume'}), /read-only/);
   await session.close();
+});
+
+test('captures agent executions and round results for the run view', () => {
+  for (const type of [
+    'agent_execution_started',
+    'agent_execution_finished',
+    'invocation_started',
+    'round_finished',
+  ]) {
+    assert.ok(CAPTURED_TYPES.has(type), type);
+  }
+});
+
+test('stop is sent as command.stop and reports its action while in flight', async () => {
+  const client = new FakeClient();
+  let release: (reply: ProtocolResponse) => void = () => {};
+  client.replies = input =>
+    input.type === 'command.stop'
+      ? new Promise(resolve => {
+          release = resolve;
+        })
+      : Promise.resolve(response());
+  const session = new WorkspaceSession(client);
+  await session.start();
+  const sent = session.command({type: 'command.stop', mode: 'after_current_agent_call'});
+  assert.equal(session.getSnapshot().command.sending, 'stop');
+  release(response({ack: {action: 'stop', status: 'pending'}}));
+  assert.equal(await sent, true);
+  assert.deepEqual(client.requests.at(-1), {
+    type: 'command.stop',
+    mode: 'after_current_agent_call',
+  });
+  assert.deepEqual(session.getSnapshot().command, {sending: null, error: null});
+});
+
+test('acknowledged steers keep their own ids and the sequence they were sent after', async () => {
+  const client = new FakeClient();
+  const session = new WorkspaceSession(client);
+  await session.start();
+  client.emit({
+    type: 'event_batch',
+    events: [status(1, 'running'), output(2, 'hello')],
+    through_sequence: 2,
+    active_executions: [],
+  });
+  assert.equal(await session.command({type: 'command.steer', text: 'Go'}), true);
+  assert.equal(await session.command({type: 'command.steer', text: 'Go'}), true);
+  assert.deepEqual(session.getSnapshot().sent, [
+    {id: 'sent-1', text: 'Go', afterSequence: 2},
+    {id: 'sent-2', text: 'Go', afterSequence: 2},
+  ]);
+});
+
+test('design patches are requested by range and path; an unattached server answers null', async () => {
+  const client = new FakeClient();
+  const session = new WorkspaceSession(client);
+  await session.start();
+  assert.equal(await session.designPatch('aaa', 'bbb', 'src/lib.rs'), null);
+  assert.deepEqual(client.requests.at(-1), {
+    type: 'query.design_patch',
+    base: 'aaa',
+    head: 'bbb',
+    path: 'src/lib.rs',
+  });
+  client.replies = async () =>
+    response({
+      design_patch: {base: 'aaa', head: 'bbb', path: 'src/lib.rs', patch: '+x\n', truncated: false},
+    });
+  assert.equal((await session.designPatch('aaa', 'bbb', 'src/lib.rs'))?.patch, '+x\n');
 });

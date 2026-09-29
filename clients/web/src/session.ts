@@ -1,4 +1,5 @@
 import type {
+  DesignPatch,
   ProtocolResponse,
   RequestInput,
   RunEvent,
@@ -34,8 +35,21 @@ export interface QueryState {
 }
 
 export type QueryName = 'experiments' | 'design' | 'performance';
-type CommandAction = 'pause' | 'resume' | 'steer';
-type Command = Extract<RequestInput, {type?: 'command.pause' | 'command.resume' | 'command.steer'}>;
+export type CommandAction = 'pause' | 'resume' | 'steer' | 'stop';
+type Command = Extract<
+  RequestInput,
+  {type?: 'command.pause' | 'command.resume' | 'command.steer' | 'command.stop'}
+>;
+
+/**
+ * A steer the backend acknowledged as pending: a client-side id that stays with it until it is
+ * consumed, and the core sequence when it was sent (journal events after it may be its own).
+ */
+export interface SentSteer {
+  id: string;
+  text: string;
+  afterSequence: number;
+}
 
 export interface WorkspaceState {
   core: CoreState;
@@ -47,7 +61,9 @@ export interface WorkspaceState {
   snapshotError: string | null;
   queries: Record<QueryName, QueryState>;
   /** Enablement comes from `core.status`; this only guards double sends and keeps the last failure. */
-  command: {sending: boolean; error: {action: CommandAction; message: string} | null};
+  command: {sending: CommandAction | null; error: {action: CommandAction; message: string} | null};
+  /** Steers acknowledged as pending, oldest first; the transcript shows them until consumed. */
+  sent: readonly SentSteer[];
   /** Events core-state drops or does not keep (see `CAPTURED_TYPES`), ascending by sequence. */
   captured: readonly RunEvent[];
   historyLoading: boolean;
@@ -60,10 +76,17 @@ export interface WorkspaceSessionOptions {
   lifecycle?: BrowserLifecycle;
 }
 
-/** Steers (`control`), judge verdicts, and the run's start and end, recorded before each fold. */
+/**
+ * Events core-state drops or does not keep, recorded before each fold: steers (`control`), judge
+ * verdicts, round results, agent executions (prompts and results), and the run's start and end.
+ */
 export const CAPTURED_TYPES: ReadonlySet<string> = new Set([
   'control',
   'judge_result',
+  'round_finished',
+  'agent_execution_started',
+  'agent_execution_finished',
+  'invocation_started',
   'run_started',
   'run_finished',
   'run_failed',
@@ -72,7 +95,7 @@ export const CAPTURED_TYPES: ReadonlySet<string> = new Set([
 ]);
 const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
 const emptyQuery = (): QueryState => ({response: null, loading: true, error: null});
-const idleCommand = (): WorkspaceState['command'] => ({sending: false, error: null});
+const idleCommand = (): WorkspaceState['command'] => ({sending: null, error: null});
 
 /** Owns browser subscriptions and query state; core-state owns the event projection. */
 export class WorkspaceSession {
@@ -85,6 +108,7 @@ export class WorkspaceSession {
     snapshotError: null,
     queries: {experiments: emptyQuery(), design: emptyQuery(), performance: emptyQuery()},
     command: idleCommand(),
+    sent: [],
     captured: [],
     historyLoading: false,
     historyError: null,
@@ -99,6 +123,7 @@ export class WorkspaceSession {
   #failedDials = 0;
   #spine = new Set<number>();
   #storeId = '';
+  #sentCount = 0;
   #fetches = new Map<QueryName, Promise<void>>();
   #refreshPending = new Set<QueryName>();
   readonly #reconnectDelaysMs: readonly number[];
@@ -254,28 +279,40 @@ export class WorkspaceSession {
   }
 
   async command(input: Command): Promise<boolean> {
-    if (this.#state.command.sending || this.#state.connection !== 'connected') return false;
-    const action: CommandAction =
-      input.type === 'command.pause'
-        ? 'pause'
-        : input.type === 'command.resume'
-          ? 'resume'
-          : 'steer';
+    if (this.#state.command.sending !== null || this.#state.connection !== 'connected')
+      return false;
+    const action = commandAction(input);
     const generation = this.#runGeneration;
-    this.#set({command: {sending: true, error: null}});
+    const afterSequence = this.#state.core.sequence;
+    this.#set({command: {sending: action, error: null}});
     try {
       const response = await this.client.request(input);
       if (generation !== this.#runGeneration) return false;
       if (!response.ack) throw new Error('The backend returned no command acknowledgment.');
       // An acknowledgment is not a lifecycle transition. Only events/snapshots set status.
-      this.#set({command: idleCommand()});
+      const queued =
+        input.type === 'command.steer' && response.ack.status === 'pending'
+          ? {
+              sent: [
+                ...this.#state.sent,
+                {id: `sent-${++this.#sentCount}`, text: input.text, afterSequence},
+              ],
+            }
+          : {};
+      this.#set({command: idleCommand(), ...queued});
       return true;
     } catch (error) {
       if (generation !== this.#runGeneration) return false;
-      this.#set({command: {sending: false, error: {action, message: commandMessage(error)}}});
+      this.#set({command: {sending: null, error: {action, message: commandMessage(error)}}});
       return false;
     }
   }
+
+  /** One file's patch for a round's commit range; null when the server is not attached to a run. */
+  designPatch = async (base: string, head: string, path: string): Promise<DesignPatch | null> => {
+    const response = await this.client.request({type: 'query.design_patch', base, head, path});
+    return response.design_patch ?? null;
+  };
 
   async loadOlder(): Promise<void> {
     const floor = this.#state.core.historyAfterSequence;
@@ -331,6 +368,7 @@ export class WorkspaceSession {
           snapshotError: null,
           queries: {experiments: emptyQuery(), design: emptyQuery(), performance: emptyQuery()},
           command: idleCommand(),
+          sent: [],
           historyLoading: false,
           historyError: null,
         });
@@ -451,6 +489,19 @@ function capture(held: readonly RunEvent[], events: readonly RunEvent[]): readon
   );
   if (added.length === 0) return held;
   return [...held, ...added].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+}
+
+function commandAction(input: Command): CommandAction {
+  switch (input.type) {
+    case 'command.pause':
+      return 'pause';
+    case 'command.resume':
+      return 'resume';
+    case 'command.stop':
+      return 'stop';
+    default:
+      return 'steer';
+  }
 }
 
 function commandMessage(error: unknown): string {

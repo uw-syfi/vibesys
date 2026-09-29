@@ -46,7 +46,7 @@ const HINT_KEY = 'vibesys.web.sheet-hint';
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
 const NO_DESIGN: DesignRound[] = [];
 const NO_PERFORMANCE: PerformanceRound[] = [];
-const ACTIONS = {pause: 'Pause', resume: 'Resume', steer: 'Steer'} as const;
+const ACTIONS = {pause: 'Pause', resume: 'Resume', steer: 'Steer', stop: 'Stop'} as const;
 
 function useMedia(query: string): boolean {
   const subscribe = useCallback(
