@@ -4,6 +4,7 @@ import {
   type AuthStatus,
   type Catalog,
   errorText,
+  type FsListing,
   type HomeClient,
   type ProjectValidation,
   type TaskDetail,
@@ -28,6 +29,7 @@ import {
   withTask,
   withTasks,
 } from './setup.js';
+import {FolderPicker} from './ui/FolderPicker.js';
 import {KeyRow} from './ui/KeyRow.js';
 import {
   Advanced,
@@ -259,6 +261,61 @@ function ProviderKey({client, auth, provider, refreshAuth}: ProviderKeyProps) {
   );
 }
 
+interface PickerState {
+  listing: FsListing | null;
+  error: string | null;
+}
+
+function usePicker(client: HomeClient) {
+  const [picker, setPicker] = useState<PickerState | null>(null);
+  const open = useCallback(
+    (path: string | null) => {
+      setPicker(current => ({listing: current?.listing ?? null, error: null}));
+      client.fs(path).then(
+        listing => setPicker(current => (current === null ? null : {listing, error: null})),
+        (reason: unknown) =>
+          setPicker(current => (current === null ? null : {...current, error: errorText(reason)})),
+      );
+    },
+    [client],
+  );
+  const close = useCallback(() => setPicker(null), []);
+  return {picker, open, close};
+}
+
+/** Adopts the chosen folder: forgets the last check, sets the path, and checks it again. */
+function chooseFolder(
+  picker: ReturnType<typeof usePicker>,
+  folder: Folder,
+  act: ReturnType<typeof formActions>,
+  path: string,
+): void {
+  picker.close();
+  folder.clear();
+  act.patch({path});
+  folder.check(path);
+}
+
+interface FolderPickerHostProps {
+  folder: Folder;
+  act: ReturnType<typeof formActions>;
+  picker: ReturnType<typeof usePicker>;
+}
+
+/** The picker dialog, or nothing while it is closed. */
+function FolderPickerHost({folder, act, picker}: FolderPickerHostProps) {
+  if (picker.picker === null) return null;
+  return (
+    <FolderPicker
+      listing={picker.picker.listing}
+      error={picker.picker.error}
+      onOpen={picker.open}
+      onChoose={path => chooseFolder(picker, folder, act, path)}
+      onClose={picker.close}
+    />
+  );
+}
+
 interface NewRunProps {
   client: HomeClient;
   token: string;
@@ -279,6 +336,7 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
   const tasks = useTasks(client, folder.validation);
   const [detail] = useTaskDetail(client, project?.id ?? null, form.task);
   const launch = useLaunch(client, token);
+  const picker = usePicker(client);
   useEffect(() => {
     if (tasks !== null) setForm(current => withTasks(current, tasks));
   }, [tasks]);
@@ -317,6 +375,7 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
               act.patch({path});
             }}
             onCheck={() => folder.check(form.path)}
+            onBrowse={() => picker.open(folder.validation?.path ?? null)}
           />
           <TaskRow
             form={checked}
@@ -353,6 +412,7 @@ function NewRun({client, token, data, refreshAuth}: NewRunProps) {
               <option key={value} value={value} />
             ))}
           </datalist>
+          <FolderPickerHost folder={folder} act={act} picker={picker} />
         </div>
       </div>
       <SetupFooter

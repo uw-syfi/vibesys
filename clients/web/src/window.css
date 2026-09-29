@@ -295,3 +295,14 @@ a.btn { text-decoration: none; }
 .keyfld input { flex: 1; min-width: 0; height: 30px; border: 0; outline: 0; background: transparent; color: var(--text-1); font: inherit; letter-spacing: 0.12em; }
 .keyfld input::placeholder { letter-spacing: normal; color: var(--text-3); }
 .form code.mono { color: var(--text-1); }
+
+/* folder picker */
+dialog.picker { width: 480px; max-height: 70vh; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+dialog.picker:not([open]) { display: none; }
+.picker h4 { margin: 0; padding: 12px 14px; font-weight: 500; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plist { overflow: auto; padding: 4px; min-height: 120px; }
+.pit { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 10px; border-radius: 6px; color: var(--text-1); }
+.pit:hover { background: var(--bg-hover); }
+.pit .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker .hint { margin: 0; padding: 0 14px 8px; }
+.picker .row { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--border-subtle); }

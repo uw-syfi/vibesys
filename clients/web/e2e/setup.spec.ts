@@ -230,3 +230,26 @@ test('a provider change drops a typed key; a CLI-only provider shows its sign-in
   await provider.selectOption('codex');
   await expect(page.getByLabel('OpenAI API key')).toHaveValue('');
 });
+
+test('Browse… walks folders and checks the chosen one', async ({page}) => {
+  const home = await mockHome(page);
+  await page.goto(NEW);
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  await page.getByRole('button', {name: 'Browse…'}).click();
+  const picker = page.getByRole('dialog');
+  await expect(picker.locator('h4')).toHaveText(ROOT);
+  await picker.getByRole('button', {name: 'Up'}).click();
+  await expect(picker.locator('h4')).toHaveText('/Users/me/src');
+  await picker.getByRole('button', {name: /tokenizer-rs/}).click();
+  await picker.getByRole('button', {name: 'Choose this folder'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByLabel('Folder')).toHaveValue(OTHER_ROOT);
+  await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
+  expect(
+    home.requests.map(request => request.path).filter(path => path.startsWith('/api/fs')),
+  ).toEqual([
+    `/api/fs?path=${encodeURIComponent(ROOT)}`,
+    '/api/fs?path=%2FUsers%2Fme%2Fsrc',
+    `/api/fs?path=${encodeURIComponent(OTHER_ROOT)}`,
+  ]);
+});
