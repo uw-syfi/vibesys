@@ -1,6 +1,9 @@
+import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
+
 /** What the window shows: selection, pane, widths, disclosures, menus. A pure reducer. */
 export type PaneTab = 'ask' | 'changes' | 'agents' | 'experiments' | 'notes';
-export type Menu = 'more' | 'stop' | null;
+/** The one open popover: the ••• menu, the Stop confirmation, or Ask's thread and model menus. */
+export type Menu = 'more' | 'stop' | 'thread' | 'model' | null;
 
 export interface UiState {
   /** The run the selection below belongs to; a different run starts from a clean selection. */
@@ -24,6 +27,10 @@ export interface UiState {
   /** The experiments row whose evidence is open. */
   evidence: number | null;
   experimentsView: 'hypotheses' | 'design';
+  /** The Ask thread on screen. */
+  thread: string;
+  /** Unsent composer text; a note can replace either (drafts only, nothing is sent). */
+  drafts: {steer: string; ask: string};
 }
 
 export type UiAction =
@@ -39,7 +46,9 @@ export type UiAction =
   | {type: 'menu'; menu: Menu}
   | {type: 'palette'; open: boolean}
   | {type: 'evidence'; round: number}
-  | {type: 'experimentsView'; view: 'hypotheses' | 'design'};
+  | {type: 'experimentsView'; view: 'hypotheses' | 'design'}
+  | {type: 'thread'; id: string}
+  | {type: 'draft'; target: 'steer' | 'ask'; text: string};
 
 export const SIDE = {min: 220, max: 380, initial: 276} as const;
 export const PANE = {min: 340, max: 640, initial: 400} as const;
@@ -59,6 +68,8 @@ export const INITIAL_UI: UiState = {
   palette: false,
   evidence: null,
   experimentsView: 'hypotheses',
+  thread: DEFAULT_CHAT_THREAD_ID,
+  drafts: {steer: '', ask: ''},
 };
 
 /**
@@ -73,8 +84,9 @@ const clamp = (value: number, low: number, high: number) => Math.min(high, Math.
 
 /**
  * The state as it applies to `runId`: selection, open rows, disclosures, the agent filter, open
- * evidence, menus and the palette belong to one run and reset when the session replaces it (a reconnect that
- * lands on a new run). Layout (pane, sidebar, widths, view) carries over.
+ * evidence, menus, the palette, the Ask thread and drafts belong to one run and reset when the
+ * session replaces it (a reconnect that lands on a new run). Layout (pane, sidebar, widths, view)
+ * carries over.
  */
 export function forRun(state: UiState, runId: string | null): UiState {
   if (state.runId === runId) return state;
@@ -89,6 +101,8 @@ export function forRun(state: UiState, runId: string | null): UiState {
     menu: null,
     palette: false,
     evidence: null,
+    thread: DEFAULT_CHAT_THREAD_ID,
+    drafts: INITIAL_UI.drafts,
   };
 }
 
@@ -137,6 +151,10 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       return {...state, evidence: state.evidence === action.round ? null : action.round};
     case 'experimentsView':
       return {...state, experimentsView: action.view};
+    case 'thread':
+      return {...state, thread: action.id, menu: null};
+    case 'draft':
+      return {...state, drafts: {...state.drafts, [action.target]: action.text}};
   }
 }
 

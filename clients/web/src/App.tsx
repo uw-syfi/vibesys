@@ -350,7 +350,7 @@ function RunTranscript({state, view, ui, dispatch, history}: SectionProps & {his
   );
 }
 
-function RunComposer({state, view, session}: SectionProps) {
+function RunComposer({state, view, ui, dispatch, session}: SectionProps) {
   if (view.ended) return null;
   const error = state.command.error;
   const connected = state.connection === 'connected';
@@ -359,6 +359,8 @@ function RunComposer({state, view, session}: SectionProps) {
       disabled={!connected}
       reason={connected ? null : 'Steering resumes when the connection returns'}
       error={error?.action === 'steer' ? `Steer failed: ${error.message}` : null}
+      draft={ui.drafts.steer}
+      onDraft={text => dispatch({type: 'draft', target: 'steer', text})}
       onSend={text => session.command({type: 'command.steer', text})}
     />
   );

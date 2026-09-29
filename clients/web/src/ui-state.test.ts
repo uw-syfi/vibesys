@@ -87,6 +87,19 @@ test('selection belongs to one run: a replaced run starts clean and keeps the la
   assert.deepEqual(uiReducer(busy, {type: 'run', runId: 'run-2'}), next);
 });
 
+test('drafts and the Ask thread belong to one run', () => {
+  let state = forRun(INITIAL_UI, 'run-1');
+  state = uiReducer(state, {type: 'draft', target: 'steer', text: 'Measure first.'});
+  state = uiReducer(state, {type: 'draft', target: 'ask', text: 'Why?'});
+  state = uiReducer({...state, menu: 'thread'}, {type: 'thread', id: 't2'});
+  assert.deepEqual(
+    [state.drafts, state.thread, state.menu],
+    [{steer: 'Measure first.', ask: 'Why?'}, 't2', null],
+  );
+  const next = forRun(state, 'run-2');
+  assert.deepEqual([next.drafts, next.thread], [{steer: '', ask: ''}, 'default']);
+});
+
 test('the sidebar yields before the transcript drops below 560px', () => {
   const open = {...INITIAL_UI, pane: 'changes' as const};
   assert.deepEqual(frame(1440, open), {sidebar: true, paneWidth: 400});

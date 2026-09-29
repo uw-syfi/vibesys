@@ -9,6 +9,8 @@ test('the composer states why it is off, and shows a failed steer', () => {
       disabled
       reason="Steering resumes when the connection returns"
       error="Steer failed: gateway closed"
+      draft=""
+      onDraft={() => {}}
       onSend={async () => true}
     />,
   );

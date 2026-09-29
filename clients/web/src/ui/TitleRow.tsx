@@ -219,7 +219,7 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
       <button
         ref={trigger}
         type="button"
-        className={shown === null ? 'iconbtn' : 'iconbtn on'}
+        className={shown === 'more' || shown === 'stop' ? 'iconbtn on' : 'iconbtn'}
         title={
           copyFailed
             ? "Couldn't copy the run ID"
@@ -232,7 +232,7 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
         aria-expanded={shown === 'more'}
         onClick={() => {
           setCopyFailed(false);
-          onMenu(shown === null ? 'more' : null);
+          onMenu(shown === 'more' ? null : 'more');
         }}
       >
         <Ellipsis size={16} strokeWidth={1.5} aria-hidden />
