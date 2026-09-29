@@ -1126,7 +1126,7 @@ const TERMINAL = new Set(['run_finished', 'run_failed', 'run_interrupted', 'conf
  * space or line end). Soft wraps become spaces; paragraph breaks and list-item lines (`- `, `* `,
  * `1. `) stay; inline backticks are dropped.
  */
-function objective(text: string | null | undefined): HeaderModel['objective'] {
+export function objectiveText(text: string | null | undefined): HeaderModel['objective'] {
   const full = text
     ?.split(/\n[ \t]*\n/)
     .map(paragraph => paragraph.trim().replace(/[ \t]*\n(?![ \t]*(?:[-*] |\d+\. ))[ \t]*/g, ' '))
@@ -1176,7 +1176,7 @@ export function headerModel(
   return {
     status: core.status,
     project: input?.split('/').filter(Boolean).at(-1) ?? null,
-    objective: objective(context?.objective_description),
+    objective: objectiveText(context?.objective_description),
     startedAt: started?.timestamp ?? null,
     usage: usageText(core),
     endedAt: hasRunEnded(core)
