@@ -26,7 +26,13 @@ from entrypoints.web_home.contract import (
     KeyWriteResult,
     ProviderAuth,
 )
-from vs_agent.api import SHIPPED_PROVIDERS, credential_path, provider_profile
+from vs_agent.api import (
+    KEYCHAIN_SERVICES,
+    LOGIN_COMMANDS,
+    SHIPPED_PROVIDERS,
+    credential_path,
+    provider_profile,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -37,9 +43,6 @@ if TYPE_CHECKING:
 
 # Only secrets are writable: the profile's other auth variables (base URLs, headers) are not keys.
 _KEY_SUFFIXES = ("_API_KEY", "_AUTH_TOKEN")
-_LOGIN_COMMANDS = {"codex": "codex login", "opencode": "opencode auth login"}
-# Claude Code on macOS keeps its login in the keychain instead of `.credentials.json`.
-_KEYCHAIN_SERVICES = {"claude": "Claude Code-credentials"}
 # Visible ASCII only: excludes space (a stored key is stripped, not internally spaced),
 # every control character, and every non-ASCII code point (U+2028/U+2029 included), so a
 # key can never break a line-oriented reader of the file it lands in.
@@ -51,8 +54,15 @@ def key_variables(profile: ProviderProfile) -> tuple[str, ...]:
     return tuple(name for name in profile.auth_env_vars if name.endswith(_KEY_SUFFIXES))
 
 
+def _not_utf8() -> ApiError:
+    return ApiError(ErrorCode.INVALID_REQUEST, "the .env file is not UTF-8")
+
+
 def _stored(path: Path) -> dict[str, str | None]:
-    return dict(dotenv_values(path)) if path.is_file() else {}
+    try:
+        return dict(dotenv_values(path)) if path.is_file() else {}
+    except UnicodeDecodeError:
+        raise _not_utf8() from None
 
 
 def _key_var(name: str, environ: Mapping[str, str], stored: Mapping[str, str | None]) -> KeyVar:
@@ -75,7 +85,7 @@ def _cli_session(
     path = credential_path(profile, home=Path(home), env=environ) if home else None
     if path is not None and path.is_file():
         return "present"
-    service = _KEYCHAIN_SERVICES.get(profile.name)
+    service = KEYCHAIN_SERVICES.get(profile.name)
     if service is None:
         return "absent"
     found = config.keychain(service)
@@ -98,7 +108,7 @@ def _provider_auth(name: str, config: HomeConfig, stored: Mapping[str, str | Non
         status=status,
         keys=keys,
         cli_session=cli_session,
-        login_command=_LOGIN_COMMANDS.get(name, profile.binary),
+        login_command=LOGIN_COMMANDS.get(name, profile.binary),
     )
 
 
@@ -131,7 +141,10 @@ def store_key(path: Path, name: str, value: str) -> None:
     so python-dotenv neither unescapes nor interpolates the value. Bytes are
     decoded without newline translation, so CRLF files keep their line endings.
     """
-    text = path.read_bytes().decode("utf-8") if path.is_file() else ""
+    try:
+        text = path.read_bytes().decode("utf-8") if path.is_file() else ""
+    except UnicodeDecodeError:
+        raise _not_utf8() from None
     line = f"{name}='{value}'\n"
     kept: list[str] = []
     for binding in parse_stream(io.StringIO(text)):

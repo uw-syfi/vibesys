@@ -59,3 +59,11 @@ def test_a_corrupt_note_reads_as_absent(home: Home) -> None:
     path.write_text("{not json")
 
     assert home.get("/api/notes/run-3").json() == {"note": None}
+
+
+def test_a_run_id_too_long_for_one_file_name_is_a_typed_error(home: Home) -> None:
+    assert home.put("/api/notes/" + "a" * 200, {"text": "x"}).status == 200
+
+    reply = home.put("/api/notes/" + "%F0%9F%98%80" * 101, {"text": "x"})
+
+    assert (reply.status, reply.json()["error"]["code"]) == (400, "invalid_request")

@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints.web import _parser
-from entrypoints.web_home.app import DEFAULT_PORT, HomeServer, save_port, saved_port
+from entrypoints.web_home.app import DEFAULT_PORT, HomeServer, run_home, save_port, saved_port
 from entrypoints.web_home.context import HomeConfig
 from server.runtime import WebInstanceRecord
+from vs_project.api import state_home
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,6 +37,7 @@ def test_built_assets_are_served_without_a_token_but_only_below_assets(home: Hom
     assert home.send("GET", "/assets/app.js", headers={}).status == 200
     assert home.send("GET", "/assets/%2e%2e/index.html", headers={}).status == 404
     assert home.send("GET", "/assets/missing.js", headers={}).status == 404
+    assert home.send("GET", "/assets/app%00.js", headers={}).status == 404
 
 
 def test_api_requires_the_bearer_token(home: Home) -> None:
@@ -75,6 +77,22 @@ def test_request_logs_never_contain_the_capability_token(
     assert home.config.token not in caplog.text
     assert "guess" not in caplog.text
     assert "oken" not in caplog.text
+
+
+def test_a_second_home_reuses_the_first_and_names_the_flags_it_ignores(
+    home: Home, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    record = WebInstanceRecord.from_gateway(
+        pid=os.getpid(), port=home.config.port, token=home.config.token, project_root=tmp_path
+    )
+    record.write(state_home() / "web" / "home.json")
+    args = _parser().parse_args(["home", "--port", str(home.config.port), "--root", "/srv"])
+
+    with caplog.at_level(logging.WARNING):
+        assert run_home(args, tmp_path) == 0
+
+    assert "ignoring --root" in caplog.text
+    assert "--port" not in caplog.text
 
 
 def test_health_answers_the_discovery_probe(home: Home, tmp_path: Path) -> None:

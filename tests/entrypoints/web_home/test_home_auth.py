@@ -164,6 +164,19 @@ def test_rejected_keys_never_echo_the_value_or_touch_the_file(
     assert not home.config.dotenv_path.exists()
 
 
+def test_a_non_utf8_env_file_is_a_typed_error_and_untouched(home: Home) -> None:
+    path = home.config.dotenv_path
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"A=\xff\n")
+
+    status = home.get("/api/auth")
+    reply = home.put("/api/auth/codex", {"name": "OPENAI_API_KEY", "value": SAMPLE_KEY})
+
+    assert (status.status, status.json()["error"]["code"]) == (400, "invalid_request")
+    assert (reply.status, reply.json()["error"]["code"]) == (400, "invalid_request")
+    assert path.read_bytes() == b"A=\xff\n"
+
+
 def test_a_symlinked_env_file_is_refused(home: Home, tmp_path: Path) -> None:
     target = tmp_path / "real.env"
     target.write_text("A=1\n")

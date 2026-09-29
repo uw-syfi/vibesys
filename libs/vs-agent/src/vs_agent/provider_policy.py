@@ -52,6 +52,12 @@ duplicated because ``omnigent`` is an optional extra. Gemini ships no curated
 list, so it offers free-text entry alone.
 """
 
+LOGIN_COMMANDS: dict[str, str] = {"codex": "codex login", "opencode": "opencode auth login"}
+"""The sign-in command a setup UI shows per provider; others sign in by running the binary."""
+
+KEYCHAIN_SERVICES: dict[str, str] = {"claude": "Claude Code-credentials"}
+"""macOS keychain items holding a provider's login instead of a credentials file."""
+
 CODEX_PROVIDER = "codex"
 """The provider name naming Codex itself, for call sites that need the name
 (to look up its ``agentshim`` profile, say) rather than a yes/no answer to

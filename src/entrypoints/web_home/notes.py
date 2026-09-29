@@ -15,15 +15,19 @@ if TYPE_CHECKING:
 
     from entrypoints.web_home.context import HomeConfig, Request
 
-_MAX_RUN_ID = 256
+# The file name, and atomic_write's `.<name>.<12 hex>.tmp` beside it, stay under NAME_MAX (255).
+_MAX_SEGMENT = 200
 
 
 def note_path(config: HomeConfig, run_id: str) -> Path:
     """Return the note file the TUI's ``notePath`` names for *run_id*."""
-    if not run_id or len(run_id) > _MAX_RUN_ID:
-        message = "run id must be 1 to 256 characters"
+    segment = safe_segment(run_id)
+    if not segment or len(segment) > _MAX_SEGMENT:
+        message = (
+            f"run id must be 1 to {_MAX_SEGMENT} characters (a non-BMP character counts twice)"
+        )
         raise ApiError(ErrorCode.INVALID_REQUEST, message)
-    return config.state_home / "tui" / "notes" / f"{safe_segment(run_id)}.json"
+    return config.state_home / "tui" / "notes" / f"{segment}.json"
 
 
 def _read(path: Path) -> NoteRecord | None:

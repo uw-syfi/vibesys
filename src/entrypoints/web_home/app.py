@@ -209,7 +209,10 @@ class _Handler(BaseHTTPRequestHandler):
             message = "web assets are not built; run `pnpm build` in clients/web"
             raise ApiError(ErrorCode.NOT_FOUND, message)
         allowed = root if relative == "index.html" else root / "assets"
-        candidate = (root / relative).resolve()
+        try:
+            candidate = (root / relative).resolve()
+        except ValueError:  # an embedded NUL
+            candidate = allowed
         if not candidate.is_relative_to(allowed) or not candidate.is_file():
             message = "not found"
             raise ApiError(ErrorCode.NOT_FOUND, message)
@@ -260,8 +263,19 @@ def run_home(args: argparse.Namespace, repository_root: Path) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     web_dir = state_home() / "web"
     record_path = web_dir / "home.json"
-    existing = WebInstanceRecord.discover(record_path)
+    # No cleanup_stale: a busy home that misses one /health probe keeps its record.
+    existing = WebInstanceRecord.discover(record_path, cleanup_stale=False)
     if existing is not None:
+        flags = (
+            ("--root", args.root),
+            ("--dev-origin", args.dev_origin),
+            ("--assets", args.assets),
+        )
+        ignored = [flag for flag, value in flags if value]
+        if args.port not in {None, existing.port}:
+            ignored.insert(0, "--port")
+        if ignored:
+            _LOG.warning("a home server is already running; ignoring %s", ", ".join(ignored))
         _announce(existing.url, open_browser=args.open)
         return 0
     claim = WebInstanceClaim(record_path)
