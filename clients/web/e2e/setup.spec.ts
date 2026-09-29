@@ -258,6 +258,27 @@ test('Browse… walks folders and checks the chosen one', async ({page}) => {
   ]);
 });
 
+test('Browse… from a folder that no longer exists lists the roots instead of a dead end', async ({
+  page,
+}) => {
+  await mockHome(page);
+  await page.goto(NEW);
+  await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
+  const gone = '/Users/me/src/deleted';
+  await page.getByLabel('Folder').fill(gone);
+  await page.getByLabel('Folder').blur();
+  await expect(page.getByText('Folder is not a git repository')).toBeVisible();
+  await page.getByRole('button', {name: 'Browse…'}).click();
+  const picker = page.getByRole('dialog');
+  await expect(picker.getByRole('alert')).toContainText(`not a directory: ${gone}`);
+  await picker.getByRole('button', {name: 'me', exact: true}).click();
+  await picker.getByRole('button', {name: 'src', exact: true}).click();
+  await picker.getByRole('button', {name: /tokenizer-rs/}).click();
+  await picker.getByRole('button', {name: 'Choose this folder'}).click();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByLabel('Folder')).toHaveValue(OTHER_ROOT);
+});
+
 test('a slow listing for a folder left behind is ignored once a newer one has landed', async ({
   page,
 }) => {

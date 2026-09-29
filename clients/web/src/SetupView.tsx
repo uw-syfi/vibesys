@@ -380,7 +380,20 @@ function usePicker(client: HomeClient) {
         },
         (reason: unknown) => {
           if (mine !== ticket.current) return;
-          setPicker(current => (current === null ? null : {...current, error: errorText(reason)}));
+          const error = errorText(reason);
+          setPicker(current => (current === null ? null : {...current, error}));
+          if (path === null) return;
+          // Nothing listed yet (the start folder is gone or outside the roots): list the roots
+          // under the error, so the picker is never a dead end.
+          client.fs(null).then(
+            roots => {
+              if (mine !== ticket.current) return;
+              setPicker(current =>
+                current === null || current.listing !== null ? current : {listing: roots, error},
+              );
+            },
+            () => {},
+          );
         },
       );
     },

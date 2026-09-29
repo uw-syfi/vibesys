@@ -225,12 +225,14 @@ const FOLDERS: Readonly<Record<string, FsListing>> = {
       {name: 'tokenizer-rs', path: OTHER_ROOT, git: true},
     ],
   },
+  [ROOT]: {path: ROOT, parent: '/Users/me/src', entries: []},
+  [OTHER_ROOT]: {path: OTHER_ROOT, parent: '/Users/me/src', entries: []},
 };
 
-function listing(path: string | null): FsListing {
+/** Like the real server: a folder that does not exist is `invalid_path`, not an empty listing. */
+function listing(path: string | null): Reply {
   const known = FOLDERS[path ?? ''];
-  if (known !== undefined || path === null) return known ?? {path: null, parent: null, entries: []};
-  return {path, parent: path.slice(0, path.lastIndexOf('/')) || null, entries: []};
+  return known === undefined ? fail(400, 'invalid_path', `not a directory: ${path}`) : ok(known);
 }
 
 const isTaskFile = (path: string) => path.startsWith('.vibesys/tasks/');
@@ -329,7 +331,7 @@ class FakeServer {
 
   private fs(path: string | null): Answer {
     const key = path ?? '';
-    const answer = (): Reply => ok(listing(path));
+    const answer = (): Reply => listing(path);
     if (!this.options.slowFs.includes(key)) return answer();
     return new Promise(resolve => this.waiting.set(`fs:${key}`, () => resolve(answer())));
   }
