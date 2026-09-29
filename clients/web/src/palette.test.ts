@@ -35,6 +35,8 @@ const BASE: PaletteInput = {
   resumeHref: null,
   prompt: {turn: 'x1', detail: 'round 2, attempt 1'},
   todos: {turn: 'x1', detail: 'round 2'},
+  ask: null,
+  theme: 'system',
 };
 const labels = (input: PaletteInput) =>
   paletteItems(input).map(item => `${item.group}: ${item.label}`);
@@ -55,7 +57,24 @@ test('the palette mirrors the visible controls', () => {
     'Go to: Hide sidebar',
     'Agent: Show the prompt',
     'Agent: Show the todos',
+    'Appearance: Theme: System',
+    'Appearance: Theme: Light',
+    'Appearance: Theme: Dark',
   ]);
+});
+
+test('Ask commands appear with a chat harness; the current theme is marked', () => {
+  const items = paletteItems({...BASE, ask: {threads: 2, model: 'claude-opus-5'}, theme: 'dark'});
+  assert.deepEqual(
+    items
+      .filter(entry => entry.group === 'Ask')
+      .map(entry => `${entry.label} ${entry.detail}`.trim()),
+    ['New thread', 'Switch thread… 2 threads', 'Chat model… claude-opus-5'],
+  );
+  assert.deepEqual(
+    items.filter(entry => entry.detail === 'current').map(entry => entry.label),
+    ['Theme: Dark'],
+  );
 });
 
 test('what is not visible is not offered: an ended run, a pending transition, no prompt', () => {
@@ -142,9 +161,11 @@ test('the home palette: New run unless it is open, and every run the sidebar lin
   const sections = [
     {id: 'p1', name: 'llm-serve', runs: [run('a', '/?token=h#open=p1/a'), run('b', null)]},
   ];
-  const items = homePaletteItems(sections, true);
+  const items = homePaletteItems(sections, true, 'system');
   assert.deepEqual(
-    items.map(entry => [entry.label, entry.detail, entry.keys]),
+    items
+      .filter(entry => entry.group !== 'Appearance')
+      .map(entry => [entry.label, entry.detail, entry.keys]),
     [
       ['New run', '', '⌘N'],
       ['Run a', 'llm-serve', undefined],
@@ -152,7 +173,19 @@ test('the home palette: New run unless it is open, and every run the sidebar lin
   );
   assert.deepEqual(items[1]?.intent, {kind: 'open', href: '/?token=h#open=p1/a'});
   assert.deepEqual(
-    homePaletteItems(sections, false).map(entry => entry.label),
+    homePaletteItems(sections, false, 'system')
+      .filter(entry => entry.group !== 'Appearance')
+      .map(entry => entry.label),
     ['Run a'],
+  );
+});
+
+test('the home palette offers Appearance too: the home page has no ••• menu to change theme in', () => {
+  const items = homePaletteItems([], true, 'light');
+  assert.deepEqual(
+    items
+      .filter(entry => entry.group === 'Appearance')
+      .map(entry => `${entry.label} ${entry.detail}`.trim()),
+    ['Theme: System', 'Theme: Light current', 'Theme: Dark'],
   );
 });

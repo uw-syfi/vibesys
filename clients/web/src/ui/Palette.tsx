@@ -1,7 +1,7 @@
 import {type KeyboardEvent, type RefObject, useEffect, useRef, useState} from 'react';
 import {filterPalette, type PaletteItem} from '../palette.js';
 
-const GROUPS: ReadonlyArray<PaletteItem['group']> = ['Run', 'Go to', 'Agent'];
+const GROUPS: ReadonlyArray<PaletteItem['group']> = ['Run', 'Go to', 'Agent', 'Ask', 'Appearance'];
 
 export interface PaletteProps {
   items: PaletteItem[];

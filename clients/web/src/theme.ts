@@ -1,4 +1,6 @@
 /** Appearance: System follows the OS through light-dark(); Light and Dark set data-theme on <html>. */
+import {useState} from 'react';
+
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
 export const THEMES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
@@ -35,10 +37,27 @@ export function savedTheme(): string | null {
   }
 }
 
-export function saveTheme(choice: ThemeChoice): void {
+function saveTheme(choice: ThemeChoice): void {
   try {
     localStorage.setItem(KEY, choice);
   } catch {
     // The choice still applies until the page reloads.
   }
+}
+
+/** Applies and persists a theme choice; shared by the run window and the home page. */
+export function useTheme(opened: ThemeChoice): [ThemeChoice, (choice: ThemeChoice) => void] {
+  const [theme, setTheme] = useState(opened);
+  const choose = (choice: ThemeChoice) => {
+    setTheme(choice);
+    applyTheme(document.documentElement, choice);
+    saveTheme(choice);
+    // A choice made here outranks the page's ?theme= from now on, reloads included.
+    const url = new URL(location.href);
+    if (url.searchParams.has('theme')) {
+      url.searchParams.delete('theme');
+      history.replaceState(history.state, '', url);
+    }
+  };
+  return [theme, choose];
 }

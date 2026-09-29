@@ -33,7 +33,7 @@ import {
 } from './rounds.js';
 import type {RunLinks} from './route.js';
 import type {WorkspaceSession, WorkspaceState} from './session.js';
-import {applyTheme, saveTheme, type ThemeChoice} from './theme.js';
+import {type ThemeChoice, useTheme} from './theme.js';
 import {
   type LineStat,
   type RoundEdits,
@@ -242,22 +242,6 @@ function subscribeWidth(notify: () => void): () => void {
 
 function useWindowWidth(): number {
   return useSyncExternalStore(subscribeWidth, () => innerWidth);
-}
-
-function useTheme(opened: ThemeChoice): [ThemeChoice, (choice: ThemeChoice) => void] {
-  const [theme, setTheme] = useState(opened);
-  const choose = (choice: ThemeChoice) => {
-    setTheme(choice);
-    applyTheme(document.documentElement, choice);
-    saveTheme(choice);
-    // A choice made here outranks the page's ?theme= from now on, reloads included.
-    const url = new URL(location.href);
-    if (url.searchParams.has('theme')) {
-      url.searchParams.delete('theme');
-      history.replaceState(history.state, '', url);
-    }
-  };
-  return [theme, choose];
 }
 
 function transcriptControls(
@@ -624,6 +608,8 @@ interface IntentContext {
   state: WorkspaceState;
   toggleSidebar: () => void;
   links: RunLinks | null;
+  newThread: () => void;
+  chooseTheme: (choice: ThemeChoice) => void;
 }
 
 function runIntent(intent: Intent, context: IntentContext): void {
@@ -663,6 +649,17 @@ function runIntent(intent: Intent, context: IntentContext): void {
     case 'open':
       window.location.assign(intent.href);
       return;
+    case 'newThread':
+      dispatch({type: 'pane', pane: 'ask'});
+      context.newThread();
+      return;
+    case 'askMenu':
+      dispatch({type: 'pane', pane: 'ask'});
+      dispatch({type: 'menu', menu: intent.menu});
+      return;
+    case 'theme':
+      context.chooseTheme(intent.theme);
+      return;
   }
 }
 
@@ -673,7 +670,9 @@ function paletteInput(
   ui: UiState,
   sidebarShown: boolean,
   links: RunLinks | null,
+  extra: {ask: AskView; theme: ThemeChoice},
 ): PaletteInput {
+  const {ask, theme} = extra;
   const only = agentFilter(ui, view.round);
   const visible = (view.transcript?.turns ?? []).filter(turn => only === null || turn.id === only);
   const withPrompt = visible.filter(turn => turn.prompt !== null).at(-1);
@@ -697,6 +696,9 @@ function paletteInput(
     prompt:
       withPrompt === undefined ? null : {turn: withPrompt.id, detail: where(withPrompt.phase)},
     todos: withTodos === undefined ? null : {turn: withTodos.id, detail: where(withTodos.phase)},
+    ask:
+      ask.harness === 'available' ? {threads: ask.threads.length, model: ask.current.model} : null,
+    theme,
   };
 }
 
@@ -760,9 +762,21 @@ export function App({session, home, links, notes, theme: opened}: AppProps) {
       )}
       {ui.palette ? (
         <Palette
-          items={paletteItems(paletteInput(state, view, ui, layout.sidebar, links))}
+          items={paletteItems(
+            paletteInput(state, view, ui, layout.sidebar, links, {ask: ask.view, theme}),
+          )}
           placeholder="Search commands, rounds and views…"
-          onRun={entry => runIntent(entry.intent, {dispatch, session, state, toggleSidebar, links})}
+          onRun={entry =>
+            runIntent(entry.intent, {
+              dispatch,
+              session,
+              state,
+              toggleSidebar,
+              links,
+              newThread: () => ask.start(null),
+              chooseTheme,
+            })
+          }
           onClose={() => dispatch({type: 'palette', open: false})}
         />
       ) : null}

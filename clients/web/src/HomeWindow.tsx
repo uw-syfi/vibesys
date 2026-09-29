@@ -9,6 +9,7 @@ import {ReopenView, ResumeView} from './RunEntry.js';
 import {runSummary} from './rounds.js';
 import {type HomeView, homeHref, homeView} from './route.js';
 import {SetupView} from './SetupView.js';
+import {type ThemeChoice, useTheme} from './theme.js';
 import {Palette} from './ui/Palette.js';
 import {Resizer} from './ui/Resizer.js';
 import {NewRunRow, SearchRow, Sidebar} from './ui/Sidebar.js';
@@ -79,9 +80,11 @@ function HomeMain({view, client, token, listing}: HomeMainProps) {
 export interface HomeWindowProps {
   client: HomeClient;
   token: string;
+  /** The theme the page opened with (see main.tsx). */
+  theme: ThemeChoice;
 }
 
-export function HomeWindow({client, token}: HomeWindowProps) {
+export function HomeWindow({client, token, theme: opened}: HomeWindowProps) {
   const home = useMemo(() => httpHomeApi(client, token), [client, token]);
   const listing = useHome(home);
   const view = useHashView();
@@ -90,6 +93,7 @@ export function HomeWindow({client, token}: HomeWindowProps) {
   const [palette, setPalette] = useState(false);
   const openPalette = useCallback(() => setPalette(true), []);
   usePaletteShortcut(openPalette);
+  const [theme, chooseTheme] = useTheme(opened);
   const sections = sidebarSections(listing.projects, listing.runs, null);
   // As in the run window: the sidebar hides and resizes. Home has no pane, so it always fits.
   const [sidebar, setSidebar] = useState(true);
@@ -99,6 +103,7 @@ export function HomeWindow({client, token}: HomeWindowProps) {
     setPalette(false);
     if (intent.kind === 'newRun') window.location.assign(newRun);
     if (intent.kind === 'open') window.location.assign(intent.href);
+    if (intent.kind === 'theme') chooseTheme(intent.theme);
   };
   return (
     <div className="win">
@@ -142,7 +147,7 @@ export function HomeWindow({client, token}: HomeWindowProps) {
       </main>
       {palette ? (
         <Palette
-          items={homePaletteItems(sections, view.kind !== 'new')}
+          items={homePaletteItems(sections, view.kind !== 'new', theme)}
           placeholder="Search commands and runs…"
           onRun={onRun}
           onClose={() => setPalette(false)}

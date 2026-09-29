@@ -238,6 +238,21 @@ const SCREENS: Screen[] = [
       await page.getByRole('dialog', {name: 'Search and commands'}).waitFor();
     },
   },
+  {
+    name: 'palette-ask',
+    act: async page => {
+      await page.getByRole('button', {name: /Search and commands/}).click();
+      await page.keyboard.type('thread');
+      await page.getByRole('option', {name: /Switch thread…/}).waitFor();
+    },
+  },
+  {
+    name: 'palette-theme',
+    act: async page => {
+      await page.getByRole('button', {name: /Search and commands/}).click();
+      await page.keyboard.type('theme');
+    },
+  },
   {name: 'notes', act: async page => openPane(page, 'Notes')},
   {name: 'notes-failed', notes: 'fail', act: async page => openPane(page, 'Notes')},
 ];
@@ -436,6 +451,18 @@ const SETUP_SCREENS: SetupScreen[] = [
       await see(page, 'Completed');
       await page.getByRole('button', {name: 'More'}).click();
       await see(page, 'Resume run…');
+    },
+  },
+  {
+    name: 'palette',
+    url: HOME,
+    act: async page => {
+      await page.getByRole('button', {name: /Search and commands/}).click();
+      await page.keyboard.type('theme');
+      await page
+        .getByRole('option', {name: /Theme:/})
+        .first()
+        .waitFor();
     },
   },
 ];

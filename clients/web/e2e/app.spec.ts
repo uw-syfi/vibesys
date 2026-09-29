@@ -503,3 +503,28 @@ test('the ••• menu switches the theme and the choice survives a reload', a
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
   expect(await background()).toBe('rgb(17, 17, 19)');
 });
+
+test("the palette reaches Ask's model menu, a new thread and the theme", async ({page}) => {
+  const gateway = await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.locator('.titlebar').click();
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('chat model');
+  await expect(page.getByRole('option', {name: /Chat model…/})).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('tab', {name: 'Ask'})).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('menu', {name: 'Chat model'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('new thread');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(
+      () => gateway.requests.filter(request => request.type === 'query.chat_thread_create').length,
+    )
+    .toBe(1);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('theme: dark');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});

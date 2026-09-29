@@ -45,7 +45,7 @@ if (client === null || token === null) {
   // `?token=` alone is the home page, or a run gateway's own page (`vibesys web live`), whose
   // origin has no home API: only the home answers.
   client.projects().then(
-    () => root.render(<HomeWindow client={client} token={token} />),
+    () => root.render(<HomeWindow client={client} token={token} theme={theme} />),
     (error: unknown) => {
       // The home answered but refused the token (a tab kept across a home restart): a run page
       // would dial a socket that can never connect, so say what to do instead.

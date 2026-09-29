@@ -2,6 +2,7 @@
 import type {ProjectSection} from './home.js';
 import type {RunControl} from './model.js';
 import type {RoundRow} from './rounds.js';
+import {THEME_LABELS, THEMES, type ThemeChoice} from './theme.js';
 import type {PaneTab, UiAction} from './ui-state.js';
 
 export type Intent =
@@ -12,11 +13,14 @@ export type Intent =
   | {kind: 'sidebar'}
   | {kind: 'reveal'; key: string; turn: string}
   | {kind: 'newRun'}
-  | {kind: 'open'; href: string};
+  | {kind: 'open'; href: string}
+  | {kind: 'newThread'}
+  | {kind: 'askMenu'; menu: 'thread' | 'model'}
+  | {kind: 'theme'; theme: ThemeChoice};
 
 export interface PaletteItem {
   id: string;
-  group: 'Run' | 'Go to' | 'Agent';
+  group: 'Run' | 'Go to' | 'Agent' | 'Ask' | 'Appearance';
   label: string;
   detail: string;
   intent: Intent;
@@ -45,6 +49,9 @@ export interface PaletteInput {
   prompt: {turn: string; detail: string} | null;
   /** The selected round's latest turn that recorded todos. */
   todos: {turn: string; detail: string} | null;
+  /** Ask's thread count and model; null while the run offers no chat harness (Ask shows no such controls). */
+  ask: {threads: number; model: string | null} | null;
+  theme: ThemeChoice;
 }
 
 const TABS: ReadonlyArray<readonly [PaneTab, string, string]> = [
@@ -147,14 +154,52 @@ function agentItems(input: PaletteInput): PaletteItem[] {
   return items;
 }
 
-export function paletteItems(input: PaletteInput): PaletteItem[] {
-  return [...runItems(input), ...goToItems(input), ...agentItems(input)];
+function askItems(input: PaletteInput): PaletteItem[] {
+  if (input.ask === null) return [];
+  const {threads, model} = input.ask;
+  return [
+    item('ask-new', 'Ask', 'New thread', '', {kind: 'newThread'}),
+    item('ask-thread', 'Ask', 'Switch thread…', threads === 1 ? '1 thread' : `${threads} threads`, {
+      kind: 'askMenu',
+      menu: 'thread',
+    }),
+    item('ask-model', 'Ask', 'Chat model…', model ?? '', {kind: 'askMenu', menu: 'model'}),
+  ];
 }
 
-/** The home page's palette: New run (unless it is open) and every run the sidebar links. */
+function themeItems(theme: ThemeChoice): PaletteItem[] {
+  return THEMES.map(choice =>
+    item(
+      `theme-${choice}`,
+      'Appearance',
+      `Theme: ${THEME_LABELS[choice]}`,
+      choice === theme ? 'current' : '',
+      {
+        kind: 'theme',
+        theme: choice,
+      },
+    ),
+  );
+}
+
+export function paletteItems(input: PaletteInput): PaletteItem[] {
+  return [
+    ...runItems(input),
+    ...goToItems(input),
+    ...agentItems(input),
+    ...askItems(input),
+    ...themeItems(input.theme),
+  ];
+}
+
+/**
+ * The home page's palette: New run (unless it is open), every run the sidebar links, and
+ * Appearance (the home page has no ••• menu, so the palette is the only place to change theme).
+ */
 export function homePaletteItems(
   sections: readonly ProjectSection[],
   newRun: boolean,
+  theme: ThemeChoice,
 ): PaletteItem[] {
   const runs = sections.flatMap(section =>
     section.runs.flatMap(run =>
@@ -169,7 +214,7 @@ export function homePaletteItems(
     ),
   );
   const create = {...item('run-new', 'Run', 'New run', '', {kind: 'newRun'}), keys: '⌘N'};
-  return newRun ? [create, ...runs] : runs;
+  return [...(newRun ? [create] : []), ...runs, ...themeItems(theme)];
 }
 
 export function filterPalette(items: readonly PaletteItem[], query: string): PaletteItem[] {
