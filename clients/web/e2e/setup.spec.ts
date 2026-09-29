@@ -37,8 +37,10 @@ test('the home page lists every project with its runs and links New run', async 
 });
 
 test('a run page opened from the home links New run, also on ⌘N', async ({page}) => {
-  await mockHome(page);
+  // mockGateway registers its /api/projects stub first so mockHome's later, broader /api/
+  // handler wins for a request both would otherwise match.
   await mockGateway(page);
+  await mockHome(page);
   await page.goto(runHref('home', PROJECT_ID, GATEWAY_WS));
   await expect(page.locator('.titlebar')).toContainText('Judging round 6');
   await expect(sidebar(page).getByRole('link', {name: /New run/})).toHaveAttribute(
@@ -88,8 +90,8 @@ const posts = (home: FakeHome, suffix: string) =>
 test('a ready folder with a saved task starts a run and opens it once it attaches', async ({
   page,
 }) => {
-  const home = await mockHome(page);
   await mockGateway(page);
+  const home = await mockHome(page);
   await page.goto(NEW);
   await expect(page.getByText('Git repository, working tree clean')).toBeVisible();
   await expect(page.locator('.summary')).toContainText('cargo bench --bench decode');
@@ -490,8 +492,8 @@ test('a run server that dies while starting shows its stderr tail', async ({page
 });
 
 test('a finished run in the sidebar reopens read-only', async ({page}) => {
-  const home = await mockHome(page);
   await mockGateway(page, {through: FINISHED});
+  const home = await mockHome(page);
   await page.goto(HOME);
   await sidebar(page)
     .getByRole('link', {name: /Reduce p99 prefill latency/})
@@ -504,8 +506,8 @@ test('a finished run in the sidebar reopens read-only', async ({page}) => {
 test("Resume… from a finished run's menu resumes it; a smaller budget is refused", async ({
   page,
 }) => {
-  const home = await mockHome(page);
   await mockGateway(page, {through: FINISHED});
+  const home = await mockHome(page);
   await page.goto(runHref('home', PROJECT_ID, GATEWAY_WS));
   await expect(page.locator('.titlebar')).toContainText('Completed');
   await page.getByRole('button', {name: 'More'}).click();
@@ -523,8 +525,8 @@ test("Resume… from a finished run's menu resumes it; a smaller budget is refus
 });
 
 test('a live run offers no Resume', async ({page}) => {
-  await mockHome(page);
   await mockGateway(page);
+  await mockHome(page);
   await page.goto(runHref('home', PROJECT_ID, GATEWAY_WS));
   await page.getByRole('button', {name: 'More'}).click();
   await expect(page.getByRole('menuitem', {name: 'Resume run…'})).toHaveCount(0);

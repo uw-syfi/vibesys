@@ -257,6 +257,8 @@ a.nav { text-decoration: none; }
 .fld.bad { border-color: var(--error); }
 .fld[disabled] { color: var(--text-2); }
 .fld.budget { width: 80px; }
+/* Resume's budget field carries the "As recorded" placeholder, which the plain 80px clips. */
+.fld.budget.resume { width: 140px; }
 .sel { position: relative; display: block; }
 .sel > select { appearance: none; padding-right: 28px; }
 .sel > svg { position: absolute; right: 10px; top: 50%; translate: 0 -50%; color: var(--text-2); pointer-events: none; }

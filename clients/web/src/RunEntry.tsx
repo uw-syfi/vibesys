@@ -119,7 +119,9 @@ export function ResumeView({client, token, projectId, runId, title, root, loop}:
           <Row label={label} htmlFor="f-budget">
             <input
               id="f-budget"
-              className={line.error === null ? 'fld num budget' : 'fld num budget bad'}
+              className={
+                line.error === null ? 'fld num budget resume' : 'fld num budget resume bad'
+              }
               type="number"
               min={1}
               step={1}

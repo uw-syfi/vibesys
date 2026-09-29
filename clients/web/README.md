@@ -43,9 +43,18 @@ form to connect to a live gateway URL.
 - Agents draws the round's executions top to bottom (React Flow, dagre). Edges follow start
   times and are dashed because events carry no dependency graph; a card filters the transcript.
 - ⌘K lists the visible controls, the rounds and the pane tabs. Ask and Notes are placeholders
-  until sub-project 5. The sidebar reads `HomeApi`, a fixture until the home server exists.
+  until sub-project 5. The sidebar reads the home server's API; a replay page or a gateway's own
+  page lists only the open run.
 - Themes: System (default), Light and Dark (`?theme=light|dark`).
 - Session, core-state, the tail bootstrap and backfill are unchanged (`src/session.ts`).
+- The home page (the URL `vibesys web home` prints) lists every recent project's runs. New run
+  (⌘N) checks a folder, picks a task or creates one (its files are committed only after a
+  confirmation), sets rounds, model, per-role models and advanced options, saves provider keys
+  write-only to `.env`, and lists what blocks Start, each linked to its field. Start waits until
+  the run attaches, then opens it; a failed start shows the run server's stderr with copyable
+  file locations and Retry.
+- A finished run reopens read-only from the sidebar; ••• Resume run… resumes it with its
+  recorded configuration and an optional larger budget.
 
 ## Verification
 

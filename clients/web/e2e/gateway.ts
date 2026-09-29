@@ -467,6 +467,18 @@ export async function mockGateway(
   options: {through?: number; status?: RunStatus; reject?: readonly string[]} = {},
 ): Promise<Gateway> {
   const run = new DemoRun(options.through ?? LIVE_THROUGH, options.status, options.reject ?? []);
+  // main.tsx probes GET /api/projects to tell a home page from a gateway's own page. Without a
+  // mocked home server, Vite's dev proxy forwards it to a home server that isn't running, which
+  // logs ECONNREFUSED noise for every gateway-only screen; answer 404 so main.tsx falls through
+  // to gateway mode instead. Registered before mockHome (called first in tests using both) so
+  // mockHome's own, later-registered handler for /api/ wins and answers for real.
+  await page.route(/\/api\/projects(\?|$)/, route =>
+    route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({error: {code: 'not_found', message: 'not found', details: null}}),
+    }),
+  );
   await page.routeWebSocket(/\/ws(\?|$)/, ws => {
     ws.onMessage(raw => {
       const request = JSON.parse(String(raw)) as GatewayRequest;

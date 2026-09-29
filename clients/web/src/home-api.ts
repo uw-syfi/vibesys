@@ -36,7 +36,7 @@ export type ErrorCode =
   | 'budget_decrease'
   | 'not_resumable';
 
-export interface FsEntry {
+interface FsEntry {
   name: string;
   /** Canonical. */
   path: string;
@@ -50,7 +50,7 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
-export type ProjectState =
+type ProjectState =
   | 'missing'
   | 'not_git'
   | 'invalid'
@@ -60,7 +60,7 @@ export type ProjectState =
   | 'dirty_tree'
   | 'ready';
 
-export interface ProjectRef {
+interface ProjectRef {
   id: string;
   root: string;
   name: string;
@@ -77,11 +77,11 @@ export interface ProjectValidation {
   pending: string[];
 }
 
-export interface RecentProject extends ProjectRef {
+interface RecentProject extends ProjectRef {
   last_opened: string;
 }
 
-export interface ProjectList {
+interface ProjectList {
   projects: RecentProject[];
 }
 
@@ -92,7 +92,7 @@ export interface TaskSummary {
   error: string | null;
 }
 
-export interface TaskList {
+interface TaskList {
   tasks: TaskSummary[];
 }
 
@@ -138,7 +138,7 @@ export interface CommitPreview {
   other: string[];
 }
 
-export interface CommitResult {
+interface CommitResult {
   commit: string;
   committed: string[];
 }
@@ -154,7 +154,7 @@ export interface OuterLoop {
   roles: string[];
 }
 
-export interface ProviderOption {
+interface ProviderOption {
   provider: string;
   display_name: string;
   supports_reasoning_effort: boolean;
@@ -169,7 +169,7 @@ export interface Catalog {
   default_compute_backend: ComputeBackend;
 }
 
-export interface ProviderKey {
+interface ProviderKey {
   name: string;
   source: 'env' | 'dotenv' | 'missing';
   /** In the inherited environment (even empty) and in `.env`: the environment wins. */
@@ -191,7 +191,7 @@ export interface AuthStatus {
   providers: ProviderAuth[];
 }
 
-export interface KeyWriteResult {
+interface KeyWriteResult {
   provider: string;
   name: string;
   status: 'unverified';
@@ -235,11 +235,11 @@ export interface RunRow {
   created_at: string | null;
 }
 
-export interface RunList {
+interface RunList {
   runs: RunRow[];
 }
 
-export interface RoleOverride {
+interface RoleOverride {
   model: string | null;
   reasoning_effort: string | null;
 }

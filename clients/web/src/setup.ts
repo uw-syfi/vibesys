@@ -204,7 +204,7 @@ export function taskForm(draft: Draft): TaskForm {
   };
 }
 
-export const isTaskFile = (path: string): boolean => path.startsWith(TASKS_ROOT);
+const isTaskFile = (path: string): boolean => path.startsWith(TASKS_ROOT);
 
 export function budgetLabel(loop: OuterLoop | undefined): 'Rounds' | 'Generations' {
   return loop?.budget.flag === '--max-generations' ? 'Generations' : 'Rounds';

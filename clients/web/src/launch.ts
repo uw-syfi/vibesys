@@ -92,7 +92,7 @@ export function launchError(error: unknown): LaunchState {
   return failed ? {kind: 'failed', failure: failureOf(error)} : {kind: 'rejected', error};
 }
 
-export function rejectionText(error: HomeError): string {
+function rejectionText(error: HomeError): string {
   const recorded = error.details?.['recorded'];
   if (error.code === 'budget_decrease' && typeof recorded === 'number') {
     return `The run already has a budget of ${recorded}; resume with at least that.`;

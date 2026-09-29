@@ -35,6 +35,18 @@ Open `http://127.0.0.1:5173`. This mode replays `clients/web/src/fixtures/demo-r
 browser; queries answer empty, so round titles come from the recorded plans. It starts no Python
 server. Append `?gateway=<capability URL>` to connect the page to a live gateway instead.
 
+## Home mode
+
+Start the home server with the Vite origin allowed, then open the Vite page with its token:
+
+```bash
+uv run python -m entrypoints.web home --dev-origin http://127.0.0.1:5173
+```
+
+It prints `VibeSys home: http://127.0.0.1:8764/?token=<token>`. Open
+`http://127.0.0.1:5173/?token=<token>`: Vite proxies `/api` to the home server
+(`VIBESYS_HOME_PORT`, default 8764), so New run, keys and runs use the real API with hot reload.
+
 ## Live demo mode
 
 The demo reopens the repository's recorded run through the real HTTP and
