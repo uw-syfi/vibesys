@@ -449,35 +449,7 @@ export class WorkspaceSession {
 
   #onMessage(message: ServerMessage, resumed: boolean): void {
     if (message.type === 'subscribed') {
-      const changed = this.#state.runId !== null && this.#state.runId !== message.run_id;
-      if (changed) {
-        this.#runGeneration += 1;
-        this.#historyGeneration += 1;
-        this.#declaredFloor = null;
-        this.#spine.clear();
-        this.#fetches.clear();
-        this.#refreshPending.clear();
-        this.#set({
-          runId: message.run_id,
-          core: initialCoreState(),
-          captured: [],
-          snapshotError: null,
-          queries: emptyQueries(),
-          command: idleCommand(),
-          sent: [],
-          asks: [],
-          historyLoading: false,
-          historyError: null,
-        });
-        // A resume requested the old run's cursor and can omit the entire new run.
-        // Replacing the stream also rejects remaining messages from that dial; its
-        // bootstrap batch then runs the queries.
-        if (resumed) {
-          void this.reconnect();
-          return;
-        }
-      }
-      this.#set({runId: message.run_id, connection: 'connected', connectionError: null});
+      this.#onSubscribed(message, resumed);
     } else if (message.type === 'protocol_error') {
       this.#set({connection: 'error', connectionError: `${message.code}: ${message.message}`});
     } else if (message.type === 'event') {
@@ -487,44 +459,85 @@ export class WorkspaceSession {
       });
       this.#invalidate([message.event]);
     } else if (message.type === 'event_batch') {
-      const declared = message.history_after_sequence ?? 0;
-      const storeId = message.store_id ?? '';
-      // A resume that lands on a replaced store carries that store's full replay.
-      const replaced = this.#storeId !== '' && storeId !== '' && storeId !== this.#storeId;
-      if (storeId !== '') this.#storeId = storeId;
-      const reset =
-        replaced || (!resumed && (this.#declaredFloor === null || declared > this.#declaredFloor));
-      let floor = this.#state.core.historyAfterSequence;
-      if (!resumed || replaced) {
-        this.#declaredFloor = declared;
-        floor = reset ? declared : Math.min(floor, declared);
-        if (reset) {
-          this.#historyGeneration += 1;
-          this.#spine.clear();
-        }
-        for (const event of message.events) {
-          if (event.sequence !== undefined && event.sequence <= declared)
-            this.#spine.add(event.sequence);
-        }
-      }
-      const fold = reset ? reduceEventRebootstrap : reduceEventBatch;
-      this.#set({
-        // core-state drops control events, so record them before folding.
-        captured: capture(reset ? [] : this.#state.captured, message.events),
-        core: fold(
-          this.#state.core,
-          message.events,
-          message.active_executions,
-          message.through_sequence,
-          floor,
-        ),
-        // The bump above orphans an in-flight chunk, whose `finally` then skips the unlock.
-        ...(reset ? {historyLoading: false, historyError: null} : {}),
-      });
-      // A bootstrap is the one time every query runs; its replayed invalidations are history.
-      if (reset) void this.refresh();
-      else this.#invalidate(message.events);
+      this.#onEventBatch(message, resumed);
     }
+  }
+
+  #onSubscribed(message: Extract<ServerMessage, {type?: 'subscribed'}>, resumed: boolean): void {
+    const changed = this.#state.runId !== null && this.#state.runId !== message.run_id;
+    if (changed) {
+      this.#runGeneration += 1;
+      this.#historyGeneration += 1;
+      this.#declaredFloor = null;
+      this.#spine.clear();
+      this.#fetches.clear();
+      this.#refreshPending.clear();
+      this.#set({
+        runId: message.run_id,
+        core: initialCoreState(),
+        captured: [],
+        snapshotError: null,
+        queries: emptyQueries(),
+        command: idleCommand(),
+        sent: [],
+        asks: [],
+        historyLoading: false,
+        historyError: null,
+      });
+      // A resume requested the old run's cursor and can omit the entire new run.
+      // Replacing the stream also rejects remaining messages from that dial; its
+      // bootstrap batch then runs the queries.
+      if (resumed) {
+        void this.reconnect();
+        return;
+      }
+    }
+    this.#set({runId: message.run_id, connection: 'connected', connectionError: null});
+  }
+
+  #onEventBatch(message: Extract<ServerMessage, {type?: 'event_batch'}>, resumed: boolean): void {
+    const declared = message.history_after_sequence ?? 0;
+    const storeId = message.store_id ?? '';
+    // A resume that lands on a replaced store carries that store's full replay.
+    const replaced = this.#storeId !== '' && storeId !== '' && storeId !== this.#storeId;
+    if (storeId !== '') this.#storeId = storeId;
+    const reset =
+      replaced || (!resumed && (this.#declaredFloor === null || declared > this.#declaredFloor));
+    let floor = this.#state.core.historyAfterSequence;
+    if (!resumed || replaced) {
+      floor = this.#reconcileHistoryFloor(message.events, declared, reset);
+    }
+    const fold = reset ? reduceEventRebootstrap : reduceEventBatch;
+    this.#set({
+      // core-state drops control events, so record them before folding.
+      captured: capture(reset ? [] : this.#state.captured, message.events),
+      core: fold(
+        this.#state.core,
+        message.events,
+        message.active_executions,
+        message.through_sequence,
+        floor,
+      ),
+      // The bump above orphans an in-flight chunk, whose `finally` then skips the unlock.
+      ...(reset ? {historyLoading: false, historyError: null} : {}),
+    });
+    // A bootstrap is the one time every query runs; its replayed invalidations are history.
+    if (reset) void this.refresh();
+    else this.#invalidate(message.events);
+  }
+
+  #reconcileHistoryFloor(events: readonly RunEvent[], declared: number, reset: boolean): number {
+    this.#declaredFloor = declared;
+    const floor = reset ? declared : Math.min(this.#state.core.historyAfterSequence, declared);
+    if (reset) {
+      this.#historyGeneration += 1;
+      this.#spine.clear();
+    }
+    for (const event of events) {
+      if (event.sequence !== undefined && event.sequence <= declared)
+        this.#spine.add(event.sequence);
+    }
+    return floor;
   }
 
   #wake = (): void => {

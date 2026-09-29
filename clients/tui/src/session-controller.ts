@@ -1091,7 +1091,7 @@ export class SocketSessionController implements SessionController {
         this.#experimentRefreshPending = true;
         return;
       }
-      if (update === undefined || update === null) {
+      if (!update) {
         this.#experimentCursor = null;
         this.#experimentTarget = null;
         this.#experimentForceRefresh = false;
