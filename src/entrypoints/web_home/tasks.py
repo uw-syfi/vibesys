@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import shlex
 import tomllib
@@ -193,8 +194,23 @@ def edit_task(request: Request) -> TaskDetail:
         if current.read_only_reason is not None:
             raise ApiError(ErrorCode.TASK_READ_ONLY, current.read_only_reason)
         manifest = build_manifest(body, load_project_task(project, task).manifest)
-        atomic_write(task.objective_path, body.objective.encode("utf-8"), mode=0o644)
-        atomic_write(
-            task.manifest_path, render_input_manifest(manifest).encode("utf-8"), mode=0o644
-        )
+        rendered = render_input_manifest(manifest)
+        try:
+            tomllib.loads(rendered)
+        except tomllib.TOMLDecodeError as error:
+            message = f"the rendered task manifest is invalid TOML: {error}"
+            raise ApiError(ErrorCode.TASK_INVALID, message) from None
+        previous_objective = task.objective_path.read_bytes()
+        try:
+            atomic_write(task.objective_path, body.objective.encode("utf-8"), mode=0o644)
+        except OSError as error:
+            message = f"failed to write the task objective: {error}"
+            raise ApiError(ErrorCode.INTERNAL, message) from None
+        try:
+            atomic_write(task.manifest_path, rendered.encode("utf-8"), mode=0o644)
+        except OSError as error:
+            with contextlib.suppress(OSError):
+                atomic_write(task.objective_path, previous_objective, mode=0o644)
+            message = f"failed to write the task manifest: {error}"
+            raise ApiError(ErrorCode.INTERNAL, message) from None
     return detail(project, task)

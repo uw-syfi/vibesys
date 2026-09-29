@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import tomllib
 from pathlib import Path
@@ -369,8 +370,15 @@ class InputManifest(BaseModel):
         return self
 
 
+_TOML_FORBIDDEN_CONTROL = re.compile(r"[\x7f-\x9f]")
+
+
 def _toml_string(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False)
+    # json.dumps(ensure_ascii=False) escapes every C0 control (U+0000-U+001F) but
+    # leaves U+007F (DEL) and the C1 controls (U+0080-U+009F) as literal characters;
+    # TOML basic strings forbid all of these unescaped.
+    encoded = json.dumps(value, ensure_ascii=False)
+    return _TOML_FORBIDDEN_CONTROL.sub(lambda match: f"\\u{ord(match.group()):04x}", encoded)
 
 
 def _toml_array(values: tuple[str, ...]) -> str:

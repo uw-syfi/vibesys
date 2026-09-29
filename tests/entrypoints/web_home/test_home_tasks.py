@@ -122,6 +122,18 @@ def test_create_writes_both_files_and_the_task_loads(home: Home) -> None:
     assert again["error"]["code"] == "task_exists"
 
 
+def test_create_with_a_del_character_round_trips(home: Home) -> None:
+    key, _ = _setup(home, tasks=())
+
+    created = home.post(
+        f"/api/projects/{key}/tasks", {**FORM, "name": "serve", "result_metric": "a\x7fb"}
+    ).json()
+
+    assert created["result"]["metric"] == "a\x7fb"
+    loaded = home.get(f"/api/projects/{key}/tasks/serve").json()
+    assert loaded["result"]["metric"] == "a\x7fb"
+
+
 @pytest.mark.parametrize(
     ("change", "code"),
     [
@@ -145,12 +157,17 @@ def test_edit_needs_the_current_hash(home: Home) -> None:
     base = home.get(f"/api/projects/{key}/tasks/bench").json()["content_hash"]
 
     edited = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base}).json()
-    stale = home.put(f"/api/projects/{key}/tasks/bench", {**FORM, "base_hash": base}).json()
+    stale = home.put(
+        f"/api/projects/{key}/tasks/bench",
+        {**FORM, "objective": "Never applied.\n", "result_metric": "never_applied", "base_hash": base},
+    ).json()
 
     assert edited["objective"] == FORM["objective"]
     assert edited["content_hash"] != base
     assert stale["error"]["code"] == "task_conflict"
+    manifest = root / ".vibesys" / "tasks" / "bench" / "vibesys.input.toml"
     assert (root / ".vibesys" / "tasks" / "bench" / "OBJECTIVE.md").read_text() == FORM["objective"]
+    assert tomllib.loads(manifest.read_text())["benchmark"]["result"]["metric"] == FORM["result_metric"]
 
 
 def test_edit_keeps_manifest_settings_the_form_does_not_show(home: Home) -> None:
