@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import type {DesignRound, HypothesisEntry, RunEvent} from '@vibesys/backend-client';
 import {initialCoreState, reduceEventBatch} from '@vibesys/core-state';
 import {chartModel, designRows, evidenceRows} from './experiments.js';
-import {runSummary} from './rounds.js';
+import {type RoundRow, type RunSummary, runSummary} from './rounds.js';
 import {CAPTURED_TYPES} from './session.js';
 
 const LIVE = readFileSync(new URL('./fixtures/demo-run.jsonl', import.meta.url), 'utf8')
@@ -49,6 +49,10 @@ test('the chart: the retained step line, a mark per round, planned rounds, the a
   assert.equal(chart.ticks.length, 12);
   assert.equal(chart.path.match(/ V/g)?.length, 4);
   assert.deepEqual([chart.baseline?.value, chart.retained?.value], ['950', '1,230']);
+  assert.deepEqual(
+    [chart.baseline?.label, chart.retained?.label],
+    ['Baseline: 950 tok/s', 'Retained: 1,230 tok/s'],
+  );
   assert.equal(chartModel(runSummary(initialCoreState(), [], [], null), 12), null);
 });
 
@@ -65,6 +69,8 @@ test('evidence without experiments: outcomes from verdicts, facts from the recor
       [6, 'Judging', 't2'],
     ],
   );
+  assert.deepEqual([rows[0]?.value, rows[0]?.valueLabel], ['1,060', '1,060 tok/s']);
+  assert.equal(rows[2]?.valueLabel, null);
   const terms = rows[2]?.facts.map(fact => fact.term);
   assert.deepEqual(terms, ['Hypothesis', 'Pass criteria', 'Judge', 'Change', 'Files', 'Commit']);
   assert.deepEqual(rows[2]?.facts.at(-1), {term: 'Commit', text: 'c0ffee03', mono: true});
@@ -92,4 +98,60 @@ test('design rows: files per round, reverted rounds marked', () => {
     designRows(summary, DESIGN, captured).map(row => [row.round, row.files, row.reverted]),
     [[3, 'src/sampler.rs', true]],
   );
+});
+
+function kept(round: number, value: number): RoundRow {
+  return {
+    round,
+    state: 'kept',
+    title: null,
+    hypothesis: null,
+    value,
+    delta: null,
+    before: {round: round - 1, value: null},
+  };
+}
+
+function summaryOf(rows: RoundRow[], baseline: number | null): RunSummary {
+  const last = rows.at(-1);
+  return {
+    rows,
+    unit: 'ms',
+    baseline,
+    retained: {round: last?.round ?? 0, value: last?.value ?? baseline},
+    planned: null,
+    lowerIsBetter: true,
+  };
+}
+
+function assertInside(chart: ReturnType<typeof chartModel>) {
+  assert.ok(chart);
+  const ys = [...chart.points.map(point => point.y), chart.baseline?.y, chart.retained?.y];
+  for (const y of ys.filter(y => y !== undefined)) {
+    assert.ok(Number.isFinite(y) && y >= 0 && y <= chart.floor, `y ${y} outside the plot`);
+  }
+  assert.doesNotMatch(chart.path, /NaN|Infinity/);
+  return chart;
+}
+
+test('the chart: a single point with no baseline sits inside the plot', () => {
+  const chart = assertInside(chartModel(summaryOf([kept(1, 42)], null), null));
+  assert.equal(chart.points.length, 1);
+  assert.equal(chart.ticks.length, 1);
+  assert.equal(chart.baseline, null);
+  assert.equal(chart.points[0]?.label, 'Round 1: 42 ms');
+});
+
+test('the chart: all-equal values share one height', () => {
+  const chart = assertInside(chartModel(summaryOf([kept(1, 100), kept(2, 100)], 100), 4));
+  assert.deepEqual(
+    new Set([chart.baseline?.y, chart.retained?.y, ...chart.points.map(point => point.y)]).size,
+    1,
+  );
+});
+
+test('the chart: a zero value is plotted, not treated as missing', () => {
+  const chart = assertInside(chartModel(summaryOf([kept(1, 0)], 0), 2));
+  assert.equal(chart.points[0]?.mark, 'kept');
+  assert.equal(chart.baseline?.label, 'Baseline: 0 ms');
 });

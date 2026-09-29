@@ -110,7 +110,7 @@ function Chart({chart}: {chart: ChartModel | null}) {
               x2={chart.width - 42}
               y1={chart.baseline.y}
               y2={chart.baseline.y}
-              stroke="var(--border)"
+              stroke="var(--line)"
             />
           )}
           {chart.path === '' ? null : (
@@ -136,11 +136,13 @@ function Chart({chart}: {chart: ChartModel | null}) {
           ))}
           {chart.baseline === null ? null : (
             <text x={label} y={chart.baseline.y + 4}>
+              <title>{chart.baseline.label}</title>
               {chart.baseline.value}
             </text>
           )}
           {chart.retained === null ? null : (
             <text className="v" x={label} y={chart.retained.y + 4}>
+              <title>{chart.retained.label}</title>
               {chart.retained.value}
             </text>
           )}
@@ -171,7 +173,9 @@ function EvidenceList({
             <span className="id">r{row.round}</span>
             <span className="ttl">{row.title}</span>
             <span className={`oc ${row.outcome.tone}`}>{row.outcome.text}</span>
-            <span className="m">{row.value ?? ''}</span>
+            <span className="m" title={row.valueLabel ?? undefined}>
+              {row.value ?? ''}
+            </span>
           </button>
           {open === row.round ? (
             <div className="ev">

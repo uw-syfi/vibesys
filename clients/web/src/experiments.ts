@@ -24,13 +24,15 @@ export interface ChartModel {
   points: ChartPoint[];
   planned: Array<{round: number; x: number}>;
   ticks: Array<{round: number; x: number}>;
-  baseline: {value: string; y: number} | null;
-  retained: {value: string; y: number} | null;
+  /** Axis labels; `label` is the hover hint with the unit. */
+  baseline: {value: string; y: number; label: string} | null;
+  retained: {value: string; y: number; label: string} | null;
 }
 
 const W = 368;
 const H = 136;
 const PAD = {l: 6, r: 42, t: 10, b: 20};
+const unitSuffix = (unit: string | null) => (unit === null ? '' : ` ${unit}`);
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 function pointOf(
@@ -59,6 +61,17 @@ function pointOf(
   return [{round: row.round, x, y: y(row.value), mark, label}];
 }
 
+function axisLabel(
+  name: string,
+  value: number | null,
+  y: (value: number) => number,
+  unit: string,
+): ChartModel['baseline'] {
+  if (value === null) return null;
+  const text = formatValue(value);
+  return {value: text, y: y(value), label: `${name}: ${text}${unit}`};
+}
+
 export function chartModel(summary: RunSummary, maxRounds: number | null): ChartModel | null {
   const {rows, baseline} = summary;
   const values = rows.flatMap(row => (row.value === null ? [] : [row.value]));
@@ -73,7 +86,7 @@ export function chartModel(summary: RunSummary, maxRounds: number | null): Chart
   const y = (value: number) =>
     round2(PAD.t + (1 - (value - low + pad) / (high - low + 2 * pad)) * (H - PAD.t - PAD.b));
   const floor = H - PAD.b - 5.5;
-  const unit = summary.unit === null ? '' : ` ${summary.unit}`;
+  const unit = unitSuffix(summary.unit);
   const kept = rows.flatMap(row =>
     row.state === 'kept' && row.value !== null ? [{round: row.round, value: row.value}] : [],
   );
@@ -91,11 +104,8 @@ export function chartModel(summary: RunSummary, maxRounds: number | null): Chart
       x: x(last + index + 1),
     })),
     ticks: Array.from({length: total}, (_, index) => ({round: index + 1, x: x(index + 1)})),
-    baseline: baseline === null ? null : {value: formatValue(baseline), y: y(baseline)},
-    retained:
-      summary.retained.value === null
-        ? null
-        : {value: formatValue(summary.retained.value), y: y(summary.retained.value)},
+    baseline: axisLabel('Baseline', baseline, y, unit),
+    retained: axisLabel('Retained', summary.retained.value, y, unit),
   };
 }
 
@@ -104,6 +114,8 @@ export interface Evidence {
   title: string;
   outcome: {text: string; tone: 'ok' | 'bad' | 't2'};
   value: string | null;
+  /** The value with its unit: the hover hint. */
+  valueLabel: string | null;
   facts: Array<{term: string; text: string; mono: boolean}>;
 }
 
@@ -174,6 +186,8 @@ export function evidenceRows(
       title: row.title ?? 'No hypothesis yet',
       outcome: outcomeOf(row, outcomes.get(row.round)),
       value: row.value === null ? null : formatValue(row.value),
+      valueLabel:
+        row.value === null ? null : `${formatValue(row.value)}${unitSuffix(summary.unit)}`,
       facts: facts.flatMap(([term, text, mono]) => (text === null ? [] : [{term, text, mono}])),
     };
   });
