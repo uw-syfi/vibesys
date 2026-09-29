@@ -39,7 +39,7 @@ from entrypoints.web_home.contract import (
 )
 from entrypoints.web_home.projects import inspect_project, project_id, resolve_project
 from entrypoints.web_home.tasks import select_task
-from server.runtime import WebInstanceRecord
+from server.runtime import WebInstanceClaim, WebInstanceRecord
 from vibesys.api import Config, RunRecordReadError, RunStatus, open_run_store
 from vibesys.api.request import (
     generate_experiment_name,
@@ -284,11 +284,21 @@ def _discover(path: Path) -> WebInstanceRecord | None:
     return WebInstanceRecord.discover(path, cleanup_stale=False)
 
 
+def _held(path: Path) -> WebInstanceRecord | None:
+    # A gateway holds its startup claim for its lifetime; a deaf one is still live.
+    # No record, no claim check: is_held creates `<record>.lock`, which would dirty the tree.
+    if not path.exists():
+        return None
+    if (record := _discover(path)) is not None:
+        return record
+    return WebInstanceRecord.read(path) if WebInstanceClaim.is_held(path) else None
+
+
 def _live(config: HomeConfig, root: Path) -> _Live | None:
     """Return the project's serving live gateway, home-owned first, then external."""
     project = _open(root)
     for path, external in ((_live_record(config, root), False), (_external_record(project), True)):
-        record = _discover(path)
+        record = _held(path)
         if record is not None:
             run_id = _owner_run(path, record, project, external=external)
             return _Live(path=path, record=record, run_id=run_id, external=external)
@@ -427,9 +437,10 @@ def _stop(record: WebInstanceRecord, path: Path, *, group: bool) -> bool:
         else:
             os.kill(record.pid, signal.SIGTERM)
     deadline = time.monotonic() + _REAP_SECONDS
-    while _discover(path) is not None and time.monotonic() < deadline:
+    # The claim, not /health: a deaf gateway still holds it until the process exits.
+    while WebInstanceClaim.is_held(path) and time.monotonic() < deadline:
         time.sleep(_RECORD_POLL_SECONDS)
-    return _discover(path) is None
+    return not WebInstanceClaim.is_held(path)
 
 
 def _live_gateway(live: _Live) -> Gateway:

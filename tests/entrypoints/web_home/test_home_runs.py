@@ -585,13 +585,33 @@ def test_a_gateway_that_misses_the_health_probe_keeps_its_record(runs_home: Home
     key, root = _project(runs_home)
     _persist_run(root, "plain-run")
     record = Project.open(root).configuration_path() / "web-gateway.json"
-    deaf = {**os.environ, "FAKE_RUN_SERVER_DEAF": "1"}
+    flag = root.parent / "deaf"
+    flag.touch()
+    deaf = {**os.environ, "FAKE_RUN_SERVER_DEAF": str(flag)}
     with _external_gateway(record, root, environ=deaf):
         assert _rows(runs_home, key)["plain-run"]["gateway"]["state"] == "stale"
-        runs_home.delete(f"/api/projects/{key}/live")
         runs_home.post(f"/api/projects/{key}/runs/plain-run/open")
         runs_home.post(f"/api/projects/{key}/runs/plain-run/resume", {})
         assert record.exists()
+
+
+def test_a_deaf_home_gateway_blocks_a_start_and_still_stops(runs_home: Home) -> None:
+    key, _ = _project(runs_home)
+    deaf = runs_home.workspace / "deaf"
+    runs_home.config.environ = {**runs_home.config.environ, "FAKE_RUN_SERVER_DEAF": str(deaf)}
+    runs_home.post(f"/api/projects/{key}/runs", START)
+    process = next(iter(runs_home.config.launches.values())).process
+    owner = next((runs_home.config.state_home / "web" / "gateways").glob("*/live.owner.json"))
+    sidecar = owner.read_bytes()
+    deaf.touch()
+
+    again = runs_home.post(f"/api/projects/{key}/runs", START).json()
+    stopped = runs_home.delete(f"/api/projects/{key}/live").json()
+
+    assert again["error"]["code"] == "already_live"
+    assert owner.read_bytes() == sidecar
+    assert stopped["stopped"] is True
+    assert process.wait(timeout=10) is not None
 
 
 def test_open_and_resume_report_an_external_gateway_as_external(runs_home: Home) -> None:

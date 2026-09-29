@@ -301,6 +301,18 @@ def test_fresh_run_uses_the_supplied_run_id(tmp_path: Path) -> None:
     assert Project.open(project).state.load_run(run_id).display_name == "queue"
 
 
+def test_fresh_run_rejects_a_malformed_supplied_run_id(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    runs_dir = tmp_path / "runs"
+    with (
+        pytest.raises(ConfigurationError, match="invalid run id"),
+        _create_context(project, evaluator=evaluator, run_id="../escape", runs_dir=runs_dir),
+    ):
+        pass
+    assert not runs_dir.exists()
+
+
 def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_only(
     tmp_path: Path,
 ) -> None:

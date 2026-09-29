@@ -7,12 +7,13 @@ exact `Origin` from `--web-origin` or its own origin. It records its argv next
 to the record and removes the record on SIGTERM.
 
 `FAKE_RUN_SERVER_FAIL=1` writes to stderr and exits 2; `FAKE_RUN_SERVER_HANG=1`
-never publishes a record; `FAKE_RUN_SERVER_DEAF=1` publishes, then never answers
-(a gateway too busy for the 0.4 s `/health` probe).
+never publishes a record; `FAKE_RUN_SERVER_DEAF=<path>` answers every request 2 s
+late once *path* exists (a gateway too busy for the 0.4 s `/health` probe).
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import secrets
@@ -37,6 +38,10 @@ class _Gateway(BaseHTTPRequestHandler):
     origins: ClassVar[frozenset[str]] = frozenset()
 
     def do_GET(self) -> None:
+        deaf = os.environ.get("FAKE_RUN_SERVER_DEAF")
+        if deaf and Path(deaf).exists():
+            # test-isolation: the slow reply is the behaviour under test (misses the 0.4 s probe)
+            time.sleep(2)
         parsed = urlsplit(self.path)
         token = parse_qs(parsed.query).get("token", [""])[0]
         if not secrets.compare_digest(token, self.token):
@@ -69,6 +74,9 @@ def main() -> None:
     if os.environ.get("FAKE_RUN_SERVER_HANG") == "1":
         signal.pause()
     record_path = Path(_option(argv, "--web-instance") or "")
+    # Hold the startup claim for the process lifetime, as the real gateway does.
+    claim = record_path.with_name(f"{record_path.name}.lock").open("a+")
+    fcntl.flock(claim.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     reopen = _option(argv, "--web-reopen-run")
     server = HTTPServer(("127.0.0.1", 0), _Gateway)
     port = server.server_address[1]
@@ -99,8 +107,6 @@ def main() -> None:
     signal.signal(signal.SIGTERM, stop)
     sys.stdout.write("ready\n")
     sys.stdout.flush()
-    if os.environ.get("FAKE_RUN_SERVER_DEAF") == "1":
-        signal.pause()
     server.serve_forever()
 
 
