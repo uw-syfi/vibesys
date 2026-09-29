@@ -1,7 +1,8 @@
 // Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it: the
 // replay harness (`tui/dev`), benchmarks, and the workspace's own tooling (`scripts`).
-const PACKAGES = '^(?:backend-client|core-state|tui|web)/';
-const TOOLING = '^(?:tui/dev|tui/benchmarks|core-state/bench|web/e2e|scripts)/';
+const PACKAGES = '^(?:backend-client|core-state|tui|web|desktop)/';
+const TOOLING =
+  '^(?:tui/dev|tui/benchmarks|core-state/bench|web/e2e|desktop/e2e|desktop/test|scripts)/';
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 
@@ -53,6 +54,14 @@ module.exports = {
       severity: 'error',
       from: {path: '^tui/'},
       to: {path: ['^web/', '/node_modules/@vibesys/web/']},
+    },
+    {
+      // The shell loads the app over HTTP (home server or Vite) and shares no code with the
+      // client packages, so a client refactor cannot reach its process and security code.
+      name: 'desktop-is-standalone',
+      severity: 'error',
+      from: {path: '^desktop/'},
+      to: {path: ['^(?:backend-client|core-state|tui|web)/', '/node_modules/@vibesys/']},
     },
     {
       // `tui/dev/` is the development replay harness. It is kept out of

@@ -85,6 +85,7 @@ const VALID_FILES = {
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   'web/src/index.ts': "import '@vibesys/backend-client';\nimport '@vibesys/core-state';\n",
+  'desktop/src/main.ts': "import 'node:child_process';\n",
   'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
   'tui/src/session-controller.ts': "import './session-model.js';\nimport './ui/theme.js';\n",
   'tui/src/session-model.ts': "import './ui/theme.js';\n",
@@ -207,6 +208,10 @@ const RULE_CASES = [
     rule: 'tui-launcher-stays-standalone',
     files: {'tui/src/launcher.ts': "import '@vibesys/core-state';\n"},
   },
+  {
+    rule: 'desktop-is-standalone',
+    files: {'desktop/src/main.ts': "import '../../web/src/index.js';\n"},
+  },
 ];
 
 async function violatedRules(files) {
@@ -246,6 +251,7 @@ async function violatedRules(files) {
       'tui/dev',
       'tui/benchmarks',
       'web/src',
+      'desktop/src',
       'scripts',
     ],
     {
@@ -286,11 +292,15 @@ test('manifest policy rejects declared reverse dependencies', async () => {
     '@vibesys/backend-client': 'workspace:*',
     '@vibesys/core-state': 'workspace:*',
   });
+  await writeManifest(root, 'desktop', '@vibesys/desktop', {
+    '@vibesys/web': 'workspace:*',
+  });
 
   assert.deepEqual(await manifestErrors(root), [
     'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
     'core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
     'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
+    'desktop/package.json: @vibesys/desktop must not depend on @vibesys/web',
   ]);
 });
 

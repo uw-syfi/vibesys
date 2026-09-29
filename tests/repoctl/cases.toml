@@ -43,7 +43,7 @@ native_targets = [
   "resources/evaluators/queue/native_runner",
   "sdk/vs-evaluator/vseval",
 ]
-pnpm_packages = ["@vibesys/backend-client", "@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
+pnpm_packages = ["@vibesys/backend-client", "@vibesys/core-state", "@vibesys/desktop", "@vibesys/tui", "@vibesys/web"]
 
 [[cases]]
 name = "website files do not start application CI"

@@ -40,6 +40,18 @@
       // of it. home-api.ts, setup.ts, launch.ts and ui/Setup.tsx are consumed from real app code
       // (SetupView.tsx, RunEntry.tsx, HomeWindow.tsx, main.tsx) and traced from src/index.ts.
       "entry": ["src/index.ts", "e2e/gateway.ts", "e2e/home.ts"]
+    },
+    "desktop": {
+      // electron-vite builds the two process entries; `home.test.ts` spawns the fake home by path.
+      // Playwright's plugin finds playwright.config.ts and e2e/*.spec.ts.
+      "entry": [
+        "src/main/index.ts",
+        "src/preload/index.ts",
+        "src/**/*.test.ts",
+        "test/fake-home.ts",
+        "electron.vite.config.ts"
+      ],
+      "project": ["src/**/*.ts", "test/**/*.ts", "e2e/**/*.ts"]
     }
   }
 }
