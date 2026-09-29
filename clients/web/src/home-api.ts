@@ -79,6 +79,8 @@ export interface ProjectValidation {
 
 interface RecentProject extends ProjectRef {
   last_opened: string;
+  /** The folder no longer exists. */
+  missing: boolean;
 }
 
 interface ProjectList {

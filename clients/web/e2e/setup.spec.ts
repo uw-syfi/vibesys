@@ -258,6 +258,17 @@ test('Browse… walks folders and checks the chosen one', async ({page}) => {
   ]);
 });
 
+test('the default folder is the most recent project that still exists, or none', async ({page}) => {
+  await mockHome(page, {missing: [ROOT]});
+  await page.goto(NEW);
+  await expect(page.getByLabel('Folder')).toHaveValue(OTHER_ROOT);
+  await page.unrouteAll();
+  await mockHome(page, {missing: [ROOT, OTHER_ROOT]});
+  await page.reload();
+  await expect(page.getByRole('button', {name: 'Browse…'})).toBeVisible();
+  await expect(page.getByLabel('Folder')).toHaveValue('');
+});
+
 test('Browse… from a folder that no longer exists lists the roots instead of a dead end', async ({
   page,
 }) => {

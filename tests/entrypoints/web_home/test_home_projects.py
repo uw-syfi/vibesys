@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from typing import TYPE_CHECKING
 
 from tests.entrypoints.web_home.support import make_project
@@ -67,6 +68,22 @@ def test_validated_git_work_trees_become_recent_projects(home: Home) -> None:
     assert listing["home"] == home.config.environ["HOME"]
     stored = next((home.config.state_home / "web").glob("*recent*.json")).read_text()
     assert "home" not in json.loads(stored)
+    assert [p["missing"] for p in projects] == [False, False]
+
+
+def test_recent_projects_whose_folder_is_gone_are_listed_as_missing(home: Home) -> None:
+    gone = make_project(home.workspace / "gone")
+    kept = make_project(home.workspace / "kept")
+    for path in (gone, kept):
+        home.post("/api/projects/validate", {"path": str(path)})
+    shutil.rmtree(gone)
+
+    projects = home.get("/api/projects").json()["projects"]
+
+    assert [(p["root"], p["missing"]) for p in projects] == [(str(kept), False), (str(gone), True)]
+    stored = json.loads(next((home.config.state_home / "web").glob("*recent*.json")).read_text())
+    assert len(stored["projects"]) == 2
+    assert all("missing" not in p for p in stored["projects"])
 
 
 def test_validate_rejects_paths_outside_the_roots(home: Home) -> None:

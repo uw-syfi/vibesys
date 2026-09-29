@@ -168,7 +168,8 @@ def remember(config: HomeConfig, project: ProjectRef) -> None:
     with config.write_lock:
         kept = [item for item in _load_recents(config) if item.id != project.id]
         document = ProjectList(projects=[entry, *kept][:_MAX_RECENTS])
-        encoded = document.model_dump_json(indent=2, exclude={"home"}).encode()
+        exclude = {"home": True, "projects": {"__all__": {"missing"}}}
+        encoded = document.model_dump_json(indent=2, exclude=exclude).encode()
         atomic_write(_recents_path(config), encoded, mode=0o600)
 
 
@@ -176,7 +177,11 @@ def recent(request: Request) -> ProjectList:
     """``GET /api/projects``: recent projects, most recent first, and the user's home."""
     config = request.config
     home = config.environ.get("HOME") or str(Path.home())
-    return ProjectList(projects=_load_recents(config), home=home)
+    projects = [
+        entry.model_copy(update={"missing": not Path(entry.root).is_dir()})
+        for entry in _load_recents(config)
+    ]
+    return ProjectList(projects=projects, home=home)
 
 
 def resolve_project(config: HomeConfig, key: str) -> Path:

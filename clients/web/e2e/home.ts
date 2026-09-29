@@ -95,6 +95,8 @@ export interface HomeOptions {
   changedOnDisk: boolean;
   /** Another task file appears between the commit preview and the first commit, which conflicts. */
   commitRace: boolean;
+  /** Recent project roots whose folder is gone: GET /api/projects marks them `missing`. */
+  missing: string[];
 }
 
 export interface FakeHome {
@@ -120,6 +122,7 @@ const DEFAULTS: HomeOptions = {
   hold: [],
   changedOnDisk: false,
   commitRace: false,
+  missing: [],
 };
 
 interface Reply {
@@ -295,7 +298,16 @@ class FakeServer {
     const at = (method: string, suffix: string) =>
       new RegExp(`^${method} /api/projects/([^/]+)${suffix}$`);
     return [
-      [/^GET \/api\/projects$/, () => ok({projects: PROJECTS, home: '/Users/me'})],
+      [
+        /^GET \/api\/projects$/,
+        () => {
+          const projects = PROJECTS.map(p => ({
+            ...p,
+            missing: this.options.missing.includes(p.root),
+          }));
+          return ok({projects, home: '/Users/me'});
+        },
+      ],
       [/^GET \/api\/fs$/, (_match, _body, search) => this.fs(search.get('path'))],
       [
         /^POST \/api\/projects\/validate$/,

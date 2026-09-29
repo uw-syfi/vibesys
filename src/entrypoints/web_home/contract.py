@@ -189,6 +189,8 @@ class RecentProject(ProjectRef):
     """One recent-projects entry, most recent first."""
 
     last_opened: str
+    # Response only: the folder no longer exists. Never written to the file.
+    missing: bool = False
 
 
 class ProjectList(_Model):

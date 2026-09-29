@@ -57,6 +57,8 @@ interface SetupData {
   auth: AuthStatus;
   /** Recent project roots, most recent first. */
   recent: string[];
+  /** The New run form's default folder: the most recent that still exists, or `''`. */
+  initial: string;
   /** The user's home directory, for display only. */
   home: string | null;
 }
@@ -69,7 +71,9 @@ function useSetupData(client: HomeClient): {
 } {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [projects, setProjects] = useState<Pick<SetupData, 'recent' | 'home'> | null>(null);
+  const [projects, setProjects] = useState<Pick<SetupData, 'recent' | 'initial' | 'home'> | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const fail = useCallback((reason: unknown) => setError(errorText(reason)), []);
   const refreshAuth = useCallback(() => void client.auth().then(setAuth, fail), [client, fail]);
@@ -77,8 +81,13 @@ function useSetupData(client: HomeClient): {
     setError(null);
     client.catalog().then(setCatalog, fail);
     client.projects().then(
-      list => setProjects({recent: list.projects.map(project => project.root), home: list.home}),
-      () => setProjects({recent: [], home: null}),
+      list =>
+        setProjects({
+          recent: list.projects.map(project => project.root),
+          initial: list.projects.find(project => !project.missing)?.root ?? '',
+          home: list.home,
+        }),
+      () => setProjects({recent: [], initial: '', home: null}),
     );
     refreshAuth();
   }, [client, fail, refreshAuth]);
@@ -672,14 +681,14 @@ interface NewRunProps {
 
 /** The form is inert (a disabled fieldset) while a launch is in flight: an edit then would be lost. */
 function NewRun({client, token, data, refreshAuth}: NewRunProps) {
-  const {catalog, auth, recent, home} = data;
-  const [form, setForm] = useState(() => initialForm(catalog, auth, recent[0] ?? ''));
+  const {catalog, auth, recent, initial, home} = data;
+  const [form, setForm] = useState(() => initialForm(catalog, auth, initial));
   const act = formActions(setForm, catalog);
   const onChecked = useCallback(
     (result: ProjectValidation) => setForm(current => ({...current, path: result.path})),
     [],
   );
-  const folder = useFolder(client, recent[0] ?? '', onChecked);
+  const folder = useFolder(client, initial, onChecked);
   const project = folder.validation?.project ?? null;
   const tasks = useTasks(client, folder.validation, setForm);
   const [detail, setDetail] = useTaskDetail(client, project?.id ?? null, form.task);
