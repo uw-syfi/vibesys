@@ -176,3 +176,57 @@ test('the home palette opens from its sidebar row and from ⌘K, and opens a run
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(`/?token=home#open=${PROJECT_ID}/${FINISHED_RUN}`);
 });
+
+const SECRET = 'sk-e2e-0123456789';
+
+test('a key is sent once in a PUT body and never shown back', async ({page}) => {
+  const home = await mockHome(page);
+  await page.goto(NEW);
+  await page.getByRole('combobox', {name: 'Provider'}).selectOption('codex');
+  const footer = page.locator('.sheetfoot');
+  await footer.getByRole('button', {name: 'Codex CLI key is needed'}).click();
+  const key = page.getByLabel('Codex CLI key');
+  await expect(key).toBeFocused();
+  await key.fill(SECRET);
+  await key.press('Enter');
+  await expect(page.getByText('Saved to .env. Unverified until the first run.')).toBeVisible();
+  await expect(key).toHaveValue('');
+  await expect(footer).not.toContainText('key is needed');
+  expect(home.requests.filter(request => JSON.stringify(request).includes(SECRET))).toEqual([
+    {method: 'PUT', path: '/api/auth/codex', body: {name: 'OPENAI_API_KEY', value: SECRET}},
+  ]);
+  expect(await page.content()).not.toContain(SECRET);
+  const stored = await page.evaluate(
+    () => JSON.stringify({...localStorage}) + JSON.stringify({...sessionStorage}) + document.cookie,
+  );
+  expect(stored).not.toContain(SECRET);
+});
+
+test('a rejected key keeps the field and says why', async ({page}) => {
+  await mockHome(page, {rejectKey: true});
+  await page.goto(NEW);
+  await page.getByRole('combobox', {name: 'Provider'}).selectOption('codex');
+  const key = page.getByLabel('Codex CLI key');
+  await key.fill('sk-"bad');
+  await page.getByRole('button', {name: 'Save', exact: true}).click();
+  await expect(
+    page.getByRole('alert').filter({hasText: 'Rejected: The key has a quote'}),
+  ).toBeVisible();
+  await expect(key).toHaveValue('sk-"bad');
+  await expect(page.locator('.sheetfoot')).toContainText('Codex CLI key is needed');
+});
+
+test('a provider change drops a typed key; a CLI-only provider shows its sign-in', async ({
+  page,
+}) => {
+  await mockHome(page);
+  await page.goto(NEW);
+  const provider = page.getByRole('combobox', {name: 'Provider'});
+  await provider.selectOption('codex');
+  await page.getByLabel('Codex CLI key').fill(SECRET);
+  await provider.selectOption('opencode');
+  await expect(page.locator('code#f-key')).toHaveText('opencode auth login');
+  await expect(page.locator('.sheetfoot')).toContainText('Sign in to OpenCode from a terminal');
+  await provider.selectOption('codex');
+  await expect(page.getByLabel('Codex CLI key')).toHaveValue('');
+});

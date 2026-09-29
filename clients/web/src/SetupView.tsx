@@ -17,6 +17,8 @@ import {
   fieldId,
   folderStatus,
   initialForm,
+  type KeyWrite,
+  keyView,
   NEW_TASK,
   type RoleChoice,
   type SetupForm,
@@ -26,6 +28,7 @@ import {
   withTask,
   withTasks,
 } from './setup.js';
+import {KeyRow} from './ui/KeyRow.js';
 import {
   Advanced,
   BudgetRow,
@@ -212,6 +215,50 @@ function Titlebar() {
   );
 }
 
+interface ProviderKeyProps {
+  client: HomeClient;
+  auth: AuthStatus;
+  provider: string;
+  refreshAuth: () => void;
+}
+
+/**
+ * The key typed for one provider. Mounted with `key={provider}`, so a provider change unmounts it
+ * and the typed value goes with it; a successful write clears the value before anything else renders.
+ */
+function ProviderKey({client, auth, provider, refreshAuth}: ProviderKeyProps) {
+  const [value, setValue] = useState('');
+  const [write, setWrite] = useState<KeyWrite>({kind: 'idle'});
+  const row = auth.providers.find(item => item.provider === provider);
+  if (row === undefined) return null;
+  const name = row.keys[0]?.name;
+  const save = () => {
+    if (name === undefined || value === '') return;
+    setWrite({kind: 'saving'});
+    client.saveKey(provider, name, value).then(
+      result => {
+        setValue('');
+        setWrite({kind: 'saved', shadowed: result.shadowed_by_env});
+        refreshAuth();
+      },
+      (reason: unknown) => setWrite({kind: 'rejected', message: errorText(reason)}),
+    );
+  };
+  return (
+    <KeyRow
+      view={keyView(row, write, auth.dotenv_path)}
+      value={value}
+      saving={write.kind === 'saving'}
+      onValue={next => {
+        setValue(next);
+        if (write.kind !== 'idle' && write.kind !== 'saving') setWrite({kind: 'idle'});
+      }}
+      onSave={save}
+      onRecheck={refreshAuth}
+    />
+  );
+}
+
 interface NewRunProps {
   client: HomeClient;
   token: string;
@@ -219,7 +266,7 @@ interface NewRunProps {
   refreshAuth: () => void;
 }
 
-function NewRun({client, token, data}: NewRunProps) {
+function NewRun({client, token, data, refreshAuth}: NewRunProps) {
   const {catalog, auth, recent} = data;
   const [form, setForm] = useState(() => initialForm(catalog, auth, recent[0] ?? ''));
   const act = formActions(setForm, catalog);
@@ -287,6 +334,13 @@ function NewRun({client, token, data}: NewRunProps) {
           >
             <Roles roles={loop?.roles ?? []} form={form} effort={effort} onRole={act.role} />
           </ModelRow>
+          <ProviderKey
+            key={form.provider}
+            client={client}
+            auth={auth}
+            provider={form.provider}
+            refreshAuth={refreshAuth}
+          />
           <Advanced
             catalog={catalog}
             form={form}

@@ -1,0 +1,61 @@
+/** The selected provider's key: write-only. A typed key lives in this field until it is saved. */
+import type {KeyView} from '../setup.js';
+import {Hint, Row} from './Setup.js';
+
+export interface KeyRowProps {
+  view: KeyView;
+  value: string;
+  saving: boolean;
+  onValue: (value: string) => void;
+  onSave: () => void;
+  /** Reads key status again (after a terminal sign-in). */
+  onRecheck: () => void;
+}
+
+export function KeyRow({view, value, saving, onValue, onSave, onRecheck}: KeyRowProps) {
+  if (view.name === null) {
+    return (
+      <Row label={view.label} htmlFor={null}>
+        <Hint tone={view.tone}>
+          {view.hint}
+          {view.login === null ? null : (
+            <>
+              <code id="f-key" className="mono" tabIndex={-1}>
+                {view.login}
+              </code>
+              <button type="button" className="linkbtn" onClick={onRecheck}>
+                Check again
+              </button>
+            </>
+          )}
+        </Hint>
+      </Row>
+    );
+  }
+  return (
+    <Row label={view.label} htmlFor="f-key">
+      <div className={view.tone === 'bad' ? 'fld keyfld bad' : 'fld keyfld'} title={view.where}>
+        <input
+          id="f-key"
+          type="password"
+          autoComplete="new-password"
+          spellCheck={false}
+          placeholder={view.placeholder}
+          value={value}
+          disabled={saving}
+          onChange={event => onValue(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && value !== '') onSave();
+          }}
+        />
+        {saving ? <span className="spin" aria-hidden /> : null}
+        {!saving && value !== '' ? (
+          <button type="button" className="linkbtn" onClick={onSave}>
+            Save
+          </button>
+        ) : null}
+      </div>
+      <Hint tone={view.tone}>{view.hint}</Hint>
+    </Row>
+  );
+}
