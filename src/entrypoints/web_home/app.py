@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast, override
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from entrypoints.web_home.context import HomeConfig, Request
+from entrypoints.web_home.context import HomeConfig, Request, atomic_write
 from entrypoints.web_home.contract import ApiError, ErrorBody, ErrorCode
 from server.runtime import WebInstanceClaim, WebInstanceRecord
 from vibesys.api import DOTENV_PATH
@@ -58,6 +58,7 @@ class HomeServer(ThreadingHTTPServer):
     """A loopback HTTP server bound to one ``HomeConfig``."""
 
     daemon_threads = True
+    allow_reuse_address = False
 
     def __init__(self, config: HomeConfig) -> None:
         """Bind 127.0.0.1 on ``config.port`` (0 picks a free port and updates the config)."""
@@ -93,6 +94,13 @@ class _Handler(BaseHTTPRequestHandler):
         # The raw request line carries the query (a capability token, possibly
         # percent-encoded), so only the method, the path, and the fixed format are logged.
         _LOG.info("%s %s: %s", self._command(), self._path(), format)
+
+    @override
+    def end_headers(self) -> None:
+        # Every response, including send_error's, must carry the security headers.
+        for name, value in _SECURITY_HEADERS:
+            self.send_header(name, value)
+        super().end_headers()
 
     def _command(self) -> str:
         return getattr(self, "command", None) or "-"
@@ -195,8 +203,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        for name, value in _SECURITY_HEADERS:
-            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -216,8 +222,7 @@ def saved_port(web_dir: Path) -> int:
 
 def save_port(web_dir: Path, port: int) -> None:
     """Persist *port* as the default; call only after it bound."""
-    web_dir.mkdir(parents=True, exist_ok=True)
-    _settings_path(web_dir).write_text(json.dumps({"port": port}) + "\n", encoding="utf-8")
+    atomic_write(_settings_path(web_dir), (json.dumps({"port": port}) + "\n").encode(), mode=0o600)
 
 
 def _announce(url: str, *, open_browser: bool) -> None:
