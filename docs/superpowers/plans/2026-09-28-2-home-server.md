@@ -215,7 +215,8 @@ type Gateway = {
   stderr_tail: string[]; stderr_log: string | null;  // set for "failed": clickable diagnostic file
   origin_mismatch: boolean;                          // gateway was launched for another home origin
 };
-type RunRow = { run_id: string; loop: string | null; status: "unknown" | "active" | "completed" | "failed"; rounds: number; gateway: Gateway; reopen: Gateway | null; error: string | null };
+type RunRow = { run_id: string; loop: string | null; status: "unknown" | "active" | "completed" | "failed"; rounds: number; gateway: Gateway; reopen: Gateway | null; error: string | null;
+  task: string | null; objective: string | null /* the record's effective objective */; created_at: string | null /* ISO 8601, from the manifest */ };  // the three are null for launches not yet in the run store
 type RunList = { runs: RunRow[] };  // launches not yet in the run store first, then the store newest first
 ```
 Gateway states come from the gateway record plus the latest attempt in the run's `run-events.jsonl` (an attempt begins at the last `server_started`; a resume appends a new one, so an earlier attempt's terminal event never counts):
@@ -252,7 +253,7 @@ Returns once the run server's discovery record exists (gateway ready); poll `GET
 ```ts
 type NoteResponse = { note: { runId: string; text: string; createdAt: string; updatedAt: string } | null };  // TUI NoteRecord, camelCase
 ```
-Last write wins; `createdAt` is kept across writes. Errors: `invalid_request` (empty or over 256 characters run id).
+Last write wins; `createdAt` is kept across writes. Errors: `invalid_request` (empty run id, or over 200 characters once sanitized, a non-BMP character counting twice).
 
 ---
 
@@ -3824,6 +3825,9 @@ class RunRow(_Model):
     gateway: Gateway
     reopen: Gateway | None = None
     error: str | None = None
+    task: str | None = None
+    objective: str | None = None
+    created_at: str | None = None
 
 
 class RunList(_Model):
@@ -4642,6 +4646,9 @@ def test_run_list_shows_a_serving_reopen_beside_the_run(runs_home: Home) -> None
         "none",
         "reopened",
     )
+    # The setup UI titles sidebar rows from these (plan 4); a stored run always has a manifest time.
+    assert row["created_at"] is not None
+    assert {"task", "objective"} <= row.keys()
 
 
 def test_a_reopen_serving_an_old_home_origin_is_restarted(runs_home: Home) -> None:
@@ -4703,7 +4710,7 @@ Expected: the new tests FAIL with `not_found`.
 
 - [ ] **Step 3: Implement**
 
-In `runs.py`, add `RunList` and `RunRow` to the contract import, change the core import to `from vibesys.api import Config, RunRecordReadError, RunStatus, open_run_store`, add `from vibesys.api import RunStore` under `TYPE_CHECKING`, add the constants
+In `runs.py`, add `RunList` and `RunRow` to the contract import, change the core import to `from vibesys.api import Config, RunRecordReadError, RunStatus, open_run_store`, add `from vibesys.api import RunStore` under `TYPE_CHECKING` (beside Task 13's `OrchestrationRunManifest`), add the constants
 
 ```python
 _HISTORY_TAIL_BYTES = 262_144
@@ -4873,13 +4880,20 @@ def _status(root: Path, run_id: str, gateway: Gateway) -> RunStatus:
 
 
 def _row(
-    config: HomeConfig, root: Path, store: RunStore, run_id: str, published: list[_Published]
+    config: HomeConfig,
+    root: Path,
+    store: RunStore,
+    manifest: OrchestrationRunManifest,
+    published: list[_Published],
 ) -> RunRow:
+    run_id = manifest.run_id
     gateway = _gateway(config, root, run_id, published)
     reopen = _reopen_gateway(config, root, run_id)
     status = _status(root, run_id, gateway)
+    identity = {"task": manifest.task_name, "created_at": manifest.created_at.isoformat()}
     try:
         view = store.get_run(run_id)
+        objective = store.get_record(run_id).facts().effective_objective
     except (RunRecordReadError, ProjectError, ValueError) as error:
         return RunRow(
             run_id=run_id,
@@ -4889,6 +4903,7 @@ def _row(
             gateway=gateway,
             reopen=reopen,
             error=str(error),
+            **identity,
         )
     return RunRow(
         run_id=run_id,
@@ -4897,6 +4912,8 @@ def _row(
         rounds=len(view.rounds),
         gateway=gateway,
         reopen=reopen,
+        objective=objective,
+        **identity,
     )
 
 
@@ -4912,13 +4929,15 @@ def list_runs(request: Request) -> RunList:
         manifests = []
     store = open_run_store(project)
     rows = [
-        _row(config, root, store, manifest.run_id, published) for manifest in reversed(manifests)
+        _row(config, root, store, manifest, published) for manifest in reversed(manifests)
     ]
     known = {row.run_id for row in rows}
     launch = config.launches.get(_live_record(config, root))
     candidates = [item.run_id for item in published] + ([launch.run_id] if launch else [])
     pending = [run_id for run_id in dict.fromkeys(candidates) if run_id and run_id not in known]
     gateways = [(run_id, _gateway(config, root, run_id, published)) for run_id in pending]
+    # Launches not yet in the run store have no manifest or record, so task, objective
+    # and created_at stay None.
     starting = [
         RunRow(
             run_id=run_id,
@@ -5210,7 +5229,7 @@ Expected: `ready`; a `LaunchResult` whose `websocket_url` accepts a WebSocket wi
 11. **Editability.** Beyond the spec's round-trip rule, the form edits only `command` argv tasks with `[benchmark.result]`; protocol, entrypoint, and metric-less tasks are read-only. Edits apply onto the existing manifest, keeping timeouts and other sections.
 12. **Key allowlist.** Profile `auth_env_vars` ending in `_API_KEY` or `_AUTH_TOKEN` (so `OPENAI_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS` are not writable). Values are written single-quoted, and `'`, `"`, `\` and `$` are rejected: python-dotenv interpolates `${VAR}` even inside single quotes, so only a `$`-free value round-trips through `dotenv_values`/`load_dotenv` unchanged (the Hypothesis test checks the round trip). An inherited variable, even empty, shadows `.env`, so shadowing is reported by membership.
 13. **CLI session.** `present`/`absent`/`unknown`, never verified: the profile's primary credential file (`auth_files[0]`, relocated through `state_root_env`), else for Claude the macOS keychain item `Claude Code-credentials` checked with `security find-generic-password -s` (no `-w`, 2 s timeout; exit 44 is absent, other failures unknown).
-14. **Run config.** A run-owned `<run>.agent.toml` beside the gateway record, validated as `Config` before launch. Resume passes no config: the CLI restores the recorded settings. `--exp-name` is generated up front so the run id is known before the gateway exists.
+14. **Run config.** A run-owned `<run>.agent.toml` beside the gateway record, validated as `Config` before launch. Resume passes no config: the CLI restores the recorded settings. `--run-id` is generated up front with `generate_run_id` (beside a readable `--exp-name`), so the id the reply returns is the id the run store records, known before the gateway exists.
 15. **Stop.** SIGTERMs the home-launched live gateway, else the external one, as `web stop` does; it returns without waiting.
 16. **Notes sanitization.** Matches the TUI per UTF-16 code unit (a non-BMP character becomes two underscores).
 17. **Default compute backend.** Reported by the catalog (`metal` on Apple silicon, else `cuda`/`rocm` if their CLI exists, else `cpu`), so the setup UI does not guess.

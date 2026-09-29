@@ -75,6 +75,16 @@ class Project:
         """Select a task explicitly, or implicitly when exactly one exists."""
         return self._layout.select_task(task_name)
 
+    def create_task(
+        self, task_name: TaskName | str, *, objective: str, manifest: str
+    ) -> TaskDirectory:
+        """Create a task under the tasks root, creating the root on first use.
+
+        Raises ``TaskExistsError`` when the name is taken and
+        ``InvalidTaskNameError`` when it is not a valid task name.
+        """
+        return self._layout.create_task(task_name, objective=objective, manifest=manifest)
+
     @classmethod
     def is_state_initialized(cls, path: Path | str) -> bool:
         """Return whether a directory contains initialized generated state."""

@@ -55,6 +55,7 @@ class RunRequest(BaseModel):
     objective: str | None = None
     resume: ResumeRef | None = None
     exp_name: str | None = None
+    run_id: str | None = None
     runs_dir: Path | None = None
     profiler_kind: ProfilerKind = ProfilerKind.AUTO
     skills_dirs: list[str] | None = None

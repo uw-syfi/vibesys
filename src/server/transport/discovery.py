@@ -49,6 +49,11 @@ class WebInstanceRecord:
         return None
 
     @classmethod
+    def read(cls, path: Path) -> WebInstanceRecord | None:
+        """Return the published record without probing it."""
+        return _read_record(path)
+
+    @classmethod
     def from_gateway(  # noqa: PLR0913  # lint-waiver: LW-101105 [PLR0913]; the factory takes one keyword per persisted discovery fact
         # > A parameter object was rejected: it would duplicate WebInstanceRecord's own
         # > fields, and the record itself cannot be built before the URL is derived.

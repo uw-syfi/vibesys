@@ -29,6 +29,35 @@ declarations nor a container install recipe for, so it is not offered here.
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
 
+OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
+"""The opencode model VibeSys offers first (a deployment default, not the library's)."""
+
+SUGGESTED_MODELS: dict[str, tuple[str, ...]] = {
+    "codex": ("gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"),
+    "claude": (
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+    ),
+    "gemini": (),
+    "opencode": (OPENCODE_DEFAULT_MODEL,),
+}
+"""A short model suggestion list per shipped provider, not a registry.
+
+The model a run uses is whatever the provider's CLI accepts; clients keep
+free-text entry for anything not named here. The codex and claude slugs mirror
+the release-curated alias catalogs those CLIs ship (``omnigent.model_fallbacks``),
+duplicated because ``omnigent`` is an optional extra. Gemini ships no curated
+list, so it offers free-text entry alone.
+"""
+
+LOGIN_COMMANDS: dict[str, str] = {"codex": "codex login", "opencode": "opencode auth login"}
+"""The sign-in command a setup UI shows per provider; others sign in by running the binary."""
+
+KEYCHAIN_SERVICES: dict[str, str] = {"claude": "Claude Code-credentials"}
+"""macOS keychain items holding a provider's login instead of a credentials file."""
+
 CODEX_PROVIDER = "codex"
 """The provider name naming Codex itself, for call sites that need the name
 (to look up its ``agentshim`` profile, say) rather than a yes/no answer to

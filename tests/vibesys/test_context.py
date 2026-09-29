@@ -76,6 +76,7 @@ class _CreateContextOptions(TypedDict, total=False):
     evaluator: Path | None
     evaluator_package_root: Path | None
     exp_name: str
+    run_id: str | None
     existing: bool
     configuration: AgentOrchestrationOptions | None
     config: Config | None
@@ -193,6 +194,7 @@ def _create_context(
         input_bundle=bundle,
         objective=options.get("objective", "Make the queue faster.\n"),
         exp_name=exp_name,
+        run_id=options.get("run_id"),
         resume=ResumeRef(run_id=exp_name) if options.get("existing", False) else None,
         runs_dir=options.get("runs_dir"),
         profiler_kind=options.get("profiler_kind", ProfilerKind.NONE),
@@ -288,6 +290,27 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
     assert manifest.branch == f"vibesys-runs/{run_id}"
     assert _git(project, "branch", "--show-current") == manifest.branch
     assert _git(project, "status", "--porcelain") == ""
+
+
+def test_fresh_run_uses_the_supplied_run_id(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    run_id = "20260929-122922-452d39b1-queue"
+    with _create_context(project, evaluator=evaluator, run_id=run_id) as ctx:
+        assert ctx.project_resources.state.run_id == run_id
+    assert Project.open(project).state.load_run(run_id).display_name == "queue"
+
+
+def test_fresh_run_rejects_a_malformed_supplied_run_id(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    runs_dir = tmp_path / "runs"
+    with (
+        pytest.raises(ConfigurationError, match="invalid run id"),
+        _create_context(project, evaluator=evaluator, run_id="../escape", runs_dir=runs_dir),
+    ):
+        pass
+    assert not runs_dir.exists()
 
 
 def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_only(

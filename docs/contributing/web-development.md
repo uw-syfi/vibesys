@@ -37,8 +37,11 @@ server. Append `?gateway=<capability URL>` to connect the page to a live gateway
 
 ## Live demo mode
 
-The demo serves the repository's deterministic recorded run through the real
-HTTP and WebSocket gateway:
+The demo reopens the repository's recorded run through the real HTTP and
+WebSocket gateway. The bundle is the event journal
+`clients/web/src/fixtures/demo-run.jsonl` plus the recorded project
+`clients/web/src/fixtures/demo-project`, so experiment and performance queries
+return the recorded data:
 
 ```bash
 uv run python -m entrypoints.web live --demo --open
@@ -108,3 +111,13 @@ passed as an SSH argument.
 The remote project record is project-local and can be reused by a second launch
 without creating another gateway. Stop the remote gateway from the remote host
 with the `stop` command, or send `SIGTERM` to the recorded PID.
+
+## Home server
+
+`uv run python -m entrypoints.web home` serves the desktop app and its setup API on
+`127.0.0.1:8764` and prints `VibeSys home: <capability URL>`. Pass `--port` once to change
+the saved port, `--root DIR` (repeatable) to limit the folder picker (default: your home
+directory), and `--dev-origin http://127.0.0.1:5173` when the Vite dev server proxies `/api`.
+The API contract is `src/entrypoints/web_home/contract.py`; print its JSON Schema with
+`uv run python -m entrypoints.web_home.contract`. Keys saved from the app go to the
+checkout's `.env` (mode 0600); the server never loads that file into its own environment.

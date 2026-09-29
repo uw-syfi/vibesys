@@ -24,6 +24,7 @@ from vibesys.inputs._manifest import (
     load_input_bundle,
     load_project_task,
     render_input_manifest,
+    toml_string,
 )
 from vibesys.inputs._synthesis import (
     EVALUATOR_SRC_DIRNAME,
@@ -55,4 +56,5 @@ __all__ = [
     "load_project_task",
     "render_input_manifest",
     "synthesize_input_bundle",
+    "toml_string",
 ]

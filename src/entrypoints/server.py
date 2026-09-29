@@ -144,8 +144,10 @@ def _run_id_from_argv(argv: list[str]) -> str | None:
         argument == "--web-reopen-run" or argument.startswith("--web-reopen-run=")
         for argument in argv
     ):
-        raise ValueError(  # noqa: TRY003  # lint-waiver: LW-232915 [TRY003]; report an empty or valueless reopen flag as a user-facing configuration error
-            "--web-reopen-run requires a non-empty run ID"
+        cli.configuration_error(
+            "--web-reopen-run requires a non-empty run ID",
+            code="invalid_arguments",
+            stage="argument_parsing",
         )
     return None
 
@@ -392,9 +394,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
                 read_only_record.run_id if read_only_record is not None else None,
             )
             if (existing.mode, existing.run_id) != requested:
+                run_suffix = "" if existing.run_id is None else f" for run {existing.run_id}"
                 cli.configuration_error(
-                    f"{instance_path} is held by a {existing.mode} gateway for run "
-                    f"{existing.run_id}",
+                    f"{instance_path} is held by a {existing.mode} gateway{run_suffix}",
                     code="invalid_arguments",
                     stage="argument_parsing",
                 )

@@ -26,11 +26,14 @@ from vibesys.composition import resolve_agent_driver
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
+    InputManifest,
     InputSynthesisError,
     SynthesizedInputSpec,
     load_input_bundle,
     load_project_task,
+    render_input_manifest,
     synthesize_input_bundle,
+    toml_string,
 )
 from vibesys.repository import (
     REPOSITORY_SLUG,
@@ -78,6 +81,7 @@ def with_operator_constraints(objective: str, constraints: list[str]) -> str:
 __all__ = [
     "REPOSITORY_SLUG",
     "InputBundle",
+    "InputManifest",
     "InputSynthesisError",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
@@ -89,12 +93,15 @@ __all__ = [
     "load_objective",
     "load_project_task",
     "make_run_environment_spec",
+    "orchestration_roles",
+    "render_input_manifest",
     "repository_name_from_experiment",
     "resolve_agent_driver",
     "resolve_skill_source_dirs",
     "run_environment_record",
     "supported_profilers",
     "synthesize_input_bundle",
+    "toml_string",
     "validate_descriptor",
     "validate_experiment_name",
     "with_operator_constraints",
@@ -108,6 +115,17 @@ def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
 
     registration = built_in_orchestrations().resolve(descriptor.id)
     registration.parse_options(descriptor)
+
+
+def orchestration_roles(orchestration_id: str) -> tuple[str, ...]:
+    """Return the agent role IDs a built-in orchestration declares, in order."""
+    # lint-waiver: LW-101320 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
+    # > Module scope would import every policy whenever the request facade loads;
+    # > a shared cached loader adds indirection for two call sites.
+    from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
+
+    plugin = built_in_orchestrations().resolve(orchestration_id).plugin
+    return tuple(str(role.id) for role in plugin.agents)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

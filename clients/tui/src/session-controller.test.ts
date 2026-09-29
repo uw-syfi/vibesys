@@ -979,6 +979,26 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.selectedId).toBe('H-01');
   });
 
+  it('settles a log left pending when the ended snapshot lands after an early not-ready answer', async () => {
+    // A run that ended before its project attached never emits `experiments_changed`,
+    // so nothing settles the log unless boot re-asks once both boot answers are in.
+    // `query.experiments` answers not-ready while the snapshot (not yet applied) still
+    // looks unended, then the delayed snapshot reports the run already ended.
+    const transport = new FakeTransport();
+    transport.experimentsReady = false;
+    transport.snapshotStatus = 'completed';
+    transport.delaySnapshot = true;
+    const controller = new SocketSessionController(transport);
+
+    expect(controller.state.experimentLog?.pending).toBe(true);
+    await controller.start();
+
+    expect(controller.state.experimentLog?.pending).toBe(false);
+    expect(transport.requests.filter(request => request.type === 'query.experiments')).toHaveLength(
+      2,
+    );
+  });
+
   it('loads the design log with the experiments so the drill-down can annotate rounds', async () => {
     const transport = new FakeTransport();
     transport.design = [{round: 1, files: [{path: 'src/ring.rs', change: 'added'}]}];
@@ -2648,6 +2668,10 @@ class FakeTransport implements ServerTransport {
   /** Mutable so a test can change what a refetch returns mid-run. */
   experiments: NonNullable<ProtocolResponse['experiments']> = [];
   experimentsReady = true;
+  /** The snapshot's run status; a test sets this to an ended status to race boot. */
+  snapshotStatus: NonNullable<ProtocolResponse['snapshot']>['status'] = 'running';
+  /** Delays the snapshot response one extra microtask so it lands after `query.experiments`. */
+  delaySnapshot = false;
   design: NonNullable<ProtocolResponse['design']> = [];
   designReady = true;
   /** Patch text `query.design_patch` echoes back; null omits the field. */
@@ -2672,7 +2696,7 @@ class FakeTransport implements ServerTransport {
     if (input.type === 'query.design_patch' && this.designPatchError) {
       return Promise.reject(this.designPatchError);
     }
-    return Promise.resolve({
+    const response: ProtocolResponse = {
       protocol_version: 1,
       request_id: 'request',
       timestamp: '2026-01-01T00:00:00Z',
@@ -2705,8 +2729,13 @@ class FakeTransport implements ServerTransport {
             },
           }
         : {}),
-      snapshot: {run_id: 'run', status: 'running', sequence: 12},
-    });
+      snapshot: {run_id: 'run', status: this.snapshotStatus, sequence: 12},
+    };
+    // An extra microtask hop, so a test can make `query.experiments` land first
+    // even though both requests are issued in the same boot barrier.
+    return input.type === 'query.snapshot' && this.delaySnapshot
+      ? Promise.resolve().then(() => response)
+      : Promise.resolve(response);
   }
 
   subscribe(

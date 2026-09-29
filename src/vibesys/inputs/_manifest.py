@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import tomllib
 from pathlib import Path
@@ -369,12 +370,20 @@ class InputManifest(BaseModel):
         return self
 
 
-def _toml_string(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False)
+_TOML_FORBIDDEN_CONTROL = re.compile(r"[\x7f-\x9f]")
+
+
+def toml_string(value: str) -> str:
+    """Return *value* as a TOML basic string, escaping every control character."""
+    # json.dumps(ensure_ascii=False) escapes every C0 control (U+0000-U+001F) but
+    # leaves U+007F (DEL) and the C1 controls (U+0080-U+009F) as literal characters;
+    # TOML basic strings forbid all of these unescaped.
+    encoded = json.dumps(value, ensure_ascii=False)
+    return _TOML_FORBIDDEN_CONTROL.sub(lambda match: f"\\u{ord(match.group()):04x}", encoded)
 
 
 def _toml_array(values: tuple[str, ...]) -> str:
-    return "[" + ", ".join(_toml_string(value) for value in values) + "]"
+    return "[" + ", ".join(toml_string(value) for value in values) + "]"
 
 
 def render_input_manifest(manifest: InputManifest) -> str:
@@ -383,7 +392,7 @@ def render_input_manifest(manifest: InputManifest) -> str:
         f"version = {manifest.version}",
         "",
         "[agent]",
-        f"domain = {_toml_string(manifest.agent.domain.value)}",
+        f"domain = {toml_string(manifest.agent.domain.value)}",
     ]
     _append_profile_guided(lines, manifest)
     _append_accuracy(lines, manifest)
@@ -420,7 +429,7 @@ def _append_accuracy(lines: list[str], manifest: InputManifest) -> None:
         )
         lines.extend(
             [
-                f"entrypoint = {_toml_string(accuracy_entrypoint)}",
+                f"entrypoint = {toml_string(accuracy_entrypoint)}",
                 f"args = {_toml_array(manifest.accuracy.args)}",
             ]
         )
@@ -434,7 +443,7 @@ def _append_environment_and_resources(lines: list[str], manifest: InputManifest)
             [
                 "",
                 "[environment.modal]",
-                f"entrypoint = {_toml_string(manifest.environment.modal.entrypoint)}",
+                f"entrypoint = {toml_string(manifest.environment.modal.entrypoint)}",
             ]
         )
 
@@ -445,7 +454,7 @@ def _append_environment_and_resources(lines: list[str], manifest: InputManifest)
                 "[resources]",
                 f"nodes = {manifest.resources.nodes}",
                 f"accelerators_per_node = {manifest.resources.accelerators_per_node}",
-                (f"accelerator_backend = {_toml_string(manifest.resources.accelerator_backend)}"),
+                (f"accelerator_backend = {toml_string(manifest.resources.accelerator_backend)}"),
             ]
         )
         if manifest.resources.cpus_per_node is not None:
@@ -468,7 +477,7 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
         )
         lines.extend(
             [
-                f"entrypoint = {_toml_string(benchmark_entrypoint)}",
+                f"entrypoint = {toml_string(benchmark_entrypoint)}",
                 f"args = {_toml_array(manifest.benchmark.args)}",
             ]
         )
@@ -479,8 +488,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
             [
                 "",
                 "[benchmark.result]",
-                f"json_argument = {_toml_string(manifest.benchmark.result.json_argument)}",
-                f"metric = {_toml_string(manifest.benchmark.result.metric)}",
+                f"json_argument = {toml_string(manifest.benchmark.result.json_argument)}",
+                f"metric = {toml_string(manifest.benchmark.result.metric)}",
             ]
         )
 
@@ -492,10 +501,10 @@ def _append_workspace_sources(lines: list[str], manifest: InputManifest) -> None
                 [
                     "",
                     "[[workspace.sources]]",
-                    f"name = {_toml_string(source.name)}",
-                    f"repo = {_toml_string(source.repo)}",
-                    f"commit = {_toml_string(source.commit)}",
-                    f"dest = {_toml_string(source.dest)}",
+                    f"name = {toml_string(source.name)}",
+                    f"repo = {toml_string(source.repo)}",
+                    f"commit = {toml_string(source.commit)}",
+                    f"dest = {toml_string(source.dest)}",
                     f"strip_git = {str(source.strip_git).lower()}",
                 ]
             )
@@ -507,7 +516,7 @@ def _append_evaluator(lines: list[str], manifest: InputManifest) -> None:
             [
                 "",
                 "[evaluator]",
-                f"source = {_toml_string(manifest.evaluator.source)}",
+                f"source = {toml_string(manifest.evaluator.source)}",
             ]
         )
     elif manifest.evaluator is not None:
@@ -520,8 +529,8 @@ def _append_evaluator(lines: list[str], manifest: InputManifest) -> None:
             [
                 "",
                 "[evaluator]",
-                f"name = {_toml_string(evaluator_name)}",
-                f"version = {_toml_string(evaluator_version)}",
+                f"name = {toml_string(evaluator_name)}",
+                f"version = {toml_string(evaluator_version)}",
             ]
         )
 

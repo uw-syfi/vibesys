@@ -340,6 +340,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             objective=objective,
             resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
             exp_name=args.exp_name,
+            run_id=getattr(args, "run_id", None),
             runs_dir=args.runs_dir,
             profiler_kind=args.profiler,
             skills_dirs=skills,

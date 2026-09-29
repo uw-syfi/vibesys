@@ -791,6 +791,17 @@ def generate_run_id(
     return f"{timestamp:%Y%m%d-%H%M%S}-{suffix}-{slug}"
 
 
+_GENERATED_RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{8}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
+
+
+def validate_run_id(run_id: str) -> str:
+    """Return *run_id* if it has the shape ``generate_run_id`` produces, else raise ``ValueError``."""
+    if _GENERATED_RUN_ID.fullmatch(run_id) is None:
+        message = f"invalid run id {run_id!r}: expected YYYYMMDD-HHMMSS-<8 hex>-<slug>"
+        raise ValueError(message)
+    return run_id
+
+
 class ProjectState:
     """Internal persistence implementation exposed through ``Project.state``."""
 
@@ -858,15 +869,6 @@ class ProjectState:
         return cls._log_directory_path(project_root, run_id, state_home)
 
     @classmethod
-    def log_directory_path_for(cls, project_root: Path | str, run_id: str) -> Path:
-        """Return a run log destination without preparing machine-local storage.
-
-        For read-only lookups (a reopen): callers that need to write should use
-        `log_directory_for`, which prepares the state home before returning.
-        """
-        return cls._log_directory_path(project_root, run_id, _state_home())
-
-    @classmethod
     def _log_directory_path(cls, project_root: Path | str, run_id: str, state_home: Path) -> Path:
         root = Path(project_root).expanduser().resolve()
         if root.exists() and not root.is_dir():
@@ -898,7 +900,7 @@ class ProjectState:
     def log_directory_path(self, run_id: str) -> Path:
         """Return the machine-local log directory for one run without preparing storage."""
         self._validate_storage_roots()
-        return self.log_directory_path_for(self.project_root, run_id)
+        return self._log_directory_path(self.project_root, run_id, _state_home())
 
     def model_cache_directory(self, name: str) -> Path:
         """Return a named machine-local model cache directory."""
@@ -1290,6 +1292,14 @@ def _project_id(display_name: str, fingerprint: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "project"
     slug = slug[:64].rstrip("-") or "project"
     return f"{slug}-{fingerprint[:12]}"
+
+
+def state_home() -> Path:
+    """Return the machine-local VibeSys state root.
+
+    ``$VIBESYS_STATE_HOME`` when set (it must be absolute), else ``~/.vibesys``.
+    """
+    return _state_home()
 
 
 def _state_home() -> Path:

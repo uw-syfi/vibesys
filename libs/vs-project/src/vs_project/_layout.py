@@ -11,6 +11,7 @@ contents remain outside this package.
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -139,6 +140,15 @@ class InvalidTaskDefinitionError(ProjectLayoutError):
     def optional_path_not_file(cls, task_name: TaskName, path: Path) -> Self:
         """Describe an optional task path that is not a regular file."""
         return cls(f"VibeSys task {task_name.value!r} optional path is not a file: {path}")
+
+
+class TaskExistsError(ProjectLayoutError):
+    """Raised when a new task would replace an existing task directory."""
+
+    @classmethod
+    def existing(cls, task_name: TaskName) -> Self:
+        """Describe a task name that is already taken."""
+        return cls(f"VibeSys task {task_name.value!r} already exists")
 
 
 class TaskNotFoundError(ProjectLayoutError):
@@ -338,6 +348,30 @@ class ProjectLayout:
             if task.name == selected_name:
                 return task
         raise TaskNotFoundError(selected_name.value, available)
+
+    def create_task(
+        self, task_name: TaskName | str, *, objective: str, manifest: str
+    ) -> TaskDirectory:
+        """Create one task directory with its objective and manifest files."""
+        name = TaskName(task_name) if isinstance(task_name, str) else task_name
+        configuration_path = self._configuration_path()
+        if configuration_path.is_symlink():
+            description = "VibeSys configuration root"
+            raise UnsafeProjectPathError.symlink(description, configuration_path)
+        (configuration_path / _TASKS_DIRECTORY_NAME).mkdir(parents=True, exist_ok=True)
+        tasks_root = self.tasks_root()
+        lexical_path = tasks_root.path / name.value
+        try:
+            lexical_path.mkdir()
+        except FileExistsError as exc:
+            raise TaskExistsError.existing(name) from exc
+        try:
+            (lexical_path / _OBJECTIVE_FILE_NAME).write_text(objective, encoding="utf-8")
+            (lexical_path / _MANIFEST_FILE_NAME).write_text(manifest, encoding="utf-8")
+        except OSError:
+            shutil.rmtree(lexical_path)
+            raise
+        return self._load_task(tasks_root, name, lexical_path)
 
     def _load_task(
         self,

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
+from entrypoints.web_home.app import run_home
 from server.runtime import WebInstanceRecord
 from vs_project.api import Project
 
@@ -25,6 +26,8 @@ _DEV_PORT = 5173
 _MAX_PORT = 65_535
 _RECORD_WAIT_SECONDS = 10.0
 _DEMO_LOG = Path("clients/web/src/fixtures/demo-run.jsonl")
+_DEMO_PROJECT = Path("clients/web/src/fixtures/demo-project")
+_DEMO_RUN_ID = "20260925-140000-8f21c3a0-web-live"
 
 
 def _repository_root() -> Path:
@@ -74,6 +77,26 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--url", required=True, help="capability URL printed by `vibesys web live`")
     tunnel.add_argument("--local-port", type=_port, default=None)
     tunnel.add_argument("--browser-origin", default="http://127.0.0.1:5173")
+
+    home = commands.add_parser("home", help="serve the desktop app and its setup API")
+    home.add_argument(
+        "--port", type=_port, default=None, help="listen port, saved as the new default (8764)"
+    )
+    home.add_argument(
+        "--root",
+        type=Path,
+        action="append",
+        default=[],
+        help="folder the picker may browse; repeatable (default: your home directory)",
+    )
+    home.add_argument(
+        "--dev-origin",
+        action="append",
+        default=[],
+        help="extra exact Origin allowed to call the API, e.g. http://127.0.0.1:5173",
+    )
+    home.add_argument("--assets", type=Path, default=None, help="built app (clients/web/dist)")
+    home.add_argument("--open", action="store_true", help="open the app in a browser")
 
     stop = commands.add_parser("stop", help="stop a detached gateway")
     stop.add_argument("--instance", type=Path, required=True)
@@ -128,9 +151,18 @@ def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep in
         str(instance),
     ]
     if replay_log is not None:
-        if project is not None:
+        if project is None:
             raise AssertionError
-        command.extend(("--web-reopen", str(replay_log)))
+        command.extend(
+            (
+                "--project",
+                str(project),
+                "--web-reopen",
+                str(replay_log),
+                "--web-reopen-run",
+                _DEMO_RUN_ID,
+            )
+        )
     elif project is not None:
         command.extend(("--project", str(project)))
         if task is not None:
@@ -161,12 +193,14 @@ def _run_live(args: argparse.Namespace, root: Path) -> int:
         raise SystemExit("vibesys web live: pass --project or use --demo")  # noqa: TRY003  # lint-waiver: LW-101080 [TRY003]; require an explicit project for non-demo live mode
     if args.demo:
         replay_source = (root / _DEMO_LOG).resolve()
-        if not replay_source.is_file():
-            raise SystemExit(f"vibesys web: demo event log does not exist: {replay_source}")  # noqa: TRY003  # lint-waiver: LW-101104 [TRY003]; report an incomplete source checkout before gateway startup
+        demo_source = (root / _DEMO_PROJECT).resolve()
+        if not replay_source.is_file() or not demo_source.is_dir():
+            raise SystemExit(f"vibesys web: demo bundle is incomplete under {root}")  # noqa: TRY003  # lint-waiver: LW-101104 [TRY003]; report an incomplete source checkout before gateway startup
         demo_dir = Path(tempfile.mkdtemp(prefix="vibesys-web-demo-"))
         replay_log = demo_dir / "run-events.jsonl"
         shutil.copy2(replay_source, replay_log)
-        project = None
+        project = demo_dir / "project"
+        shutil.copytree(demo_source, project)
         default_instance = demo_dir / "web-gateway.json"
     else:
         replay_log = None
@@ -285,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_dev(args, root)
     if args.command == "live":
         return _run_live(args, root)
+    if args.command == "home":
+        return run_home(args, root)
     if args.command == "tunnel":
         return _run_tunnel(args)
     if args.command == "status":

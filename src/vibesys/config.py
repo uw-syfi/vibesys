@@ -26,6 +26,9 @@ from vs_runtime.api.infrastructure import BundledResources
 
 BUNDLED_RESOURCES = BundledResources(PROJECT_ROOT / "resources", package="vibesys")
 
+DOTENV_PATH = PROJECT_ROOT / ".env"
+"""The `.env` that `load_config` reads (existing environment variables win)."""
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -200,7 +203,7 @@ def as_config(config: "Config | Mapping[str, Any]") -> "Config":
     return config if isinstance(config, Config) else Config.model_validate(config)
 
 
-def _load_dotenv_file(path: Path = PROJECT_ROOT / ".env") -> None:
+def _load_dotenv_file(path: Path = DOTENV_PATH) -> None:
     """Load environment variables from a ``.env`` file via ``python-dotenv``.
 
     Existing environment variables take precedence (``override=False``); a

@@ -49,6 +49,7 @@ from entrypoints.cli.inputs import (
     _apply_bundle_profiler_default,
     _run_validate,
     _validate_agent,
+    _validate_run_id_arg,
     _validate_target_inputs,
 )
 from entrypoints.cli.loops import (
@@ -173,6 +174,7 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     args.outer_loop = loop_kind
     args.explicit_cli_dests = _explicit_cli_dests(parser, remaining)
     _normalize_runs_dir(args)
+    _validate_run_id_arg(args)
     _resolve_resume_args(args, loop_kind=loop_kind)
     command.validate(args)
     return CliInvocation(loop_kind=loop_kind, args=args)
