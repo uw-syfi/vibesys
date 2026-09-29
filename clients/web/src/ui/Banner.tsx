@@ -1,6 +1,5 @@
 import {RefreshCw, WifiOff} from 'lucide-react';
 import type {Connection} from '../model.js';
-import './Banner.css';
 
 export interface BannerProps {
   connection: Connection;
@@ -23,7 +22,7 @@ export function Banner(props: BannerProps) {
       <div className="banner" role="alert">
         <WifiOff {...icon} />
         <span>Backend protocol error: {connectionError}</span>
-        <button type="button" className="btn btn-sm" onClick={onReconnect}>
+        <button type="button" className="btn" onClick={onReconnect}>
           Retry
         </button>
       </div>
@@ -34,7 +33,7 @@ export function Banner(props: BannerProps) {
       <div className="banner" role="alert">
         <WifiOff {...icon} />
         <span>Disconnected from the backend.</span>
-        <button type="button" className="btn btn-sm" onClick={onReconnect}>
+        <button type="button" className="btn" onClick={onReconnect}>
           Retry
         </button>
       </div>
@@ -49,7 +48,7 @@ export function Banner(props: BannerProps) {
     return (
       <div className="banner" role="alert">
         <span>Could not load run status: {snapshotError}</span>
-        <button type="button" className="btn btn-sm" onClick={onRetrySnapshot}>
+        <button type="button" className="btn" onClick={onRetrySnapshot}>
           Retry
         </button>
       </div>

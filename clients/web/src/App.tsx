@@ -1,295 +1,255 @@
-import type {DesignRound, HypothesisEntry, PerformanceRound} from '@vibesys/backend-client';
+/** The run window over one WorkspaceSession: the only component that reads the session. */
+
+import type {HypothesisEntry} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
+import {type Dispatch, useEffect, useMemo, useReducer, useState, useSyncExternalStore} from 'react';
+import {latestRound, needsOlder, steersNeedOlder} from './derive.js';
+import {type HomeApi, type HomeProject, type HomeRun, openRun, sidebarSections} from './home.js';
 import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
-import {
-  agentGraph,
-  endedWord,
-  headerModel,
-  inspectorModel,
-  latestRound,
-  logGroups,
-  needsOlder,
-  railModel,
-  railState,
-  showsChanges,
-  steers,
-  steersNeedOlder,
-  summaryModel,
-  toolOutput,
-  trendModel,
-} from './derive.js';
-import type {WorkspaceSession} from './session.js';
+  type RetainedText,
+  type RoundRow,
+  type RunSummary,
+  type RunTitle,
+  resultParts,
+  retainedText,
+  runSummary,
+  runTitle,
+  type StatusLine,
+  statusLine,
+} from './rounds.js';
+import type {WorkspaceSession, WorkspaceState} from './session.js';
+import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js';
 import {Banner} from './ui/Banner.js';
-import {Composer} from './ui/Composer.js';
-import {Graph} from './ui/Graph.js';
-import {Header} from './ui/Header.js';
-import {Inspector} from './ui/Inspector.js';
-import {LiveRegion} from './ui/LiveRegion.js';
-import {Log, type LogHandle} from './ui/Log.js';
-import {Rail} from './ui/Rail.js';
-import {Shortcuts} from './ui/Shortcuts.js';
-import {Summary} from './ui/Summary.js';
-import {Tooltip} from './ui/Tooltip.js';
-import './App.css';
+import {Sidebar} from './ui/Sidebar.js';
+import {SteerComposer} from './ui/SteerComposer.js';
+import {Retained, RunStatus, TitleRow} from './ui/TitleRow.js';
+import {Transcript, type TranscriptControls} from './ui/Transcript.js';
+import {forRun, INITIAL_UI, type UiAction, type UiState, uiReducer} from './ui-state.js';
+import './window.css';
 
-const WIDE = '(min-width: 1200px)';
-const TABLET = '(min-width: 768px)';
-const HINT_KEY = 'vibesys.web.sheet-hint';
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
-const NO_DESIGN: DesignRound[] = [];
-const NO_PERFORMANCE: PerformanceRound[] = [];
-const ACTIONS = {pause: 'Pause', resume: 'Resume', steer: 'Steer', stop: 'Stop'} as const;
 
-function useMedia(query: string): boolean {
-  const subscribe = useCallback(
-    (notify: () => void) => {
-      const media = matchMedia(query);
-      media.addEventListener('change', notify);
-      return () => media.removeEventListener('change', notify);
-    },
-    [query],
-  );
-  return useSyncExternalStore(subscribe, () => matchMedia(query).matches);
+export interface AppProps {
+  session: WorkspaceSession;
+  home: HomeApi;
 }
 
-/**
- * Hands the log focus that is nowhere a reader can use it: on `<body>`, or on an element that
- * has been hidden under it. A reader left there has arrow keys that move the round instead of
- * the log's cursor, which is the whole of it. Focus that is somewhere real is left alone.
- */
-function reclaimFocus(): void {
-  const at = document.activeElement;
-  if (!(at instanceof HTMLElement) || at === document.body || !at.checkVisibility()) {
-    document.getElementById('log')?.focus({preventScroll: true});
-  }
+interface View {
+  summary: RunSummary;
+  live: number | null;
+  round: number | null;
+  row: RoundRow | undefined;
+  transcript: RoundTranscript | null;
+  title: RunTitle;
+  status: StatusLine;
+  retained: RetainedText | null;
+  ended: boolean;
 }
 
-function hintSeen(): boolean {
-  try {
-    return localStorage.getItem(HINT_KEY) === 'seen';
-  } catch {
-    return false;
-  }
+interface History {
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
 }
 
-/** `connect` renders under the header: the gateway form on a page with no live gateway. */
-export function App({session, connect}: {session: WorkspaceSession; connect?: ReactNode}) {
-  const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
-  const wide = useMedia(WIDE);
-  const tablet = useMedia(TABLET);
-  const [picked, setPicked] = useState<{runId: string | null; round: number} | null>(null);
-  // The row whose output the inspector shows, tied to the round it was picked in so that
-  // changing round clears it without an effect.
-  const [rowPick, setRowPick] = useState<{round: number; id: string} | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [hinted, setHinted] = useState(hintSeen);
-  const log = useRef<LogHandle>(null);
+interface Listing {
+  projects: HomeProject[];
+  runs: HomeRun[];
+}
 
-  const {core, captured, runId, connection, queries, command} = state;
+const EMPTY_LISTING: Listing = {projects: [], runs: []};
+
+function useRunView(state: WorkspaceState, ui: UiState): View {
+  const {core, captured, runId, queries, sent} = state;
   const experiments = queries.experiments.response?.experiments ?? NO_EXPERIMENTS;
-  const design = queries.design.response?.design ?? NO_DESIGN;
   const context = queries.performance.response?.performance_context ?? null;
-  const series = queries.performance.response?.performance ?? NO_PERFORMANCE;
-  const rail = useMemo(() => railModel(core, experiments, context), [core, experiments, context]);
-  const trend = useMemo(() => trendModel(series, context), [series, context]);
   const summary = useMemo(
-    () => summaryModel(rail, context, core.maxRounds, experiments),
-    [rail, context, core.maxRounds, experiments],
+    () => runSummary(core, captured, experiments, context),
+    [core, captured, experiments, context],
   );
-  const steer = useMemo(() => steers(captured), [captured]);
   const live = latestRound(core);
-  // The live round stays selected on new rounds until the user picks another.
-  const selected = picked !== null && picked.runId === runId ? picked.round : live;
-  const groups = useMemo(
-    () => (selected === null ? [] : logGroups(core, steer.consumed, selected, runId)),
-    [core, steer, selected, runId],
+  const round = ui.round ?? live;
+  const transcript = useMemo(
+    () => (round === null ? null : roundTranscript({core, captured, sent, round, runId})),
+    [core, captured, sent, round, runId],
   );
-  const graph = useMemo(() => agentGraph(core, selected), [core, selected]);
-  const inspector = useMemo(
-    () =>
-      selected === null
-        ? null
-        : inspectorModel(rail.rows, experiments, design, captured, selected, context),
-    [rail, experiments, design, captured, selected, context],
-  );
-  // The guard covers the live round advancing on its own; `select` and `step` clear the pick
-  // outright, so a round the reader comes back to does not restore the output it once showed.
-  const selectedRow = rowPick !== null && rowPick.round === selected ? rowPick.id : null;
-  const output = useMemo(() => toolOutput(core, selectedRow), [core, selectedRow]);
-  const header = headerModel(core, captured, connection, context);
-  const ended = endedWord(core, captured);
-  const error = command.error;
+  return {
+    summary,
+    live,
+    round,
+    row: summary.rows.find(row => row.round === round),
+    transcript,
+    title: runTitle(context, captured, runId),
+    status: statusLine(core, state.command.sending),
+    retained: retainedText(summary),
+    ended: hasRunEnded(core),
+  };
+}
 
-  // Backfill while the tail floor may hide the selected round's events (verdicts included) or
-  // the text of a steer it consumed: one 500-event chunk at a time (single-flight in the
-  // session), re-evaluated after each, never retried after an error. Every folded chunk lowers
-  // the floor, so no floor is requested twice within a bootstrap; a bootstrap that orphans a
-  // chunk clears the loading flag and requests at its own floor.
-  const roundHidden = selected !== null && needsOlder(core, selected);
-  const wantsHistory =
-    roundHidden || (selected !== null && steersNeedOlder(core, captured, selected));
-  const {historyLoading, historyError} = state;
+function useHome(home: HomeApi): Listing {
+  const [listing, setListing] = useState(EMPTY_LISTING);
   useEffect(() => {
-    if (wantsHistory && !historyLoading && historyError === null) void session.loadOlder();
-  }, [session, wantsHistory, historyLoading, historyError]);
-  const commandError = error === null ? null : `${ACTIONS[error.action]} failed: ${error.message}`;
+    let current = true;
+    home
+      .projects()
+      .then(async projects => {
+        const runs = (await Promise.all(projects.map(project => home.runs(project.id)))).flat();
+        if (current) setListing({projects, runs});
+      })
+      // ponytail: a failed listing leaves the open run only; sub-project 4 adds its error state.
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [home]);
+  return listing;
+}
 
-  // Past 1024px the inspector is an aside, so an open dialog is removed rather than closed, and
-  // removing an open <dialog> fires no `close` at all: the hand-off below never runs and focus
-  // falls to <body>. A reader at 125% zoom is in the drawer layout, and one Cmd+0 crosses this.
-  // Keyed on the width rather than on the dialog's own teardown, which would also fire on an
-  // ordinary close: there the dialog has already restored focus synchronously inside `close()`,
-  // so the guard would find a visible row and take nothing. Firing it on a path with no focus
-  // to reclaim is the wrong place for it, not a theft.
+/** Backfills older events while the selected round (or a steer it consumed) sits below the floor. */
+function useBackfill(
+  session: WorkspaceSession,
+  state: WorkspaceState,
+  round: number | null,
+): History {
+  const {core, captured, historyLoading, historyError} = state;
+  const wants =
+    round !== null && (needsOlder(core, round) || steersNeedOlder(core, captured, round));
   useEffect(() => {
-    if (wide && inspectorOpen) reclaimFocus();
-  }, [wide, inspectorOpen]);
+    if (wants && !historyLoading && historyError === null) void session.loadOlder();
+  }, [session, wants, historyLoading, historyError]);
+  return {
+    loading: wants && historyLoading,
+    error: wants ? historyError : null,
+    onRetry: () => void session.loadOlder(),
+  };
+}
 
-  function select(round: number) {
-    const again = round === selected;
-    setPicked(round === live ? null : {runId, round});
-    if (!again) setRowPick(null);
-    if (wide || (!tablet && !again)) return;
-    setInspectorOpen(true);
-    if (!tablet && !hinted) {
-      setHinted(true);
-      try {
-        localStorage.setItem(HINT_KEY, 'seen');
-      } catch {
-        // Private mode: the hint shows again next visit.
-      }
-    }
-  }
+/** The UI state of the session's current run; a replaced run starts from a clean selection. */
+function useRunUi(runId: string | null): [UiState, Dispatch<UiAction>] {
+  const [stored, dispatch] = useReducer(uiReducer, INITIAL_UI);
+  useEffect(() => {
+    if (stored.runId !== runId) dispatch({type: 'run', runId});
+  }, [stored.runId, runId]);
+  return [forRun(stored, runId), dispatch];
+}
 
-  function selectRow(id: string | null) {
-    setRowPick(id === null || selected === null ? null : {round: selected, id});
-    // Narrow: the inspector is a dialog, so a row picked there has to open it or nothing happens.
-    if (id !== null && !wide) setInspectorOpen(true);
-  }
+function transcriptControls(
+  state: WorkspaceState,
+  ui: UiState,
+  dispatch: Dispatch<UiAction>,
+): TranscriptControls {
+  return {
+    expanded: ui.expanded,
+    disclosed: ui.disclosed,
+    detail: id => toolDetail(state.core, id),
+    onExpand: id => dispatch({type: 'expand', id}),
+    onDisclose: key => dispatch({type: 'disclose', key}),
+  };
+}
 
-  function step(offset: number) {
-    const index = rail.rows.findIndex(row => row.round === selected);
-    const next = rail.rows[Math.min(rail.rows.length - 1, Math.max(0, index + offset))];
-    if (next === undefined || next.round === selected) return;
-    setPicked(next.round === live ? null : {runId, round: next.round});
-    setRowPick(null);
-  }
+interface SectionProps {
+  state: WorkspaceState;
+  view: View;
+  ui: UiState;
+  dispatch: Dispatch<UiAction>;
+  session: WorkspaceSession;
+}
 
-  function toggleRun() {
-    const control = header.control;
-    if (control.kind !== 'action' || control.disabled) return;
-    void session.command(
-      control.action === 'pause'
-        ? {type: 'command.pause', mode: 'after_current_agent_call'}
-        : {type: 'command.resume'},
-    );
-  }
-
+function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listing: Listing}) {
+  const open = openRun({
+    runId: state.runId,
+    title: view.title.title,
+    project: view.title.project,
+    status: state.core.status,
+    updatedAt: state.core.lastEventTimestamp,
+  });
   return (
-    <div className="app">
-      <a className="skip" href="#log">
-        Skip to log
-      </a>
-      <Header
-        model={header}
-        error={error !== null && error.action !== 'steer' ? commandError : null}
-        onControl={toggleRun}
-      />
-      {connect}
-      <Banner
-        connection={connection}
-        connectionError={state.connectionError}
-        canRetry={state.canRetry}
-        snapshotError={state.snapshotError}
-        onReconnect={() => {
-          // Retry unmounts the banner; focus goes to the log instead of falling to <body>.
-          document.getElementById('log')?.focus({preventScroll: true});
-          void session.reconnect();
-        }}
-        onRetrySnapshot={() => void session.refresh()}
-      />
-      {summary === null ? null : <Summary model={summary} trend={trend} />}
-      <div className="shell">
-        <Rail
-          state={railState(
-            queries.experiments.response,
-            queries.experiments.error,
-            hasRunEnded(core),
-          )}
-          model={rail}
-          selected={selected}
-          error={queries.experiments.error}
-          hint={!tablet && !hinted}
-          onSelect={select}
-          onRetry={() => void session.load('experiments')}
+    <Sidebar
+      width={ui.sideWidth}
+      sections={sidebarSections(listing.projects, listing.runs, open)}
+      current={state.runId}
+      summary={view.summary}
+      selected={view.round}
+      now={new Date()}
+      onRound={round => dispatch({type: 'round', round, live: view.live})}
+    />
+  );
+}
+
+function RunHeader({view}: SectionProps) {
+  return (
+    <TitleRow
+      title={view.title.title}
+      objective={view.title.objective}
+      project={view.title.project}
+    >
+      <RunStatus line={view.status} />
+      {view.retained === null ? null : (
+        <>
+          <span className="vsep" />
+          <Retained text={view.retained} />
+        </>
+      )}
+    </TitleRow>
+  );
+}
+
+function RunTranscript({state, view, ui, dispatch, history}: SectionProps & {history: History}) {
+  const connecting = state.core.status === 'connecting' && state.core.sequence === 0;
+  const {row, summary} = view;
+  return (
+    <Transcript
+      round={view.round}
+      row={row ?? null}
+      result={row === undefined ? [] : resultParts(row, summary.unit, summary.lowerIsBetter)}
+      model={view.transcript}
+      follow={!view.ended && view.round === view.live}
+      history={history}
+      empty={connecting ? 'Connecting…' : 'Waiting for round 1.'}
+      controls={transcriptControls(state, ui, dispatch)}
+      only={ui.agent}
+      onShowAll={() => dispatch({type: 'agent', id: null})}
+    />
+  );
+}
+
+function RunComposer({state, view, session}: SectionProps) {
+  if (view.ended) return null;
+  const error = state.command.error;
+  const connected = state.connection === 'connected';
+  return (
+    <SteerComposer
+      disabled={!connected}
+      reason={connected ? null : 'Steering resumes when the connection returns'}
+      error={error?.action === 'steer' ? `Steer failed: ${error.message}` : null}
+      onSend={text => session.command({type: 'command.steer', text})}
+    />
+  );
+}
+
+export function App({session, home}: AppProps) {
+  const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const [ui, dispatch] = useRunUi(state.runId);
+  const view = useRunView(state, ui);
+  const listing = useHome(home);
+  const history = useBackfill(session, state, view.round);
+  const section: SectionProps = {state, view, ui, dispatch, session};
+  return (
+    <div className="win">
+      <RunSidebar {...section} listing={listing} />
+      <main className="main">
+        <RunHeader {...section} />
+        <Banner
+          connection={state.connection}
+          connectionError={state.connectionError}
+          canRetry={state.canRetry}
+          snapshotError={state.snapshotError}
+          onReconnect={() => void session.reconnect()}
+          onRetrySnapshot={() => void session.refresh()}
         />
-        <main className="center">
-          <Graph round={selected} graph={graph} />
-          <Log
-            key={selected ?? 'none'}
-            ref={log}
-            // Loading until the bootstrap batch folds an event or the snapshot gives a status:
-            // `subscribed` sets runId a frame before the batch arrives.
-            state={core.status === 'connecting' && core.sequence === 0 ? 'loading' : 'ready'}
-            round={selected}
-            groups={groups}
-            follow={selected !== null && selected === live}
-            // Backfill state belongs to the rounds that asked for it, not to every round.
-            history={{
-              loading: wantsHistory && historyLoading,
-              error: wantsHistory ? historyError : null,
-              onRetry: () => void session.loadOlder(),
-            }}
-            selected={selectedRow}
-            onSelect={selectRow}
-          />
-          {ended === null ? (
-            <Composer
-              pending={steer.pending}
-              disabled={connection !== 'connected'}
-              error={error?.action === 'steer' ? commandError : null}
-              onSend={text => session.command({type: 'command.steer', text})}
-            />
-          ) : null}
-        </main>
-        <Inspector
-          model={inspector}
-          output={output}
-          mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
-          open={inspectorOpen}
-          judgePending={roundHidden && historyLoading}
-          designError={
-            showsChanges(rail.rows.find(row => row.round === selected))
-              ? queries.design.error
-              : null
-          }
-          onClose={() => {
-            setInspectorOpen(false);
-            // A modal <dialog> restores focus to the node it remembered on open, and a commit
-            // behind it can have replaced that row. Focus then stays somewhere the reader
-            // cannot use: on <body>, or on the dialog's own control now that the dialog is
-            // hidden. No React commit attends the close, so the log cannot see it for itself.
-            reclaimFocus();
-          }}
-          onRetryDesign={() => void session.load('design')}
-        />
-      </div>
-      <LiveRegion status={core.status} round={live} ended={ended} connection={connection} />
-      <Shortcuts
-        onNext={() => step(1)}
-        onPrevious={() => step(-1)}
-        onToggleRun={toggleRun}
-        onJumpToLive={() => log.current?.jump()}
-      />
-      <Tooltip />
+        <RunTranscript {...section} history={history} />
+        <RunComposer {...section} />
+      </main>
     </div>
   );
 }

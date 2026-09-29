@@ -15,7 +15,30 @@ interface Screen {
   act?: (page: Page, gateway: Gateway) => Promise<void>;
 }
 
-const SCREENS: Screen[] = [{name: 'live'}, {name: 'finished', through: FINISHED}];
+const runs = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
+
+const SCREENS: Screen[] = [
+  {name: 'live'},
+  {name: 'finished', through: FINISHED},
+  {
+    name: 'round3',
+    act: async page => {
+      await runs(page)
+        .getByRole('button', {name: /^Round 3,/})
+        .click();
+      await page.getByRole('button', {name: /cargo test --release sampler.*exit 1/}).click();
+    },
+  },
+  {
+    name: 'steer',
+    act: async page => {
+      const box = page.getByRole('textbox', {name: 'Steer the next agent call'});
+      await box.fill('Measure lock hold time before replacing the queue.');
+      await box.press('Enter');
+      await page.getByText('Queued for the next agent call').waitFor();
+    },
+  },
+];
 
 test.describe('screens', () => {
   test.skip(OUT === undefined, 'Set CAPTURE_DIR to write the frames');
@@ -28,7 +51,7 @@ test.describe('screens', () => {
       await page.clock.setFixedTime(new Date('2026-09-25T14:02:00Z'));
       await page.setViewportSize({width: 1440, height: 900});
       await page.goto('/?token=e2e');
-      await page.getByText('llm-serve').first().waitFor();
+      await page.locator('.titlebar').waitFor();
       await screen.act?.(page, gateway);
       for (const width of [1440, 1024]) {
         for (const theme of ['dark', 'light'] as const) {
