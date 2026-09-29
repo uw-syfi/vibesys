@@ -98,6 +98,9 @@ test('one launch starts the home server and shows the app; it stays on its origi
       Object.keys((Reflect.get(window, 'vibesysDesktop') as object | undefined) ?? {}),
     ]),
   ).toEqual(['undefined', 'undefined', ['platform']]);
+  expect(await page.evaluate(() => document.documentElement.dataset['desktop'])).toBe(
+    process.platform,
+  );
   await page.screenshot({path: test.info().outputPath('window.png')});
 
   const refused = launched.waitForOutput(/blocked navigation to https:\/\/example\.com/);

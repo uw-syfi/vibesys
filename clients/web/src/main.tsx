@@ -18,6 +18,9 @@ const root = createRoot(mount);
 const search = new URL(window.location.href).searchParams;
 const theme = initialTheme(search.get('theme'), savedTheme());
 applyTheme(document.documentElement, theme);
+// The desktop shell (clients/desktop) exposes its platform; window.css insets the native chrome.
+const desktop = (window as Window & {vibesysDesktop?: {platform: string}}).vibesysDesktop;
+if (desktop !== undefined) document.documentElement.dataset['desktop'] = desktop.platform;
 const page = pageParams(window.location.href);
 const token = page.token;
 const client = token === null ? null : homeClient(token, (url, init) => fetch(url, init));

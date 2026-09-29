@@ -104,6 +104,8 @@ function createWindow(): BrowserWindow {
     show: false,
     title: 'VibeSys',
     titleBarStyle: 'hiddenInset',
+    // The mockup's 40px sidebar head: 16px from the left edge, circles centred at y = 20.
+    trafficLightPosition: {x: 16, y: 13},
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#111113' : '#fcfcfd',
     webPreferences: {
       preload: PRELOAD,
