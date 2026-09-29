@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {renderToStaticMarkup} from 'react-dom/server';
 import type {RunControl} from '../model.js';
 import type {Menu} from '../ui-state.js';
-import {MoreMenu, Retained, RunControlChip, RunStatus, TitleRow} from './TitleRow.js';
+import {MoreMenu, Retained, RunControlChip, RunStatus, ThemeItems, TitleRow} from './TitleRow.js';
 
 const pause: RunControl = {
   kind: 'action',
@@ -128,4 +128,11 @@ test('a failed run says why: the summary in the row, the full diagnostic as its 
     />,
   );
   assert.equal(completed.includes('title='), false);
+});
+
+test('the theme items: one radio per choice, the current one checked', () => {
+  const html = renderToStaticMarkup(<ThemeItems theme="light" onTheme={() => {}} />);
+  assert.match(html, /<div class="gh">Theme<\/div>/);
+  assert.equal(html.match(/role="menuitemradio"/g)?.length, 3);
+  assert.match(html, /aria-checked="true" class="it">Light/);
 });

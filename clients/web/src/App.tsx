@@ -33,6 +33,7 @@ import {
 } from './rounds.js';
 import type {RunLinks} from './route.js';
 import type {WorkspaceSession, WorkspaceState} from './session.js';
+import {applyTheme, saveTheme, type ThemeChoice} from './theme.js';
 import {
   type LineStat,
   type RoundEdits,
@@ -59,6 +60,7 @@ import {
   RunControlChip,
   RunStatus,
   SidebarToggle,
+  ThemeItems,
   TitleRow,
 } from './ui/TitleRow.js';
 import {Transcript, type TranscriptControls} from './ui/Transcript.js';
@@ -86,6 +88,8 @@ export interface AppProps {
   links: RunLinks | null;
   /** The home server's notes API; null when the page was opened without the home token. */
   notes: NotesApi | null;
+  /** The theme the page opened with (see main.tsx). */
+  theme: ThemeChoice;
 }
 
 interface View {
@@ -240,6 +244,22 @@ function useWindowWidth(): number {
   return useSyncExternalStore(subscribeWidth, () => innerWidth);
 }
 
+function useTheme(opened: ThemeChoice): [ThemeChoice, (choice: ThemeChoice) => void] {
+  const [theme, setTheme] = useState(opened);
+  const choose = (choice: ThemeChoice) => {
+    setTheme(choice);
+    applyTheme(document.documentElement, choice);
+    saveTheme(choice);
+    // A choice made here outranks the page's ?theme= from now on, reloads included.
+    const url = new URL(location.href);
+    if (url.searchParams.has('theme')) {
+      url.searchParams.delete('theme');
+      history.replaceState(history.state, '', url);
+    }
+  };
+  return [theme, choose];
+}
+
 function transcriptControls(
   state: WorkspaceState,
   ui: UiState,
@@ -330,7 +350,14 @@ function RunSidebar({
   );
 }
 
-function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: () => void}) {
+function RunHeader(
+  props: SectionProps & {
+    sidebarShown: boolean;
+    onShowSidebar: () => void;
+    theme: ThemeChoice;
+    onTheme: (choice: ThemeChoice) => void;
+  },
+) {
   const {state, view, ui, dispatch, session} = props;
   const error = state.command.error;
   const control = runControl(state.core, state.captured, state.connection);
@@ -390,6 +417,15 @@ function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: 
         >
           Notes
         </button>
+        <div className="sepl" />
+        <ThemeItems
+          theme={props.theme}
+          onTheme={choice => {
+            props.onTheme(choice);
+            dispatch({type: 'menu', menu: null});
+          }}
+        />
+        <div className="sepl" />
       </MoreMenu>
     </TitleRow>
   );
@@ -664,7 +700,7 @@ function paletteInput(
   };
 }
 
-export function App({session, home, links, notes}: AppProps) {
+export function App({session, home, links, notes, theme: opened}: AppProps) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [ui, dispatch] = useRunUi(state.runId);
   const view = useRunView(state, ui);
@@ -672,6 +708,7 @@ export function App({session, home, links, notes}: AppProps) {
   const history = useBackfill(session, state, view.round);
   const ask = useAsk(session, state, ui, dispatch);
   const note = useNote(notes, state.runId, ui.pane === 'notes');
+  const [theme, chooseTheme] = useTheme(opened);
   usePaletteShortcut(useCallback(() => dispatch({type: 'palette', open: true}), [dispatch]));
   useNewRunShortcut(links?.newRun ?? null);
   const width = useWindowWidth();
@@ -692,7 +729,13 @@ export function App({session, home, links, notes}: AppProps) {
     <div className="win">
       {layout.sidebar ? <RunSidebar {...section} listing={listing} /> : null}
       <main className="main">
-        <RunHeader {...section} sidebarShown={layout.sidebar} onShowSidebar={toggleSidebar} />
+        <RunHeader
+          {...section}
+          sidebarShown={layout.sidebar}
+          onShowSidebar={toggleSidebar}
+          theme={theme}
+          onTheme={chooseTheme}
+        />
         <Banner
           connection={state.connection}
           connectionError={state.connectionError}

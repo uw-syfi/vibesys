@@ -1,4 +1,4 @@
-import {Ellipsis, PanelLeft, PanelRight, Pause, Play} from 'lucide-react';
+import {Check, Ellipsis, PanelLeft, PanelRight, Pause, Play} from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -11,6 +11,7 @@ import {
 import {copyText} from '../clipboard.js';
 import type {RunControl} from '../model.js';
 import type {RetainedText, StatusLine} from '../rounds.js';
+import {THEME_LABELS, THEMES, type ThemeChoice} from '../theme.js';
 import type {Menu} from '../ui-state.js';
 
 export interface TitleRowProps {
@@ -224,7 +225,7 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
           copyFailed
             ? "Couldn't copy the run ID"
             : canStop
-              ? 'Notes, copy run ID, stop the run'
+              ? 'Notes, theme, copy run ID, stop the run'
               : 'Notes, copy run ID'
         }
         aria-label="More"
@@ -295,5 +296,34 @@ export function PaneToggle({open, onToggle}: {open: boolean; onToggle: () => voi
     >
       <PanelRight size={16} strokeWidth={1.5} aria-hidden />
     </button>
+  );
+}
+
+export function ThemeItems({
+  theme,
+  onTheme,
+}: {
+  theme: ThemeChoice;
+  onTheme: (choice: ThemeChoice) => void;
+}) {
+  return (
+    <>
+      <div className="gh">Theme</div>
+      {THEMES.map(choice => (
+        <button
+          key={choice}
+          type="button"
+          role="menuitemradio"
+          aria-checked={choice === theme}
+          className="it"
+          onClick={() => onTheme(choice)}
+        >
+          {THEME_LABELS[choice]}
+          {choice === theme ? (
+            <Check size={14} strokeWidth={1.5} className="d" aria-hidden />
+          ) : null}
+        </button>
+      ))}
+    </>
   );
 }

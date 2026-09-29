@@ -482,3 +482,24 @@ test('Notes: a note that fails to load is not editable', async ({page}) => {
   await expect(pane.getByRole('textbox', {name: 'Notes'})).toHaveCount(0);
   await expect(pane.getByRole('button', {name: 'Retry'})).toBeVisible();
 });
+
+test('the ••• menu switches the theme and the choice survives a reload', async ({page}) => {
+  await mockGateway(page);
+  await page.emulateMedia({colorScheme: 'dark'});
+  await page.goto('/?token=e2e');
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.getByRole('button', {name: 'More'}).click();
+  await expect(page.getByRole('menuitemradio', {name: 'System'})).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await page.getByRole('menuitemradio', {name: 'Light'}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await background()).toBe('rgb(252, 252, 253)');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.getByRole('button', {name: 'More'}).click();
+  await page.getByRole('menuitemradio', {name: 'System'}).click();
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
+  expect(await background()).toBe('rgb(17, 17, 19)');
+});

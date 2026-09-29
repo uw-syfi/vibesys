@@ -9,13 +9,15 @@ import {httpNotesApi} from './notes.js';
 import {fetchReplay, replayTransport} from './replay.js';
 import {pageParams, type RunLinks, runLinks} from './route.js';
 import {browserLifecycle, WorkspaceSession, webSocketUrlFromLocation} from './session.js';
+import {applyTheme, initialTheme, savedTheme} from './theme.js';
 
 const mount = document.getElementById('root');
 if (!mount) throw new Error('Missing workspace root');
 const root = createRoot(mount);
 // System follows the OS through light-dark(); ?theme=light|dark forces one (reviews, captures).
-const theme = new URL(window.location.href).searchParams.get('theme');
-if (theme === 'light' || theme === 'dark') document.documentElement.dataset['theme'] = theme;
+const search = new URL(window.location.href).searchParams;
+const theme = initialTheme(search.get('theme'), savedTheme());
+applyTheme(document.documentElement, theme);
 const page = pageParams(window.location.href);
 const token = page.token;
 const client = token === null ? null : homeClient(token, (url, init) => fetch(url, init));
@@ -32,7 +34,7 @@ const showRun = (home: HomeApi, links: RunLinks | null) => {
     {lifecycle: browserLifecycle},
   );
   void session.start();
-  root.render(<App session={session} home={home} links={links} notes={notes} />);
+  root.render(<App session={session} home={home} links={links} notes={notes} theme={theme} />);
 };
 
 if (client === null || token === null) {
