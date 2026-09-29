@@ -12,9 +12,10 @@ const file = (path: string, body: FileChanges['body']): FileChanges => ({
   removed: 0,
   body,
   command: `git diff b h -- ${path}`,
+  hidden: body.kind === 'patch' && body.truncated ? 12 : null,
 });
 
-test('unavailable and truncated patches offer the reproduction command; loading says so', () => {
+test('an unavailable patch offers to copy its command; a truncated one counts what it leaves out', () => {
   const model: ChangesModel = {
     kind: 'files',
     round: 3,
@@ -36,9 +37,10 @@ test('unavailable and truncated patches offer the reproduction command; loading 
     /<span class="scope">Round 3<\/span><span>against the round 2 checkpoint<\/span>/,
   );
   assert.match(html, /The workspace repository could not produce this patch\./);
-  assert.match(html, /title="git diff b h -- src\/a\.rs"[^>]*>Reproduce</);
+  assert.match(html, /<div class="note stack">/);
+  assert.match(html, /title="git diff b h -- src\/a\.rs"[^>]*>Copy command</);
   assert.doesNotMatch(html, /git diff b h -- src\/a\.rs<\/button>/);
-  assert.match(html, /Patch truncated at the server&#x27;s size bound\./);
+  assert.match(html, /aria-expanded="false"[^>]*>.*12 more changed lines<\/button>/);
   assert.match(html, /<div class="add">/);
   assert.match(html, /Loading patch…/);
 });

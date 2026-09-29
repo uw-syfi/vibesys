@@ -3,6 +3,7 @@ import type {DesignRound, HypothesisEntry, RunEvent} from '@vibesys/backend-clie
 import {roundNumberFromLabel} from '@vibesys/core-state';
 import {formatValue} from './derive.js';
 import {finishedResult, planFacts, type RoundRow, type RunSummary, resultText} from './rounds.js';
+import type {LineStat, RoundEdits} from './transcript.js';
 
 type Mark = 'kept' | 'rejected' | 'judging' | 'unmeasured';
 
@@ -42,7 +43,7 @@ function pointOf(
   floor: number,
   unit: string,
 ): ChartPoint[] {
-  const open = row.state === 'running' || row.state === 'paused';
+  const open = row.state === 'running';
   if (row.value === null) {
     return open
       ? []
@@ -132,13 +133,26 @@ const OUTCOMES: Readonly<Record<string, Evidence['outcome']>> = {
 };
 
 function outcomeOf(row: RoundRow, recorded: string | undefined): Evidence['outcome'] {
-  if (row.state === 'running' || row.state === 'paused') {
+  if (row.state === 'running') {
     return {text: row.value === null ? 'Running' : 'Judging', tone: 't2'};
   }
   const known = recorded === undefined ? undefined : OUTCOMES[recorded];
   if (known !== undefined) return known;
   if (row.state === 'kept') return {text: 'Kept', tone: 'ok'};
   return {text: row.state === 'failed' ? 'Failed' : 'Rejected', tone: 'bad'};
+}
+
+/**
+ * The judge's own finding, the note the transcript shows under its turn. The verdict rationale
+ * already reads in full in the transcript; it stands in only when the judge left no note.
+ */
+function judgeFinding(captured: readonly RunEvent[], round: number): string | null {
+  const result = finishedResult(captured, new RegExp(`^round-${round}-retry-\\d+-judge$`));
+  return (
+    resultText(result, 'analysis') ??
+    resultText(result, 'reasoning') ??
+    judgeFeedback(captured, round)
+  );
 }
 
 function judgeFeedback(captured: readonly RunEvent[], round: number): string | null {
@@ -176,7 +190,7 @@ export function evidenceRows(
     const facts: Array<[string, string | null, boolean]> = [
       ['Hypothesis', row.hypothesis, false],
       ['Pass criteria', planFacts(captured, row.round)?.passCriteria ?? null, false],
-      ['Judge', judgeFeedback(captured, row.round), false],
+      ['Judge', judgeFinding(captured, row.round), false],
       ['Change', implementerSummary(captured, row.round), false],
       ['Files', changes?.files?.map(file => file.path).join(', ') || null, true],
       ['Commit', changes?.commit ?? null, true],
@@ -198,23 +212,45 @@ export interface DesignRow {
   files: string;
   summary: string | null;
   reverted: boolean;
+  /** The lines the round's edits changed; null when it recorded none. */
+  stat: LineStat | null;
 }
 
-/** The design summary: what each round changed, from the design query. */
+function total(stats: ReadonlyMap<string, LineStat> | undefined): LineStat | null {
+  if (stats === undefined || stats.size === 0) return null;
+  let added = 0;
+  let removed = 0;
+  for (const stat of stats.values()) {
+    added += stat.added;
+    removed += stat.removed;
+  }
+  return {added, removed};
+}
+
+/**
+ * The design summary: what each round changed, from the design query, with the lines its edits
+ * changed. The round in flight joins once it has edits, its files named by the edits.
+ */
 export function designRows(
   summary: RunSummary,
   design: readonly DesignRound[],
   captured: readonly RunEvent[],
+  edits: RoundEdits,
 ): DesignRow[] {
   return summary.rows.flatMap(row => {
-    const files = design.find(candidate => candidate.round === row.round)?.files;
-    if (files == null) return [];
+    const stats = edits.get(row.round);
+    const recorded = design.find(candidate => candidate.round === row.round)?.files;
+    const files =
+      recorded?.map(file => file.path) ??
+      (row.state === 'running' && stats !== undefined ? [...stats.keys()] : null);
+    if (files === null) return [];
     return [
       {
         round: row.round,
-        files: files.map(file => file.path).join(', ') || 'no files',
+        files: files.join(', ') || 'no files',
         summary: implementerSummary(captured, row.round),
         reverted: row.state === 'reverted' || row.state === 'failed',
+        stat: total(stats),
       },
     ];
   });

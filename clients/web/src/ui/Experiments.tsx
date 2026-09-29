@@ -10,6 +10,7 @@ import {
   evidenceRows,
 } from '../experiments.js';
 import type {RunSummary} from '../rounds.js';
+import type {RoundEdits} from '../transcript.js';
 import {PaneHead} from './Pane.js';
 
 export interface ExperimentsProps {
@@ -173,8 +174,8 @@ function EvidenceList({
             <span className="id">r{row.round}</span>
             <span className="ttl">{row.title}</span>
             <span className={`oc ${row.outcome.tone}`}>{row.outcome.text}</span>
-            <span className="m" title={row.valueLabel ?? undefined}>
-              {row.value ?? ''}
+            <span className="m" title={row.valueLabel ?? 'Not measured'}>
+              {row.value ?? '—'}
             </span>
           </button>
           {open === row.round ? (
@@ -219,7 +220,15 @@ function DesignList({design, onChanges}: Pick<ExperimentsProps, 'design' | 'onCh
             <div className="mono">{row.files}</div>
             {row.summary === null ? null : <div className="t2">{row.summary}</div>}
           </span>
-          <span className="m">{row.reverted ? 'reverted' : ''}</span>
+          <span className="m">
+            {row.stat === null ? null : (
+              <div>
+                <span className="ok">+{row.stat.added}</span>{' '}
+                <span className="bad">−{row.stat.removed}</span>
+              </div>
+            )}
+            {row.reverted ? <div className="t2">reverted</div> : null}
+          </span>
         </button>
       ))}
     </div>
@@ -275,6 +284,7 @@ export interface ExperimentsTabProps
   experiments: readonly HypothesisEntry[];
   designRounds: readonly DesignRound[];
   captured: readonly RunEvent[];
+  edits: RoundEdits;
   maxRounds: number | null;
 }
 
@@ -283,6 +293,7 @@ export function ExperimentsTab({
   experiments,
   designRounds,
   captured,
+  edits,
   maxRounds,
   ...rest
 }: ExperimentsTabProps) {
@@ -292,8 +303,8 @@ export function ExperimentsTab({
     [summary, experiments, designRounds, captured],
   );
   const design = useMemo(
-    () => designRows(summary, designRounds, captured),
-    [summary, designRounds, captured],
+    () => designRows(summary, designRounds, captured, edits),
+    [summary, designRounds, captured, edits],
   );
   const count = summary.rows.length;
   const progress = maxRounds === null ? `${count} rounds` : `${count} of ${maxRounds} rounds`;

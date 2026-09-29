@@ -2,6 +2,7 @@
 import type {DesignFileChange, DesignPatch, DesignRound} from '@vibesys/backend-client';
 import type {DiffLine} from './model.js';
 import type {RoundRow} from './rounds.js';
+import {type LineStat, statFor} from './transcript.js';
 
 export type PatchSlot =
   | {kind: 'loading'}
@@ -24,6 +25,8 @@ export interface FileChanges {
   body: FileBody;
   /** Reproduces the full patch outside the app. */
   command: string;
+  /** A truncated patch: the changed lines it leaves out, when the round's edits give a count. */
+  hidden: number | null;
 }
 
 export type ChangesModel =
@@ -139,6 +142,7 @@ function fileChanges(
   design: DesignRound,
   file: DesignFileChange,
   patches: Readonly<Record<string, PatchSlot>>,
+  edits: ReadonlyMap<string, LineStat>,
 ): FileChanges {
   const queryable = Boolean(design.base && design.commit);
   const slot: PatchSlot | undefined = queryable
@@ -146,14 +150,19 @@ function fileChanges(
     : {kind: 'loaded', patch: null};
   const body = bodyOf(slot);
   const lines = body.kind === 'patch' ? body.lines : [];
+  const added = lines.filter(line => line.tone === 'add').length;
+  const removed = lines.filter(line => line.tone === 'del').length;
+  const stat = body.kind === 'patch' && body.truncated ? statFor(edits, file.path) : null;
+  const hidden = stat === null ? 0 : stat.added + stat.removed - added - removed;
   return {
     path: file.path,
     renamedFrom: file.renamed_from ?? null,
     change: file.change,
-    added: lines.filter(line => line.tone === 'add').length,
-    removed: lines.filter(line => line.tone === 'del').length,
+    added,
+    removed,
     body,
     command: reproCommand(design, file),
+    hidden: hidden > 0 ? hidden : null,
   };
 }
 
@@ -161,15 +170,16 @@ export function changesModel(
   row: RoundRow | undefined,
   design: DesignRound | undefined,
   patches: Readonly<Record<string, PatchSlot>>,
+  edits: ReadonlyMap<string, LineStat> = new Map(),
 ): ChangesModel {
   if (row === undefined) return {kind: 'none'};
-  if (row.state === 'running' || row.state === 'paused') return {kind: 'running', round: row.round};
+  if (row.state === 'running') return {kind: 'running', round: row.round};
   if (design?.files == null) return {kind: 'unresolved', round: row.round};
   return {
     kind: 'files',
     round: row.round,
     against: row.before.round === 0 ? 'the baseline' : `the round ${row.before.round} checkpoint`,
     commit: design.commit ?? null,
-    files: design.files.map(file => fileChanges(design, file, patches)),
+    files: design.files.map(file => fileChanges(design, file, patches, edits)),
   };
 }

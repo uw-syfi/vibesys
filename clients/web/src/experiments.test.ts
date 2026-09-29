@@ -93,11 +93,31 @@ test('evidence with experiments: the recorded hypothesis outcome', () => {
   });
 });
 
-test('design rows: files per round, reverted rounds marked', () => {
+test('design rows: files and changed lines per round, reverted rounds marked, the live round once it edits', () => {
+  const edits = new Map([
+    [3, new Map([['src/sampler.rs', {added: 2, removed: 1}]])],
+    [6, new Map([['src/queue.rs', {added: 54, removed: 0}]])],
+  ]);
   assert.deepEqual(
-    designRows(summary, DESIGN, captured).map(row => [row.round, row.files, row.reverted]),
-    [[3, 'src/sampler.rs', true]],
+    designRows(summary, DESIGN, captured, edits).map(row => [
+      row.round,
+      row.files,
+      row.reverted,
+      row.stat,
+    ]),
+    [
+      [3, 'src/sampler.rs', true, {added: 2, removed: 1}],
+      [6, 'src/queue.rs', false, {added: 54, removed: 0}],
+    ],
   );
+});
+
+test('the judge fact is the judge finding, not the verdict rationale the transcript shows', () => {
+  const judge = evidenceRows(summary, [], DESIGN, captured)[2]?.facts.find(
+    fact => fact.term === 'Judge',
+  );
+  assert.ok(judge);
+  assert.match(judge.text, /^Ran the full suite against the reverted staging-buffer patch/);
 });
 
 function kept(round: number, value: number): RoundRow {

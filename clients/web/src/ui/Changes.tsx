@@ -1,4 +1,5 @@
 import type {DesignRound} from '@vibesys/backend-client';
+import {ChevronRight} from 'lucide-react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {
   type ChangesModel,
@@ -11,6 +12,7 @@ import {
   patchRequests,
 } from '../changes.js';
 import type {RoundRow} from '../rounds.js';
+import type {LineStat} from '../transcript.js';
 import {Diff} from './Diff.js';
 import {PaneHead} from './Pane.js';
 
@@ -20,10 +22,13 @@ interface FileProps {
   onCopy: (command: string) => void;
 }
 
-/** The full command is secondary detail: it lives only in the `title` hint, never inline. */
+/**
+ * The note, then the copy button on its own line. The button only copies: the full command is
+ * secondary detail and lives in its `title` hint, never inline.
+ */
 function Reproduce({text, file, copied, onCopy}: FileProps & {text: string}) {
   return (
-    <div className="note">
+    <div className="note stack">
       <span>{text}</span>
       <button
         type="button"
@@ -31,9 +36,29 @@ function Reproduce({text, file, copied, onCopy}: FileProps & {text: string}) {
         title={file.command}
         onClick={() => onCopy(file.command)}
       >
-        {copied === file.command ? 'Copied' : 'Reproduce'}
+        {copied === file.command ? 'Copied' : 'Copy command'}
       </button>
     </div>
+  );
+}
+
+/** A truncated patch: how much it leaves out, and on opening, how to get the rest. */
+function Truncated(props: FileProps) {
+  const [open, setOpen] = useState(false);
+  const {hidden} = props.file;
+  return (
+    <>
+      <button type="button" className="morerow" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <ChevronRight
+          size={12}
+          strokeWidth={1.75}
+          className={open ? 'chev open' : 'chev'}
+          aria-hidden
+        />
+        {hidden === null ? 'More changed lines' : `${hidden} more changed lines`}
+      </button>
+      {open ? <Reproduce {...props} text="Patch truncated at the server's size bound." /> : null}
+    </>
   );
 }
 
@@ -54,9 +79,7 @@ function FileBodyView(props: FileProps) {
           ) : (
             <Diff lines={body.lines} />
           )}
-          {body.truncated ? (
-            <Reproduce {...props} text="Patch truncated at the server's size bound." />
-          ) : null}
+          {body.truncated ? <Truncated {...props} /> : null}
         </>
       );
   }
@@ -160,9 +183,19 @@ export interface ChangesTabProps {
   error: string | null;
   onRetry: () => void;
   loadPatch: LoadPatch;
+  /** The round's edits per file, which count what a truncated patch leaves out. */
+  edits: ReadonlyMap<string, LineStat>;
 }
 
-export function ChangesTab({row, design, loading, error, onRetry, loadPatch}: ChangesTabProps) {
+export function ChangesTab({
+  row,
+  design,
+  loading,
+  error,
+  onRetry,
+  loadPatch,
+  edits,
+}: ChangesTabProps) {
   const requests = useMemo(() => patchRequests(design), [design]);
   const patches = usePatches(requests, loadPatch);
   const [copied, setCopied] = useState<string | null>(null);
@@ -191,5 +224,7 @@ export function ChangesTab({row, design, loading, error, onRetry, loadPatch}: Ch
   const copy = (command: string) => {
     void navigator.clipboard.writeText(command).then(() => setCopied(command));
   };
-  return <Changes model={changesModel(row, design, patches)} copied={copied} onCopy={copy} />;
+  return (
+    <Changes model={changesModel(row, design, patches, edits)} copied={copied} onCopy={copy} />
+  );
 }

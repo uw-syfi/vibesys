@@ -17,7 +17,15 @@ const EVIDENCE: Evidence[] = [
 const props: ExperimentsProps = {
   chart: null,
   evidence: EVIDENCE,
-  design: [{round: 3, files: 'src/sampler.rs', summary: 'Removed the sync.', reverted: true}],
+  design: [
+    {
+      round: 3,
+      files: 'src/sampler.rs',
+      summary: 'Removed the sync.',
+      reverted: true,
+      stat: {added: 15, removed: 7},
+    },
+  ],
   view: 'hypotheses',
   open: null,
   progress: '6 of 12 rounds',
@@ -61,5 +69,18 @@ test('design: one row per round with its files; reverted rounds say so', () => {
   const html = renderToStaticMarkup(<Experiments {...props} view="design" />);
   assert.match(html, /aria-pressed="true"[^>]*>Design</);
   assert.match(html, /<div class="mono">src\/sampler.rs<\/div>/);
-  assert.match(html, />reverted</);
+  assert.match(
+    html,
+    /<span class="ok">\+15<\/span> <span class="bad">−7<\/span><\/div><div class="t2">reverted<\/div>/,
+  );
+});
+
+test('an unmeasured round shows a dash in the value column, its hint says why', () => {
+  const html = renderToStaticMarkup(
+    <Experiments
+      {...props}
+      evidence={[{...EVIDENCE[0], value: null, valueLabel: null} as Evidence]}
+    />,
+  );
+  assert.match(html, /<span class="m" title="Not measured">—<\/span>/);
 });

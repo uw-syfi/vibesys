@@ -84,6 +84,11 @@ export const DEMO: RunEvent[] = withMockPromptAndTodos(RECORDED);
  * later than the recording's own sequence because the mock todo_update above adds an event. */
 export const LIVE_THROUGH = 233;
 export const FINISHED = DEMO.at(-1)?.sequence ?? 0;
+/** Round 6's judge has finished and the round with it: where a pause requested during the judge
+ * call takes effect. */
+export const ROUND_6_FINISHED =
+  DEMO.find(event => event.type === 'round_finished' && event.round_label === 'round-6')
+    ?.sequence ?? 0;
 /** [mock] The objective and the 950 tok/s baseline the recording's round 1 judge states. */
 export const DEMO_CONTEXT: PerformanceContext = {
   objective_metric: 'median_tok_per_sec',
@@ -180,10 +185,30 @@ interface Edit {
   tool: string;
   before: string;
   after: string;
+  /** The file line the edit starts at: the latest search hit on the file before it, else 1. */
+  start: number;
+}
+
+/** `src/sampler.rs:104:…`, the first line of a search result that names `path`. */
+function hitLine(event: RunEvent, path: string): number | null {
+  const data = event.data;
+  if (data?.kind !== 'tool_result') return null;
+  const output = data.content || (data.payload?.kind === 'command' ? data.payload.stdout : '');
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const line = new RegExp(`^${escaped}:(\\d+):`).exec(output ?? '')?.[1];
+  return line === undefined ? null : Number(line);
+}
+
+function startOf(earlier: readonly RunEvent[], round: number, path: string): number {
+  for (const event of [...earlier].reverse()) {
+    const line = roundOf(event.round_label) === round ? hitLine(event, path) : null;
+    if (line !== null) return line;
+  }
+  return 1;
 }
 
 function editsOf(events: readonly RunEvent[], round: number): Edit[] {
-  return events.flatMap(event => {
+  return events.flatMap((event, index) => {
     const data = event.data;
     if (data?.kind !== 'tool_call' || roundOf(event.round_label) !== round) return [];
     const args = data.args ?? {};
@@ -197,9 +222,34 @@ function editsOf(events: readonly RunEvent[], round: number): Edit[] {
         tool: data.tool,
         before: typeof before === 'string' ? before : '',
         after: typeof after === 'string' ? after : '',
+        start: startOf(events.slice(0, index), round, path),
       },
     ];
   });
+}
+
+/** One edit as a unified hunk: the lines its old and new text share at either end are context. */
+function hunkOf(edit: Edit, shift: number): {text: string; shift: number} {
+  const old = edit.before.replace(/\n$/, '').split('\n');
+  const next = edit.after.replace(/\n$/, '').split('\n');
+  let head = 0;
+  while (head < old.length && head < next.length && old[head] === next[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < old.length - head &&
+    tail < next.length - head &&
+    old[old.length - 1 - tail] === next[next.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+  const rows = [
+    ...old.slice(0, head).map(line => ` ${line}`),
+    ...old.slice(head, old.length - tail).map(line => `-${line}`),
+    ...next.slice(head, next.length - tail).map(line => `+${line}`),
+    ...old.slice(old.length - tail).map(line => ` ${line}`),
+  ];
+  const header = `@@ -${edit.start},${old.length} +${edit.start + shift},${next.length} @@`;
+  return {text: [header, ...rows].join('\n'), shift: shift + next.length - old.length};
 }
 
 export function demoDesign(events: readonly RunEvent[]): DesignRound[] {
@@ -215,8 +265,9 @@ export function demoDesign(events: readonly RunEvent[]): DesignRound[] {
 }
 
 /**
- * Edits become a patch. A file the implementer wrote whole has no prior text in the recording,
- * so the workspace "cannot produce" it (patch null); round 3's patches are marked truncated.
+ * Edits become a patch, one hunk each, positioned at the search hit before the edit. A file the
+ * implementer wrote whole has no prior text in the recording, so the workspace "cannot produce"
+ * it (patch null). Round 3's patch is cut after its first hunk and marked truncated.
  */
 export function demoPatch(
   events: readonly RunEvent[],
@@ -229,17 +280,18 @@ export function demoPatch(
   if (edits.length === 0 || edits.some(edit => edit.tool === 'Write')) {
     return {base, head, path, patch: null, truncated: false};
   }
-  const hunks = edits.map(edit => {
-    const before = edit.before.split('\n');
-    const after = edit.after.split('\n');
-    return [
-      `@@ -1,${before.length} +1,${after.length} @@`,
-      ...before.map(line => `-${line}`),
-      ...after.map(line => `+${line}`),
-    ].join('\n');
-  });
-  const patch = [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...hunks, ''];
-  return {base, head, path, patch: patch.join('\n'), truncated: round === 3};
+  let shift = 0;
+  const hunks = [...edits]
+    .sort((left, right) => left.start - right.start)
+    .map(edit => {
+      const hunk = hunkOf(edit, shift);
+      shift = hunk.shift;
+      return hunk.text;
+    });
+  const truncated = round === 3 && hunks.length > 1;
+  const kept = truncated ? hunks.slice(0, 1) : hunks;
+  const patch = [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...kept, ''];
+  return {base, head, path, patch: patch.join('\n'), truncated};
 }
 
 function demoPerformance(events: readonly RunEvent[]): PerformanceRound[] {
@@ -265,6 +317,8 @@ export interface Gateway {
   /** Appends an event to the run and sends it to every open stream. */
   push(event: Partial<RunEvent> & Pick<RunEvent, 'type'>): void;
   setStatus(status: RunStatus): void;
+  /** Sends the recording's next events, up to and including sequence `through`. */
+  advance(through: number): void;
   requests: GatewayRequest[];
 }
 
@@ -309,8 +363,14 @@ class DemoRun {
   readonly requests: GatewayRequest[] = [];
   sequence: number;
   status: RunStatus;
+  /** The last recorded event sent; pushed events renumber, so this is tracked apart. */
+  played: number;
+  /** Request types answered with an error instead of an acknowledgment. */
+  readonly rejects: ReadonlySet<string>;
 
-  constructor(through: number, status: RunStatus | undefined) {
+  constructor(through: number, status: RunStatus | undefined, rejects: readonly string[]) {
+    this.rejects = new Set(rejects);
+    this.played = through;
     this.events = DEMO.filter(event => (event.sequence ?? 0) <= through);
     this.sequence = this.events.at(-1)?.sequence ?? 0;
     this.status = status ?? (through >= FINISHED ? 'completed' : 'running');
@@ -337,6 +397,14 @@ class DemoRun {
     });
   };
 
+  advance = (through: number): void => {
+    for (const event of DEMO) {
+      const sequence = event.sequence ?? 0;
+      if (sequence > this.played && sequence <= through) this.push(event);
+    }
+    this.played = Math.max(this.played, through);
+  };
+
   /** What the running backend does after acknowledging a command. */
   react(request: GatewayRequest): void {
     if (request.type === 'command.pause') this.setStatus('pausing');
@@ -351,6 +419,18 @@ class DemoRun {
 
   onRequest(ws: WebSocketRoute, request: GatewayRequest): void {
     this.requests.push(request);
+    if (this.rejects.has(request.type)) {
+      ws.send(
+        JSON.stringify({
+          protocol_version: 1,
+          request_id: request.request_id,
+          ok: false,
+          error: 'Command rejected',
+          diagnostic: {code: 'illegal_transition', summary: 'The run refused.', scope: 'request'},
+        }),
+      );
+      return;
+    }
     const snapshot = () => ({run_id: this.runId, sequence: this.sequence, status: this.status});
     const fields = answer(request, this.events, snapshot);
     ws.send(
@@ -384,9 +464,9 @@ class DemoRun {
 
 export async function mockGateway(
   page: Page,
-  options: {through?: number; status?: RunStatus} = {},
+  options: {through?: number; status?: RunStatus; reject?: readonly string[]} = {},
 ): Promise<Gateway> {
-  const run = new DemoRun(options.through ?? LIVE_THROUGH, options.status);
+  const run = new DemoRun(options.through ?? LIVE_THROUGH, options.status, options.reject ?? []);
   await page.routeWebSocket(/\/ws(\?|$)/, ws => {
     ws.onMessage(raw => {
       const request = JSON.parse(String(raw)) as GatewayRequest;
@@ -394,5 +474,10 @@ export async function mockGateway(
       else run.onRequest(ws, request);
     });
   });
-  return {push: run.push, setStatus: run.setStatus, requests: run.requests};
+  return {
+    push: run.push,
+    setStatus: run.setStatus,
+    advance: run.advance,
+    requests: run.requests,
+  };
 }
