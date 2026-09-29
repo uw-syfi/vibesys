@@ -61,6 +61,15 @@ const SCREENS: Screen[] = [
       await page.getByRole('alertdialog').waitFor();
     },
   },
+  {name: 'pane', act: async page => page.getByRole('button', {name: 'Toggle side pane'}).click()},
+  {name: 'collapsed', act: async page => page.getByRole('button', {name: 'Hide sidebar'}).click()},
+  {
+    name: 'ask',
+    act: async page => {
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByRole('tab', {name: 'Ask'}).click();
+    },
+  },
 ];
 
 test.describe('screens', () => {

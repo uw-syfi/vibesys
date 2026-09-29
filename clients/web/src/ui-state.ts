@@ -120,3 +120,16 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       return {...state, experimentsView: action.view};
   }
 }
+
+const TRANSCRIPT_MIN = 560;
+
+/**
+ * Which of the sidebar and the pane fit at `width`: the pane keeps at least its minimum, and the
+ * sidebar yields before the transcript drops below `TRANSCRIPT_MIN` (at 1024 with a pane open).
+ */
+export function frame(width: number, ui: UiState): {sidebar: boolean; paneWidth: number} {
+  const paneWidth =
+    ui.pane === null ? 0 : Math.max(PANE.min, Math.min(ui.paneWidth, width - TRANSCRIPT_MIN));
+  const room = width - paneWidth - (ui.sidebar ? ui.sideWidth : 0);
+  return {sidebar: ui.sidebar && room >= TRANSCRIPT_MIN, paneWidth};
+}

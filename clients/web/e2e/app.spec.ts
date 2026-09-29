@@ -91,3 +91,44 @@ test('stop asks first, names who finishes, and focuses Cancel', async ({page}) =
   await expect(page.locator('.titlebar')).toContainText('Stopping after the current call…');
   expect(gateway.requests.some(request => request.type === 'command.stop')).toBe(true);
 });
+
+test('the pane opens beside the transcript; at 1024 the sidebar yields to it', async ({page}) => {
+  await mockGateway(page);
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
+  await expect(page.getByRole('tab', {name: 'Changes'})).toHaveAttribute('aria-selected', 'true');
+  await expect(rounds(page)).toBeVisible();
+  await page.setViewportSize({width: 1024, height: 900});
+  await expect(rounds(page)).toHaveCount(0);
+  expect((await page.locator('main').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(560);
+  await page.getByRole('button', {name: 'Show sidebar'}).click();
+  await expect(rounds(page)).toBeVisible();
+  await expect(page.getByRole('complementary', {name: 'Run details'})).toHaveCount(0);
+});
+
+test('the sidebar hides and returns, and resizes from the keyboard', async ({page}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  const edge = page.getByRole('separator', {name: 'Resize the sidebar'});
+  await edge.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(edge).toHaveAttribute('aria-valuenow', '292');
+  await page.getByRole('button', {name: 'Hide sidebar'}).click();
+  await expect(rounds(page)).toHaveCount(0);
+  await page.getByRole('button', {name: 'Show sidebar'}).click();
+  await expect(rounds(page)).toBeVisible();
+});
+
+test('Ask and Notes say they are not available yet; Notes is also in the ••• menu', async ({
+  page,
+}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await page.getByRole('button', {name: 'More'}).click();
+  await page.getByRole('menuitem', {name: 'Notes'}).click();
+  const pane = page.getByRole('complementary', {name: 'Run details'});
+  await expect(pane).toContainText('Run notes are not available yet.');
+  await pane.getByRole('tab', {name: 'Ask'}).click();
+  await expect(pane).toContainText('Chat about this run is not available yet.');
+});

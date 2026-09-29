@@ -147,3 +147,21 @@ a.run:hover { background: var(--bg-hover); }
 dialog { color: var(--text-1); }
 dialog.confirm { width: 300px; padding: 14px 14px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-raised); box-shadow: var(--shadow); }
 dialog::backdrop { background: var(--scrim); }
+
+/* right pane and resizing */
+.pane { flex: none; border-left: 1px solid var(--border-subtle); display: flex; flex-direction: column; position: relative; min-width: 0; background: var(--bg-app); }
+.drag { position: absolute; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; touch-action: none; }
+.drag.right { right: -4px; }
+.drag.left { left: -4px; }
+.drag:hover, .drag.on, .drag:focus-visible { background: linear-gradient(90deg, transparent 3px, var(--line) 3px, var(--line) 4px, transparent 4px); outline: none; }
+.tabs { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--border-subtle); }
+.tab { height: 26px; padding: 0 9px; border-radius: 6px; color: var(--text-2); white-space: nowrap; }
+.tab:hover { color: var(--text-1); background: var(--bg-hover); }
+.tab.on { background: var(--bg-selected); color: var(--text-1); font-weight: 500; }
+.tabs .iconbtn { margin-left: auto; }
+.pbody { flex: 1; overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+.phead { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 16px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle); flex: none; }
+.phead .scope { color: var(--text-1); font-weight: 500; }
+.phead .r { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.titlebar > .iconbtn:first-child { margin-left: -10px; }
+.drag { border: 0; margin: 0; height: auto; }

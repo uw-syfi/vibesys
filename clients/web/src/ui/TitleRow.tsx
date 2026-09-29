@@ -1,4 +1,4 @@
-import {Ellipsis, Pause, Play} from 'lucide-react';
+import {Ellipsis, PanelLeft, PanelRight, Pause, Play} from 'lucide-react';
 import {type ReactNode, type RefObject, useEffect, useRef} from 'react';
 import type {RunControl} from '../model.js';
 import type {RetainedText, StatusLine} from '../rounds.js';
@@ -224,5 +224,29 @@ export function MoreMenu({menu, canStop, stopWho, runId, onMenu, onStop, childre
         <StopConfirm who={stopWho} trigger={trigger} onCancel={close} onStop={onStop} />
       ) : null}
     </span>
+  );
+}
+
+export function SidebarToggle({shown, onToggle}: {shown: boolean; onToggle: () => void}) {
+  const label = shown ? 'Hide sidebar' : 'Show sidebar';
+  return (
+    <button type="button" className="iconbtn" title={label} aria-label={label} onClick={onToggle}>
+      <PanelLeft size={16} strokeWidth={1.5} aria-hidden />
+    </button>
+  );
+}
+
+export function PaneToggle({open, onToggle}: {open: boolean; onToggle: () => void}) {
+  return (
+    <button
+      type="button"
+      className={open ? 'iconbtn on' : 'iconbtn'}
+      title="Ask, changes, agents, experiments, notes"
+      aria-label="Toggle side pane"
+      aria-pressed={open}
+      onClick={onToggle}
+    >
+      <PanelRight size={16} strokeWidth={1.5} aria-hidden />
+    </button>
   );
 }

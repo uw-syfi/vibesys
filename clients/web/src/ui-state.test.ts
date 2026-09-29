@@ -1,6 +1,6 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
-import {forRun, INITIAL_UI, PANE, SIDE, uiReducer} from './ui-state.js';
+import {forRun, frame, INITIAL_UI, PANE, SIDE, uiReducer} from './ui-state.js';
 
 test('picking the live round follows it again; another round pins and clears row state', () => {
   const busy = {...INITIAL_UI, expanded: '26', agent: 'x1'};
@@ -76,4 +76,13 @@ test('selection belongs to one run: a replaced run starts clean and keeps the la
   );
   assert.deepEqual([next.pane, next.sideWidth], ['agents', 300]);
   assert.deepEqual(uiReducer(busy, {type: 'run', runId: 'run-2'}), next);
+});
+
+test('the sidebar yields before the transcript drops below 560px', () => {
+  const open = {...INITIAL_UI, pane: 'changes' as const};
+  assert.deepEqual(frame(1440, open), {sidebar: true, paneWidth: 400});
+  assert.deepEqual(frame(1024, open), {sidebar: false, paneWidth: 400});
+  assert.deepEqual(frame(1024, INITIAL_UI), {sidebar: true, paneWidth: 0});
+  assert.deepEqual(frame(900, {...open, paneWidth: 640}), {sidebar: false, paneWidth: 340});
+  assert.deepEqual(frame(1440, {...open, sidebar: false}), {sidebar: false, paneWidth: 400});
 });

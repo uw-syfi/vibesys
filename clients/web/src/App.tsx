@@ -20,11 +20,30 @@ import {
 import type {WorkspaceSession, WorkspaceState} from './session.js';
 import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js';
 import {Banner} from './ui/Banner.js';
+import {Pane, Placeholder} from './ui/Pane.js';
+import {Resizer} from './ui/Resizer.js';
 import {Sidebar} from './ui/Sidebar.js';
 import {SteerComposer} from './ui/SteerComposer.js';
-import {MoreMenu, Retained, RunControlChip, RunStatus, TitleRow} from './ui/TitleRow.js';
+import {
+  MoreMenu,
+  PaneToggle,
+  Retained,
+  RunControlChip,
+  RunStatus,
+  SidebarToggle,
+  TitleRow,
+} from './ui/TitleRow.js';
 import {Transcript, type TranscriptControls} from './ui/Transcript.js';
-import {forRun, INITIAL_UI, type UiAction, type UiState, uiReducer} from './ui-state.js';
+import {
+  forRun,
+  frame,
+  INITIAL_UI,
+  type PaneTab,
+  SIDE,
+  type UiAction,
+  type UiState,
+  uiReducer,
+} from './ui-state.js';
 import './window.css';
 
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
@@ -134,6 +153,15 @@ function useRunUi(runId: string | null): [UiState, Dispatch<UiAction>] {
   return [forRun(stored, runId), dispatch];
 }
 
+function subscribeWidth(notify: () => void): () => void {
+  addEventListener('resize', notify);
+  return () => removeEventListener('resize', notify);
+}
+
+function useWindowWidth(): number {
+  return useSyncExternalStore(subscribeWidth, () => innerWidth);
+}
+
 function transcriptControls(
   state: WorkspaceState,
   ui: UiState,
@@ -187,11 +215,25 @@ function RunSidebar({state, view, ui, dispatch, listing}: SectionProps & {listin
       selected={view.round}
       now={new Date()}
       onRound={round => dispatch({type: 'round', round, live: view.live})}
+      head={<SidebarToggle shown onToggle={() => dispatch({type: 'sidebar', open: false})} />}
+      resizer={
+        <Resizer
+          label="Resize the sidebar"
+          edge="right"
+          value={ui.sideWidth}
+          min={SIDE.min}
+          max={SIDE.max}
+          grow={1}
+          widthAt={clientX => clientX}
+          onChange={width => dispatch({type: 'resize', target: 'side', width})}
+        />
+      }
     />
   );
 }
 
-function RunHeader({state, view, ui, dispatch, session}: SectionProps) {
+function RunHeader(props: SectionProps & {sidebarShown: boolean; onShowSidebar: () => void}) {
+  const {state, view, ui, dispatch, session} = props;
   const error = state.command.error;
   const stop = () => {
     dispatch({type: 'menu', menu: null});
@@ -202,6 +244,11 @@ function RunHeader({state, view, ui, dispatch, session}: SectionProps) {
       title={view.title.title}
       objective={view.title.objective}
       project={view.title.project}
+      leading={
+        props.sidebarShown ? undefined : (
+          <SidebarToggle shown={false} onToggle={props.onShowSidebar} />
+        )
+      }
     >
       <RunStatus line={view.status} />
       {error !== null && error.action !== 'steer' ? (
@@ -222,6 +269,7 @@ function RunHeader({state, view, ui, dispatch, session}: SectionProps) {
         </>
       )}
       <span className="vsep" />
+      <PaneToggle open={ui.pane !== null} onToggle={() => dispatch({type: 'togglePane'})} />
       <MoreMenu
         menu={ui.menu}
         canStop={canStop(state, view)}
@@ -229,7 +277,16 @@ function RunHeader({state, view, ui, dispatch, session}: SectionProps) {
         runId={state.runId}
         onMenu={menu => dispatch({type: 'menu', menu})}
         onStop={stop}
-      />
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="it"
+          onClick={() => dispatch({type: 'pane', pane: 'notes'})}
+        >
+          Notes
+        </button>
+      </MoreMenu>
     </TitleRow>
   );
 }
@@ -267,18 +324,64 @@ function RunComposer({state, view, session}: SectionProps) {
   );
 }
 
+interface PaneHostProps extends SectionProps {
+  tab: PaneTab;
+  width: number;
+  controls: TranscriptControls;
+}
+
+function PaneBody(props: PaneHostProps) {
+  const scope = props.view.round === null ? 'Run' : `Round ${props.view.round}`;
+  switch (props.tab) {
+    case 'ask':
+      return <Placeholder scope="Run" text="Chat about this run is not available yet." />;
+    case 'notes':
+      return <Placeholder scope="Run" text="Run notes are not available yet." />;
+    case 'changes':
+      return <Placeholder scope={scope} text="Not available yet." />;
+    case 'agents':
+      return <Placeholder scope={scope} text="Not available yet." />;
+    case 'experiments':
+      return <Placeholder scope={scope} text="Not available yet." />;
+  }
+}
+
+function RunPane(props: PaneHostProps) {
+  const {dispatch} = props;
+  return (
+    <Pane
+      tab={props.tab}
+      width={props.width}
+      onTab={pane => dispatch({type: 'pane', pane})}
+      onClose={() => dispatch({type: 'pane', pane: null})}
+      onResize={width => dispatch({type: 'resize', target: 'pane', width})}
+    >
+      <PaneBody {...props} />
+    </Pane>
+  );
+}
+
 export function App({session, home}: AppProps) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [ui, dispatch] = useRunUi(state.runId);
   const view = useRunView(state, ui);
   const listing = useHome(home);
   const history = useBackfill(session, state, view.round);
+  const width = useWindowWidth();
+  const layout = frame(width, ui);
   const section: SectionProps = {state, view, ui, dispatch, session};
+  const toggleSidebar = () => {
+    if (layout.sidebar) return dispatch({type: 'sidebar', open: false});
+    dispatch({type: 'sidebar', open: true});
+    // Narrow with a pane open, the sidebar can only return by taking the pane's room.
+    if (!frame(width, {...ui, sidebar: true}).sidebar) dispatch({type: 'pane', pane: null});
+  };
+  const controls = transcriptControls(state, ui, dispatch);
   return (
     <div className="win">
-      <RunSidebar {...section} listing={listing} />
+      {layout.sidebar ? <RunSidebar {...section} listing={listing} /> : null}
       <main className="main">
-        <RunHeader {...section} />
+        <RunHeader {...section} sidebarShown={layout.sidebar} onShowSidebar={toggleSidebar} />
         <Banner
           connection={state.connection}
           connectionError={state.connectionError}
@@ -290,6 +393,9 @@ export function App({session, home}: AppProps) {
         <RunTranscript {...section} history={history} />
         <RunComposer {...section} />
       </main>
+      {ui.pane === null ? null : (
+        <RunPane {...section} tab={ui.pane} width={layout.paneWidth} controls={controls} />
+      )}
     </div>
   );
 }
