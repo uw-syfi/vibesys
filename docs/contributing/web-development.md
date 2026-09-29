@@ -133,3 +133,20 @@ directory), and `--dev-origin http://127.0.0.1:5173` when the Vite dev server pr
 The API contract is `src/entrypoints/web_home/contract.py`; print its JSON Schema with
 `uv run python -m entrypoints.web_home.contract`. Keys saved from the app go to the
 checkout's `.env` (mode 0600); the server never loads that file into its own environment.
+
+## Desktop app
+
+`clients/desktop` is an Electron shell. It starts `vibesys web home` from this checkout and
+opens the app in a native window. Run these from `clients/`:
+
+| Command | What runs |
+| --- | --- |
+| `pnpm desktop` | Vite with hot reload on `http://127.0.0.1:5173`, and the home server with `--dev-origin` for it. Edits under `clients/web` reload in place; main-process and preload edits need a restart. A home server that was already running without `--dev-origin` is reused, and writes from Vite fail until it is restarted. |
+| `pnpm desktop:start` | Builds `clients/web` and the shell, then loads the built app from the home server. |
+| `pnpm --filter @vibesys/desktop test:e2e` | Launches the built app with Playwright on a temporary state home and screenshots the window. Needs `uv`. |
+
+`VIBESYS_HOME_PORT` sets the home server's port (the Vite proxy reads it too).
+`VIBESYS_STATE_HOME` moves the home server's state and the shell's profile; one app runs per
+state home. Quitting stops the home server the app started; run servers keep running and are
+listed again on the next launch. A home server that was already running (for example
+`vibesys web home --open`) is reused and left running. There is no packaged build yet.

@@ -372,5 +372,5 @@ a.it { text-decoration: none; }
    the traffic lights sit over the sidebar head (x 16, centred at y 20), or over the title row
    while the sidebar is hidden, which then starts after them. */
 :root[data-desktop] :is(.sidehead, .titlebar) { -webkit-app-region: drag; user-select: none; }
-:root[data-desktop] :is(.sidehead, .titlebar) :is(button, a, input, select, textarea, [role='menu'], [tabindex]) { -webkit-app-region: no-drag; }
+:root[data-desktop] :is(.sidehead, .titlebar) :is(button, a, input, select, textarea, .pop, [tabindex]) { -webkit-app-region: no-drag; }
 :root[data-desktop='darwin'] .win:not(:has(> .side)) .titlebar { padding-left: 80px; }
