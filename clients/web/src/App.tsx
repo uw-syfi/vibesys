@@ -20,6 +20,7 @@ import {
 import type {WorkspaceSession, WorkspaceState} from './session.js';
 import {type RoundTranscript, roundTranscript, toolDetail} from './transcript.js';
 import {Banner} from './ui/Banner.js';
+import {ChangesTab} from './ui/Changes.js';
 import {Pane, Placeholder} from './ui/Pane.js';
 import {Resizer} from './ui/Resizer.js';
 import {Sidebar} from './ui/Sidebar.js';
@@ -330,6 +331,20 @@ interface PaneHostProps extends SectionProps {
   controls: TranscriptControls;
 }
 
+function changesTab(props: PaneHostProps) {
+  const design = props.state.queries.design;
+  return (
+    <ChangesTab
+      row={props.view.row}
+      design={design.response?.design?.find(entry => entry.round === props.view.round)}
+      loading={design.response === null && design.error === null}
+      error={design.error}
+      onRetry={() => void props.session.load('design')}
+      loadPatch={props.session.designPatch}
+    />
+  );
+}
+
 function PaneBody(props: PaneHostProps) {
   const scope = props.view.round === null ? 'Run' : `Round ${props.view.round}`;
   switch (props.tab) {
@@ -338,7 +353,7 @@ function PaneBody(props: PaneHostProps) {
     case 'notes':
       return <Placeholder scope="Run" text="Run notes are not available yet." />;
     case 'changes':
-      return <Placeholder scope={scope} text="Not available yet." />;
+      return changesTab(props);
     case 'agents':
       return <Placeholder scope={scope} text="Not available yet." />;
     case 'experiments':

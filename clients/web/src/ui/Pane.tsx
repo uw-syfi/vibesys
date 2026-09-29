@@ -66,7 +66,7 @@ export function Pane({tab, width, onTab, onClose, onResize, children}: PaneProps
 }
 
 /** A tab's first row: its scope ("Round N" or "Run"), then what it shows. */
-function PaneHead({scope, children}: {scope: string; children?: ReactNode}) {
+export function PaneHead({scope, children}: {scope: string; children?: ReactNode}) {
   return (
     <div className="phead">
       <span className="scope">{scope}</span>

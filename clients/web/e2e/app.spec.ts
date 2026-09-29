@@ -132,3 +132,24 @@ test('Ask and Notes say they are not available yet; Notes is also in the ••�
   await pane.getByRole('tab', {name: 'Ask'}).click();
   await expect(pane).toContainText('Chat about this run is not available yet.');
 });
+
+test('changes: a patch, one the repository cannot produce, a truncated one, a running round', async ({
+  page,
+}) => {
+  await mockGateway(page);
+  await page.goto('/?token=e2e');
+  await round(page, 4).click();
+  await page.getByRole('button', {name: 'Toggle side pane'}).click();
+  const pane = page.getByRole('complementary', {name: 'Run details'});
+  await expect(pane).toContainText('against the round 2 checkpoint');
+  await expect(
+    pane.getByRole('region', {name: 'src/batch.rs'}).locator('.diff .add').first(),
+  ).toBeVisible();
+  await expect(pane.getByRole('region', {name: 'src/kv_cache.rs'})).toContainText(
+    'could not produce this patch',
+  );
+  await round(page, 3).click();
+  await expect(pane).toContainText("Patch truncated at the server's size bound.");
+  await round(page, 6).click();
+  await expect(pane).toContainText('Changes appear when round 6 finishes.');
+});

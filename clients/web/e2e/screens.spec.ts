@@ -70,6 +70,36 @@ const SCREENS: Screen[] = [
       await page.getByRole('tab', {name: 'Ask'}).click();
     },
   },
+  {
+    name: 'changes',
+    act: async page => {
+      await runs(page)
+        .getByRole('button', {name: /^Round 1,/})
+        .click();
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.locator('.pbody .diff').first().waitFor();
+    },
+  },
+  {
+    name: 'changes-r4',
+    act: async page => {
+      await runs(page)
+        .getByRole('button', {name: /^Round 4,/})
+        .click();
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByText('could not produce this patch').waitFor();
+    },
+  },
+  {
+    name: 'changes-r3',
+    act: async page => {
+      await runs(page)
+        .getByRole('button', {name: /^Round 3,/})
+        .click();
+      await page.getByRole('button', {name: 'Toggle side pane'}).click();
+      await page.getByText("Patch truncated at the server's size bound.").waitFor();
+    },
+  },
 ];
 
 test.describe('screens', () => {
