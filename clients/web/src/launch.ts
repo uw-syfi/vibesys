@@ -154,21 +154,37 @@ export function locationText(root: string | null, location: FileLocation): strin
     location.path.startsWith('/') || root === null ? location.path : `${root}/${location.path}`;
   return `${path}:${location.line}${location.column === null ? '' : `:${location.column}`}`;
 }
+
 const POLL_MS = 1_000;
 /** Two minutes of polls; a run server that has not attached by then is treated as stuck. */
 const MAX_POLLS = 120;
 const IDLE: LaunchState = {kind: 'idle'};
-const pause = (ms: number) =>
+const sleep = (ms: number) =>
   new Promise<void>(resolve => {
     setTimeout(resolve, ms);
   });
 
-/** Polls the project's runs until the launched run attaches, fails, or the page leaves. */
-async function follow(
+/** One poll; a home server that did not answer leaves the launch waiting. */
+async function poll(client: HomeClient, projectId: string, runId: string): Promise<LaunchPhase> {
+  try {
+    const {runs} = await client.runs(projectId);
+    return launchPhase(runs.find(row => row.run_id === runId));
+  } catch (error) {
+    if (error instanceof HomeError && error.code === 'network') return WAITING;
+    throw error;
+  }
+}
+
+/**
+ * Polls the project's runs until the launched run attaches, fails, the cap runs out, or the page
+ * leaves. `pause` waits between polls; tests pass one that resolves at once.
+ */
+export async function followLaunch(
   client: HomeClient,
   projectId: string,
   result: LaunchResult,
   alive: () => boolean,
+  pause: (ms: number) => Promise<void> = sleep,
 ): Promise<LaunchPhase> {
   let phase = gatewayPhase(result.gateway, null);
   for (let polls = 0; phase.kind === 'waiting' && alive(); polls += 1) {
@@ -179,8 +195,7 @@ async function follow(
     }
     await pause(POLL_MS);
     if (!alive()) break;
-    const {runs} = await client.runs(projectId);
-    phase = launchPhase(runs.find(row => row.run_id === result.run_id));
+    phase = await poll(client, projectId, result.run_id);
   }
   return phase;
 }
@@ -215,7 +230,7 @@ export function useLaunch(client: HomeClient, token: string): Launch {
       send()
         .then(async result => {
           if (mounted.current) setState({kind: 'starting', runId: result.run_id});
-          const phase = await follow(client, projectId, result, () => mounted.current);
+          const phase = await followLaunch(client, projectId, result, () => mounted.current);
           if (phase.kind === 'ready')
             window.location.assign(runHref(token, projectId, phase.websocketUrl));
           if (phase.kind === 'failed') settle({kind: 'failed', failure: phase.failure});

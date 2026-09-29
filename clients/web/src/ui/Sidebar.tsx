@@ -1,4 +1,4 @@
-import {Check, Pause, Plus, Square, Undo2} from 'lucide-react';
+import {Check, Pause, Plus, Search, Square, Undo2} from 'lucide-react';
 import type {ReactNode} from 'react';
 import {type HomeRun, type ProjectSection, relativeTime} from '../home.js';
 import {type RoundRow, type RunSummary, signed} from '../rounds.js';
@@ -205,6 +205,17 @@ function OtherRun({run, now}: {run: HomeRun; now: Date}) {
     <a className="run" href={run.url} title={runHint(run)}>
       {body}
     </a>
+  );
+}
+
+/** Opens the ⌘K palette. */
+export function SearchRow({onOpen}: {onOpen: () => void}) {
+  return (
+    <button type="button" className="nav" onClick={onOpen}>
+      <Search size={16} strokeWidth={1.5} aria-hidden />
+      Search and commands
+      <span className="kbd">⌘K</span>
+    </button>
   );
 }
 

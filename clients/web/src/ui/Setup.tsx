@@ -1,6 +1,6 @@
 /** New run form rows (mockup #setup). Rendering only: `SetupView` owns the state and the API calls. */
-import {Check, ChevronRight} from 'lucide-react';
-import type {ReactNode} from 'react';
+import {Check, ChevronDown, ChevronRight} from 'lucide-react';
+import type {ReactNode, SelectHTMLAttributes} from 'react';
 import {titleCase} from '../derive.js';
 import type {Catalog, ComputeBackend, OuterLoop, TaskDetail, TaskSummary} from '../home-api.js';
 import {
@@ -57,6 +57,16 @@ export function Hint({tone, children}: {tone: Tone; children: ReactNode}) {
       {tone === 'ok' ? <Check size={12} strokeWidth={1.75} className="ok" aria-hidden /> : null}
       {children}
     </div>
+  );
+}
+
+/** A native select drawn as a field, with the form's own chevron. */
+function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className="sel">
+      <select {...props} />
+      <ChevronDown size={14} strokeWidth={1.5} aria-hidden />
+    </span>
   );
 }
 
@@ -155,7 +165,7 @@ function TaskSelect({
   onTask,
 }: Omit<TaskRowProps, 'detail' | 'onEdit'> & {className: string}) {
   return (
-    <select
+    <Select
       id="f-task"
       className={className}
       value={form.task ?? ''}
@@ -176,7 +186,7 @@ function TaskSelect({
         </option>
       ))}
       <option value={NEW_TASK}>New task…</option>
-    </select>
+    </Select>
   );
 }
 
@@ -221,7 +231,10 @@ export function TaskRow({form, tasks, detail, disabled, onTask, onEdit}: TaskRow
           {detail.objective}
         </span>
         <span className="m">
-          <span className="mono">{detail.benchmark_command}</span>, {resultText(detail)}
+          <span className="mono" title={detail.benchmark_command}>
+            {detail.benchmark_command}
+          </span>
+          , <span className="nw">{resultText(detail)}</span>
         </span>
         <TaskAction detail={detail} onEdit={onEdit} />
       </div>
@@ -268,9 +281,8 @@ export interface ModelRowProps {
 export function ModelRow({catalog, form, onProvider, onModel, children}: ModelRowProps) {
   return (
     <Row label="Model" htmlFor="f-model">
-      <div className="row2">
+      <div className="fld model">
         <select
-          className="fld provider"
           aria-label="Provider"
           value={form.provider}
           onChange={event => onProvider(event.target.value)}
@@ -283,7 +295,6 @@ export function ModelRow({catalog, form, onProvider, onModel, children}: ModelRo
         </select>
         <input
           id="f-model"
-          className="fld mono"
           list="models"
           value={form.model}
           placeholder="Model name"
@@ -291,6 +302,7 @@ export function ModelRow({catalog, form, onProvider, onModel, children}: ModelRo
           autoComplete="off"
           onChange={event => onModel(event.target.value)}
         />
+        <ChevronDown size={14} strokeWidth={1.5} aria-hidden />
         <datalist id="models">
           {suggestedModels(catalog, form.provider).map(model => (
             <option key={model} value={model} />
@@ -360,7 +372,7 @@ export function Advanced({catalog, form, effort, onLoop, onChange}: AdvancedProp
   return (
     <Disclosure summary="Advanced">
       <Row label="Outer loop" htmlFor="f-loop">
-        <select
+        <Select
           id="f-loop"
           className="fld"
           value={form.loop}
@@ -371,10 +383,10 @@ export function Advanced({catalog, form, effort, onLoop, onChange}: AdvancedProp
               {titleCase(loop.id)}
             </option>
           ))}
-        </select>
+        </Select>
       </Row>
       <Row label="Compute" htmlFor="f-compute">
-        <select
+        <Select
           id="f-compute"
           className="fld"
           value={form.compute}
@@ -391,10 +403,10 @@ export function Advanced({catalog, form, effort, onLoop, onChange}: AdvancedProp
               {COMPUTE[backend]}
             </option>
           ))}
-        </select>
+        </Select>
       </Row>
       <Row label="Agent driver" htmlFor="f-driver">
-        <select
+        <Select
           id="f-driver"
           className="fld"
           value={form.driver ?? ''}
@@ -410,7 +422,7 @@ export function Advanced({catalog, form, effort, onLoop, onChange}: AdvancedProp
               {titleCase(option.driver)}
             </option>
           ))}
-        </select>
+        </Select>
       </Row>
       {effort ? (
         <Row label="Reasoning" htmlFor="f-effort">

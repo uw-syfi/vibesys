@@ -1,7 +1,16 @@
 import {expect, type Page, test} from '@playwright/test';
 import {runHref} from '../src/route.js';
 import {mockGateway} from './gateway.js';
-import {FINISHED_RUN, GATEWAY_WS, HOME, mockHome, OTHER_ROOT, PROJECT_ID, ROOT} from './home.js';
+import {
+  type FakeHome,
+  FINISHED_RUN,
+  GATEWAY_WS,
+  HOME,
+  mockHome,
+  OTHER_ROOT,
+  PROJECT_ID,
+  ROOT,
+} from './home.js';
 
 const sidebar = (page: Page) => page.getByRole('navigation', {name: 'Runs'});
 
@@ -73,7 +82,7 @@ test("a gateway's own page, whose origin has no home API, still opens its run", 
 });
 
 const NEW = `${HOME}#new`;
-const posts = (home: {requests: {method: string; path: string}[]}, suffix: string) =>
+const posts = (home: FakeHome, suffix: string) =>
   home.requests.filter(request => request.method === 'POST' && request.path.endsWith(suffix));
 
 test('a ready folder with a saved task starts a run and opens it once it attaches', async ({
@@ -149,4 +158,21 @@ test('a slow check of an older folder never replaces a newer one', async ({page}
   await expect(page.getByText('No tasks yet. Create one below.')).toBeVisible();
   await expect(page.getByText('Git repository, working tree clean')).toHaveCount(0);
   await expect(folder).toHaveValue(OTHER_ROOT);
+});
+
+test('the home palette opens from its sidebar row and from ⌘K, and opens a run', async ({page}) => {
+  await mockHome(page);
+  await page.goto(HOME);
+  await sidebar(page)
+    .getByRole('button', {name: /Search and commands/})
+    .click();
+  const palette = page.getByRole('dialog', {name: 'Search and commands'});
+  await expect(palette.getByRole('option', {name: /New run/})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await page.locator('.titlebar').click();
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('prefill');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(`/?token=home#open=${PROJECT_ID}/${FINISHED_RUN}`);
 });

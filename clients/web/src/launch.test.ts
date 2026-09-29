@@ -1,7 +1,8 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
-import {type Gateway, HomeError, type RunRow} from './home-api.js';
+import {type Gateway, HomeError, homeClient, type RunRow} from './home-api.js';
 import {
+  followLaunch,
   gatewayPhase,
   launchError,
   launchLine,
@@ -120,4 +121,53 @@ test('stderr lines split into text and file locations (Rust and Python forms)', 
     '/Users/me/src/llm-serve/benches/decode.rs:41:14',
   );
   assert.equal(locationText(null, relative), 'benches/decode.rs:41:14');
+});
+
+const STARTING = {run_id: 'r1', gateway: gateway('starting')};
+const now = async () => undefined;
+
+test('a launch that never attaches settles as failed after 120 polls', async () => {
+  let polls = 0;
+  const client = homeClient('t', async () => {
+    polls += 1;
+    return Response.json({runs: []});
+  });
+  const phase = await followLaunch(client, 'p', STARTING, () => true, now);
+  assert.equal(phase.kind, 'failed');
+  assert.equal(polls, 120);
+});
+
+test('a poll the home server did not answer keeps waiting; the next one attaches', async () => {
+  const replies: Array<() => Response> = [
+    () => {
+      throw new TypeError('Failed to fetch');
+    },
+    () => Response.json({runs: [row('live', {websocket_url: 'ws://gw'})]}),
+  ];
+  const client = homeClient('t', async () => {
+    const reply = replies.shift();
+    assert.ok(reply, 'polled after the run attached');
+    return reply();
+  });
+  assert.deepEqual(await followLaunch(client, 'p', STARTING, () => true, now), {
+    kind: 'ready',
+    websocketUrl: 'ws://gw',
+  });
+});
+
+test('a refused poll ends the launch; a page that left stops polling', async () => {
+  const refused = homeClient('t', async () =>
+    Response.json({error: {code: 'unauthorized', message: 'no', details: null}}, {status: 401}),
+  );
+  await assert.rejects(
+    followLaunch(refused, 'p', STARTING, () => true, now),
+    HomeError,
+  );
+  let polls = 0;
+  const counted = homeClient('t', async () => {
+    polls += 1;
+    return Response.json({runs: []});
+  });
+  assert.equal((await followLaunch(counted, 'p', STARTING, () => polls < 3, now)).kind, 'waiting');
+  assert.equal(polls, 3);
 });

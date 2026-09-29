@@ -1,4 +1,4 @@
-/** Hooks both windows share: the sidebar's listing and the New run shortcut. */
+/** Hooks both windows share: the sidebar's listing and the New run and palette shortcuts. */
 import {useEffect, useState} from 'react';
 import {EMPTY_LISTING, type HomeApi, type Listing, loadListing} from './home.js';
 
@@ -32,4 +32,18 @@ export function useNewRunShortcut(href: string | null): void {
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
   }, [href]);
+}
+
+/** ⌘K (Ctrl+K elsewhere) opens the palette; an open dialog (the palette, a confirmation) keeps the keyboard. */
+export function usePaletteShortcut(open: () => void): void {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      if (document.querySelector('dialog[open], [role="alertdialog"]') !== null) return;
+      open();
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [open]);
 }

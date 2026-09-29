@@ -1,4 +1,5 @@
 /** The ⌘K palette: every item is a control that is also visible somewhere in the window. */
+import type {ProjectSection} from './home.js';
 import type {RunControl} from './model.js';
 import type {RoundRow} from './rounds.js';
 import type {PaneTab, UiAction} from './ui-state.js';
@@ -10,7 +11,8 @@ export type Intent =
   | {kind: 'steer'}
   | {kind: 'sidebar'}
   | {kind: 'reveal'; key: string; turn: string}
-  | {kind: 'newRun'};
+  | {kind: 'newRun'}
+  | {kind: 'open'; href: string};
 
 export interface PaletteItem {
   id: string;
@@ -140,6 +142,27 @@ function agentItems(input: PaletteInput): PaletteItem[] {
 
 export function paletteItems(input: PaletteInput): PaletteItem[] {
   return [...runItems(input), ...goToItems(input), ...agentItems(input)];
+}
+
+/** The home page's palette: New run (unless it is open) and every run the sidebar links. */
+export function homePaletteItems(
+  sections: readonly ProjectSection[],
+  newRun: boolean,
+): PaletteItem[] {
+  const runs = sections.flatMap(section =>
+    section.runs.flatMap(run =>
+      run.url === null
+        ? []
+        : [
+            item(`open-${run.projectId}-${run.id}`, 'Go to', run.title, section.name, {
+              kind: 'open',
+              href: run.url,
+            }),
+          ],
+    ),
+  );
+  const create = {...item('run-new', 'Run', 'New run', '', {kind: 'newRun'}), keys: '⌘N'};
+  return newRun ? [create, ...runs] : runs;
 }
 
 export function filterPalette(items: readonly PaletteItem[], query: string): PaletteItem[] {

@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import {renderToStaticMarkup} from 'react-dom/server';
 import type {AuthStatus, Catalog, TaskDetail, TaskSummary} from '../home-api.js';
 import {initialForm, NEW_TASK, withTask} from '../setup.js';
-import {Advanced, FolderRow, Roles, SetupFooter, TaskRow} from './Setup.js';
+import {Advanced, FolderRow, ModelRow, Roles, SetupFooter, TaskRow} from './Setup.js';
 
 const load = (name: string): unknown =>
   JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf8'));
@@ -69,7 +69,7 @@ test('a saved task is a card whose title picks the task; read-only tasks say why
       onEdit={none}
     />,
   );
-  assert.match(html, /<div class="summary"><select id="f-task" class="t">/);
+  assert.match(html, /<div class="summary"><span class="sel"><select id="f-task" class="t">/);
   assert.match(
     html,
     /<option value="broken" disabled="" title="bad key">broken \(invalid\)<\/option>/,
@@ -77,7 +77,7 @@ test('a saved task is a card whose title picks the task; read-only tasks say why
   assert.match(html, /<option value="\+new">New task…<\/option>/);
   assert.match(
     html,
-    /<span class="mono">cargo bench --bench decode<\/span>, median_tok_per_sec, higher is better/,
+    />cargo bench --bench decode<\/span>, <span class="nw">median_tok_per_sec, higher is better<\/span>/,
   );
   assert.match(html, />Edit<\/button>/);
   const readOnly = renderToStaticMarkup(
@@ -184,4 +184,13 @@ test('the footer lists blockers as links; busy or blocked disables Start', () =>
     />,
   );
   assert.match(ready, /<button type="button" class="btn primary">Start run<\/button>/);
+});
+
+test('provider and model read as one field', () => {
+  const html = renderToStaticMarkup(
+    <ModelRow catalog={CATALOG} form={FORM} onProvider={none} onModel={none} />,
+  );
+  assert.match(html, /<div class="fld model"><select aria-label="Provider">/);
+  assert.match(html, /<input id="f-model" list="models" placeholder="Model name"/);
+  assert.equal(html.match(/<svg/g)?.length, 1);
 });

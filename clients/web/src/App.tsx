@@ -2,7 +2,6 @@
 
 import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
-import {Search} from 'lucide-react';
 import {
   type Dispatch,
   useCallback,
@@ -13,7 +12,7 @@ import {
 } from 'react';
 import {attachNote, latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
-import {useHome, useNewRunShortcut} from './home-hooks.js';
+import {useHome, useNewRunShortcut, usePaletteShortcut} from './home-hooks.js';
 import {type Intent, type PaletteInput, paletteItems} from './palette.js';
 import {
   type RetainedText,
@@ -44,7 +43,7 @@ import {ExperimentsTab} from './ui/Experiments.js';
 import {Palette} from './ui/Palette.js';
 import {Pane, Placeholder} from './ui/Pane.js';
 import {Resizer} from './ui/Resizer.js';
-import {NewRunRow, Sidebar} from './ui/Sidebar.js';
+import {NewRunRow, SearchRow, Sidebar} from './ui/Sidebar.js';
 import {SteerComposer} from './ui/SteerComposer.js';
 import {
   MoreMenu,
@@ -165,21 +164,6 @@ function useWindowWidth(): number {
   return useSyncExternalStore(subscribeWidth, () => innerWidth);
 }
 
-function usePaletteShortcut(dispatch: Dispatch<UiAction>): void {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        // An open dialog (the palette, the Stop confirmation) keeps the keyboard.
-        if (document.querySelector('dialog[open], [role="alertdialog"]') !== null) return;
-        dispatch({type: 'palette', open: true});
-      }
-    };
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, [dispatch]);
-}
-
 function transcriptControls(
   state: WorkspaceState,
   ui: UiState,
@@ -251,15 +235,7 @@ function RunSidebar({
       nav={
         <>
           {links === null ? null : <NewRunRow href={links.newRun} on={false} />}
-          <button
-            type="button"
-            className="nav"
-            onClick={() => dispatch({type: 'palette', open: true})}
-          >
-            <Search size={16} strokeWidth={1.5} aria-hidden />
-            Search and commands
-            <span className="kbd">⌘K</span>
-          </button>
+          <SearchRow onOpen={() => dispatch({type: 'palette', open: true})} />
         </>
       }
       resizer={
@@ -514,6 +490,9 @@ function runIntent(intent: Intent, context: IntentContext): void {
     case 'newRun':
       if (context.links !== null) window.location.assign(context.links.newRun);
       return;
+    case 'open':
+      window.location.assign(intent.href);
+      return;
   }
 }
 
@@ -555,7 +534,7 @@ export function App({session, home, links}: AppProps) {
   const view = useRunView(state, ui);
   const listing = useHome(home);
   const history = useBackfill(session, state, view.round);
-  usePaletteShortcut(dispatch);
+  usePaletteShortcut(useCallback(() => dispatch({type: 'palette', open: true}), [dispatch]));
   useNewRunShortcut(links?.newRun ?? null);
   const width = useWindowWidth();
   const layout = frame(width, ui);

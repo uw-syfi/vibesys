@@ -1,13 +1,15 @@
 /** The home page: every project's runs in the sidebar, and the view the URL hash names. */
 import {initialCoreState} from '@vibesys/core-state';
-import {useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {httpHomeApi, sidebarSections} from './home.js';
 import type {HomeClient} from './home-api.js';
-import {useHome, useNewRunShortcut} from './home-hooks.js';
+import {useHome, useNewRunShortcut, usePaletteShortcut} from './home-hooks.js';
+import {homePaletteItems, type PaletteItem} from './palette.js';
 import {runSummary} from './rounds.js';
 import {type HomeView, homeHref, homeView} from './route.js';
 import {SetupView} from './SetupView.js';
-import {NewRunRow, Sidebar} from './ui/Sidebar.js';
+import {Palette} from './ui/Palette.js';
+import {NewRunRow, SearchRow, Sidebar} from './ui/Sidebar.js';
 import {SIDE} from './ui-state.js';
 import './window.css';
 
@@ -53,21 +55,42 @@ export function HomeWindow({client, token}: HomeWindowProps) {
   const view = useHashView();
   const newRun = homeHref(token, {kind: 'new'});
   useNewRunShortcut(newRun);
+  const [palette, setPalette] = useState(false);
+  const openPalette = useCallback(() => setPalette(true), []);
+  usePaletteShortcut(openPalette);
+  const sections = sidebarSections(listing.projects, listing.runs, null);
+  const onRun = ({intent}: PaletteItem) => {
+    setPalette(false);
+    if (intent.kind === 'newRun') window.location.assign(newRun);
+    if (intent.kind === 'open') window.location.assign(intent.href);
+  };
   return (
     <div className="win">
       <Sidebar
         width={SIDE.initial}
-        sections={sidebarSections(listing.projects, listing.runs, null)}
+        sections={sections}
         current={null}
         summary={NO_ROUNDS}
         selected={null}
         now={new Date()}
         onRound={() => undefined}
-        nav={<NewRunRow href={newRun} on={view.kind === 'new'} />}
+        nav={
+          <>
+            <NewRunRow href={newRun} on={view.kind === 'new'} />
+            <SearchRow onOpen={openPalette} />
+          </>
+        }
       />
       <main className="main">
         <HomeMain view={view} client={client} token={token} />
       </main>
+      {palette ? (
+        <Palette
+          items={homePaletteItems(sections, view.kind !== 'new')}
+          onRun={onRun}
+          onClose={() => setPalette(false)}
+        />
+      ) : null}
     </div>
   );
 }

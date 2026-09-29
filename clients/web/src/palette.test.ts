@@ -1,7 +1,7 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
 import type {RunControl} from './model.js';
-import {filterPalette, type PaletteInput, paletteItems} from './palette.js';
+import {filterPalette, homePaletteItems, type PaletteInput, paletteItems} from './palette.js';
 import type {RoundRow} from './rounds.js';
 
 const row = (round: number, title: string): RoundRow => ({
@@ -112,4 +112,32 @@ test('New run is offered with its shortcut only when the sidebar shows it', () =
     },
   );
   assert.equal(labels(BASE).includes('Run: New run'), false);
+});
+
+test('the home palette: New run unless it is open, and every run the sidebar links', () => {
+  const run = (id: string, url: string | null) => ({
+    id,
+    projectId: 'p1',
+    title: `Run ${id}`,
+    gateway: 'none' as const,
+    outcome: 'completed' as const,
+    updatedAt: '2026-09-28T12:00:00Z',
+    url,
+  });
+  const sections = [
+    {id: 'p1', name: 'llm-serve', runs: [run('a', '/?token=h#open=p1/a'), run('b', null)]},
+  ];
+  const items = homePaletteItems(sections, true);
+  assert.deepEqual(
+    items.map(entry => [entry.label, entry.detail, entry.keys]),
+    [
+      ['New run', '', '⌘N'],
+      ['Run a', 'llm-serve', undefined],
+    ],
+  );
+  assert.deepEqual(items[1]?.intent, {kind: 'open', href: '/?token=h#open=p1/a'});
+  assert.deepEqual(
+    homePaletteItems(sections, false).map(entry => entry.label),
+    ['Run a'],
+  );
 });

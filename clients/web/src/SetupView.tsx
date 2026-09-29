@@ -272,7 +272,7 @@ function NewRun({client, token, data}: NewRunProps) {
             onCheck={() => folder.check(form.path)}
           />
           <TaskRow
-            form={form}
+            form={checked}
             tasks={tasks ?? []}
             detail={shown}
             disabled={project === null}
