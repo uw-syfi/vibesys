@@ -1,5 +1,13 @@
 import {Ellipsis, PanelLeft, PanelRight, Pause, Play} from 'lucide-react';
-import {type ReactNode, type RefObject, useEffect, useRef, useState} from 'react';
+import {
+  createContext,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {copyText} from '../clipboard.js';
 import type {RunControl} from '../model.js';
 import type {RetainedText, StatusLine} from '../rounds.js';
@@ -13,6 +21,19 @@ export interface TitleRowProps {
   /** Before the title: the Show sidebar button while the sidebar is hidden. */
   leading?: ReactNode;
   children: ReactNode;
+}
+
+/** Before a home page's title: the Show sidebar button while the sidebar is hidden. */
+export const TitleLead = createContext<ReactNode>(null);
+
+/** A home page's title row (empty, New run, reopen, resume). */
+export function Titlebar({children}: {children?: ReactNode}) {
+  return (
+    <header className="titlebar">
+      {useContext(TitleLead)}
+      {children}
+    </header>
+  );
 }
 
 /** The run's name on the left, its status and controls on the right. */

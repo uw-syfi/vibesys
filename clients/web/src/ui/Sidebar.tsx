@@ -71,6 +71,8 @@ export interface SidebarProps {
   sections: ProjectSection[];
   /** The page's own run: it lists its rounds. */
   current: string | null;
+  /** Another run the page is opening or resuming: highlighted. */
+  selectedRun?: string | null;
   summary: RunSummary;
   /** A line under the open run's rounds, in place of the planned count (the project has not attached). */
   note?: string | null;
@@ -88,6 +90,7 @@ export function Sidebar({
   width,
   sections,
   current,
+  selectedRun = null,
   summary,
   note = null,
   selected,
@@ -117,7 +120,7 @@ export function Sidebar({
                   onRound={onRound}
                 />
               ) : (
-                <OtherRun key={run.id} run={run} now={now} />
+                <OtherRun key={run.id} run={run} now={now} on={run.id === selectedRun} />
               ),
             )}
           </section>
@@ -186,7 +189,9 @@ function runHint(run: HomeRun): string {
     : `${run.title}\nGateway: ${run.gateway.replaceAll('_', ' ')}`;
 }
 
-function OtherRun({run, now}: {run: HomeRun; now: Date}) {
+function OtherRun({run, now, on}: {run: HomeRun; now: Date; on: boolean}) {
+  const className = on ? 'run sel' : 'run';
+  const current = on ? 'page' : undefined;
   const body = (
     <>
       <RunGlyph outcome={run.outcome} />
@@ -196,13 +201,17 @@ function OtherRun({run, now}: {run: HomeRun; now: Date}) {
   );
   if (run.url === null) {
     return (
-      <div className="run" title={`${runHint(run)}\nNot reachable from this page`}>
+      <div
+        className={className}
+        aria-current={current}
+        title={`${runHint(run)}\nNot reachable from this page`}
+      >
         {body}
       </div>
     );
   }
   return (
-    <a className="run" href={run.url} title={runHint(run)}>
+    <a className={className} aria-current={current} href={run.url} title={runHint(run)}>
       {body}
     </a>
   );

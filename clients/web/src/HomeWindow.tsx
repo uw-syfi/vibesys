@@ -10,7 +10,9 @@ import {runSummary} from './rounds.js';
 import {type HomeView, homeHref, homeView} from './route.js';
 import {SetupView} from './SetupView.js';
 import {Palette} from './ui/Palette.js';
+import {Resizer} from './ui/Resizer.js';
 import {NewRunRow, SearchRow, Sidebar} from './ui/Sidebar.js';
+import {SidebarToggle, Titlebar, TitleLead} from './ui/TitleRow.js';
 import {SIDE} from './ui-state.js';
 import './window.css';
 
@@ -30,7 +32,7 @@ function useHashView(): HomeView {
 function EmptyHome() {
   return (
     <>
-      <header className="titlebar" />
+      <Titlebar />
       <p className="empty">Select a run, or start one with ⌘N</p>
     </>
   );
@@ -88,6 +90,10 @@ export function HomeWindow({client, token}: HomeWindowProps) {
   const openPalette = useCallback(() => setPalette(true), []);
   usePaletteShortcut(openPalette);
   const sections = sidebarSections(listing.projects, listing.runs, null);
+  // As in the run window: the sidebar hides and resizes. Home has no pane, so it always fits.
+  const [sidebar, setSidebar] = useState(true);
+  const [sideWidth, setSideWidth] = useState<number>(SIDE.initial);
+  const shownRun = view.kind === 'open' || view.kind === 'resume' ? view.runId : null;
   const onRun = ({intent}: PaletteItem) => {
     setPalette(false);
     if (intent.kind === 'newRun') window.location.assign(newRun);
@@ -95,23 +101,43 @@ export function HomeWindow({client, token}: HomeWindowProps) {
   };
   return (
     <div className="win">
-      <Sidebar
-        width={SIDE.initial}
-        sections={sections}
-        current={null}
-        summary={NO_ROUNDS}
-        selected={null}
-        now={new Date()}
-        onRound={() => undefined}
-        nav={
-          <>
-            <NewRunRow href={newRun} on={view.kind === 'new'} />
-            <SearchRow onOpen={openPalette} />
-          </>
-        }
-      />
+      {sidebar ? (
+        <Sidebar
+          width={sideWidth}
+          sections={sections}
+          current={null}
+          selectedRun={shownRun}
+          summary={NO_ROUNDS}
+          selected={null}
+          now={new Date()}
+          onRound={() => undefined}
+          head={<SidebarToggle shown onToggle={() => setSidebar(false)} />}
+          nav={
+            <>
+              <NewRunRow href={newRun} on={view.kind === 'new'} />
+              <SearchRow onOpen={openPalette} />
+            </>
+          }
+          resizer={
+            <Resizer
+              label="Resize the sidebar"
+              edge="right"
+              value={sideWidth}
+              min={SIDE.min}
+              max={SIDE.max}
+              grow={1}
+              widthAt={clientX => clientX}
+              onChange={width => setSideWidth(Math.min(SIDE.max, Math.max(SIDE.min, width)))}
+            />
+          }
+        />
+      ) : null}
       <main className="main">
-        <HomeMain view={view} client={client} token={token} listing={listing} />
+        <TitleLead.Provider
+          value={sidebar ? null : <SidebarToggle shown={false} onToggle={() => setSidebar(true)} />}
+        >
+          <HomeMain view={view} client={client} token={token} listing={listing} />
+        </TitleLead.Provider>
       </main>
       {palette ? (
         <Palette

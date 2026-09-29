@@ -6,6 +6,7 @@ import {homeHref} from './route.js';
 import {budgetLabel} from './setup.js';
 import {Hint, Row} from './ui/Setup.js';
 import {StartFailure} from './ui/StartFailure.js';
+import {Titlebar} from './ui/TitleRow.js';
 
 export interface RunEntryProps {
   client: HomeClient;
@@ -22,14 +23,14 @@ const WHOLE = /^[1-9]\d*$/;
 
 function DidNotStart({title}: {title: string}) {
   return (
-    <header className="titlebar">
+    <Titlebar>
       <span className="name">{title}</span>
       <span className="sp" />
       <span className="status">
         <span className="dot err" />
         Did not start
       </span>
-    </header>
+    </Titlebar>
   );
 }
 
@@ -57,15 +58,21 @@ export function ReopenView({client, token, projectId, runId, title, root}: RunEn
   const {error} = launchLine(state);
   return (
     <>
-      <header className="titlebar">
+      <Titlebar>
         <span className="name">{title}</span>
-      </header>
-      <p
-        className={error === null ? 'empty' : 'empty bad'}
-        role={error === null ? undefined : 'alert'}
-      >
-        {error ?? 'Opening the run read-only…'}
-      </p>
+      </Titlebar>
+      {error === null ? (
+        <p className="empty">
+          <span className="busy">
+            <span className="spin" />
+            Opening the run read-only…
+          </span>
+        </p>
+      ) : (
+        <p className="empty bad" role="alert">
+          {error}
+        </p>
+      )}
     </>
   );
 }
@@ -93,11 +100,10 @@ export function ResumeView({client, token, projectId, runId, title, root, loop}:
     start(projectId, () =>
       client.resume(projectId, runId, trimmed === '' ? null : Number(trimmed)),
     );
-  const heading = `Resume ${title}`;
   if (state.kind === 'failed') {
     return (
       <>
-        <DidNotStart title={heading} />
+        <DidNotStart title={title} />
         <StartFailure
           failure={state.failure}
           root={root}
@@ -111,9 +117,11 @@ export function ResumeView({client, token, projectId, runId, title, root, loop}:
   const line = launchLine(state);
   return (
     <>
-      <header className="titlebar">
-        <span className="name">{heading}</span>
-      </header>
+      <Titlebar>
+        <span className="name">{title}</span>
+        <span className="sp" />
+        <span className="status">Resume</span>
+      </Titlebar>
       <div className="scroll">
         <div className="form">
           <Row label={label} htmlFor="f-budget">
@@ -127,13 +135,13 @@ export function ResumeView({client, token, projectId, runId, title, root, loop}:
               step={1}
               inputMode="numeric"
               value={budget}
-              placeholder="As recorded"
-              title={`Total ${label.toLowerCase()} for the run; only a larger total adds any`}
+              placeholder="Recorded"
+              title={`Total ${label.toLowerCase()} for the run; empty keeps the recorded total`}
               onChange={event => setBudget(event.target.value)}
             />
             <Hint tone={line.error === null ? 'plain' : 'bad'}>
               {line.error ??
-                `Runs again with the recorded configuration. A larger total adds ${label.toLowerCase()}.`}
+                `Runs again with the recorded configuration and total. A larger total adds ${label.toLowerCase()}.`}
             </Hint>
           </Row>
         </div>
