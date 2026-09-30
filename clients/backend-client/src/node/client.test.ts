@@ -3,8 +3,9 @@ import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
+import type {ControlChannelState} from '../control-channel.js';
 import {BackendClientError, ServerError} from '../errors.js';
-import {type ControlChannelState, ServerClient, type ServerClientOptions} from './client.js';
+import {ServerClient, type ServerClientOptions} from './client.js';
 
 let socketPath: string | undefined;
 
@@ -591,8 +592,8 @@ describe('ServerClient', () => {
   it('rejects a pending request when the control stream cannot be framed', async () => {
     await withServer(
       socket => {
-        // The client drops the connection on the framing error, so swallow the
-        // reset the server sees rather than let it become an uncaught error.
+        // The client releases the connection on the framing error, so swallow
+        // whatever the server sees rather than let it become an uncaught error.
         socket.on('error', () => undefined);
         socket.once('data', () => socket.write('x'.repeat(4 * 1024 * 1024 + 1)));
       },
@@ -789,6 +790,119 @@ describe('ServerClient', () => {
         // The client default is 30s; the per-call override must win.
         const rejected = client.request({type: 'query.snapshot'}, {timeoutMs: 20});
         await expect(rejected).rejects.toThrow('Server request timed out after 20ms');
+      },
+    );
+  });
+
+  it('fails a non-idempotent request issued while the control channel is down', async () => {
+    let connections = 0;
+    const seen: string[] = [];
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          seen.push(request['type'] as string);
+          socket.write('{not-json}\n');
+        });
+      },
+      async client => {
+        // A protocol fault takes the channel down with no redial pending: a
+        // redial would fetch the same unreadable bytes back.
+        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+          kind: 'parse',
+        });
+        expect(client.connected).toBe(false);
+        const dialsBefore = connections;
+
+        // A steer issued against that state must fail on the spot. Queueing it
+        // for a later revive would apply, seconds later and invisibly, a
+        // command the caller was already told could not be delivered.
+        await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
+          kind: 'disconnected',
+          retryable: true,
+        });
+        expect(connections).toBe(dialsBefore);
+        expect(seen).toEqual(['query.snapshot']);
+      },
+      // A schedule is configured, so the refusal is the down state's answer and
+      // not an artifact of having nothing to redial on.
+      {reconnectDelaysMs: [0]},
+    );
+  });
+
+  it('fails a request issued once the reconnect schedule is spent', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        socket.once('data', () => socket.destroy());
+      },
+      async client => {
+        // The drop spends the empty schedule at once, so the channel settles
+        // into the down state with nothing pending to recover it.
+        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+          kind: 'disconnected',
+        });
+        expect(client.connected).toBe(false);
+        const dialsBefore = connections;
+
+        // A later request is answered by the disconnect rather than queued
+        // behind a dial nobody scheduled; `reconnect()` is the entry that asks.
+        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+          kind: 'disconnected',
+        });
+        expect(connections).toBe(dialsBefore);
+      },
+      {reconnectDelaysMs: []},
+    );
+  });
+
+  it('recovers repeated outages on a finite schedule', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          // Answer, then end: every round costs one whole outage, so a schedule
+          // whose cursor survived the previous one would strand a later request.
+          socket.end(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        for (let round = 0; round < 4; round += 1) {
+          await waitFor(() => client.connected);
+          const response = await client.request({type: 'command.pause'});
+          expect({round, ok: response.ok}).toEqual({round, ok: true});
+        }
+        expect(connections).toBeGreaterThanOrEqual(4);
+      },
+      {reconnectDelaysMs: [0]},
+    );
+  });
+
+  it('rejects a dedicated request whose signal is already aborted', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, () => undefined);
+      },
+      async client => {
+        const controller = new AbortController();
+        controller.abort();
+        const dialsBefore = connections;
+        const rejected = client
+          .request({type: 'query.chat', text: 'x'}, {signal: controller.signal})
+          .catch(error => error);
+
+        // An already-aborted signal never fires its event, so the refusal has
+        // to happen before the request is routed anywhere.
+        expect((await rejected).name).toBe('AbortError');
+        expect(connections).toBe(dialsBefore);
       },
     );
   });
