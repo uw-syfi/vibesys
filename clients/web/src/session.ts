@@ -22,14 +22,22 @@ export interface WebSessionState {
   readonly status: WebSessionStatus;
   readonly error: Error | null;
   /**
-   * Whether a control command issued now can be delivered, as the transport's
-   * control channel reports it. `disconnected` means pause, resume, steer, and
-   * chat cannot reach the backend, which is a different fact from a stale
-   * transcript: the stream and the command path fail independently, and only
-   * this one says the controls are inert. Optimistically `connected` until the
-   * channel reports otherwise, so a page that has issued no request yet does
-   * not claim an outage it has not observed, and it stays `connected` once the
-   * run has ended, because a finished run has no commands left to deliver.
+   * Whether a control request issued now can be delivered, as the transport's
+   * control channel reports it. A different fact from a stale transcript: the
+   * stream and the command path fail independently, and only this one says the
+   * request/response half is inert. Today that costs the page its
+   * `query.snapshot`, so `reattach()` cannot reload the run's state; the run
+   * controls that #815 adds ride the same channel.
+   *
+   * `connected` until the channel reports otherwise, because there is nothing
+   * to report before the first dial settles. That is a starting value, not a
+   * claim: the page issues `query.snapshot` from `start()`, so the first dial
+   * is already under way by the time anything renders, and a cold-start failure
+   * arrives as a `disconnected` report like any other.
+   *
+   * An outage is reported whenever the channel reports one, including on a run
+   * that has already ended. Whether it is worth showing then is the frontend's
+   * decision, and `connectionBanners` in `banners.ts` makes it.
    */
   readonly controls: ControlChannelState;
 }
@@ -155,9 +163,10 @@ export class WebSession {
    * mean. It touches the event stream not at all: a dead command path with a
    * live transcript is exactly the case this exists for.
    *
-   * Unlike `reattach()` it is offered on an ended run too, because a redial is
-   * real work there: the snapshot and chat queries still answer, and it is the
-   * command path, not the run, that the user is asking about.
+   * No `hasRunEnded` guard, unlike `reattach()`, because this does not decide
+   * when it is offered: `connectionBanners` does, and it withholds the banner
+   * on an ended run. The verb stays unconditional so the one place that judges
+   * an ended run is the one place that renders the affordance.
    */
   reconnectControls(): void {
     if (this.#closed) return;
@@ -192,16 +201,16 @@ export class WebSession {
    * deliverable commands, are both real and a frontend acts on them
    * differently.
    *
-   * An outage on a run that has already ended is not reported, for the same
-   * reason `#onConnectionState` and `#offline` do not report one: there is
-   * nothing left to deliver, the gateway going away is the expected end of the
-   * run rather than a fault, and an affordance shown then would be asking the
-   * user to fix a problem they do not have. A recovery is still reported, so a
-   * banner raised while the run was live clears.
+   * Every outage the channel reports is published, including one on a run that
+   * has already ended. Whether it is worth putting on screen is the frontend's
+   * decision, and `connectionBanners` in `banners.ts` makes it. Judging it here
+   * instead latches: the control channel and the event stream are two
+   * independent sockets with no ordering guarantee, so a drop can be reported
+   * while the run's terminal event is still buffered, and nothing re-enters
+   * this method when that event lands.
    */
   #onControlState(state: ControlChannelState): void {
     if (this.#closed) return;
-    if (state.status === 'disconnected' && hasRunEnded(this.store.getState())) return;
     if (this.#controls.status === state.status) return;
     this.#controls = state;
     this.#publish();

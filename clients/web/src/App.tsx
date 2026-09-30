@@ -1,5 +1,5 @@
-import {hasRunEnded} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
+import {connectionBanners} from './banners.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
@@ -24,6 +24,7 @@ export function App({
     session?.getState ?? (() => EMPTY_SESSION_STATE),
     session?.getState ?? (() => EMPTY_SESSION_STATE),
   );
+  const banners = connectionBanners(state, sessionState);
   const [replayError, setReplayError] = useState<Error | null>(null);
   const [replayAttempt, setReplayAttempt] = useState(0);
   useEffect(() => {
@@ -48,34 +49,28 @@ export function App({
         </div>
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
-      {sessionState.status === 'stale' && (
+      {banners.stream && (
         <div className="stale-banner" role="alert" data-testid="stream-banner">
           <span>
             Live connection is stale
             {sessionState.error === null ? '' : `: ${sessionState.error.message}`}
           </span>
-          {/*
-            The message stands on an ended run, because a stale stream means the
-            transcript on screen may be missing that run's tail. The button does
-            not: `reattach()` declines to resubscribe a run that cannot produce
-            another event, so offering it would be offering a no-op.
-          */}
-          {!hasRunEnded(state) && (
+          {banners.reattach && (
             <button type="button" onClick={() => session?.reattach()}>
               Reattach
             </button>
           )}
         </div>
       )}
-      {sessionState.controls.status === 'disconnected' && (
+      {banners.controls !== null && (
         <div className="stale-banner" role="alert" data-testid="controls-banner">
           <span>
-            Controls cannot reach the run: {sessionState.controls.error.message}. Pause, resume,
-            steer, and chat will not be delivered.
+            Controls cannot reach the run: {banners.controls.error.message}. Pause, resume, steer,
+            and chat will not be delivered.
           </span>
           {/*
-            Offered whatever the run's status, because it always does something:
-            a reported outage has a redial armed on a backoff schedule, and this
+            Offered whenever the banner is, because it always does something: a
+            reported outage has a redial armed on a backoff schedule, and this
             cancels it and dials now. See `WebSession.reconnectControls`.
           */}
           <button type="button" onClick={() => session?.reconnectControls()}>

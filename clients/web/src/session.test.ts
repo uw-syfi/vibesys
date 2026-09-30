@@ -323,7 +323,7 @@ describe('WebSession', () => {
     expect(transport.reconnectCalls).toBe(1);
   });
 
-  test('does not raise the controls state for a run that has already ended', async () => {
+  test('publishes an outage on an ended run rather than judging it', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
     transport.snapshots.push(snapshotResponse('completed'));
@@ -331,11 +331,17 @@ describe('WebSession', () => {
     await session.start();
     expect(session.store.getState().status).toBe('completed');
 
-    // Nothing is left to deliver and the gateway going away is how a finished
-    // run ends, so an outage then is not news and must not put an affordance on
-    // screen for a problem the user does not have.
+    // The channel is genuinely undeliverable, so the session says so. Whether
+    // that is worth an affordance on a finished run is a presentation judgment
+    // and belongs to `connectionBanners`, which withholds the banner here; see
+    // `banners.test.ts`. Deciding it at report time instead latches the banner
+    // on, because a drop reported while the run's terminal event is still in
+    // flight never gets re-examined when that event lands.
     transport.dropControlChannel(new Error('gateway exited'));
-    expect(session.getState().controls).toEqual({status: 'connected'});
+    expect(session.getState().controls).toEqual({
+      status: 'disconnected',
+      error: new Error('gateway exited'),
+    });
 
     await session.close();
   });
@@ -353,8 +359,8 @@ describe('WebSession', () => {
     expect(session.store.getState().status).toBe('completed');
     expect(session.getState().controls.status).toBe('disconnected');
 
-    // A recovery is reported whatever the run's status: the suppression above is
-    // about not raising a banner, not about refusing to take one down.
+    // A recovery is reported whatever the run's status, so a banner raised
+    // while the run was live comes down on its own.
     transport.recoverControlChannel();
     expect(session.getState().controls).toEqual({status: 'connected'});
 
