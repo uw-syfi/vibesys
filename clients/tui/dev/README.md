@@ -12,7 +12,7 @@ pass emits nothing, so it cannot put any of it on the shipping path.
 That widening has one cost: with `dev/` in the check program, a `src/` file
 importing this directory typechecks cleanly, where before it did not. The build
 still rejects it (`rootDir: "src"`, TS6059), but the rule belongs where the other
-layering rules live, so `.dependency-cruiser.cjs` states it directly as
+layering rules live, so `.dependency-cruiser.mjs` states it directly as
 `shipping-path-does-not-depend-on-dev-harness`.
 
 ## Why it needs no product code

@@ -8,7 +8,7 @@
   },
   "files": {
     "includes": [
-      ".dependency-cruiser.cjs",
+      ".dependency-cruiser.mjs",
       "**/*.ts",
       "**/*.tsx",
       "scripts/**/*.mjs",

@@ -8,9 +8,10 @@ import {cruise} from 'dependency-cruiser';
 import extractDepcruiseOptions from 'dependency-cruiser/config-utl/extract-depcruise-options';
 import extractTSConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 import {manifestErrors} from './check_ts_package_manifests.mjs';
+import {declarationErrors, pathAlternation, workspaceLayout} from './workspace_layout.mjs';
 
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.cjs');
+const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.mjs');
 
 test('dependency-cruiser rule names are unique', async () => {
   const options = await extractDepcruiseOptions(CONFIG);
@@ -84,13 +85,16 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async () 
 });
 
 // Each case is the smallest fixture that breaks one rule. The fixture root also has the valid
-// edges the rule must keep allowing, so a rule that over-matches fails the `clean` case.
+// edges the rule must keep allowing, so a rule that over-matches fails the `clean` case. The
+// fixtures use the real package names, because `.dependency-cruiser.mjs` derives its path
+// patterns from the workspace on disk.
 const VALID_FILES = {
   'backend-client/src/index.ts': '',
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   'web/src/index.ts': "import '@vibesys/backend-client';\nimport '@vibesys/core-state';\n",
+  'web/e2e/live.spec.ts': "import 'declared-package';\n",
   'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
   'tui/src/session-controller.ts': "import './session-model.js';\nimport './ui/theme.js';\n",
   'tui/src/session-model.ts': "import './ui/theme.js';\n",
@@ -125,6 +129,14 @@ const RULE_CASES = [
   {
     rule: 'tools-are-leaves',
     files: {'tui/dev/harness.ts': "import '../../scripts/check.mjs';\n"},
+  },
+  {
+    rule: 'tools-are-leaves',
+    files: {'web/src/index.ts': "import '../e2e/live.spec.js';\n"},
+  },
+  {
+    rule: 'backend-client-is-lowest-layer',
+    files: {'backend-client/src/index.ts': "import '../../web/src/index.js';\n"},
   },
   {
     rule: 'scripts-do-not-import-package-code',
@@ -172,6 +184,12 @@ const RULE_CASES = [
   {
     rule: 'production-dependencies-are-declared',
     files: {'scripts/check.mjs': "import 'undeclared-package';\n"},
+  },
+  {
+    // The rule could not reach the end-to-end specs while the scan roots were a hand-written
+    // list that omitted `web/e2e`, which is how `@playwright/test` stayed undeclared.
+    rule: 'production-dependencies-are-declared',
+    files: {'web/e2e/live.spec.ts': "import 'undeclared-package';\n"},
   },
   {
     rule: 'tui-opentui-is-confined-to-ui-and-composition-root',
@@ -252,6 +270,7 @@ async function violatedRules(files) {
       'tui/dev',
       'tui/benchmarks',
       'web/src',
+      'web/e2e',
       'scripts',
     ],
     {
@@ -277,7 +296,7 @@ for (const {rule, files} of RULE_CASES) {
 }
 
 test('manifest policy rejects declared reverse dependencies', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'vibesys-manifest-rules-'));
+  const root = await workspaceFixture('vibesys-manifest-rules-');
   await writeManifest(root, 'backend-client', '@vibesys/backend-client', {
     '@vibesys/core-state': 'workspace:*',
   });
@@ -293,11 +312,123 @@ test('manifest policy rejects declared reverse dependencies', async () => {
     '@vibesys/core-state': 'workspace:*',
   });
 
-  assert.deepEqual(await manifestErrors(root), [
+  assert.deepEqual(manifestErrors(root), [
     'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
     'core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
     'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
   ]);
+});
+
+test('manifest policy names a package that joins the workspace without one', async () => {
+  const root = await workspaceFixture('vibesys-manifest-policy-');
+  await writeManifest(root, 'stub', '@vibesys/stub', {});
+
+  assert.deepEqual(manifestErrors(root), [
+    'stub/package.json: @vibesys/stub has no dependency policy in ' +
+      'scripts/check_ts_package_manifests.mjs',
+  ]);
+});
+
+// The workspace admits directories, so the layout is what every gate enumerates from: a package
+// or a directory that joins it must appear here without anyone editing a list.
+const TOOLING_DIRECTORY_SETS = [[], ['bench'], ['e2e'], ['dev', 'e2e']];
+
+for (const tooling of TOOLING_DIRECTORY_SETS) {
+  test(`workspace layout covers a package whose tools are [${tooling.join(' ')}]`, async () => {
+    const root = await workspaceFixture('vibesys-layout-');
+    // Directories that hold no source must stay out, whether or not a build has run.
+    await writePackage(root, 'stub', '@vibesys/stub', [
+      'src',
+      ...tooling,
+      'dist',
+      'node_modules',
+      '.cache',
+    ]);
+    await mkdir(join(root, 'scripts'), {recursive: true});
+
+    const layout = workspaceLayout(root);
+
+    assert.deepEqual(
+      layout.packages.map(({name, directory}) => ({name, directory})),
+      [{name: '@vibesys/stub', directory: 'stub'}],
+    );
+    assert.deepEqual(
+      layout.toolingDirectories,
+      [...tooling.map(directory => `stub/${directory}`).sort(), 'scripts'].sort(),
+    );
+    assert.deepEqual(
+      layout.scanRoots,
+      ['scripts', 'stub/src', ...tooling.map(directory => `stub/${directory}`)].sort(),
+    );
+  });
+}
+
+test('workspace layout rejects a packages pattern it cannot expand', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'vibesys-layout-pattern-'));
+  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "libs/*"\n');
+
+  assert.throws(() => workspaceLayout(root), /unsupported packages pattern "libs\/\*"/);
+});
+
+test('declarations accept a package whose entry points and scripts agree with the layout', async () => {
+  const root = await workspaceFixture('vibesys-declarations-');
+  await writePackage(root, 'stub', '@vibesys/stub', ['src'], {
+    scripts: {build: 'true', check: 'true', test: 'true'},
+  });
+  await writeFile(join(root, 'stub/src/index.ts'), '');
+  await writeFile(
+    join(root, 'tsconfig.architecture.json'),
+    JSON.stringify({compilerOptions: {paths: {'@vibesys/stub': ['stub/src/index.ts']}}}),
+  );
+
+  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), []);
+});
+
+test('declarations name a package that joins the workspace unchecked', async () => {
+  const root = await workspaceFixture('vibesys-declarations-stub-');
+  await writePackage(root, 'stub', '@vibesys/stub', ['src']);
+  await writeFile(join(root, 'tsconfig.architecture.json'), JSON.stringify({compilerOptions: {}}));
+
+  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
+    'tsconfig.architecture.json: @vibesys/stub must map to ["stub/src/index.ts"]',
+    'stub/package.json: @vibesys/stub must declare a "build" script, because `pnpm -r build` ' +
+      'skips a package that does not',
+    'stub/package.json: @vibesys/stub must declare a "check" script, because `pnpm -r check` ' +
+      'skips a package that does not',
+    'stub/package.json: @vibesys/stub must declare a "test" script, because `pnpm -r test` ' +
+      'skips a package that does not',
+  ]);
+});
+
+test('declarations reject a path map entry no package exports', async () => {
+  const root = await workspaceFixture('vibesys-declarations-extra-');
+  await writePackage(root, 'stub', '@vibesys/stub', ['src'], {
+    scripts: {build: 'true', check: 'true', test: 'true'},
+    exports: {'.': {import: './dist/index.js'}, './node': {import: './dist/node/index.js'}},
+  });
+  await writeFile(join(root, 'stub/src/index.ts'), '');
+  await mkdir(join(root, 'stub/src/node'), {recursive: true});
+  await writeFile(join(root, 'stub/src/node/index.ts'), '');
+  await writeFile(
+    join(root, 'tsconfig.architecture.json'),
+    JSON.stringify({
+      compilerOptions: {
+        paths: {
+          '@vibesys/stub': ['stub/src/index.ts'],
+          '@vibesys/stub/node': ['stub/src/node/index.ts'],
+          '@vibesys/gone': ['gone/src/index.ts'],
+        },
+      },
+    }),
+  );
+
+  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
+    'tsconfig.architecture.json: @vibesys/gone is not a workspace package export',
+  ]);
+});
+
+test('path alternation escapes a directory name', () => {
+  assert.equal(pathAlternation(['core-state', 'web.next']), 'core-state|web\\.next');
 });
 
 async function writeSource(root, packageDirectory, file, source) {
@@ -306,10 +437,23 @@ async function writeSource(root, packageDirectory, file, source) {
   await writeFile(join(directory, file), source);
 }
 
+async function workspaceFixture(prefix) {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "*"\n');
+  return root;
+}
+
 async function writeManifest(root, directory, name, dependencies) {
+  await writePackage(root, directory, name, [], {dependencies});
+}
+
+async function writePackage(root, directory, name, directories, manifest = {}) {
   const packageDirectory = join(root, directory);
   await mkdir(packageDirectory, {recursive: true});
-  await writeFile(join(packageDirectory, 'package.json'), JSON.stringify({name, dependencies}));
+  await writeFile(join(packageDirectory, 'package.json'), JSON.stringify({name, ...manifest}));
+  for (const child of directories) {
+    await mkdir(join(packageDirectory, child), {recursive: true});
+  }
 }
 
 async function writeExternalPackage(root, name) {

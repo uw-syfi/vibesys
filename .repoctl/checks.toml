@@ -49,12 +49,10 @@ language = "typescript"
 directory = "clients"
 collection = "pnpm_packages"
 timeout_seconds = 1200
-commands = [
-  ["pnpm", "--filter", "@vibesys/backend-client", "test"],
-  ["pnpm", "--filter", "@vibesys/core-state", "test"],
-  ["pnpm", "--filter", "@vibesys/tui", "test"],
-  ["pnpm", "--filter", "@vibesys/web", "test"],
-]
+# The fallback when the change filter selects no package: `-r` covers every workspace member, so
+# this does not go stale when one is added. One package at a time, because the package tests spawn
+# processes and share fixed paths under the temporary directory.
+commands = [["pnpm", "-r", "--workspace-concurrency=1", "run", "test"]]
 package_commands = [["pnpm", "--filter", "{package}", "test"]]
 always_commands = [["pnpm", "test:ts-architecture"], ["pnpm", "test:conformance"]]
 

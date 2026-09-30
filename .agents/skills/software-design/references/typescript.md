@@ -19,16 +19,20 @@ anything else in another package is an error.
 
 - **Layering.** `backend-client` is the lowest layer; `core-state` sits on it;
   `tui` and `web` sit on both and do not import each other. Rules live in
-  `clients/.dependency-cruiser.cjs`.
+  `clients/.dependency-cruiser.mjs`.
 - **No deep imports.** `workspace-packages-use-public-exports` and
   `workspace-packages-have-no-deep-imports` reject imports of another
   package's internal files or build output.
 - **Allowed workspace dependencies.** `clients/scripts/check_ts_package_manifests.mjs`
   lists each package's permitted workspace dependencies and forbidden
   prefixes (for example, `core-state` may not depend on `@opentui/*`).
-- **New or split package.** Add it to the manifest check and to the scanned
-  set in `.dependency-cruiser.cjs`, with its `exports`, so its boundary is
-  enforced from the first commit. Keep `knip` clean (no unused exports).
+- **New or split package.** The package set comes from the workspace on disk
+  (`clients/scripts/workspace_layout.mjs`), so the scanned paths follow from
+  the directories you create. Declare the policy the gates ask for: the
+  dependency direction in the manifest check, the audited entry points in
+  `knip.config.ts`, the public entry in `tsconfig.architecture.json`, and
+  `build`, `check`, and `test` scripts for `pnpm -r`. Each one names the
+  package if it is missing, so run `pnpm check:ts-architecture` first.
 
 ## Idioms
 
@@ -50,7 +54,7 @@ Named by module.
 | Rule | Look at |
 | --- | --- |
 | 1, 2 | `@vibesys/core-state` (small `exports`, logic behind it) |
-| 4 | The layering rules in `.dependency-cruiser.cjs` |
+| 4 | The layering rules in `.dependency-cruiser.mjs` |
 | 6 | The backend-neutral versus `backend-client/src/node` split behind the `./node` export |
 | 8 | `@vibesys/backend-client` generated protocol types |
 
