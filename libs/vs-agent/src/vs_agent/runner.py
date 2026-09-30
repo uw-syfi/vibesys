@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TypeVar
 
@@ -35,8 +34,7 @@ def parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
             continue
         seen.add(candidate)
         try:
-            payload = json.loads(candidate)
-            return response_cls.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError, TypeError):
+            return response_cls.model_validate_json(candidate)
+        except (ValidationError, TypeError):
             continue
     return None
