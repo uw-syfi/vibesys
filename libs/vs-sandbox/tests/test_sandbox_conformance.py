@@ -26,7 +26,7 @@ import pytest
 from tests.support import run_test_command
 
 from vs_sandbox import host_sandbox, landlock
-from vs_sandbox.api import SandboxUnavailableError
+from vs_sandbox.api import SandboxUnavailableError, build_host_sandbox
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 from vs_sandbox.host_sandbox import HostSandbox, LandlockSandbox, LinuxBackend, SeatbeltSandbox
 
@@ -110,11 +110,16 @@ _BACKEND_BUILDERS = {
 }
 
 
-def _probe_script(workspace: Path, readonly_path: Path, unlisted_path: Path) -> str:
+def _probe_script(
+    workspace: Path, readonly_path: Path, writable_path: Path, unlisted_path: Path
+) -> str:
     """Shell script exercising every conformance check in one subprocess."""
     written = workspace / "written-by-probe.txt"
     return (
         f"printf ok > {written}; printf 'write_ws=%s\\n' $?; "
+        f"cat {readonly_path} >/dev/null 2>&1; printf 'read_ro=%s\\n' $?; "
+        f"printf state > {writable_path}; printf 'write_rw=%s\\n' $?; "
+        f"cat {writable_path} >/dev/null 2>&1; printf 'read_rw=%s\\n' $?; "
         f"(printf x > {readonly_path}) 2>/dev/null; printf 'write_ro=%s\\n' $?; "
         f"cat {unlisted_path} >/dev/null 2>&1; printf 'read_unlisted=%s\\n' $?; "
         "printf 'uid=%s\\n' \"$(id -u)\"; "
@@ -165,20 +170,27 @@ class TestSandboxConformance:
         unlisted_path = tmp_path / "unlisted" / "secret.txt"
         unlisted_path.parent.mkdir()
         unlisted_path.write_text("do not read\n")
+        writable_path = tmp_path / "state" / "session.txt"
+        writable_path.parent.mkdir()
         resources = (
+            HostResource(writable_path.parent, HostResourceAccess.READ_WRITE, "conformance state"),
             HostResource(readonly_path, HostResourceAccess.READ_ONLY, "conformance fixture"),
         )
 
         sandbox = _BACKEND_BUILDERS[backend_name](workspace, resources, monkeypatch)
         fields = _run_probe(
             sandbox,
-            _probe_script(workspace, readonly_path, unlisted_path),
+            _probe_script(workspace, readonly_path, writable_path, unlisted_path),
             cwd=workspace,
         )
 
         # Write inside the workspace succeeds.
         assert fields["write_ws"] == "0"
         assert (workspace / "written-by-probe.txt").read_text() == "ok"
+        assert fields["read_ro"] == "0"
+        assert fields["write_rw"] == "0"
+        assert fields["read_rw"] == "0"
+        assert writable_path.read_text() == "state"
         # Write to the declared read-only resource fails, and nothing changed.
         assert fields["write_ro"] != "0"
         assert readonly_path.read_text() == '{"k": "v"}\n'
@@ -189,3 +201,53 @@ class TestSandboxConformance:
         # HOME and PATH inside match what the sandbox promises through env.
         assert fields["HOME"] == sandbox.env["HOME"]
         assert fields["PATH"] == sandbox.env["PATH"]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS Seatbelt")
+@pytest.mark.parametrize("aliased", [False, True])
+def test_seatbelt_allows_declared_first_run_state_without_exposing_its_parent(
+    tmp_path: Path, *, aliased: bool
+) -> None:
+    workspace = tmp_path / "Documents" / "workspace"
+    workspace.mkdir(parents=True)
+    state = tmp_path / ".provider"
+    state.mkdir()
+    if aliased:
+        alias = tmp_path / ".provider-alias"
+        alias.symlink_to(state, target_is_directory=True)
+        state = alias
+    secret = state / "undeclared"
+    secret.write_text("private")
+    state_file = state / "installation_id"
+    state_dir = state / "thread-writer-locks"
+    sandbox = build_host_sandbox(
+        workspace,
+        env=dict(_PROBE_ENV),
+        resources=(
+            HostResource(state_file, HostResourceAccess.READ_WRITE),
+            HostResource(state_dir, HostResourceAccess.READ_WRITE),
+        ),
+        require_enforcement=True,
+    )
+    assert isinstance(sandbox, SeatbeltSandbox)
+    assert not state_file.exists()
+    assert not state_dir.exists()
+    script = (
+        f"/usr/bin/stat {state} >/dev/null 2>&1; printf 'stat_parent=%s\\n' $?; "
+        f"printf id > {state_file}; printf 'create_file=%s\\n' $?; "
+        f"mkdir {state_dir}; printf 'create_dir=%s\\n' $?; "
+        f"printf lock > {state_dir}/thread.lock; printf 'create_child=%s\\n' $?; "
+        f"cat {secret} >/dev/null 2>&1; printf 'read_unlisted=%s\\n' $?; "
+        f"ls {state} >/dev/null 2>&1; printf 'list_parent=%s\\n' $?"
+    )
+
+    fields = _run_probe(sandbox, script, cwd=workspace)
+
+    assert fields["stat_parent"] == "0"
+    assert fields["create_file"] == "0"
+    assert fields["create_dir"] == "0"
+    assert fields["create_child"] == "0"
+    assert fields["read_unlisted"] != "0"
+    assert fields["list_parent"] != "0"
+    assert state_file.read_text() == "id"
+    assert (state_dir / "thread.lock").read_text() == "lock"

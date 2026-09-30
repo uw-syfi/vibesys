@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from tests.support import run_test_command
 
 import vs_sandbox.api as sandbox_api
@@ -528,3 +530,160 @@ class TestBuildSelectsDocker:
         sandbox = host_sandbox.build(workspace, env={}, require_enforcement=True)
 
         assert isinstance(sandbox, host_sandbox.HostSandbox)
+
+
+@pytest.mark.parametrize("is_directory", [False, True])
+@pytest.mark.parametrize("writable", [False, True])
+def test_seatbelt_declared_resources_survive_ancestor_blinding(
+    tmp_path: Path, *, is_directory: bool, writable: bool
+) -> None:
+    workspace = tmp_path / "Documents" / "project"
+    workspace.mkdir(parents=True)
+    resource = tmp_path / ".provider" / "resource"
+    resource.parent.mkdir()
+    if is_directory:
+        resource.mkdir()
+    else:
+        resource.write_text("provider configuration")
+    sandbox = sandbox_api.SeatbeltSandbox(
+        workspace=workspace,
+        sandbox_exec_path="/usr/bin/sandbox-exec",
+        read_paths=() if writable else (resource,),
+        write_paths=(resource,) if writable else (),
+    )
+
+    profile = sandbox.profile()
+    operation = "allow file-read* file-write*" if writable else "allow file-read*"
+    predicate = "subpath" if is_directory else "literal"
+    grant = f'({operation} ({predicate} "{resource}"))'
+    assert profile.index(grant) > profile.index("(deny file-read* file-write*")
+    assert f'(subpath "{tmp_path}")' in profile
+    assert f'(allow file-read* file-write* (subpath "{tmp_path}"))' not in profile
+    if not writable:
+        assert f'(allow file-write* ({predicate} "{resource}"))' not in profile
+        assert f'(allow file-read* file-write* ({predicate} "{resource}"))' not in profile
+
+
+@given(
+    name=st.text(alphabet='abcdefghijklmnopqrstuvwxyz0123456789 \\"', min_size=1, max_size=20),
+    writable=st.booleans(),
+)
+def test_seatbelt_absent_resource_grants_are_narrow_and_quoted(
+    name: str, *, writable: bool
+) -> None:
+    workspace = Path("/Users/provider-fixture/Documents/project")
+    resource = workspace.parent.parent / ".provider" / name
+    sandbox = sandbox_api.SeatbeltSandbox(
+        workspace=workspace,
+        sandbox_exec_path="/usr/bin/sandbox-exec",
+        read_paths=() if writable else (resource,),
+        write_paths=(resource,) if writable else (),
+    )
+
+    profile = sandbox.profile()
+    escaped = str(resource).replace("\\", "\\\\").replace('"', '\\"')
+    operation = "allow file-read* file-write*" if writable else "allow file-read*"
+    grant = f'({operation} (subpath "{escaped}"))'
+    assert profile.index(grant) > profile.index("(deny file-read* file-write*")
+    assert f'({operation} (subpath "{resource.parent}"))' not in profile
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS host builder")
+@pytest.mark.parametrize("writable", [False, True])
+def test_seatbelt_builder_rejects_resources_that_expose_project_siblings(
+    tmp_path: Path, *, writable: bool
+) -> None:
+    workspace = tmp_path / "Documents" / "project"
+    workspace.mkdir(parents=True)
+    alias = tmp_path / "home-alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    access = (
+        sandbox_api.HostResourceAccess.READ_WRITE
+        if writable
+        else sandbox_api.HostResourceAccess.READ_ONLY
+    )
+    sandbox = sandbox_api.build_host_sandbox(
+        workspace,
+        env={},
+        resources=tuple(
+            sandbox_api.HostResource(path, access) for path in (tmp_path, alias, Path("/"))
+        ),
+        require_enforcement=True,
+    )
+
+    assert isinstance(sandbox, sandbox_api.SeatbeltSandbox)
+    assert sandbox.read_paths == ()
+    assert sandbox.write_paths == ()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS host builder")
+@pytest.mark.parametrize("target_kind", ["ancestor", "sibling"])
+@pytest.mark.parametrize("writable", [False, True])
+def test_seatbelt_pins_resource_symlink_targets_before_launch(
+    tmp_path: Path, target_kind: str, *, writable: bool
+) -> None:
+    workspace = tmp_path / "Documents" / "project"
+    workspace.mkdir(parents=True)
+    original = tmp_path / ".provider"
+    original.mkdir()
+    resource = workspace / "provider-state"
+    resource.symlink_to(original, target_is_directory=True)
+    access = (
+        sandbox_api.HostResourceAccess.READ_WRITE
+        if writable
+        else sandbox_api.HostResourceAccess.READ_ONLY
+    )
+    sandbox = sandbox_api.build_host_sandbox(
+        workspace,
+        env={},
+        resources=(sandbox_api.HostResource(resource, access),),
+        require_enforcement=True,
+    )
+    assert isinstance(sandbox, sandbox_api.SeatbeltSandbox)
+    assert (*sandbox.read_paths, *sandbox.write_paths) == (original,)
+    target = workspace.parent if target_kind == "ancestor" else workspace.parent / "sibling"
+    target.mkdir(exist_ok=True)
+    resource.unlink()
+    resource.symlink_to(target, target_is_directory=True)
+
+    profile = sandbox.profile()
+    operation = "allow file-read* file-write*" if writable else "allow file-read*"
+    assert f'({operation} (subpath "{original}"))' in profile
+    assert f'({operation} (subpath "{target}"))' not in profile
+    original.rmdir()
+    original.symlink_to(target, target_is_directory=True)
+    with pytest.raises(sandbox_api.SandboxUnavailableError, match="resource target changed"):
+        sandbox.wrap(["agent"])
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS host builder")
+@pytest.mark.parametrize("writable", [False, True])
+@pytest.mark.parametrize("target_kind", ["ancestor", "sibling"])
+def test_seatbelt_missing_resource_fails_closed_when_its_parent_is_retargeted(
+    tmp_path: Path, target_kind: str, *, writable: bool
+) -> None:
+    workspace = tmp_path / "Documents" / "project"
+    workspace.mkdir(parents=True)
+    parent = tmp_path / ".provider"
+    parent.mkdir()
+    resource = parent / "first-run-state"
+    access = (
+        sandbox_api.HostResourceAccess.READ_WRITE
+        if writable
+        else sandbox_api.HostResourceAccess.READ_ONLY
+    )
+    sandbox = sandbox_api.build_host_sandbox(
+        workspace,
+        env={},
+        resources=(sandbox_api.HostResource(resource, access),),
+        require_enforcement=True,
+    )
+    assert isinstance(sandbox, sandbox_api.SeatbeltSandbox)
+    assert (*sandbox.read_paths, *sandbox.write_paths) == (resource,)
+    parent.rmdir()
+    target = workspace.parent if target_kind == "ancestor" else workspace.parent / "sibling"
+    target.mkdir(exist_ok=True)
+    parent.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(sandbox_api.SandboxUnavailableError, match="resource target changed"):
+        sandbox.wrap(["agent"])

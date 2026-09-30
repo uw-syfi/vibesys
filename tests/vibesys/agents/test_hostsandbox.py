@@ -221,11 +221,12 @@ class TestBuild:
         assert codex_home not in sb.write_paths
         assert auth in sb.read_paths
         assert auth not in sb.write_paths
-        assert config not in sb.read_paths
+        assert config in sb.read_paths
         assert config not in sb.write_paths
         argv = sb.wrap(["codex", "login", "status"])
         assert _has_pair(argv, "--dir", str(codex_home))
         assert _has_pair(argv, "--ro-bind-try", str(auth), str(auth))
+        assert _has_pair(argv, "--ro-bind-try", str(config), str(config))
 
 
 # ---------------------------------------------------------------------------

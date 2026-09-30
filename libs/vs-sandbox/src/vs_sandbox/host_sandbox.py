@@ -478,6 +478,25 @@ class SeatbeltSandbox(WorkspaceSandbox):
 
     sandbox_exec_path: str = field(kw_only=True)
     system_read_roots: tuple[str, ...] = _MACOS_SYSTEM_READ_ROOTS
+    _resource_metadata_paths: tuple[Path, ...] = field(default=(), init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Pin canonical resource targets before the confined process can change aliases."""
+        workspace = self.workspace.resolve()
+        resource_metadata_paths = {
+            parent for path in (*self.read_paths, *self.write_paths) for parent in path.parents
+        }
+        resource_metadata_paths.update(
+            path for path in (*self.read_paths, *self.write_paths) if path.is_symlink()
+        )
+        object.__setattr__(self, "_resource_metadata_paths", tuple(sorted(resource_metadata_paths)))
+        for attribute in ("read_paths", "write_paths"):
+            paths = tuple(path.resolve() for path in getattr(self, attribute))
+            for path in paths:
+                if workspace.is_relative_to(path):
+                    message = f"resource {path} is an ancestor of the workspace {workspace}"
+                    raise SandboxUnavailableError(message)
+            object.__setattr__(self, attribute, paths)
 
     def blind_roots(self) -> list[Path]:
         """Project ancestor directories to deny for sibling isolation.
@@ -525,7 +544,7 @@ class SeatbeltSandbox(WorkspaceSandbox):
         # Writes are denied by default; permit them only on the project, the
         # agent's own config/auth dirs, scratch tmp, and device nodes (a process
         # must be able to write /dev/null, /dev/stdout, /dev/tty, ...).
-        write_roots = [str(self.workspace)] + [str(p) for p in self.write_paths]
+        write_roots = [str(workspace)]
         write_roots += ["/private/tmp", "/private/var/tmp", "/dev"]
         lines.append("(allow file-write*")
         lines += [f"    (subpath {_sbpl_string(w)})" for w in write_roots]
@@ -540,6 +559,35 @@ class SeatbeltSandbox(WorkspaceSandbox):
             lines += [f"    (subpath {_sbpl_string(str(r))})" for r in blind]
             lines.append(")")
             lines.append(f"(allow file-read* file-write* (subpath {ws}))")
+
+        # stat/create_dir_all must reach resource parents without listing them.
+        # Literal metadata grants reveal no directory entries or file contents.
+        ancestors = {
+            parent
+            for path in (workspace, *self.read_paths, *self.write_paths)
+            for parent in path.parents
+        }
+        ancestors.update(self._resource_metadata_paths)
+        for parent in sorted(ancestors):
+            lines.append(
+                _seatbelt_path_rule("allow file-read-metadata", parent, is_directory=False)
+            )
+
+        # Reapply validated resource grants after ancestor denies. Existing files
+        # use literals; missing paths grant only the declared future namespace.
+        for operation, paths in (
+            ("allow file-read*", self.read_paths),
+            ("allow file-read* file-write*", self.write_paths),
+        ):
+            for path in paths:
+                if path.resolve() != path:
+                    message = f"resource target changed after sandbox build: {path}"
+                    raise SandboxUnavailableError(message)
+                lines.append(
+                    _seatbelt_path_rule(
+                        operation, path, is_directory=path.is_dir() or not path.exists()
+                    )
+                )
 
         # Project restrictions come after every project allow. Hidden paths
         # deny both visibility and mutation; read-only paths deny mutation.
@@ -577,7 +625,7 @@ def _seatbelt_path_rule(
     *,
     is_directory: bool,
 ) -> str:
-    """Render a path-specific deny for a resolved project path."""
+    """Render a path-specific access rule for a resolved path."""
     predicate = "subpath" if is_directory else "literal"
     value = _sbpl_string(str(path))
     return f"({operation} ({predicate} {value}))"
@@ -824,12 +872,14 @@ def _build_macos(
             log=options.log,
         )
 
-    read_paths, write_paths = _resource_paths(workspace, options.log, options.resources)
+    imports = prepare_host_resource_imports(
+        workspace, options.resources, log=options.log, include_missing=True
+    )
     return SeatbeltSandbox(
         sandbox_exec_path=sandbox_exec,
         workspace=workspace,
-        read_paths=tuple(read_paths),
-        write_paths=tuple(write_paths),
+        read_paths=imports.read_paths,
+        write_paths=imports.write_paths,
         project_path_policy=options.project_path_policy,
         build_env=options.env,
     )

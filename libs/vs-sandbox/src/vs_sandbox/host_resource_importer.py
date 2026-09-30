@@ -33,11 +33,13 @@ def prepare_host_resource_imports(
     declarations: Iterable[HostResource],
     *,
     log: Callable[[str], None],
+    include_missing: bool = False,
 ) -> HostResourceImports:
     """Validate declarations and partition them for an import backend.
 
-    Paths must exist and be absolute. Canonical targets are checked so a
-    symlink cannot expose a workspace ancestor and sibling runs. If the same
+    Paths must be absolute and exist unless the backend supports grants for
+    paths created after launch (``include_missing``). Canonical targets are
+    checked so a symlink cannot expose a workspace ancestor and sibling runs. If the same
     path requests both access modes, read-write wins.
     """
     workspace = workspace.resolve()
@@ -52,7 +54,7 @@ def prepare_host_resource_imports(
                 "host resources must use absolute paths."
             )
             continue
-        if not path.exists():
+        if not include_missing and not path.exists():
             continue
 
         resolved = path.resolve()

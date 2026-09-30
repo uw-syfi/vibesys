@@ -212,8 +212,15 @@ def _agent_executable_runtime(ctx: HostResourceContext) -> Iterable[HostResource
 #: gone by the next turn, so ``codex exec resume`` reports no rollout for the
 #: thread, the driver restarts the conversation, and a confined run silently
 #: loses continuity it was told it had.
-_NARROWED_WRITABLE_STATE_DIRS: dict[str, dict[str, tuple[str, ...]]] = {
-    CODEX_PROVIDER: {".codex": ("sessions",)},
+# Codex startup reads role definitions and execution rules, and its in-process
+# server opens installation_id read/write and locks each persistent thread.
+# Keep those leaves explicit so sibling worktrees stay outside the grant.
+_NARROWED_READ_ONLY_STATE_PATHS: dict[str, dict[str, tuple[str, ...]]] = {
+    CODEX_PROVIDER: {".codex": ("config.toml", "agents", "rules")},
+}
+
+_NARROWED_WRITABLE_STATE_PATHS: dict[str, dict[str, tuple[str, ...]]] = {
+    CODEX_PROVIDER: {".codex": ("sessions", "installation_id", "thread-writer-locks")},
 }
 
 
@@ -244,7 +251,7 @@ def declare_provider_state_resources(
         state_dirs.extend(profile.darwin_state_dirs)
 
     resources: list[HostResource] = []
-    narrowed = _NARROWED_WRITABLE_STATE_DIRS.get(profile.name, {})
+    narrowed = _NARROWED_WRITABLE_STATE_PATHS.get(profile.name, {})
     for state_dir in state_dirs:
         root = _state_root(state_dir, home=Path(home), ctx=ctx, profile=profile)
         writable_leaves = narrowed.get(state_dir)
@@ -271,6 +278,14 @@ def declare_provider_state_resources(
                     f"{profile.name} agent authentication",
                 )
             )
+        resources.extend(
+            HostResource(
+                root / leaf,
+                HostResourceAccess.READ_ONLY,
+                f"{profile.name} agent configuration",
+            )
+            for leaf in _NARROWED_READ_ONLY_STATE_PATHS.get(profile.name, {}).get(state_dir, ())
+        )
         resources.extend(
             HostResource(
                 root / leaf,

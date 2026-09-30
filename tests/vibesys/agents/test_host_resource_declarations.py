@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import agentshim
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from tests.support import provider_profiles as fake_profiles
 
 from vs_agent import host_resource_declarations
@@ -249,12 +251,17 @@ def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(
     # A Codex checkout may live under $CODEX_HOME/worktrees, so the directory
     # itself must never be granted (#185). Authentication is immutable input;
     # sessions persist so a later turn can resume the rollout.
-    assert by_path == {
+    assert {
         ".codex/auth.json": HostResourceAccess.READ_ONLY,
+        ".codex/config.toml": HostResourceAccess.READ_ONLY,
+        ".codex/agents": HostResourceAccess.READ_ONLY,
+        ".codex/rules": HostResourceAccess.READ_ONLY,
+        ".codex/installation_id": HostResourceAccess.READ_WRITE,
         ".codex/sessions": HostResourceAccess.READ_WRITE,
+        ".codex/thread-writer-locks": HostResourceAccess.READ_WRITE,
         ".config/codex": HostResourceAccess.READ_WRITE,
-    }
-    assert ".codex/config.toml" not in by_path
+    }.items() <= by_path.items()
+    assert ".codex" not in by_path
 
 
 def test_codex_home_relocates_the_state_leaves(tmp_path: Path) -> None:
@@ -267,10 +274,29 @@ def test_codex_home_relocates_the_state_leaves(tmp_path: Path) -> None:
 
     assert by_path["relocated-codex/auth.json"] is HostResourceAccess.READ_ONLY
     assert by_path["relocated-codex/sessions"] is HostResourceAccess.READ_WRITE
-    assert "relocated-codex/config.toml" not in by_path
+    assert by_path["relocated-codex/config.toml"] is HostResourceAccess.READ_ONLY
     assert ".codex/auth.json" not in by_path
     # $CODEX_HOME does not move the XDG config directory.
     assert by_path[".config/codex"] is HostResourceAccess.READ_WRITE
+
+
+@given(name=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789_-", min_size=1, max_size=30))
+def test_codex_startup_resources_follow_any_relocated_state_root(name: str) -> None:
+    home = Path("/provider-fixture")
+    root = home / name
+    resources = _fake_codex_state(home, {"CODEX_HOME": str(root)})
+    by_path = {resource.path: resource.access for resource in resources}
+
+    assert all(
+        by_path[root / leaf] is HostResourceAccess.READ_ONLY
+        for leaf in ("auth.json", "config.toml", "agents", "rules")
+    )
+    assert all(
+        by_path[root / leaf] is HostResourceAccess.READ_WRITE
+        for leaf in ("installation_id", "sessions", "thread-writer-locks")
+    )
+    assert root not in by_path
+    assert root / "worktrees" not in by_path
 
 
 @pytest.mark.usefixtures("_fake_profiles_installed")
@@ -337,7 +363,12 @@ class TestShippedProfileState:
         assert codex_home not in granted
         assert {path.name for path in granted if path.is_relative_to(codex_home)} == {
             "auth.json",
+            "config.toml",
+            "agents",
+            "rules",
+            "installation_id",
             "sessions",
+            "thread-writer-locks",
         }
         by_name = {
             resource.path.name: resource.access
@@ -345,7 +376,7 @@ class TestShippedProfileState:
         }
         assert by_name["auth.json"] is HostResourceAccess.READ_ONLY
         assert by_name["sessions"] is HostResourceAccess.READ_WRITE
-        assert "config.toml" not in by_name
+        assert by_name["config.toml"] is HostResourceAccess.READ_ONLY
 
 
 class TestContainerRuntimeResources:
