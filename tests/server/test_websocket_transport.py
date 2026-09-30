@@ -49,21 +49,37 @@ if TYPE_CHECKING:
 # absorber is the server's socket send queue, which is not settable from this
 # side and which Linux autotunes up to ``net.ipv4.tcp_wmem``'s ceiling. That
 # queue charges skb overhead against ``sk_wmem_queued`` alongside the bytes, so
-# the payload that fits is a fraction of the ceiling, not the ceiling:
-# measured on a host whose ceiling is 4 MiB, 1.0 MiB is absorbed and 1.5 MiB
-# stalls. The burst is derived from the ceiling rather than hardcoded so a host
-# tuned to 16 or 32 MiB cannot turn this test red. Absorbing the whole burst
-# fails the test rather than passing it vacuously, so the multiple is not load
-# bearing for correctness, only for not reporting a false regression.
+# the payload that fits is a fraction of the ceiling, not the ceiling. Measured
+# on a host whose ceiling is 4 MiB, with the peer's receive buffer capped as
+# below, the boundary is sharp: 17 events (1.0625 MiB) are absorbed 3/3 and 18
+# (1.125 MiB) stall 3/3. The burst is derived from the ceiling rather than
+# hardcoded so a host tuned to 16 or 32 MiB cannot turn this test red.
+#
+# Nothing bounds that absorber from below, so the derivation must not be
+# clamped: ``send_buffer_bytes`` is a ``drain()`` high-water mark rather than a
+# send cap and ``SO_RCVBUF`` is advisory, and measured on the same host the
+# burst is absorbed at 1, 2, 4, 8, 12 and 16 events. A fixed clamp would
+# therefore stop stalling on exactly the high-ceiling hosts the derivation
+# exists to serve, if the absorber scales with the ceiling (plausible, since
+# Linux autotunes ``sk_wmem_queued`` toward ``tcp_wmem``'s ceiling; settling it
+# needs a host with a different ceiling and root to write the sysctl). So the
+# burst is never clamped. What is bounded instead is memory: the payload costs
+# about 4 resident bytes per byte (measured peak RSS 97.7 MiB + 4.05 x payload,
+# within 0.4 MiB from 0.5 MiB to 256 MiB of payload), so 4, 16 and 32 MiB
+# ceilings cost 130, 228 and 357 MiB and run, while a 128 MiB ceiling would
+# cost 1.11 GiB and skips with its numbers in the reason.
 _SEND_CEILING_PATH = Path("/proc/sys/net/ipv4/tcp_wmem")
 _SEND_CEILING_FALLBACK_BYTES = 4 * 1024 * 1024
 _BURST_CEILING_MULTIPLE = 2
+_BURST_PAYLOAD_BUDGET_BYTES = 64 * 1024 * 1024
 _STALL_EVENT_BYTES = 64 * 1024
 # Capping the peer's receive buffer takes the second, receive-side absorber out
 # of that derivation, since the send-side ceiling says nothing about its size.
-# It is not the main absorber, and the burst is not sized against it: measured
-# here it moves the stall threshold from 2.5 MiB down to 1.5 MiB, against a
-# burst of twice the ceiling.
+# It is not the main absorber and the burst is not sized against it: measured
+# here the stall boundary is 38 events absorbed / 39 stalling (2.4375 MiB)
+# uncapped and 17 / 18 (1.125 MiB) capped, so the cap moves it down 1.3125 MiB.
+# The kernel doubles the request and enforces its own floor, so 2048 is granted
+# as 4096.
 _PEER_RECEIVE_BUFFER_BYTES = 2048
 # RFC 6455's two payload-length escape values.
 _EXTENDED_LENGTH = 126
@@ -71,12 +87,25 @@ _EXTENDED_LENGTH_64 = 127
 
 
 def _stall_event_count() -> int:
-    """How many ``_STALL_EVENT_BYTES`` events exceed this host's send-side absorber."""
+    """How many ``_STALL_EVENT_BYTES`` events exceed this host's send-side absorber.
+
+    Skips rather than clamping when the honest burst would exceed the memory
+    budget: a clamped burst could fall under the absorber, which would fail the
+    test on the hosts the derivation is for. The skip is a host-capability
+    gate, not a masked failure; below the threshold this test fails red.
+    """
     try:
         ceiling = int(_SEND_CEILING_PATH.read_text().split()[2])
-    except OSError:
+    except (OSError, IndexError, ValueError):
         ceiling = _SEND_CEILING_FALLBACK_BYTES
     burst = _BURST_CEILING_MULTIPLE * ceiling
+    if burst > _BURST_PAYLOAD_BUDGET_BYTES:
+        pytest.skip(
+            f"net.ipv4.tcp_wmem's {ceiling}B ceiling needs a {burst}B burst to"
+            f" outrun the send-side absorber, over this test's"
+            f" {_BURST_PAYLOAD_BUDGET_BYTES}B budget at ~4 resident bytes per"
+            f" payload byte"
+        )
     return (burst + _STALL_EVENT_BYTES - 1) // _STALL_EVENT_BYTES
 
 
@@ -89,9 +118,23 @@ def test_the_stated_transport_bounds_are_the_values_they_replaced() -> None:
 
     Three of them compose into the liveness ceiling in ``WP-DISCONNECT`` and
     one is the flow-control threshold burst batching depends on, so editing a
-    default here, or ``_KEEPALIVE_SECONDS``, changes a documented contract. The
-    tuple is written out positionally rather than field by field so that
-    dropping or reordering a field fails too.
+    default here, or ``_KEEPALIVE_SECONDS``, changes a documented contract.
+
+    What the positional tuple establishes, measured mutation by mutation:
+    dropping a field fails (``TypeError``, seven positional arguments for six
+    parameters), and reordering two fields whose defaults differ fails. What it
+    does not establish: adding a seventh field with a default passes, and
+    swapping ``ping_interval_seconds`` with ``ping_timeout_seconds`` passes,
+    because both hold ``_KEEPALIVE_SECONDS``.
+
+    It also says nothing about which ``serve()`` keyword each field reaches.
+    Measured, that mapping is pinned by
+    ``test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_finish``
+    instead: it sets ``write_deadline_seconds`` to 300.0, so passing that field
+    as ``close_timeout`` parks the connection in ``CLOSING`` past its ceiling,
+    and it is the only failure in the suite. The stalled-subscriber test cannot
+    catch the same swap, because there ``write_deadline_seconds`` is the
+    shorter of the two.
     """
     assert WebSocketLimits() == WebSocketLimits(20.0, 20.0, 10.0, 40.0, 32768, (32, 8))
 
@@ -911,16 +954,21 @@ class _HalfOpenPeer:
 def _reaped(wait: Callable[[], None], *, ceiling: float = 30.0) -> bool:
     """Whether *wait* observes the last subscription ending.
 
-    The ceiling only keeps a regression from hanging the suite: the assertion
-    is on the boolean, never on how long it took. Nothing competes with the
-    waiter, so the outcome does not depend on how fast the host is.
+    The assertion is on the boolean, never on how long it took, but the
+    boolean is still a wall-clock comparison: the two socket callers below race
+    real timers inside ``websockets`` against this ceiling, and measured, their
+    verdict flips 3/3 between a 1.2s and a 1.5s ceiling. This helper is
+    therefore not a wall-clock-free construction, only one with a large margin.
+    Their docstrings say what that costs and why there is no seam to remove it.
+    The Fake-connection test needs none of this and takes no ceiling.
 
     The ceiling is deliberately far above the injected timeouts, because those
     are not the largest term under it. ``wait_for_subscriber_disconnect``
     reaches ``wait_for_none_active`` with its default settle window,
     ``RECONNECT_SETTLE_SECONDS`` (1.0s), which no caller here injects and which
     dominates both socket tests' elapsed time. 30s leaves room for that
-    constant to be retuned without silently eating the headroom.
+    constant to be retuned without silently eating the headroom, and lowering
+    it would widen the wall-clock exposure rather than narrow it.
     """
     observed = threading.Event()
 
@@ -940,6 +988,20 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
     The write deadline is left far above the ceiling so it cannot be what ends
     this connection: the only mechanism under test is ping, ping timeout, and
     the closing handshake giving up on a peer that never echoes the close.
+    Setting ``write_deadline_seconds`` that far out is also what makes this the
+    one test that pins the field-to-``serve()``-keyword mapping, since passing
+    it as ``close_timeout`` would park the connection in ``CLOSING`` for 300s.
+
+    Load sensitive by construction, with no seam to fix it here. The three
+    timers under test are ``websockets``' own, taken from ``loop.time()``
+    inside a dependency this repository does not own, so there is no clock to
+    inject without adding a production parameter for the test's benefit. The
+    chain completes in 1.40s to 1.51s against the 30s ceiling, measured stable
+    over 11 runs including 6 at a load average of 28 to 34 on a 64-core host,
+    so the margin is about 20x. If it is ever exceeded the signature to look
+    for is a connection parked in ``State.CLOSING``: only ``send_context``'s
+    ``raise_close_exc`` abort moves it to ``CLOSED``, and ``_stream`` polls for
+    exactly that.
     """
     limits = WebSocketLimits(
         ping_interval_seconds=0.1,
@@ -985,7 +1047,17 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
     the only thing that can end the connection. That also makes the pass an
     assertion about the producer stall itself: had the burst been buffered
     instead of stalling, the send would have completed and no deadline could
-    have fired.
+    have fired. A burst too small to stall therefore fails this test red rather
+    than passing it vacuously, in either direction, which is what lets
+    ``_stall_event_count`` derive the burst from the host instead of pinning
+    it. Measured on a 4 MiB-ceiling host the boundary is 17 events absorbed and
+    18 stalling, against a derived burst of 128.
+
+    Load sensitive in the same way as the keepalive test above, and for the
+    same reason: ``asyncio.timeout`` reads the running loop's clock, so this
+    verdict is a wall-clock comparison with a large margin (1.4s against 30s)
+    rather than a wall-clock-free one. The Fake-connection test below covers
+    the same policy with no clock at all.
     """
     limits = WebSocketLimits(
         ping_interval_seconds=600.0,
