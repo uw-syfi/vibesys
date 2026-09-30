@@ -146,7 +146,9 @@ function startArguments(instancePath: string, replayLog: string): string[] {
  * A gateway that will not stop is still a failure, reported with `expect.soft`
  * so it is additional to the spec's own failure rather than in place of it. The
  * teardown errors `stop` collected are annotated for the same reason: a
- * filesystem error during cleanup must not replace the assertion that failed.
+ * filesystem error during cleanup must not replace the assertion that failed,
+ * which is #1028's defect and is how this file's real failures were first
+ * masked. This supersedes #1047's inline gate in `live.spec.ts`.
  */
 export async function withGateway(
   run: (gateway: {readonly url: string}) => Promise<void>,

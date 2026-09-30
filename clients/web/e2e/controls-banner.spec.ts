@@ -105,7 +105,12 @@ async function injectFrames(page: Page, injection: Injection): Promise<Observed>
   // with a query string, so the route never fired and both specs measured an
   // uninstrumented page. `live.spec.ts` already asserts that exact URL shape;
   // the refutation was in the sibling file the whole time.
-  await page.routeWebSocket(
+  //
+  // Registered on the context rather than the page. Both should route a redial
+  // opened after `goto`, but the context form is the one that has actually been
+  // measured sustaining an outage across a series of refused dials here, and
+  // choosing the variant with evidence costs nothing.
+  await page.context().routeWebSocket(
     url => url.pathname === '/ws',
     ws => {
       if (injection.blockDials) {
@@ -207,14 +212,32 @@ test('reports a dead control channel without disturbing the live transcript', as
     // given state selects; what this pins is that the page renders it.
     await expectBundleUnderTest(controls);
     await expect(controls.getByRole('button', {name: /Reconnect now|Reconnecting/})).toBeVisible();
-    // A dead command path with a live transcript is the case the two separate
-    // reports exist for, so the stream must say nothing about this.
+
+    // Awaited, not read. `ControlChannel.#onDrop` reports the outage and *then*
+    // arms the redial, so the banner is on screen in the same task as the close
+    // while the first dial is still 500ms away (`DEFAULT_RECONNECT_DELAYS_MS`).
+    // Every assertion above settles on its first poll, so a synchronous read
+    // here lands inside that 500ms and reports zero every time: the counter was
+    // right and the spec was early.
+    //
+    // Two, not one, because the claim this spec makes is that the outage is
+    // sustained by refusing the *series*. One refusal is consistent with a
+    // single dial that happened to be caught. Refused dials fail as fast as the
+    // route can close them, so the second arrives about 1.5s in; the timeout is
+    // generous against the 500/1000/2000/4000/8000 schedule rather than tuned.
+    await expect.poll(() => observed.refusedDials, {timeout: 10_000}).toBeGreaterThanOrEqual(2);
+
+    // Checked after the refusal series, so they hold across the whole outage
+    // rather than in the instant after the close. A dead command path with a
+    // live transcript is the case the two separate reports exist for, so the
+    // stream must say nothing about this.
+    await expect(controls).toBeVisible();
     await expect(stream).toHaveCount(0);
     await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
     expect(await transcript.textContent()).toBe(foldedBefore);
-    // Refusing every later dial is only sound while the stream never redials.
+    // Refusing every dial indiscriminately is only sound while the stream never
+    // redials, which would otherwise be refused too. Now covers the series.
     expect(observed.streamSocketClosed).toBe(false);
-    expect(observed.refusedDials).toBeGreaterThan(0);
     expect(pageErrors).toEqual([]);
   });
 });
@@ -256,13 +279,21 @@ test('takes the controls banner down when the run ends during the outage', async
     // the fix, and the failure would point at the wrong thing.
     await expectBundleUnderTest(controls);
 
+    // Awaited before the release, because this spec's argument is that the only
+    // thing which can take the banner down is the run ending. That argument
+    // needs the channel to be demonstrably still trying and still failing. Read
+    // synchronously, this was zero (the first redial is 500ms out, and every
+    // assertion above settles sooner), which made the comparison below
+    // `0 >= 0`: true whatever happened, and therefore evidence of nothing.
+    await expect.poll(() => observed.refusedDials, {timeout: 10_000}).toBeGreaterThanOrEqual(1);
     const refusedBefore = observed.refusedDials;
+    expect(refusedBefore).toBeGreaterThanOrEqual(1);
     observed.releaseTerminal?.();
 
     await expect(status).toHaveText('completed');
     await expect(controls).toHaveCount(0);
-    // The channel is still dead and still being refused, so the banner came
-    // down because the run ended and for no other reason.
+    // The channel is still dead and was still being refused across the release,
+    // so the banner came down because the run ended and for no other reason.
     expect(observed.refusedDials).toBeGreaterThanOrEqual(refusedBefore);
     expect(observed.streamSocketClosed).toBe(false);
     expect(pageErrors).toEqual([]);
