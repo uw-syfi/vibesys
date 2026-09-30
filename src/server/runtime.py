@@ -38,6 +38,9 @@ from server.transport.discovery import (
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway
+from server.transport.websocket import (
+    browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
+)
 from vibesys.api import ConfigurationError, RunStopped, create_session
 
 if TYPE_CHECKING:

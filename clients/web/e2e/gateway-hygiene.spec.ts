@@ -1,17 +1,28 @@
 import {expect, type Page, test} from '@playwright/test';
 import {startLiveGateway} from './gateway.js';
 
-// The one wall-clock value in this file, and a resource bound rather than the
-// flakiness patch `.agents/skills/testing/references/flakiness.md` prohibits.
-// It does not make a racing assertion pass: every asynchronous condition below
-// is an `expect`/`expect.poll` on an observable state, none of which waits on
-// elapsed time. What the budget covers is process startup the spec cannot
-// avoid: a cold `uv run` resolving the Python environment, plus
+// A resource bound rather than the flakiness patch
+// `.agents/skills/testing/references/flakiness.md` prohibits. It does not make
+// a racing assertion pass. What the budget covers is process startup the spec
+// cannot avoid: a cold `uv run` resolving the Python environment, plus
 // `entrypoints.server`'s own 10s readiness budget, running concurrently with
 // the other gateway-booting spec and the Vite dev server. That cost is bounded
 // and independent of what is asserted, and it does not fit the 30s global
 // default. Scoped to this file; the global config is left alone.
 test.describe.configure({timeout: 120_000});
+
+// This file has one other wall-clock dependence, named here rather than left
+// to contradict the paragraph above: the `expect.poll` on the stopped pid.
+// `flakiness.md` lists polling for a process by name and prescribes
+// synchronizing on the thing itself, which this spec cannot do yet. `_run_stop`
+// (`src/entrypoints/web.py`) returns once the instance record is gone and
+// returns 0 unconditionally, so process exit is not observable through its
+// result. Measured here: `stop` returned status 0 after 2.24s with the pid
+// still alive, and the pid disappeared 0.15s later. Signal 0 is therefore the
+// only observable, and it is polled. #1028 makes `stop` own that wait and
+// return non-zero when the child outlives SIGTERM; when it lands, the poll
+// should be replaced by asserting the status alone, and this comment removed.
+const PROCESS_EXIT_TIMEOUT_MS = 30_000;
 
 /**
  * Loopback literals a URL may use: any 127.0.0.0/8 form including the dotted
@@ -76,9 +87,14 @@ test('serves the app under a strict CSP without leaving loopback', async ({page}
     // The pid is the load-bearing half: `_run_stop` in `src/entrypoints/web.py`
     // currently returns 0 unconditionally, including when its wait loop times
     // out with the child still alive, so the exit status only becomes
-    // meaningful once #1028 lands.
+    // meaningful once #1028 lands. The timeout is explicit rather than the
+    // implicit 5s default, because the measured gap between `stop` returning
+    // and the pid going away is unbounded by anything `stop` guarantees; see
+    // the note at the top of this file.
     const stopped = gateway.stop();
-    await expect.poll(() => processIsGone(gateway.pid)).toBe(true);
+    await expect
+      .poll(() => processIsGone(gateway.pid), {timeout: PROCESS_EXIT_TIMEOUT_MS})
+      .toBe(true);
     expect(stopped.status).toBe(0);
   } finally {
     // Read in `finally`, not in the body: `stop()` memoizes, so this is the
@@ -189,10 +205,13 @@ async function interceptWebSockets(page: Page): Promise<Intercepted> {
 /**
  * Independent cross-language restatement of `_POLICY_DIRECTIVES` in
  * `src/server/transport/websocket.py`. It imports nothing from the gateway, so
- * it fails when the two disagree rather than agreeing by construction. The
- * gateway's socket sources are always its own port, one per accepted
- * hostname; this spec declares no extra browser origin, so the page's own
- * authority is the whole list.
+ * it fails when the two disagree rather than agreeing by construction.
+ *
+ * `connect-src` is derived from the page's own authority, which is exactly the
+ * rule the gateway now implements: one socket source, its own `host:port`,
+ * with no declared browser origin contributing anything. So this is no longer
+ * only correct because the spec declares no extra origin; it stays correct
+ * whatever is declared.
  */
 function expectedPolicy(pageUrl: string): Readonly<Record<string, string>> {
   return {

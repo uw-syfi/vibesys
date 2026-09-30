@@ -67,14 +67,25 @@ function stopAndClean(instancePath: string, runtimeDirectory: string): GatewaySt
   } catch (error) {
     errors.push(`stop failed: ${String(error)}`);
   }
-  try {
-    // ENOENT is suppressed by `force`, ENOTEMPTY is not: an NFS silly-rename
-    // of a file the gateway still held open leaves the directory non-empty.
-    // Root-causing that is #1028; swallowing it here keeps teardown from
-    // replacing a spec's real failure with a filesystem error.
-    rmSync(runtimeDirectory, {recursive: true, force: true});
-  } catch (error) {
-    errors.push(`runtime directory cleanup failed: ${String(error)}`);
+  // Removed only when `stop` reported success, which is the contract #1028
+  // defines: a non-zero status means a process may still hold files under this
+  // directory, and removing files another process holds open is the original
+  // defect. Measured: after `stop` returns, the directory still holds
+  // `web-gateway.json.lock` and `web-gateway.json.log`, which are exactly what
+  // an NFS silly-rename leaves behind. Forward-compatible, because `_run_stop`
+  // returns 0 unconditionally today, so this is a no-op until #1028 lands and
+  // then becomes correct without another edit. Leaving the directory behind is
+  // the right outcome when the gateway is still using it.
+  if (status === 0) {
+    try {
+      // ENOENT is suppressed by `force`, ENOTEMPTY is not. Swallowed so
+      // teardown cannot replace a spec's real failure with a filesystem error.
+      rmSync(runtimeDirectory, {recursive: true, force: true});
+    } catch (error) {
+      errors.push(`runtime directory cleanup failed: ${String(error)}`);
+    }
+  } else {
+    errors.push(`runtime directory ${runtimeDirectory} kept: stop reported status ${status}`);
   }
   return {status, errors};
 }

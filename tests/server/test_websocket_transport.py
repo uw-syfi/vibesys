@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from http.client import HTTPConnection, HTTPMessage
+import socket
+from http.client import HTTPConnection, HTTPMessage, HTTPResponse
 from pathlib import Path
+from string import ascii_lowercase, digits
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import build_server_parts
 from websockets.asyncio.client import connect
@@ -104,6 +105,21 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
                 ("unknown-route", f"/nope?token={gateway.token}"),
             )
         }
+        # The same bytes spelled raw rather than percent-encoded, which
+        # `HTTPConnection` cannot express. `websockets` decodes the request
+        # target with `ascii`/`surrogateescape`, so these arrive as lone
+        # surrogates, which strict UTF-8 refuses just as `compare_digest`
+        # refuses a non-ASCII `str`. Both spellings have to answer alike.
+        routes.update(
+            {
+                name: _raw_fetch(gateway.bound_port, target)
+                for name, target in (
+                    ("raw-non-ascii-token", b"/?token=\xc3\xa9"),
+                    ("raw-non-ascii-token-on-health", b"/health?token=\x80"),
+                    ("raw-non-ascii-token-on-socket", b"/ws?token=\xff"),
+                )
+            }
+        )
         expected_policy = _expected_policy(f"ws://127.0.0.1:{gateway.bound_port}")
 
     assert {name: status for name, (status, _headers) in routes.items()} == {
@@ -112,6 +128,9 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
         "health": 200,
         "missing-token": 403,
         "non-ascii-token": 403,
+        "raw-non-ascii-token": 403,
+        "raw-non-ascii-token-on-health": 403,
+        "raw-non-ascii-token-on-socket": 403,
         "unknown-route": 404,
     }
     for name, (_status, headers) in routes.items():
@@ -121,40 +140,135 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
         assert headers.get_all("Content-Security-Policy") == [expected_policy], name
 
 
-def test_gateway_socket_sources_name_its_own_port_and_every_declared_hostname(
+# Origins an operator can legitimately declare, spelled every way a browser
+# could send one: a generated domain, both schemes in both cases, an IPv6
+# literal, a trailing-dot FQDN, and a present or absent port.
+_ORIGIN_HOSTS = st.one_of(
+    st.lists(
+        st.text(alphabet=ascii_lowercase + digits, min_size=1, max_size=6), min_size=1, max_size=3
+    ).map(".".join),
+    st.sampled_from(["localhost", "127.0.0.1", "[::1]", "[fe80::1]", "localhost.", "a-b.example"]),
+)
+_DECLARED_ORIGINS = st.builds(
+    lambda scheme, host, port: f"{scheme}://{host}" + ("" if port is None else f":{port}"),
+    st.sampled_from(["http", "https", "HTTP", "Https"]),
+    _ORIGIN_HOSTS,
+    st.one_of(st.none(), st.integers(min_value=1, max_value=65535)),
+)
+
+
+@settings(max_examples=15, suppress_health_check=[HealthCheck.function_scoped_fixture])
+# The documented development origins, pinned so the normal case is always drawn.
+@example(
+    origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "https://localhost:4173",
+        "http://[::1]:5173",
+    ]
+)
+@given(origins=st.lists(_DECLARED_ORIGINS, min_size=1, max_size=4))
+def test_gateway_names_only_its_own_socket_authority_whatever_origins_are_declared(
+    tmp_path: Path, origins: list[str]
+) -> None:
+    with _asset_gateway(tmp_path, allowed_origins=origins) as gateway:
+        status, headers = _fetch(gateway.bound_port, f"/?token={gateway.token}")
+        expected_policy = _expected_policy(f"ws://127.0.0.1:{gateway.bound_port}")
+
+    # Asserted, not discarded: on a 403 the header table below would still
+    # match, so without this the test passes on a route that never served.
+    assert status == 200
+    # The whole served policy is invariant in the declared origins, which is
+    # the property the single-example assertion cannot give: `connect-src`
+    # answers where a *gateway-served* page may connect, and every page this
+    # gateway serves is at its own authority. Because no declared string
+    # reaches the header, a wildcard host (`http://*:5173`), an embedded `;`
+    # that would split the directive, a space, or a non-ASCII byte cannot
+    # appear in it, whatever an operator declares.
+    assert headers.get_all("Content-Security-Policy") == [expected_policy]
+
+
+_REJECTED_ORIGINS = st.one_of(
+    st.builds(
+        lambda host: f"http://{host}:5173",
+        st.sampled_from(
+            [
+                # A bare wildcard is a valid CSP `host-part`, so the previous
+                # rule put `ws://*:<port>` in the header and authorized the
+                # token to any host at this gateway's port.
+                "*",
+                "*.example.test",
+                # A `;` terminates the directive, so the rest became a junk
+                # directive and `connect-src` lost its own socket source.
+                "!;evil.example",
+                "x y",
+                "exämple.test",
+                "user:pw@host",
+                "[::1",
+                "[]",
+                "[:::]",
+                "",
+            ]
+        ),
+    ),
+    st.sampled_from(
+        [
+            "file:///tmp/page.html",
+            "ws://localhost:5173",
+            "http://localhost:5173/app",
+            "http://localhost:5173/?token=leaked",
+            "http://localhost:5173#fragment",
+            "http://localhost:0",
+            "http://localhost:99999",
+            "http://localhost:not-a-port",
+            "//localhost:5173",
+            "",
+        ]
+    ),
+)
+
+
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(origin=_REJECTED_ORIGINS)
+def test_gateway_rejects_a_declared_origin_no_browser_can_send(tmp_path: Path, origin: str) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+
+    # Rejected while constructing, not per response: parsing these lazily made
+    # an unparseable origin a 500 on every route instead of a startup error,
+    # and an origin no browser can send is dead configuration either way.
+    with pytest.raises(ValueError, match="is not an origin a browser can send") as failure:
+        WebSocketGateway(parts.api, allowed_origins=(origin,))
+
+    # The operator has to be able to find the value they typed.
+    assert repr(origin) in str(failure.value)
+
+
+def test_gateway_accepts_the_origin_a_browser_sends_for_a_differently_spelled_declaration(
     tmp_path: Path,
 ) -> None:
-    # A declared origin matters for its hostname spelling, because CSP host
-    # matching is textual, and never for its port: a page this gateway served
-    # can only legitimately reach this gateway. `file:` names no host at all,
-    # and an IPv6 literal has to keep the brackets `urlsplit` strips.
-    origins = (
-        "http://localhost:5173",
-        "https://other.localhost:4173",
-        "http://[::1]:5173",
-        "file:///tmp/page.html",
+    parts = build_server_parts(tmp_path / "logs")
+    # What an operator may type, against what a browser actually sends for it:
+    # the scheme and host arrive lowercased, a default port is omitted, and an
+    # IPv6 literal arrives compressed. The handshake compares `Origin` by exact
+    # string, so an unnormalized entry is an allowlist entry that can never
+    # match.
+    declared = (
+        "http://LOCALHOST:5173",
+        "https://Proxy.Example:443",
+        "HTTP://127.0.0.1:80",
+        "http://[0:0:0:0:0:0:0:1]:5173",
     )
-    with _asset_gateway(tmp_path, allowed_origins=origins) as gateway:
-        _status, headers = _fetch(gateway.bound_port, f"/?token={gateway.token}")
-        port = gateway.bound_port
 
-    policies = headers.get_all("Content-Security-Policy") or []
-    assert policies == [
-        _expected_policy(
-            f"ws://127.0.0.1:{port}",
-            f"ws://[::1]:{port}",
-            f"ws://localhost:{port}",
-            f"ws://other.localhost:{port}",
-        )
-    ]
-    # The property that matters, stated without restating the expected string:
-    # every socket source names this gateway's own port over `ws:`, so no
-    # declared origin's port can authorize a socket to another listener here.
-    sources = policies[0].partition("connect-src ")[2].partition(";")[0].split()
-    assert sources[0] == "'self'"
-    assert {(urlsplit(source).scheme, urlsplit(source).port) for source in sources[1:]} == {
-        ("ws", port)
-    }
+    with WebSocketGateway(parts.api, allowed_origins=declared) as gateway:
+        assert gateway.allowed_origins == {
+            "http://localhost:5173",
+            "https://proxy.example",
+            "http://127.0.0.1",
+            "http://[::1]:5173",
+        }
+        response = asyncio.run(_request(gateway, SnapshotQuery(), origin="http://localhost:5173"))
+
+    assert response["ok"] is True
 
 
 _INDEX_BODY = b"<!doctype html><title>VibeSys</title>"
@@ -216,6 +330,13 @@ def test_gateway_routes_dot_segments_and_trailing_slashes_as_the_normalized_targ
 
 _TRAVERSAL_PATHS = (
     "/assets/index.js",
+    # A trailing slash or `.` on a file normalizes away, so these are the same
+    # target and stay token-free. Pinned because it follows from the accepted
+    # normalization rather than from an explicit route.
+    "/assets/index.js/",
+    "/assets/index.js/.",
+    # One segment up leaves `/assets/` entirely, so the token applies again.
+    "/assets/index.js/..",
     "/assets/../index.html",
     "/assets/%2e%2e/index.html",
     "/assets/../operator-notes.txt",
@@ -235,6 +356,9 @@ def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_pa
     assert tokenless == {
         # The one genuine bundle request stays token-free.
         "/assets/index.js": 200,
+        "/assets/index.js/": 200,
+        "/assets/index.js/.": 200,
+        "/assets/index.js/..": 403,
         # Everything a traversal reaches leaves `/assets/`, so the token applies.
         "/assets/../index.html": 403,
         "/assets/%2e%2e/index.html": 403,
@@ -246,6 +370,10 @@ def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_pa
     # never a served file: no traversal reaches the assets root either way.
     assert with_token == {
         "/assets/index.js": 200,
+        "/assets/index.js/": 200,
+        "/assets/index.js/.": 200,
+        # Normalizes to `/assets`, which is not under `/assets/`.
+        "/assets/index.js/..": 404,
         "/assets/../index.html": 200,
         "/assets/%2e%2e/index.html": 200,
         "/assets/../operator-notes.txt": 404,
@@ -331,6 +459,79 @@ def test_gateway_serves_no_token_free_body_from_outside_the_bundle_directory(
             assert body == _BUNDLE_BODY, path
 
 
+# Every byte a request target can carry. The target is the request line's
+# middle field, so only the bytes that delimit that line's fields or end it are
+# excluded; everything else is target content the gateway has to answer.
+_TARGET_BYTES = st.integers(min_value=0, max_value=255).filter(lambda byte: byte not in b" \t\r\n")
+_RAW_TARGETS = st.builds(
+    lambda route, token: route + b"?token=" + token,
+    st.sampled_from(
+        [
+            b"/",
+            b"/index.html",
+            b"/health",
+            b"/ws",
+            b"/nope",
+            b"/assets/index.js",
+            b"/assets/../index.html",
+        ]
+    ),
+    st.lists(_TARGET_BYTES, max_size=24).map(bytes),
+)
+
+
+@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(targets=st.lists(_RAW_TARGETS, min_size=1, max_size=6))
+def test_gateway_answers_every_token_spelling_through_its_own_response_builder(
+    tmp_path: Path, targets: list[bytes]
+) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        answers = {target: _raw_fetch(gateway.bound_port, target) for target in targets}
+        expected_policy = _expected_policy(f"ws://127.0.0.1:{gateway.bound_port}")
+
+    for target, (status, headers) in answers.items():
+        # A response the gateway did not build carries none of these headers,
+        # so the policy is how "this left `_response`" is observable from
+        # outside. The generalization of `?token=%C3%A9`: no byte a client can
+        # put in the request target may push the handshake onto the library's
+        # error path, whatever the comparison or the decoder does with it.
+        assert headers.get_all("Content-Security-Policy") == [expected_policy], target
+        assert status in {200, 403, 404}, target
+
+
+def test_gateway_answers_a_request_target_a_url_parser_rejects(tmp_path: Path) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        token = gateway.token.encode()
+        answers = {
+            name: _raw_fetch(gateway.bound_port, target)
+            for name, target in (
+                # `urlsplit` raises `ValueError` on a malformed IPv6 authority,
+                # which left the handshake as an unauthenticated 500 carrying
+                # none of the hygiene headers. An origin-form request target is
+                # `absolute-path [ "?" query ]` and not a URL, so it is split
+                # on the first `?` and never parsed as one.
+                ("authority-form, malformed literal", b"//[::/?token=" + token),
+                ("absolute-form, malformed literal", b"http://[::1/?token=" + token),
+                # Routed by path alone, so an authority in the target names no
+                # route rather than being resolved away.
+                ("authority-form", b"//host/?token=" + token),
+                # `#` is an ordinary query byte in a request target, so it is
+                # part of the token rather than a fragment delimiter.
+                ("fragment-looking suffix", b"/?token=" + token + b"#fragment"),
+            )
+        }
+        expected_policy = _expected_policy(f"ws://127.0.0.1:{gateway.bound_port}")
+
+    assert {name: status for name, (status, _headers) in answers.items()} == {
+        "authority-form, malformed literal": 404,
+        "absolute-form, malformed literal": 404,
+        "authority-form": 404,
+        "fragment-looking suffix": 403,
+    }
+    for name, (_status, headers) in answers.items():
+        assert headers.get_all("Content-Security-Policy") == [expected_policy], name
+
+
 def _fetch(port: int, path: str) -> tuple[int, HTTPMessage]:
     connection = HTTPConnection("127.0.0.1", port, timeout=5)
     try:
@@ -340,6 +541,23 @@ def _fetch(port: int, path: str) -> tuple[int, HTTPMessage]:
         return response.status, response.headers
     finally:
         connection.close()
+
+
+def _raw_fetch(port: int, target: bytes) -> tuple[int, HTTPMessage]:
+    """Fetch a request target spelled as raw bytes.
+
+    `HTTPConnection` encodes the target as ASCII, so a byte above 0x7F, or one
+    that no URL grammar admits, can only be put on the request line over a bare
+    socket. That is the only way to reach the decode `websockets` actually
+    performs (`ascii`/`surrogateescape`), which turns such a byte into a lone
+    surrogate rather than rejecting it.
+    """
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
+        client.sendall(b"GET " + target + b" HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        response = HTTPResponse(client)
+        response.begin()
+        response.read()
+        return response.status, response.headers
 
 
 def _fetch_body(port: int, path: str) -> tuple[int, bytes]:

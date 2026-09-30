@@ -154,15 +154,42 @@ def test_web_origins_accept_repeated_explicit_origins() -> None:
     ) == ("http://127.0.0.1:5173", "https://localhost:5173")
 
 
-def test_web_origins_reject_paths() -> None:
+def test_web_origins_reject_what_no_browser_can_send() -> None:
     with pytest.raises(ValueError, match="requires an origin"):
         _web_origins_from_argv(["--web-origin"])
 
-    with pytest.raises(ValueError, match="without a path"):
-        _web_origins_from_argv(["--web-origin", "http://localhost:5173/app"])
+    # Every rejection names the flag that carried the value and the value
+    # itself, so the operator can find what they typed. Before this, an
+    # unparseable authority reached `urlsplit` and surfaced as a bare
+    # `ValueError: Invalid IPv6 URL` naming neither.
+    rejected = (
+        "http://localhost:5173/app",
+        "http://localhost:5173/?token=bad",
+        "http://[::1",
+        "http://*:5173",
+        "http://!;evil.example:5173",
+        "http://user:pw@localhost:5173",
+        "file:///tmp/page.html",
+    )
+    for value in rejected:
+        with pytest.raises(ValueError, match="--web-origin") as failure:
+            _web_origins_from_argv(["--web-origin", value])
+        assert repr(value) in str(failure.value), value
 
-    with pytest.raises(ValueError, match="without a path"):
-        _web_origins_from_argv(["--web-origin", "http://localhost:5173/?token=bad"])
+
+def test_web_origins_canonicalize_to_the_spelling_a_browser_sends() -> None:
+    # The gateway compares `Origin` by exact string, so the launcher stores the
+    # form a browser actually sends: lowercase scheme and host, default port
+    # omitted. `http://LOCALHOST:5173` would otherwise never match.
+    assert _web_origins_from_argv(
+        [
+            "--web-origin",
+            "http://LOCALHOST:5173",
+            "--web-origin=HTTPS://Proxy.Example:443",
+            "--web-origin",
+            "http://[::1]:5173",
+        ]
+    ) == ("http://localhost:5173", "https://proxy.example", "http://[::1]:5173")
 
 
 def test_web_instance_record_is_project_local(

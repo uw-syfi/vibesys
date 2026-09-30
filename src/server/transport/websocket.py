@@ -11,7 +11,9 @@ import secrets
 import threading
 from contextlib import suppress
 from http import HTTPStatus
+from ipaddress import ip_address
 from pathlib import Path
+from string import ascii_lowercase, digits
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -41,12 +43,24 @@ if TYPE_CHECKING:
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
 _LOOPBACK_HOST = "127.0.0.1"
-_ALLOWED_ORIGIN_TEMPLATE = f"http://{_LOOPBACK_HOST}:{{port}}"
+# This gateway's own authority, spelled once. The page origin it accepts and
+# the socket source its policy names are this single `host:port` under two
+# schemes, so the two cannot come to name different authorities.
+_AUTHORITY_TEMPLATE = f"{_LOOPBACK_HOST}:{{port}}"
 _WEB_SOCKET_PATH = "/ws"
 _ASSET_PREFIX = "/assets/"
 # The one subdirectory of the bundle the `/assets/` URL space names, spelled
 # once so the prefix test and the filesystem guard cannot disagree.
 _ASSET_DIRECTORY = _ASSET_PREFIX.strip("/")
+
+# The schemes a browser can name in an `Origin` header, each with the port it
+# omits when the authority uses that scheme's default.
+_ORIGIN_DEFAULT_PORTS: Mapping[str, int] = MappingProxyType({"http": 80, "https": 443})
+# Every character a host in an `Origin` header can hold once `urlsplit` has
+# lowercased it. Deliberately not the CSP `host-part` character set, which is
+# narrower still (no brackets, so no IPv6 literal): declared origins are
+# compared to a request header and never reach a response header.
+_HOST_CHARACTERS = frozenset(ascii_lowercase + digits + "-.")
 
 # The gateway renders model- and tool-produced transcript text, so the served
 # page is denied every fetch destination by default and then granted exactly
@@ -70,9 +84,17 @@ _POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         # polyfill, which `fetch`es every `link[rel=modulepreload]` href, and a
         # `fetch` of a script URL is governed by `connect-src`, not
         # `script-src`. Inert while the build emits a single chunk, live the
-        # moment it code-splits. `_socket_origins` appends the gateway's own
-        # WebSocket authority, because `'self'` alone is not resolved against
-        # `ws:` by every browser engine.
+        # moment it code-splits.
+        #
+        # `_socket_source` appends this gateway's own `ws://host:port`, which
+        # is what actually authorizes the socket. Every page this gateway
+        # hands out is at that authority (`url` is always
+        # `http://127.0.0.1:<bound port>/...`), so the grant is exact and
+        # textual and does not rest on how an engine resolves `'self'` against
+        # `ws:`, which CSP3 leaves less clear than it does for `wss:`. A page
+        # reached by some other spelling of the same socket, or served through
+        # a proxy forwarding these headers, falls back on `'self'`; see
+        # `_socket_source` for why no declared origin can help there.
         "connect-src": ("'self'",),
         "base-uri": ("'none'",),
         "form-action": ("'none'",),
@@ -120,14 +142,22 @@ class WebSocketGateway:
         project_root: Path | None = None,
         allowed_origins: Sequence[str] = (),
     ) -> None:
-        """Create a loopback gateway around a shared run API."""
+        """Create a loopback gateway around a shared run API.
+
+        Raises `ValueError`, naming the offending value, when `allowed_origins`
+        holds anything a browser cannot send as an `Origin` header.
+        """
         self.api = api
         self.assets_dir = assets_dir.resolve() if assets_dir is not None else None
         self.port = port
         self.token = token or secrets.token_urlsafe(32)
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
-        self.allowed_origins = frozenset(allowed_origins)
+        # Parsed here because this is the one boundary declared origins enter
+        # through, so the stored set holds the exact spelling a browser sends
+        # and an origin no browser can send is a construction-time error rather
+        # than an allowlist entry that silently never matches.
+        self.allowed_origins = frozenset(browser_origin(origin) for origin in allowed_origins)
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._claim: WebInstanceClaim | None = None
         self._instance_record: WebInstanceRecord | None = None
@@ -274,21 +304,37 @@ class WebSocketGateway:
     ) -> HttpResponse | None:
         # `websockets` calls this with the connection positionally. Responses are
         # built from gateway state, not from the connection, so it is unused.
-        parsed = urlsplit(getattr(request, "path", ""))
-        query = parse_qs(parsed.query, keep_blank_values=True)
+        #
+        # Split, not `urlsplit`: an origin-form request target is
+        # `absolute-path [ "?" query ]` (RFC 9110 7.1) and not a URL, so `#` is
+        # an ordinary query byte rather than a fragment delimiter, and a target
+        # a URL parser rejects is still a target this gateway has to answer.
+        # `urlsplit` raised `ValueError` on `//[::/` and on any absolute-form
+        # target with a malformed authority, which left the handshake through
+        # the library's error path as an unauthenticated 500 carrying none of
+        # these headers. `partition` cannot fail.
+        raw_path, _separator, raw_query = getattr(request, "path", "").partition("?")
+        query = parse_qs(raw_query, keep_blank_values=True)
         token = query.get("token", [""])[0]
         # Route on one normalized target. Deciding the token requirement from the
         # raw path and then looking the file up from a decoded, traversal-bearing
         # copy of it would let `/assets/../index.html` claim the `/assets/`
         # exemption while resolving to a file outside it.
-        path = _routing_path(parsed.path)
+        path = _routing_path(raw_path)
         serves_asset = path.startswith(_ASSET_PREFIX)
-        # Compared as bytes: `compare_digest` raises `TypeError` on a `str`
-        # holding a non-ASCII character, and `token` is whatever the query
-        # string carried, so `?token=%C3%A9` would otherwise leave the
-        # handshake through the library's error path with none of these
-        # headers. `encode` keeps the comparison constant-time.
-        if not serves_asset and not secrets.compare_digest(token.encode(), self.token.encode()):
+        # Compared as bytes, encoded with the inverse of the decode the library
+        # applied. `compare_digest` raises `TypeError` on a `str` holding a
+        # non-ASCII character, and `token` is whatever the query string carried,
+        # so a plain comparison made `?token=%C3%A9` a library-generated 500.
+        # `websockets` decodes the target with `ascii`/`surrogateescape`
+        # (`websockets/http11.py`), so a raw byte above 0x7F arrives as a lone
+        # surrogate that strict UTF-8 also refuses; `surrogateescape` here is
+        # that decode's inverse and recovers the byte the client sent. Bytes
+        # keep the comparison constant-time, and one encoder is used on both
+        # sides so a caller-supplied token cannot fail where a request cannot.
+        candidate = token.encode("utf-8", "surrogateescape")
+        expected = self.token.encode("utf-8", "surrogateescape")
+        if not serves_asset and not secrets.compare_digest(candidate, expected):
             return self._response(
                 HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n", "text/plain"
             )
@@ -310,45 +356,51 @@ class WebSocketGateway:
             return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         return self._asset_response(path.removeprefix(_ASSET_PREFIX), subdirectory=_ASSET_DIRECTORY)
 
-    def _origin_port(self) -> int:
-        """Return the port an origin names, falling back before the bind."""
-        return self.port if self._bound_port is None else self._bound_port
+    def _authority(self) -> str:
+        """Return this gateway's own `host:port`, falling back before the bind."""
+        port = self.port if self._bound_port is None else self._bound_port
+        return _AUTHORITY_TEMPLATE.format(port=port)
 
     def _actual_origin(self) -> str:
-        return _ALLOWED_ORIGIN_TEMPLATE.format(port=self._origin_port())
+        return f"http://{self._authority()}"
 
     def _allowed_origins(self) -> frozenset[str]:
         return frozenset({self._actual_origin(), *self.allowed_origins})
 
-    def _socket_origins(self) -> tuple[str, ...]:
-        """Return the WebSocket origins a page from this gateway may open.
+    def _socket_source(self) -> str:
+        """Return the one WebSocket authority this gateway's policy names.
 
-        A page this gateway served can only legitimately reach the gateway's
-        own authority, so the port is always this instance's and never a
-        declared origin's. A declared origin contributes its *hostname* only:
-        CSP host matching is textual and performs no name resolution, so a page
-        loaded through `http://localhost:<port>` needs `ws://localhost:<port>`
-        named even though it resolves to the same socket. `ws:` only: the
-        gateway speaks plain HTTP, so no page it serves is an `https:` origin.
-        Sorted, so the header is deterministic.
+        Declared browser origins are deliberately absent, because they answer
+        a different question. `allowed_origins` is the inbound `Origin`
+        allowlist: it says who may connect *to* this gateway. `connect-src`
+        says where a page this gateway *served* may connect to. Neither
+        documented flow makes a declared origin an answer to the second:
+
+        - In the development flow the page is served by Vite, so it carries
+          Vite's policy and this header never governs it.
+        - In a proxied deployment the page is at the proxy's authority and its
+          socket uses the proxy's own port, never this gateway's, so pairing a
+          declared *hostname* with this gateway's bound port (what this
+          replaced) named an authority no page can ever be served from.
+
+        So a declared origin cannot name a source a gateway-served page needs,
+        and none reaches the header. That is also why no configured string can
+        put a wildcard host, a space, or a directive-terminating `;` into a
+        security header: the value is built from module constants and the
+        bound socket, and nothing else.
+
+        The residual is a page at some other spelling of this socket, or
+        behind a header-forwarding proxy: its socket rests on `'self'`, which
+        CSP3 states covers the `wss:` variant of the page's origin but is less
+        clear about plain `ws:`. Deriving this from the document request's own
+        authority would close that; it is not done here.
         """
-        port = self._origin_port()
-        hosts = {_LOOPBACK_HOST}
-        for origin in self.allowed_origins:
-            host = urlsplit(origin).hostname
-            # `hostname` is `None` for an origin with no authority, which names
-            # no reachable host and so contributes nothing, and it strips an
-            # IPv6 literal's brackets, which a CSP host source needs back. Both
-            # would otherwise put a source expression in the header that no
-            # browser can parse.
-            if host is not None:
-                hosts.add(f"[{host}]" if ":" in host else host)
-        return tuple(sorted(f"ws://{host}:{port}" for host in hosts))
+        return f"ws://{self._authority()}"
 
     def _content_security_policy(self) -> str:
-        """Serialize `_POLICY_DIRECTIVES` with this instance's socket origins."""
+        """Serialize `_POLICY_DIRECTIVES` with this instance's socket source."""
         directives = dict(_POLICY_DIRECTIVES)
-        directives["connect-src"] = (*directives["connect-src"], *self._socket_origins())
+        directives["connect-src"] = (*directives["connect-src"], self._socket_source())
         return "; ".join(f"{name} {' '.join(sources)}" for name, sources in directives.items())
 
     def _response(
@@ -541,6 +593,71 @@ class WebSocketGateway:
             ).model_dump_json()
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id
+
+
+def browser_origin(value: str) -> str:
+    """Return `value` as the origin a browser would send, or reject it by name.
+
+    The WebSocket handshake compares the `Origin` request header to
+    `WebSocketGateway.allowed_origins` by exact string, so an entry a browser
+    cannot send is dead configuration that fails silently rather than loudly:
+    `http://LOCALHOST:5173` and `http://proxy.example:80` never match what a
+    browser sends, `http://[::1` is not a URL, and `http://*:5173` is not an
+    authority. Canonicalizing once here leaves one spelling inside the
+    gateway: lowercase scheme and host, IPv6 literal compressed and
+    bracketed, default port omitted.
+
+    Raises `ValueError`, naming `value` and the reason, otherwise.
+    """
+    rejection = _origin_rejection(value)
+    if rejection is not None:
+        raise ValueError(f"{value!r} is not an origin a browser can send: {rejection}")  # noqa: TRY003  # lint-waiver: LW-101107 [TRY003]; name the rejected origin and the reason at the configuration boundary, which a bare exception class cannot do
+    parsed = urlsplit(value)
+    host = parsed.hostname or ""
+    # `hostname` strips an IPv6 literal's brackets, which the serialized origin
+    # needs back, and leaves whatever spelling was typed. A browser sends the
+    # compressed form, so `http://[0:0:0:0:0:0:0:1]:5173` would otherwise be an
+    # entry that never matches. Only a literal can hold a `:` once
+    # `_origin_rejection` has restricted every other host to
+    # `_HOST_CHARACTERS`, and `urlsplit` has already accepted it as one.
+    authority = f"[{ip_address(host).compressed}]" if ":" in host else host
+    port = parsed.port
+    if port is not None and port != _ORIGIN_DEFAULT_PORTS[parsed.scheme]:
+        authority = f"{authority}:{port}"
+    return f"{parsed.scheme}://{authority}"
+
+
+def _origin_rejection(value: str) -> str | None:
+    """Return why `value` is not an origin a browser can send, or `None`."""
+    try:
+        parsed = urlsplit(value)
+        # `urlsplit` defers port validation to this attribute, so reading it
+        # here is what rejects a non-numeric or out-of-range port.
+        port = parsed.port
+    except ValueError as error:
+        # A malformed IPv6 literal fails `urlsplit` and a bad port fails
+        # `port`; either way this is not a URL with an authority.
+        return str(error)
+    host = parsed.hostname or ""
+    # Stated as a table rather than a return ladder, so what an origin *is*
+    # reads as one list. A `:` survives in `host` only for an IPv6 literal,
+    # which `urlsplit` has already validated, so the character set applies to
+    # every other host.
+    requirements = (
+        (parsed.scheme in _ORIGIN_DEFAULT_PORTS, "the scheme must be http or https"),
+        (parsed.username is None and parsed.password is None, "an origin carries no userinfo"),
+        (
+            parsed.path in {"", "/"} and not parsed.query and not parsed.fragment,
+            "an origin carries no path, query, or fragment",
+        ),
+        (bool(host), "the authority names no host"),
+        (
+            ":" in host or not set(host) - _HOST_CHARACTERS,
+            "the host holds only ASCII letters, digits, hyphens, and dots",
+        ),
+        (port != 0, "the port must be between 1 and 65535"),
+    )
+    return next((reason for satisfied, reason in requirements if not satisfied), None)
 
 
 def _request_id(raw: str) -> str:

@@ -11,10 +11,9 @@ import webbrowser
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
-from urllib.parse import urlsplit
 
 from entrypoints import cli
-from server.runtime import WebInstanceClaim, WebInstanceRecord
+from server.runtime import WebInstanceClaim, WebInstanceRecord, browser_origin
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
@@ -86,18 +85,14 @@ def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
         else:
             index += 1
             continue
-        parsed = urlsplit(value)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.netloc
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-101069 [TRY003]; reject browser origins that cannot satisfy the exact WebSocket origin policy
-                "--web-origin must be an http:// or https:// origin without a path"
-            )
-        origin = f"{parsed.scheme}://{parsed.netloc}"
+        # Validated against the gateway's own definition rather than a second
+        # copy of it, so the operator gets a `configuration_error` naming the
+        # flag and the value before any run setup starts, instead of the same
+        # rejection from deep inside `ServerRuntime.run`.
+        try:
+            origin = browser_origin(value)
+        except ValueError as error:
+            raise ValueError(f"--web-origin {error}") from None  # noqa: TRY003  # lint-waiver: LW-101069 [TRY003]; prefix the gateway's rejection with the flag that carried the value, which a bare exception class cannot do
         if origin not in origins:
             origins.append(origin)
     return tuple(origins)

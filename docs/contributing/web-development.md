@@ -105,30 +105,65 @@ deny-everything (`default-src 'none'`) plus these grants:
   403.
 - `font-src 'none'`, stated rather than left to the `default-src` fallback,
   because "no external font" is the air-gap property being asserted.
-- `connect-src 'self'` plus one WebSocket origin per accepted browser origin.
-  `'self'` is separately load-bearing and must not be removed: Vite's
-  modulepreload polyfill `fetch`es `link[rel=modulepreload]` hrefs, and a
-  `fetch` of a script URL is governed by `connect-src`, not `script-src`.
+- `connect-src 'self'` plus this gateway's own WebSocket authority. `'self'` is
+  separately load-bearing and must not be removed: Vite's modulepreload
+  polyfill `fetch`es `link[rel=modulepreload]` hrefs, and a `fetch` of a script
+  URL is governed by `connect-src`, not `script-src`.
 
-`connect-src`'s socket sources are derived per gateway instance: one
-`ws://<host>:<this gateway's port>` per accepted hostname, sorted. The port is
-always this gateway's own, because a page this gateway served can only
-legitimately reach this gateway. A declared browser origin contributes its
-*hostname* and nothing else: CSP host matching is textual and performs no name
-resolution, so `--browser-origin http://localhost:8765` produces a page whose
-Origin check passes but whose `ws://localhost:8765/ws` does not match
-`ws://127.0.0.1:8765`, and naming the hostname is what fixes that. The scheme
-is always `ws:`, because the gateway speaks plain HTTP and no page it serves is
-an `https:` origin.
+`connect-src` names exactly one socket source, `ws://127.0.0.1:<this gateway's
+bound port>`. That is the authority of every page this gateway hands out
+(`WebSocketGateway.url` is always `http://127.0.0.1:<bound port>/?token=...`),
+so the grant is exact and textual.
 
-Two shapes this replaced were each wrong in a different direction. A wildcard
-port (`ws://127.0.0.1:*`) authorized a socket to any other loopback listener,
-including another user's on a shared host. Taking the port from each declared
-origin instead would have kept exactly that grant for every declared port,
-including the `--browser-origin http://127.0.0.1:5173` this document uses as
-the normal case. The bound port being unknown before `start()` is not an
-obstacle: `_origin_port` falls back to the requested `port`, and the policy is
-computed per response.
+**Declared browser origins do not appear in `connect-src`, and must not be
+added to it.** They answer a different question. `--web-origin` is the inbound
+`Origin` allowlist: it says who may connect *to* the gateway. `connect-src`
+says where a page the gateway *served* may connect to. Neither documented flow
+makes a declared origin an answer to the second one:
+
+- In the development flow the page is served by Vite, so it carries Vite's
+  policy and the gateway's header never governs it.
+- In a proxied deployment the page is at the proxy's authority and its socket
+  uses the proxy's own port, never the gateway's.
+
+Three shapes this replaced were each wrong in a different direction, which is
+why the current rule is narrow. A wildcard port (`ws://127.0.0.1:*`) authorized
+a socket to any other loopback listener, including another user's on a shared
+host. Taking each declared origin's full authority kept that grant for every
+declared port, including the `--browser-origin http://127.0.0.1:5173` this
+document uses as the normal case. Pairing each declared *hostname* with the
+gateway's bound port was wrong in both directions at once: it named authorities
+no page can ever be served from (`ws://proxy.example:<gateway port>` when the
+page needs the proxy's port), and because a CSP `host-part` admits a bare `*`
+(`host-char = ALPHA / DIGIT / "-"`, so `*` is valid and `[::1]` is not),
+`--web-origin http://*:5173` put `ws://*:<port>` in the header and authorized
+the capability token to any host at that port, while `--web-origin
+'http://!;evil.example:5173'` split the directive with its `;` and dropped the
+gateway's own socket source.
+
+The value is now built from module constants and the bound socket only, so no
+configured string reaches a security header at all. Declared origins are
+instead parsed and canonicalized when they enter, by `browser_origin` in
+`src/server/transport/websocket.py`, which is the one definition of "an origin
+a browser can send" and is what both `--web-origin` and the gateway
+constructor use. It rejects anything a browser could not send, naming the
+offending value, and lowercases the scheme and host, compresses an IPv6
+literal, and drops a default port, because the handshake compares `Origin` by
+exact string and `http://LOCALHOST:5173`, `http://proxy.example:80`, and
+`http://[0:0:0:0:0:0:0:1]:5173` would otherwise be allowlist entries that never
+match. Note this predicate is deliberately *not* the CSP `host-part` grammar:
+`http://[::1]:5173` is a legitimate `Origin` and is accepted, even though
+`[::1]` is not a valid CSP `host-part`.
+
+The residual, stated rather than claimed away: a page reached by some other
+spelling of the same socket (`http://localhost:<port>`), or served through a
+proxy that forwards these headers, is not covered by the explicit source and
+falls back on `'self'`. CSP3 states `'self'` covers the `wss:` variant of the
+page's origin but is less clear about plain `ws:`. Deriving the source from the
+document request's own authority would close that exactly, and is the intended
+follow-up; no declared origin can close it, which is the point above. The bound
+port being unknown before `start()` is not an obstacle: `_authority` falls back
+to the requested `port`, and the policy is computed per response.
 
 The narrowed header is defense in depth and not a fix for the client. The page
 still builds its own socket URL: `webSocketUrlFromLocation` in
@@ -179,12 +214,28 @@ Normalizing once also makes trailing slashes and `.` segments equivalent to
 their normalized target, which is a deliberate widening rather than a side
 effect: `/health/`, `/index.html/`, `/./`, `/..`, and `/ws/` route as
 `/health`, `/index.html`, `/`, `/`, and `/ws`, where each of those spellings
-was a 404 before. Accepted because one normalization is what makes the
-`/assets/` test mean what it says, and because every route keeps its own check
-under every spelling: `/ws/` still requires both the capability token and an
-exact Origin match, and a target above the root resolves to the token-required
-index rather than outside the tree. The whole table is pinned in
+was a 404 before. It applies inside `/assets/` too: `/assets/index.js/` and
+`/assets/index.js/.` are the same token-free target as `/assets/index.js`,
+while `/assets/index.js/..` normalizes to `/assets` and therefore leaves the
+exemption. Accepted because one normalization is what makes the `/assets/` test
+mean what it says, and because every route keeps its own check under every
+spelling: `/ws/` still requires both the capability token and an exact Origin
+match, and a target above the root resolves to the token-required index rather
+than outside the tree. The whole table is pinned in
 `tests/server/test_websocket_transport.py`.
+
+The target is split on its first `?` rather than parsed as a URL, because an
+origin-form request target is `absolute-path [ "?" query ]` (RFC 9110 7.1) and
+not a URL. Two consequences, both pinned: `#` is an ordinary query byte and so
+is part of the token rather than a fragment delimiter, and a target no URL
+grammar accepts is still answered. `urlsplit` raised `ValueError` on a
+malformed IPv6 authority (`//[::/`, or any absolute-form target with one),
+which left the handshake through the `websockets` library's own error path as
+an unauthenticated 500 carrying none of these headers. The capability token is
+compared as bytes for the same reason, encoded with `surrogateescape`: the
+library decodes the target with `ascii`/`surrogateescape`, so a raw byte above
+0x7F arrives as a lone surrogate that strict UTF-8 refuses, just as
+`compare_digest` refuses a non-ASCII `str`.
 
 ## Remote host and local laptop
 
