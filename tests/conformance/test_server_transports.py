@@ -178,10 +178,7 @@ def test_a_backlog_published_between_checkpoints_arrives_as_coalesced_batches(
     ``subscription_checkpoint`` returns everything past the cursor, so however
     many events land between two checkpoints arrive as one batch. That is what
     keeps a consumer that reads less often than the journal is written cheap,
-    instead of repainting once per event. No writer is stalled here: this burst
-    fits in the loopback buffers (measured, the largest frame is 18665B on unix
-    and 14961B on websocket, both under the gateway's 32 KiB high-water mark),
-    and the consumer is simply not called during the publish loop.
+    instead of repainting once per event.
 
     Each chunk is published under the shared condition the stream loop waits
     on, so a chunk can never be observed half-written. The consumer's cursor
@@ -189,10 +186,23 @@ def test_a_backlog_published_between_checkpoints_arrives_as_coalesced_batches(
     one whole chunk, which makes the batch count bounded by construction
     rather than by how fast the host happens to be.
 
-    What this pins is the coalescing, on both transports. That the WebSocket
-    send path really does stall rather than buffer without bound is a separate
-    claim, asserted in ``tests/server/test_websocket_transport.py`` by the
-    write deadline firing, which can only happen if a write made no progress.
+    Frame size, on the other hand, is bounded only by ``_BURST_EVENTS``: a
+    batch is 364 bytes per event plus a 144 to 155 byte envelope, so the whole
+    burst in one frame is about 36.6 kB. Measured over 210 runs, 45 cold
+    processes and 60 warm iterations per transport, batch counts ranged over
+    {1, 2, 3, 4} and the largest frame was 36548B, one cold WebSocket run that
+    coalesced all 100 events. That is above ``send_buffer_bytes`` (32 KiB) and
+    harmless: ``write_limit`` reaches only ``transport.set_write_buffer_limits``,
+    and ``transport.write`` appends a whole frame to an unbounded buffer before
+    consulting the mark, so overrunning it suspends the following ``drain()``
+    rather than failing or truncating the send. Confirmed directly: a forced
+    single batch of 1000 events delivers intact as one 366052B frame.
+
+    What this pins is therefore the coalescing, on both transports, and not any
+    stall. The consumer here reads continuously. That the WebSocket send path
+    really does stall rather than buffer without bound is a separate claim,
+    asserted in ``tests/server/test_websocket_transport.py`` by the write
+    deadline firing, which can only happen if a write made no progress.
     """
     parts = build_server_parts(tmp_path / "logs")
     try:
