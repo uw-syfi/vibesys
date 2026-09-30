@@ -41,6 +41,11 @@
           "options": { "max": 6 }
         }
       },
+      "security": {
+        "noDangerouslySetInnerHtml": "error",
+        "noDangerouslySetInnerHtmlWithChildren": "error",
+        "noGlobalEval": "error"
+      },
       "style": {
         "noExcessiveLinesPerFile": {
           "level": "error",
