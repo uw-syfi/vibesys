@@ -48,6 +48,7 @@ Historical evidence and decisions: `.superpowers/sdd/HANDOFF-web-app/completion.
 
 ## Known follow-ups (not blocking)
 
+- Transcript code and tool output have no language syntax highlighting; prompts and output render as plain preformatted text, with diff colors where applicable.
 - TUI notes writes are non-atomic (`clients/tui/src/notes-store.ts:66`), so the last write wins against the web app.
 - The Resume view cannot show a recorded budget for loops without an int budget; `RunRow.budget` is None.
 - `KeyVar.label` contract, and making the private `entrypoints.cli` names public (plan 2, M3/M9).
