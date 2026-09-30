@@ -29,7 +29,11 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
-from vibesys.orchestration.metrics import Measurement
+from vibesys.orchestration.metrics import (
+    FrameworkBenchmarkOutcome,
+    Measurement,
+    MetricComparison,
+)
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_runtime.api import BenchmarkObjective, MetricDirection, Run, RunStatus
 
@@ -126,6 +130,7 @@ class _DynamicRun:
 
     async def execute(self) -> RunStatus:
         """Run bounded portfolio epochs and adopt the best trusted candidate."""
+        await self._measure_input_baseline()
         while self.state.next_epoch <= self.options.max_rounds:
             await self.run.control.checkpoint()
             epoch = self.state.next_epoch
@@ -140,6 +145,41 @@ class _DynamicRun:
                 await self._commit(label=f"dynamic: close epoch {epoch}")
         await self._select_and_adopt()
         return RunStatus.SUCCEEDED
+
+    async def _measure_input_baseline(self) -> None:
+        """Benchmark the input tree once, before epoch 1, as the root baseline."""
+        if (
+            not self.run.facts.benchmark_configured
+            or self.state.workstreams
+            or self.state.search.input_baseline is not None
+        ):
+            return
+        revision = self._root_revision()
+        benchmark = await self.run.evaluation.benchmark(
+            self.run.workspaces.root, objectives=self._objectives()
+        )
+        if not benchmark.executed:
+            return
+        baseline = HypothesisSearch.input_baseline(
+            revision, FrameworkBenchmarkOutcome.from_evaluation(benchmark)
+        )
+        if baseline is None:
+            self.run.observations.warning(
+                "input benchmark produced no headline metric; candidates have no input baseline"
+                + (f": {benchmark.feedback}" if benchmark.feedback else "")
+            )
+            return
+        async with self._state_lock:
+            self.state.search = self.state.search.model_copy(
+                update={"input_baseline": baseline}, deep=True
+            )
+            await self._commit(label="dynamic: measure input baseline")
+
+    def _objectives(self) -> tuple[BenchmarkObjective, ...]:
+        return tuple(
+            BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
+            for item in self.options.metric_space.objectives
+        )
 
     def _capacity(self) -> int:
         return self.options.max_in_flight if self.run.workspaces.supports_parallel_candidates else 1
@@ -200,6 +240,7 @@ class _DynamicRun:
                 capacity=self._capacity(),
                 objective_location=self.run.facts.objective_location,
                 root_revision=self._root_revision(),
+                input_baseline=self._input_baseline_text(),
                 history=self._history_projection(),
             )
             first_error: DynamicPlanError | ValidationError | None = None
@@ -555,16 +596,7 @@ class _DynamicRun:
             )
             benchmark_task = (
                 evaluations.create_task(
-                    self.run.evaluation.benchmark(
-                        workspace,
-                        objectives=tuple(
-                            BenchmarkObjective(
-                                name=item.name,
-                                direction=MetricDirection(item.direction),
-                            )
-                            for item in self.options.metric_space.objectives
-                        ),
-                    ),
+                    self.run.evaluation.benchmark(workspace, objectives=self._objectives()),
                 )
                 if self.run.facts.benchmark_configured
                 else None
@@ -637,20 +669,16 @@ class _DynamicRun:
                 and evaluation.metric_name is not None
                 and evaluation.metric_value is not None
             )
-            baseline = (
-                hypothesis_transitions.metric_baseline(
+            baseline_round, baseline_commit, baseline_value = (
+                hypothesis_transitions.causal_baseline(
                     parent_round=None,
                     parent_commit=item.parent_revision,
                     metric=evaluation.metric_name,
                     rounds=self.state.search.rounds,
+                    input_baseline=self.state.search.input_baseline,
                 )
                 if framework_metric
-                else None
-            )
-            baseline_value = (
-                hypothesis_transitions.record_metric_value(baseline, evaluation.metric_name)
-                if baseline is not None and evaluation is not None
-                else None
+                else (None, None, None)
             )
             direction = (
                 evaluation.metric_direction.value
@@ -678,7 +706,15 @@ class _DynamicRun:
             disposition, retained = self._candidate_decision(
                 accepted=accepted,
                 metrics=metrics,
-                framework_metric=framework_metric,
+                headline=(
+                    Measurement(
+                        metric=evaluation.metric_name,
+                        value=evaluation.metric_value,
+                        direction=direction,
+                    )
+                    if framework_metric
+                    else None
+                ),
             )
             record = RoundRecord(
                 round_number=item.sequence,
@@ -705,8 +741,8 @@ class _DynamicRun:
                 candidate_metrics=metrics,
                 candidate_retained=retained,
                 perf_direction=direction,
-                perf_baseline_round=baseline.round_number if baseline is not None else None,
-                perf_baseline_commit=baseline.commit if baseline is not None else None,
+                perf_baseline_round=baseline_round,
+                perf_baseline_commit=baseline_commit,
                 perf_baseline_metric=baseline_value,
                 perf_delta_pct=(
                     (evaluation.metric_value - baseline_value) / abs(baseline_value) * 100
@@ -758,6 +794,7 @@ class _DynamicRun:
         winner = search.best(
             self.state.search.rounds,
             space=self.options.metric_space,
+            baseline=self.state.search.input_baseline,
         )
         if winner is None:
             return None
@@ -790,17 +827,22 @@ class _DynamicRun:
         *,
         accepted: bool | None,
         metrics: dict[str, float],
-        framework_metric: bool,
+        headline: Measurement | None,
     ) -> tuple[CandidateDisposition, bool | None]:
-        """Apply the shared noise aware frontier policy to one evaluated candidate."""
+        """Apply the shared noise aware frontier policy to one evaluated candidate.
+
+        A candidate that does not beat the measured input tree is discarded.
+        """
         if accepted is False:
             return CandidateDisposition.DISCARD, False
         if accepted is not True:
             return CandidateDisposition.UNASSESSED, None
         space = self.options.metric_space
-        comparable = space.complete(metrics) if space.objectives else framework_metric
+        comparable = space.complete(metrics) if space.objectives else headline is not None
         if not comparable:
             return CandidateDisposition.UNASSESSED, None
+        if self._loses_to_input(metrics, headline):
+            return CandidateDisposition.DISCARD, False
         search = HypothesisSearch(_hypothesis_config(self.options))
         conflict = search.pareto_conflict(
             disposition=CandidateDisposition.PARETO_FRONTIER,
@@ -811,6 +853,27 @@ class _DynamicRun:
         if conflict is not None:
             return CandidateDisposition.DISCARD, False
         return CandidateDisposition.PARETO_FRONTIER, True
+
+    def _loses_to_input(self, metrics: dict[str, float], headline: Measurement | None) -> bool:
+        """Whether the measured input tree beats (or, on a frontier, dominates) a candidate."""
+        baseline = self.state.search.input_baseline
+        space = self.options.metric_space
+        if space.objectives:
+            return hypothesis_transitions.input_dominates(baseline, metrics, space)
+        reading = hypothesis_transitions.input_baseline_measurement(
+            baseline, headline.metric if headline is not None else None
+        )
+        return reading is not None and space.compare(headline, reading) in {
+            MetricComparison.WORSE,
+            MetricComparison.WITHIN_NOISE,
+        }
+
+    def _input_baseline_text(self) -> str | None:
+        baseline = self.state.search.input_baseline
+        if baseline is None:
+            return None
+        row = ", ".join(f"{name}={value:.6g}" for name, value in baseline.metrics.items())
+        return f"{row} (commit `{baseline.commit[:12]}`)"
 
     def _history_projection(self) -> str:
         rows = [

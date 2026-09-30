@@ -75,6 +75,20 @@ def _portfolio(
     }
 
 
+# The input tree's benchmark runs first; tests of unrelated behavior leave it unmeasured.
+_UNMEASURED_INPUT = BenchmarkEvaluation(executed=False)
+
+
+def _throughput(value: float) -> BenchmarkEvaluation:
+    return BenchmarkEvaluation(
+        executed=True,
+        metric_name="throughput",
+        metric_value=value,
+        metric_direction=MetricDirection.MAXIMIZE,
+        row={"throughput": value},
+    )
+
+
 def _implementation(identifier: str) -> dict[str, object]:
     return {
         "summary": f"Implemented {identifier}.",
@@ -124,6 +138,7 @@ class _CoordinatedEvaluation:
         self.accuracy_task: asyncio.Task[object] | None = None
         self.benchmark_task: asyncio.Task[object] | None = None
         self.canceled_while_live: list[str] = []
+        self.input_measured = False
 
     async def accuracy(
         self,
@@ -152,6 +167,9 @@ class _CoordinatedEvaluation:
         objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> BenchmarkEvaluation:
         del objectives
+        if not self.input_measured:
+            self.input_measured = True
+            return BenchmarkEvaluation(executed=False)
         self.benchmark_task = asyncio.current_task()
         self.benchmark_started.set()
         try:
@@ -233,22 +251,7 @@ def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Pa
             },
             supports_parallel_candidates=True,
         )
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=10.0,
-                metric_direction=MetricDirection.MAXIMIZE,
-                row={"throughput": 10.0},
-            ),
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=12.0,
-                metric_direction=MetricDirection.MAXIMIZE,
-                row={"throughput": 12.0},
-            ),
-        )
+        run.evaluation.script_benchmark(_throughput(8.0), _throughput(10.0), _throughput(12.0))
         status = await PLUGIN.orchestrate(run, _options())
         return status, run
 
@@ -437,16 +440,8 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
             supports_parallel_candidates=True,
         )
         run.evaluation.script_benchmark(
-            *(
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=12.0,
-                    metric_direction=MetricDirection.MAXIMIZE,
-                    row={"throughput": 12.0},
-                )
-                for _ in range(benchmark_results)
-            )
+            _UNMEASURED_INPUT,
+            *(_throughput(12.0) for _ in range(benchmark_results)),
         )
         run.state.script_commit(*commit_results)
         with pytest.raises(RuntimeError, match="stop"):
@@ -463,7 +458,7 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
     assert len([s for s in run.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
     assert len([s for s in run.agents.sessions if s.role.id == IMPLEMENTER.id]) == 1
     assert len([s for s in run.agents.sessions if s.role.id == JUDGE.id]) == judge_replies
-    assert len(run.evaluation.benchmark_calls) == benchmark_results
+    assert len(run.evaluation.benchmark_calls) == 1 + benchmark_results
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "evaluated"
@@ -504,14 +499,9 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
             supports_parallel_candidates=True,
         )
         run.evaluation.script_benchmark(
+            _UNMEASURED_INPUT,
             BenchmarkEvaluation(executed=True, feedback=feedback),
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=12.0,
-                metric_direction=MetricDirection.MAXIMIZE,
-                row={"throughput": 12.0},
-            ),
+            _throughput(12.0),
         )
         run.state.script_commit(
             None,
@@ -721,14 +711,9 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
             )
         else:
             run.evaluation.script_benchmark(
+                _UNMEASURED_INPUT,
                 BenchmarkEvaluation(executed=True, feedback=feedback),
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=10.0,
-                    metric_direction=MetricDirection.MAXIMIZE,
-                    row={"throughput": 10.0},
-                ),
+                _throughput(10.0),
             )
         await PLUGIN.orchestrate(run, _options(max_retries_per_round=2))
         return run
@@ -777,15 +762,7 @@ def test_evaluation_cadence_counts_eligible_candidates_not_successes(tmp_path: P
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=10.0,
-                metric_direction=MetricDirection.MAXIMIZE,
-                row={"throughput": 10.0},
-            )
-        )
+        run.evaluation.script_benchmark(_UNMEASURED_INPUT, _throughput(10.0))
         await PLUGIN.orchestrate(run, _options(max_rounds=2))
         return run
 
@@ -793,7 +770,7 @@ def test_evaluation_cadence_counts_eligible_candidates_not_successes(tmp_path: P
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert state.eligible_evaluation_candidates == 2
-    assert len(run.evaluation.benchmark_calls) == 1
+    assert len(run.evaluation.benchmark_calls) == 1 + 1
 
 
 def test_portfolio_history_omits_large_evaluation_feedback(tmp_path: Path) -> None:
@@ -823,7 +800,9 @@ def test_portfolio_history_omits_large_evaluation_feedback(tmp_path: Path) -> No
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        run.evaluation.script_benchmark(BenchmarkEvaluation(executed=True, feedback=diagnostic))
+        run.evaluation.script_benchmark(
+            _UNMEASURED_INPUT, BenchmarkEvaluation(executed=True, feedback=diagnostic)
+        )
         await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
         return run
 
@@ -883,7 +862,7 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
                     metric_direction=MetricDirection.MAXIMIZE,
                     row=row,
                 )
-                for row in rows
+                for row in ({"throughput": 80.0, "latency": 12.0}, *rows)
             )
         )
         await PLUGIN.orchestrate(
@@ -914,3 +893,65 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     }
     winner = next(item for item in state.workstreams if item.hypothesis_id == "fast")
     assert state.winner_revision == winner.candidate_revision
+
+
+@pytest.mark.parametrize(
+    "objectives",
+    [[], [{"name": "throughput", "direction": "max"}]],
+    ids=["scalar", "pareto"],
+)
+def test_candidates_slower_than_the_input_are_discarded_and_never_adopted(
+    tmp_path: Path,
+    objectives: list[dict[str, str]],
+) -> None:
+    """Regression: without an input baseline a slower candidate was retained and adopted."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("prefill", "decode")],
+            IMPLEMENTER.id: [_implementation("prefill"), _implementation("decode")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Candidate is correct."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            _throughput(800_000.0), _throughput(98_000.0), _throughput(110_000.0)
+        )
+        await PLUGIN.orchestrate(run, _options(metric_space={"objectives": objectives}))
+        return run
+
+    run = asyncio.run(scenario())
+
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.search.input_baseline is not None
+    assert state.search.input_baseline.metrics == {"throughput": 800_000.0}
+    assert [record.candidate_retained for record in state.search.rounds] == [False, False]
+    assert [record.candidate_disposition for record in state.search.rounds] == [
+        "discard",
+        "discard",
+    ]
+    assert all(record.perf_baseline_round is None for record in state.search.rounds)
+    assert all(record.perf_baseline_metric == 800_000.0 for record in state.search.rounds)
+    assert state.winner_revision is None
+    assert "dynamic search produced no trusted candidate" in [
+        call.message for call in run.observations.calls
+    ]
+    planner_prompt = next(message for role, _, message in script.calls if role == ORCHESTRATOR.id)
+    assert "Input baseline (measured before epoch 1): throughput=800000" in planner_prompt

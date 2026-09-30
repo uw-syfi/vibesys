@@ -3,7 +3,9 @@ You are scheduling epoch {{ epoch }} of {{ max_epochs }} with at most
 
 Objective: {{ objective_location }}
 Current root revision: `{{ root_revision }}`
-
+{% if input_baseline %}Input baseline (measured before epoch 1): {{ input_baseline }}. The framework
+retains and adopts a candidate only if it also beats this.
+{% endif %}
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.

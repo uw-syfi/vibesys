@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, Literal
 from vibesys.orchestration.hypothesis.attempts import recorded_judge_verdict
 from vibesys.orchestration.hypothesis.transitions import (
     ResolutionEvidence,
+    causal_baseline,
     input_baseline_measurement,
-    metric_baseline,
+    input_dominates,
     pareto_archive_dominators,
     provisional_candidate_retained,
     record_metric_value,
@@ -119,26 +120,6 @@ def _accepted_metrics(data: RecordInput) -> dict[str, float]:
     return metrics
 
 
-def _baseline(data: RecordInput, metric: str | None) -> tuple[int | None, str | None, float | None]:
-    """Return the round, commit, and value this round is compared against.
-
-    The nearest retained measured ancestor wins; without one, the input tree.
-    """
-    parent = metric_baseline(
-        parent_round=data.hypothesis.parent_round,
-        parent_commit=data.hypothesis.parent_commit,
-        metric=metric,
-        rounds=data.records,
-    )
-    if parent is not None:
-        return parent.round_number, parent.commit, record_metric_value(parent, metric)
-    input_baseline = data.state.input_baseline
-    reading = input_baseline_measurement(input_baseline, metric)
-    if input_baseline is None or reading is None:
-        return None, None, None
-    return None, input_baseline.commit, reading.value
-
-
 def _measurement(
     data: RecordInput, accepted_metrics: dict[str, float], *, official: bool
 ) -> MeasurementEvidence:
@@ -153,7 +134,13 @@ def _measurement(
     )
     if official_metric is None and not accepted_metrics:
         official_metric = projection.metric
-    baseline_round, baseline_commit, baseline = _baseline(data, metric_name)
+    baseline_round, baseline_commit, baseline = causal_baseline(
+        parent_round=data.hypothesis.parent_round,
+        parent_commit=data.hypothesis.parent_commit,
+        metric=metric_name,
+        rounds=data.records,
+        input_baseline=data.state.input_baseline,
+    )
     trusted = trusted_perf_provenance(projection.provenance)
     reading = (
         Measurement(metric=metric_name, value=official_metric, direction=direction)
@@ -218,13 +205,7 @@ def _pareto_retained(data: RecordInput, row: dict[str, float]) -> bool:
     space = data.state.metrics
     if pareto_archive_dominators(row, data.records, space):
         return False
-    baseline = data.state.input_baseline
-    return not (
-        baseline is not None
-        and space.complete(baseline.metrics)
-        and space.complete(row)
-        and space.dominates(baseline.metrics, row)
-    )
+    return not input_dominates(data.state.input_baseline, row, space)
 
 
 def _scalar_retained(data: RecordInput, measurement: MeasurementEvidence) -> bool | None:

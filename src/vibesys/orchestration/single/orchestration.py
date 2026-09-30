@@ -49,7 +49,6 @@ from vibesys.orchestration.single.models import (
     SingleState,
 )
 from vs_runtime.api import (
-    BenchmarkEvaluation,
     BenchmarkObjective,
     MetricDirection,
     Run,
@@ -81,19 +80,6 @@ class _SelectedRound:
 
 SingleRunOptions = SingleOptions | ProfileGuidedSingleOptions
 _PROFILE_MEASUREMENT_REASON = "profile-guided component measurement"
-
-
-def _framework_outcome(benchmark: BenchmarkEvaluation) -> FrameworkBenchmarkOutcome:
-    return FrameworkBenchmarkOutcome(
-        feedback=benchmark.feedback,
-        metric_name=benchmark.metric_name,
-        metric_value=benchmark.metric_value,
-        metric_direction=(
-            benchmark.metric_direction.value if benchmark.metric_direction is not None else None
-        ),
-        metric_unit=benchmark.metric_unit,
-        row=benchmark.row,
-    )
 
 
 def _benchmark_objectives(options: SingleRunOptions) -> tuple[BenchmarkObjective, ...]:
@@ -198,7 +184,9 @@ class _SingleRun:
         )
         if not benchmark.executed:
             return
-        baseline = self.search.input_baseline(revision, _framework_outcome(benchmark))
+        baseline = self.search.input_baseline(
+            revision, FrameworkBenchmarkOutcome.from_evaluation(benchmark)
+        )
         if baseline is None:
             self.run.observations.warning(
                 "input benchmark produced no headline metric; rounds have no input baseline"
@@ -435,7 +423,7 @@ class _SingleRun:
             self.workspace,
             objectives=_benchmark_objectives(self.options),
         )
-        selected.attempt.framework_benchmark = _framework_outcome(benchmark)
+        selected.attempt.framework_benchmark = FrameworkBenchmarkOutcome.from_evaluation(benchmark)
         selected.attempt.framework_perf_metric = benchmark.metric_value
         if not benchmark.passed:
             await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")

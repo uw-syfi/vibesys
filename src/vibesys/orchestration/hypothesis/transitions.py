@@ -207,6 +207,42 @@ def baseline_candidates(
     ]
 
 
+def causal_baseline(
+    *,
+    parent_round: int | None,
+    parent_commit: str | None,
+    metric: str | None,
+    rounds: Sequence[RoundRecord],
+    input_baseline: InputBaseline | None,
+) -> tuple[int | None, str | None, float | None]:
+    """Return the round, commit, and value a new reading is compared against.
+
+    The nearest retained measured ancestor wins; without one, the input tree.
+    The round is ``None`` when the baseline is the input.
+    """
+    parent = metric_baseline(
+        parent_round=parent_round, parent_commit=parent_commit, metric=metric, rounds=rounds
+    )
+    if parent is not None:
+        return parent.round_number, parent.commit, record_metric_value(parent, metric)
+    reading = input_baseline_measurement(input_baseline, metric)
+    if input_baseline is None or reading is None:
+        return None, None, None
+    return None, input_baseline.commit, reading.value
+
+
+def input_dominates(
+    input_baseline: InputBaseline | None, row: dict[str, float], space: MetricSpace
+) -> bool:
+    """Whether the input tree materially dominates a complete objective *row*."""
+    return (
+        input_baseline is not None
+        and space.complete(input_baseline.metrics)
+        and space.complete(row)
+        and space.dominates(input_baseline.metrics, row)
+    )
+
+
 def input_baseline_from(commit: str, benchmark: FrameworkBenchmarkOutcome) -> InputBaseline | None:
     """Build the input baseline from its benchmark, or ``None`` without a usable headline."""
     if benchmark.feedback is not None or benchmark.metric_name is None:
