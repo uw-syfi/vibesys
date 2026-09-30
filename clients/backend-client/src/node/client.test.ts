@@ -310,7 +310,7 @@ describe('ServerClient', () => {
     );
   });
 
-  it('carries a subscribe tail only when one is asked for', async () => {
+  it('carries a subscribe tail and store id only when one is asked for', async () => {
     const frames: Array<Record<string, unknown>> = [];
     await withServer(
       socket =>
@@ -329,14 +329,28 @@ describe('ServerClient', () => {
       async client => {
         const tailed = await client.subscribe(0, () => undefined, noopDisconnect, {tail: 1000});
         const full = await client.subscribe(0, () => undefined, noopDisconnect);
+        const named = await client.subscribe(3, () => undefined, noopDisconnect, {storeId: 'log'});
+        const unnamed = await client.subscribe(3, () => undefined, noopDisconnect, {storeId: ''});
 
         expect(frames[0]).toMatchObject({after_sequence: 0, tail: 1000});
-        expect(frames.map(frame => frame['client_id'])).toEqual(['node-client', 'node-client']);
+        expect(frames.map(frame => frame['client_id'])).toEqual([
+          'node-client',
+          'node-client',
+          'node-client',
+          'node-client',
+        ]);
         // An old server forbids unknown fields, so the plain call must not
         // carry the key at all, not even as null.
         expect(frames[1]).not.toHaveProperty('tail');
+        // `subscribeRequest` owns both encodings, so this transport and the
+        // browser one agree: a named store rides along, an empty one is
+        // absence, and neither ever becomes an explicit null.
+        expect(frames[2]).toMatchObject({after_sequence: 3, store_id: 'log'});
+        expect(frames[3]).not.toHaveProperty('store_id');
         await tailed.close();
         await full.close();
+        await named.close();
+        await unnamed.close();
       },
       {clientId: 'node-client'},
     );
