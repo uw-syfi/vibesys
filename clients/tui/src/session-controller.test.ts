@@ -2409,6 +2409,55 @@ describe('a stream that re-bootstraps into a log shorter than the tail', () => {
 });
 
 /**
+ * The mirror of a raised floor: a fresh batch declaring a floor the stream has
+ * already declared. `#declaredFloor` is the highest such floor, not the latest,
+ * so a descent within one store is extra history rather than a gap, and the
+ * climb back to a floor the stream already declared costs no refold. #1036.
+ */
+describe('a stream that re-declares a floor it already declared', () => {
+  it('keeps the fold when the declared floor returns to an earlier level', async () => {
+    const history = longHistory(2_000);
+    const transport = new HistoryTransport(history);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch(history.slice(1_500), 1_500);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    // A second bootstrap dial against the same store, floored lower: more
+    // history offered and no gap, so the fold extends and the floor descends.
+    transport.emitBatch(history.slice(1_000), 1_000);
+    expect(controller.state.core.historyAfterSequence).toBe(1_000);
+    const folded = controller.state.core.transcript.length;
+
+    // Back at a floor the stream already declared: above the last one but not
+    // above the highest, so there is no gap and the fold has to survive.
+    transport.emitBatch([event(2_001, 'agent_output_chunk', 'live\n')], 1_500);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_000);
+    expect(controller.state.core.transcript).toHaveLength(folded + 1);
+    expect(controller.state.core.transcript.at(-1)?.content).toBe('live\n');
+  });
+
+  it('takes a store change that lowers the floor as the new watermark', async () => {
+    const transport = new HistoryTransport(longHistory(2_000));
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch([event(1_501, 'agent_output_chunk', 'server\n')], 1_500, 'server-store');
+    transport.emitBatch([event(301, 'agent_output_chunk', 'run\n')], 300, 'run-store');
+    expect(controller.state.core.historyAfterSequence).toBe(300);
+
+    // 900 is below the superseded store's watermark and above the attached
+    // log's, so it is a burst outrunning the tail bound in the log now
+    // streaming, not a return to a floor this stream declared.
+    transport.emitBatch([event(901, 'agent_output_chunk', 'burst\n')], 900, 'run-store');
+
+    expect(controller.state.core.historyAfterSequence).toBe(900);
+    expect(controller.state.core.transcript.map(item => item.content)).toEqual(['burst\n']);
+  });
+});
+
+/**
  * A backfill request is addressed in the sequence numbering of the log that
  * was streaming when it left. If the stream re-bootstraps before the answer
  * lands, the answer describes the superseded log and must be dropped rather

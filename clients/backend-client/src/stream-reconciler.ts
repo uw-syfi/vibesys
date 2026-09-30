@@ -175,12 +175,27 @@ export class StreamReconciler {
    */
   #historyFloor: number | null = null;
   /**
-   * The floor the stream itself last declared, which is not the same as the
-   * floor reached: backfill lowers that and the stream never sees it. A later
-   * batch declaring more than this is a re-bootstrap within one store, which
-   * is what the server does when a burst outruns the tail bound. Null until
-   * the first fresh batch, whose floor is the bootstrap's own and therefore
-   * raises nothing.
+   * The highest floor the stream itself has declared for the log now folded,
+   * which is not the floor reached: backfill lowers that and the stream never
+   * sees it. A later batch declaring more than this is a re-bootstrap within
+   * one store, which is what the server does when a burst outruns the tail
+   * bound. Null until the first fresh batch, whose floor is the bootstrap's own
+   * and therefore raises nothing.
+   *
+   * A watermark rather than the last value declared, because of what the caller
+   * does with the answer it feeds. `rebootstrap` tells the caller to discard
+   * everything it folded, so the comparison at `reconcileBatch` has to be a gap
+   * test: a fresh batch declaring more than the stream ever declared means the
+   * server re-bootstrapped the subscription further forward and never delivered
+   * the events between the top of the fold and the new floor. Comparing against
+   * the last value instead makes a return to a level the stream already declared
+   * read as a raise, so a fold with no gap in it is thrown away and refolded.
+   * Clamping is what keeps the comparison a gap test; see #1036 for why this is
+   * clamped rather than reported as a server violation.
+   *
+   * A re-bootstrap takes the declared floor literally, up or down, exactly as
+   * `#historyFloor` does and for the same reason: it starts a new folded log,
+   * and the superseded log's watermark does not number the new one.
    *
    * A resume writes it only on the store-change branch, which is a full
    * bootstrap. That writes 0: a tail-less subscription reports
@@ -191,14 +206,14 @@ export class StreamReconciler {
    * though the store did not change. TUI-identical
    * (`session-controller.ts:1436`) and pinned by the resumed store-swap test.
    */
-  #declaredFloor: number | null = null;
+  #highestDeclaredFloor: number | null = null;
   /**
    * The event store the folded sequences belong to, as the stream last named
    * it. Sequences only mean anything within one store, and a run swaps in its
    * durable log after the client subscribes, so a batch that names a different
    * store supersedes the fold however the two logs compare in length. Null
    * until the first batch, and empty against a server that does not report
-   * identity, which leaves `#declaredFloor` as the only signal.
+   * identity, which leaves `#highestDeclaredFloor` as the only signal.
    */
   #storeId: string | null = null;
   /**
@@ -240,8 +255,10 @@ export class StreamReconciler {
    * so the wire value is 0), and the floor already reached is kept, so
    * scrollback survives the reconnect. A fresh batch re-declares its
    * subscription's bootstrap floor on every delivery, including live ones, so
-   * that floor is taken as a lower bound rather than literally. Either kind
-   * re-bootstraps when the store it names is not the one the fold belongs to.
+   * that floor is taken as a lower bound rather than literally, and is recorded
+   * as a watermark: only a floor above everything the stream has declared for
+   * this log is the gap a re-bootstrap leaves. Either kind re-bootstraps when
+   * the store it names is not the one the fold belongs to.
    *
    * Refuses a `history_after_sequence` that cannot be a sequence, through
    * `declaredFloorOf`, which is what makes `historyFloor >= 0` an invariant
@@ -266,10 +283,17 @@ export class StreamReconciler {
     }
     const rebootstrap =
       (this.#storeId !== null && store !== this.#storeId) ||
-      (this.#declaredFloor !== null && declared > this.#declaredFloor);
+      (this.#highestDeclaredFloor !== null && declared > this.#highestDeclaredFloor);
     if (rebootstrap) return this.#rebootstrap(store, declared, message.events);
     this.#storeId = store;
-    this.#declaredFloor = declared;
+    // Clamped, so the field is the watermark its name claims. The null case is
+    // the first fresh batch, whose own floor is the watermark; conflating it
+    // with 0 here would be harmless but would restate an invariant the read
+    // above depends on holding.
+    this.#highestDeclaredFloor =
+      this.#highestDeclaredFloor === null
+        ? declared
+        : Math.max(this.#highestDeclaredFloor, declared);
     const historyFloor = this.#lowerFloor(declared);
     this.#recordSpine(message.events, declared);
     return {kind: 'extend', historyFloor};
@@ -370,6 +394,8 @@ export class StreamReconciler {
    * described a log this one replaces. Descending is not the backfill's
    * descent either: a run log shorter than the tail is replayed whole and
    * declares floor 0, which is the truth about the log now being streamed.
+   * `#highestDeclaredFloor` descends with it for the same reason: it is the
+   * watermark of the log being folded, and this starts a new one.
    *
    * An outstanding range is left outstanding. Nothing can cancel it: the
    * protocol carries no store or generation on `query.events`, the server keeps
@@ -380,7 +406,7 @@ export class StreamReconciler {
    */
   #rebootstrap(store: string, declared: number, events: readonly RunEvent[]): BatchReconciliation {
     this.#storeId = store;
-    this.#declaredFloor = declared;
+    this.#highestDeclaredFloor = declared;
     this.#rebootstrapGeneration += 1;
     this.#historyFloor = declared;
     this.#foldedBelowFloor.clear();

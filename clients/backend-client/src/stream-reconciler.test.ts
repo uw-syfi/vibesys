@@ -327,7 +327,8 @@ describe('StreamReconciler batch dispositions', () => {
   });
 
   /**
-   * The store-change branch is the one place a resume writes `#declaredFloor`,
+   * The store-change branch is the one place a resume writes
+   * `#highestDeclaredFloor`,
    * and on the wire the value it writes is 0: a tail-less subscription reports
    * `history_after_sequence = 0` whatever cursor it resumed from
    * (`reported_floor = 0 if request.tail is None`,
@@ -336,8 +337,8 @@ describe('StreamReconciler batch dispositions', () => {
    * The swap is a whole-log replay from zero (`src/server/api/service.py:372`),
    * so 0 is the truth about it, but every later tail dial then declares more
    * than 0 and re-bootstraps again with the store unchanged. TUI-identical
-   * (`session-controller.ts:1436`), and pinned because `#declaredFloor`'s doc
-   * comment claims it.
+   * (`session-controller.ts:1436`), and pinned because
+   * `#highestDeclaredFloor`'s doc comment claims it.
    */
   it('records the floor a resumed store swap declared, so the next tail dial re-bootstraps', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
@@ -481,21 +482,22 @@ describe('StreamReconciler store identity', () => {
   });
 
   /**
-   * Also pinned as current behavior. `#declaredFloor` holds the floor the last
-   * fresh batch declared, not the highest one the stream ever declared, so a
-   * store-preserving descent is taken as a backfill descent (no discard, no
-   * spine clear, no generation bump) and the next batch back at the original
-   * floor re-bootstraps instead.
+   * #1036. A store-preserving descent is extra history, not a gap: it lowers
+   * the floor reached the way a backfill does, and the watermark stays where it
+   * was, so the next batch back at the floor the stream already declared is a
+   * return rather than a raise and the fold survives. Only the third batch
+   * changes against a field holding the last declared floor: that reading
+   * re-bootstrapped there, discarding a fold with no gap in it.
    *
-   * What keeps the pair unreachable today is a client policy, not the server's
-   * arithmetic: one subscription's floor is fixed at its dial, so a lower floor
-   * needs a second bootstrap dial, and `PersistentEventStream` resumes on every
-   * reconnect once a fresh batch has landed
-   * (`persistent-event-stream.ts:250` and `:286`). Any consumer that dials
-   * differently reaches it. #1036 owns the choice between clamping and
-   * reporting.
+   * What keeps the pair unreachable against the current server is a client
+   * policy, not the server's arithmetic: one subscription's floor is fixed at
+   * its dial, so a lower floor needs a second bootstrap dial, and
+   * `PersistentEventStream` resumes on every reconnect once a fresh batch has
+   * landed (`persistent-event-stream.ts:250` and `:286`). Any consumer that
+   * dials differently reaches it, which is why the bound is enforced here
+   * rather than assumed of the server.
    */
-  it('takes a store-preserving floor descent as a backfill descent, then re-bootstraps on the way back up (current behavior)', () => {
+  it('keeps the highest declared floor across a store-preserving descent', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 100}), FRESH);
     expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 50}), FRESH)).toEqual({
@@ -503,9 +505,35 @@ describe('StreamReconciler store identity', () => {
       historyFloor: 50,
     });
     expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 100}), FRESH)).toEqual({
-      kind: 'rebootstrap',
-      historyFloor: 100,
+      kind: 'extend',
+      historyFloor: 50,
     });
+    // One above the watermark is a gap rather than a return, so the signal the
+    // clamp protects still fires.
+    expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 101}), FRESH)).toEqual({
+      kind: 'rebootstrap',
+      historyFloor: 101,
+    });
+  });
+
+  /**
+   * The watermark belongs to the log being folded, so a re-bootstrap takes the
+   * declared floor literally in both directions and later batches are compared
+   * against the new log's floor rather than the superseded log's higher one.
+   * The descent here is the run log being attached shorter than the server log
+   * the subscription bootstrapped against.
+   */
+  it('takes a fresh store change as the new watermark when it lowers the floor', () => {
+    const reconciler = new StreamReconciler({backfillChunk: 100});
+    reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 2_000}), FRESH);
+    expect(
+      reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 300}), FRESH),
+    ).toEqual({kind: 'rebootstrap', historyFloor: 300});
+    // Below the superseded log's watermark and above this log's, so it is a
+    // re-bootstrap within the new store and not a return to a declared floor.
+    expect(
+      reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH),
+    ).toEqual({kind: 'rebootstrap', historyFloor: 900});
   });
 });
 
@@ -597,8 +625,8 @@ describe('StreamReconciler backfill', () => {
    * request left, not from wherever the floor has moved to by the time the
    * answer lands. Only a batch that lowers the floor without re-bootstrapping
    * can tell the two apart, and that is the store-preserving descent the server
-   * does not send (pinned above as current behavior), so this is directed
-   * rather than something the generated traffic reaches.
+   * does not send (pinned above), so this is directed rather than something the
+   * generated traffic reaches.
    */
   it('records the floor of the range it asked for, not the floor when the answer lands', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
@@ -1211,6 +1239,61 @@ function askedRanges(
   return asked;
 }
 
+/**
+ * A walk of declared floors on one unchanged store, shaped to spend most of its
+ * steps below its own watermark. That is where a field holding the highest
+ * declared floor and one holding the last differ, and the server's own
+ * arithmetic cannot go there (within one store the bootstrap floor only rises),
+ * which is why #1036 is latent rather than live and why this walk is not part
+ * of `generateCommands`.
+ */
+function declaredFloorWalk(rng: Rng, length: number): readonly number[] {
+  let highest = rng.int(500, 3_000);
+  const floors = [highest];
+  for (let step = 1; step < length; step += 1) {
+    const declared = rng.chance(0.15) ? highest + rng.int(1, 500) : rng.int(0, highest);
+    highest = Math.max(highest, declared);
+    floors.push(declared);
+  }
+  return floors;
+}
+
+/**
+ * What the fresh path owes a walk of declared floors: a re-bootstrap exactly
+ * when the batch declares more than every floor before it, because only then
+ * has the stream skipped events the fold does not hold, and the floor reached
+ * descending otherwise.
+ */
+function freshDispositionsOf(floors: readonly number[]): readonly BatchReconciliation[] {
+  const decisions: BatchReconciliation[] = [];
+  let highest: number | null = null;
+  let floor: number | null = null;
+  for (const declared of floors) {
+    const rebootstrapped = highest !== null && declared > highest;
+    floor = rebootstrapped || floor === null ? declared : Math.min(floor, declared);
+    decisions.push({kind: rebootstrapped ? 'rebootstrap' : 'extend', historyFloor: floor});
+    highest = highest === null ? declared : Math.max(highest, declared);
+  }
+  return decisions;
+}
+
+/**
+ * Steps above the floor last declared but not above the watermark: the ones the
+ * clamp exists for, and the only ones that tell the two readings of the field
+ * apart. Counted so the property cannot pass by never reaching them.
+ */
+function returnsBelowWatermark(floors: readonly number[]): number {
+  let highest: number | null = null;
+  let last = 0;
+  let returns = 0;
+  for (const declared of floors) {
+    if (highest !== null && declared > last && declared <= highest) returns += 1;
+    highest = highest === null ? declared : Math.max(highest, declared);
+    last = declared;
+  }
+  return returns;
+}
+
 describe('StreamReconciler properties', () => {
   for (const seed of SEEDS) {
     it(`only ever raises the floor through a re-bootstrap (seed ${seed})`, async () => {
@@ -1310,7 +1393,7 @@ describe('StreamReconciler properties', () => {
 
     /**
      * At every position in the trace, not only at its end: an ending floor of
-     * zero makes `declared > #declaredFloor` unsatisfiable, so the claim would
+     * zero makes `declared > #highestDeclaredFloor` unsatisfiable, so the claim would
      * hold there for any implementation that echoes the declared floor back.
      * Those positions are counted instead of asserted, and the count is what
      * says the rest were real comparisons.
@@ -1337,6 +1420,36 @@ describe('StreamReconciler properties', () => {
         });
       }
       expect(probed).toBeGreaterThan(0);
+    });
+
+    /**
+     * #1036, as a characterization of the read the watermark exists for. Over a
+     * random walk of declared floors on one unchanged store, a fresh batch
+     * re-bootstraps exactly when it declares more than every floor before it,
+     * so a descending run never lowers the recorded value and the climb back
+     * through floors the stream already declared costs no refold.
+     *
+     * Generated rather than directed because the ordering matters and there are
+     * many of them: the walk spends most of its steps below its own watermark,
+     * which is where the two readings of the field disagree. The floors are
+     * shaped for that disagreement rather than after the server's arithmetic
+     * (which cannot descend within one store, and is why this is latent), so
+     * this property is deliberately outside `generateCommands`.
+     */
+    it(`re-bootstraps exactly above the highest floor declared so far (seed ${seed})`, () => {
+      const floors = declaredFloorWalk(new Rng(seed), 60);
+      const reconciler = new StreamReconciler({backfillChunk: CHUNK});
+      const expected = freshDispositionsOf(floors);
+
+      const decided = floors.map(declared =>
+        reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: declared}), FRESH),
+      );
+
+      expect(decided).toEqual([...expected]);
+      // Neither half of the walk is empty, so the property is about both the
+      // returns the watermark permits and the gaps it still reports.
+      expect(returnsBelowWatermark(floors)).toBeGreaterThan(0);
+      expect(expected.filter(decision => decision.kind === 'rebootstrap')).not.toEqual([]);
     });
   }
 });
@@ -1375,6 +1488,16 @@ describe('StreamReconciler properties', () => {
  * - the `catch` at 459-464, which turns a failed request into a state report
  *   and a `false`. Whether a failure is worth showing is the caller's decision,
  *   so the reconciler lets the rejection through and the oracle does the same.
+ * - the declared-floor clamp, which is #1036's fix. The controller's
+ *   `#declaredFloor` at 1469 is assigned unclamped, so it holds the last
+ *   declared floor; the reconciler keeps the highest. The two differ only on a
+ *   fresh batch declaring less than the stream already declared for an
+ *   unchanged store, which the generator cannot produce (a bootstrap dial
+ *   floors at `latest - tail` for one log, and `logTop` only grows, so any
+ *   descent comes with a log swap and is taken literally by both sides) and
+ *   which the identity matrix below cannot observe (its probe declares 5_000,
+ *   above every payload floor, so both readings re-bootstrap there). Pinning
+ *   that case is the directed and generated pair above, not this oracle.
  */
 class ControllerOracle implements Reconciling {
   readonly #backfillChunk: number;

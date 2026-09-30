@@ -306,6 +306,17 @@ export class SocketSessionController implements SessionController {
    * which is what the server does when a burst outruns the tail bound; see
    * `#resetHistoryFloor`. Null until the first batch, whose floor is the
    * bootstrap's own and therefore raises nothing.
+   *
+   * Clamped on the fresh path so it is the watermark this says it is, because
+   * of what the comparison decides. Re-bootstrapping discards the fold, so
+   * `declared > this.#declaredFloor` has to be a gap test: a floor above
+   * everything the stream declared means the server re-bootstrapped the
+   * subscription further forward and never delivered the events between the
+   * top of the fold and the new floor. Against the last floor declared
+   * instead, a return to a level the stream already declared reads as a raise
+   * and throws away a fold with no gap in it. `#resetHistoryFloor`'s path
+   * still takes the floor literally, up or down, because it starts a new
+   * folded log whose numbering the old watermark does not describe. #1036.
    */
   #declaredFloor: number | null = null;
   /**
@@ -1466,7 +1477,13 @@ export class SocketSessionController implements SessionController {
       (this.#storeId !== null && store !== this.#storeId) ||
       (this.#declaredFloor !== null && declared > this.#declaredFloor);
     this.#storeId = store;
-    this.#declaredFloor = declared;
+    // The watermark, not the last value declared: see the field. Literal on a
+    // re-bootstrap, which starts a new folded log the old watermark does not
+    // number, and on the first batch, which has no watermark to raise.
+    this.#declaredFloor =
+      rebootstrap || this.#declaredFloor === null
+        ? declared
+        : Math.max(this.#declaredFloor, declared);
     const floor = rebootstrap
       ? this.#resetHistoryFloor(declared)
       : this.#lowerHistoryFloor(declared);
