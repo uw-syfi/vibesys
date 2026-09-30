@@ -201,6 +201,10 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
                 # path, which carries none of these headers.
                 ("non-ascii-token", "/?token=%C3%A9"),
                 ("unknown-route", f"/nope?token={gateway.token}"),
+                # The same unknown route without a token, which is answered
+                # before the credential check and so through a second return
+                # in the same builder.
+                ("unknown-route-without-token", "/favicon.ico"),
             )
         }
         # The same bytes spelled raw rather than percent-encoded, which
@@ -230,6 +234,7 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
         "raw-non-ascii-token-on-health": 403,
         "raw-non-ascii-token-on-socket": 403,
         "unknown-route": 404,
+        "unknown-route-without-token": 404,
     }
     for name, (_status, headers) in routes.items():
         assert headers.get_all("Cache-Control") == ["no-store"], name
@@ -456,16 +461,25 @@ def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_pa
         "/assets/index.js": 200,
         "/assets/index.js/": 200,
         "/assets/index.js/.": 200,
-        "/assets/index.js/..": 403,
-        # Everything a traversal reaches leaves `/assets/`, so the token applies.
+        # A traversal leaves `/assets/`, so the exemption no longer applies and
+        # the normalized target decides. `/index.html` is a route, so the token
+        # applies to it; the rest name no route, so they are 404 rather than a
+        # 403 that would report token validity for a resource that does not
+        # exist. Either way no traversal reaches a body, which is the property
+        # `test_gateway_serves_no_token_free_body_from_outside_the_bundle_directory`
+        # generalizes.
+        "/assets/index.js/..": 404,
         "/assets/../index.html": 403,
         "/assets/%2e%2e/index.html": 403,
-        "/assets/../operator-notes.txt": 403,
-        "/assets/%2e%2e/operator-notes.txt": 403,
-        "/assets/%2e%2e/%2e%2e/etc/passwd": 403,
+        "/assets/../operator-notes.txt": 404,
+        "/assets/%2e%2e/operator-notes.txt": 404,
+        "/assets/%2e%2e/%2e%2e/etc/passwd": 404,
     }
     # With the token the same paths route as their normalized target, which is
-    # never a served file: no traversal reaches the assets root either way.
+    # never a served file: no traversal reaches the assets root either way. The
+    # only entries that differ from the token-free table above are the two that
+    # normalize onto a route, which is the point of the exemption being a
+    # statement about the URL space.
     assert with_token == {
         "/assets/index.js": 200,
         "/assets/index.js/": 200,
@@ -478,6 +492,96 @@ def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_pa
         "/assets/%2e%2e/operator-notes.txt": 404,
         "/assets/%2e%2e/%2e%2e/etc/passwd": 404,
     }
+
+
+# The token-free answers for the reported instance and for each route it has to
+# stay distinguishable from. Restated here rather than imported, so the route
+# table and the statuses it owes are asserted from outside the module.
+_TOKEN_FREE_ANSWERS = {
+    # A browser issues this for every document it loads, with no query string
+    # of its own, so before the fix every page load logged a 403 that no token
+    # could have prevented. Nothing is served here and nothing ever was.
+    "/favicon.ico": (404, b"Not found\n"),
+    # Same shape, from a crawler rather than the page: an unrouted target is
+    # answered by the route table, not by the credential check.
+    "/robots.txt": (404, b"Not found\n"),
+    # Every routed path outside `/assets/*` still spends 403 on a missing
+    # token. Pinned so the 404 above cannot later be widened into an auth hole
+    # by moving a route out of the token-required set.
+    "/": (403, b"Invalid VibeSys capability token\n"),
+    "/index.html": (403, b"Invalid VibeSys capability token\n"),
+    "/health": (403, b"Invalid VibeSys capability token\n"),
+    "/ws": (403, b"Invalid VibeSys capability token\n"),
+    # The documented exemption, unchanged: the bundle is token-free.
+    "/assets/index.js": (200, _BUNDLE_BODY),
+}
+
+
+def test_gateway_answers_a_token_free_request_by_route_before_credential(
+    tmp_path: Path,
+) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        answers = {path: _fetch_body(gateway.bound_port, path) for path in _TOKEN_FREE_ANSWERS}
+
+    assert answers == _TOKEN_FREE_ANSWERS
+
+
+# Targets a browser or a scanner asks for unprompted, plus the routes they have
+# to stay distinguishable from, plus generated segments so the property below
+# is not limited to the paths someone thought to list.
+_PROBE_TARGETS = st.one_of(
+    st.sampled_from(
+        [
+            "/favicon.ico",
+            "/apple-touch-icon.png",
+            "/apple-touch-icon-precomposed.png",
+            "/robots.txt",
+            "/sitemap.xml",
+            "/manifest.webmanifest",
+            "/.well-known/appspecific/com.chrome.devtools.json",
+            "/assets",
+            "/assets/../operator-notes.txt",
+            "/index.htm",
+            "/health/../nope",
+        ]
+    ),
+    st.sampled_from(["/", "/index.html", "/health", "/ws", "/assets/index.js"]),
+    st.lists(
+        st.text(alphabet=ascii_lowercase + digits + "-._", min_size=1, max_size=8),
+        min_size=1,
+        max_size=3,
+    ).map(lambda segments: "/" + "/".join(segments)),
+)
+
+
+@settings(max_examples=20, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(targets=["/favicon.ico"])
+@given(targets=st.lists(_PROBE_TARGETS, min_size=1, max_size=6))
+def test_gateway_spends_403_only_on_a_target_a_token_could_unlock(
+    tmp_path: Path, targets: list[str]
+) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        answers = {
+            target: (
+                _fetch(gateway.bound_port, target)[0],
+                _fetch(gateway.bound_port, f"{target}?token={gateway.token}")[0],
+            )
+            for target in targets
+        }
+
+    for target, (token_free, with_token) in answers.items():
+        # 403 is what an operator debugging the capability token reads first,
+        # so it may only be spent where a token is what is missing. A target
+        # the real token also answers 404 for is not such a place, and before
+        # the fix the two statuses disagreed there: the token decided the
+        # answer for a path no route existed for.
+        if with_token == 404:
+            assert token_free == 404, target
+        # The converse, so the property cannot be satisfied by answering 404
+        # everywhere: a target the token does unlock, outside the documented
+        # `/assets/*` exemption, must still require it.
+        if with_token == 200 and not target.startswith("/assets/"):
+            assert token_free == 403, target
 
 
 def test_gateway_rejects_an_asset_target_the_filesystem_cannot_name(tmp_path: Path) -> None:

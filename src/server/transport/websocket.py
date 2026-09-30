@@ -52,10 +52,19 @@ _LOOPBACK_HOST = "127.0.0.1"
 # schemes, so the two cannot come to name different authorities.
 _AUTHORITY_TEMPLATE = f"{_LOOPBACK_HOST}:{{port}}"
 _WEB_SOCKET_PATH = "/ws"
+_HEALTH_PATH = "/health"
+_INDEX_FILE = "index.html"
+_INDEX_PATHS = frozenset({"/", f"/{_INDEX_FILE}"})
 _ASSET_PREFIX = "/assets/"
 # The one subdirectory of the bundle the `/assets/` URL space names, spelled
 # once so the prefix test and the filesystem guard cannot disagree.
 _ASSET_DIRECTORY = _ASSET_PREFIX.strip("/")
+# Every target outside `/assets/` this gateway has a route for, spelled once so
+# the "could this ever be served?" test and the routes that answer it cannot
+# come to disagree. Membership is what the capability token gates; a target
+# outside this set and outside `/assets/` is answered 404 whether or not it
+# carried a token, because there is no resource there for a token to unlock.
+_ROUTED_PATHS = frozenset({_WEB_SOCKET_PATH, _HEALTH_PATH, *_INDEX_PATHS})
 
 # The schemes a browser can name in an `Origin` header, each with the port it
 # omits when the authority uses that scheme's default.
@@ -388,6 +397,25 @@ class WebSocketGateway:
         # exemption while resolving to a file outside it.
         path = _routing_path(raw_path)
         serves_asset = path.startswith(_ASSET_PREFIX)
+        if not serves_asset and path not in _ROUTED_PATHS:
+            # "Is this a path we could ever serve?" is decided before "is the
+            # token valid?", because the first question is about this module's
+            # route table and the second is about the caller's credential.
+            # Folding an unrouted target into the token branch spent 403, the
+            # one signal an operator reads as "the capability token is wrong",
+            # on a request no token could ever have satisfied: a browser probes
+            # `/favicon.ico` on its own for every document it loads, and that
+            # probe carries no query string, so every page load logged a
+            # permanent 403 unrelated to the token.
+            #
+            # This does make the route table observable without a token, since
+            # a routed target answers 403 where an unrouted one answers 404.
+            # The set is these module constants plus `/assets/*`, which is
+            # already served token-free, so nothing per-run or per-deployment
+            # is disclosed, and an unrouted target now answers alike with and
+            # without a token instead of reporting token validity for a
+            # resource that does not exist.
+            return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         # Compared as bytes, encoded with the inverse of the decode the library
         # applied. `compare_digest` raises `TypeError` on a `str` holding a
         # non-ASCII character, and `token` is whatever the query string carried,
@@ -413,13 +441,11 @@ class WebSocketGateway:
                 )
             return None
 
-        if path == "/health":
+        if path == _HEALTH_PATH:
             return self._response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
 
-        if path in {"/", "/index.html"}:
-            return self._asset_response("index.html")
-        if not serves_asset:
-            return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
+        if path in _INDEX_PATHS:
+            return self._asset_response(_INDEX_FILE)
         return self._asset_response(path.removeprefix(_ASSET_PREFIX), subdirectory=_ASSET_DIRECTORY)
 
     def _authority(self) -> str:

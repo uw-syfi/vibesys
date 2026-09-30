@@ -137,9 +137,12 @@ deny-everything (`default-src 'none'`) plus these grants:
 - `img-src 'self'`. The app renders no images, but Chromium enforces `img-src`
   on the favicon it probes for on its own, and a denied probe is a reported
   `securitypolicyviolation` that fails the browser audit. The grant allows
-  nothing off-origin, and it does not make `/favicon.ico` reachable: that path
-  requires the capability token like any other non-`/assets/` path and answers
-  403.
+  nothing off-origin, and it does not make `/favicon.ico` reachable: the
+  gateway has no route for that path and answers 404 with or without a
+  capability token. The grant is still load-bearing, because what needs
+  permitting is the browser issuing the same-origin probe and not what the
+  probe is answered with. Only declaring an icon in `clients/web/index.html`
+  would suppress the probe and let this tighten to `'none'`.
 - `font-src 'none'`, stated rather than left to the `default-src` fallback,
   because "no external font" is the air-gap property being asserted.
 - `connect-src 'self'` plus this gateway's own WebSocket authority. `'self'` is
@@ -217,17 +220,30 @@ WebSocket the page attempts off loopback.
 
 ### `/assets/*` is served without a capability token
 
-`_process_request` requires the token on every path except `/assets/*`, and that
-exemption is deliberate rather than an oversight. The token lives in the page
-URL, and a subresource request carries no query string of its own, so requiring
-it would mean rewriting every asset URL in the built `index.html` at serve time
-or moving the token into a cookie. The assets are the public frontend bundle and
-hold no run data. Run data moves only over `/ws`, which requires both the token
-and an exact Origin match. Nothing else is exempt, `/health` included: the only
-thing that probes `/health` is record discovery in
-`src/server/transport/discovery.py`, which has already read the instance record
-and therefore already holds the token, so the reason for the exemption does not
-apply to it.
+`_process_request` requires the token on every path it has a route for except
+`/assets/*`, and that exemption is deliberate rather than an oversight. The
+token lives in the page URL, and a subresource request carries no query string
+of its own, so requiring it would mean rewriting every asset URL in the built
+`index.html` at serve time or moving the token into a cookie. The assets are
+the public frontend bundle and hold no run data. Run data moves only over
+`/ws`, which requires both the token and an exact Origin match. Nothing else is
+exempt, `/health` included: the only thing that probes `/health` is record
+discovery in `src/server/transport/discovery.py`, which has already read the
+instance record and therefore already holds the token, so the reason for the
+exemption does not apply to it.
+
+The token gate applies only to paths the gateway has a route for, because
+"could this ever be served?" is a question about the route table and "is the
+token valid?" is a question about the caller. `_ROUTED_PATHS` names the routed
+set outside `/assets/*` (`/ws`, `/health`, `/`, `/index.html`), and a target
+outside it is answered 404 before the token is looked at. Deciding in the other
+order spent 403, the one signal an operator debugging the token reads first, on
+the `/favicon.ico` probe every browser makes unprompted, on every page load,
+where no token could have changed the answer. The cost is that the route table
+is observable without a token, since a routed path answers 403 where an
+unrouted one answers 404. That discloses only the constants above, alongside
+`/assets/*`, which is already served token-free, and in exchange an unrouted
+target no longer reports token validity for a resource that does not exist.
 
 The exemption is a statement about the URL space, not about the filesystem, so
 it only holds if the path that satisfies the `/assets/` test is the same path
@@ -253,12 +269,12 @@ effect: `/health/`, `/index.html/`, `/./`, `/..`, and `/ws/` route as
 `/health`, `/index.html`, `/`, `/`, and `/ws`, where each of those spellings
 was a 404 before. It applies inside `/assets/` too: `/assets/index.js/` and
 `/assets/index.js/.` are the same token-free target as `/assets/index.js`,
-while `/assets/index.js/..` normalizes to `/assets` and therefore leaves the
-exemption. Accepted because one normalization is what makes the `/assets/` test
-mean what it says, and because every route keeps its own check under every
-spelling: `/ws/` still requires both the capability token and an exact Origin
-match, and a target above the root resolves to the token-required index rather
-than outside the tree. The whole table is pinned in
+while `/assets/index.js/..` normalizes to `/assets`, which leaves the exemption
+and names no route, so it is a 404. Accepted because one normalization is what
+makes the `/assets/` test mean what it says, and because every route keeps its
+own check under every spelling: `/ws/` still requires both the capability token
+and an exact Origin match, and a target above the root resolves to the
+token-required index rather than outside the tree. The whole table is pinned in
 `tests/server/test_websocket_transport.py`.
 
 The target is split on its first `?` rather than parsed as a URL, because an
