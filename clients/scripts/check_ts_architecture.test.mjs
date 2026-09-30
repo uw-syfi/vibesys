@@ -322,22 +322,58 @@ test('manifest policy rejects declared reverse dependencies', async t => {
   await writeManifest(root, 'backend-client', '@vibesys/backend-client', {
     '@vibesys/core-state': 'workspace:*',
   });
-  await writeManifest(root, 'core-state', '@vibesys/core-state', {
-    '@vibesys/backend-client': 'workspace:*',
-    '@opentui/core': '1.0.0',
-  });
-  await writeManifest(root, 'tui', '@vibesys/tui', {
-    '@vibesys/backend-client': 'workspace:*',
-  });
-  await writeManifest(root, 'web', '@vibesys/web', {
-    '@vibesys/backend-client': 'workspace:*',
-    '@vibesys/core-state': 'workspace:*',
-  });
+  await writeManifest(
+    root,
+    'core-state',
+    '@vibesys/core-state',
+    {'@vibesys/backend-client': 'workspace:*', '@opentui/core': '1.0.0'},
+    {pretest: 'pnpm --filter @vibesys/core-state^... build'},
+  );
+  await writeManifest(
+    root,
+    'tui',
+    '@vibesys/tui',
+    {'@vibesys/backend-client': 'workspace:*'},
+    {pretest: 'pnpm --filter @vibesys/tui^... build'},
+  );
+  await writeManifest(
+    root,
+    'web',
+    '@vibesys/web',
+    {'@vibesys/backend-client': 'workspace:*', '@vibesys/core-state': 'workspace:*'},
+    {pretest: 'pnpm --filter @vibesys/web^... build'},
+  );
 
   assert.deepEqual(manifestErrors(root), [
     'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
     'core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
     'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
+  ]);
+});
+
+test('manifest policy names a package whose tests do not build its dependencies', async t => {
+  const root = await workspaceFixture(t, 'vibesys-manifest-pretest-');
+  // `pnpm -r run test` runs these two in order and builds neither, so `core-state`'s suite reads
+  // whatever `backend-client/dist` the last build in the checkout left behind. `@vibesys/web`
+  // declared no `pretest` at all while importing values from `@vibesys/core-state` (#1039).
+  await writeManifest(root, 'backend-client', '@vibesys/backend-client', {});
+  await writeManifest(root, 'core-state', '@vibesys/core-state', {
+    '@vibesys/backend-client': 'workspace:*',
+  });
+  // A correctly wired dependent, so the rule cannot pass by rejecting every package.
+  await writeManifest(
+    root,
+    'tui',
+    '@vibesys/tui',
+    {'@vibesys/backend-client': 'workspace:*', '@vibesys/core-state': 'workspace:*'},
+    {pretest: 'pnpm --filter @vibesys/tui^... build'},
+  );
+
+  // `backend-client` has no workspace dependency to build, so it needs no hook and gets no error.
+  assert.deepEqual(manifestErrors(root), [
+    'core-state/package.json: @vibesys/core-state must declare "pretest": ' +
+      '"pnpm --filter @vibesys/core-state^... build", because `pnpm -r test` runs the packages ' +
+      'in order but builds none of them',
   ]);
 });
 
@@ -687,8 +723,8 @@ async function scratchDirectory(t, prefix) {
   return root;
 }
 
-async function writeManifest(root, directory, name, dependencies) {
-  await writePackage(root, directory, name, [], {dependencies});
+async function writeManifest(root, directory, name, dependencies, scripts = {}) {
+  await writePackage(root, directory, name, [], {dependencies, scripts});
 }
 
 async function writePackage(root, directory, name, directories, manifest = {}) {
