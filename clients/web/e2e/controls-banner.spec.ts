@@ -185,8 +185,12 @@ test('reports a dead control channel without disturbing the live transcript', as
     await breakControlChannel(observed, injection);
 
     await expect(controls).toBeVisible();
-    await expect(controls).toContainText('Controls cannot reach the run');
-    await expect(controls.getByRole('button', {name: 'Reconnect now'})).toBeVisible();
+    // The page had a connection and lost it, so the copy says so, and it names
+    // the consequence this client actually has rather than four run controls
+    // it does not implement yet.
+    await expect(controls).toContainText('Controls lost their connection to the run');
+    await expect(controls).toContainText('cannot be refreshed');
+    await expect(controls.getByRole('button', {name: /Reconnect now|Reconnecting/})).toBeVisible();
     // A dead command path with a live transcript is the case the two separate
     // reports exist for, so the stream must say nothing about this.
     await expect(stream).toHaveCount(0);

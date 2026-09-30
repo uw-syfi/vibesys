@@ -1,4 +1,9 @@
-import type {ControlChannelState, ControlTransport, ServerMessage} from '@vibesys/backend-client';
+import {
+  type ControlChannelState,
+  type ControlTransport,
+  type ServerMessage,
+  sameControlChannelState,
+} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
 import {
   PersistentEventStream,
@@ -211,7 +216,7 @@ export class WebSession {
    */
   #onControlState(state: ControlChannelState): void {
     if (this.#closed) return;
-    if (this.#controls.status === state.status) return;
+    if (sameControlChannelState(this.#controls, state)) return;
     this.#controls = state;
     this.#publish();
   }

@@ -1,8 +1,11 @@
 import {describe, expect, it} from 'bun:test';
-import type {ControlChannelState} from './control-channel.js';
-import type {BackendClientError} from './errors.js';
-import type {ProtocolResponse, RequestInput} from './protocol.js';
-import {REQUEST_POLICIES} from './request-policy.js';
+import type {
+  BackendClientError,
+  ControlChannelState,
+  ProtocolResponse,
+  RequestInput,
+} from './index.js';
+import {REQUEST_POLICIES} from './index.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
 
 const URL = 'ws://127.0.0.1:43123';
@@ -156,6 +159,17 @@ class FakeScheduler {
       if (!entry.cancelled) entry.callback();
     }
   }
+}
+
+/**
+ * One reported state as a short string, so a sequence of them reads as a
+ * sequence. Names every field a frontend renders, which is also what makes the
+ * report dedup checkable: an assertion on the whole trace fails if a transition
+ * is emitted twice or swallowed.
+ */
+function trace(state: ControlChannelState): string {
+  if (state.status === 'connected') return 'connected';
+  return `down:${state.everConnected ? 'lost' : 'cold'}${state.retrying ? ':retrying' : ''}`;
 }
 
 const okResponse = (requestId: string, body: Record<string, unknown> = {}) => ({
@@ -384,7 +398,14 @@ describe('WebSocketTransport', () => {
     await tick();
     expect(gateway.sockets).toHaveLength(2);
     expect(transport.connected).toBe(true);
-    expect(states.map(state => state.status)).toEqual(['connected', 'disconnected', 'connected']);
+    // The redial's own start is reported too, so an affordance bound to
+    // `retrying` knows a click would be a no-op while it is in flight.
+    expect(states.map(trace)).toEqual([
+      'connected',
+      'down:lost',
+      'down:lost:retrying',
+      'connected',
+    ]);
 
     const second = transport.request({type: 'command.pause'});
     await tick();
@@ -471,7 +492,8 @@ describe('WebSocketTransport', () => {
     // fails typed rather than hanging, and the dead channel is reportable.
     await expect(pending).rejects.toMatchObject({kind: 'disconnected', retryable: true});
     expect(transport.connected).toBe(false);
-    expect(states.map(state => state.status)).toEqual(['connected', 'disconnected']);
+    // A spent schedule arms no dial, so the outage is reported as idle.
+    expect(states.map(trace)).toEqual(['connected', 'down:lost']);
 
     const revived = transport.request({type: 'query.snapshot'});
     await tick();
@@ -479,7 +501,12 @@ describe('WebSocketTransport', () => {
     gateway.socket(1).answerAll();
     await expect(revived).resolves.toMatchObject({ok: true});
     expect(transport.connected).toBe(true);
-    expect(states.map(state => state.status)).toEqual(['connected', 'disconnected', 'connected']);
+    expect(states.map(trace)).toEqual([
+      'connected',
+      'down:lost',
+      'down:lost:retrying',
+      'connected',
+    ]);
     await transport.close();
   });
 

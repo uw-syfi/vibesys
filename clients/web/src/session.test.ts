@@ -1,12 +1,14 @@
 import {describe, expect, test} from 'bun:test';
-import type {
-  ControlChannelState,
-  ControlTransport,
-  ProtocolResponse,
-  RequestInput,
-  RunEvent,
-  ServerMessage,
-  SubscribeOptions,
+import {
+  BackendClientError,
+  type ControlChannelState,
+  type ControlTransport,
+  type ProtocolResponse,
+  type RequestInput,
+  type RunEvent,
+  type ServerMessage,
+  type SubscribeOptions,
+  sameControlChannelState,
 } from '@vibesys/backend-client';
 import {
   type BrowserLifecycle,
@@ -87,25 +89,43 @@ class FakeTransport implements ControlTransport {
     this.#hooks = hooks;
   }
 
-  /** The control channel lost its connection and reported the outage. */
-  dropControlChannel(error: Error): void {
-    this.#controls = {status: 'disconnected', error};
-    this.#hooks.onConnectionState(this.#controls);
+  /**
+   * The control channel lost its connection and reported the outage.
+   *
+   * Deduplicated like the real `ControlChannel.#reportState`: a report is
+   * emitted only when something a consumer renders actually changed. A Fake
+   * that re-reported an unchanged state would let the session get away with
+   * behavior the real channel never produces.
+   */
+  dropControlChannel(error: BackendClientError, retrying = false): void {
+    this.#report({status: 'disconnected', error, everConnected: true, retrying});
+  }
+
+  /** The channel started a dial, so a reconnect affordance would no-op. */
+  retryControlChannel(error: BackendClientError): void {
+    this.dropControlChannel(error, true);
   }
 
   /** A redial brought the control channel back. */
   recoverControlChannel(): void {
-    this.#controls = {status: 'connected'};
-    this.#hooks.onConnectionState(this.#controls);
+    this.#report({status: 'connected'});
   }
 
   /**
-   * Counted rather than acted on: the real one cancels an armed redial and
-   * dials, and `websocket.test.ts` owns that. What this file checks is that the
-   * session's affordance reaches the verb at all, and reaches nothing else.
+   * Redial now. The real one cancels an armed redial and dials; this one
+   * recovers the channel and reports it, so a test asserts the affordance had
+   * an *effect* rather than that a method was called. An implementation that
+   * dialed and discarded the recovery would pass a call count and fail this.
    */
   reconnect(): void {
     this.reconnectCalls += 1;
+    this.recoverControlChannel();
+  }
+
+  #report(state: ControlChannelState): void {
+    if (sameControlChannelState(this.#controls, state)) return;
+    this.#controls = state;
+    this.#hooks.onConnectionState(state);
   }
 
   async request(input: RequestInput): Promise<ProtocolResponse> {
@@ -278,17 +298,14 @@ describe('WebSession', () => {
     const published: string[] = [];
     session.subscribe(() => published.push(session.getState().controls.status));
 
-    transport.dropControlChannel(new Error('gateway restarted'));
+    transport.dropControlChannel(disconnect('gateway restarted'));
 
     const dead = session.getState();
     // The transcript is still streaming; only the command path is down, and the
     // two are reported as the separate facts they are.
     expect(dead.status).toBe('connected');
     expect(dead.error).toBeNull();
-    expect(dead.controls).toEqual({
-      status: 'disconnected',
-      error: new Error('gateway restarted'),
-    });
+    expect(dead.controls).toEqual(lost('gateway restarted'));
     expect(published).toEqual(['disconnected']);
 
     transport.recoverControlChannel();
@@ -303,24 +320,44 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(lifecycle);
 
     await session.start();
-    transport.dropControlChannel(new Error('gateway restarted'));
+    transport.dropControlChannel(disconnect('gateway restarted'));
     expect(session.getState().controls.status).toBe('disconnected');
     const requests = transport.requests.length;
 
     session.reconnectControls();
 
-    // The affordance reaches the transport's redial verb. Issuing a request
-    // instead would only queue behind the backoff the outage already armed, so
-    // a click could change nothing observable for the length of the schedule.
+    // The affordance reaches the transport's redial verb and the recovery it
+    // produces reaches the session's state. Issuing a request instead would
+    // only queue behind the backoff the outage already armed, so a click could
+    // change nothing observable for the length of the schedule.
     expect(transport.reconnectCalls).toBe(1);
+    expect(session.getState().controls).toEqual({status: 'connected'});
     // And it is the command path only: a live transcript is not resubscribed.
     await settle();
     expect(transport.subscriptions).toHaveLength(1);
     expect(transport.requests).toHaveLength(requests);
 
     await session.close();
+    transport.dropControlChannel(disconnect('gateway restarted'));
     session.reconnectControls();
     expect(transport.reconnectCalls).toBe(1);
+  });
+
+  test('publishes a retry in progress so the affordance can say it is working', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+
+    await session.start();
+    transport.dropControlChannel(disconnect('gateway restarted'));
+    expect(session.getState().controls).toEqual(lost('gateway restarted'));
+
+    // A dial starting is a change a frontend renders (the button goes dead
+    // while `reconnect()` would no-op), so it must not be swallowed by a dedup
+    // that only compares the status.
+    transport.retryControlChannel(disconnect('gateway restarted'));
+    expect(session.getState().controls).toEqual(lost('gateway restarted', true));
+
+    await session.close();
   });
 
   test('publishes an outage on an ended run rather than judging it', async () => {
@@ -337,11 +374,8 @@ describe('WebSession', () => {
     // `banners.test.ts`. Deciding it at report time instead latches the banner
     // on, because a drop reported while the run's terminal event is still in
     // flight never gets re-examined when that event lands.
-    transport.dropControlChannel(new Error('gateway exited'));
-    expect(session.getState().controls).toEqual({
-      status: 'disconnected',
-      error: new Error('gateway exited'),
-    });
+    transport.dropControlChannel(disconnect('gateway exited'));
+    expect(session.getState().controls).toEqual(lost('gateway exited'));
 
     await session.close();
   });
@@ -351,7 +385,7 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(lifecycle);
 
     await session.start();
-    transport.dropControlChannel(new Error('gateway restarted'));
+    transport.dropControlChannel(disconnect('gateway restarted'));
     // Newer than the batch `start()` already folded, so the fold takes it.
     transport.snapshots.push(snapshotResponse('completed', 5));
     session.reattach();
@@ -373,11 +407,21 @@ describe('WebSession', () => {
 
     await session.start();
     await session.close();
-    transport.dropControlChannel(new Error('too late'));
+    transport.dropControlChannel(disconnect('too late'));
 
     expect(session.getState()).toEqual(healthy());
   });
 });
+
+/** A typed transport failure, which is all the channel ever reports. */
+function disconnect(message: string): BackendClientError {
+  return new BackendClientError('disconnected', message);
+}
+
+/** The state a channel reports after losing a connection it had. */
+function lost(message: string, retrying = false): ControlChannelState {
+  return {status: 'disconnected', error: disconnect(message), everConnected: true, retrying};
+}
 
 /** The state of a session whose stream and control channel are both healthy. */
 function healthy(): ReturnType<WebSession['getState']> {

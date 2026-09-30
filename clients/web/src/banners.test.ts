@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {BackendClientError} from '@vibesys/backend-client';
 import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
 import {connectionBanners} from './banners.js';
 import type {WebSessionState, WebSessionStatus} from './session.js';
@@ -19,27 +20,66 @@ const RUN_STATUSES: readonly CoreRunStatus[] = [
 const SESSION_STATUSES: readonly WebSessionStatus[] = ['connecting', 'connected', 'stale'];
 
 const runWith = (status: CoreRunStatus) => ({...initialCoreState(), status});
-const outage = new Error('Server disconnected');
+const outage = new BackendClientError('disconnected', 'Server disconnected');
 
-function sessionState(status: WebSessionStatus, controlsDown: boolean): WebSessionState {
+const LOST =
+  'Controls lost their connection to the run. Its state cannot be refreshed until they reconnect.';
+const COLD = 'Controls have not reached the run. Its state cannot be refreshed until they connect.';
+
+function sessionState(
+  status: WebSessionStatus,
+  controls: 'up' | 'lost' | 'lost-retrying' | 'cold',
+): WebSessionState {
   return {
     status,
     error: status === 'stale' ? outage : null,
-    controls: controlsDown ? {status: 'disconnected', error: outage} : {status: 'connected'},
+    controls:
+      controls === 'up'
+        ? {status: 'connected'}
+        : {
+            status: 'disconnected',
+            error: outage,
+            everConnected: controls !== 'cold',
+            retrying: controls === 'lost-retrying',
+          },
   };
 }
 
 describe('connectionBanners', () => {
-  test('shows the controls banner for an undeliverable channel on a live run', () => {
-    expect(connectionBanners(runWith('running'), sessionState('connected', true))).toEqual({
+  test('names losing a connection and never having one as the different failures they are', () => {
+    expect(connectionBanners(runWith('running'), sessionState('connected', 'lost'))).toEqual({
       stream: false,
       reattach: false,
-      controls: {status: 'disconnected', error: outage},
+      controls: {message: LOST, retrying: false},
+    });
+    expect(connectionBanners(runWith('running'), sessionState('connected', 'cold'))).toEqual({
+      stream: false,
+      reattach: false,
+      controls: {message: COLD, retrying: false},
     });
   });
 
+  test('names no operation this client cannot perform', () => {
+    // `query.snapshot` is the only request `clients/web` issues, so promising
+    // that pause, resume, steer, and chat will not be delivered would describe
+    // affordances the page does not have. They arrive with #815.
+    for (const controls of ['lost', 'cold'] as const) {
+      const banner = connectionBanners(runWith('running'), sessionState('connected', controls));
+      expect(banner.controls?.message).not.toContain('Pause');
+      expect(banner.controls?.message).not.toContain('chat');
+      // Nor does it leak the transport's own wording onto the page.
+      expect(banner.controls?.message).not.toContain(outage.message);
+    }
+  });
+
+  test('marks the reconnect affordance dead while a dial is already in flight', () => {
+    expect(
+      connectionBanners(runWith('running'), sessionState('connected', 'lost-retrying')).controls,
+    ).toEqual({message: LOST, retrying: true});
+  });
+
   test('withholds the controls banner once the run has ended', () => {
-    expect(connectionBanners(runWith('completed'), sessionState('connected', true))).toEqual({
+    expect(connectionBanners(runWith('completed'), sessionState('connected', 'lost'))).toEqual({
       stream: false,
       reattach: false,
       controls: null,
@@ -54,18 +94,18 @@ describe('connectionBanners', () => {
    * nothing re-enters the session when the later one lands.
    */
   test('takes the controls banner down when the run ends after the outage', () => {
-    const down = sessionState('connected', true);
+    const down = sessionState('connected', 'lost');
     expect(connectionBanners(runWith('running'), down).controls).not.toBeNull();
     expect(connectionBanners(runWith('completed'), down).controls).toBeNull();
   });
 
   test('keeps the stream banner on an ended run but drops its reattach button', () => {
-    expect(connectionBanners(runWith('completed'), sessionState('stale', false))).toEqual({
+    expect(connectionBanners(runWith('completed'), sessionState('stale', 'up'))).toEqual({
       stream: true,
       reattach: false,
       controls: null,
     });
-    expect(connectionBanners(runWith('running'), sessionState('stale', false))).toEqual({
+    expect(connectionBanners(runWith('running'), sessionState('stale', 'up'))).toEqual({
       stream: true,
       reattach: true,
       controls: null,
@@ -73,40 +113,42 @@ describe('connectionBanners', () => {
   });
 
   test('reports the two failures independently', () => {
-    const both = connectionBanners(runWith('running'), sessionState('stale', true));
-    expect(both).toEqual({
+    expect(connectionBanners(runWith('running'), sessionState('stale', 'lost'))).toEqual({
       stream: true,
       reattach: true,
-      controls: {status: 'disconnected', error: outage},
+      controls: {message: LOST, retrying: false},
     });
   });
 
   /**
    * Exhaustive over the closed input space (10 run statuses x 3 session
-   * statuses x channel up/down), so the properties hold for every combination
-   * rather than the five named above.
+   * statuses x 4 channel states), so the properties hold for every combination
+   * rather than the handful named above.
    */
   test('holds its properties for every run, stream, and channel combination', () => {
     for (const runStatus of RUN_STATUSES) {
       for (const sessionStatus of SESSION_STATUSES) {
-        for (const controlsDown of [false, true]) {
-          checkCombination(runStatus, sessionStatus, controlsDown);
+        for (const controls of CHANNEL_STATES) {
+          checkCombination(runStatus, sessionStatus, controls);
         }
       }
     }
   });
 });
 
+const CHANNEL_STATES = ['up', 'lost', 'lost-retrying', 'cold'] as const;
+
 /** The properties one point of the input space must satisfy. */
 function checkCombination(
   runStatus: CoreRunStatus,
   sessionStatus: WebSessionStatus,
-  controlsDown: boolean,
+  controls: (typeof CHANNEL_STATES)[number],
 ): void {
   const run = runWith(runStatus);
   const ended = hasRunEnded(run);
-  const banners = connectionBanners(run, sessionState(sessionStatus, controlsDown));
-  const where = {runStatus, sessionStatus, controlsDown};
+  const banners = connectionBanners(run, sessionState(sessionStatus, controls));
+  const where = {runStatus, sessionStatus, controls};
+  const down = controls !== 'up';
 
   // A banner appears exactly when the failure it names is being reported, and
   // for the controls only while the run can still act on a reconnect.
@@ -114,10 +156,7 @@ function checkCombination(
     ...where,
     stream: sessionStatus === 'stale',
   });
-  expect({...where, controls: banners.controls !== null}).toEqual({
-    ...where,
-    controls: controlsDown && !ended,
-  });
+  expect({...where, shown: banners.controls !== null}).toEqual({...where, shown: down && !ended});
   // Every affordance sits inside a banner that is on screen, and none is
   // offered for a run that cannot act on it.
   expect({...where, orphaned: banners.reattach && !banners.stream}).toEqual({
@@ -128,9 +167,20 @@ function checkCombination(
     ...where,
     offeredOnEnded: ended && (banners.reattach || banners.controls !== null),
   }).toEqual({...where, offeredOnEnded: false});
-  // The banner carries the outage the session reported, unchanged.
-  expect({...where, carried: banners.controls?.error ?? null}).toEqual({
+  if (banners.controls === null) return;
+  // The copy describes the failure the channel reported, says nothing this
+  // client cannot do, and never shows the transport's own string.
+  expect({...where, message: banners.controls.message}).toEqual({
     ...where,
-    carried: controlsDown && !ended ? outage : null,
+    message: controls === 'cold' ? COLD : LOST,
+  });
+  expect({...where, leaked: banners.controls.message.includes(outage.message)}).toEqual({
+    ...where,
+    leaked: false,
+  });
+  // The button is dead exactly while a dial is in flight.
+  expect({...where, retrying: banners.controls.retrying}).toEqual({
+    ...where,
+    retrying: controls === 'lost-retrying',
   });
 }

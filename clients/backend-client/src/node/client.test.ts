@@ -3,9 +3,14 @@ import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
-import type {ControlChannelState} from '../control-channel.js';
-import {BackendClientError, ServerError} from '../errors.js';
+import {BackendClientError, type ControlChannelState, ServerError} from '../index.js';
 import {ServerClient, type ServerClientOptions} from './client.js';
+
+/** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
+function traceState(state: ControlChannelState): string {
+  if (state.status === 'connected') return 'connected';
+  return `down:${state.everConnected ? 'lost' : 'cold'}${state.retrying ? ':retrying' : ''}`;
+}
 
 let socketPath: string | undefined;
 
@@ -693,7 +698,10 @@ describe('ServerClient', () => {
         expect(response.snapshot?.status).toBe('running');
         // The steer reached only the first connection; the redial did not repeat it.
         expect(seen).toEqual(['command.steer', 'query.snapshot']);
-        expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+        // `everConnected` is true from the first report: the Node client is
+        // handed an open socket and adopts it, so it is never cold-started.
+        // The redial's own start is reported between the drop and the recovery.
+        expect(states.map(traceState)).toEqual(['down:lost', 'down:lost:retrying', 'connected']);
       },
       {reconnectDelaysMs: [0], onConnectionState: state => states.push(state)},
     );

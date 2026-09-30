@@ -5,6 +5,22 @@ import type {WebSessionState} from './session.js';
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;
 
+/** What the controls banner says and what its button can do. */
+interface ControlsBanner {
+  /**
+   * What is wrong, in the page's own words. Composed here rather than by
+   * interpolating `error.message`, which is a transport string ("WebSocket
+   * transport error") that names neither what the user lost nor what to do.
+   */
+  readonly message: string;
+  /**
+   * Whether a dial is already in flight, so `reconnect()` would no-op. The
+   * button stays rendered and goes disabled, because a click that silently does
+   * nothing is worse than a button that says it is already working.
+   */
+  readonly retrying: boolean;
+}
+
 /**
  * Which connectivity banners a render puts on screen, and what they carry. One
  * value rather than three loose predicates, so the whole decision has one site
@@ -27,15 +43,35 @@ export interface ConnectionBanners {
    */
   readonly reattach: boolean;
   /**
-   * The outage to describe in the controls banner, or `null` for no banner.
-   * Carries the state rather than a flag so the render reads the error off one
-   * narrowed value instead of testing the status a second time to reach it.
+   * The controls banner to render, or `null` for no banner. Carries its copy
+   * rather than a flag, so the text is decided somewhere a unit test can read
+   * it instead of only inside JSX.
    *
    * Null once the run has ended: the gateway going away is how a finished run
    * ends rather than a fault, and an affordance shown then asks the user to fix
    * a problem they do not have.
    */
-  readonly controls: ControlOutage | null;
+  readonly controls: ControlsBanner | null;
+}
+
+/**
+ * Describe an outage in terms of what the page lost.
+ *
+ * Two cases, because they are different failures and read differently: a
+ * channel that never reached the gateway at all, and one that lost a connection
+ * it had. `error.kind` could refine this further (a `parse` fault will not
+ * survive a redial, unlike a `disconnected` one), but every kind costs the user
+ * the same thing today, so the copy does not branch on it yet.
+ *
+ * The consequence named is the true one. `query.snapshot` is the only request
+ * `clients/web` issues, so a dead channel means the run's state cannot be
+ * reloaded; pause, resume, steer, and chat are not affordances this client has,
+ * and they arrive with #815, which owns the web run controls.
+ */
+function describeOutage(outage: ControlOutage): string {
+  return outage.everConnected
+    ? 'Controls lost their connection to the run. Its state cannot be refreshed until they reconnect.'
+    : 'Controls have not reached the run. Its state cannot be refreshed until they connect.';
 }
 
 /**
@@ -55,6 +91,9 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
   return {
     stream,
     reattach: stream && !ended,
-    controls: ended ? null : outage,
+    controls:
+      ended || outage === null
+        ? null
+        : {message: describeOutage(outage), retrying: outage.retrying},
   };
 }

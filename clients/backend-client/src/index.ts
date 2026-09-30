@@ -1,5 +1,5 @@
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
-export type {ControlChannelState} from './control-channel.js';
+export {type ControlChannelState, sameControlChannelState} from './control-channel.js';
 export {
   BackendClientError,
   type BackendErrorKind,

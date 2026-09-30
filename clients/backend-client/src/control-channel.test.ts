@@ -45,7 +45,9 @@ class FakeConnector {
     const behavior = this.#script.shift() ?? this.fallback;
     this.opened.push(behavior);
     if (behavior === 'dropsWhileDialing') {
-      handlers.onDrop(new Error('socket closed before the dial returned'));
+      handlers.onDrop(
+        new BackendClientError('disconnected', 'socket closed before the dial returned'),
+      );
     } else if (behavior === 'faultsWhileDialing') {
       // Typed the way a real transport types it: `streamFailure` classifies
       // bytes this protocol cannot read as `parse`.
@@ -84,8 +86,15 @@ function channelWith(
   return new ControlChannel(connector, {
     clientId: 'test-client',
     reconnectDelaysMs,
+    // The same rendering `node/client.test.ts` traces with: a report says more
+    // than up-or-down, so collapsing it to two strings would let a wrong
+    // `retrying` or `everConnected` pass unnoticed.
     onConnectionState: (state: ControlChannelState) =>
-      trace.push(state.status === 'connected' ? 'connected' : 'disconnected'),
+      trace.push(
+        state.status === 'connected'
+          ? 'connected'
+          : `down:${state.everConnected ? 'lost' : 'cold'}${state.retrying ? ':retrying' : ''}`,
+      ),
   });
 }
 
@@ -109,7 +118,9 @@ describe('ControlChannel', () => {
     // into a socket that cannot answer it.
     expect(connector.sent).toHaveLength(1);
     expect(channel.connected).toBe(true);
-    expect(trace).toEqual(['disconnected', 'connected']);
+    // The failed attempt, the retry going in, and the recovery. Never
+    // `connected` for the dead connection.
+    expect(trace).toEqual(['down:cold', 'down:cold:retrying', 'connected']);
     await channel.close();
   });
 
@@ -134,7 +145,15 @@ describe('ControlChannel', () => {
     ]);
     expect(connector.sent).toEqual([]);
     expect(channel.connected).toBe(false);
-    expect(trace).toEqual(['disconnected']);
+    // Each attempt is reported going in and coming out, and the channel never
+    // claims to have connected.
+    expect(trace).toEqual([
+      'down:cold',
+      'down:cold:retrying',
+      'down:cold',
+      'down:cold:retrying',
+      'down:cold',
+    ]);
     await channel.close();
   });
 
@@ -153,7 +172,7 @@ describe('ControlChannel', () => {
     expect(connector.opened).toEqual(['faultsWhileDialing']);
     expect(connector.sent).toEqual([]);
     expect(channel.connected).toBe(false);
-    expect(trace).toEqual(['disconnected']);
+    expect(trace).toEqual(['down:cold']);
 
     // `reconnect()` is the caller's decision that the fault was one-off, and it
     // still works: the channel is down, not broken.

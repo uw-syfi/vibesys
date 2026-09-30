@@ -32,9 +32,16 @@ export interface ServerTransport {
   /**
    * Send one control request. `options` are the per-call half of the request
    * policy (`request-policy.ts`): the deadline, whether it takes a connection
-   * of its own, and the signal that abandons it. An implementation honors all
-   * three, so a caller can be written once and stay correct; nothing above this
-   * line branches on a request type to get the same effect.
+   * of its own, and the signal that abandons it. Every implementation honors
+   * all three, so a caller can be written once and stay correct; nothing above
+   * this line branches on a request type to get the same effect.
+   *
+   * Two things `timeoutMs` does not mean. It is ignored when the call runs on
+   * its own connection, because such a call is bounded by the work it drives
+   * rather than by the control RPC deadline (`resolveRequestPolicy`). And it
+   * bounds only the on-the-wire phase: a request that arrives while the channel
+   * is down is held for the recovery with no deadline armed, so total call
+   * latency is bounded by the redial schedule, not by this.
    */
   request(input: RequestInput, options?: RequestOptions): Promise<ProtocolResponse>;
   subscribe(
