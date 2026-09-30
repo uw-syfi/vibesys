@@ -55,23 +55,33 @@ export interface ConnectionBanners {
 }
 
 /**
- * Describe an outage in terms of what the page lost.
+ * What the controls banner says, by whether the channel ever had a connection.
  *
- * Two cases, because they are different failures and read differently: a
- * channel that never reached the gateway at all, and one that lost a connection
- * it had. `error.kind` could refine this further (a `parse` fault will not
- * survive a redial, unlike a `disconnected` one), but every kind costs the user
- * the same thing today, so the copy does not branch on it yet.
+ * Two cases, because they are different failures and read differently: a channel
+ * that never reached the gateway at all, and one that lost a connection it had.
+ * `error.kind` could refine this further (a `parse` fault will not survive a
+ * redial, unlike a `disconnected` one), but every kind costs the user the same
+ * thing today, so the copy does not branch on it yet.
  *
  * The consequence named is the true one. `query.snapshot` is the only request
  * `clients/web` issues, so a dead channel means the run's state cannot be
  * reloaded; pause, resume, steer, and chat are not affordances this client has,
  * and they arrive with #815, which owns the web run controls.
+ *
+ * Exported because two other places have to agree with it, and retyping the
+ * string is how they stop agreeing: `banners.test.ts` asserts which of the two
+ * a given state selects, and `e2e/controls-banner.spec.ts` asserts that the
+ * rendered page says it. Both import from here. An e2e spec that kept its own
+ * copy asserted text this module had already replaced, and the mismatch read as
+ * a behavior failure rather than as drift.
  */
+export const CONTROLS_BANNER_COPY = {
+  lost: 'Controls lost their connection to the run. Its state cannot be refreshed until they reconnect.',
+  cold: 'Controls have not reached the run. Its state cannot be refreshed until they connect.',
+} as const;
+
 function describeOutage(outage: ControlOutage): string {
-  return outage.everConnected
-    ? 'Controls lost their connection to the run. Its state cannot be refreshed until they reconnect.'
-    : 'Controls have not reached the run. Its state cannot be refreshed until they connect.';
+  return CONTROLS_BANNER_COPY[outage.everConnected ? 'lost' : 'cold'];
 }
 
 /**

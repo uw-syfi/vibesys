@@ -1,9 +1,8 @@
 import {expect, test} from '@playwright/test';
-import {startLiveGateway} from './gateway.js';
+import {withGateway} from './gateway.js';
 
 test('renders a recorded run through the live WebSocket gateway', async ({page}) => {
-  const gateway = startLiveGateway();
-  try {
+  await withGateway(async gateway => {
     const sockets: string[] = [];
     const pageErrors: string[] = [];
     page.on('websocket', socket => sockets.push(socket.url()));
@@ -28,15 +27,5 @@ test('renders a recorded run through the live WebSocket gateway', async ({page})
     ).toBe(true);
     expect(pageErrors).toEqual([]);
     await page.screenshot({path: 'artifacts/web-live.png', fullPage: true});
-
-    expect(gateway.stop().status).toBe(0);
-  } finally {
-    // Read in `finally`, not in the body: `stop()` memoizes, so this is the
-    // same result the body saw, and annotating here reports teardown errors
-    // even when a body assertion failed first.
-    const stopped = gateway.stop();
-    if (stopped.errors.length > 0) {
-      test.info().annotations.push({type: 'teardown', description: stopped.errors.join('; ')});
-    }
-  }
+  });
 });

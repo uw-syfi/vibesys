@@ -1,8 +1,9 @@
 import {describe, expect, test} from 'bun:test';
-import {BackendClientError} from '@vibesys/backend-client';
+import {BackendClientError, type RunEvent} from '@vibesys/backend-client';
 import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
-import {connectionBanners} from './banners.js';
+import {CONTROLS_BANNER_COPY, connectionBanners} from './banners.js';
 import type {WebSessionState, WebSessionStatus} from './session.js';
+import {createCoreStateStore} from './store.js';
 
 /** Every status core state can hold, so a new one is a compile error here. */
 const RUN_STATUSES: readonly CoreRunStatus[] = [
@@ -22,9 +23,11 @@ const SESSION_STATUSES: readonly WebSessionStatus[] = ['connecting', 'connected'
 const runWith = (status: CoreRunStatus) => ({...initialCoreState(), status});
 const outage = new BackendClientError('disconnected', 'Server disconnected');
 
-const LOST =
-  'Controls lost their connection to the run. Its state cannot be refreshed until they reconnect.';
-const COLD = 'Controls have not reached the run. Its state cannot be refreshed until they connect.';
+// Imported rather than retyped. What this file pins is which of the two a given
+// state selects, and the properties the text has to hold (below); retyping the
+// strings would only pin that someone copied them correctly, and a second copy
+// is what let the e2e spec drift onto text the source no longer produced.
+const {lost: LOST, cold: COLD} = CONTROLS_BANNER_COPY;
 
 function sessionState(
   status: WebSessionStatus,
@@ -45,7 +48,59 @@ function sessionState(
   };
 }
 
+/**
+ * The two events that bracket a run, shaped as the gateway sends them (the
+ * `framework-events.jsonl` replay the browser specs use carries exactly these at
+ * sequences 1 and 18). Declared here rather than read from
+ * `clients/tui/dev/fixtures/`, which `web/src` must not depend on.
+ */
+const RUN_STARTED: RunEvent = {
+  protocol_version: 1,
+  sequence: 1,
+  run_id: 'run-1',
+  timestamp: '2026-09-12T10:15:00Z',
+  type: 'run_started',
+  text: '',
+  status: 'active',
+  data: {kind: 'run_started', outer_loop: 'iterate', input: 'objective.md', max_rounds: 2},
+};
+const RUN_FINISHED: RunEvent = {
+  protocol_version: 1,
+  sequence: 18,
+  run_id: 'run-1',
+  timestamp: '2026-09-12T10:15:17Z',
+  type: 'run_finished',
+  text: '',
+  status: 'completed',
+};
+
 describe('connectionBanners', () => {
+  test('takes the banner down on the run-ending event itself, folded by the real reducer', () => {
+    // The property below builds its `CoreState` by assigning `status`, so it
+    // asserts that the decision is right about a status without asserting that
+    // any real input produces that status. This closes that: the run's own
+    // terminal event goes through `core-state`'s reducer, which is the path the
+    // browser takes, and is the same event `e2e/controls-banner.spec.ts`
+    // withholds and then releases.
+    const store = createCoreStateStore();
+    const lostChannel = sessionState('connected', 'lost');
+
+    store.append([RUN_STARTED]);
+    expect(hasRunEnded(store.getState())).toBe(false);
+    expect(connectionBanners(store.getState(), lostChannel).controls).toEqual({
+      message: LOST,
+      retrying: false,
+    });
+
+    store.append([RUN_FINISHED]);
+    // Both facts come off the same folded state, which is why a render cannot
+    // show one without the other: the status the header reads and the predicate
+    // the banner reads are the same field of the same value.
+    expect(store.getState().status).toBe('completed');
+    expect(hasRunEnded(store.getState())).toBe(true);
+    expect(connectionBanners(store.getState(), lostChannel).controls).toBeNull();
+  });
+
   test('names losing a connection and never having one as the different failures they are', () => {
     expect(connectionBanners(runWith('running'), sessionState('connected', 'lost'))).toEqual({
       stream: false,

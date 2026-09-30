@@ -1,5 +1,6 @@
-import {expect, type Page, test} from '@playwright/test';
-import {type LiveGateway, startLiveGateway} from './gateway.js';
+import {expect, type Locator, type Page, test} from '@playwright/test';
+import {CONTROLS_BANNER_COPY} from '../src/banners.js';
+import {withGateway} from './gateway.js';
 
 /**
  * The controls banner against a real gateway, with the page's view of the run
@@ -99,58 +100,73 @@ async function injectFrames(page: Page, injection: Injection): Promise<Observed>
     closeControl: null,
     releaseTerminal: null,
   };
-  await page.routeWebSocket('**/ws', ws => {
-    if (injection.blockDials) {
-      // Refused before `connectToServer()`, so the page's socket never opens
-      // and the channel records a failed dial rather than a connect-then-drop.
-      observed.refusedDials += 1;
-      void ws.close();
-      return;
-    }
-    const index = observed.kinds.length;
-    observed.kinds.push('unclassified');
-    const server = ws.connectToServer();
-    let kind: SocketKind = 'unclassified';
-    ws.onMessage(message => {
-      if (kind === 'unclassified') {
-        kind = String(message).includes('"query.snapshot"') ? 'control' : 'stream';
-        observed.kinds[index] = kind;
-        if (kind === 'control') observed.closeControl = () => ws.close();
-      }
-      server.send(message);
-    });
-    server.onMessage(message => {
-      const split = kind === 'stream' ? splitAtTerminal(String(message)) : null;
-      if (split === null || !(injection.holdTerminal || injection.stripTerminal)) {
-        ws.send(message);
+  // Matched by pathname, not by a glob. The URL is
+  // `ws://127.0.0.1:<port>/ws?token=<token>`, and `'**/ws'` does not match a URL
+  // with a query string, so the route never fired and both specs measured an
+  // uninstrumented page. `live.spec.ts` already asserts that exact URL shape;
+  // the refutation was in the sibling file the whole time.
+  await page.routeWebSocket(
+    url => url.pathname === '/ws',
+    ws => {
+      if (injection.blockDials) {
+        // Refused before `connectToServer()`, so the page's socket never opens
+        // and the channel records a failed dial rather than a connect-then-drop.
+        observed.refusedDials += 1;
+        void ws.close();
         return;
       }
-      if (split.prefix !== null) ws.send(split.prefix);
-      if (injection.stripTerminal) return;
-      observed.held.push(split.tail);
-      observed.releaseTerminal = () => ws.send(split.tail);
-    });
-    ws.onClose(() => {
-      if (kind === 'stream') observed.streamSocketClosed = true;
-    });
-  });
+      const index = observed.kinds.length;
+      observed.kinds.push('unclassified');
+      const server = ws.connectToServer();
+      let kind: SocketKind = 'unclassified';
+      ws.onMessage(message => {
+        if (kind === 'unclassified') {
+          kind = String(message).includes('"query.snapshot"') ? 'control' : 'stream';
+          observed.kinds[index] = kind;
+          if (kind === 'control') observed.closeControl = () => ws.close();
+        }
+        server.send(message);
+      });
+      server.onMessage(message => {
+        const split = kind === 'stream' ? splitAtTerminal(String(message)) : null;
+        if (split === null || !(injection.holdTerminal || injection.stripTerminal)) {
+          ws.send(message);
+          return;
+        }
+        if (split.prefix !== null) ws.send(split.prefix);
+        if (injection.stripTerminal) return;
+        observed.held.push(split.tail);
+        observed.releaseTerminal = () => ws.send(split.tail);
+      });
+      ws.onClose(() => {
+        if (kind === 'stream') observed.streamSocketClosed = true;
+      });
+    },
+  );
   return observed;
 }
 
-async function withGateway(run: (gateway: LiveGateway) => Promise<void>): Promise<void> {
-  const gateway = startLiveGateway();
-  try {
-    await run(gateway);
-    expect(gateway.stop().status).toBe(0);
-  } finally {
-    // `stop()` memoizes, so this is the same result the body saw. Teardown
-    // failures are annotated rather than thrown, so they cannot replace a
-    // spec's real assertion failure with a filesystem error.
-    const stopped = gateway.stop();
-    if (stopped.errors.length > 0) {
-      test.info().annotations.push({type: 'teardown', description: stopped.errors.join('; ')});
-    }
-  }
+/**
+ * Fail fast, and say why, when the page is not running this checkout's code.
+ *
+ * The gateway serves `clients/web/dist`, a `vite build` output, so editing
+ * `clients/web/src` changes nothing the browser runs until that is rebuilt.
+ * `gateway.ts` now requires the bundle to exist and the `test:e2e` script builds
+ * it, but a run that reaches the gateway by another route can still serve an old
+ * one, and the failure mode is the worst available: the page served copy that
+ * `ad153813` had deleted, so this regression spec reported its defect as still
+ * present at a head where it was fixed.
+ *
+ * The expected text is imported from `../src/banners.js`, so this is an identity
+ * check against the module under test rather than against a string a spec author
+ * retyped. Asserted before any behavior assertion, so a stale bundle cannot
+ * present as a behavior failure.
+ */
+async function expectBundleUnderTest(banner: Locator): Promise<void> {
+  await expect(
+    banner,
+    'the dev server is serving a different build of clients/web: stop any vite on 5173 and re-run',
+  ).toContainText(CONTROLS_BANNER_COPY.lost);
 }
 
 /** Drop the control socket and refuse its redials, leaving the stream alone. */
@@ -185,11 +201,11 @@ test('reports a dead control channel without disturbing the live transcript', as
     await breakControlChannel(observed, injection);
 
     await expect(controls).toBeVisible();
-    // The page had a connection and lost it, so the copy says so, and it names
-    // the consequence this client actually has rather than four run controls
-    // it does not implement yet.
-    await expect(controls).toContainText('Controls lost their connection to the run');
-    await expect(controls).toContainText('cannot be refreshed');
+    // The page had a connection and lost it, so the copy is the `lost` case, and
+    // it names the consequence this client actually has rather than four run
+    // controls it does not implement yet. `banners.test.ts` owns which case a
+    // given state selects; what this pins is that the page renders it.
+    await expectBundleUnderTest(controls);
     await expect(controls.getByRole('button', {name: /Reconnect now|Reconnecting/})).toBeVisible();
     // A dead command path with a live transcript is the case the two separate
     // reports exist for, so the stream must say nothing about this.
@@ -235,6 +251,10 @@ test('takes the controls banner down when the run ends during the outage', async
 
     await breakControlChannel(observed, injection);
     await expect(controls).toBeVisible();
+    // Before the assertion this spec exists for: a banner rendered by a stale
+    // bundle would fail to come down for a reason that has nothing to do with
+    // the fix, and the failure would point at the wrong thing.
+    await expectBundleUnderTest(controls);
 
     const refusedBefore = observed.refusedDials;
     observed.releaseTerminal?.();
