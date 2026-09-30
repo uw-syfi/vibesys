@@ -642,7 +642,24 @@ async function cruiseFixture(t, files) {
     await mkdir(dirname(join(root, file)), {recursive: true});
     await writeFile(join(root, file), source);
   }
-  return cruiseWorkspace(root);
+  const {output, exitCode} = await cruiseWorkspace(root);
+  // dependency-cruiser's `err` reporter colorizes through chalk, which turns itself on when `CI`
+  // is set as well as for a TTY. So the same report reads `...declared: web/src/probe.ts` on a
+  // developer machine and `...declared: \x1b[1mweb/src/probe.ts\x1b[22m` on CI, and an assertion
+  // on the raw string passes locally and fails there. The colors are for the human reading the
+  // gate's stdout, not for these assertions, so they are dropped at the one seam that reads it.
+  return {output: withoutAnsi(output), exitCode};
+}
+
+/**
+ * Strip SGR escape sequences, the only kind the reporter emits. The escape byte is built outside
+ * the pattern because a regex literal containing it is a lint error, and matching `[<digits>m`
+ * without it would silently edit a report that happened to contain that text.
+ */
+const SGR_SEQUENCE = new RegExp(`${'\u001B'}\\[\\d+(?:;\\d+)*m`, 'gu');
+
+function withoutAnsi(text) {
+  return text.replaceAll(SGR_SEQUENCE, '');
 }
 
 async function writeSource(root, packageDirectory, file, source) {
