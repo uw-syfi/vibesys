@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import signal
 import subprocess
@@ -266,8 +265,14 @@ class _DetachedProcess(Protocol):
     def kill(self) -> None: ...
 
 
-class _DetachedLaunchEffects:
-    """Process, discovery, and clock effects for the detached gateway lifetime."""
+class _DetachedGatewayEffects:
+    """Process, discovery, and clock effects for the detached gateway lifetime.
+
+    One class covers launching and stopping because both act on the same
+    gateway through the same mechanisms. `stop_detached_gateway` reaches it
+    through the narrower `WebGatewayStopEffects` Protocol, which omits `spawn`
+    and `discover`.
+    """
 
     def spawn(
         self,
@@ -291,8 +296,8 @@ class _DetachedLaunchEffects:
     def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
         return WebInstanceRecord.read(instance_path)
 
-    def instance_held(self, instance_path: Path) -> bool:
-        return WebInstanceHold.is_held(instance_path)
+    def observe(self, instance_path: Path) -> WebInstanceHold:
+        return WebInstanceHold.observe(instance_path)
 
     def terminate(self, pid: int) -> None:
         os.kill(pid, signal.SIGTERM)
@@ -304,13 +309,13 @@ class _DetachedLaunchEffects:
         time.sleep(seconds)
 
 
-_DETACHED_EFFECTS = _DetachedLaunchEffects()
+_DETACHED_EFFECTS = _DetachedGatewayEffects()
 
 
 def _spawn_detached(
     arguments: list[str],
     instance_path: Path,
-    effects: _DetachedLaunchEffects = _DETACHED_EFFECTS,
+    effects: _DetachedGatewayEffects = _DETACHED_EFFECTS,
 ) -> None:
     """Start the long-lived child and wait for its capability record."""
     environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
@@ -318,12 +323,15 @@ def _spawn_detached(
     log_path = WebInstanceHold.log_path(instance_path)
     descriptor = os.open(log_path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "w+b") as output:
-        # The child inherits this descriptor as its stdout and stderr, so the
-        # hold taken here outlives the gateway's own teardown and is released
-        # by the same close that frees the log. Take it before truncating: if
+        # The child inherits this descriptor as its stdout and stderr, so lock
+        # and log are one open file description and the lock is released by the
+        # *last* close of it, which is the child's exit rather than the
+        # `output.close()` this block performs. Take it before truncating: if
         # another gateway still holds the log, its output must survive.
         if not WebInstanceHold.take(descriptor):
-            raise RuntimeError(_instance_in_use(instance_path))
+            raise RuntimeError(
+                _instance_in_use(instance_path, WebInstanceHold.observe(instance_path))
+            )
         os.fchmod(descriptor, 0o600)
         output.truncate(0)
         process = effects.spawn(
@@ -358,10 +366,26 @@ def _spawn_detached(
         )
 
 
-def _instance_in_use(instance_path: Path) -> str:
+def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
+    """Explain a refused launch, naming the processes in the way, if it can.
+
+    The blocker is whatever holds the startup log, which need not be a VibeSys
+    gateway and need not be stoppable with `vibesys web stop`: a descendant
+    that inherited the log keeps it after the gateway is gone, and nothing
+    publishes a record for such a process. So this names the measured holders
+    and offers both escapes rather than routing every case through `stop`.
+    """
+    log_path = WebInstanceHold.log_path(instance_path)
+    users = (
+        f" Processes with files open under {instance_path.parent}: "
+        f"{', '.join(str(pid) for pid in hold.holders)}."
+        if hold.holders
+        else ""
+    )
     return (
-        f"Another VibeSys web gateway still has files open under {instance_path.parent}. "
-        f"Stop it with `vibesys web stop --instance {instance_path}` first."
+        f"Another process holds {log_path}, so this launch would overwrite a running "
+        f"gateway's output.{users} Stop the gateway with `vibesys web stop --instance "
+        f"{instance_path}`, or end those processes yourself if no gateway owns them."
     )
 
 
@@ -385,18 +409,26 @@ class GatewayStopOutcome(StrEnum):
     """What `stop_detached_gateway` observed about one instance directory."""
 
     NOT_RUNNING = "not_running"
-    """Nothing held the instance files, so there was nothing to stop."""
+    """No record named a gateway and nothing observable was using the files."""
     STOPPED = "stopped"
-    """A gateway held the instance files and has now released them."""
+    """The directory was in use, and no process this host can observe uses it now."""
     STILL_HOLDING = "still_holding"
-    """The budget expired with the instance files still open."""
+    """The budget expired with the directory in use, or its state was unreadable."""
 
 
 @dataclass(frozen=True)
 class GatewayStopResult:
-    """The outcome of one stop request, and the pid it was addressed to."""
+    """What one stop request observed, and which pid it signalled.
+
+    ``hold`` is the last observation of the instance directory, which is what
+    decided ``outcome``. A caller reporting a failure reads it to name the
+    processes the operator has to deal with, because the instance record often
+    does not name them. ``pid`` is the gateway this request actually delivered
+    SIGTERM to, and is ``None`` when no record named a process it could signal.
+    """
 
     outcome: GatewayStopOutcome
+    hold: WebInstanceHold
     pid: int | None = None
 
 
@@ -407,8 +439,8 @@ class WebGatewayStopEffects(Protocol):
         """Return the published instance record without probing the gateway."""
         ...
 
-    def instance_held(self, instance_path: Path) -> bool:
-        """Report whether any process still has the instance files open."""
+    def observe(self, instance_path: Path) -> WebInstanceHold:
+        """Report which processes are observed to be using the instance files."""
         ...
 
     def terminate(self, pid: int) -> None:
@@ -420,56 +452,84 @@ class WebGatewayStopEffects(Protocol):
         ...
 
     def sleep(self, seconds: float) -> None:
-        """Wait before observing the hold again."""
+        """Wait before observing the instance directory again."""
         ...
 
 
 def stop_detached_gateway(
     instance_path: Path,
-    effects: WebGatewayStopEffects = _DETACHED_EFFECTS,
+    effects: WebGatewayStopEffects | None = None,
 ) -> GatewayStopResult:
     """Stop the gateway using ``instance_path`` and wait for its files to close.
 
-    The postcondition of a `STOPPED` result is that no process has files open
-    under the instance directory, so the caller may reuse or remove it. That is
-    what `WebInstanceHold` observes, and it is deliberately not "the instance
-    record is gone" (the gateway unlinks the record as the first step of
-    teardown) nor "the recorded pid is gone" (a descendant can still hold the
-    inherited log). A `STILL_HOLDING` result means the budget expired with
-    files still open, and the caller must not take the directory.
+    A `STOPPED` result means no process this host can observe is using the
+    instance directory, so the caller may reuse or remove it. That is a
+    statement about what `WebInstanceHold.observe` can see (a `/proc` scan plus
+    the startup log's lock), not a proof that the directory is unused: a holder
+    owned by another user is invisible to the scan, and a host that exposes
+    neither witness cannot answer at all. Where the answer is unreadable the
+    result is `STILL_HOLDING`, never `STOPPED`, so missing evidence is never
+    reported as success. The postcondition is deliberately not "the record is
+    gone" (the gateway unlinks it first) nor "the recorded pid is gone" (a
+    descendant can still hold the inherited log).
 
-    The record is read without probing the gateway's health endpoint. A probe
-    answers whether the gateway can still serve a browser, which is false
-    throughout teardown and flaky under load; stopping only needs to know which
-    process published the instance, which the record says directly. Signalling
-    a stale record's pid is not a hazard here because a readable record plus a
-    held hold means the holder published that record: a gateway writes its
-    record before serving and replaces it atomically.
+    The record is read before deciding anything and re-read on every poll: it
+    is the only thing that names a pid to signal, it may not exist yet when a
+    stop races a launch, and a gateway launched without `--detach` never
+    publishes one at all, which is why the observation and not the record
+    decides whether there is something to stop. A recorded pid is signalled
+    only once it is observed to hold a file under the directory, so a record
+    left behind by a killed gateway cannot direct SIGTERM at whatever process
+    has since been assigned that pid. Where descriptors are unobservable there
+    is nothing to validate against, and the recorded pid is signalled unchecked
+    rather than leaving the operator no way to stop a gateway.
+
+    No health probe is used. A probe answers whether the gateway can still
+    serve a browser, which is false throughout teardown and load-sensitive;
+    stopping only needs to know which process published the instance.
 
     Escalation is the operator's, not this function's: it sends SIGTERM and
     never SIGKILL, because SIGTERM is what runs the gateway's ordered teardown
     (release the record, close the transport, close the session) and a killed
-    gateway leaves its record behind for the next launch to trip over.
-    `ProcessLookupError` and `PermissionError` from the signal are absorbed; in
-    both cases this function cannot influence the process, so the hold decides
-    the outcome.
+    gateway leaves its record behind for the next launch to trip over. A signal
+    that raises `ProcessLookupError` or `PermissionError` was never delivered,
+    so the result does not claim it was, and the observation still decides the
+    outcome.
     """
-    if not effects.instance_held(instance_path):
-        return GatewayStopResult(GatewayStopOutcome.NOT_RUNNING)
+    effects = _DETACHED_EFFECTS if effects is None else effects
+    hold = effects.observe(instance_path)
+    record = effects.read_record(instance_path)
+    if record is None and hold.free:
+        return GatewayStopResult(GatewayStopOutcome.NOT_RUNNING, hold)
     deadline = effects.monotonic() + GATEWAY_STOP_TIMEOUT_SECONDS
     signalled: int | None = None
+    addressed: set[int] = set()
     while True:
-        if signalled is None:
-            record = effects.read_record(instance_path)
-            if record is not None:
+        if record is not None and record.pid not in addressed and _is_a_holder(hold, record.pid):
+            addressed.add(record.pid)
+            if _terminated(effects, record.pid):
                 signalled = record.pid
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    effects.terminate(record.pid)
-        if not effects.instance_held(instance_path):
-            return GatewayStopResult(GatewayStopOutcome.STOPPED, signalled)
+        if hold.free:
+            return GatewayStopResult(GatewayStopOutcome.STOPPED, hold, signalled)
         if effects.monotonic() >= deadline:
-            return GatewayStopResult(GatewayStopOutcome.STILL_HOLDING, signalled)
+            return GatewayStopResult(GatewayStopOutcome.STILL_HOLDING, hold, signalled)
         effects.sleep(_DETACHED_POLL_SECONDS)
+        hold = effects.observe(instance_path)
+        record = effects.read_record(instance_path)
+
+
+def _is_a_holder(hold: WebInstanceHold, pid: int) -> bool:
+    """Report that ``pid`` holds the instance files, or that this host cannot tell."""
+    return hold.holders is None or pid in hold.holders
+
+
+def _terminated(effects: WebGatewayStopEffects, pid: int) -> bool:
+    """Deliver SIGTERM to ``pid``, reporting whether it actually arrived."""
+    try:
+        effects.terminate(pid)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
@@ -523,7 +583,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
             webbrowser.open(existing.url, new=2)
             return
         if detach:
-            _spawn_detached(arguments, instance_path)
+            try:
+                _spawn_detached(arguments, instance_path)
+            except RuntimeError as exc:
+                # A refused or failed detached launch is an operator-facing
+                # outcome, not a defect, so it reports a message rather than a
+                # traceback. `_spawn_detached` has already released the log.
+                sys.stderr.write(f"{exc}\n")
+                raise SystemExit(1) from None
             return
     control_socket = _control_socket_from_argv(arguments)
     temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None

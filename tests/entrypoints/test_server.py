@@ -12,8 +12,16 @@ from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis.strategies import integers
+from tests.entrypoints.support import (
+    BUDGET_POLLS,
+    GATEWAY_PID,
+    IDLE_DIRECTORY,
+    INSTANCE_PATH,
+    FakeDetachedGateway,
+    gateway_record,
+)
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
@@ -22,7 +30,7 @@ from entrypoints.server import (
     GatewayStopOutcome,
     GatewayStopResult,
     _control_socket_from_argv,
-    _DetachedLaunchEffects,
+    _DetachedGatewayEffects,
     _headless_argv,
     _read_only_log_from_argv,
     _spawn_detached,
@@ -64,7 +72,7 @@ class RecordingDetachedProcess:
         self.status = -9
 
 
-class RecordingDetachedEffects(_DetachedLaunchEffects):
+class RecordingDetachedEffects(_DetachedGatewayEffects):
     def __init__(
         self,
         process: RecordingDetachedProcess,
@@ -99,89 +107,6 @@ class RecordingDetachedEffects(_DetachedLaunchEffects):
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
-
-
-def _gateway_record(pid: int) -> WebInstanceRecord:
-    token = "capability" + "-token"
-    return WebInstanceRecord(
-        pid=pid,
-        port=43_211,
-        token=token,
-        url=f"http://127.0.0.1:43211/?token={token}",
-        project_root="/project",
-        started_at=1.0,
-    )
-
-
-_INSTANCE_PATH = Path("/project/.vibesys/web-gateway.json")
-
-
-class FakeDetachedGateway:
-    """An in-memory detached gateway, seen the way an unrelated process sees one.
-
-    It models the two facts a stop request can read, and their real lifetimes.
-    The instance record is published while the gateway serves and unlinked as
-    the *first* step of teardown, so ``record_published=False`` is the state a
-    shutting-down gateway spends most of its teardown in. The hold on the
-    instance files is released only once the process and every descendant that
-    inherited its log are gone, so it outlives the record: teardown begins on
-    SIGTERM, or at construction with ``already_stopping``, and the hold then
-    survives ``polls_before_release`` further observations.
-    ``polls_before_release=None`` models a gateway that ignores the signal, and
-    ``already_stopping`` with no further polls models an instance directory
-    nothing is using. The clock advances only when the caller sleeps, so the
-    budget is simulated, never waited for.
-    """
-
-    def __init__(
-        self,
-        *,
-        record_published: bool = True,
-        polls_before_release: int | None = 0,
-        already_stopping: bool = False,
-        signal_error: Exception | None = None,
-    ) -> None:
-        self.record = _gateway_record(4321)
-        self.record_published = record_published
-        self.polls_before_release = polls_before_release
-        self.stopping = already_stopping
-        self.signal_error = signal_error
-        self.signals: list[int] = []
-        self.observations = 0
-        self.teardown_polls = 0
-        self.last_observation = True
-        self.sleeps: list[float] = []
-        self.clock = 0.0
-
-    def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
-        assert instance_path == _INSTANCE_PATH
-        return self.record if self.record_published else None
-
-    def instance_held(self, instance_path: Path) -> bool:
-        assert instance_path == _INSTANCE_PATH
-        self.observations += 1
-        self.last_observation = self._held()
-        return self.last_observation
-
-    def _held(self) -> bool:
-        if self.stopping and self.polls_before_release is not None:
-            if self.teardown_polls >= self.polls_before_release:
-                return False
-            self.teardown_polls += 1
-        return True
-
-    def terminate(self, pid: int) -> None:
-        self.signals.append(pid)
-        self.stopping = True
-        if self.signal_error is not None:
-            raise self.signal_error
-
-    def monotonic(self) -> float:
-        return self.clock
-
-    def sleep(self, seconds: float) -> None:
-        self.sleeps.append(seconds)
-        self.clock += seconds
 
 
 def test_control_socket_argument_forms() -> None:
@@ -350,35 +275,30 @@ def test_detached_startup_refuses_to_clobber_a_gateway_that_still_holds_the_log(
     log_path = WebInstanceHold.log_path(instance_path)
     log_path.write_text("output from the gateway that is still running\n")
     descriptor = os.open(log_path, os.O_RDWR)
-    try:
+    with os.fdopen(descriptor, "w+b") as output:
         assert WebInstanceHold.take(descriptor) is True
+        running = subprocess.Popen(
+            [sys.executable, "-c", "import signal; signal.pause()"],
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    try:
         effects = RecordingDetachedEffects(RecordingDetachedProcess(status=None), times=[])
 
-        with pytest.raises(RuntimeError, match="still has files open"):
+        with pytest.raises(RuntimeError, match="Another process holds") as failure:
             _spawn_detached(["--web", "--detach"], instance_path, effects)
     finally:
-        os.close(descriptor)
+        running.terminate()
+        running.wait()
 
-    # The hold is taken before the log is truncated, so a second launch cannot
-    # destroy the running gateway's output or spawn a rival child.
+    # The lock is taken before the log is truncated, so a second launch cannot
+    # destroy the running gateway's output or spawn a rival child. The blocker
+    # need not be a gateway and need not have published a record, so the
+    # message names the measured holder rather than assuming `stop` can help.
     assert log_path.read_text() == "output from the gateway that is still running\n"
     assert effects.command == []
-
-
-def test_detached_startup_holds_the_log_it_hands_to_the_child(tmp_path: Path) -> None:
-    instance_path = tmp_path / "web-gateway.json"
-    process = RecordingDetachedProcess(status=7)
-    effects = RecordingDetachedEffects(process, times=[0.0, 0.0])
-
-    assert WebInstanceHold.is_held(instance_path) is False
-    with pytest.raises(RuntimeError, match="exited with status 7"):
-        _spawn_detached(["--web", "--detach"], instance_path, effects)
-
-    # The launcher held the log while the child was starting, and released it
-    # by closing its own descriptor once startup failed. A real child keeps the
-    # same descriptor as stdout and stderr, which is what makes the hold
-    # outlive the gateway's teardown.
-    assert WebInstanceHold.is_held(instance_path) is False
+    assert f"open under {instance_path.parent}: {running.pid}" in str(failure.value)
 
 
 def test_detached_startup_reports_a_published_record(
@@ -442,134 +362,220 @@ def test_detached_stop_escalates_only_when_the_child_ignores_termination() -> No
 def test_stop_detached_gateway_waits_until_the_instance_files_are_released() -> None:
     gateway = FakeDetachedGateway(polls_before_release=3)
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
     # The regression: the instance record disappears as the first step of the
-    # gateway's teardown, so a stop that returns while the hold is still taken
-    # hands the caller a directory the gateway has files open under.
-    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, 4321)
-    assert gateway.signals == [4321]
+    # gateway's teardown, so a stop that returns while the files are still open
+    # hands the caller a directory the gateway is still using.
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, GATEWAY_PID)
+    assert gateway.signals == [GATEWAY_PID]
     assert gateway.observations == 5
-    assert gateway.sleeps == [0.05, 0.05, 0.05]
+    assert gateway.sleeps == [0.05] * 4
 
 
 def test_stop_detached_gateway_waits_out_a_gateway_that_already_dropped_its_record() -> None:
-    gateway = FakeDetachedGateway(
-        record_published=False, already_stopping=True, polls_before_release=2
-    )
+    gateway = FakeDetachedGateway(recorded_pid=None, already_stopping=True, polls_before_release=2)
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
     # The record is already gone, so there is no pid to signal, but the files
     # are still open: reporting "nothing is running" here is what let a caller
     # remove the directory under a live gateway.
-    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, None)
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, None)
     assert gateway.signals == []
-    assert gateway.last_observation is False
+    assert gateway.observations == 3
+    assert gateway.sleeps == [0.05, 0.05]
 
 
-def test_stop_detached_gateway_signals_a_gateway_it_cannot_reach_over_http() -> None:
-    gateway = FakeDetachedGateway(polls_before_release=1)
+def test_stop_detached_gateway_stops_a_gateway_that_holds_no_startup_log() -> None:
+    gateway = FakeDetachedGateway(log_locked=False, polls_before_release=2)
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
-    # Nothing here probes the gateway's health endpoint, so a gateway that is
-    # published but unreachable (wedged, paused, or mid-teardown) is still
-    # signalled and still waited for.
-    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, 4321)
-    assert gateway.signals == [4321]
+    # A gateway started without `--detach` writes no startup log, so the lock
+    # says nothing about it. Deciding on the lock before reading the record
+    # reported that live gateway as "not running" and left it running.
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, GATEWAY_PID)
+    assert gateway.signals == [GATEWAY_PID]
+
+
+def test_stop_detached_gateway_will_not_signal_a_pid_that_does_not_hold_the_files() -> None:
+    gateway = FakeDetachedGateway(
+        recorded_pid=9999, holder_pids=(GATEWAY_PID,), polls_before_release=None
+    )
+
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
+
+    # A record left behind by a killed gateway can name a pid the kernel has
+    # since reused. Signalling it terminates an unrelated process, leaves the
+    # real holder running, and then reports the wrong pid to the operator.
+    assert result.outcome is GatewayStopOutcome.STILL_HOLDING
+    assert result.pid is None
+    assert result.hold.holders == (GATEWAY_PID,)
+    assert gateway.signals == []
+
+
+def test_stop_detached_gateway_signals_a_pid_it_cannot_check() -> None:
+    gateway = FakeDetachedGateway(holder_pids=None, polls_before_release=1)
+
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
+
+    # Where per-process descriptors are not observable the recorded pid cannot
+    # be checked. Leaving the gateway running is the worse failure, so it is
+    # signalled unchecked and the lock alone decides when to report success.
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, GATEWAY_PID)
+    assert gateway.signals == [GATEWAY_PID]
+
+
+def test_stop_detached_gateway_signals_a_record_that_appears_during_teardown() -> None:
+    gateway = FakeDetachedGateway(record_after_polls=2, polls_before_release=1)
+
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
+
+    # The record is re-read on every poll, so a gateway that publishes late,
+    # or republishes a corrected record, is still signalled.
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, GATEWAY_PID)
+    assert gateway.signals == [GATEWAY_PID]
+
+
+def test_stop_detached_gateway_reports_a_directory_whose_state_it_cannot_read() -> None:
+    gateway = FakeDetachedGateway(
+        recorded_pid=None, holder_pids=(), log_locked=None, polls_before_release=None
+    )
+
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
+
+    # Nothing is visible and the lock state is unreadable, which is what a
+    # gateway owned by another user looks like. Reporting success there is the
+    # same defect as reporting it over a gateway this host can see.
+    assert result.outcome is GatewayStopOutcome.STILL_HOLDING
+    assert result.hold == WebInstanceHold(holders=(), log_locked=None)
 
 
 @given(polls_before_release=integers(min_value=0, max_value=400))
-def test_stop_detached_gateway_reports_success_only_once_the_hold_is_released(
+@example(polls_before_release=BUDGET_POLLS - 1)
+@example(polls_before_release=BUDGET_POLLS)
+def test_stop_detached_gateway_reports_success_only_once_the_files_are_released(
     polls_before_release: int,
 ) -> None:
     gateway = FakeDetachedGateway(polls_before_release=polls_before_release)
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
     # The property the fix turns on: anything other than a reported failure
-    # means the hold is released, for any teardown length on either side of
-    # the stop budget.
-    assert (result.outcome is GatewayStopOutcome.STILL_HOLDING) is gateway.last_observation
-    assert gateway.sleeps == [0.05] * len(gateway.sleeps)
-    budget_polls = GATEWAY_STOP_TIMEOUT_SECONDS / 0.05
-    assert (result.outcome is GatewayStopOutcome.STOPPED) is (polls_before_release <= budget_polls)
+    # means nothing observable is using the directory, for any teardown length
+    # on either side of the stop budget. Teardown here starts on the signal, so
+    # it needs one wait more than it has polls to survive. The explicit
+    # examples pin the boundary, which the generated sample steps over.
+    waits_needed = polls_before_release + 1
+    assert (result.outcome is GatewayStopOutcome.STILL_HOLDING) is not gateway.last_hold.free
+    assert result.hold == gateway.last_hold
+    assert gateway.sleeps == [0.05] * min(waits_needed, BUDGET_POLLS)
+    assert (result.outcome is GatewayStopOutcome.STOPPED) is (waits_needed <= BUDGET_POLLS)
 
 
 @given(polls_before_release=integers(min_value=0, max_value=400))
+@example(polls_before_release=BUDGET_POLLS)
+@example(polls_before_release=BUDGET_POLLS + 1)
 def test_stop_detached_gateway_never_reports_success_without_a_record(
     polls_before_release: int,
 ) -> None:
     gateway = FakeDetachedGateway(
-        record_published=False, already_stopping=True, polls_before_release=polls_before_release
+        recorded_pid=None, already_stopping=True, polls_before_release=polls_before_release
     )
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
     # Same property with no record to read, which is the state the gateway is
-    # in for almost all of its teardown, and with no pid to signal.
-    assert (result.outcome is GatewayStopOutcome.STILL_HOLDING) is gateway.last_observation
+    # in for almost all of its teardown, and with no pid to signal. Teardown is
+    # already under way, so the waits it needs equal its polls, and a directory
+    # that is free on the first look is reported as never having been in use.
+    assert (result.outcome is GatewayStopOutcome.STILL_HOLDING) is not gateway.last_hold.free
+    assert gateway.sleeps == [0.05] * min(polls_before_release, BUDGET_POLLS)
+    assert (result.outcome is GatewayStopOutcome.STOPPED) is (
+        0 < polls_before_release <= BUDGET_POLLS
+    )
+    assert (result.outcome is GatewayStopOutcome.NOT_RUNNING) is (polls_before_release == 0)
     assert gateway.signals == []
 
 
 def test_stop_detached_gateway_reports_a_gateway_that_ignores_termination() -> None:
     gateway = FakeDetachedGateway(polls_before_release=None)
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
-    assert result == GatewayStopResult(GatewayStopOutcome.STILL_HOLDING, 4321)
-    assert gateway.signals == [4321]
+    assert result.outcome is GatewayStopOutcome.STILL_HOLDING
+    assert result.pid == GATEWAY_PID
+    assert result.hold.holders == (GATEWAY_PID,)
+    assert gateway.signals == [GATEWAY_PID]
     assert gateway.clock >= GATEWAY_STOP_TIMEOUT_SECONDS
-    assert gateway.sleeps == [0.05] * len(gateway.sleeps)
+    assert gateway.sleeps == [0.05] * BUDGET_POLLS
 
 
 def test_stop_detached_gateway_reports_an_unused_instance_directory() -> None:
-    gateway = FakeDetachedGateway(already_stopping=True)
+    gateway = FakeDetachedGateway(recorded_pid=None, holder_pids=(), log_locked=False)
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
-    assert result == GatewayStopResult(GatewayStopOutcome.NOT_RUNNING, None)
+    assert result == GatewayStopResult(GatewayStopOutcome.NOT_RUNNING, IDLE_DIRECTORY, None)
     assert gateway.signals == []
+    assert gateway.observations == 1
     assert gateway.sleeps == []
 
 
-@pytest.mark.parametrize("failure", [ProcessLookupError(4321), PermissionError(4321)])
-def test_stop_detached_gateway_absorbs_a_signal_it_cannot_deliver(failure: Exception) -> None:
-    gateway = FakeDetachedGateway(polls_before_release=1, signal_error=failure)
+def test_stop_detached_gateway_waits_out_a_gateway_that_was_already_gone() -> None:
+    gateway = FakeDetachedGateway(
+        signal_error=ProcessLookupError(GATEWAY_PID), already_stopping=True, polls_before_release=1
+    )
 
-    result = stop_detached_gateway(_INSTANCE_PATH, gateway)
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
 
-    # A signal that cannot be delivered is not an answer either way, so the
-    # hold still decides the outcome and nothing escapes to the operator as a
-    # traceback.
-    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, 4321)
+    # The pid is gone but a descendant still has the inherited log, so there is
+    # something to wait for and nothing to signal. Claiming the signal landed
+    # would name a pid the operator cannot act on.
+    assert result == GatewayStopResult(GatewayStopOutcome.STOPPED, IDLE_DIRECTORY, None)
 
 
-def test_detached_launch_effects_read_a_record_and_hold_without_probing(tmp_path: Path) -> None:
-    effects = _DetachedLaunchEffects()
+def test_stop_detached_gateway_reports_a_gateway_it_is_not_allowed_to_signal() -> None:
+    gateway = FakeDetachedGateway(
+        signal_error=PermissionError(GATEWAY_PID), polls_before_release=None
+    )
+
+    result = stop_detached_gateway(INSTANCE_PATH, gateway)
+
+    # A gateway owned by another user cannot be signalled, so it never starts
+    # tearing down. Reporting `STOPPED` with its pid, as absorbing the error
+    # did, claimed a teardown that was never asked for.
+    assert result.outcome is GatewayStopOutcome.STILL_HOLDING
+    assert result.pid is None
+    assert gateway.signals == []
+
+
+def test_detached_gateway_effects_read_a_record_and_observe_without_probing(
+    tmp_path: Path,
+) -> None:
+    effects = _DetachedGatewayEffects()
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
-    record = _gateway_record(os.getpid())
+    record = gateway_record(os.getpid())
     record.write(instance_path)
 
+    # `read_record` answers for a gateway that no longer serves, which
+    # `discover` cannot, and `observe` answers without consulting either.
     assert effects.read_record(instance_path) == record
-    assert effects.instance_held(instance_path) is False
+    assert effects.observe(instance_path).free is True
 
     descriptor = os.open(WebInstanceHold.log_path(instance_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         assert WebInstanceHold.take(descriptor) is True
-        assert effects.instance_held(instance_path) is True
+        assert effects.observe(instance_path) == WebInstanceHold(holders=(), log_locked=True)
     finally:
         os.close(descriptor)
 
-    # `read_record` never probes, so it answers for a gateway that no longer
-    # serves, which `discover` cannot: there is no health endpoint here.
-    assert effects.discover(instance_path) is None
-    assert effects.instance_held(instance_path) is False
+    assert effects.observe(instance_path).free is True
 
 
 def test_detached_launch_effects_capture_a_real_child_and_use_discovery(tmp_path: Path) -> None:
-    effects = _DetachedLaunchEffects()
+    effects = _DetachedGatewayEffects()
     output_path = tmp_path / "child.log"
     with output_path.open("w+b") as output:
         process = effects.spawn(

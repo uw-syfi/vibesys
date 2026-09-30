@@ -116,20 +116,29 @@ def test_stale_instance_record_is_removed(tmp_path: Path) -> None:
     assert not path.exists()
 
 
-def test_instance_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> None:
+def test_an_idle_instance_directory_reads_free(tmp_path: Path) -> None:
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
     instance_path.parent.mkdir(parents=True)
     log_path = WebInstanceHold.log_path(instance_path)
     assert log_path == instance_path.parent / "web-gateway.json.log"
 
-    # Asking whether the instance is in use must not create the file it reads.
-    assert WebInstanceHold.is_held(instance_path) is False
+    hold = WebInstanceHold.observe(instance_path)
+
+    # Asking whether the instance is in use must not create the file it reads,
+    # and the caller's own process is never one of the holders it is told about.
+    assert hold == WebInstanceHold(holders=(), log_locked=False)
+    assert hold.free is True
     assert not log_path.exists()
+
+
+def test_the_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    instance_path.parent.mkdir(parents=True)
+    log_path = WebInstanceHold.log_path(instance_path)
 
     descriptor = os.open(log_path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "w+b") as output:
         assert WebInstanceHold.take(descriptor) is True
-        assert WebInstanceHold.is_held(instance_path) is True
         rival = os.open(log_path, os.O_RDWR)
         try:
             # Exclusion is what lets the launcher refuse a second gateway.
@@ -146,15 +155,92 @@ def test_instance_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> N
         _record_for(child.pid).write(instance_path)
         _record_for(child.pid).remove_if_owner(instance_path)
 
-        # The launcher has closed its descriptor and the record has come and
+        # The launcher has closed its own descriptor and the record has come and
         # gone, which is the state a stopping gateway leaves behind. The child
-        # still has the log, so the directory is still in use and the hold is
-        # the only thing that still says so.
+        # inherited the descriptor, so lock and log are still one open file
+        # description and both observations still name the child: this is the
+        # inherited-descriptor property the whole postcondition rests on.
         assert not instance_path.exists()
-        assert WebInstanceHold.is_held(instance_path) is True
+        hold = WebInstanceHold.observe(instance_path)
+        assert hold == WebInstanceHold(holders=(child.pid,), log_locked=True)
+        assert hold.free is False
     finally:
         child.terminate()
         child.wait()
+
+    assert WebInstanceHold.observe(instance_path).free is True
+
+
+def test_a_process_using_the_directory_without_the_lock_is_still_reported(
+    tmp_path: Path,
+) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    instance_path.parent.mkdir(parents=True)
+
+    # Two shapes the lock alone cannot see: a gateway launched without
+    # `--detach`, which writes no startup log and only holds its claim lock,
+    # and a startup log opened by a launcher that predates the lock. Treating
+    # an unlocked log as an idle directory is what let `stop` report success
+    # over a live gateway.
+    for path in (instance_path.with_name("web-gateway.json.lock"), instance_path):
+        descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        with os.fdopen(descriptor, "w+b") as output:
+            child = subprocess.Popen(
+                [sys.executable, "-c", "import signal; signal.pause()"],
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        try:
+            hold = WebInstanceHold.observe(instance_path)
+            assert hold.holders == (child.pid,)
+            assert hold.log_locked is False
+            assert hold.free is False
+        finally:
+            child.terminate()
+            child.wait()
+
+
+_SHARED_LOCK_HOLDER = """
+import fcntl, os, signal, sys
+descriptor = os.open(sys.argv[1], os.O_RDONLY)
+fcntl.flock(descriptor, fcntl.LOCK_SH)
+os.write(1, b"1")
+signal.pause()
+"""
+
+
+def test_observing_the_hold_does_not_make_the_observer_a_holder(tmp_path: Path) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    instance_path.parent.mkdir(parents=True)
+    log_path = WebInstanceHold.log_path(instance_path)
+    log_path.touch(mode=0o600)
+    reader = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-994221 [S603]; the command is this interpreter running a literal in-test program, and its one argument is a pytest tmp_path
+        [sys.executable, "-c", _SHARED_LOCK_HOLDER, str(log_path)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+    )
+    assert reader.stdout is not None
+    assert reader.stdout.read(1) == b"1"
+    try:
+        # An observation answers by taking a *shared* lock, which conflicts with
+        # the launcher's exclusive one but not with another observation. Answering
+        # with an exclusive lock made the observer a holder for the duration, so
+        # two callers asking at once each reported an idle directory as in use,
+        # and a launch racing an observation aborted for no reason. A process
+        # that holds only a shared lock is therefore not a lock holder here.
+        hold = WebInstanceHold.observe(instance_path)
+        assert hold.log_locked is False
+        assert hold.holders == (reader.pid,)
+    finally:
+        reader.terminate()
+        reader.wait()
+
+    descriptor = os.open(log_path, os.O_RDWR)
+    try:
+        assert WebInstanceHold.take(descriptor) is True
+    finally:
+        os.close(descriptor)
 
 
 def _record_for(pid: int) -> WebInstanceRecord:

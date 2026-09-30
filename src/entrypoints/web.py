@@ -18,11 +18,13 @@ from entrypoints.server import (
     GatewayStopResult,
     stop_detached_gateway,
 )
-from server.runtime import WebInstanceRecord
+from server.runtime import WebInstanceHold, WebInstanceRecord
 from vs_project.api import Project
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
+
+    from entrypoints.server import WebGatewayStopEffects
 
 _LIVE_PORT = 8765
 _DEV_PORT = 5173
@@ -278,27 +280,54 @@ def _run_status(args: argparse.Namespace) -> int:
 
 
 def _stop_message(instance: Path, result: GatewayStopResult) -> str:
-    directory = instance.parent
     if result.outcome is GatewayStopOutcome.NOT_RUNNING:
         return "No VibeSys web gateway is running."
     if result.outcome is GatewayStopOutcome.STILL_HOLDING:
-        holder = f"gateway {result.pid}" if result.pid is not None else "unidentified process"
-        return (
-            f"A VibeSys web {holder} still has files open under {directory} "
-            f"{GATEWAY_STOP_TIMEOUT_SECONDS:.0f} seconds after SIGTERM. Do not reuse or remove "
-            f"that directory yet: inspect the gateway with `vibesys web status --instance "
-            f"{instance}`, and send SIGKILL yourself if it is wedged."
-        )
+        return _still_in_use_message(instance, result)
     if result.pid is None:
-        return f"Waited for a VibeSys web gateway to finish releasing {directory}."
+        return f"Waited for a VibeSys web gateway to finish releasing {instance.parent}."
     return f"Stopped VibeSys web gateway {result.pid}."
 
 
-def _run_stop(
-    args: argparse.Namespace,
-    stop_gateway: Callable[[Path], GatewayStopResult] = stop_detached_gateway,
-) -> int:
-    result = stop_gateway(args.instance)
+def _still_in_use_message(instance: Path, result: GatewayStopResult) -> str:
+    """Say who is still using the directory and what the operator can do about it.
+
+    The instance record is not a reliable source for that: a descendant that
+    inherited the startup log keeps the directory in use with no record naming
+    it, and a record left by a killed gateway can name a process that has
+    nothing to do with this directory. So the holders come from the
+    observation, and the escalation names them rather than pointing at `status`,
+    which reads the record and therefore reports "not running" in exactly this
+    state.
+    """
+    directory = instance.parent
+    delivery = (
+        f"SIGTERM went to gateway {result.pid} {GATEWAY_STOP_TIMEOUT_SECONDS:.0f} seconds ago."
+        if result.pid is not None
+        else "Nothing was signalled: no instance record named a process that has these files open."
+    )
+    keep = f"Do not reuse or remove {directory}."
+    if result.hold.log_locked is None:
+        log_path = WebInstanceHold.log_path(instance)
+        return (
+            f"Cannot establish that {directory} is free: the lock state of {log_path} "
+            f"could not be read. {delivery} {keep}"
+        )
+    if result.hold.holders:
+        pids = ", ".join(str(pid) for pid in result.hold.holders)
+        return (
+            f"{directory} is still in use. Processes with files open there: {pids}. "
+            f"{delivery} {keep} End those processes first (`kill -9 {pids}`)."
+        )
+    return (
+        f"{directory} is still in use: {WebInstanceHold.log_path(instance)} is locked by "
+        f"a process this host cannot identify, which means it belongs to another user. "
+        f"{delivery} {keep}"
+    )
+
+
+def _run_stop(args: argparse.Namespace, effects: WebGatewayStopEffects | None = None) -> int:
+    result = stop_detached_gateway(args.instance, effects)
     print(_stop_message(args.instance, result), flush=True)  # noqa: T201  # lint-waiver: LW-101099 [T201]; report the gateway lifecycle outcome to the operator
     return 1 if result.outcome is GatewayStopOutcome.STILL_HOLDING else 0
 
