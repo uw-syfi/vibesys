@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from vibesys.orchestration.hypothesis.attempts import recorded_judge_verdict
 from vibesys.orchestration.hypothesis.transitions import (
     ResolutionEvidence,
+    input_baseline_measurement,
     metric_baseline,
     pareto_archive_dominators,
     provisional_candidate_retained,
@@ -60,13 +61,18 @@ class CandidateEvidence:
 
 @dataclass(frozen=True)
 class MeasurementEvidence:
-    """One trusted headline reading and its causal baseline."""
+    """One trusted headline reading and its causal baseline.
+
+    ``baseline_round`` is ``None`` with a ``baseline_metric`` when the
+    baseline is the input tree rather than an earlier round.
+    """
 
     accepted_metrics: dict[str, float]
     metric_name: str | None
     metric_direction: Literal["max", "min"] | None
     official_metric: float | None
-    parent_record: RoundRecord | None
+    baseline_round: int | None
+    baseline_commit: str | None
     baseline_metric: float | None
     comparison: MetricComparison | None
     delta_pct: float | None
@@ -113,6 +119,26 @@ def _accepted_metrics(data: RecordInput) -> dict[str, float]:
     return metrics
 
 
+def _baseline(data: RecordInput, metric: str | None) -> tuple[int | None, str | None, float | None]:
+    """Return the round, commit, and value this round is compared against.
+
+    The nearest retained measured ancestor wins; without one, the input tree.
+    """
+    parent = metric_baseline(
+        parent_round=data.hypothesis.parent_round,
+        parent_commit=data.hypothesis.parent_commit,
+        metric=metric,
+        rounds=data.records,
+    )
+    if parent is not None:
+        return parent.round_number, parent.commit, record_metric_value(parent, metric)
+    input_baseline = data.state.input_baseline
+    reading = input_baseline_measurement(input_baseline, metric)
+    if input_baseline is None or reading is None:
+        return None, None, None
+    return None, input_baseline.commit, reading.value
+
+
 def _measurement(
     data: RecordInput, accepted_metrics: dict[str, float], *, official: bool
 ) -> MeasurementEvidence:
@@ -127,13 +153,7 @@ def _measurement(
     )
     if official_metric is None and not accepted_metrics:
         official_metric = projection.metric
-    parent = metric_baseline(
-        parent_round=data.hypothesis.parent_round,
-        parent_commit=data.hypothesis.parent_commit,
-        metric=metric_name,
-        rounds=data.records,
-    )
-    baseline = record_metric_value(parent, metric_name) if parent is not None else None
+    baseline_round, baseline_commit, baseline = _baseline(data, metric_name)
     trusted = trusted_perf_provenance(projection.provenance)
     reading = (
         Measurement(metric=metric_name, value=official_metric, direction=direction)
@@ -160,7 +180,8 @@ def _measurement(
         metric_name,
         direction,
         official_metric,
-        parent,
+        baseline_round,
+        baseline_commit,
         baseline,
         comparison,
         delta,
@@ -186,33 +207,50 @@ def _candidate_retained(
         and data.state.metrics.objectives
         and measurement.accepted_metrics
     ):
-        return not pareto_archive_dominators(
-            measurement.accepted_metrics, data.records, data.state.metrics
-        )
+        return _pareto_retained(data, measurement.accepted_metrics)
     if official and measurement.trusted:
-        prior = [
-            Measurement(
-                metric=measurement.metric_name,
-                value=value,
-                direction=measurement.metric_direction,
-            )
-            for record in data.records
-            if measurement.metric_name is not None
-            and record.official_evaluation
-            and trusted_perf_provenance(record.perf_provenance)
-            and (value := record_metric_value(record, measurement.metric_name)) is not None
-        ]
-        reading = (
-            Measurement(
-                metric=measurement.metric_name,
-                value=measurement.official_metric,
-                direction=measurement.metric_direction,
-            )
-            if measurement.metric_name is not None and measurement.official_metric is not None
-            else None
-        )
-        return scalar_candidate_retained(data.state.metrics.compare_to_best(reading, prior))
+        return _scalar_retained(data, measurement)
     return provisional_candidate_retained(CandidateDisposition(candidate.disposition))
+
+
+def _pareto_retained(data: RecordInput, row: dict[str, float]) -> bool:
+    """Retain a row that neither the trusted archive nor the input tree dominates."""
+    space = data.state.metrics
+    if pareto_archive_dominators(row, data.records, space):
+        return False
+    baseline = data.state.input_baseline
+    return not (
+        baseline is not None
+        and space.complete(baseline.metrics)
+        and space.complete(row)
+        and space.dominates(baseline.metrics, row)
+    )
+
+
+def _scalar_retained(data: RecordInput, measurement: MeasurementEvidence) -> bool | None:
+    """Retain a reading that beats every prior official reading and the input tree."""
+    metric = measurement.metric_name
+    prior = [
+        Measurement(metric=metric, value=value, direction=measurement.metric_direction)
+        for record in data.records
+        if metric is not None
+        and record.official_evaluation
+        and trusted_perf_provenance(record.perf_provenance)
+        and (value := record_metric_value(record, metric)) is not None
+    ]
+    input_reading = input_baseline_measurement(data.state.input_baseline, metric)
+    if input_reading is not None:
+        prior.append(input_reading)
+    reading = (
+        Measurement(
+            metric=metric,
+            value=measurement.official_metric,
+            direction=measurement.metric_direction,
+        )
+        if metric is not None and measurement.official_metric is not None
+        else None
+    )
+    return scalar_candidate_retained(data.state.metrics.compare_to_best(reading, prior))
 
 
 def build_round_record(data: RecordInput) -> RoundRecord:
@@ -273,12 +311,8 @@ def build_round_record(data: RecordInput) -> RoundRecord:
             data, candidate, metrics, official=official, reviewed=reviewed
         ),
         perf_direction=metrics.metric_direction,
-        perf_baseline_round=(
-            metrics.parent_record.round_number if metrics.parent_record is not None else None
-        ),
-        perf_baseline_commit=(
-            metrics.parent_record.commit if metrics.parent_record is not None else None
-        ),
+        perf_baseline_round=metrics.baseline_round,
+        perf_baseline_commit=metrics.baseline_commit,
         perf_baseline_metric=metrics.baseline_metric,
         perf_delta_pct=metrics.delta_pct,
         perf_comparison=metrics.comparison,

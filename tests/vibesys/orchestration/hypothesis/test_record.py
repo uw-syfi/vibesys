@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from hypothesis import given
+from hypothesis import strategies as st
+
+from vibesys.orchestration.hypothesis import (
+    HypothesisConfig,
+    HypothesisSearch,
+    InputBaseline,
+    OrchestratorPlan,
+)
 from vibesys.orchestration.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
@@ -223,3 +231,130 @@ def test_baseline_skips_an_agent_self_reported_prior_round() -> None:
 
     assert record.perf_baseline_round is None
     assert record.perf_baseline_metric is None
+
+
+# --- input baseline: the measured input tree roots every baseline chain ------
+
+_INPUT = "input-commit"
+
+
+def _with_input(data: RecordInput, value: float) -> RecordInput:
+    baseline = InputBaseline(
+        commit=_INPUT, metric="throughput", direction="max", metrics={"throughput": value}
+    )
+    return replace(data, state=data.state.model_copy(update={"input_baseline": baseline}))
+
+
+def _measured(data: RecordInput, value: float) -> RecordInput:
+    data.attempt.framework_benchmark = FrameworkBenchmarkOutcome(
+        metric_name="throughput",
+        metric_value=value,
+        metric_direction="max",
+        row={"throughput": value},
+    )
+    return replace(data, projection=replace(data.projection, metric=value, accepted_metrics={}))
+
+
+def _from_input(data: RecordInput) -> RecordInput:
+    data.hypothesis.parent_round = None
+    data.hypothesis.parent_commit = _INPUT
+    return replace(data, records=[])
+
+
+def test_first_round_is_compared_with_the_input_baseline() -> None:
+    data = _measured(_with_input(_from_input(_record_input()), 10.0), 12.0)
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_round is None
+    assert record.perf_baseline_commit == _INPUT
+    assert record.perf_baseline_metric == 10.0
+    assert record.perf_delta_pct == 20.0
+    assert record.hypothesis_outcome == "proven"
+    assert record.candidate_retained is True
+
+
+def test_round_slower_than_the_input_is_not_retained() -> None:
+    """Regression: MPSC round 2 (98K, 8x below the input) became the anchor."""
+    data = _measured(_with_input(_from_input(_record_input()), 800_000.0), 98_000.0)
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_metric == 800_000.0
+    assert record.hypothesis_outcome == "disproven"
+    assert record.candidate_retained is False
+
+
+def test_round_built_on_a_non_retained_round_is_compared_with_the_input() -> None:
+    """Regression: MPSC rounds 3 and 4 cleared ``proven`` against round 2.
+
+    Round 2 was measured but not retained, so its reading stays on record
+    without becoming the baseline for the round built on top of it.
+    """
+    regressed = _official(2, 98_000.0)
+    regressed = replace(regressed, candidate_retained=False)
+    data = _measured(_with_input(_record_input(), 800_000.0), 110_000.0)
+    data = replace(data, records=[regressed], round_number=3)
+    data.hypothesis.parent_round = 2
+    data.hypothesis.parent_commit = regressed.commit
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_round is None
+    assert record.perf_baseline_metric == 800_000.0
+    assert record.perf_delta_pct is not None
+    assert record.perf_delta_pct < 0
+    assert record.hypothesis_outcome == "disproven"
+    assert record.candidate_retained is False
+
+
+@given(
+    input_value=st.floats(min_value=1.0, max_value=1e6),
+    readings=st.lists(st.floats(min_value=1.0, max_value=1e6), min_size=1, max_size=8),
+    pareto=st.booleans(),
+)
+def test_no_round_is_anchored_below_the_best_retained_tree(
+    input_value: float, readings: list[float], *, pareto: bool
+) -> None:
+    """Each round builds on the previous one, however it measured.
+
+    Every baseline is the input or a retained round. A round is retained only
+    if it beats the input and every earlier reading (a Pareto archive also
+    keeps an exact tie). The final selection is the best reading, or nothing
+    when the input still wins.
+    """
+    space = MetricSpace(objectives=(Objective("throughput", "max"),) if pareto else ())
+    records: list[RoundRecord] = []
+    for number, value in enumerate(readings, start=1):
+        data = _measured(_with_input(_record_input(), input_value), value)
+        data = replace(
+            data,
+            state=data.state.model_copy(update={"metrics": space}),
+            records=list(records),
+            round_number=number,
+            candidate_commit=f"round-{number}",
+        )
+        data.hypothesis.parent_round = number - 1 or None
+        data.hypothesis.parent_commit = records[-1].commit if records else _INPUT
+        record = build_round_record(data)
+
+        best_before = max([input_value, *(item.perf_metric or 0.0 for item in records)])
+        if record.perf_baseline_round is None:
+            assert record.perf_baseline_metric == input_value
+        else:
+            anchor = next(
+                item for item in records if item.round_number == record.perf_baseline_round
+            )
+            assert anchor.candidate_retained is True
+        beats = value >= best_before if pareto else value > best_before
+        assert record.candidate_retained is beats
+        records.append(record)
+
+    search = HypothesisSearch(HypothesisConfig(max_rounds=len(readings)))
+    baseline = _with_input(_record_input(), input_value).state.input_baseline
+    winner = search.best(records, space=space, baseline=baseline)
+    if max(readings) > input_value or (pareto and max(readings) == input_value):
+        assert winner is not None
+        assert winner.perf_metric == max(readings)
+    else:
+        assert winner is None

@@ -229,6 +229,10 @@ class MultiFiles:
         """Append a local or official evaluation decision."""
         self._append(round_number, f"Official evaluation attempt {retry}", detail)
 
+    def note_measurement(self, round_number: int, detail: str) -> None:
+        """Append the round's recorded official measurement and its baseline."""
+        self._append(round_number, "Official measurement", detail)
+
     def _initialize(self) -> None:
         roadmap = self.roadmap / "index.md"
         roadmap.parent.mkdir(parents=True, exist_ok=True)

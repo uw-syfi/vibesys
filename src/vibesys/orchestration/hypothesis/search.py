@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.hypothesis.config import HypothesisConfig
     from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
-    from vibesys.orchestration.metrics import MetricSpace
+    from vibesys.orchestration.hypothesis.state import Hypothesis, InputBaseline, RoundRecord
+    from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome, MetricSpace
     from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
 
 __all__ = ["HypothesisSearch"]
@@ -273,9 +273,15 @@ class HypothesisSearch:
         """Return the noise-aware Pareto frontier over trusted, reviewed rounds."""
         return transitions.pareto_frontier_records(records, space)
 
-    def best(self, records: Sequence[RoundRecord], *, space: MetricSpace) -> RoundRecord | None:
-        """Select the latest noise-aware winner from trusted retained records."""
-        return transitions.select_final_candidate(records, space)
+    def best(
+        self,
+        records: Sequence[RoundRecord],
+        *,
+        space: MetricSpace,
+        baseline: InputBaseline | None = None,
+    ) -> RoundRecord | None:
+        """Select the latest noise-aware winner, or ``None`` if the input still wins."""
+        return transitions.select_final_candidate(records, space, baseline)
 
     def pareto_conflict(
         self,
@@ -319,9 +325,25 @@ class HypothesisSearch:
         """Count provisional candidates recorded since the last official evaluation."""
         return transitions.provisional_candidates_since_official(records)
 
-    def archive_summary(self, records: Sequence[RoundRecord], *, space: MetricSpace) -> str:
+    def archive_summary(
+        self,
+        records: Sequence[RoundRecord],
+        *,
+        space: MetricSpace,
+        baseline: InputBaseline | None = None,
+    ) -> str:
         """Render the Pareto archive's current summary for the progress board."""
-        return transitions.pareto_archive_summary(records, space)
+        return transitions.pareto_archive_summary(records, space, baseline)
+
+    @staticmethod
+    def input_baseline(commit: str, benchmark: FrameworkBenchmarkOutcome) -> InputBaseline | None:
+        """Build the run's input baseline from its benchmark, if it has a headline."""
+        return transitions.input_baseline_from(commit, benchmark)
+
+    @staticmethod
+    def measurement_note(record: RoundRecord) -> str | None:
+        """Summarize a round's trusted official measurement for the progress ledger."""
+        return transitions.official_measurement_note(record)
 
     def format_metric_row(self, record: RoundRecord, *, space: MetricSpace) -> str:
         """Render one round record's candidate metrics against *space*'s objectives."""

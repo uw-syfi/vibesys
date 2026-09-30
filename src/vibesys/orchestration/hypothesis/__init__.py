@@ -61,6 +61,7 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisReview,
     HypothesisState,
     HypothesisStrategy,
+    InputBaseline,
 )
 
 __all__ = [
@@ -84,6 +85,7 @@ __all__ = [
     "HypothesisStrategy",
     "HypothesisStrategyUpdate",
     "ImplementerReply",
+    "InputBaseline",
     "InvalidPlanError",
     "JudgeOutcome",
     "JudgeReviewed",

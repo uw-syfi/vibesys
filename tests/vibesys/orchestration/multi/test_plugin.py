@@ -105,6 +105,16 @@ def _judge(**changes: object) -> JudgeResponse:
     )
 
 
+def _throughput(value: float) -> BenchmarkEvaluation:
+    return BenchmarkEvaluation(
+        executed=True,
+        metric_name="throughput",
+        metric_value=value,
+        metric_direction="max",
+        row={"throughput": value},
+    )
+
+
 class _Script:
     def __init__(self, *replies: object) -> None:
         self.replies = deque(replies)
@@ -299,6 +309,7 @@ def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) 
 
     def configure(run: FakeRun) -> None:
         run.evaluation.script_benchmark(
+            _throughput(100.0),
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -306,7 +317,7 @@ def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) 
                 metric_direction="max",
                 metric_unit="requests/s",
                 row={"throughput": 120.0},
-            )
+            ),
         )
 
     status, run = _run(
@@ -505,15 +516,7 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
     )
 
     def configure(run: FakeRun) -> None:
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=98_000.0,
-                metric_direction="max",
-                row={"throughput": 98_000.0},
-            )
-        )
+        run.evaluation.script_benchmark(_throughput(800_000.0), _throughput(98_000.0))
 
     status, run = _run(
         tmp_path,
@@ -538,6 +541,12 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
     assert not rejected.passed
     assert measured.passed
     assert measured.official_evaluation
+    assert measured.perf_baseline_round is None
+    assert measured.perf_baseline_metric == 800_000.0
+    assert measured.candidate_retained is False
+    assert "no trusted winner; restored the input baseline" in [
+        call.message for call in run.observations.calls
+    ]
     hypothesis = state.search.by_id("H-01")
     assert hypothesis is not None
     assert hypothesis.parent_commit is not None

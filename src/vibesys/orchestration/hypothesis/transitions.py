@@ -10,6 +10,7 @@ no agents, no prompts, no filesystem, no clock, no global RNG.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, assert_never
 
 from vibesys.orchestration.hypothesis.state import (
@@ -19,8 +20,15 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisReview,
     HypothesisState,
     HypothesisStrategy,
+    InputBaseline,
 )
-from vibesys.orchestration.metrics import Measurement, MetricComparison, MetricSpace
+from vibesys.orchestration.metrics import (
+    FrameworkBenchmarkOutcome,
+    Measurement,
+    MetricComparison,
+    MetricSpace,
+    Objective,
+)
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -182,15 +190,83 @@ def baseline_candidates(
     metric: str | None,
     rounds: Sequence[RoundRecord],
 ) -> list[RoundRecord]:
-    """Return the rounds admissible as a baseline for *metric*, in order."""
+    """Return the rounds admissible as a baseline for *metric*, in order.
+
+    A round the framework measured and did not retain stays on record for
+    the designer, but never becomes a baseline: a later round is compared
+    against the nearest retained ancestor (or the input baseline) instead.
+    """
     return [
         item
         for item in rounds
         if item.official_evaluation
         and item.perf_metric is not None
         and trusted_perf_provenance(item.perf_provenance)
+        and record_candidate_retained(item) is not False
         and (item.perf_unit == metric or (metric is not None and metric in item.metrics))
     ]
+
+
+def input_baseline_from(commit: str, benchmark: FrameworkBenchmarkOutcome) -> InputBaseline | None:
+    """Build the input baseline from its benchmark, or ``None`` without a usable headline."""
+    if benchmark.feedback is not None or benchmark.metric_name is None:
+        return None
+    metrics = dict(benchmark.row or {})
+    if benchmark.metric_value is not None:
+        metrics.setdefault(benchmark.metric_name, benchmark.metric_value)
+    if benchmark.metric_name not in metrics:
+        return None
+    return InputBaseline(
+        commit=commit,
+        metric=benchmark.metric_name,
+        direction=benchmark.metric_direction,
+        metrics=metrics,
+    )
+
+
+def official_measurement_note(record: RoundRecord) -> str | None:
+    """Summarize a round's trusted official measurement for the progress ledger.
+
+    Every measured round stays visible to the designer here, including rounds
+    that were not retained and so never serve as a baseline.
+    """
+    if (
+        not record.official_evaluation
+        or record.perf_metric is None
+        or not trusted_perf_provenance(record.perf_provenance)
+    ):
+        return None
+    lines = [f"- {record.perf_unit or 'metric'}: {record.perf_metric:.6g}"]
+    if len(record.metrics) > 1:
+        row = ", ".join(f"{name}={value:.6g}" for name, value in record.metrics.items())
+        lines.append(f"- row: {row}")
+    if record.perf_baseline_metric is None:
+        lines.append("- baseline: none measured")
+    else:
+        source = (
+            f"round {record.perf_baseline_round}"
+            if record.perf_baseline_round is not None
+            else "input"
+        )
+        delta = f"{record.perf_delta_pct:+.1f}%" if record.perf_delta_pct is not None else "n/a"
+        lines.append(f"- baseline: {source} ({record.perf_baseline_metric:.6g}), delta {delta}")
+    if record.perf_comparison is not None:
+        lines.append(f"- versus baseline: {record.perf_comparison.value}")
+    lines.append(f"- retained: {record_candidate_retained(record)}")
+    return "\n".join(lines) + "\n"
+
+
+def input_baseline_measurement(
+    baseline: InputBaseline | None, metric: str | None
+) -> Measurement | None:
+    """Return the input baseline's reading on *metric*, if it was measured."""
+    if baseline is None or metric is None:
+        return None
+    value = baseline.value(metric)
+    if value is None:
+        return None
+    direction = baseline.direction if metric == baseline.metric else None
+    return Measurement(metric=metric, value=value, direction=direction)
 
 
 def measurement_delta_reason(hypothesis: Hypothesis) -> PerfDeltaReason | None:
@@ -645,8 +721,26 @@ def _format_metric_row(metrics: dict[str, float], objectives: Sequence) -> str:
     )
 
 
-def pareto_archive_summary(records: Sequence[RoundRecord], space: MetricSpace) -> str:
-    """Render trusted frontier parents and any measured points awaiting review."""
+def _input_baseline_lines(baseline: InputBaseline | None, space: MetricSpace) -> list[str]:
+    if baseline is None:
+        return []
+    row = (
+        _format_metric_row(baseline.metrics, space.objectives)
+        if space.complete(baseline.metrics)
+        else f"{baseline.metrics[baseline.metric]:.6g} {baseline.metric}"
+    )
+    return [
+        f"Input baseline (measured before round 1), commit {baseline.commit[:12]}: {row}. "
+        "A round is retained only if it also beats this."
+    ]
+
+
+def pareto_archive_summary(
+    records: Sequence[RoundRecord],
+    space: MetricSpace,
+    baseline: InputBaseline | None = None,
+) -> str:
+    """Render the input baseline, trusted frontier parents, and points awaiting review."""
     objectives = space.objectives
     latest = max(records, key=lambda record: record.round_number, default=None)
     latest_metrics = (
@@ -676,10 +770,13 @@ def pareto_archive_summary(records: Sequence[RoundRecord], space: MetricSpace) -
         )
     )
     if not objectives:
-        return (
-            "No objective axes are configured. Use objectives.toml to enable "
-            "multi-objective checkpoint retention; official scalar tracking remains active.\n"
-            f"{latest_line}"
+        return "\n".join(
+            [
+                "No objective axes are configured. Use objectives.toml to enable "
+                "multi-objective checkpoint retention; official scalar tracking remains active.",
+                *_input_baseline_lines(baseline, space),
+                latest_line,
+            ]
         )
 
     lines = [
@@ -690,6 +787,7 @@ def pareto_archive_summary(records: Sequence[RoundRecord], space: MetricSpace) -
             f"within {space.relative_noise:.0%} on every axis and better by more than "
             f"{space.relative_noise:.0%} on at least one."
         ),
+        *_input_baseline_lines(baseline, space),
         latest_line,
     ]
     frontier = pareto_frontier_records(records, space)
@@ -809,27 +907,40 @@ def trusted_final_records(records: Sequence[RoundRecord], space: MetricSpace) ->
     ]
 
 
+def _axis_measurement(axis: Objective, record: RoundRecord) -> Measurement:
+    return Measurement(metric=axis.name, value=record.metrics[axis.name], direction=axis.direction)
+
+
 def select_final_candidate(
-    records: Sequence[RoundRecord], space: MetricSpace
+    records: Sequence[RoundRecord],
+    space: MetricSpace,
+    baseline: InputBaseline | None = None,
 ) -> RoundRecord | None:
-    """Select the latest noise-aware winner from trusted retained records."""
+    """Select the latest noise-aware winner from trusted retained records.
+
+    ``None`` when no record qualifies, or when the input baseline still beats
+    the winner on the selection axis: the input tree is then the best result.
+    """
     newest_first = sorted(
         trusted_final_records(records, space), key=lambda record: record.round_number, reverse=True
     )
-    if space.primary is not None:
+    primary = space.primary
+    if primary is None:
+        candidates, reading = newest_first, headline_measurement
+    else:
         frontier_rounds = {
             record.round_number for record in pareto_frontier_records(newest_first, space)
         }
         candidates = [record for record in newest_first if record.round_number in frontier_rounds]
-        primary = space.primary
-
-        def primary_measurement(record: RoundRecord) -> Measurement:
-            return Measurement(
-                metric=primary.name, value=record.metrics[primary.name], direction=primary.direction
-            )
-
-        return space.best(candidates, primary_measurement)
-    return space.best(newest_first, headline_measurement)
+        reading = partial(_axis_measurement, primary)
+    winner = space.best(candidates, reading)
+    winning = reading(winner) if winner is not None else None
+    input_reading = input_baseline_measurement(
+        baseline, winning.metric if winning is not None else None
+    )
+    if space.compare(input_reading, winning) is MetricComparison.BETTER:
+        return None
+    return winner
 
 
 def detect_plateau(

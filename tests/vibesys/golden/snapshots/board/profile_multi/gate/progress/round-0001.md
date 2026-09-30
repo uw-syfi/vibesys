@@ -22,3 +22,9 @@
 ## Round 1: Official evaluation attempt 1
 - decision: passed
 - reason: final_round
+
+## Round 1: Official measurement
+- throughput: 120
+- baseline: input (100), delta +20.0%
+- versus baseline: better
+- retained: True

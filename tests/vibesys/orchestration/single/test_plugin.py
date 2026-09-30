@@ -85,6 +85,16 @@ def _response(**changes: object) -> SingleAgentRoundResponse:
     )
 
 
+def _throughput(value: float) -> BenchmarkEvaluation:
+    return BenchmarkEvaluation(
+        executed=True,
+        metric_name="throughput",
+        metric_value=value,
+        metric_direction="max",
+        row={"throughput": value},
+    )
+
+
 class _Script:
     def __init__(self, *replies: object) -> None:
         self.replies = deque(replies)
@@ -209,6 +219,7 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
 
     def configure(run: FakeRun) -> None:
         run.evaluation.script_benchmark(
+            _throughput(100.0),
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -216,7 +227,7 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
                 metric_direction="max",
                 metric_unit="requests/s",
                 row={"throughput": 120.0},
-            )
+            ),
         )
 
     status, run = _run(
@@ -275,7 +286,8 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
             AccuracyEvaluation(executed=True),
         )
         run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0)
+            _throughput(70.0),
+            BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0),
         )
 
     status, run = _run(
@@ -293,7 +305,7 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
 
     assert status is RunStatus.SUCCEEDED
     assert len(run.evaluation.accuracy_calls) == 2
-    assert len(run.evaluation.benchmark_calls) == 1
+    assert len(run.evaluation.benchmark_calls) == 2
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "accuracy regressed" in implementer_calls[1][2]
@@ -435,7 +447,8 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
 
     Every attempt of round 1 fails review. Round 2 continues the hypothesis
     and passes the official gates; it must run on the pre-hypothesis tree,
-    not on the tree review rejected.
+    not on the tree review rejected, and its 98K reading is compared with the
+    800K input, so it is neither retained nor selected.
     """
     script = _Script(
         _plan("H-01"),
@@ -445,15 +458,7 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
     )
 
     def configure(run: FakeRun) -> None:
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=98_000.0,
-                metric_direction="max",
-                row={"throughput": 98_000.0},
-            )
-        )
+        run.evaluation.script_benchmark(_throughput(800_000.0), _throughput(98_000.0))
 
     status, run = _run(
         tmp_path,
@@ -477,6 +482,12 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
     assert not rejected.passed
     assert measured.passed
     assert measured.official_evaluation
+    assert measured.perf_baseline_round is None
+    assert measured.perf_baseline_metric == 800_000.0
+    assert measured.candidate_retained is False
+    assert "no trusted winner; restored the input baseline" in [
+        call.message for call in run.observations.calls
+    ]
     hypothesis = state.search.by_id("H-01")
     assert hypothesis is not None
     assert hypothesis.parent_commit is not None
@@ -487,3 +498,76 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
         message for role, _history, message in script.calls if role == IMPLEMENTER.id
     ][-1]
     assert "reverted round 1's rejected edits" in continuation_prompt
+
+
+_GATED = RunFacts(
+    domain_id="generic",
+    objective="Improve the candidate.",
+    accuracy_configured=True,
+    benchmark_configured=True,
+)
+
+
+def test_input_is_benchmarked_once_and_survives_resume(tmp_path: Path) -> None:
+    async def scenario() -> FakeRun:
+        script = _Script(RuntimeError("agent disconnected"), _plan("H-01"), _response())
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=_GATED,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        run.evaluation.script_benchmark(_throughput(100.0), _throughput(120.0))
+        options = _options(max_rounds=1, official_eval_every=1)
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, options)
+            assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    assert len(run.evaluation.benchmark_calls) == 2
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    baseline = state.search.input_baseline
+    assert baseline is not None
+    assert baseline.metrics == {"throughput": 100.0}
+    record = state.search.rounds[0]
+    assert record.perf_baseline_round is None
+    assert record.perf_baseline_commit == baseline.commit
+    assert record.perf_delta_pct == 20.0
+    assert record.candidate_retained is True
+    pareto = (tmp_path / "progress" / "pareto-frontier.md").read_text()
+    assert "Input baseline (measured before round 1)" in pareto
+    ledger = (tmp_path / "progress" / "round-0001.md").read_text()
+    assert "- baseline: input (100), delta +20.0%" in ledger
+
+
+def test_failed_input_benchmark_warns_and_runs_without_a_baseline(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response())
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(executed=True, feedback="input does not build"),
+            _throughput(120.0),
+        )
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=1, official_eval_every=1),
+        facts=_GATED,
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    assert any("input does not build" in call.message for call in run.observations.calls)
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    assert state.search.input_baseline is None
+    assert state.search.rounds[0].perf_baseline_metric is None
+    assert state.search.rounds[0].candidate_retained is True
