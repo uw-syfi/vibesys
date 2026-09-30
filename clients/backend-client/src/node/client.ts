@@ -247,7 +247,7 @@ export class ServerClient {
         }
       });
       socket.once('error', error => disconnect(transportFailure(error)));
-      socket.once('close', () => {
+      onPeerEnd(socket, () => {
         this.#secondarySockets.delete(socket);
         disconnect(
           new BackendClientError(
@@ -345,7 +345,7 @@ export class ServerClient {
       }
     });
     socket.on('error', error => handlers.onDrop(transportFailure(error)));
-    socket.on('close', () =>
+    onPeerEnd(socket, () =>
       handlers.onDrop(new BackendClientError('disconnected', 'Server disconnected')),
     );
     return {
@@ -454,7 +454,7 @@ export class ServerClient {
         }
       });
       socket.once('error', fail);
-      socket.once('close', disconnected);
+      onPeerEnd(socket, disconnected);
       if (signal !== undefined) {
         // Cancellation tears the dedicated socket down and rejects with the
         // abort reason, bypassing the transport-failure wrap so the caller sees
@@ -544,6 +544,31 @@ function delay(ms: number): Promise<void> {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Report the peer ending the connection, once, however the runtime says so.
+ *
+ * `'end'` as well as `'close'`, because on the pinned Bun (1.3.9) a write issued
+ * between the peer's FIN and the `'close'` that would follow it suppresses that
+ * `'close'` entirely: the write neither fails nor arrives, and no further event
+ * ever comes. Listening only for `'close'` therefore loses a server-initiated
+ * close exactly when the client is busy, which is when it matters: the
+ * connection keeps reporting itself live and every later request waits out its
+ * full response deadline instead of failing as a disconnect. `'end'` arrives on
+ * the FIN itself, before any write can race it, and is unambiguous for a
+ * protocol that never half-closes as a normal step: a FIN means no further
+ * response is coming.
+ */
+function onPeerEnd(socket: Socket, report: () => void): void {
+  let reported = false;
+  const once = (): void => {
+    if (reported) return;
+    reported = true;
+    report();
+  };
+  socket.once('end', once);
+  socket.once('close', once);
 }
 
 /**

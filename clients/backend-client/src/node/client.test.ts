@@ -524,6 +524,48 @@ describe('ServerClient', () => {
     expect(Date.now() - start).toBeLessThan(2_000);
   });
 
+  it('reports a peer close that the write racing it hides', async () => {
+    // A request issued in the window between the peer's FIN and the transport
+    // noticing it is written onto a half-closed socket, where it neither fails
+    // nor arrives. On the pinned Bun (1.3.9) that write also suppresses the
+    // socket's own `'close'`, so a transport that waits for `'close'` has
+    // nothing left to learn the outage from: the connection keeps reporting
+    // itself live and the request waits out its full response deadline.
+    let connections = 0;
+    const states: string[] = [];
+    await withServer(
+      socket => {
+        connections += 1;
+        const attempt = connections;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          const response = `${JSON.stringify(successResponse(request['request_id'] as string))}\n`;
+          // The first connection answers and ends in one call, so the FIN lands
+          // together with the bytes the caller was waiting for. The second
+          // stays open, so the recovery settles and the states below are final.
+          if (attempt === 1) socket.end(response);
+          else socket.write(response);
+        });
+      },
+      async client => {
+        await expect(client.request({type: 'command.pause'})).resolves.toMatchObject({ok: true});
+        // Issued with no wait, so it races the close either way round. The
+        // caller gets an answer regardless: the outage is reported, and a
+        // repeatable request rides the redial rather than the dead socket.
+        await expect(client.request({type: 'command.pause'})).resolves.toMatchObject({ok: true});
+
+        // The outage is reported before the recovery is, and one redial covers
+        // it: the dial count is what says nothing reconnected behind the
+        // report. How many times an outage reports itself is the channel's
+        // business, so it is not pinned here.
+        expect(states[0]).toBe('disconnected');
+        expect(states.at(-1)).toBe('connected');
+        expect(connections).toBe(2);
+      },
+      {reconnectDelaysMs: [0], onConnectionState: state => states.push(state.status)},
+    );
+  });
+
   it('close() tears down a live subscription without reporting it as an outage', async () => {
     let disconnects = 0;
     await withServer(
