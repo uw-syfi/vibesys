@@ -562,8 +562,9 @@ class WebSocketGateway:
         ``raise_close_exc`` assignments, of which the close-deadline one at
         line 925 is the analogue here: a peer that will not complete the
         closing handshake is abandoned rather than waited on. The four aborts
-        in ``Server.conn_handler`` are not this case; they are
-        handshake-failure, rejected-handshake, and unexpected-error paths.
+        in ``Server.conn_handler`` are not this case; they are cancellation
+        during the opening handshake, handshake failure, a rejected handshake,
+        and an unexpected error.
         """
         try:
             async with asyncio.timeout(self.limits.write_deadline_seconds):
