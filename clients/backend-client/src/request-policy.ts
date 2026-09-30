@@ -94,7 +94,7 @@ export function resolveRequestPolicy(
   type: RequestInput['type'],
   options: RequestOptions = {},
 ): RequestPolicy {
-  const base = (type === undefined ? undefined : REQUEST_POLICIES[type]) ?? DEFAULT_REQUEST_POLICY;
+  const base = REQUEST_POLICIES[type] ?? DEFAULT_REQUEST_POLICY;
   const timeoutMs = options.timeoutMs ?? base.timeoutMs;
   return {
     idempotent: base.idempotent,

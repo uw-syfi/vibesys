@@ -26,8 +26,8 @@ describe('resolveRequestPolicy', () => {
     expect(policy).toEqual({idempotent: false, dedicatedConnection: true, timeoutMs: 5});
   });
 
-  it('treats an absent type as the read default', () => {
-    expect(resolveRequestPolicy(undefined)).toEqual(DEFAULT_REQUEST_POLICY);
+  it('treats a type absent from the table as the read default', () => {
+    expect(resolveRequestPolicy('query.design')).toEqual(DEFAULT_REQUEST_POLICY);
   });
 
   it('exposes the table as data a double-submit guard can read', () => {
