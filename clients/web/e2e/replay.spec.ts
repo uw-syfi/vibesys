@@ -16,7 +16,11 @@ test('surfaces a replay load failure and retries it', async ({page}) => {
   });
 
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('Replay fixture request failed with 503');
+  // By test id, not by role: three banners share the alert role and the same
+  // class, so the role alone cannot say which failure is on screen.
+  await expect(page.getByTestId('replay-banner')).toContainText(
+    'Replay fixture request failed with 503',
+  );
 
   failRequest = false;
   await page.getByRole('button', {name: 'Retry'}).click();

@@ -1,4 +1,4 @@
-import type {ServerMessage, ServerTransport} from '@vibesys/backend-client';
+import type {ControlChannelState, ControlTransport, ServerMessage} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
 import {
   PersistentEventStream,
@@ -18,13 +18,38 @@ export interface BrowserLifecycle {
 }
 
 export interface WebSessionState {
+  /** The event stream: whether the transcript on screen is still growing. */
   readonly status: WebSessionStatus;
   readonly error: Error | null;
+  /**
+   * Whether a control command issued now can be delivered, as the transport's
+   * control channel reports it. `disconnected` means pause, resume, steer, and
+   * chat cannot reach the backend, which is a different fact from a stale
+   * transcript: the stream and the command path fail independently, and only
+   * this one says the controls are inert. Optimistically `connected` until the
+   * channel reports otherwise, so a page that has issued no request yet does
+   * not claim an outage it has not observed, and it stays `connected` once the
+   * run has ended, because a finished run has no commands left to deliver.
+   */
+  readonly controls: ControlChannelState;
+}
+
+/** What the session wires into the transport it drives. */
+export interface WebSessionTransportHooks {
+  /** Where the transport reports control-channel connectivity. */
+  readonly onConnectionState: (state: ControlChannelState) => void;
 }
 
 export interface WebSessionOptions {
   readonly lifecycle?: BrowserLifecycle;
-  readonly transport?: ServerTransport;
+  /**
+   * Build the transport this session drives, wired to the session's observers.
+   * Defaults to a `WebSocketTransport` on the page's gateway URL. A factory
+   * rather than an instance because the session, not the caller, owns what the
+   * transport reports to: an already-constructed transport could not be told
+   * where to report a dead control channel after the fact.
+   */
+  readonly transport?: (hooks: WebSessionTransportHooks) => ControlTransport;
   readonly reconnectDelaysMs?: readonly number[];
   readonly tail?: number;
 }
@@ -36,14 +61,15 @@ export interface WebSessionOptions {
  */
 export class WebSession {
   readonly store: CoreStateStore;
-  readonly #transport: ServerTransport;
+  readonly #transport: ControlTransport;
   readonly #stream: PersistentEventStream;
   readonly #lifecycle: BrowserLifecycle;
   readonly #listeners = new Set<() => void>();
 
   #status: WebSessionStatus = 'connecting';
   #error: Error | null = null;
-  #state: WebSessionState = {status: 'connecting', error: null};
+  #controls: ControlChannelState = {status: 'connected'};
+  #state: WebSessionState = {status: 'connecting', error: null, controls: {status: 'connected'}};
   #storeId = '';
   #started = false;
   #closed = false;
@@ -51,8 +77,13 @@ export class WebSession {
 
   constructor(options: WebSessionOptions = {}) {
     this.store = createCoreStateStore();
+    const hooks: WebSessionTransportHooks = {
+      onConnectionState: state => this.#onControlState(state),
+    };
     this.#transport =
-      options.transport ?? new WebSocketTransport(webSocketUrlFromLocation(window.location));
+      options.transport === undefined
+        ? this.#browserTransport(hooks, options.reconnectDelaysMs)
+        : options.transport(hooks);
     const streamOptions: PersistentEventStreamOptions = {};
     if (options.tail !== undefined) streamOptions.tail = options.tail;
     if (options.reconnectDelaysMs !== undefined) {
@@ -114,6 +145,25 @@ export class WebSession {
     void this.#wake();
   }
 
+  /**
+   * Redial the control channel now. This is what the controls-unavailable
+   * affordance calls, and it is deliberately not `reattach()`: a channel that
+   * reported a drop has a redial already armed, so issuing another request only
+   * queues behind that backoff and a click would change nothing observable for
+   * as long as the schedule says. `ControlTransport.reconnect` cancels the armed
+   * redial and dials, which is the only thing a user asking to reconnect can
+   * mean. It touches the event stream not at all: a dead command path with a
+   * live transcript is exactly the case this exists for.
+   *
+   * Unlike `reattach()` it is offered on an ended run too, because a redial is
+   * real work there: the snapshot and chat queries still answer, and it is the
+   * command path, not the run, that the user is asking about.
+   */
+  reconnectControls(): void {
+    if (this.#closed) return;
+    this.#transport.reconnect();
+  }
+
   #loadSnapshot = async (): Promise<void> => {
     const response = await this.#transport.request({type: 'query.snapshot'});
     if (response.ok !== true || response.snapshot === null || response.snapshot === undefined) {
@@ -135,6 +185,42 @@ export class WebSession {
     if (state.status === 'connected') this.#setState('connected', null);
     else if (!hasRunEnded(this.store.getState())) this.#setState('stale', state.error);
   };
+
+  /**
+   * The control channel changed state. Kept separate from the stream's status:
+   * a dead command path with a live transcript, and a stale transcript with
+   * deliverable commands, are both real and a frontend acts on them
+   * differently.
+   *
+   * An outage on a run that has already ended is not reported, for the same
+   * reason `#onConnectionState` and `#offline` do not report one: there is
+   * nothing left to deliver, the gateway going away is the expected end of the
+   * run rather than a fault, and an affordance shown then would be asking the
+   * user to fix a problem they do not have. A recovery is still reported, so a
+   * banner raised while the run was live clears.
+   */
+  #onControlState(state: ControlChannelState): void {
+    if (this.#closed) return;
+    if (state.status === 'disconnected' && hasRunEnded(this.store.getState())) return;
+    if (this.#controls.status === state.status) return;
+    this.#controls = state;
+    this.#publish();
+  }
+
+  /**
+   * The browser transport, wired to report control-channel connectivity here
+   * and to redial on the session's own reconnect cadence, so the command path
+   * and the event stream back off on one schedule.
+   */
+  #browserTransport(
+    hooks: WebSessionTransportHooks,
+    reconnectDelaysMs: readonly number[] | undefined,
+  ): ControlTransport {
+    return new WebSocketTransport(webSocketUrlFromLocation(window.location), {
+      onConnectionState: hooks.onConnectionState,
+      ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
+    });
+  }
 
   #wake = (): void => {
     if (this.#closed || this.#lifecycle.visibilityState === 'hidden' || !this.#lifecycle.online) {
@@ -166,7 +252,16 @@ export class WebSession {
     if (this.#status === status && this.#error === error) return;
     this.#status = status;
     this.#error = error;
-    this.#state = {status, error};
+    this.#publish();
+  }
+
+  /**
+   * Republish the whole state as one immutable value, so a
+   * `useSyncExternalStore` consumer compares one reference rather than tracking
+   * fields.
+   */
+  #publish(): void {
+    this.#state = {status: this.#status, error: this.#error, controls: this.#controls};
     for (const listener of this.#listeners) listener();
   }
 }

@@ -1,9 +1,14 @@
+import {hasRunEnded} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
 
-const EMPTY_SESSION_STATE = {status: 'connected' as const, error: null};
+const EMPTY_SESSION_STATE = {
+  status: 'connected' as const,
+  error: null,
+  controls: {status: 'connected' as const},
+};
 const EMPTY_SESSION_SUBSCRIBE = (): (() => void) => () => undefined;
 
 export function App({
@@ -44,18 +49,42 @@ export function App({
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
       {sessionState.status === 'stale' && (
-        <div className="stale-banner" role="alert">
+        <div className="stale-banner" role="alert" data-testid="stream-banner">
           <span>
             Live connection is stale
             {sessionState.error === null ? '' : `: ${sessionState.error.message}`}
           </span>
-          <button type="button" onClick={() => session?.reattach()}>
-            Reattach
+          {/*
+            The message stands on an ended run, because a stale stream means the
+            transcript on screen may be missing that run's tail. The button does
+            not: `reattach()` declines to resubscribe a run that cannot produce
+            another event, so offering it would be offering a no-op.
+          */}
+          {!hasRunEnded(state) && (
+            <button type="button" onClick={() => session?.reattach()}>
+              Reattach
+            </button>
+          )}
+        </div>
+      )}
+      {sessionState.controls.status === 'disconnected' && (
+        <div className="stale-banner" role="alert" data-testid="controls-banner">
+          <span>
+            Controls cannot reach the run: {sessionState.controls.error.message}. Pause, resume,
+            steer, and chat will not be delivered.
+          </span>
+          {/*
+            Offered whatever the run's status, because it always does something:
+            a reported outage has a redial armed on a backoff schedule, and this
+            cancels it and dials now. See `WebSession.reconnectControls`.
+          */}
+          <button type="button" onClick={() => session?.reconnectControls()}>
+            Reconnect now
           </button>
         </div>
       )}
       {replayError !== null && (
-        <div className="stale-banner" role="alert">
+        <div className="stale-banner" role="alert" data-testid="replay-banner">
           <span>Replay failed to load: {replayError.message}</span>
           <button type="button" onClick={() => setReplayAttempt(attempt => attempt + 1)}>
             Retry

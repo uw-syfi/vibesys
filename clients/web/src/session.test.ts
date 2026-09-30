@@ -1,13 +1,19 @@
 import {describe, expect, test} from 'bun:test';
 import type {
+  ControlChannelState,
+  ControlTransport,
   ProtocolResponse,
   RequestInput,
   RunEvent,
   ServerMessage,
-  ServerTransport,
   SubscribeOptions,
 } from '@vibesys/backend-client';
-import {type BrowserLifecycle, WebSession, webSocketUrlFromLocation} from './session.js';
+import {
+  type BrowserLifecycle,
+  WebSession,
+  type WebSessionTransportHooks,
+  webSocketUrlFromLocation,
+} from './session.js';
 
 type LifecycleEvent = 'visibilitychange' | 'online' | 'offline';
 
@@ -63,11 +69,44 @@ interface SubscriptionRecord {
   closed: boolean;
 }
 
-class FakeTransport implements ServerTransport {
+/**
+ * An in-memory transport whose event stream and control channel fail
+ * independently, the way the real one does: a gateway restart can leave the
+ * transcript streaming while commands are undeliverable, and vice versa.
+ */
+class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error> = [];
   closeCalls = 0;
+  reconnectCalls = 0;
+  readonly #hooks: WebSessionTransportHooks;
+  #controls: ControlChannelState = {status: 'connected'};
+
+  constructor(hooks: WebSessionTransportHooks) {
+    this.#hooks = hooks;
+  }
+
+  /** The control channel lost its connection and reported the outage. */
+  dropControlChannel(error: Error): void {
+    this.#controls = {status: 'disconnected', error};
+    this.#hooks.onConnectionState(this.#controls);
+  }
+
+  /** A redial brought the control channel back. */
+  recoverControlChannel(): void {
+    this.#controls = {status: 'connected'};
+    this.#hooks.onConnectionState(this.#controls);
+  }
+
+  /**
+   * Counted rather than acted on: the real one cancels an armed redial and
+   * dials, and `websocket.test.ts` owns that. What this file checks is that the
+   * session's affordance reaches the verb at all, and reaches nothing else.
+   */
+  reconnect(): void {
+    this.reconnectCalls += 1;
+  }
 
   async request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
@@ -181,15 +220,10 @@ describe('WebSession', () => {
 
   test('wakes a stale session after the browser returns online', async () => {
     const lifecycle = new FakeLifecycle();
-    const transport = new FakeTransport();
-    const session = new WebSession({
-      lifecycle,
-      transport,
-      reconnectDelaysMs: [0],
-    });
+    const {session, transport} = sessionWith(lifecycle);
 
     await session.start();
-    expect(session.getState()).toEqual({status: 'connected', error: null});
+    expect(session.getState()).toEqual(healthy());
     expect(session.store.getState().sequence).toBe(1);
     expect(transport.subscriptions[0]).toMatchObject({afterSequence: 0});
 
@@ -208,7 +242,7 @@ describe('WebSession', () => {
       afterSequence: 1,
       options: {storeId: 'store-1'},
     });
-    expect(session.getState()).toEqual({status: 'connected', error: null});
+    expect(session.getState()).toEqual(healthy());
     expect(session.store.getState().sequence).toBe(2);
 
     await session.close();
@@ -220,13 +254,8 @@ describe('WebSession', () => {
 
   test('keeps a failed snapshot stale until an explicit wake succeeds', async () => {
     const lifecycle = new FakeLifecycle();
-    const transport = new FakeTransport();
+    const {session, transport} = sessionWith(lifecycle);
     transport.snapshots.push(new Error('snapshot unavailable'));
-    const session = new WebSession({
-      lifecycle,
-      transport,
-      reconnectDelaysMs: [0],
-    });
 
     await session.start();
     expect(session.getState().status).toBe('stale');
@@ -235,21 +264,152 @@ describe('WebSession', () => {
     session.reattach();
     await settle();
     expect(transport.subscriptions).toHaveLength(2);
-    expect(session.getState()).toEqual({status: 'connected', error: null});
+    expect(session.getState()).toEqual(healthy());
     expect(transport.requests).toHaveLength(2);
 
     await session.close();
   });
+
+  test('reports a dead control channel as its own state, not as a stale stream', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+    expect(session.getState()).toEqual(healthy());
+    const published: string[] = [];
+    session.subscribe(() => published.push(session.getState().controls.status));
+
+    transport.dropControlChannel(new Error('gateway restarted'));
+
+    const dead = session.getState();
+    // The transcript is still streaming; only the command path is down, and the
+    // two are reported as the separate facts they are.
+    expect(dead.status).toBe('connected');
+    expect(dead.error).toBeNull();
+    expect(dead.controls).toEqual({
+      status: 'disconnected',
+      error: new Error('gateway restarted'),
+    });
+    expect(published).toEqual(['disconnected']);
+
+    transport.recoverControlChannel();
+    expect(session.getState()).toEqual(healthy());
+    expect(published).toEqual(['disconnected', 'connected']);
+
+    await session.close();
+  });
+
+  test('redials the control channel without touching the event stream', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+
+    await session.start();
+    transport.dropControlChannel(new Error('gateway restarted'));
+    expect(session.getState().controls.status).toBe('disconnected');
+    const requests = transport.requests.length;
+
+    session.reconnectControls();
+
+    // The affordance reaches the transport's redial verb. Issuing a request
+    // instead would only queue behind the backoff the outage already armed, so
+    // a click could change nothing observable for the length of the schedule.
+    expect(transport.reconnectCalls).toBe(1);
+    // And it is the command path only: a live transcript is not resubscribed.
+    await settle();
+    expect(transport.subscriptions).toHaveLength(1);
+    expect(transport.requests).toHaveLength(requests);
+
+    await session.close();
+    session.reconnectControls();
+    expect(transport.reconnectCalls).toBe(1);
+  });
+
+  test('does not raise the controls state for a run that has already ended', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.snapshots.push(snapshotResponse('completed'));
+
+    await session.start();
+    expect(session.store.getState().status).toBe('completed');
+
+    // Nothing is left to deliver and the gateway going away is how a finished
+    // run ends, so an outage then is not news and must not put an affordance on
+    // screen for a problem the user does not have.
+    transport.dropControlChannel(new Error('gateway exited'));
+    expect(session.getState().controls).toEqual({status: 'connected'});
+
+    await session.close();
+  });
+
+  test('clears a controls banner raised before the run ended', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+
+    await session.start();
+    transport.dropControlChannel(new Error('gateway restarted'));
+    // Newer than the batch `start()` already folded, so the fold takes it.
+    transport.snapshots.push(snapshotResponse('completed', 5));
+    session.reattach();
+    await settle();
+    expect(session.store.getState().status).toBe('completed');
+    expect(session.getState().controls.status).toBe('disconnected');
+
+    // A recovery is reported whatever the run's status: the suppression above is
+    // about not raising a banner, not about refusing to take one down.
+    transport.recoverControlChannel();
+    expect(session.getState().controls).toEqual({status: 'connected'});
+
+    await session.close();
+  });
+
+  test('ignores a control-channel report after the session is closed', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+
+    await session.start();
+    await session.close();
+    transport.dropControlChannel(new Error('too late'));
+
+    expect(session.getState()).toEqual(healthy());
+  });
 });
 
-function snapshotResponse(): ProtocolResponse {
+/** The state of a session whose stream and control channel are both healthy. */
+function healthy(): ReturnType<WebSession['getState']> {
+  return {status: 'connected', error: null, controls: {status: 'connected'}};
+}
+
+/**
+ * A session over an in-memory transport, built the way the session builds the
+ * real one: the factory receives the session's observers, so the control
+ * channel has somewhere to report.
+ */
+function sessionWith(lifecycle: FakeLifecycle): {
+  readonly session: WebSession;
+  readonly transport: FakeTransport;
+} {
+  const built: FakeTransport[] = [];
+  const session = new WebSession({
+    lifecycle,
+    transport: hooks => {
+      const transport = new FakeTransport(hooks);
+      built.push(transport);
+      return transport;
+    },
+    reconnectDelaysMs: [0],
+  });
+  const transport = built[0];
+  if (transport === undefined) throw new Error('WebSession did not build its transport');
+  return {session, transport};
+}
+
+function snapshotResponse(status = 'running', sequence = 0): ProtocolResponse {
   return {
     ok: true,
     request_id: 'request-1',
     snapshot: {
       run_id: 'run-1',
-      sequence: 0,
-      status: 'running',
+      sequence,
+      status,
     },
   } as ProtocolResponse;
 }
