@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import os
 import posixpath
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
     from websockets.http11 import Response as HttpResponse
 
     from server.api.service import RunApi, SubscriptionBootstrap
+
+_LOG = logging.getLogger(__name__)
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
@@ -553,12 +556,14 @@ class WebSocketGateway:
 
         The transport is aborted rather than closed because a close frame is
         itself a write: it would re-enter the same stalled ``drain()``. This is
-        the library's own escape hatch for the same problem: ``Connection``'s
-        ``send_context`` aborts the transport on its ``raise_close_exc`` path
-        once the close deadline elapses
-        (``websockets.asyncio.connection``, 14.2 line 931). The four aborts in
-        ``Server.conn_handler`` are not this case; they are handshake-failure,
-        rejected-handshake, and unexpected-error paths.
+        the library's own escape hatch for the same problem. ``Connection``'s
+        ``send_context`` ends in one ``transport.abort()``
+        (``websockets.asyncio.connection``, 14.2 line 931) shared by four
+        ``raise_close_exc`` assignments, of which the close-deadline one at
+        line 925 is the analogue here: a peer that will not complete the
+        closing handshake is abandoned rather than waited on. The four aborts
+        in ``Server.conn_handler`` are not this case; they are
+        handshake-failure, rejected-handshake, and unexpected-error paths.
         """
         try:
             async with asyncio.timeout(self.limits.write_deadline_seconds):
@@ -583,11 +588,18 @@ class WebSocketGateway:
                 if await self._handle_request(websocket, raw):
                     return
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101016 [BLE001]; a disconnected browser is normal at the transport boundary
-            # The websocket library owns close frames. A peer disappearing
-            # while the API is writing is therefore a normal stream teardown.
+            # The websocket library owns close frames, so a peer disappearing
+            # while the API is writing is a normal stream teardown and stays at
+            # debug. The write deadline re-raised by ``_handle_request`` is
+            # not: it means this gateway abandoned a peer that stopped
+            # draining, and unrecorded it is indistinguishable from a browser
+            # tab closing.
+            if isinstance(error, TimeoutError):
+                _LOG.warning("abandoned a websocket peer at the write deadline: %r", error)
+            else:
+                _LOG.debug("websocket stream ended: %r", error)
             with suppress(Exception):
                 await websocket.close()
-            del error
 
     async def _handle_request(self, websocket: ServerConnection, raw: str) -> bool:
         request_id, client_id = _request_metadata(raw)

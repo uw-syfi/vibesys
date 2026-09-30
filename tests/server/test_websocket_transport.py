@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import secrets
 import socket
 import struct
@@ -1018,7 +1019,7 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
 
 
 def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
-    tmp_path: Path,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The send-side overflow policy, without depending on any socket's buffers.
 
@@ -1031,6 +1032,11 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
     request failure, so it must not be funnelled into the control-path
     ``Response`` handler and written a second time to the socket that was just
     aborted.
+
+    The warning is the other half. ``_handle_connection``'s handler absorbs
+    both a browser closing its tab and a peer this gateway gave up on, and
+    those must not be indistinguishable to an operator, so only the second is
+    reported above debug.
     """
     parts = build_server_parts(tmp_path / "logs")
     tracker = SubscriptionTracker()
@@ -1064,18 +1070,30 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
             raise TimeoutError
 
         async def close(self) -> None:
-            """Absorb the library-owned close in ``_handle_connection``'s teardown."""
+            """Absorb the library-owned close in ``_handle_connection``'s teardown.
+
+            A real ``Connection.close()`` on an aborted transport does abort a
+            second time: ``send_context`` sees a state other than ``OPEN``,
+            takes its ``raise_close_exc`` path, and reaches
+            ``transport.abort()`` again. That extra abort is idempotent and
+            invisible to the caller, so the Fake omits it, which is why
+            ``aborts == 1`` below counts only ``_send``'s own abort.
+            """
 
     connection = StalledConnection([SubscribeRequest(client_id="stalled").model_dump_json()])
 
-    asyncio.run(
-        gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101109 [SLF001]; drive the write deadline without a socket whose buffers the test cannot bound
-            cast("ServerConnection", connection)
+    with caplog.at_level(logging.DEBUG, logger="server.transport.websocket"):
+        asyncio.run(
+            gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101109 [SLF001]; drive the write deadline without a socket whose buffers the test cannot bound
+                cast("ServerConnection", connection)
+            )
         )
-    )
 
     assert connection.transport.aborts == 1
     assert _reaped(lambda: tracker.wait_for_none_active(settle_seconds=0.0))
+    reported = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(reported) == 1
+    assert "TimeoutError" in reported[0].getMessage()
     parts.close()
 
 
