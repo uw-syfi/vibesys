@@ -858,7 +858,8 @@ describe('WebSocketTransport', () => {
     // Only the kept request rides the recovery. A held entry removed from the
     // queue must not be written to the fresh connection, or the caller gets a
     // command they explicitly abandoned.
-    expect(gateway.socket(1).frames().map(frame => frame['type'])).toEqual(['query.tui_defaults']);
+    const resent = gateway.socket(1).frames();
+    expect(resent.map(frame => frame['type'])).toEqual(['query.tui_defaults']);
     gateway.socket(1).answerAll();
     await expect(kept).resolves.toMatchObject({ok: true});
     await transport.close();
