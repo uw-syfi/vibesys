@@ -219,8 +219,28 @@ _NARROWED_READ_ONLY_STATE_PATHS: dict[str, dict[str, tuple[str, ...]]] = {
     CODEX_PROVIDER: {".codex": ("config.toml", "agents", "rules")},
 }
 
+# Codex initialization and resumed thread history require these databases;
+# denying one leaves thread history unsupported on resume. Keep SQLite sidecars
+# scoped to these current databases, without exposing other files or worktrees.
+_CODEX_SQLITE_STATE_FILES = tuple(
+    f"{database}{suffix}"
+    for database in (
+        "state_5.sqlite",
+        "logs_2.sqlite",
+        "goals_1.sqlite",
+        "memories_1.sqlite",
+        "memories_v2_1.sqlite",
+        "queue_1.sqlite",
+        "thread_history_1.sqlite",
+    )
+    # SQLite creates a rollback journal while initializing/converting to WAL.
+    for suffix in ("", "-wal", "-shm", "-journal")
+)
+
 _NARROWED_WRITABLE_STATE_PATHS: dict[str, dict[str, tuple[str, ...]]] = {
-    CODEX_PROVIDER: {".codex": ("sessions", "installation_id", "thread-writer-locks")},
+    CODEX_PROVIDER: {
+        ".codex": ("sessions", "installation_id", "thread-writer-locks", *_CODEX_SQLITE_STATE_FILES)
+    },
 }
 
 

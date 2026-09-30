@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,12 +11,23 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support import provider_profiles as fake_profiles
+from tests.support import run_test_command
 
 from vs_agent import host_resource_declarations
 from vs_agent.api import declare_provider_state_resources
-from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_sandbox.api import HostResource, HostResourceAccess, build_host_sandbox
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
+
+_CODEX_DATABASES = (
+    "state_5.sqlite",
+    "logs_2.sqlite",
+    "goals_1.sqlite",
+    "memories_1.sqlite",
+    "memories_v2_1.sqlite",
+    "queue_1.sqlite",
+    "thread_history_1.sqlite",
+)
 
 # Stand-in profiles for the tests whose subject is VibeSys's declaration table
 # rather than any CLI's declared state layout. agentshim registers real
@@ -295,8 +309,85 @@ def test_codex_startup_resources_follow_any_relocated_state_root(name: str) -> N
         by_path[root / leaf] is HostResourceAccess.READ_WRITE
         for leaf in ("installation_id", "sessions", "thread-writer-locks")
     )
+    assert all(
+        by_path[root / f"{database}{suffix}"] is HostResourceAccess.READ_WRITE
+        for database in _CODEX_DATABASES
+        for suffix in ("", "-wal", "-shm", "-journal")
+    )
     assert root not in by_path
     assert root / "worktrees" not in by_path
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS Seatbelt")
+@pytest.mark.parametrize("existing_rollback_database", [False, True])
+def test_codex_sqlite_history_persists_without_exposing_other_provider_state(
+    tmp_path: Path, *, existing_rollback_database: bool
+) -> None:
+    workspace = tmp_path / "Documents" / "project"
+    workspace.mkdir(parents=True)
+    state = tmp_path / ".codex"
+    state.mkdir()
+    for leaf in ("config.toml", "auth.json"):
+        (state / leaf).write_text("immutable fixture")
+    secret = state / "worktrees" / "other-project" / "secret"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("private")
+    if existing_rollback_database:
+        with sqlite3.connect(state / "state_5.sqlite") as connection:
+            connection.execute("CREATE TABLE seed (value TEXT)")
+    sandbox = build_host_sandbox(
+        workspace,
+        env={},
+        resources=_fake_codex_state(tmp_path),
+        require_enforcement=True,
+    )
+    assert sandbox is not None
+    script = """
+import json
+import sqlite3
+import sys
+from pathlib import Path
+state = Path(sys.argv[1])
+for name in json.loads(sys.argv[2]):
+    database = state / name
+    with sqlite3.connect(database) as connection:
+        assert connection.execute('PRAGMA journal_mode=WAL').fetchone() == ('wal',)
+        connection.execute('CREATE TABLE history (message TEXT)')
+        connection.execute("INSERT INTO history VALUES ('remembered')")
+        connection.commit()
+        assert Path(str(database) + '-wal').exists()
+        assert Path(str(database) + '-shm').exists()
+    with sqlite3.connect(database) as resumed:
+        assert resumed.execute('SELECT message FROM history').fetchone() == ('remembered',)
+for path in (state / 'auth.json', state / 'config.toml', state / 'state_5.sqlite-other'):
+    try:
+        path.write_text('changed')
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError(f'undeclared write permitted: {path}')
+try:
+    Path(sys.argv[3]).read_text()
+except PermissionError:
+    pass
+else:
+    raise AssertionError('sibling worktree was readable')
+"""
+
+    result = run_test_command(
+        sandbox.wrap(
+            [sys.executable, "-c", script, str(state), json.dumps(_CODEX_DATABASES), str(secret)]
+        ),
+        cwd=workspace,
+        env=dict(sandbox.env),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (state / "auth.json").read_text() == "immutable fixture"
+    assert (state / "config.toml").read_text() == "immutable fixture"
 
 
 @pytest.mark.usefixtures("_fake_profiles_installed")
@@ -369,6 +460,10 @@ class TestShippedProfileState:
             "installation_id",
             "sessions",
             "thread-writer-locks",
+        } | {
+            f"{database}{suffix}"
+            for database in _CODEX_DATABASES
+            for suffix in ("", "-wal", "-shm", "-journal")
         }
         by_name = {
             resource.path.name: resource.access
