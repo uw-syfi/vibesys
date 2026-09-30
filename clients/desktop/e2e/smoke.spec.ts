@@ -140,7 +140,10 @@ test('a home server crash is detected and reported', async () => {
   const reported = launched.waitForOutput(/the home server stopped unexpectedly/);
   process.kill(pid, 'SIGKILL');
   await reported;
-  // Wait for Electron to exit before removing the profile it still writes to.
-  await launched.app.close();
+  // The native crash dialog blocks graceful quit; wait for process close before removing its profile.
+  const electron = launched.app.process();
+  const closed = new Promise<void>(resolve => electron.once('close', () => resolve()));
+  electron.kill('SIGKILL');
+  await closed;
   await rm(launched.stateHome, {recursive: true, force: true});
 });
