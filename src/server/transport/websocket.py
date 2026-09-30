@@ -40,16 +40,24 @@ if TYPE_CHECKING:
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
-_ALLOWED_ORIGIN_TEMPLATE = "http://127.0.0.1:{port}"
+_LOOPBACK_HOST = "127.0.0.1"
+_ALLOWED_ORIGIN_TEMPLATE = f"http://{_LOOPBACK_HOST}:{{port}}"
 _WEB_SOCKET_PATH = "/ws"
 _ASSET_PREFIX = "/assets/"
+# The one subdirectory of the bundle the `/assets/` URL space names, spelled
+# once so the prefix test and the filesystem guard cannot disagree.
+_ASSET_DIRECTORY = _ASSET_PREFIX.strip("/")
 
 # The gateway renders model- and tool-produced transcript text, so the served
 # page is denied every fetch destination by default and then granted exactly
 # what the built bundle uses: its own script and stylesheet, and the WebSocket
 # of the origin it was loaded from. This mapping is the one representation of
-# the policy; the served header is `_content_security_policy` of it, and no
-# other copy in this repository is authoritative.
+# the policy that the gateway serves; `_content_security_policy` is its only
+# serializer. Two tests restate it as independent cross-checks
+# (`_expected_policy` in `tests/server/test_websocket_transport.py` and
+# `expectedPolicy` in `clients/web/e2e/gateway-hygiene.spec.ts`); neither
+# imports this module, so neither is tautological, and both fail when they
+# disagree with it.
 _POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "default-src": ("'none'",),
@@ -62,9 +70,9 @@ _POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(
         # polyfill, which `fetch`es every `link[rel=modulepreload]` href, and a
         # `fetch` of a script URL is governed by `connect-src`, not
         # `script-src`. Inert while the build emits a single chunk, live the
-        # moment it code-splits. `_socket_origins` appends the exact WebSocket
-        # authorities, because `'self'` alone is not resolved against `ws:` by
-        # every browser engine.
+        # moment it code-splits. `_socket_origins` appends the gateway's own
+        # WebSocket authority, because `'self'` alone is not resolved against
+        # `ws:` by every browser engine.
         "connect-src": ("'self'",),
         "base-uri": ("'none'",),
         "form-action": ("'none'",),
@@ -87,10 +95,6 @@ _STATIC_HEADERS = MappingProxyType(
         "X-Content-Type-Options": "nosniff",
     }
 )
-
-# A browser page may only open a WebSocket to its own authority, so a declared
-# browser origin maps to exactly one WebSocket origin.
-_WEB_SOCKET_SCHEMES = MappingProxyType({"http": "ws", "https": "wss"})
 
 
 class WebSocketGateway:
@@ -124,12 +128,6 @@ class WebSocketGateway:
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
         self.allowed_origins = frozenset(allowed_origins)
-        # Derive the declared origins' WebSocket authorities here, so a browser
-        # origin the policy cannot express fails at construction rather than on
-        # every response.
-        self._configured_socket_origins = frozenset(
-            _socket_origin(origin) for origin in self.allowed_origins
-        )
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._claim: WebInstanceClaim | None = None
         self._instance_record: WebInstanceRecord | None = None
@@ -146,14 +144,14 @@ class WebSocketGateway:
         """Return the capability-bearing page URL after startup."""
         if self._bound_port is None:
             raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101007 [TRY003]; property misuse is a programmer error during gateway lifecycle
-        return f"http://127.0.0.1:{self._bound_port}/?token={self.token}"
+        return f"http://{_LOOPBACK_HOST}:{self._bound_port}/?token={self.token}"
 
     @property
     def websocket_url(self) -> str:
         """Return the capability-bearing WebSocket endpoint after startup."""
         if self._bound_port is None:
             raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101008 [TRY003]; property misuse is a programmer error during gateway lifecycle
-        return f"ws://127.0.0.1:{self._bound_port}{_WEB_SOCKET_PATH}?token={self.token}"
+        return f"ws://{_LOOPBACK_HOST}:{self._bound_port}{_WEB_SOCKET_PATH}?token={self.token}"
 
     @property
     def bound_port(self) -> int:
@@ -234,7 +232,7 @@ class WebSocketGateway:
 
         async with serve(
             self._handle_connection,
-            "127.0.0.1",
+            _LOOPBACK_HOST,
             self.port,
             process_request=self._process_request,
             compression=None,
@@ -285,7 +283,12 @@ class WebSocketGateway:
         # exemption while resolving to a file outside it.
         path = _routing_path(parsed.path)
         serves_asset = path.startswith(_ASSET_PREFIX)
-        if not serves_asset and not secrets.compare_digest(token, self.token):
+        # Compared as bytes: `compare_digest` raises `TypeError` on a `str`
+        # holding a non-ASCII character, and `token` is whatever the query
+        # string carried, so `?token=%C3%A9` would otherwise leave the
+        # handshake through the library's error path with none of these
+        # headers. `encode` keeps the comparison constant-time.
+        if not serves_asset and not secrets.compare_digest(token.encode(), self.token.encode()):
             return self._response(
                 HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n", "text/plain"
             )
@@ -305,12 +308,14 @@ class WebSocketGateway:
             return self._asset_response("index.html")
         if not serves_asset:
             return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
-        return self._asset_response(path.removeprefix("/"))
+        return self._asset_response(path.removeprefix(_ASSET_PREFIX), subdirectory=_ASSET_DIRECTORY)
+
+    def _origin_port(self) -> int:
+        """Return the port an origin names, falling back before the bind."""
+        return self.port if self._bound_port is None else self._bound_port
 
     def _actual_origin(self) -> str:
-        if self._bound_port is None:
-            return _ALLOWED_ORIGIN_TEMPLATE.format(port=self.port)
-        return _ALLOWED_ORIGIN_TEMPLATE.format(port=self._bound_port)
+        return _ALLOWED_ORIGIN_TEMPLATE.format(port=self._origin_port())
 
     def _allowed_origins(self) -> frozenset[str]:
         return frozenset({self._actual_origin(), *self.allowed_origins})
@@ -318,13 +323,27 @@ class WebSocketGateway:
     def _socket_origins(self) -> tuple[str, ...]:
         """Return the WebSocket origins a page from this gateway may open.
 
-        A page can only reach the gateway at the authority it was loaded from,
-        and the origins it may be loaded from are exactly the ones the handshake
-        accepts, so the union over `_allowed_origins` is the tightest value one
-        shared header can carry. Sorted, so the header is deterministic.
+        A page this gateway served can only legitimately reach the gateway's
+        own authority, so the port is always this instance's and never a
+        declared origin's. A declared origin contributes its *hostname* only:
+        CSP host matching is textual and performs no name resolution, so a page
+        loaded through `http://localhost:<port>` needs `ws://localhost:<port>`
+        named even though it resolves to the same socket. `ws:` only: the
+        gateway speaks plain HTTP, so no page it serves is an `https:` origin.
+        Sorted, so the header is deterministic.
         """
-        own = _socket_origin(self._actual_origin())
-        return tuple(sorted({own, *self._configured_socket_origins}))
+        port = self._origin_port()
+        hosts = {_LOOPBACK_HOST}
+        for origin in self.allowed_origins:
+            host = urlsplit(origin).hostname
+            # `hostname` is `None` for an origin with no authority, which names
+            # no reachable host and so contributes nothing, and it strips an
+            # IPv6 literal's brackets, which a CSP host source needs back. Both
+            # would otherwise put a source expression in the header that no
+            # browser can parse.
+            if host is not None:
+                hosts.add(f"[{host}]" if ":" in host else host)
+        return tuple(sorted(f"ws://{host}:{port}" for host in hosts))
 
     def _content_security_policy(self) -> str:
         """Serialize `_POLICY_DIRECTIVES` with this instance's socket origins."""
@@ -359,18 +378,30 @@ class WebSocketGateway:
             body,
         )
 
-    def _asset_response(self, relative: str) -> HttpResponse:
+    def _asset_response(self, relative: str, *, subdirectory: str = "") -> HttpResponse:
+        """Serve `relative` from `assets_dir/subdirectory`, guarded to that root.
+
+        The guard is rooted at the subtree the URL names, not at `assets_dir`,
+        because `/assets/*` is the only token-free URL space: rooting it higher
+        would serve a symlink inside the bundle's `assets/` directory that
+        points elsewhere under the dist root without a capability token. The
+        default root is `assets_dir` itself, for the token-required index.
+        """
         if self.assets_dir is None:
             return self._response(
                 HTTPStatus.NOT_FOUND, "Web assets are not installed\n", "text/plain"
             )
         try:
-            candidate = (self.assets_dir / relative).resolve()
-            candidate.relative_to(self.assets_dir)
+            # The root is resolved too, so a deliberately symlinked `assets/`
+            # directory still serves while a symlink *inside* it that leaves
+            # it does not.
+            root = (self.assets_dir / subdirectory).resolve()
+            candidate = (root / relative).resolve()
+            candidate.relative_to(root)
         except (OSError, ValueError):
             # `resolve` rejects a NUL byte and an unresolvable symlink chain;
-            # `relative_to` rejects a symlink inside the directory that escapes
-            # it. Both mean the target is not a bundle file.
+            # `relative_to` rejects a symlink inside the root that escapes it.
+            # Both mean the target is not a bundle file.
             return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         if not candidate.is_file():
             return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
@@ -540,15 +571,6 @@ def _routing_path(raw_path: str) -> str:
     the asset lookup, for the same target.
     """
     return posixpath.normpath("/" + unquote(raw_path).lstrip("/"))
-
-
-def _socket_origin(origin: str) -> str:
-    """Return the WebSocket origin a page served from `origin` may open."""
-    parsed = urlsplit(origin)
-    scheme = _WEB_SOCKET_SCHEMES.get(parsed.scheme)
-    if scheme is None or not parsed.netloc:
-        raise ValueError(f"Not a browser origin the gateway policy can express: {origin!r}")  # noqa: TRY003  # lint-waiver: LW-101108 [TRY003]; an origin the Content-Security-Policy cannot name is a wiring error, and a dedicated exception class would be a one-call-site type for a value the launcher already validates
-    return f"{scheme}://{parsed.netloc}"
 
 
 def _content_type(path: Path) -> str:

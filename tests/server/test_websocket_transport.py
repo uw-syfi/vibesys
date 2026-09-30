@@ -8,6 +8,7 @@ from http.client import HTTPConnection, HTTPMessage
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import pytest
@@ -95,6 +96,11 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
                 ("asset", "/assets/index.js"),
                 ("health", f"/health?token={gateway.token}"),
                 ("missing-token", "/"),
+                # A token the constant-time comparison cannot take as `str`.
+                # Rejected like any other wrong token, and through this
+                # response builder, not through the library's handshake error
+                # path, which carries none of these headers.
+                ("non-ascii-token", "/?token=%C3%A9"),
                 ("unknown-route", f"/nope?token={gateway.token}"),
             )
         }
@@ -105,6 +111,7 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
         "asset": 200,
         "health": 200,
         "missing-token": 403,
+        "non-ascii-token": 403,
         "unknown-route": 404,
     }
     for name, (_status, headers) in routes.items():
@@ -114,50 +121,97 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
         assert headers.get_all("Content-Security-Policy") == [expected_policy], name
 
 
-def test_gateway_derives_the_connect_source_from_its_allowed_origins(tmp_path: Path) -> None:
-    origins = ("http://127.0.0.1:5173", "https://localhost:5173")
+def test_gateway_socket_sources_name_its_own_port_and_every_declared_hostname(
+    tmp_path: Path,
+) -> None:
+    # A declared origin matters for its hostname spelling, because CSP host
+    # matching is textual, and never for its port: a page this gateway served
+    # can only legitimately reach this gateway. `file:` names no host at all,
+    # and an IPv6 literal has to keep the brackets `urlsplit` strips.
+    origins = (
+        "http://localhost:5173",
+        "https://other.localhost:4173",
+        "http://[::1]:5173",
+        "file:///tmp/page.html",
+    )
     with _asset_gateway(tmp_path, allowed_origins=origins) as gateway:
         _status, headers = _fetch(gateway.bound_port, f"/?token={gateway.token}")
-        expected_sockets = sorted(
-            {
-                f"ws://127.0.0.1:{gateway.bound_port}",
-                "ws://127.0.0.1:5173",
-                "wss://localhost:5173",
-            }
+        port = gateway.bound_port
+
+    policies = headers.get_all("Content-Security-Policy") or []
+    assert policies == [
+        _expected_policy(
+            f"ws://127.0.0.1:{port}",
+            f"ws://[::1]:{port}",
+            f"ws://localhost:{port}",
+            f"ws://other.localhost:{port}",
         )
-
-    # Every declared browser origin contributes its own WebSocket authority,
-    # `https:` as `wss:`, and nothing else. No wildcard port, no bare loopback.
-    assert headers.get_all("Content-Security-Policy") == [_expected_policy(*expected_sockets)]
-
-
-def test_gateway_policy_uses_the_requested_port_before_binding(tmp_path: Path) -> None:
-    gateway = _asset_gateway(tmp_path, allowed_origins=("https://localhost:5173",))
-    gateway.port = 4312
-
-    # Same pre-bind fallback `_actual_origin` uses, so the policy is well formed
-    # on a response served before the listening socket exists.
-    policy = gateway._content_security_policy()  # noqa: SLF001  # lint-waiver: LW-101107 [SLF001]; exercise the pre-bind policy without a listening socket
-
-    assert policy == _expected_policy("ws://127.0.0.1:4312", "wss://localhost:5173")
+    ]
+    # The property that matters, stated without restating the expected string:
+    # every socket source names this gateway's own port over `ws:`, so no
+    # declared origin's port can authorize a socket to another listener here.
+    sources = policies[0].partition("connect-src ")[2].partition(";")[0].split()
+    assert sources[0] == "'self'"
+    assert {(urlsplit(source).scheme, urlsplit(source).port) for source in sources[1:]} == {
+        ("ws", port)
+    }
 
 
-def test_gateway_rejects_a_browser_origin_the_policy_cannot_express(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path / "logs")
-
-    with pytest.raises(ValueError, match="Not a browser origin"):
-        WebSocketGateway(parts.api, allowed_origins=("file:///tmp/page.html",))
+_INDEX_BODY = b"<!doctype html><title>VibeSys</title>"
+_BUNDLE_BODY = b"export {};\n"
 
 
 def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> WebSocketGateway:
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
     (assets / "assets").mkdir(parents=True, exist_ok=True)
-    (assets / "index.html").write_text("<!doctype html><title>VibeSys</title>")
-    (assets / "assets" / "index.js").write_text("export {};\n")
+    (assets / "index.html").write_bytes(_INDEX_BODY)
+    (assets / "assets" / "index.js").write_bytes(_BUNDLE_BODY)
     # Lives at the assets root, so only a traversal out of `/assets/` reaches it.
     (assets / "operator-notes.txt").write_text("not part of the bundle\n")
     return WebSocketGateway(parts.api, assets_dir=assets, allowed_origins=allowed_origins)
+
+
+# Routing one normalized target makes trailing slashes and `.`/`..` segments
+# equivalent to their normalized form. Pinned because it is a deliberate
+# behavior change: at the merge base every entry below except `/health`, `/`,
+# `/index.html`, and `/ws` was a 404.
+_NORMALIZED_ROUTES = {
+    "/health": 200,
+    "/health/": 200,
+    "/health//": 200,
+    "/index.html": 200,
+    "/index.html/": 200,
+    "/./index.html": 200,
+    "/index.html/./": 200,
+    "/": 200,
+    "/..": 200,
+    "/../..": 200,
+    "/./": 200,
+    # `/ws` and its trailing-slash spellings now enter the WebSocket route,
+    # which rejects a plain GET whose `Origin` does not match. Accepted on
+    # purpose: the Origin and token checks still apply to every spelling, and
+    # normalizing the target exactly once is what makes the `/assets/`
+    # exemption mean what the decision record says it means.
+    "/ws": 403,
+    "/ws/": 403,
+    "/ws//": 403,
+}
+
+
+def test_gateway_routes_dot_segments_and_trailing_slashes_as_the_normalized_target(
+    tmp_path: Path,
+) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        statuses = {
+            path: _fetch(gateway.bound_port, f"{path}?token={gateway.token}")[0]
+            for path in _NORMALIZED_ROUTES
+        }
+        above_root = _fetch_body(gateway.bound_port, f"/..?token={gateway.token}")
+
+    assert statuses == _NORMALIZED_ROUTES
+    # A target above the root normalizes to the root rather than escaping it.
+    assert above_root == (200, _INDEX_BODY)
 
 
 _TRAVERSAL_PATHS = (
@@ -200,8 +254,57 @@ def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_pa
     }
 
 
-_BUNDLE_BODY = b"export {};\n"
-_TRAVERSAL_SEGMENTS = st.sampled_from(["..", "%2e%2e", "%2E%2E", ".", "%2e", "assets", "%61ssets"])
+def test_gateway_rejects_an_asset_target_the_filesystem_cannot_name(tmp_path: Path) -> None:
+    targets = ("/assets/%00", "/assets/%00/index.js", "/assets/in%00dex.js")
+    with _asset_gateway(tmp_path) as gateway:
+        statuses = {path: _fetch(gateway.bound_port, path)[0] for path in targets}
+
+    # `resolve` raises `ValueError` on an embedded NUL instead of returning a
+    # path, which left the handshake as an unauthenticated 500 before the
+    # lookup caught it. The property test below generates `%00` too; this pins
+    # it without depending on which examples Hypothesis draws.
+    assert statuses == dict.fromkeys(targets, 404)
+
+
+def test_gateway_does_not_serve_a_symlink_out_of_the_token_free_subtree(tmp_path: Path) -> None:
+    gateway = _asset_gateway(tmp_path)
+    assert gateway.assets_dir is not None
+    served = gateway.assets_dir / "assets" / "sub"
+    served.mkdir()
+    served.joinpath("notes").symlink_to(Path("../../operator-notes.txt"))
+
+    with gateway:
+        escaping = _fetch_body(gateway.bound_port, "/assets/sub/notes")
+        inside = _fetch_body(gateway.bound_port, "/assets/index.js")
+
+    # `/assets/*` is the only token-free URL space, so the filesystem guard has
+    # to be rooted at the subtree the URL names and not at the dist root above
+    # it: otherwise a link planted under `assets/` serves a non-bundle file
+    # with no capability token.
+    assert escaping == (404, b"Not found\n")
+    assert inside == (200, _BUNDLE_BODY)
+
+
+# Every encoding of a traversal the normalizer has to collapse or reject:
+# literal and single-encoded `..`, an encoded separator inside a segment, a
+# double-encoded `..` (which must survive as a literal segment name, because
+# decoding happens exactly once), and a NUL byte, which `resolve` rejects.
+_TRAVERSAL_SEGMENTS = st.sampled_from(
+    [
+        "..",
+        "%2e%2e",
+        "%2E%2E",
+        ".",
+        "%2e",
+        ".%2e",
+        "..%2f",
+        "%2e%2e%2f",
+        "%252e%252e",
+        "%00",
+        "assets",
+        "%61ssets",
+    ]
+)
 _TRAVERSAL_TARGETS = st.sampled_from(
     ["index.js", "index.html", "operator-notes.txt", "etc/passwd", "ws", "health", ""]
 )

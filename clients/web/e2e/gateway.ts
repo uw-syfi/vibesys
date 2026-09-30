@@ -25,6 +25,8 @@ interface GatewayStop {
 
 export interface LiveGateway {
   readonly url: string;
+  /** Detached gateway process, so a spec can assert it really went away. */
+  readonly pid: number;
   stop(): GatewayStop;
 }
 
@@ -47,8 +49,8 @@ export function startLiveGateway(): LiveGateway {
       env: {...process.env, BROWSER: 'true'},
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const record = JSON.parse(readFileSync(instancePath, 'utf8')) as {url: string};
-    return {url: record.url, stop};
+    const record = JSON.parse(readFileSync(instancePath, 'utf8')) as {url: string; pid: number};
+    return {url: record.url, pid: record.pid, stop};
   } catch (error) {
     // The start command can exit non-zero after the child has already written
     // its instance record, so stop before deleting the file that names the pid.

@@ -80,10 +80,13 @@ merges the headers into one dict literal, so no route can set or duplicate one:
 | `Content-Security-Policy` | derived | Transcripts render model- and tool-produced text. |
 
 `_POLICY_DIRECTIVES` in that module is the authoritative directive map, and
-`_content_security_policy` is its only serializer. Do not copy the header value
-here: the only other copy is `EXPECTED_POLICY` in
-`clients/web/e2e/gateway-hygiene.spec.ts`, which exists on purpose as the
-cross-language check and fails when the two disagree. The shape is
+`_content_security_policy` is its only serializer. Do not add another copy of
+the header value. Two exist on purpose, as independent cross-checks that fail
+when they disagree with the module: `_expected_policy` in
+`tests/server/test_websocket_transport.py` and the `expectedPolicy` function in
+`clients/web/e2e/gateway-hygiene.spec.ts`. Neither imports the gateway, so
+neither agrees by construction. The directive values named below are
+explanation and not a third copy, since nothing reads them. The shape is
 deny-everything (`default-src 'none'`) plus these grants:
 
 - `script-src 'self'` and `style-src 'self'`, no `'unsafe-inline'`. The Vite
@@ -94,7 +97,12 @@ deny-everything (`default-src 'none'`) plus these grants:
   The real constraints on a contributor are therefore: no CSS-in-JS runtime
   (emotion and styled-components inject `<style>`) and no React 19
   `<style href precedence>` hoisting.
-- `img-src 'self'` for the browser's own same-origin favicon probe.
+- `img-src 'self'`. The app renders no images, but Chromium enforces `img-src`
+  on the favicon it probes for on its own, and a denied probe is a reported
+  `securitypolicyviolation` that fails the browser audit. The grant allows
+  nothing off-origin, and it does not make `/favicon.ico` reachable: that path
+  requires the capability token like any other non-`/assets/` path and answers
+  403.
 - `font-src 'none'`, stated rather than left to the `default-src` fallback,
   because "no external font" is the air-gap property being asserted.
 - `connect-src 'self'` plus one WebSocket origin per accepted browser origin.
@@ -102,17 +110,33 @@ deny-everything (`default-src 'none'`) plus these grants:
   modulepreload polyfill `fetch`es `link[rel=modulepreload]` hrefs, and a
   `fetch` of a script URL is governed by `connect-src`, not `script-src`.
 
-`connect-src` is derived per gateway instance from `_allowed_origins`, mapping
-`http:` to `ws:` and `https:` to `wss:` and sorting the result. A page can only
-reach the gateway at the authority it was loaded from, and the origins it may be
-loaded from are exactly the ones the handshake accepts, so that union is the
-tightest value one shared header can carry. It is not a wildcard: a wildcard
-port (`ws://127.0.0.1:*`) would authorize a socket to any other user's loopback
-listener on a shared host, and a literal `127.0.0.1` host would break a gateway
-reached through a declared `localhost` origin, because CSP host matching is
-textual and performs no name resolution. The bound port being unknown before
-`start()` is not an obstacle: `_actual_origin` already falls back to the
-requested `port`, and the policy is computed per response.
+`connect-src`'s socket sources are derived per gateway instance: one
+`ws://<host>:<this gateway's port>` per accepted hostname, sorted. The port is
+always this gateway's own, because a page this gateway served can only
+legitimately reach this gateway. A declared browser origin contributes its
+*hostname* and nothing else: CSP host matching is textual and performs no name
+resolution, so `--browser-origin http://localhost:8765` produces a page whose
+Origin check passes but whose `ws://localhost:8765/ws` does not match
+`ws://127.0.0.1:8765`, and naming the hostname is what fixes that. The scheme
+is always `ws:`, because the gateway speaks plain HTTP and no page it serves is
+an `https:` origin.
+
+Two shapes this replaced were each wrong in a different direction. A wildcard
+port (`ws://127.0.0.1:*`) authorized a socket to any other loopback listener,
+including another user's on a shared host. Taking the port from each declared
+origin instead would have kept exactly that grant for every declared port,
+including the `--browser-origin http://127.0.0.1:5173` this document uses as
+the normal case. The bound port being unknown before `start()` is not an
+obstacle: `_origin_port` falls back to the requested `port`, and the policy is
+computed per response.
+
+The narrowed header is defense in depth and not a fix for the client. The page
+still builds its own socket URL: `webSocketUrlFromLocation` in
+`clients/web/src/session.ts` takes the socket authority from the page's
+`?gateway=` query parameter while inheriting the page's `?token=`, so a link
+carrying both still asks the browser to send this gateway's token to another
+authority. The header now refuses that for a foreign port, but the client
+should not be constructing it at all; that is #1041.
 
 `clients/web/e2e/gateway-hygiene.spec.ts` asserts the whole policy against a
 live gateway, fails on any reported `securitypolicyviolation` (with a negative
@@ -143,6 +167,24 @@ requires the token like any other page request. Deciding the exemption on the
 raw target and then looking the file up from a separately decoded copy would
 widen the exemption from "URLs under `/assets/`" to "anything reachable under
 the assets directory", which is not what this decision grants.
+
+The filesystem lookup is rooted at the same subtree for the same reason.
+`/assets/*` is resolved under `<dist>/assets` and the containment guard is
+checked against that directory rather than against the dist root above it, so a
+symlink planted inside `assets/` that points elsewhere under the dist root is a
+404 and not a token-free file. Rooting the guard at the dist root would again
+make the exemption a filesystem statement.
+
+Normalizing once also makes trailing slashes and `.` segments equivalent to
+their normalized target, which is a deliberate widening rather than a side
+effect: `/health/`, `/index.html/`, `/./`, `/..`, and `/ws/` route as
+`/health`, `/index.html`, `/`, `/`, and `/ws`, where each of those spellings
+was a 404 before. Accepted because one normalization is what makes the
+`/assets/` test mean what it says, and because every route keeps its own check
+under every spelling: `/ws/` still requires both the capability token and an
+exact Origin match, and a target above the root resolves to the token-required
+index rather than outside the tree. The whole table is pinned in
+`tests/server/test_websocket_transport.py`.
 
 ## Remote host and local laptop
 

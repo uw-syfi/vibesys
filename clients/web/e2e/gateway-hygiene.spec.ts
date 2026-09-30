@@ -1,10 +1,16 @@
 import {expect, type Page, test} from '@playwright/test';
 import {startLiveGateway} from './gateway.js';
 
-// This spec boots a detached gateway through `uv run`, whose own readiness
-// budget is 10s, concurrently with the other gateway-booting spec and the Vite
-// dev server. A cold `uv run` plus boot under that contention does not fit the
-// 30s global default. Scoped to this file; the global config is left alone.
+// The one wall-clock value in this file, and a resource bound rather than the
+// flakiness patch `.agents/skills/testing/references/flakiness.md` prohibits.
+// It does not make a racing assertion pass: every asynchronous condition below
+// is an `expect`/`expect.poll` on an observable state, none of which waits on
+// elapsed time. What the budget covers is process startup the spec cannot
+// avoid: a cold `uv run` resolving the Python environment, plus
+// `entrypoints.server`'s own 10s readiness budget, running concurrently with
+// the other gateway-booting spec and the Vite dev server. That cost is bounded
+// and independent of what is asserted, and it does not fit the 30s global
+// default. Scoped to this file; the global config is left alone.
 test.describe.configure({timeout: 120_000});
 
 /**
@@ -44,9 +50,14 @@ test('serves the app under a strict CSP without leaving loopback', async ({page}
     // socket to anything but this gateway.
     expect(http.offLoopback).toEqual([]);
     expect(sockets.offLoopback).toEqual([]);
-    // Guard against a vacuous pass where interception never saw the subresources.
-    expect(http.requested.filter(url => new URL(url).pathname.endsWith('.js'))).not.toEqual([]);
-    expect(http.requested.filter(url => new URL(url).pathname.endsWith('.css'))).not.toEqual([]);
+    // Guard against a vacuous pass where interception never saw the page's
+    // subresources. Asserted as "the gateway served the bundle" rather than as
+    // a chunk shape: pinning `.css` would pin Vite's chunking, so inlining the
+    // stylesheet would turn a security property red for a build-config change
+    // that is not a gateway regression.
+    expect(http.requested.filter(url => new URL(url).pathname.startsWith('/assets/'))).not.toEqual(
+      [],
+    );
 
     const headers = response?.headers() ?? {};
     expect(policyDirectives(headers['content-security-policy'] ?? '')).toEqual(
@@ -62,15 +73,34 @@ test('serves the app under a strict CSP without leaving loopback', async ({page}
     await assertTheListenerReportsAViolation(page, http);
 
     // A detached gateway that outlived the spec would be silent otherwise.
+    // The pid is the load-bearing half: `_run_stop` in `src/entrypoints/web.py`
+    // currently returns 0 unconditionally, including when its wait loop times
+    // out with the child still alive, so the exit status only becomes
+    // meaningful once #1028 lands.
+    const stopped = gateway.stop();
+    await expect.poll(() => processIsGone(gateway.pid)).toBe(true);
+    expect(stopped.status).toBe(0);
+  } finally {
+    // Read in `finally`, not in the body: `stop()` memoizes, so this is the
+    // same result the body saw, and annotating here reports teardown errors
+    // even when a body assertion failed first.
     const stopped = gateway.stop();
     if (stopped.errors.length > 0) {
       test.info().annotations.push({type: 'teardown', description: stopped.errors.join('; ')});
     }
-    expect(stopped.status).toBe(0);
-  } finally {
-    gateway.stop();
   }
 });
+
+/** True once the detached gateway process no longer exists. */
+function processIsGone(pid: number): boolean {
+  try {
+    // Signal 0 only probes for existence; it delivers nothing.
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Negative control for the assertion above.
@@ -133,9 +163,13 @@ async function interceptHttp(page: Page): Promise<Intercepted> {
  *
  * `page.route` does not see WebSocket handshakes, so observing `page.on
  * ('websocket')` after the fact would only report an escape, not prevent one.
- * Routing the socket makes the loopback rule an actual restriction: a loopback
- * URL is connected straight through to the real server with frames forwarded
- * both ways, anything else is closed without ever reaching the network.
+ * Routing the socket makes the loopback rule a restriction on the app's own
+ * code: a loopback URL is connected straight through to the real server with
+ * frames forwarded both ways, and anything else is closed by the route
+ * handler. This is a renderer-side `globalThis.WebSocket` override, not a
+ * network-layer block, so a socket opened from a Worker or through a
+ * previously captured native constructor would bypass it. Both are things the
+ * app does not do, and the `connect-src` assertion is what covers them.
  */
 async function interceptWebSockets(page: Page): Promise<Intercepted> {
   const intercepted: Intercepted = {requested: [], offLoopback: []};
@@ -153,10 +187,12 @@ async function interceptWebSockets(page: Page): Promise<Intercepted> {
 }
 
 /**
- * Cross-language copy of `_POLICY_DIRECTIVES` in
- * `src/server/transport/websocket.py`. The gateway derives `connect-src` from
- * the origins it accepts a page from, and this spec declares none beyond the
- * gateway's own, so the page's own authority is the whole list.
+ * Independent cross-language restatement of `_POLICY_DIRECTIVES` in
+ * `src/server/transport/websocket.py`. It imports nothing from the gateway, so
+ * it fails when the two disagree rather than agreeing by construction. The
+ * gateway's socket sources are always its own port, one per accepted
+ * hostname; this spec declares no extra browser origin, so the page's own
+ * authority is the whole list.
  */
 function expectedPolicy(pageUrl: string): Readonly<Record<string, string>> {
   return {
