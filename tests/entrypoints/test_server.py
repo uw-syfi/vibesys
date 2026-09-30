@@ -508,7 +508,9 @@ def test_stop_detached_gateway_reports_a_gateway_that_ignores_termination() -> N
     assert result.pid == GATEWAY_PID
     assert result.hold.holders == (GATEWAY_PID,)
     assert gateway.signals == [GATEWAY_PID]
-    assert gateway.clock >= GATEWAY_STOP_TIMEOUT_SECONDS
+    # The budget is spent exactly: the last wait the budget allows is taken, and
+    # the comparison that ends the loop must not grant one beyond it.
+    assert gateway.monotonic() == GATEWAY_STOP_TIMEOUT_SECONDS
     assert gateway.sleeps == [0.05] * BUDGET_POLLS
 
 

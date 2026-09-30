@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS
@@ -79,7 +80,6 @@ class FakeDetachedGateway:
         self.teardown_polls = 0
         self.last_hold = WebInstanceHold(holders=holder_pids, log_locked=log_locked)
         self.sleeps: list[float] = []
-        self.clock = 0.0
 
     def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
         """Return the published record, if this gateway has one right now."""
@@ -110,10 +110,16 @@ class FakeDetachedGateway:
         self.stopping = True
 
     def monotonic(self) -> float:
-        """Return the simulated clock, which only the caller's waits advance."""
-        return self.clock
+        """Return the simulated clock, which only the caller's waits advance.
+
+        The reading is the correctly-rounded total of the waits, not a running
+        sum of them. A real clock does not accumulate one rounding error per
+        wait, and a model that did would drift past the budget a fraction of a
+        wait early, which is exactly the difference the budget's boundary
+        comparison turns on.
+        """
+        return math.fsum(self.sleeps)
 
     def sleep(self, seconds: float) -> None:
-        """Record a wait and advance the simulated clock by it."""
+        """Record a wait, which is the only thing that advances the clock."""
         self.sleeps.append(seconds)
-        self.clock += seconds
