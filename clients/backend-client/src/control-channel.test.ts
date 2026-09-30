@@ -125,7 +125,13 @@ describe('ControlChannel', () => {
       kind: 'disconnected',
     });
 
-    expect(connector.opened).toEqual(['dropsWhileDialing', 'dropsWhileDialing']);
+    // One immediate attempt, then one per schedule entry: `reconnect()` dials
+    // now rather than waiting out a delay before the first try.
+    expect(connector.opened).toEqual([
+      'dropsWhileDialing',
+      'dropsWhileDialing',
+      'dropsWhileDialing',
+    ]);
     expect(connector.sent).toEqual([]);
     expect(channel.connected).toBe(false);
     expect(trace).toEqual(['disconnected']);

@@ -873,29 +873,46 @@ describe('ServerClient', () => {
     );
   });
 
-  it('fails a request issued once the reconnect schedule is spent', async () => {
+  it('revives a spent channel for a repeatable request but still refuses a steer', async () => {
     let connections = 0;
+    const seen: string[] = [];
     await withServer(
       socket => {
         connections += 1;
+        const attempt = connections;
         socket.on('error', () => undefined);
-        socket.once('data', () => socket.destroy());
+        if (attempt === 1) {
+          socket.once('data', () => socket.destroy());
+          return;
+        }
+        respondToLines(socket, request => {
+          seen.push(request['type'] as string);
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
       },
       async client => {
-        // The drop spends the empty schedule at once, so the channel settles
-        // into the down state with nothing pending to recover it.
+        // The drop spends the empty schedule at once, so the channel is down
+        // with nothing pending, and the caller has been told so.
         await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
           kind: 'disconnected',
         });
         expect(client.connected).toBe(false);
-        const dialsBefore = connections;
 
-        // A later request is answered by the disconnect rather than queued
-        // behind a dial nobody scheduled; `reconnect()` is the entry that asks.
-        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+        // A steer must not wait out a channel the caller was told is dead: it
+        // fails on the spot and opens nothing. The Node client is connected
+        // before it is constructed, so it is never in the cold-start state that
+        // makes a first request of any type wait.
+        await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
           kind: 'disconnected',
         });
-        expect(connections).toBe(dialsBefore);
+        expect(connections).toBe(1);
+
+        // A repeatable request is what asks for the connection back, so a spent
+        // schedule is not a permanent death sentence for the client.
+        const response = await client.request({type: 'command.pause'});
+        expect(response.ok).toBe(true);
+        expect(seen).toEqual(['command.pause']);
+        expect(connections).toBe(2);
       },
       {reconnectDelaysMs: []},
     );

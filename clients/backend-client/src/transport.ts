@@ -1,4 +1,5 @@
 import type {ProtocolResponse, RequestInput, ServerMessage} from './protocol.js';
+import type {RequestOptions} from './request-policy.js';
 
 export interface EventSubscription {
   close(): Promise<void>;
@@ -28,7 +29,14 @@ export interface SubscribeOptions {
  * travel. Neutral by construction: it names only protocol types, no runtime.
  */
 export interface ServerTransport {
-  request(input: RequestInput): Promise<ProtocolResponse>;
+  /**
+   * Send one control request. `options` are the per-call half of the request
+   * policy (`request-policy.ts`): the deadline, whether it takes a connection
+   * of its own, and the signal that abandons it. An implementation honors all
+   * three, so a caller can be written once and stay correct; nothing above this
+   * line branches on a request type to get the same effect.
+   */
+  request(input: RequestInput, options?: RequestOptions): Promise<ProtocolResponse>;
   subscribe(
     afterSequence: number,
     onMessage: (message: ServerMessage) => void,
@@ -36,4 +44,22 @@ export interface ServerTransport {
     options?: SubscribeOptions,
   ): Promise<EventSubscription>;
   close(): Promise<void>;
+}
+
+/**
+ * A transport whose control channel can be redialed on demand. Separate from
+ * `ServerTransport` rather than folded into it: a frontend that offers a
+ * reconnect affordance needs this, and one that does not (the TUI today) should
+ * not have to implement a verb it never calls. Both shipped transports satisfy
+ * it, so the affordance is reachable without an optional method, which would
+ * make "does my transport actually redial" a per-implementation question.
+ */
+export interface ControlTransport extends ServerTransport {
+  /**
+   * Dial the control channel now, whatever its backoff schedule was going to
+   * do. See `ControlChannel.reconnect`: it cancels an armed redial rather than
+   * waiting it out, so a user-visible reconnect control always shortens the
+   * outage, and it no-ops on a healthy channel.
+   */
+  reconnect(): void;
 }

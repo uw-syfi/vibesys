@@ -280,8 +280,8 @@ export class ServerClient {
   }
 
   /**
-   * Redial the control channel now, outside its backoff schedule. See
-   * `ControlChannel.reconnect`.
+   * Redial the control channel now, whatever its backoff schedule was going to
+   * do. See `ControlChannel.reconnect`.
    */
   reconnect(): void {
     this.#channel.reconnect();

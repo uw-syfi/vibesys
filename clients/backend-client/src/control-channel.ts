@@ -24,13 +24,13 @@ export type ControlChannelState =
  * cancel function rather than a handle, so the type names no runtime's timer
  * object and a test can drive deadlines without waiting for them.
  */
-type ScheduleTimeout = (callback: () => void, delayMs: number) => () => void;
+export type ScheduleTimeout = (callback: () => void, delayMs: number) => () => void;
 
 /**
  * The real-timer implementation of the seam, shared so a transport and the
  * channel it drives do not each carry a copy of the same four lines.
  */
-const defaultScheduleTimeout: ScheduleTimeout = (callback, delayMs) => {
+export const defaultScheduleTimeout: ScheduleTimeout = (callback, delayMs) => {
   const timer = setTimeout(callback, delayMs);
   return () => clearTimeout(timer);
 };
@@ -107,8 +107,10 @@ interface ControlChannelOptions {
   /** Response deadline for a request with no table entry or per-call override. */
   readonly requestTimeoutMs?: number | undefined;
   /**
-   * Backoff schedule for redials after a drop; its length bounds the attempts
-   * per outage. Defaults to the schedule the subscription shares.
+   * Backoff schedule for redials after a failed dial or a drop; its length
+   * bounds the attempts per outage, so a server that is down costs one bounded
+   * series rather than a fresh connect timeout per operator action. Defaults to
+   * the schedule the subscription shares.
    */
   readonly reconnectDelaysMs?: readonly number[] | undefined;
   /** Observe connectivity changes; see `ControlChannelState`. */
@@ -145,16 +147,14 @@ interface ControlRequest {
  * path has an unreachable branch to guess at.
  *
  * - `connected`: requests go straight onto the connection.
- * - `reconnecting`: an outage the backoff loop is working.
- * - `disconnected`: no connection and no redial pending, because the schedule
- *   is spent or a protocol fault took the channel down. `reconnect()` revives
- *   it; until then the disconnect is the channel's answer.
+ * - `down`: no connection. Whether a dial is in flight and whether a redial is
+ *   armed are separate facts, tracked separately, because neither changes what
+ *   happens to a request: see `#enqueue`.
  * - `closed`: terminal.
  */
 type ControlPhase =
   | {readonly kind: 'connected'; readonly connection: ControlConnection}
-  | {readonly kind: 'reconnecting'}
-  | {readonly kind: 'disconnected'}
+  | {readonly kind: 'down'}
   | {readonly kind: 'closed'};
 
 /**
@@ -187,8 +187,10 @@ interface DialReport {
  * - A request id is never reused. A resend mints a fresh one, and a response
  *   whose id is not outstanding is discarded, so no late frame from a dead
  *   connection (or from an abandoned request) can resolve a later request.
- * - Only an idempotent request survives an outage. One that must not be
- *   repeated fails typed rather than risking a double effect.
+ * - Once the channel has reported that it cannot deliver, a request that must
+ *   not be repeated fails typed rather than waiting for a recovery. Before the
+ *   first connection there is no such report, so a lazily-dialed transport's
+ *   first request waits for its dial instead of being refused.
  */
 export class ControlChannel {
   readonly #connector: ControlConnector;
@@ -200,12 +202,13 @@ export class ControlChannel {
   /** Requests on the wire, by the id they were written with. */
   readonly #pending = new Map<string, ControlRequest>();
   /**
-   * Idempotent requests waiting for the redial that recovers an outage. A
-   * request that must not be repeated never waits one out; it fails at the drop.
+   * Requests waiting for a connection: any type before the channel's first
+   * connection, and idempotent ones across a later outage. A request that must
+   * not be repeated never waits out an outage; it fails at the drop instead.
    */
   readonly #held: ControlRequest[] = [];
 
-  #phase: ControlPhase = {kind: 'disconnected'};
+  #phase: ControlPhase = {kind: 'down'};
   /**
    * Identifies the live connection. Each dial takes the next value and binds it
    * into that connection's handlers, so an event from a connection the channel
@@ -231,6 +234,8 @@ export class ControlChannel {
    * attempt, and a recovery reports `connected` once.
    */
   #reported: 'connected' | 'disconnected' | undefined;
+  /** The failure that took the channel down, kept as the cause of what it fails. */
+  #lastError: Error | null = null;
 
   constructor(connector: ControlConnector, options: ControlChannelOptions) {
     this.#connector = connector;
@@ -245,8 +250,10 @@ export class ControlChannel {
    * Take over a connection the caller already dialed, as the channel's live
    * one. A transport whose constructor is handed an open connection (the Node
    * client, which dials before it can report success) calls this once, before
-   * any request. The adopted connection is the caller's starting point, so it is
-   * not reported as a change.
+   * any request; a transport that dials lazily never does, and its first
+   * request opens the channel instead. The adopted connection is the caller's
+   * starting point, so it is not reported as a change, and it means such a
+   * channel is never in the cold-start state `#enqueue` describes.
    */
   adopt(connect: (handlers: ControlConnectionHandlers) => ControlConnection): void {
     this.#phase = {kind: 'connected', connection: connect(this.#bindHandlers())};
@@ -292,26 +299,26 @@ export class ControlChannel {
   }
 
   /**
-   * Redial now, outside the backoff schedule. Once the schedule is spent, or a
-   * protocol fault has taken the channel down, it stays down with the
-   * disconnect as its answer; this is the entry a caller uses to try again (a
-   * reconnect affordance, or a resume-after-sleep watcher such as #832). It
-   * no-ops unless the channel is in that spent state, so it cannot stack a
-   * second dial onto a healthy or already-retrying one.
+   * Dial now, whatever the backoff schedule was going to do. This is the entry
+   * behind a reconnect affordance and behind a resume-after-sleep watcher such
+   * as #832: a caller asking explicitly outranks an armed redial, so the armed
+   * one is cancelled and the dial happens immediately. It no-ops on a healthy
+   * channel, on a closed one, and while a dial is already in flight, so it
+   * cannot stack a second dial onto either.
    */
   reconnect(): void {
-    if (this.#phase.kind !== 'disconnected') return;
-    this.#phase = {kind: 'reconnecting'};
-    this.#backoff.reset();
-    this.#scheduleRedial();
+    if (this.#phase.kind !== 'down' || this.#dialing) return;
+    this.#cancelRedial?.();
+    this.#cancelRedial = null;
+    this.#dialNow();
   }
 
   /**
-   * Whether the channel currently holds a live connection. False while a redial
-   * is outstanding and once the schedule is spent, so a frontend can disable
-   * the controls a dropped channel cannot carry.
-   * `ControlChannelOptions.onConnectionState` reports the same transitions as
-   * they happen.
+   * Whether the channel currently holds a live connection. False before the
+   * first dial completes, while a redial is outstanding, and once the schedule
+   * is spent, so a frontend can disable the controls a dropped channel cannot
+   * carry. `ControlChannelOptions.onConnectionState` reports the same
+   * transitions as they happen.
    */
   get connected(): boolean {
     return this.#phase.kind === 'connected';
@@ -331,26 +338,46 @@ export class ControlChannel {
     if (phase.kind === 'connected') await phase.connection.close();
   }
 
-  /** Route one request by the channel's state: send it, hold it, or fail it. */
+  /**
+   * Route one request by the channel's state: send it, hold it, or fail it.
+   *
+   * The axis is cold start versus outage, not which down state the channel is
+   * in. A channel that has never connected has reported nothing and shown no
+   * evidence that anything is broken, so every request type waits for its first
+   * dial. Once the channel has told the caller it is disconnected (a drop, a
+   * protocol fault, a failed dial, or a spent schedule), a request that must not
+   * be repeated fails instead of waiting: the caller has been told the command
+   * path is dead and gets to decide whether to reissue it, rather than having
+   * the command applied invisibly seconds later. An idempotent request waits
+   * either way, because repeating it is free.
+   */
   #enqueue(entry: ControlRequest): void {
     const phase = this.#phase;
     if (phase.kind === 'connected') {
       this.#send(entry, phase.connection);
       return;
     }
-    // An outage the backoff loop is working: hold an idempotent request to
-    // resend once the channel recovers; fail one that must not be repeated so
-    // the caller, seeing the disconnected state, decides whether to reissue it.
-    // Anything else (a spent schedule, a fault, a closed channel) has no
-    // recovery pending, so the disconnect is the answer for every type.
-    if (phase.kind === 'reconnecting' && entry.policy.idempotent) {
-      this.#held.push(entry);
+    if (phase.kind === 'closed') {
+      this.#settleReject(entry, disconnectedError('Client is closed'));
       return;
     }
-    this.#settleReject(
-      entry,
-      phase.kind === 'closed' ? disconnectedError('Client is closed') : disconnectedError(),
-    );
+    if (this.#toldDisconnected && !entry.policy.idempotent) {
+      this.#settleReject(entry, disconnectedError(undefined, this.#lastError));
+      return;
+    }
+    this.#held.push(entry);
+    this.#revive();
+  }
+
+  /**
+   * Whether the channel has reported itself undeliverable, which is what both
+   * `connected` and `onConnectionState` expose. Derived from the reported state
+   * rather than tracked separately, so the refusal above is tied to exactly the
+   * transition a frontend sees, and cannot drift from it. It does not depend on
+   * anyone having registered the callback.
+   */
+  get #toldDisconnected(): boolean {
+    return this.#reported === 'disconnected';
   }
 
   /** Write one request to the live connection and arm its response deadline. */
@@ -371,10 +398,14 @@ export class ControlChannel {
   #envelope(input: RequestInput, requestId: string): IssuedRequest {
     return {
       protocol_version: 1,
-      request_id: requestId,
       client_id: this.#clientId,
       timestamp: new Date().toISOString(),
       ...input,
+      // Last, so an input carrying its own `request_id` cannot overwrite the
+      // freshly minted, never-reused one every correlation path keys on. The
+      // cast widens the spread to the request union; it must not also be
+      // suppressing a lost id.
+      request_id: requestId,
     } as IssuedRequest;
   }
 
@@ -428,7 +459,8 @@ export class ControlChannel {
       this.#recordWhileDialing(error, false);
       return;
     }
-    this.#phase = {kind: 'reconnecting'};
+    this.#phase = {kind: 'down'};
+    this.#lastError = error;
     this.#report({status: 'disconnected', error});
     void phase.connection.close();
     this.#disposeForOutage();
@@ -441,9 +473,9 @@ export class ControlChannel {
    * cannot read (malformed JSON, an unknown message, an unsupported version, an
    * unframable stream). Unlike a drop this is not a transient outage a redial
    * recovers, and it is a real answer about every request in flight, so each
-   * fails with the typed error rather than being silently resent. The channel
-   * settles into the dead state that `reconnect()` can revive if a caller
-   * decides the fault was one-off.
+   * fails with the typed error rather than being silently resent. No redial is
+   * armed, so the channel stays down with the disconnect as its answer until
+   * `reconnect()`, or a repeatable request, asks for a connection back.
    */
   #onFault(error: Error): void {
     const phase = this.#phase;
@@ -451,7 +483,8 @@ export class ControlChannel {
       this.#recordWhileDialing(error, true);
       return;
     }
-    this.#phase = {kind: 'disconnected'};
+    this.#phase = {kind: 'down'};
+    this.#lastError = error;
     this.#report({status: 'disconnected', error});
     void phase.connection.close();
     this.#failOwed(error);
@@ -479,11 +512,33 @@ export class ControlChannel {
   }
 
   /**
-   * One redial attempt. Never rejects: a failure is an outage the backoff loop
+   * Dial for a request that found the channel down, unless something already
+   * is: a dial in flight or an armed redial is already the recovery, and
+   * stacking another would cost a connection per request during an outage. The
+   * guard runs before anything is mutated, so a no-op cannot leave the channel
+   * claiming a dial that does not exist.
+   */
+  #revive(): void {
+    if (this.#phase.kind !== 'down' || this.#dialing || this.#cancelRedial !== null) return;
+    this.#dialNow();
+  }
+
+  /**
+   * Start a fresh series of attempts. The cursor is reset, so whatever asks for
+   * a connection gets the whole bounded series; within one series an outage
+   * costs one series however many requests arrive during it.
+   */
+  #dialNow(): void {
+    this.#backoff.reset();
+    void this.#dial();
+  }
+
+  /**
+   * One dial attempt. Never rejects: a failure is an outage the backoff loop
    * owns, and a connection nobody wants any more is closed rather than kept.
    */
   async #dial(): Promise<void> {
-    if (this.#phase.kind !== 'reconnecting' || this.#dialing) return;
+    if (this.#phase.kind !== 'down' || this.#dialing) return;
     this.#dialing = true;
     // Discard an earlier attempt's report before this one can be blamed for it.
     this.#takeDialReport();
@@ -492,13 +547,12 @@ export class ControlChannel {
       const handlers = this.#bindHandlers();
       try {
         connection = await this.#connector.open(handlers);
-      } catch {
-        // This attempt failed; back off again, or exhaust the schedule.
-        if (this.#phase.kind === 'reconnecting') this.#scheduleRedial();
+      } catch (error) {
+        this.#onDialFailure(toError(error));
         return;
       }
-      if (this.#phase.kind !== 'reconnecting') {
-        // close(), or a revive, raced the dial: this connection is not wanted.
+      if (this.#phase.kind !== 'down') {
+        // close() raced the dial: this connection is not wanted.
         void connection.close();
         return;
       }
@@ -506,28 +560,60 @@ export class ControlChannel {
       if (reported !== null) {
         // The connection failed before this dial could install it. Installing it
         // anyway would make `connected` true for a connection that will never
-        // answer and never report again (a socket emits `close` once), leaving
-        // every later request to wait out its response deadline. So the attempt
-        // takes the failure it was handed: a drop is an outage the schedule may
-        // still recover, a fault is not.
+        // answer and never report again (a socket reports its close once),
+        // leaving every later request to wait out its response deadline. So the
+        // attempt takes the failure it was handed, and each disposition is the
+        // one that failure gets on an installed connection.
         void connection.close();
-        if (reported.fault) {
-          this.#phase = {kind: 'disconnected'};
-          this.#report({status: 'disconnected', error: reported.error});
-          this.#failOwed(reported.error);
-        } else {
-          this.#report({status: 'disconnected', error: reported.error});
-          this.#scheduleRedial();
-        }
+        if (reported.fault) this.#onDialFault(reported.error);
+        else this.#onDialFailure(reported.error);
         return;
       }
-      this.#phase = {kind: 'connected', connection};
-      this.#backoff.reset();
-      this.#report({status: 'connected'});
-      this.#flushHeld(connection);
+      this.#install(connection);
     } finally {
       this.#dialing = false;
     }
+  }
+
+  /** Take a freshly dialed connection as the live one and resend what waited. */
+  #install(connection: ControlConnection): void {
+    this.#phase = {kind: 'connected', connection};
+    this.#backoff.reset();
+    this.#lastError = null;
+    this.#flushHeld(connection);
+    // Reported after the resends are written, so a request issued from the
+    // callback queues behind them rather than ahead of them, and only if the
+    // flush did not itself lose the connection again.
+    const phase = this.#phase;
+    if (phase.kind === 'connected' && phase.connection === connection) {
+      this.#report({status: 'connected'});
+    }
+  }
+
+  /**
+   * This attempt failed. The channel is demonstrably not deliverable now, so
+   * the outage is reported and whatever was waiting is disposed by the same
+   * rule a drop uses, then the schedule decides whether to try again.
+   */
+  #onDialFailure(error: Error): void {
+    if (this.#phase.kind !== 'down') return;
+    this.#lastError = error;
+    this.#report({status: 'disconnected', error});
+    this.#disposeForOutage();
+    this.#scheduleRedial();
+  }
+
+  /**
+   * This attempt's connection sent bytes this client cannot read, before the
+   * attempt could install it. Same disposition as a fault on an installed
+   * connection: a real answer about every request owed, and no redial armed,
+   * because a redial would most likely re-read the same bytes.
+   */
+  #onDialFault(error: Error): void {
+    if (this.#phase.kind !== 'down') return;
+    this.#lastError = error;
+    this.#report({status: 'disconnected', error});
+    this.#failOwed(error);
   }
 
   /**
@@ -542,7 +628,7 @@ export class ControlChannel {
     for (const entry of owed) {
       this.#cancelDeadline(entry);
       if (entry.policy.idempotent) this.#held.push(entry);
-      else this.#settleReject(entry, disconnectedError());
+      else this.#settleReject(entry, disconnectedError(undefined, this.#lastError));
     }
   }
 
@@ -561,16 +647,25 @@ export class ControlChannel {
 
   /**
    * The finite schedule is spent: no connection is coming without a caller
-   * asking for one, so fail every held request and settle into the reportable
-   * dead state that `reconnect()` revives.
+   * asking for one, so fail every held request. The channel stays down and
+   * reportable, and the next `reconnect()` or repeatable request revives it.
    */
   #exhaust(): void {
-    this.#phase = {kind: 'disconnected'};
-    for (const entry of this.#held.splice(0)) this.#settleReject(entry, disconnectedError());
+    for (const entry of this.#held.splice(0)) {
+      this.#settleReject(entry, disconnectedError(undefined, this.#lastError));
+    }
   }
 
   #flushHeld(connection: ControlConnection): void {
-    for (const entry of this.#held.splice(0)) {
+    const queued = this.#held.splice(0);
+    let written = 0;
+    for (const entry of queued) {
+      const phase = this.#phase;
+      // A send can fail synchronously and route straight to `onDrop`, which
+      // re-enters the disposition path and takes the held queue over. Re-check
+      // ownership every turn rather than keep writing to a dead connection.
+      if (phase.kind !== 'connected' || phase.connection !== connection) break;
+      written += 1;
       // Mint a fresh id: the id this request last carried may have been written
       // to a connection that is now dead, so reusing it could let a late frame
       // from that connection match the resend. A never-reused id closes that
@@ -580,6 +675,10 @@ export class ControlChannel {
       entry.requestId = nextId;
       this.#send(entry, connection);
     }
+    // Whatever is left was never written, so the one rule that decides what an
+    // unwritten request does gets to decide again: hold it for the recovery now
+    // in progress, or fail it if it must not be repeated.
+    for (const entry of queued.slice(written)) this.#enqueue(entry);
   }
 
   /** Free an abandoned request's slot and reject it; its id is never reused. */
@@ -627,9 +726,20 @@ function newRequestId(): string {
 /**
  * A typed disconnect for a request the channel cannot carry. The message is the
  * same whatever ended the channel, so callers branch on `kind` rather than on
- * text, and `ControlChannelState.disconnected` carries the failure that
- * actually ended it for a frontend to show.
+ * text; the failure that actually ended it rides along as the cause, and
+ * `ControlChannelState.disconnected` carries it for a frontend to show.
  */
-function disconnectedError(message = 'Server is disconnected'): BackendClientError {
-  return new BackendClientError('disconnected', message);
+function disconnectedError(
+  message = 'Server is disconnected',
+  cause?: unknown,
+): BackendClientError {
+  return new BackendClientError(
+    'disconnected',
+    message,
+    cause === undefined || cause === null ? {} : {cause},
+  );
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }

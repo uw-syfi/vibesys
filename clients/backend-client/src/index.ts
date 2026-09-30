@@ -1,4 +1,5 @@
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+export type {ControlChannelState} from './control-channel.js';
 export {
   BackendClientError,
   type BackendErrorKind,
@@ -52,4 +53,9 @@ export {
   StreamReconciler,
   type StreamReconcilerOptions,
 } from './stream-reconciler.js';
-export type {EventSubscription, ServerTransport, SubscribeOptions} from './transport.js';
+export type {
+  ControlTransport,
+  EventSubscription,
+  ServerTransport,
+  SubscribeOptions,
+} from './transport.js';
