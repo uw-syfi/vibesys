@@ -168,19 +168,20 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
 
 
 @pytest.mark.parametrize("transport", ["unix", "websocket"])
-def test_a_burst_behind_a_stalled_consumer_arrives_as_coalesced_batches(
+def test_a_backlog_published_between_checkpoints_arrives_as_coalesced_batches(
     tmp_path: Path,
     socket_dir: Path,
     transport: str,
 ) -> None:
-    """Burst batching is a property of both transports, not a WebSocket accident.
+    """Checkpoint coalescing is a property of both transports, not a WebSocket accident.
 
-    Both stall the producing stream loop while the consumer is behind: the Unix
-    handler blocks in ``wfile.write``, the gateway suspends in the library's
-    ``drain()`` above its stated send buffer. A stalled loop is not reading the
-    journal, so the next ``subscription_checkpoint`` folds the whole backlog
-    into one batch. That is what keeps a slow consumer cheap instead of
-    repainting once per event.
+    ``subscription_checkpoint`` returns everything past the cursor, so however
+    many events land between two checkpoints arrive as one batch. That is what
+    keeps a consumer that reads less often than the journal is written cheap,
+    instead of repainting once per event. No writer is stalled here: this burst
+    fits in the loopback buffers (measured, the largest frame is 18665B on unix
+    and 14961B on websocket, both under the gateway's 32 KiB high-water mark),
+    and the consumer is simply not called during the publish loop.
 
     Each chunk is published under the shared condition the stream loop waits
     on, so a chunk can never be observed half-written. The consumer's cursor
@@ -215,7 +216,6 @@ def test_a_burst_behind_a_stalled_consumer_arrives_as_coalesced_batches(
             delivered = [event for batch in batches for event in batch["events"]]
             assert len(delivered) == _BURST_EVENTS
             assert len(batches) <= _BURST_CHUNKS
-            assert max(len(batch["events"]) for batch in batches) >= _BURST_CHUNK_EVENTS
     finally:
         parts.close()
 

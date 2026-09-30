@@ -139,9 +139,15 @@ A peer that stops answering is sent a close frame after 40s, and its socket is a
 that close is never echoed. Only the abort moves the connection to `CLOSED`, which is what the
 stream loop polls for, so the subscription is released about 50.1s after the peer went silent (one
 `_DISCONNECT_POLL_SECONDS`), and a non-detached run may then finish after
-`RECONNECT_SETTLE_SECONDS`. Measured, not inferred: ping at 19.5s, close frame at 39.5s, tracker
-released at 50.1s. A peer that sends a FIN without a close frame needs none of this and is released
-in 0.15s.
+`RECONNECT_SETTLE_SECONDS`. Those are nominal bounds derived from the three values in the table, not
+three independently measured constants. A peer that sends a FIN without a close frame needs none of
+this and is released in 0.15s (measured).
+
+That chain is not unconditional. `websockets` writes its own keepalive ping through the same
+transport and outside the gateway's `_send`, so no write deadline covers it, and it can only go out
+while the transport is below its low-water mark. It always is in practice, because a `_send` that
+returns has drained below the mark and one that does not has aborted the transport, but the bound
+above is a consequence of the send-side deadline holding rather than independent of it.
 
 Flow control has two separate bounds in opposite directions, and conflating them is the easy
 mistake. `max_queue`, `(32, 8)`, bounds frames arriving *from* the peer. `write_limit`, 32 KiB, is
@@ -183,9 +189,10 @@ No server-side heartbeat frame exists, and the server does not need one. The dir
 governs, the server detecting a dead client, is served entirely by protocol-level pings, because a
 browser's own WebSocket implementation answers them below the JavaScript API (`WP-DISCONNECT`). Only
 the opposite direction, a client detecting a dead server, would use the reserved field, so it stays
-reserved and unimplemented on both transports. The reservation is what
-`tests/conformance/scenarios/heartbeat-probe.json` pins: the field is rejected today, and that
-rejection is the capability probe working, not a gap.
+reserved and unimplemented on both transports. `tests/conformance/scenarios/heartbeat-probe.json`
+records the reservation: the field is rejected today, and that rejection is the capability probe
+working, not a gap. It records rather than pins, because no runner executes it yet
+(`tests/conformance/README.md`).
 
 ### WP-CAPABILITY-PROBE: capabilities are probed by rejection, not advertised
 

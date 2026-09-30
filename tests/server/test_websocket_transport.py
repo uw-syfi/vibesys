@@ -43,23 +43,56 @@ if TYPE_CHECKING:
     from websockets.http11 import Request
     from websockets.typing import Origin
 
-# A burst has to outrun everything that could absorb it before the producing
-# coroutine stalls: the peer's kernel receive buffer, which is capped here, and
-# the server's send buffer, which is not settable from this side and which
-# Linux autotunes up to ``net.ipv4.tcp_wmem``'s ceiling (4 MiB stock). 8 MiB
-# leaves a factor of two over that ceiling. Absorbing the whole burst would
-# fail this test rather than pass it vacuously, so the margin is not load
+# The burst has to be larger than the send path can absorb, or the producing
+# coroutine never stalls and the write deadline under test never fires. The
+# absorber is the server's socket send queue, which is not settable from this
+# side and which Linux autotunes up to ``net.ipv4.tcp_wmem``'s ceiling. That
+# queue charges skb overhead against ``sk_wmem_queued`` alongside the bytes, so
+# the payload that fits is a fraction of the ceiling, not the ceiling:
+# measured on a host whose ceiling is 4 MiB, 1.0 MiB is absorbed and 1.5 MiB
+# stalls. The burst is derived from the ceiling rather than hardcoded so a host
+# tuned to 16 or 32 MiB cannot turn this test red. Absorbing the whole burst
+# fails the test rather than passing it vacuously, so the multiple is not load
 # bearing for correctness, only for not reporting a false regression.
-_PEER_RECEIVE_BUFFER_BYTES = 2048
+_SEND_CEILING_PATH = Path("/proc/sys/net/ipv4/tcp_wmem")
+_SEND_CEILING_FALLBACK_BYTES = 4 * 1024 * 1024
+_BURST_CEILING_MULTIPLE = 2
 _STALL_EVENT_BYTES = 64 * 1024
-_STALL_EVENTS = 128
+# Capping the peer's receive buffer takes the second, receive-side absorber out
+# of that derivation, since the send-side ceiling says nothing about its size.
+# It is not the main absorber, and the burst is not sized against it: measured
+# here it moves the stall threshold from 2.5 MiB down to 1.5 MiB, against a
+# burst of twice the ceiling.
+_PEER_RECEIVE_BUFFER_BYTES = 2048
 # RFC 6455's two payload-length escape values.
 _EXTENDED_LENGTH = 126
 _EXTENDED_LENGTH_64 = 127
 
 
+def _stall_event_count() -> int:
+    """How many ``_STALL_EVENT_BYTES`` events exceed this host's send-side absorber."""
+    try:
+        ceiling = int(_SEND_CEILING_PATH.read_text().split()[2])
+    except OSError:
+        ceiling = _SEND_CEILING_FALLBACK_BYTES
+    burst = _BURST_CEILING_MULTIPLE * ceiling
+    return (burst + _STALL_EVENT_BYTES - 1) // _STALL_EVENT_BYTES
+
+
 def _http_request(path: str) -> Request:
     return cast("Request", SimpleNamespace(path=path, headers={}))
+
+
+def test_the_stated_transport_bounds_are_the_values_they_replaced() -> None:
+    """The six pinned bounds must stay the numbers the wire contract publishes.
+
+    Three of them compose into the liveness ceiling in ``WP-DISCONNECT`` and
+    one is the flow-control threshold burst batching depends on, so editing a
+    default here, or ``_KEEPALIVE_SECONDS``, changes a documented contract. The
+    tuple is written out positionally rather than field by field so that
+    dropping or reordering a field fails too.
+    """
+    assert WebSocketLimits() == WebSocketLimits(20.0, 20.0, 10.0, 40.0, 32768, (32, 8))
 
 
 def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -> None:
@@ -874,12 +907,19 @@ class _HalfOpenPeer:
         return opcode, self._take(length)
 
 
-def _reaped(wait: Callable[[], None], *, ceiling: float = 10.0) -> bool:
+def _reaped(wait: Callable[[], None], *, ceiling: float = 30.0) -> bool:
     """Whether *wait* observes the last subscription ending.
 
     The ceiling only keeps a regression from hanging the suite: the assertion
     is on the boolean, never on how long it took. Nothing competes with the
     waiter, so the outcome does not depend on how fast the host is.
+
+    The ceiling is deliberately far above the injected timeouts, because those
+    are not the largest term under it. ``wait_for_subscriber_disconnect``
+    reaches ``wait_for_none_active`` with its default settle window,
+    ``RECONNECT_SETTLE_SECONDS`` (1.0s), which no caller here injects and which
+    dominates both socket tests' elapsed time. 30s leaves room for that
+    constant to be retuned without silently eating the headroom.
     """
     observed = threading.Event()
 
@@ -962,7 +1002,7 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
         ):
             peer = _HalfOpenPeer(gateway, receive_buffer=_PEER_RECEIVE_BUFFER_BYTES)
             try:
-                for index in range(_STALL_EVENTS):
+                for index in range(_stall_event_count()):
                     parts.journal.publish_output(
                         "stdout", f"{index:04d}" + "x" * _STALL_EVENT_BYTES
                     )
@@ -980,11 +1020,21 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
 def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
     tmp_path: Path,
 ) -> None:
-    """The send-side overflow policy, without depending on any socket's buffers."""
-    limits = WebSocketLimits(write_deadline_seconds=0.05)
+    """The send-side overflow policy, without depending on any socket's buffers.
+
+    The Fake raises the expired deadline rather than waiting for one, so this
+    test is wall-clock free: what is under test is how ``_send`` and its
+    callers handle the error, not that ``asyncio.timeout`` fires, which the
+    socket tests above already exercise against a real stalled transport.
+
+    Exactly one abort is the assertion that matters. A deadline is not a
+    request failure, so it must not be funnelled into the control-path
+    ``Response`` handler and written a second time to the socket that was just
+    aborted.
+    """
     parts = build_server_parts(tmp_path / "logs")
     tracker = SubscriptionTracker()
-    gateway = WebSocketGateway(parts.api, subscriptions=tracker, limits=limits)
+    gateway = WebSocketGateway(parts.api, subscriptions=tracker)
 
     class FakeTransport:
         def __init__(self) -> None:
@@ -994,12 +1044,11 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
             self.aborts += 1
 
     class StalledConnection:
-        """A connection whose writes never complete, as a paused transport's do."""
+        """A connection whose every write has already outlasted its deadline."""
 
         def __init__(self, frames: list[str]) -> None:
             self.frames = iter(frames)
             self.transport = FakeTransport()
-            self.state = "OPEN"
 
         def __aiter__(self) -> StalledConnection:
             return self
@@ -1012,26 +1061,20 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
 
         async def send(self, message: str) -> None:
             del message
-            await asyncio.Event().wait()
+            raise TimeoutError
 
         async def close(self) -> None:
-            self.state = "CLOSED"
+            """Absorb the library-owned close in ``_handle_connection``'s teardown."""
 
     connection = StalledConnection([SubscribeRequest(client_id="stalled").model_dump_json()])
 
-    async def drive() -> None:
-        # The ceiling turns a missing deadline into a failure instead of a
-        # hung suite. It cannot mask one: the deadline under test is 0.05s.
-        await asyncio.wait_for(
-            gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101109 [SLF001]; drive the write deadline without a socket whose buffers the test cannot bound
-                cast("ServerConnection", connection)
-            ),
-            timeout=10.0,
+    asyncio.run(
+        gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101109 [SLF001]; drive the write deadline without a socket whose buffers the test cannot bound
+            cast("ServerConnection", connection)
         )
+    )
 
-    asyncio.run(drive())
-
-    assert connection.transport.aborts >= 1
+    assert connection.transport.aborts == 1
     assert _reaped(lambda: tracker.wait_for_none_active(settle_seconds=0.0))
     parts.close()
 

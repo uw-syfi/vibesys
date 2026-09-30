@@ -149,8 +149,11 @@ class WebSocketLimits:
     liveness bound holds at all.
 
     Defaults reproduce the values in force before they were named, so the
-    library's own defaults can no longer move them: 20s pings, a 10s closing
-    handshake, a 32 KiB write buffer, and a ``(32, 8)`` receive queue. The
+    library's own defaults can no longer move them. The field defaults below
+    are the only statement of those numbers in this module; the published
+    liveness table in ``wire-protocol.md`` quotes them, and
+    ``test_the_stated_transport_bounds_are_the_values_they_replaced`` asserts
+    the whole tuple so an edit here cannot silently falsify the table. The
     default write deadline is one full keepalive reaping window, because a
     write that cannot make progress for as long as an unresponsive peer would
     take to fail its keepalive is the same failure and deserves the same bound.
@@ -528,11 +531,14 @@ class WebSocketGateway:
     async def _send(self, websocket: ServerConnection, payload: str) -> None:
         """Write one protocol frame, stalling at most one write deadline.
 
-        Every frame the gateway emits goes through here, so the send-side
-        policy lives in one place: stall the producing coroutine while the
-        peer is behind (which is what lets the next ``subscription_checkpoint``
-        coalesce a backlog into one batch), and abandon the peer once the stall
-        outlasts ``write_deadline_seconds``.
+        Every *protocol* frame the gateway emits goes through here, so the
+        send-side policy lives in one place: stall the producing coroutine
+        while the peer is behind (which is what lets the next
+        ``subscription_checkpoint`` coalesce a backlog into one batch), and
+        abandon the peer once the stall outlasts ``write_deadline_seconds``.
+        The one write that does not is the library-owned close frame in
+        ``_handle_connection``'s teardown, whose ``drain()`` is unbounded;
+        that path runs only after the stream is already ending.
 
         The deadline is what makes the liveness bound true rather than
         conditional. ``websockets`` ends every write, including its own
@@ -540,12 +546,19 @@ class WebSocketGateway:
         the transport sits above ``send_buffer_bytes``. A peer that neither
         drains its socket nor answers pings therefore blocks the keepalive that
         was supposed to reap it, and without this deadline the subscription is
-        never released and a non-detached run never exits.
+        never released and a non-detached run never exits. The keepalive's own
+        ping write is still not covered by any deadline, so the keepalive bound
+        holds only while the transport dips below its low-water mark, which it
+        does whenever a ``send`` here returns.
 
         The transport is aborted rather than closed because a close frame is
         itself a write: it would re-enter the same stalled ``drain()``. This is
-        the library's own escape hatch for the same problem, used in
-        ``websockets.asyncio.server.Server.conn_handler``.
+        the library's own escape hatch for the same problem: ``Connection``'s
+        ``send_context`` aborts the transport on its ``raise_close_exc`` path
+        once the close deadline elapses
+        (``websockets.asyncio.connection``, 14.2 line 931). The four aborts in
+        ``Server.conn_handler`` are not this case; they are handshake-failure,
+        rejected-handshake, and unexpected-error paths.
         """
         try:
             async with asyncio.timeout(self.limits.write_deadline_seconds):
@@ -585,6 +598,13 @@ class WebSocketGateway:
                     await self._stream(websocket, request)
                 return True
             response = self.api.execute(request)
+        except TimeoutError:
+            # A write deadline is not a request failure, and ``TimeoutError``
+            # is an ``OSError`` subclass, so without this the broad handler
+            # below would convert it into a control-path ``Response`` and hand
+            # it to ``_send`` for the transport that was just aborted: a second
+            # doomed write, on the wrong envelope, costing a second deadline.
+            raise
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101017 [BLE001]; convert malformed browser frames into protocol responses
             response = Response.from_exception(
                 request_id,
