@@ -1,11 +1,9 @@
 import {describe, expect, it} from 'bun:test';
-import {BackendClientError} from './errors.js';
 import type {EventBatchMessage, RunEvent} from './protocol.js';
 import {
-  type BackfillPlan,
-  type BackfillReconciliation,
+  type BackfillFetch,
+  type BackfillOutcome,
   type BackfillRequest,
-  type BackfillStamp,
   type BatchContext,
   type BatchReconciliation,
   StreamReconciler,
@@ -44,28 +42,85 @@ function sequences(events: readonly RunEvent[]): readonly (number | undefined)[]
   return events.map(item => item.sequence);
 }
 
-function prepended(settled: BackfillReconciliation): {
+function prepended(outcome: BackfillOutcome): {
   readonly events: readonly RunEvent[];
   readonly historyFloor: number;
 } {
-  if (settled.kind !== 'prepend') throw new Error(`expected a prepend, got ${settled.kind}`);
-  return settled;
+  if (outcome.kind !== 'prepend') throw new Error(`expected a prepend, got ${outcome.kind}`);
+  return outcome;
 }
 
-function fetched(plan: BackfillPlan): BackfillRequest {
-  if (plan.kind !== 'fetch') throw new Error(`expected a range to fetch, got ${plan.kind}`);
-  return plan.request;
-}
-
-/** The rejection `action` threw, so a test can assert on its kind and message. */
-function rejection(action: () => unknown): BackendClientError {
+/** The error `promise` rejected with, so a test can assert on it. */
+async function rejected(promise: Promise<unknown>): Promise<Error> {
   try {
-    action();
+    await promise;
   } catch (error) {
-    if (error instanceof BackendClientError) return error;
-    throw error;
+    return error as Error;
   }
   throw new Error('expected a rejection');
+}
+
+/** A promise a test settles on command, so a request stays in flight without a timer. */
+interface Gate {
+  readonly promise: Promise<readonly RunEvent[]>;
+  readonly answer: (events: readonly RunEvent[]) => void;
+  readonly fail: (error: Error) => void;
+}
+
+function gate(): Gate {
+  let answer!: (events: readonly RunEvent[]) => void;
+  let fail!: (error: Error) => void;
+  const promise = new Promise<readonly RunEvent[]>((resolve, reject) => {
+    answer = resolve;
+    fail = reject;
+  });
+  return {promise, answer, fail};
+}
+
+/**
+ * A fake `query.events`: records every range it was asked for and answers each
+ * only when the test says so, which is what lets a test hold a request in
+ * flight across a batch with no reliance on timing.
+ */
+class FakeQuery {
+  readonly requests: BackfillRequest[] = [];
+  readonly #gates: Gate[] = [];
+
+  readonly fetch: BackfillFetch = request => {
+    this.requests.push(request);
+    const pending = gate();
+    this.#gates.push(pending);
+    return pending.promise;
+  };
+
+  /** The bounds of the `index`th range asked for, exclusive on both ends. */
+  range(index = 0): readonly [number, number] {
+    const request = this.requests[index];
+    if (request === undefined) throw new Error(`no range was asked for at ${index}`);
+    return [request.afterSequence, request.beforeSequence];
+  }
+
+  answer(events: readonly RunEvent[]): void {
+    this.#latest().answer(events);
+  }
+
+  fail(error: Error): void {
+    this.#latest().fail(error);
+  }
+
+  #latest(): Gate {
+    const pending = this.#gates.at(-1);
+    if (pending === undefined) throw new Error('no request is in flight');
+    return pending;
+  }
+}
+
+/** One backfill whose fetch answers immediately with `events`. */
+function backfilled(
+  reconciler: StreamReconciler,
+  events: readonly RunEvent[] = [],
+): Promise<BackfillOutcome> {
+  return reconciler.backfill(() => Promise.resolve(events));
 }
 
 /** How far apart the run-level spine's events sit in a log. */
@@ -146,11 +201,14 @@ describe('StreamReconciler batch dispositions', () => {
     });
   });
 
-  it('keeps a backfilled floor when a later live batch re-declares the bootstrap floor', () => {
+  it('keeps a backfilled floor when a later live batch re-declares the bootstrap floor', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 1_000});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 1_500}), FRESH);
-    const settled = reconciler.settleBackfill(fetched(reconciler.beginBackfill()), []);
-    expect(settled).toEqual({kind: 'prepend', events: [], historyFloor: 500});
+    expect(await backfilled(reconciler)).toEqual({
+      kind: 'prepend',
+      events: [],
+      historyFloor: 500,
+    });
 
     // The subscription re-declares its own bootstrap floor on every live batch.
     expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 1_500}), FRESH)).toEqual(
@@ -169,7 +227,7 @@ describe('StreamReconciler batch dispositions', () => {
     ).toEqual({kind: 'rebootstrap', historyFloor: 4_200});
   });
 
-  it('takes a re-bootstrapped floor literally when a shorter run log replays whole', () => {
+  it('takes a re-bootstrapped floor literally when a shorter run log replays whole', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 2_000}), FRESH);
     // A run log shorter than the tail is replayed whole and declares floor 0.
@@ -180,7 +238,7 @@ describe('StreamReconciler batch dispositions', () => {
         historyFloor: 0,
       },
     );
-    expect(reconciler.beginBackfill()).toEqual({kind: 'complete'});
+    expect(await backfilled(reconciler)).toEqual({kind: 'complete'});
   });
 
   /**
@@ -191,7 +249,7 @@ describe('StreamReconciler batch dispositions', () => {
    * nothing, so the next fresh batch is still a first batch and takes its own
    * floor literally rather than as a descent.
    */
-  it('lets a resume before any bootstrap declare no floor at all', () => {
+  it('lets a resume before any bootstrap declare no floor at all', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 900}), RESUMED)).toEqual(
       {
@@ -199,29 +257,30 @@ describe('StreamReconciler batch dispositions', () => {
         historyFloor: 0,
       },
     );
-    expect(reconciler.beginBackfill()).toEqual({kind: 'complete'});
+    expect(await backfilled(reconciler)).toEqual({kind: 'complete'});
     expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 900}), FRESH)).toEqual({
       kind: 'extend',
       historyFloor: 900,
     });
   });
 
-  it('keeps the floor already reached on a resume so scrollback survives a reconnect', () => {
+  it('keeps the floor already reached on a resume so scrollback survives a reconnect', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 1_000});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 1_500}), FRESH);
-    reconciler.settleBackfill(fetched(reconciler.beginBackfill()), []);
-    // A resume dials with no tail, so the server declares the client's cursor
-    // as the floor. That is far above the 500 the reader has backfilled to.
-    expect(
-      reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 9_000}), RESUMED),
-    ).toEqual({kind: 'extend', historyFloor: 500});
+    await backfilled(reconciler);
+    // A tail-less subscription withheld nothing, so it reports floor 0 however
+    // far the cursor it resumed from had reached. Either way the floor the
+    // reader backfilled to is what survives.
+    expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 0}), RESUMED)).toEqual({
+      kind: 'extend',
+      historyFloor: 500,
+    });
   });
 
   /**
-   * The resumed path reads the floor but never records it as declared. The
-   * cursor a resume declares is the top of the caller's fold, far above any
-   * bootstrap floor, so recording it would swallow the next real
-   * re-bootstrap: every later tail dial declares less than the cursor.
+   * The resumed path reads the floor but never records it as declared, outside
+   * the store-change branch below. Recording it would swallow the next real
+   * re-bootstrap if a resume ever declared a floor above a tail dial's.
    */
   it('lets a resume declare any floor without arming the re-bootstrap signal', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
@@ -235,7 +294,7 @@ describe('StreamReconciler batch dispositions', () => {
     );
   });
 
-  it('treats a resumed batch from a different store as a fresh bootstrap, spine included', () => {
+  it('treats a resumed batch from a different store as a fresh bootstrap, spine included', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     const before = bootstrap('server-log', 100, [101, 102]);
     reconciler.reconcileBatch(before.message, FRESH);
@@ -246,35 +305,41 @@ describe('StreamReconciler batch dispositions', () => {
     });
     expect(reconciler.storeId()).toBe('run-log');
     // The new store's spine is tracked, and the superseded store's is gone.
-    const settled = reconciler.settleBackfill(
-      fetched(reconciler.beginBackfill()),
+    const settled = await backfilled(
+      reconciler,
       [...swapped.spine, ...before.spine].map(sequence => event(sequence, SPINE_TYPE)),
     );
     expect(sequences(prepended(settled).events)).toEqual(
       before.spine.filter(sequence => !swapped.spine.includes(sequence)),
     );
   });
+
+  /**
+   * The store-change branch is the one place a resume writes `#declaredFloor`,
+   * and on the wire the value it writes is 0: a tail-less subscription reports
+   * `history_after_sequence = 0` whatever cursor it resumed from
+   * (`reported_floor = 0 if request.tail is None`,
+   * `src/server/transport/websocket.py:390`,
+   * `src/server/transport/unix_jsonl.py:190`), because nothing was withheld.
+   * The swap is a whole-log replay from zero (`src/server/api/service.py:372`),
+   * so 0 is the truth about it, but every later tail dial then declares more
+   * than 0 and re-bootstraps again with the store unchanged. TUI-identical
+   * (`session-controller.ts:1436`), and pinned because `#declaredFloor`'s doc
+   * comment claims it.
+   */
+  it('records the floor a resumed store swap declared, so the next tail dial re-bootstraps', () => {
+    const reconciler = new StreamReconciler({backfillChunk: 100});
+    reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 2_000}), FRESH);
+    expect(
+      reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 0}), RESUMED),
+    ).toEqual({kind: 'rebootstrap', historyFloor: 0});
+    expect(
+      reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 1_500}), FRESH),
+    ).toEqual({kind: 'rebootstrap', historyFloor: 1_500});
+  });
 });
 
 describe('StreamReconciler validation', () => {
-  it('rejects a declared floor that cannot be a sequence, naming the key', () => {
-    for (const declaredFloor of [-1, -4_096, 12.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-      const reconciler = new StreamReconciler({backfillChunk: 100});
-      const error = rejection(() => reconciler.reconcileBatch(batch({declaredFloor}), FRESH));
-      expect(error.kind).toBe('parse');
-      expect(error.message).toContain('event_batch.history_after_sequence');
-      expect(error.message).toContain(String(declaredFloor));
-    }
-  });
-
-  it('rejects a declared floor on the resumed path too, which ignores its value', () => {
-    const reconciler = new StreamReconciler({backfillChunk: 100});
-    reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 10}), FRESH);
-    expect(
-      rejection(() => reconciler.reconcileBatch(batch({declaredFloor: -1}), RESUMED)).kind,
-    ).toBe('parse');
-  });
-
   it('accepts an omitted declared floor as zero', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     expect(reconciler.reconcileBatch(batch({storeId: 'log'}), FRESH)).toEqual({
@@ -283,6 +348,12 @@ describe('StreamReconciler validation', () => {
     });
   });
 
+  /**
+   * A `RangeError` rather than a `BackendClientError`: an out-of-range option
+   * is a bug in the wiring code, not an outcome of talking to a server, so
+   * there is no `BackendErrorKind` for a caller to branch on. See the note on
+   * `BackendClientError`.
+   */
   it('rejects a backfill chunk that cannot size a range', () => {
     for (const backfillChunk of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(() => new StreamReconciler({backfillChunk})).toThrow(RangeError);
@@ -368,10 +439,15 @@ describe('StreamReconciler store identity', () => {
    * fresh batch declared, not the highest one the stream ever declared, so a
    * store-preserving descent is taken as a backfill descent (no discard, no
    * spine clear, no generation bump) and the next batch back at the original
-   * floor re-bootstraps instead. The server never sends that pair: one
-   * subscription's floor is fixed at its dial, so a lower floor means a new
-   * dial, and a new dial's floor only rises as the log grows. Reported as a
-   * candidate follow-up.
+   * floor re-bootstraps instead.
+   *
+   * What keeps the pair unreachable today is a client policy, not the server's
+   * arithmetic: one subscription's floor is fixed at its dial, so a lower floor
+   * needs a second bootstrap dial, and `PersistentEventStream` resumes on every
+   * reconnect once a fresh batch has landed
+   * (`persistent-event-stream.ts:250` and `:286`). Any consumer that dials
+   * differently reaches it. #1036 owns the choice between clamping and
+   * reporting.
    */
   it('takes a store-preserving floor descent as a backfill descent, then re-bootstraps on the way back up (current behavior)', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
@@ -388,146 +464,191 @@ describe('StreamReconciler store identity', () => {
 });
 
 describe('StreamReconciler backfill', () => {
-  it('reports history complete before any batch and at floor zero', () => {
+  it('reports history complete before any batch and at floor zero', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
-    expect(reconciler.beginBackfill()).toEqual({kind: 'complete'});
+    const query = new FakeQuery();
+    expect(await reconciler.backfill(query.fetch)).toEqual({kind: 'complete'});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 0}), FRESH);
-    expect(reconciler.beginBackfill()).toEqual({kind: 'complete'});
+    expect(await reconciler.backfill(query.fetch)).toEqual({kind: 'complete'});
+    expect(query.requests).toEqual([]);
   });
 
-  it('asks for the chunk below the floor, including the floor itself', () => {
+  it('asks for the chunk below the floor, including the floor itself', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 40});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 100}), FRESH);
+    const query = new FakeQuery();
     // Both bounds are exclusive, so the range holds exactly `backfillChunk`
     // sequences and the last of them is the floor itself.
-    const first = fetched(reconciler.beginBackfill());
-    expect([first.afterSequence, first.beforeSequence]).toEqual([60, 101]);
-    reconciler.settleBackfill(first, []);
-    const second = fetched(reconciler.beginBackfill());
-    expect([second.afterSequence, second.beforeSequence]).toEqual([20, 61]);
+    const first = reconciler.backfill(query.fetch);
+    expect(query.range(0)).toEqual([60, 101]);
+    query.answer([]);
+    await first;
+    const second = reconciler.backfill(query.fetch);
+    expect(query.range(1)).toEqual([20, 61]);
+    query.answer([]);
+    await second;
   });
 
-  it('never asks below the start of the log', () => {
+  it('never asks below the start of the log', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 1_000});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 10}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
-    expect([request.afterSequence, request.beforeSequence]).toEqual([0, 11]);
-    expect(prepended(reconciler.settleBackfill(request, [])).historyFloor).toBe(0);
+    const query = new FakeQuery();
+    const settled = reconciler.backfill(query.fetch);
+    expect(query.range()).toEqual([0, 11]);
+    query.answer([]);
+    expect(prepended(await settled).historyFloor).toBe(0);
   });
 
-  it('holds one range at a time until the caller settles it', () => {
+  it('shares one round trip between concurrent readers', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
-    // The floor moves only when a response is folded, so a second range taken
-    // now would be the same range.
-    expect(reconciler.beginBackfill()).toEqual({kind: 'in-flight'});
-    reconciler.settleBackfill(request, []);
-    expect(fetched(reconciler.beginBackfill()).afterSequence).toBe(300);
+    const query = new FakeQuery();
+    const first = reconciler.backfill(query.fetch);
+    const second = reconciler.backfill(query.fetch);
+    // The floor moves only when an answer is folded, so a second range taken
+    // now would be the same range. The second reader joins the first round trip
+    // instead of asking for it again.
+    expect(second).toBe(first);
+    expect(query.requests).toHaveLength(1);
+    query.answer([event(450)]);
+    expect(prepended(await second).historyFloor).toBe(400);
+    // The slot is free once the round trip settles, and the next ask moves on.
+    const next = reconciler.backfill(query.fetch);
+    expect(query.range(1)).toEqual([300, 401]);
+    query.answer([]);
+    await next;
   });
 
-  it('folds one response once, so a duplicated answer cannot lower the floor twice', () => {
+  it('frees the slot and leaves the floor when the fetch fails', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
-    expect(prepended(reconciler.settleBackfill(request, [event(450)])).historyFloor).toBe(400);
-    expect(reconciler.settleBackfill(request, [event(450)])).toEqual({kind: 'superseded'});
+    const query = new FakeQuery();
+    const failed = reconciler.backfill(query.fetch);
+    query.fail(new Error('query.events did not answer'));
+    // The rejection reaches the caller, which is the only party that can decide
+    // whether a failed backfill is worth showing.
+    expect((await rejected(failed)).message).toBe('query.events did not answer');
+    // The floor stayed where it was, so the same range is asked for again, and
+    // the slot the failed request held was released without anyone reporting it.
+    const retry = reconciler.backfill(query.fetch);
+    expect(query.range(1)).toEqual(query.range(0));
+    query.answer([event(450)]);
+    expect(prepended(await retry).historyFloor).toBe(400);
   });
 
-  it('retries the same range after an abandoned request', () => {
+  it('frees the slot for a fetch that throws before it returns a promise', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
-    const failed = fetched(reconciler.beginBackfill());
-    reconciler.abandonBackfill(failed);
-    const retry = fetched(reconciler.beginBackfill());
-    expect([retry.afterSequence, retry.beforeSequence]).toEqual([
-      failed.afterSequence,
-      failed.beforeSequence,
-    ]);
-    // The abandoned request is no longer outstanding, so a late answer to it
-    // cannot fold under the retry.
-    expect(reconciler.settleBackfill(failed, [event(450)])).toEqual({kind: 'superseded'});
-    expect(prepended(reconciler.settleBackfill(retry, [event(450)])).historyFloor).toBe(400);
+    const thrown = reconciler.backfill(() => {
+      throw new Error('no transport');
+    });
+    expect((await rejected(thrown)).message).toBe('no transport');
+    expect(prepended(await backfilled(reconciler, [])).historyFloor).toBe(400);
   });
 
-  it('ignores an abandon of a range that is not outstanding', () => {
+  /**
+   * The floor recorded comes from the range the reconciler computed when the
+   * request left, not from wherever the floor has moved to by the time the
+   * answer lands. Only a batch that lowers the floor without re-bootstrapping
+   * can tell the two apart, and that is the store-preserving descent the server
+   * does not send (pinned above as current behavior), so this is directed
+   * rather than something the generated traffic reaches.
+   */
+  it('records the floor of the range it asked for, not the floor when the answer lands', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
-    const first = fetched(reconciler.beginBackfill());
-    reconciler.settleBackfill(first, []);
-    const second = fetched(reconciler.beginBackfill());
-    reconciler.abandonBackfill(first);
-    expect(prepended(reconciler.settleBackfill(second, [])).historyFloor).toBe(300);
+    const query = new FakeQuery();
+    const settled = reconciler.backfill(query.fetch);
+    expect(query.range()).toEqual([400, 501]);
+    // A descent with no re-bootstrap: same store, lower declared floor.
+    expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 300}), FRESH)).toEqual({
+      kind: 'extend',
+      historyFloor: 300,
+    });
+    query.answer([]);
+    // 300, the lowest floor reached, and not the 200 that deriving the range
+    // from the floor now held would give, which no round trip justifies.
+    expect(prepended(await settled).historyFloor).toBe(300);
   });
 
-  it('judges a response by the range it issued, not the one handed back', () => {
+  it('rejects an answer wholesale when a re-bootstrap landed while it was in flight', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
-    reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
-    // A widened copy keeps the stamp, so it settles, but the floor comes from
-    // the range the reconciler issued rather than the one it was handed.
-    expect(
-      prepended(reconciler.settleBackfill({...request, afterSequence: 0}, [])).historyFloor,
-    ).toBe(400);
+    reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 200}), FRESH);
+    const query = new FakeQuery();
+    const stale = reconciler.backfill(query.fetch);
+    reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
+    query.answer([event(150), event(199)]);
+    expect(await stale).toEqual({kind: 'superseded'});
   });
 
-  it('cannot be handed a range it never issued', () => {
+  it('leaves the floor where the re-bootstrap put it when it rejects a superseded answer', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
-    reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
-    const forged: BackfillRequest = {...request, stamp: (request.stamp + 1) as BackfillStamp};
-    expect(reconciler.settleBackfill(forged, [event(450)])).toEqual({kind: 'superseded'});
-    // @ts-expect-error a stamp is only mintable inside the reconciler
-    const invented: BackfillRequest = {...request, stamp: request.stamp + 1};
-    reconciler.abandonBackfill(invented);
-    // Neither touched the outstanding range.
-    expect(prepended(reconciler.settleBackfill(request, [event(450)])).historyFloor).toBe(400);
+    reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 200}), FRESH);
+    const query = new FakeQuery();
+    const stale = reconciler.backfill(query.fetch);
+    reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
+    query.answer([event(150)]);
+    await stale;
+    // The next ask backfills against the new log's own numbering, from 900.
+    const next = reconciler.backfill(query.fetch);
+    expect(query.range(1)).toEqual([800, 901]);
+    query.answer([]);
+    expect(prepended(await next).historyFloor).toBe(800);
   });
 
-  it('reports history complete with a range still outstanding', () => {
+  it('reports history complete with a range still outstanding', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 400});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 300}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
+    const query = new FakeQuery();
+    const outstanding = reconciler.backfill(query.fetch);
     // A live batch re-declaring floor zero says the log now streaming is
     // complete, so there is no older range left to wait for.
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 0}), FRESH);
-    expect(reconciler.beginBackfill()).toEqual({kind: 'complete'});
-    // The outstanding range still settles: the caller owes it an answer.
-    expect(reconciler.settleBackfill(request, [event(150)])).toEqual({
+    expect(await reconciler.backfill(query.fetch)).toEqual({kind: 'complete'});
+    expect(query.requests).toHaveLength(1);
+    // The outstanding round trip still answers: nothing re-bootstrapped.
+    query.answer([event(150)]);
+    expect(await outstanding).toEqual({
       kind: 'prepend',
       events: [event(150)],
       historyFloor: 0,
     });
   });
 
-  it('filters spine events the tail already delivered out of a chunk', () => {
+  it('filters spine events the tail already delivered out of a chunk', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     const {message, spine} = bootstrap('log', 200, [201, 202]);
     reconciler.reconcileBatch(message, FRESH);
     const chunk = [101, ...spine.filter(s => s >= 101), 150, 199].map(s => event(s, SPINE_TYPE));
-    const settled = prepended(
-      reconciler.settleBackfill(fetched(reconciler.beginBackfill()), chunk),
-    );
+    const settled = prepended(await backfilled(reconciler, chunk));
     expect(sequences(settled.events)).toEqual([101, 150, 199]);
     expect(settled.historyFloor).toBe(100);
   });
 
-  it('never filters an unsequenced event', () => {
+  /**
+   * The two `sequence === undefined` branches (the spine filter's and
+   * `#recordSpine`'s) are runtime no-ops: `Set.has(undefined)` is false and
+   * `undefined <= 200` is false, so deleting either changes nothing any test
+   * could see. `tsc` holds them instead (TS2345: `Set<number>.has` cannot take
+   * `number | undefined`), which is why both are written as narrowing branches
+   * rather than as disjuncts. What this pins is the observable half: an event
+   * the server sent with no sequence is handed back rather than dropped, and
+   * a sequenced one the batch already carried from below its floor is not.
+   */
+  it('hands back every unsequenced event in a chunk', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
-    const message = batch({storeId: 'log', declaredFloor: 200, sequences: [undefined, 7]});
-    reconciler.reconcileBatch(message, FRESH);
-    const settled = reconciler.settleBackfill(fetched(reconciler.beginBackfill()), [
-      event(undefined),
-      event(undefined),
-      event(7),
-    ]);
+    reconciler.reconcileBatch(
+      batch({storeId: 'log', declaredFloor: 200, sequences: [undefined, 7]}),
+      FRESH,
+    );
+    const settled = await backfilled(reconciler, [event(undefined), event(undefined), event(7)]);
     expect(sequences(prepended(settled).events)).toEqual([undefined, undefined]);
   });
 
-  it('hands back an empty chunk as an empty prepend that still lowers the floor', () => {
+  it('hands back an empty chunk as an empty prepend that still lowers the floor', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 200}), FRESH);
-    expect(reconciler.settleBackfill(fetched(reconciler.beginBackfill()), [])).toEqual({
+    expect(await backfilled(reconciler)).toEqual({
       kind: 'prepend',
       events: [],
       historyFloor: 100,
@@ -540,65 +661,40 @@ describe('StreamReconciler backfill', () => {
    * `ge=0` and exclusive (`src/server/api/protocol.py:183-187`), so no range
    * can return sequence 0, and the only sequences the short circuit suppresses
    * are `<= 0`. It is observable through the filter being total over whatever
-   * chunk the caller hands back, which is what this pins, together with the
+   * chunk the fetch answers with, which is what this pins, together with the
    * batch not disturbing a spine an earlier bootstrap recorded. Sequence 0 is
    * protocol-legal: `RunEvent.sequence` carries no lower bound
    * (`src/server/api/protocol.py:247`).
    */
-  it('records no spine and disturbs none for a batch that declares floor zero', () => {
+  it('records no spine and disturbs none for a batch that declares floor zero', async () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     const {message} = bootstrap('log', 200, [201]);
     reconciler.reconcileBatch(message, FRESH);
-    const request = fetched(reconciler.beginBackfill());
+    const query = new FakeQuery();
+    const settled = reconciler.backfill(query.fetch);
     expect(
       reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 0, sequences: [0]}), FRESH),
     ).toEqual({kind: 'extend', historyFloor: 0});
-    const settled = reconciler.settleBackfill(request, [
-      event(0),
-      event(120, SPINE_TYPE),
-      event(150),
-    ]);
-    expect(sequences(prepended(settled).events)).toEqual([0, 150]);
+    query.answer([event(0), event(120, SPINE_TYPE), event(150)]);
+    expect(sequences(prepended(await settled).events)).toEqual([0, 150]);
   });
 
-  it('rejects a response wholesale when a re-bootstrap landed while it was in flight', () => {
-    const reconciler = new StreamReconciler({backfillChunk: 100});
-    reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 200}), FRESH);
-    const request = fetched(reconciler.beginBackfill());
-    reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
-    expect(reconciler.settleBackfill(request, [event(150), event(199)])).toEqual({
-      kind: 'superseded',
-    });
-  });
-
-  it('leaves the floor where the re-bootstrap put it when it rejects a superseded response', () => {
-    const reconciler = new StreamReconciler({backfillChunk: 100});
-    reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 200}), FRESH);
-    const stale = fetched(reconciler.beginBackfill());
-    reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
-    reconciler.settleBackfill(stale, [event(150)]);
-    // The next ask backfills against the new log's own numbering, from 900.
-    const next = fetched(reconciler.beginBackfill());
-    expect(next.afterSequence).toBe(800);
-    expect(prepended(reconciler.settleBackfill(next, [])).historyFloor).toBe(800);
-  });
-
-  it('clears the spine set on a re-bootstrap but not on a backfill descent', () => {
+  it('clears the spine set on a re-bootstrap but not on a backfill descent', async () => {
     const chunk = [event(1, SPINE_TYPE), event(50)];
     const {message} = bootstrap('log', 200, [201]);
 
     const descent = new StreamReconciler({backfillChunk: 100});
     descent.reconcileBatch(message, FRESH);
-    descent.settleBackfill(fetched(descent.beginBackfill()), []);
+    await backfilled(descent);
     // The floor is 100 now; the spine recorded at 200 must still filter.
-    const kept = descent.settleBackfill(fetched(descent.beginBackfill()), chunk);
-    expect(sequences(prepended(kept).events)).toEqual([50]);
+    const kept = prepended(await backfilled(descent, chunk));
+    expect(sequences(kept.events)).toEqual([50]);
 
     const reset = new StreamReconciler({backfillChunk: 100});
     reset.reconcileBatch(message, FRESH);
     reset.reconcileBatch(batch({storeId: 'log', declaredFloor: 800}), FRESH);
-    const unfiltered = reset.settleBackfill(fetched(reset.beginBackfill()), chunk);
-    expect(sequences(prepended(unfiltered).events)).toEqual([1, 50]);
+    const unfiltered = prepended(await backfilled(reset, chunk));
+    expect(sequences(unfiltered.events)).toEqual([1, 50]);
   });
 });
 
@@ -643,7 +739,7 @@ type Command =
   | {readonly op: 'batch'; readonly resumed: boolean; readonly message: EventBatchMessage}
   | {readonly op: 'begin'; readonly id: number}
   | {readonly op: 'settle'; readonly id: number; readonly seed: number}
-  | {readonly op: 'abandon'; readonly id: number};
+  | {readonly op: 'fail'; readonly id: number};
 
 /**
  * The stream the generator is modelling, as the server sees it.
@@ -659,7 +755,7 @@ interface Stream {
   readonly reportsIdentity: boolean;
   /** The log now streaming. Each log numbers its own sequences from 1. */
   log: string;
-  /** The floor every batch on the live connection declares. */
+  /** The floor every batch on the live connection declares, as the wire carries it. */
   floor: number;
   /** Whether the live connection resumed from the client's cursor. */
   resumed: boolean;
@@ -721,7 +817,9 @@ function batchOn(
 /**
  * A tail bootstrap dial. The server floors the replay at `latest - tail` and
  * replays the run-level spine from below it
- * (`subscription_bootstrap`, `src/server/api/service.py:353-386`).
+ * (`subscription_bootstrap`, `src/server/api/service.py:353-386`), and reports
+ * that floor on every batch the connection sends
+ * (`src/server/transport/websocket.py:390`).
  */
 function bootstrapDial(rng: Rng, tops: Map<string, number>, stream: Stream): Command {
   if (stream.reportsIdentity && rng.chance(0.3)) stream.log = rng.pick(LOGS);
@@ -732,24 +830,34 @@ function bootstrapDial(rng: Rng, tops: Map<string, number>, stream: Stream): Com
 }
 
 /**
- * A resume dial. It carries the client's cursor and no tail, so the server
- * declares the cursor as the floor and replays no spine. A cursor naming a
- * store the journal has since replaced is dropped, and the live log is
- * replayed whole from zero (`src/server/api/service.py:372-375`).
+ * A resume dial: the client's cursor and no tail.
+ *
+ * A tail-less subscription reports `history_after_sequence = 0` on every batch
+ * it sends, whatever cursor it resumed from
+ * (`reported_floor = 0 if request.tail is None`,
+ * `src/server/transport/websocket.py:390`,
+ * `src/server/transport/unix_jsonl.py:190`): nothing was withheld, so there is
+ * no floor to report. The cursor becomes `bootstrap.floor` internally
+ * (`src/server/api/service.py:374`) and never reaches the client. No spine
+ * either, because `bootstrap_spine = tail is not None`
+ * (`src/server/api/service.py:376`, `src/server/journal.py:367`).
+ *
+ * A cursor naming a store the journal has since replaced is dropped and the
+ * live log is replayed whole from zero (`src/server/api/service.py:372-374`).
  */
 function resumeDial(rng: Rng, tops: Map<string, number>, stream: Stream): Command {
   const swapped = stream.reportsIdentity && rng.chance(0.3);
   if (swapped) stream.log = rng.pick(LOGS.filter(log => log !== stream.log));
-  stream.floor = swapped ? 0 : logTop(rng, tops, stream.log);
+  stream.floor = 0;
   stream.resumed = true;
   return batchOn(rng, tops, stream, swapped ? span(1, logTop(rng, tops, stream.log)) : []);
 }
 
 /**
- * One backfill response, dense over the range the request asked for. Both
- * bounds are exclusive (`src/server/api/protocol.py:183-187`), so a chunk
- * covering a bootstrap floor redelivers the spine event sitting at it, which
- * is what the reconciler has to filter.
+ * One backfill answer, dense over the range the request asked for. Both bounds
+ * are exclusive (`src/server/api/protocol.py:183-187`), so a chunk covering a
+ * bootstrap floor redelivers the spine event sitting at it, which is what the
+ * reconciler has to filter.
  */
 function chunkForRange(request: BackfillRequest, seed: number): readonly RunEvent[] {
   const rng = new Rng(seed);
@@ -768,8 +876,8 @@ function chunkForRange(request: BackfillRequest, seed: number): readonly RunEven
  * that replay the spine below their floor, live batches that re-declare the
  * same floor, resume dials with and without the store swapped underneath
  * them, log swaps against a server that reports identity and floor moves
- * against one that does not, and backfills that settle out of order, are
- * abandoned, or are asked for again while one is outstanding.
+ * against one that does not, and backfills that are asked for again while one
+ * is outstanding, or fail.
  */
 function generateCommands(rng: Rng, length: number): readonly Command[] {
   const tops = new Map<string, number>();
@@ -789,7 +897,7 @@ function generateCommands(rng: Rng, length: number): readonly Command[] {
     if (open.length > 0 && rng.chance(0.3)) {
       const id = open.splice(rng.int(0, open.length - 1), 1)[0] as number;
       const seed = rng.int(1, 1 << 20);
-      commands.push(rng.chance(0.15) ? {op: 'abandon', id} : {op: 'settle', id, seed});
+      commands.push(rng.chance(0.25) ? {op: 'fail', id} : {op: 'settle', id, seed});
       continue;
     }
     if (rng.chance(0.3)) {
@@ -811,16 +919,21 @@ type Observation =
   | {readonly op: 'batch'; readonly decision: BatchReconciliation}
   | {
       readonly op: 'begin';
-      readonly kind: BackfillPlan['kind'];
+      /**
+       * `fetch` asked for a range. `joined` got the outstanding round trip's
+       * own promise back instead of a second range. Anything else is what the
+       * backfill resolved to without asking, which is `complete`.
+       */
+      readonly kind: 'fetch' | 'joined' | BackfillOutcome['kind'];
       readonly range: readonly [number, number] | null;
     }
   | {
       readonly op: 'settle';
-      readonly kind: BackfillReconciliation['kind'];
+      readonly kind: BackfillOutcome['kind'];
       readonly events: readonly (number | undefined)[];
       readonly historyFloor: number | null;
     }
-  | {readonly op: 'abandon'};
+  | {readonly op: 'fail'; readonly rejected: boolean; readonly detail: string};
 
 /**
  * The reconciler's surface, so the differential oracle can be driven by the
@@ -829,9 +942,7 @@ type Observation =
 interface Reconciling {
   storeId(): string;
   reconcileBatch(message: EventBatchMessage, context: BatchContext): BatchReconciliation;
-  beginBackfill(): BackfillPlan;
-  settleBackfill(request: BackfillRequest, events: readonly RunEvent[]): BackfillReconciliation;
-  abandonBackfill(request: BackfillRequest): void;
+  backfill(fetch: BackfillFetch): Promise<BackfillOutcome>;
 }
 
 interface Trace {
@@ -843,39 +954,77 @@ interface Trace {
   readonly prepends: number;
   /** Events the spine filter dropped, each of which would have been a refold. */
   readonly filtered: number;
+  /** Asks that joined the outstanding round trip rather than starting one. */
+  readonly joins: number;
+  /** Round trips whose fetch rejected. */
+  readonly failures: number;
   readonly historyFloor: number;
   readonly storeId: string;
+}
+
+/** The one round trip a walk can have outstanding, and the gate that ends it. */
+interface Pending {
+  readonly gate: Gate;
+  readonly outcome: Promise<BackfillOutcome>;
+  readonly request: BackfillRequest;
 }
 
 /** The walk's mutable position, threaded through the per-command handlers. */
 interface Walk {
   readonly reconciler: Reconciling;
-  readonly requests: Map<number, BackfillRequest | null>;
   readonly folded: Set<number>;
   readonly refolded: number[];
   readonly observations: Observation[];
+  pending: Pending | null;
   historyFloor: number;
   prepends: number;
   filtered: number;
+  joins: number;
+  failures: number;
   record: boolean;
 }
 
-function walkBegin(walk: Walk, command: Extract<Command, {op: 'begin'}>): void {
-  const plan = walk.reconciler.beginBackfill();
-  walk.requests.set(command.id, plan.kind === 'fetch' ? plan.request : null);
-  if (!walk.record) return;
-  walk.observations.push({
-    op: 'begin',
-    kind: plan.kind,
-    range: plan.kind === 'fetch' ? [plan.request.afterSequence, plan.request.beforeSequence] : null,
+async function walkBegin(walk: Walk): Promise<void> {
+  const pending = gate();
+  // An array rather than a `let`: the fetch runs inside `backfill`, and control
+  // flow analysis would narrow a reassigned local back to its initializer.
+  const asked: BackfillRequest[] = [];
+  const outcome = walk.reconciler.backfill(request => {
+    asked.push(request);
+    return pending.promise;
   });
+  const request = asked[0];
+  if (request === undefined) {
+    if (walk.pending !== null && walk.pending.outcome === outcome) {
+      // A range is already outstanding, and this is that round trip's own
+      // promise, so there is one answer for both readers and one fold.
+      walk.joins += 1;
+      if (walk.record) walk.observations.push({op: 'begin', kind: 'joined', range: null});
+      return;
+    }
+    // Nothing was asked for and nothing is outstanding, so the fold already
+    // reaches the start of the log and the answer is immediate.
+    const settled = await outcome;
+    if (walk.record) walk.observations.push({op: 'begin', kind: settled.kind, range: null});
+    return;
+  }
+  walk.pending = {gate: pending, outcome, request};
+  if (walk.record) {
+    walk.observations.push({
+      op: 'begin',
+      kind: 'fetch',
+      range: [request.afterSequence, request.beforeSequence],
+    });
+  }
 }
 
-function walkSettle(walk: Walk, command: Extract<Command, {op: 'settle'}>): void {
-  const request = walk.requests.get(command.id);
-  if (request === undefined || request === null) return;
-  const chunk = chunkForRange(request, command.seed);
-  const settled = walk.reconciler.settleBackfill(request, chunk);
+async function walkSettle(walk: Walk, command: Extract<Command, {op: 'settle'}>): Promise<void> {
+  const pending = walk.pending;
+  if (pending === null) return;
+  walk.pending = null;
+  const chunk = chunkForRange(pending.request, command.seed);
+  pending.gate.answer(chunk);
+  const settled = await pending.outcome;
   if (settled.kind === 'prepend') {
     walk.prepends += 1;
     walk.filtered += chunk.length - settled.events.length;
@@ -895,11 +1044,20 @@ function walkSettle(walk: Walk, command: Extract<Command, {op: 'settle'}>): void
   });
 }
 
-function walkAbandon(walk: Walk, command: Extract<Command, {op: 'abandon'}>): void {
-  const request = walk.requests.get(command.id);
-  if (request === undefined || request === null) return;
-  walk.reconciler.abandonBackfill(request);
-  if (walk.record) walk.observations.push({op: 'abandon'});
+async function walkFail(walk: Walk, command: Extract<Command, {op: 'fail'}>): Promise<void> {
+  const pending = walk.pending;
+  if (pending === null) return;
+  walk.pending = null;
+  const detail = `query.events failed (${command.id})`;
+  pending.gate.fail(new Error(detail));
+  // Recorded either way: a reconciler that swallowed the rejection and resolved
+  // instead would show up here rather than as a missing observation.
+  const settled = await pending.outcome.then(
+    outcome => ({rejected: false, detail: outcome.kind}),
+    error => ({rejected: true, detail: (error as Error).message}),
+  );
+  walk.failures += 1;
+  if (walk.record) walk.observations.push({op: 'fail', ...settled});
 }
 
 function walkBatch(walk: Walk, command: Extract<Command, {op: 'batch'}>): void {
@@ -915,40 +1073,50 @@ function walkBatch(walk: Walk, command: Extract<Command, {op: 'batch'}>): void {
 /**
  * Drives a reconciler the way a client does: it folds nothing, but it applies
  * each disposition to a set standing in for the folded log, records the floor
- * each disposition reports, and keeps the requests it has not settled yet.
+ * each disposition reports, and holds the one round trip that can be in flight.
  * Observations are recorded from `recordFrom` onwards.
  */
-function drive(reconciler: Reconciling, commands: readonly Command[], recordFrom = 0): Trace {
+async function drive(
+  reconciler: Reconciling,
+  commands: readonly Command[],
+  recordFrom = 0,
+): Promise<Trace> {
   const walk: Walk = {
     reconciler,
-    requests: new Map(),
     folded: new Set(),
     refolded: [],
     observations: [],
+    pending: null,
     historyFloor: 0,
     prepends: 0,
     filtered: 0,
+    joins: 0,
+    failures: 0,
     record: recordFrom === 0,
   };
-  commands.forEach((command, index) => {
+  for (const [index, command] of commands.entries()) {
     walk.record = index >= recordFrom;
     if (index === recordFrom) {
       // The counters describe the recorded window, not the warm-up before it.
       walk.refolded.length = 0;
       walk.prepends = 0;
       walk.filtered = 0;
+      walk.joins = 0;
+      walk.failures = 0;
     }
-    if (command.op === 'begin') walkBegin(walk, command);
-    else if (command.op === 'settle') walkSettle(walk, command);
-    else if (command.op === 'abandon') walkAbandon(walk, command);
+    if (command.op === 'begin') await walkBegin(walk);
+    else if (command.op === 'settle') await walkSettle(walk, command);
+    else if (command.op === 'fail') await walkFail(walk, command);
     else walkBatch(walk, command);
-  });
+  }
   return {
     observations: walk.observations,
     folded: [...walk.folded].sort((left, right) => left - right),
     refolded: walk.refolded,
     prepends: walk.prepends,
     filtered: walk.filtered,
+    joins: walk.joins,
+    failures: walk.failures,
     historyFloor: walk.historyFloor,
     storeId: reconciler.storeId(),
   };
@@ -975,12 +1143,34 @@ function floorSteps(
   return steps;
 }
 
+/**
+ * Every range asked for, paired with the floor the disposition before it
+ * reported. That floor is what the range has to be derived from: the caller
+ * never passes one in, so a range disagreeing with it is the reconciler having
+ * lost track of its own floor.
+ */
+function askedRanges(
+  observations: readonly Observation[],
+): readonly {readonly range: readonly [number, number]; readonly floor: number}[] {
+  const asked: {range: readonly [number, number]; floor: number}[] = [];
+  let floor = 0;
+  for (const observation of observations) {
+    if (observation.op === 'begin') {
+      if (observation.range !== null) asked.push({range: observation.range, floor});
+      continue;
+    }
+    const reported = floorOf(observation);
+    if (reported !== null) floor = reported;
+  }
+  return asked;
+}
+
 describe('StreamReconciler properties', () => {
   for (const seed of SEEDS) {
-    it(`only ever raises the floor through a re-bootstrap (seed ${seed})`, () => {
-      const trace = drive(
+    it(`only ever raises the floor through a re-bootstrap (seed ${seed})`, async () => {
+      const trace = await drive(
         new StreamReconciler({backfillChunk: CHUNK}),
-        generateCommands(new Rng(seed), 80),
+        generateCommands(new Rng(seed), 100),
       );
       const steps = floorSteps(trace.observations);
       let previous: number | null = null;
@@ -992,32 +1182,32 @@ describe('StreamReconciler properties', () => {
       expect(steps.filter(step => step.rebootstrapped)).not.toEqual([]);
     });
 
-    it(`asks only for ranges inside the log, sized by the chunk (seed ${seed})`, () => {
-      const {observations} = drive(
+    it(`asks for exactly the chunk below the floor it last reported (seed ${seed})`, async () => {
+      const trace = await drive(
         new StreamReconciler({backfillChunk: CHUNK}),
-        generateCommands(new Rng(seed), 80),
+        generateCommands(new Rng(seed), 100),
       );
-      let fetches = 0;
-      for (const observation of observations) {
-        if (observation.op !== 'begin' || observation.range === null) continue;
-        fetches += 1;
-        const [after, before] = observation.range;
-        expect(after).toBeGreaterThanOrEqual(0);
+      const asked = askedRanges(trace.observations);
+      for (const {range, floor} of asked) {
         // Both bounds exclusive, so the range spans `before - after - 1`
-        // sequences, capped by the start of the log.
-        expect(before - after - 1).toBeLessThanOrEqual(CHUNK);
-        expect(before - after - 1).toBeGreaterThan(0);
+        // sequences: the chunk, clamped at the start of the log, ending at the
+        // floor itself.
+        expect(range).toEqual([Math.max(0, floor - CHUNK), floor + 1]);
       }
-      expect(fetches).toBeGreaterThan(0);
+      expect(asked).not.toEqual([]);
+      // Both of the backfill paths that are not a plain round trip occur in the
+      // generated traffic, so the assertions above are not the only ones run.
+      expect(trace.joins).toBeGreaterThan(0);
+      expect(trace.failures).toBeGreaterThan(0);
     });
 
-    it(`never hands back a backfilled event the caller already folded (seed ${seed})`, () => {
+    it(`never hands back a backfilled event the caller already folded (seed ${seed})`, async () => {
       // `drive` applies every disposition to the set standing in for the folded
       // log and records any sequence a prepend handed back twice, which is what
       // folding a spine event a second time would look like.
-      const trace = drive(
+      const trace = await drive(
         new StreamReconciler({backfillChunk: CHUNK}),
-        generateCommands(new Rng(seed), 80),
+        generateCommands(new Rng(seed), 100),
       );
       expect(trace.refolded).toEqual([]);
       // The spine set only ever holds sequences the caller folded from the same
@@ -1025,16 +1215,15 @@ describe('StreamReconciler properties', () => {
       // filter dropped is one the assertion above would have caught. A positive
       // count is therefore exactly the claim that the property is not vacuous.
       expect(trace.filtered).toBeGreaterThan(0);
-      expect(trace.prepends).toBeGreaterThan(0);
     });
 
     /**
-     * With nothing in flight. A range outstanding across the re-bootstrap
+     * With nothing in flight. A round trip outstanding across the re-bootstrap
      * deliberately survives it (the TUI's `#historyFetch` does too), so the
-     * prefix is drained first: abandoning an id that is not outstanding is a
-     * no-op, so one abandon per possible id clears whatever it left.
+     * prefix is drained first: at most one is outstanding, and failing one that
+     * is not there is a no-op.
      */
-    it(`makes a re-bootstrap independent of everything before it (seed ${seed})`, () => {
+    it(`makes a re-bootstrap independent of everything before it (seed ${seed})`, async () => {
       // A fresh batch naming a log the generator never picks always
       // re-bootstraps once any batch has landed, whatever the prefix left.
       const cut: Command = {
@@ -1053,16 +1242,19 @@ describe('StreamReconciler properties', () => {
         message: batch({storeId: 'seed-log', declaredFloor: 10}),
       };
       const after = generateCommands(new Rng(seed + 2), 30);
-      const trails = [20, 45].map(length => {
+      const drain: readonly Command[] = [{op: 'fail', id: -1}];
+      const trails: Trace[] = [];
+      for (const length of [20, 45]) {
         const prefix = generateCommands(new Rng(seed + length), length);
-        const drain: readonly Command[] = span(0, prefix.length).map(id => ({op: 'abandon', id}));
         const commands = [...prefix, ...drain, seeded, cut, ...after];
-        return drive(
-          new StreamReconciler({backfillChunk: CHUNK}),
-          commands,
-          prefix.length + drain.length + 1,
+        trails.push(
+          await drive(
+            new StreamReconciler({backfillChunk: CHUNK}),
+            commands,
+            prefix.length + drain.length + 1,
+          ),
         );
-      });
+      }
       expect(trails[0]?.observations[0]).toEqual({
         op: 'batch',
         decision: {kind: 'rebootstrap', historyFloor: 640},
@@ -1070,22 +1262,35 @@ describe('StreamReconciler properties', () => {
       expect(trails[1]).toEqual(trails[0] as Trace);
     });
 
-    it(`treats a batch repeating what the stream already said as a no-op (seed ${seed})`, () => {
-      const reconciler = new StreamReconciler({backfillChunk: CHUNK});
-      const trace = drive(reconciler, generateCommands(new Rng(seed), 50));
-      // The floor the caller holds is at or below the floor the stream last
-      // declared, so a batch re-declaring it is neither a raise nor a descent,
-      // on either path.
-      const floor = trace.historyFloor;
-      const repeat = batch({storeId: trace.storeId, declaredFloor: floor});
-      expect(reconciler.reconcileBatch(repeat, FRESH)).toEqual({
-        kind: 'extend',
-        historyFloor: floor,
-      });
-      expect(reconciler.reconcileBatch(repeat, RESUMED)).toEqual({
-        kind: 'extend',
-        historyFloor: floor,
-      });
+    /**
+     * At every position in the trace, not only at its end: an ending floor of
+     * zero makes `declared > #declaredFloor` unsatisfiable, so the claim would
+     * hold there for any implementation that echoes the declared floor back.
+     * Those positions are counted instead of asserted, and the count is what
+     * says the rest were real comparisons.
+     */
+    it(`treats a batch repeating what the stream already said as a no-op (seed ${seed})`, async () => {
+      const commands = generateCommands(new Rng(seed), 40);
+      let probed = 0;
+      for (const length of span(1, commands.length)) {
+        const reconciler = new StreamReconciler({backfillChunk: CHUNK});
+        const trace = await drive(reconciler, commands.slice(0, length));
+        if (trace.historyFloor === 0) continue;
+        probed += 1;
+        // The floor the caller holds is at or below the floor the stream last
+        // declared, so a batch re-declaring it is neither a raise nor a descent,
+        // on either path.
+        const repeat = batch({storeId: trace.storeId, declaredFloor: trace.historyFloor});
+        expect(reconciler.reconcileBatch(repeat, FRESH)).toEqual({
+          kind: 'extend',
+          historyFloor: trace.historyFloor,
+        });
+        expect(reconciler.reconcileBatch(repeat, RESUMED)).toEqual({
+          kind: 'extend',
+          historyFloor: trace.historyFloor,
+        });
+      }
+      expect(probed).toBeGreaterThan(0);
     });
   }
 });
@@ -1094,18 +1299,19 @@ describe('StreamReconciler properties', () => {
  * The TUI controller's reconciliation, transcribed from
  * `clients/tui/src/session-controller.ts` at merge base 667a08f8.
  *
- * Kept in the controller's own shape (a resumed and a fresh batch method, the
- * floor and spine helpers, the single-flight gate, and the floor read back out
- * of the state the controller wrote) rather than the reconciler's. It is a
- * transliteration, not an independent derivation, so it does not confirm the
- * extraction is right; what it does is fail loudly if the controller and the
- * reconciler drift before phase (b) migrates the controller onto it. The
- * equivalence argument is the hand re-derivation recorded in the PR body.
+ * Kept in the controller's own shape rather than the reconciler's: a resumed
+ * and a fresh batch method, the floor and spine helpers, the `#historyFetch`
+ * promise released by a `finally`, and the floor read back out of the state the
+ * controller wrote. It is a transliteration, not an independent derivation, so
+ * it does not confirm the extraction is right. It is regression protection: it
+ * fails loudly if the controller and the reconciler drift before phase (b)
+ * migrates the controller onto this. The equivalence argument is the hand
+ * re-derivation recorded in the PR body.
  *
  * Line references in that file:
  *
- * - fields: 299 `#foldedBelowFloor`, 301 `#historyFloor`, 310 `#declaredFloor`,
- *   319 `#storeId`, 328 `#rebootstrapGeneration`, and `#historyFetch`
+ * - fields: 286 `#historyFetch`, 299 `#foldedBelowFloor`, 301 `#historyFloor`,
+ *   310 `#declaredFloor`, 319 `#storeId`, 328 `#rebootstrapGeneration`
  * - `storeId` subscription callback: 381
  * - `loadOlderHistory`: 425-433, `#requestOlderHistory`: 435-465
  * - `#reconcileBatch`: 1419-1425, `#reconcileResumedBatch`: 1427-1460,
@@ -1113,16 +1319,16 @@ describe('StreamReconciler properties', () => {
  * - `#lowerHistoryFloor`: 1493-1496, `#resetHistoryFloor`: 1509-1514,
  *   `#recordSpine`: 1517-1525
  *
- * Two things are deliberately not transcribed, because they are the
- * differences this phase introduces rather than drift:
+ * Two things are deliberately not transcribed, because they are where this
+ * phase differs from the controller rather than drift:
  *
- * - the declared-floor validation, which the controller does not do. The
- *   generator only produces floors a conforming server can send, so the
- *   validation never fires inside the differential runs.
- * - promise sharing. `loadOlderHistory` hands a second caller the first
- *   caller's promise; `beginBackfill` reports `in-flight` and leaves the
- *   sharing to the caller, which is where the request lives. The oracle
- *   models the gate, not the promise.
+ * - the declared-floor validation, which is new and lives in
+ *   `parseServerMessage` rather than in either of these. The generator only
+ *   produces floors a conforming server can send, so it would never fire in a
+ *   differential run anyway.
+ * - the `catch` at 459-464, which turns a failed request into a state report
+ *   and a `false`. Whether a failure is worth showing is the caller's decision,
+ *   so the reconciler lets the rejection through and the oracle does the same.
  */
 class ControllerOracle implements Reconciling {
   readonly #backfillChunk: number;
@@ -1131,15 +1337,16 @@ class ControllerOracle implements Reconciling {
   #declaredFloor: number | null = null;
   #storeId: string | null = null;
   #rebootstrapGeneration = 0;
-  /** `#historyFetch`: the controller holds a promise, the oracle its identity. */
-  #fetch: {readonly stamp: number; readonly generation: number; readonly nextFloor: number} | null =
-    null;
-  #issued = 0;
+  /** `#historyFetch`, the single-flight guard, released by the `finally` at 428-430. */
+  #historyFetch: Promise<BackfillOutcome> | null = null;
   /**
    * `this.#state.core.historyAfterSequence`. The controller reads the floor
-   * back out of the state it wrote, which is the second source of truth the
-   * reconciler replaces with its own field. Keeping it here is what makes the
-   * differential test check that the two agree at every step.
+   * back out of the state it wrote (426 and 436 read it, 457, 1437, 1452 and
+   * 1474 write it); the reconciler keeps its own field instead. Nothing in the
+   * harness feeds a floor to either side, because neither `reconcileBatch` nor
+   * `backfill` takes one, so the two floors are maintained independently from
+   * the same commands and comparing the traces is what checks they agree at
+   * every step.
    */
   #stateFloor = 0;
 
@@ -1193,39 +1400,29 @@ class ControllerOracle implements Reconciling {
     return {kind: rebootstrap ? 'rebootstrap' : 'extend', historyFloor: floor};
   }
 
-  // Lines 425-433 and 436-438.
-  beginBackfill(): BackfillPlan {
-    if (this.#stateFloor === 0) return {kind: 'complete'};
-    if (this.#fetch !== null) return {kind: 'in-flight'};
-    const nextFloor = Math.max(0, this.#stateFloor - this.#backfillChunk);
-    this.#issued += 1;
-    this.#fetch = {stamp: this.#issued, generation: this.#rebootstrapGeneration, nextFloor};
-    return {
-      kind: 'fetch',
-      request: {
-        afterSequence: nextFloor,
-        beforeSequence: this.#stateFloor + 1,
-        stamp: this.#issued as BackfillStamp,
-      },
-    };
+  // Lines 425-433.
+  backfill(fetch: BackfillFetch): Promise<BackfillOutcome> {
+    if (this.#stateFloor === 0) return Promise.resolve({kind: 'complete'});
+    if (this.#historyFetch !== null) return this.#historyFetch;
+    const running = this.#requestOlderHistory(fetch).finally(() => {
+      this.#historyFetch = null;
+    });
+    this.#historyFetch = running;
+    return running;
   }
 
-  // Lines 439-458, with the `finally` at 428-430.
-  settleBackfill(request: BackfillRequest, events: readonly RunEvent[]): BackfillReconciliation {
-    const fetch = this.#fetch;
-    if (fetch === null || fetch.stamp !== request.stamp) return {kind: 'superseded'};
-    this.#fetch = null;
-    if (this.#rebootstrapGeneration !== fetch.generation) return {kind: 'superseded'};
+  // Lines 435-458.
+  async #requestOlderHistory(fetch: BackfillFetch): Promise<BackfillOutcome> {
+    const floor = this.#stateFloor;
+    const nextFloor = Math.max(0, floor - this.#backfillChunk);
+    const generation = this.#rebootstrapGeneration;
+    const events = await fetch({afterSequence: nextFloor, beforeSequence: floor + 1});
+    if (this.#rebootstrapGeneration !== generation) return {kind: 'superseded'};
     const filtered = events.filter(
       item => item.sequence === undefined || !this.#foldedBelowFloor.has(item.sequence),
     );
-    this.#stateFloor = this.#lowerHistoryFloor(fetch.nextFloor);
+    this.#stateFloor = this.#lowerHistoryFloor(nextFloor);
     return {kind: 'prepend', events: filtered, historyFloor: this.#stateFloor};
-  }
-
-  // Lines 459-464: the floor stays where it was, so the same range is retried.
-  abandonBackfill(request: BackfillRequest): void {
-    if (this.#fetch !== null && this.#fetch.stamp === request.stamp) this.#fetch = null;
   }
 
   // Lines 1493-1496.
@@ -1255,15 +1452,15 @@ class ControllerOracle implements Reconciling {
 
 describe('StreamReconciler against the TUI controller', () => {
   for (const seed of SEEDS) {
-    it(`decides every command exactly as the controller does (seed ${seed})`, () => {
+    it(`decides every command exactly as the controller does (seed ${seed})`, async () => {
       const commands = generateCommands(new Rng(seed), 150);
-      expect(drive(new StreamReconciler({backfillChunk: CHUNK}), commands)).toEqual(
-        drive(new ControllerOracle(CHUNK), commands),
+      expect(await drive(new StreamReconciler({backfillChunk: CHUNK}), commands)).toEqual(
+        await drive(new ControllerOracle(CHUNK), commands),
       );
     });
   }
 
-  it('agrees across the whole store identity and floor matrix', () => {
+  it('agrees across the whole store identity and floor matrix', async () => {
     const payloads: readonly EventBatchMessage[] = [
       batch({storeId: 'log', declaredFloor: 100, sequences: [50, 100, 101]}),
       batch({storeId: '', declaredFloor: 100, sequences: [102]}),
@@ -1281,7 +1478,6 @@ describe('StreamReconciler against the TUI controller', () => {
       resumed: false,
       message: batch({storeId: 'log', declaredFloor: 5_000}),
     };
-    let compared = 0;
     for (const resumed of [false, true]) {
       for (const first of payloads) {
         for (const second of payloads) {
@@ -1291,20 +1487,19 @@ describe('StreamReconciler against the TUI controller', () => {
             {op: 'batch', resumed, message: second},
             {op: 'settle', id: 0, seed: 17},
             {op: 'begin', id: 1},
-            {op: 'abandon', id: 1},
+            {op: 'fail', id: 1},
             {op: 'begin', id: 2},
             {op: 'settle', id: 2, seed: 23},
             probe,
             {op: 'begin', id: 3},
+            {op: 'begin', id: 4},
             {op: 'settle', id: 3, seed: 29},
           ];
-          expect(drive(new StreamReconciler({backfillChunk: 60}), commands)).toEqual(
-            drive(new ControllerOracle(60), commands),
+          expect(await drive(new StreamReconciler({backfillChunk: 60}), commands)).toEqual(
+            await drive(new ControllerOracle(60), commands),
           );
-          compared += 1;
         }
       }
     }
-    expect(compared).toBe(2 * payloads.length * payloads.length);
   });
 });

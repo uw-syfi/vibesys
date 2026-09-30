@@ -36,6 +36,7 @@ export function parseServerMessage(line: string): ServerMessage {
     if (!Array.isArray(value['events'])) {
       throw new BackendClientError('parse', 'Invalid event batch message');
     }
+    validateHistoryFloor(value);
   } else if (type === 'protocol_error') {
     if (typeof value['code'] !== 'string' || typeof value['message'] !== 'string') {
       throw new BackendClientError('parse', 'Invalid protocol error message');
@@ -97,6 +98,28 @@ function parseRecord(line: string, description: string): Record<string, unknown>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Every consumer uses `history_after_sequence` as a sequence: the floor to
+ * record against the fold, and the top of the next `query.events` range. The
+ * protocol model bounds it (`int = Field(default=0, ge=0)`,
+ * `src/server/api/protocol.py:569`), but the wire carries JSON, where a
+ * negative or fractional number is representable and only the `events` array
+ * was checked above. A floor no range can express has to be refused here,
+ * where the rest of the frame is validated, rather than in each consumer:
+ * `StreamReconciler` and `clients/web/src/store.ts` both read the field, and
+ * a check in one of them leaves the other unguarded.
+ */
+function validateHistoryFloor(value: Record<string, unknown>): void {
+  const floor = value['history_after_sequence'];
+  if (floor === undefined) return;
+  if (typeof floor !== 'number' || !Number.isSafeInteger(floor) || floor < 0) {
+    throw new BackendClientError(
+      'parse',
+      `Invalid event batch message: history_after_sequence must be a non-negative integer, received ${String(floor)}`,
+    );
+  }
 }
 
 function validateClientId(value: Record<string, unknown>, description: string): void {
