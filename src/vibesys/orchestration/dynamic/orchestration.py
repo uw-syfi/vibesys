@@ -35,7 +35,13 @@ from vibesys.orchestration.metrics import (
     MetricComparison,
 )
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
-from vs_runtime.api import BenchmarkObjective, MetricDirection, Run, RunStatus
+from vs_runtime.api import (
+    BenchmarkEvaluation,
+    BenchmarkObjective,
+    MetricDirection,
+    Run,
+    RunStatus,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -160,9 +166,7 @@ class _DynamicRun:
         )
         if not benchmark.executed:
             return
-        baseline = HypothesisSearch.input_baseline(
-            revision, FrameworkBenchmarkOutcome.from_evaluation(benchmark)
-        )
+        baseline = HypothesisSearch.input_baseline(revision, _framework_outcome(benchmark))
         if baseline is None:
             self.run.observations.warning(
                 "input benchmark produced no headline metric; candidates have no input baseline"
@@ -919,6 +923,19 @@ class _DynamicRun:
             workspace=self.run.workspaces.root if workspace else None,
             label=label,
         )
+
+
+def _framework_outcome(benchmark: BenchmarkEvaluation) -> FrameworkBenchmarkOutcome:
+    return FrameworkBenchmarkOutcome(
+        feedback=benchmark.feedback,
+        metric_name=benchmark.metric_name,
+        metric_value=benchmark.metric_value,
+        metric_direction=(
+            benchmark.metric_direction.value if benchmark.metric_direction is not None else None
+        ),
+        metric_unit=benchmark.metric_unit,
+        row=benchmark.row,
+    )
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:

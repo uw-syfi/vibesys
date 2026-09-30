@@ -32,8 +32,6 @@ from vs_loop_state.api import MetricComparison
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from vs_runtime.api import BenchmarkEvaluation
-
 
 __all__ = [
     "FrameworkBenchmarkOutcome",
@@ -54,20 +52,6 @@ class FrameworkBenchmarkOutcome:
     metric_direction: Literal["max", "min"] | None = None
     metric_unit: str | None = None
     row: Mapping[str, float] | None = None
-
-    @classmethod
-    def from_evaluation(cls, benchmark: BenchmarkEvaluation) -> FrameworkBenchmarkOutcome:
-        """Carry one runtime benchmark evaluation into policy terms."""
-        return cls(
-            feedback=benchmark.feedback,
-            metric_name=benchmark.metric_name,
-            metric_value=benchmark.metric_value,
-            metric_direction=(
-                benchmark.metric_direction.value if benchmark.metric_direction is not None else None
-            ),
-            metric_unit=benchmark.metric_unit,
-            row=benchmark.row,
-        )
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
