@@ -140,7 +140,7 @@ test('a home server crash is detected and reported', async () => {
   const reported = launched.waitForOutput(/the home server stopped unexpectedly/);
   process.kill(pid, 'SIGKILL');
   await reported;
-  // The crash dialog is open and the server is gone, so nothing is left to stop.
-  launched.app.process().kill('SIGKILL');
+  // Wait for Electron to exit before removing the profile it still writes to.
+  await launched.app.close();
   await rm(launched.stateHome, {recursive: true, force: true});
 });

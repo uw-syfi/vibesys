@@ -8,6 +8,8 @@ import mimetypes
 import os
 import re
 import secrets
+import socket
+import sys
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -80,11 +82,21 @@ class HomeServer(ThreadingHTTPServer):
     """A loopback HTTP server bound to one ``HomeConfig``."""
 
     daemon_threads = True
-    allow_reuse_address = False
+    # Rebind after TIME_WAIT without sharing an identical active listener.
+    allow_reuse_address = True
+    allow_reuse_port = False
 
     def __init__(self, config: HomeConfig) -> None:
         """Bind 127.0.0.1 on ``config.port`` (0 picks a free port and updates the config)."""
-        super().__init__(("127.0.0.1", config.port), _Handler)
+        if sys.platform == "darwin":
+            # Darwin permits a specific bind beside a wildcard listener with SO_REUSEADDR.
+            # Reserve the wildcard address until our loopback listener has bound and activated.
+            with socket.socket() as reservation:
+                reservation.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                reservation.bind(("", config.port))
+                super().__init__(("127.0.0.1", reservation.getsockname()[1]), _Handler)
+        else:
+            super().__init__(("127.0.0.1", config.port), _Handler)
         config.port = int(self.server_address[1])
         self.config = config
 

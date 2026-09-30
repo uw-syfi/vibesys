@@ -4,9 +4,13 @@ import http.client
 import logging
 import os
 import socket
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from entrypoints.web import _parser
 from entrypoints.web_home.app import DEFAULT_PORT, HomeServer, run_home, save_port, saved_port
@@ -15,8 +19,6 @@ from server.runtime import WebInstanceRecord
 from vs_project.api import state_home
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tests.entrypoints.web_home.support import Home
 
 
@@ -113,10 +115,42 @@ def test_the_saved_port_defaults_and_round_trips(tmp_path: Path) -> None:
     assert saved_port(tmp_path) == DEFAULT_PORT
 
 
-def test_the_home_server_refuses_a_port_another_listener_holds(tmp_path: Path) -> None:
+@given(connection_count=st.integers(min_value=1, max_value=4))
+@example(connection_count=1)
+def test_the_home_server_restarts_on_the_same_origin_after_closing_connections(
+    connection_count: int,
+) -> None:
+    # test-isolation: real TCP FIN and bind semantics cannot be reproduced by a Fake.
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        config = HomeConfig(
+            state_home=root, roots=(root,), dotenv_path=root / ".env", assets_dir=None, port=0
+        )
+        with HomeServer(config) as server:
+            origin = config.origin
+            for _ in range(connection_count):
+                with socket.create_connection(("127.0.0.1", config.port)) as client:
+                    accepted, _ = server.get_request()
+                    with accepted:
+                        # The server closes first; synchronize both FINs to leave TIME_WAIT.
+                        accepted.shutdown(socket.SHUT_WR)
+                        assert client.recv(1) == b""
+                        client.shutdown(socket.SHUT_WR)
+                        assert accepted.recv(1) == b""
+        with HomeServer(config) as restarted:
+            assert restarted.config.origin == origin
+
+
+@pytest.mark.parametrize("reuse_port", [False, True])
+@pytest.mark.parametrize("host", ["127.0.0.1", ""], ids=["loopback", "wildcard"])
+def test_the_home_server_refuses_a_port_another_listener_holds(
+    tmp_path: Path, host: str, *, reuse_port: bool
+) -> None:
     with socket.socket() as other:
         other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        other.bind(("", 0))
+        if reuse_port and hasattr(socket, "SO_REUSEPORT"):
+            other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        other.bind((host, 0))
         other.listen()
         config = HomeConfig(
             state_home=tmp_path,
