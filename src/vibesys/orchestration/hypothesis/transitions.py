@@ -534,6 +534,46 @@ class CarryOver:
     exhaustion_info: str | None = None
 
 
+@dataclass(frozen=True)
+class RestorePoint:
+    """The last accepted tree that a rejected round's edits are reverted to.
+
+    ``round_number`` names the round that produced ``commit``; ``None`` means
+    the tree predates every recorded round (the run's input).
+    """
+
+    round_number: int | None
+    commit: str
+
+    def describe(self) -> str:
+        """Name this tree for agent-facing guidance."""
+        where = f"round {self.round_number}" if self.round_number is not None else "the run's input"
+        return f"{where} (commit `{self.commit[:12]}`)"
+
+
+def round_rejected(record: RoundRecord) -> bool:
+    """Whether review or a framework gate rejected *record*'s final attempt."""
+    return record.reviewed and not record.passed
+
+
+def rejected_round_restore_point(hypothesis: Hypothesis) -> RestorePoint | None:
+    """Return the tree a rejected round of *hypothesis* is reverted to.
+
+    A rejected tree never becomes a parent. The latest passing round of the
+    same hypothesis keeps its checkpoint; otherwise the hypothesis's own
+    parent tree is restored. ``None`` when that parent has no recorded commit.
+    """
+    checkpoint = next(
+        (item for item in reversed(hypothesis.rounds) if item.passed and item.commit),
+        None,
+    )
+    if checkpoint is not None and checkpoint.commit is not None:
+        return RestorePoint(checkpoint.round_number, checkpoint.commit)
+    if hypothesis.parent_commit is None:
+        return None
+    return RestorePoint(hypothesis.parent_round, hypothesis.parent_commit)
+
+
 def record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
     """Return the comparable objective row associated with *record*."""
     if record.official_evaluation and record.metrics:

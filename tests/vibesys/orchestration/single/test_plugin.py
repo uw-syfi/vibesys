@@ -426,3 +426,64 @@ def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: 
     assert (tmp_path / "progress" / "plans" / "round-0001.json").is_file()
     assert legacy_roadmap.read_text() == "legacy roadmap\n"
     assert legacy_progress.read_text() == "legacy progress\n"
+
+
+def test_rejected_round_is_reverted_before_its_continuation_is_measured(
+    tmp_path: Path,
+) -> None:
+    """Regression: MPSC round 1's rejected edits were measured and anchored round 2.
+
+    Every attempt of round 1 fails review. Round 2 continues the hypothesis
+    and passes the official gates; it must run on the pre-hypothesis tree,
+    not on the tree review rejected.
+    """
+    script = _Script(
+        _plan("H-01"),
+        _response(verdict=Verdict.FAIL, feedback="lost wakeup under contention"),
+        _response(verdict=Verdict.FAIL, feedback="lost wakeup under contention"),
+        _response(),
+    )
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=98_000.0,
+                metric_direction="max",
+                row={"throughput": 98_000.0},
+            )
+        )
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(
+            metric_space=MetricSpace(objectives=(Objective(name="throughput", direction="max"),)),
+        ),
+        facts=RunFacts(
+            domain_id="generic",
+            objective="Improve the candidate.",
+            accuracy_configured=True,
+            benchmark_configured=True,
+        ),
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    rejected, measured = state.search.rounds
+    assert not rejected.passed
+    assert measured.passed
+    assert measured.official_evaluation
+    hypothesis = state.search.by_id("H-01")
+    assert hypothesis is not None
+    assert hypothesis.parent_commit is not None
+    workspace = run.workspaces.root
+    assert isinstance(workspace, FakeWorkspace)
+    assert workspace.restore_calls[0] == (hypothesis.parent_commit, True)
+    continuation_prompt = [
+        message for role, _history, message in script.calls if role == IMPLEMENTER.id
+    ][-1]
+    assert "reverted round 1's rejected edits" in continuation_prompt

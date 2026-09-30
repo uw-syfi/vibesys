@@ -487,3 +487,64 @@ def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> No
     assert hypothesis.revert_commit == first.commit
     assert hypothesis.parent_commit == first.commit
     assert all(session.closed for session in run.agents.sessions)
+
+
+def test_rejected_round_is_reverted_before_its_continuation_is_measured(
+    tmp_path: Path,
+) -> None:
+    """Regression: a rejected round's edits were measured and anchored the next round."""
+    script = _Script(
+        _pre_round(),
+        _plan("H-01"),
+        _implementation(),
+        _judge(verdict=Verdict.FAIL, feedback="lost wakeup under contention"),
+        _implementation(),
+        _judge(verdict=Verdict.FAIL, feedback="lost wakeup under contention"),
+        _implementation(),
+        _judge(),
+    )
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=98_000.0,
+                metric_direction="max",
+                row={"throughput": 98_000.0},
+            )
+        )
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(
+            max_rounds=2,
+            metric_space=MetricSpace(objectives=(Objective(name="throughput", direction="max"),)),
+        ),
+        facts=RunFacts(
+            domain_id="generic",
+            objective="Improve the candidate.",
+            accuracy_configured=True,
+            benchmark_configured=True,
+        ),
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    state = asyncio.run(run.state.load(MultiState))
+    assert state is not None
+    rejected, measured = state.search.rounds
+    assert not rejected.passed
+    assert measured.passed
+    assert measured.official_evaluation
+    hypothesis = state.search.by_id("H-01")
+    assert hypothesis is not None
+    assert hypothesis.parent_commit is not None
+    workspace = run.workspaces.root
+    assert isinstance(workspace, FakeWorkspace)
+    assert workspace.restore_calls[0] == (hypothesis.parent_commit, True)
+    continuation_prompt = [
+        message for role, _history, message in script.calls if role == IMPLEMENTER.id
+    ][-1]
+    assert "reverted round 1's rejected edits" in continuation_prompt

@@ -31,6 +31,7 @@ from vibesys.orchestration.hypothesis import (
     HypothesisStrategyUpdate,
     NewHypothesis,
     OrchestratorPlan,
+    RestorePoint,
 )
 from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
 from vibesys.orchestration.hypothesis.attempts import (
@@ -726,6 +727,214 @@ def test_reprojection_of_a_self_reported_round_stays_unmeasured() -> None:
     assert hypothesis is not None
     assert hypothesis.resolution is HypothesisResolution.UNMEASURED
     assert [record.hypothesis_outcome for record in hypothesis.rounds] == ["unmeasured"]
+
+
+# --- close_round / start: rejected rounds are reverted, never inherited ----
+
+_SEED = "5" * 40
+
+
+def _rejected(number: int, hypothesis: Hypothesis) -> RoundRecord:
+    return _round(
+        number,
+        hypothesis_id=hypothesis.hypothesis_id,
+        outcome="rejected",
+        passed=False,
+        judge_verdict="fail",
+        retained=False,
+        parent_round=hypothesis.parent_round,
+        parent_commit=hypothesis.parent_commit,
+    )
+
+
+def test_rejected_round_is_reverted_and_never_parents_the_next_hypothesis() -> None:
+    """Regression: a rejected round's edits anchored every later measurement.
+
+    MPSC round 1 was rejected on all three attempts and its tree stayed in
+    the workspace. The next round was measured on top of it (8x below the
+    input), became the first retained checkpoint, and later rounds cleared
+    ``proven`` against it while still slower than the input.
+    """
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5, max_continuation_rounds=0))
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    rejected = _rejected(1, started.hypothesis)
+    closed = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=rejected,
+        records=[],
+        **_closing_kwargs(passed=False),
+    )
+
+    assert closed.restore == RestorePoint(round_number=None, commit=_SEED)
+    assert "reverted round 1's rejected edits" in (closed.carry.exhaustion_info or "")
+    following = search.start(
+        closed.state,
+        _plan("H-2"),
+        round_number=2,
+        current_commit="c" * 40,
+        records=closed.state.rounds,
+    )
+    assert following.hypothesis.parent_round is None
+    assert following.hypothesis.parent_commit == _SEED
+    assert following.hypothesis.parent_commit != rejected.commit
+
+
+def test_continued_hypothesis_restarts_from_the_restored_tree() -> None:
+    """A continuation after a rejection is told its edits are gone."""
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    hypothesis = started.hypothesis
+    hypothesis.gate_revalidation_pending = True
+    closed = search.close_round(
+        started.state,
+        hypothesis=hypothesis,
+        record=_rejected(1, hypothesis),
+        records=[],
+        carry=CarryOver(),
+        passed=False,
+        reviewed=True,
+        feedback="lost wakeup under contention",
+        keeps_active=False,
+        requests_continuation=False,
+        next_step=None,
+        terminal_needs_parent_choice=False,
+    )
+
+    assert closed.restore == RestorePoint(round_number=None, commit=_SEED)
+    continued = closed.next_active
+    assert continued is not None
+    assert continued.parent_commit == _SEED
+    assert (continued.feedback or "").startswith("lost wakeup under contention")
+    assert "reverted round 1's rejected edits" in (continued.feedback or "")
+    assert not continued.gate_revalidation_pending
+
+
+def test_rejected_continuation_keeps_the_hypothesis_latest_passing_checkpoint() -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    checkpoint = _round(1, hypothesis_id="H-1", outcome="continue", declared="continue")
+    kept = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=checkpoint,
+        records=[],
+        carry=CarryOver(),
+        passed=True,
+        reviewed=True,
+        feedback=None,
+        keeps_active=True,
+        requests_continuation=True,
+        next_step="extend the batch path",
+        terminal_needs_parent_choice=False,
+    )
+    assert kept.restore is None
+    continued = kept.state.active_hypothesis
+    assert continued is not None
+
+    closed = search.close_round(
+        kept.state,
+        hypothesis=continued,
+        record=_rejected(2, continued),
+        records=kept.state.rounds,
+        **_closing_kwargs(passed=False),
+    )
+
+    assert checkpoint.commit is not None
+    assert closed.restore == RestorePoint(round_number=1, commit=checkpoint.commit)
+
+
+def test_unreviewed_round_is_not_reverted() -> None:
+    """A deferred round is provisional, not rejected: its tree stays the parent."""
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    deferred = _round(
+        1, hypothesis_id="H-1", outcome=None, passed=False, reviewed=False, judge_verdict="deferred"
+    )
+    closed = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=deferred,
+        records=[],
+        **_closing_kwargs(passed=False, reviewed=False),
+    )
+
+    assert closed.restore is None
+    following = search.start(
+        closed.state, _plan("H-2"), round_number=2, current_commit=_SEED, records=[deferred]
+    )
+    assert following.hypothesis.parent_commit == deferred.commit
+
+
+@given(
+    verdicts=st.lists(st.sampled_from(["pass", "fail", "deferred"]), min_size=1, max_size=8),
+    continuations=st.integers(min_value=0, max_value=2),
+)
+def test_no_round_starts_from_a_rejected_tree(
+    verdicts: list[Literal["pass", "fail", "deferred"]], continuations: int
+) -> None:
+    """Every round's starting tree is the input, a passing round, or a deferred one.
+
+    ``close_round`` reverts each rejection to the tree that ``start`` then
+    names as the next hypothesis's parent, so the two never disagree and a
+    rejected commit is never materialized, inherited, or used as a baseline.
+    """
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=len(verdicts), max_continuation_rounds=continuations)
+    )
+    state = search.initial()
+    rejected_commits: set[str] = set()
+    tree = _SEED
+    for number, verdict in enumerate(verdicts, start=1):
+        active = state.active_hypothesis
+        if active is None:
+            started = search.start(
+                state,
+                _plan(f"H-{number}"),
+                round_number=number,
+                current_commit=tree,
+                records=state.rounds,
+            )
+            state, active = started.state, started.hypothesis
+            assert active.parent_commit == tree
+        passed, reviewed = verdict == "pass", verdict != "deferred"
+        record = _round(
+            number,
+            hypothesis_id=active.hypothesis_id,
+            outcome={"pass": "proven", "fail": "rejected", "deferred": None}[verdict],
+            passed=passed,
+            reviewed=reviewed,
+            judge_verdict=verdict,
+            retained=passed or None,
+            parent_round=active.parent_round,
+            parent_commit=active.parent_commit,
+        )
+        closed = search.close_round(
+            state,
+            hypothesis=active,
+            record=record,
+            records=state.rounds,
+            **_closing_kwargs(passed=passed, reviewed=reviewed),
+        )
+        state = closed.state
+        if closed.restore is None:
+            assert verdict != "fail"
+            assert record.commit is not None
+            tree = record.commit
+        else:
+            assert verdict == "fail"
+            assert record.commit is not None
+            rejected_commits.add(record.commit)
+            tree = closed.restore.commit
+        assert tree not in rejected_commits
 
 
 # --- frontier / best / pareto_conflict -----------------------------------

@@ -51,7 +51,7 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import CarryOver, RollbackTarget
+    from vibesys.orchestration.hypothesis import CarryOver, RestorePoint, RollbackTarget
     from vibesys.orchestration.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
 
@@ -679,6 +679,8 @@ class _MultiRun:
             ),
             has_implementation=implementation is not None,
         )
+        if closed.restore is not None:
+            await self._revert_rejected(closed.restore)
         self.state = self.state.model_copy(
             update={"search": closed.state, "last_paid_attempt": None},
             deep=True,
@@ -689,6 +691,13 @@ class _MultiRun:
             label=f"{self.label_prefix}: close round {self.round_number}",
         )
         self.round_number += 1
+
+    async def _revert_rejected(self, restore: RestorePoint) -> None:
+        """Drop a rejected round's edits so they are neither measured nor inherited."""
+        await self.workspace.restore(restore.commit, clean=True)
+        self.run.observations.note(
+            f"reverted rejected round {self.round_number} to {restore.describe()}"
+        )
 
     async def _finish(self) -> None:
         self.files.write_pareto(

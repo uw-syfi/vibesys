@@ -107,7 +107,9 @@ class HypothesisSearch:
         """Start a designer's new hypothesis and resolve its rollback target.
 
         ``current_commit`` seeds the parent commit when no earlier round
-        recorded one. Rollback resolution (``RoundHistory.resolve_rollback_commit``)
+        recorded one. The default parent is the previous round, unless that
+        round was rejected: then it is the tree ``close_round`` reverted to.
+        Rollback resolution (``RoundHistory.resolve_rollback_commit``)
         is for orchestration's workspace checkout; it never touches the
         filesystem itself.
         """
@@ -120,6 +122,13 @@ class HypothesisSearch:
         parent_commit = (
             parent.commit if parent is not None and parent.commit is not None else current_commit
         )
+        restored = (
+            _rejected_parent_restore_point(state, parent)
+            if plan.revert_to_round is None and parent is not None
+            else None
+        )
+        if restored is not None:
+            parent_round, parent_commit = restored.round_number, restored.commit
         rollback: RollbackTarget | None = None
         if plan.revert_to_round is not None:
             if parent is None or not parent.commit:
@@ -209,7 +218,16 @@ class HypothesisSearch:
         Callers evaluate their own strategy's ``keeps_hypothesis_active`` /
         ``terminal_success_needs_parent_choice`` policy (today's
         ``_TerminalPolicy``) and pass the results in as plain booleans.
+
+        A rejected round's edits are never kept: ``ClosedRound.restore``
+        names the tree orchestration must materialize before the next round,
+        and the continuation feedback and exhaustion notice say so.
         """
+        restore = (
+            transitions.rejected_round_restore_point(hypothesis)
+            if transitions.round_rejected(record)
+            else None
+        )
         next_active = _next_active(
             hypothesis,
             keeps_active=keeps_active,
@@ -221,6 +239,8 @@ class HypothesisSearch:
             feedback=feedback,
             max_continuation_rounds=self.config.max_continuation_rounds,
         )
+        if next_active is not None and restore is not None:
+            next_active = _continue_from_restore(next_active, record, restore)
         updated = (
             transitions.update_active_hypothesis(state, next_active)
             if next_active is not None
@@ -239,11 +259,14 @@ class HypothesisSearch:
             terminal_needs_parent_choice=terminal_needs_parent_choice,
             keeps_active=keeps_active,
         )
+        if restore is not None and new_carry.exhaustion_info is not None:
+            new_carry.exhaustion_info += f" {_revert_notice(record, restore)}"
         return ClosedRound(
             state=updated,
             next_active=next_active,
             carry=new_carry,
             exhaustion_feedback=exhaustion_feedback,
+            restore=restore,
         )
 
     def frontier(self, records: Sequence[RoundRecord], *, space: MetricSpace) -> list[RoundRecord]:
@@ -315,6 +338,38 @@ class HypothesisSearch:
         can call it without constructing one.
         """
         return transitions.measurement_delta_reason(hypothesis)
+
+
+def _rejected_parent_restore_point(
+    state: HypothesisState, parent: RoundRecord
+) -> transitions.RestorePoint | None:
+    """Return the tree that replaced *parent*'s edits, if *parent* was rejected."""
+    if not transitions.round_rejected(parent) or parent.hypothesis_id is None:
+        return None
+    hypothesis = state.by_id(parent.hypothesis_id)
+    return transitions.rejected_round_restore_point(hypothesis) if hypothesis else None
+
+
+def _revert_notice(record: RoundRecord, restore: transitions.RestorePoint) -> str:
+    return (
+        f"The framework reverted round {record.round_number}'s rejected edits; "
+        f"the workspace is back at {restore.describe()}."
+    )
+
+
+def _continue_from_restore(
+    hypothesis: Hypothesis, record: RoundRecord, restore: transitions.RestorePoint
+) -> Hypothesis:
+    """Point a continued hypothesis at the restored tree instead of its rejected edits.
+
+    The rejected candidate is gone, so there is nothing left to revalidate:
+    the next attempt is reviewed and gated from scratch.
+    """
+    continued = hypothesis.clone()
+    notice = _revert_notice(record, restore)
+    continued.feedback = f"{continued.feedback}\n\n{notice}" if continued.feedback else notice
+    continued.gate_revalidation_pending = False
+    return continued
 
 
 def _next_active(  # noqa: PLR0913  # LW-040044 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
