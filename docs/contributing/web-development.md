@@ -110,8 +110,22 @@ URL, and a subresource request carries no query string of its own, so requiring
 it would mean rewriting every asset URL in the built `index.html` at serve time
 or moving the token into a cookie. The assets are the public frontend bundle and
 hold no run data. Run data moves only over `/ws`, which requires both the token
-and an exact Origin match. `/health` keeps the token requirement because its
-purpose is to confirm that one specific gateway is live.
+and an exact Origin match. Nothing else is exempt, `/health` included: the only
+thing that probes `/health` is record discovery in
+`src/server/transport/discovery.py`, which has already read the instance record
+and therefore already holds the token, so the reason for the exemption does not
+apply to it.
+
+The exemption is a statement about the URL space, not about the filesystem, so
+it only holds if the path that satisfies the `/assets/` test is the same path
+that is looked up. `_routing_path` percent-decodes and normalizes the request
+target once, and `_process_request` derives both the token decision and the
+asset lookup from that single value. A path such as `/assets/../index.html`
+therefore normalizes to `/index.html` before either decision is made, so it
+requires the token like any other page request. Deciding the exemption on the
+raw target and then looking the file up from a separately decoded copy would
+widen the exemption from "URLs under `/assets/`" to "anything reachable under
+the assets directory", which is not what this decision grants.
 
 ## Remote host and local laptop
 

@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.request import urlopen
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.server.support import build_server_parts
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
@@ -26,6 +28,8 @@ from server.transport.websocket import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
     from websockets.typing import Origin
@@ -110,13 +114,82 @@ def test_gateway_content_security_policy_denies_every_unused_destination(tmp_pat
     }
 
 
-def _asset_gateway(tmp_path: Path) -> WebSocketGateway:
+def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> WebSocketGateway:
     parts = build_server_parts(tmp_path / "logs")
     assets = tmp_path / "web"
-    (assets / "assets").mkdir(parents=True)
+    (assets / "assets").mkdir(parents=True, exist_ok=True)
     (assets / "index.html").write_text("<!doctype html><title>VibeSys</title>")
     (assets / "assets" / "index.js").write_text("export {};\n")
-    return WebSocketGateway(parts.api, assets_dir=assets)
+    # Lives at the assets root, so only a traversal out of `/assets/` reaches it.
+    (assets / "operator-notes.txt").write_text("not part of the bundle\n")
+    return WebSocketGateway(parts.api, assets_dir=assets, allowed_origins=allowed_origins)
+
+
+def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_path: Path) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        tokenless = {path: _fetch(gateway.bound_port, path)[0] for path in _TRAVERSAL_PATHS}
+        with_token = {
+            path: _fetch(gateway.bound_port, f"{path}?token={gateway.token}")[0]
+            for path in _TRAVERSAL_PATHS
+        }
+
+    assert tokenless == {
+        # The one genuine bundle request stays token-free.
+        "/assets/index.js": 200,
+        # Everything a traversal reaches leaves `/assets/`, so the token applies.
+        "/assets/../index.html": 403,
+        "/assets/%2e%2e/index.html": 403,
+        "/assets/../operator-notes.txt": 403,
+        "/assets/%2e%2e/operator-notes.txt": 403,
+        "/assets/%2e%2e/%2e%2e/etc/passwd": 403,
+    }
+    # With the token the same paths route as their normalized target, which is
+    # never a served file: no traversal reaches the assets root either way.
+    assert with_token == {
+        "/assets/index.js": 200,
+        "/assets/../index.html": 200,
+        "/assets/%2e%2e/index.html": 200,
+        "/assets/../operator-notes.txt": 404,
+        "/assets/%2e%2e/operator-notes.txt": 404,
+        "/assets/%2e%2e/%2e%2e/etc/passwd": 404,
+    }
+
+
+_TRAVERSAL_PATHS = (
+    "/assets/index.js",
+    "/assets/../index.html",
+    "/assets/%2e%2e/index.html",
+    "/assets/../operator-notes.txt",
+    "/assets/%2e%2e/operator-notes.txt",
+    "/assets/%2e%2e/%2e%2e/etc/passwd",
+)
+
+_BUNDLE_BODY = b"export {};\n"
+_TRAVERSAL_SEGMENTS = st.sampled_from(["..", "%2e%2e", "%2E%2E", ".", "%2e", "assets", "%61ssets"])
+_TRAVERSAL_TARGETS = st.sampled_from(
+    ["index.js", "index.html", "operator-notes.txt", "etc/passwd", "ws", "health", ""]
+)
+_TRAVERSAL_ATTEMPTS = st.builds(
+    lambda segments, target: "/assets/" + "/".join([*segments, target]),
+    st.lists(_TRAVERSAL_SEGMENTS, max_size=4),
+    _TRAVERSAL_TARGETS,
+)
+
+
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(attempts=st.lists(_TRAVERSAL_ATTEMPTS, min_size=1, max_size=6))
+def test_gateway_serves_no_token_free_body_from_outside_the_bundle_directory(
+    tmp_path: Path, attempts: list[str]
+) -> None:
+    with _asset_gateway(tmp_path) as gateway:
+        bodies = {path: _fetch_body(gateway.bound_port, path) for path in attempts}
+
+    for path, (status, body) in bodies.items():
+        assert status in {200, 403, 404}, path
+        # `assets_dir/assets/` holds exactly one file, so a token-free 200 that
+        # returns anything else means the request escaped the bundle directory.
+        if status == 200:
+            assert body == _BUNDLE_BODY, path
 
 
 def _fetch(port: int, path: str) -> tuple[int, HTTPMessage]:
@@ -126,6 +199,16 @@ def _fetch(port: int, path: str) -> tuple[int, HTTPMessage]:
         response = connection.getresponse()
         response.read()
         return response.status, response.headers
+    finally:
+        connection.close()
+
+
+def _fetch_body(port: int, path: str) -> tuple[int, bytes]:
+    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        return response.status, response.read()
     finally:
         connection.close()
 
@@ -215,14 +298,8 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
         )
         assert missing is not None
         assert missing.status_code == 404
-        forbidden = asyncio.run(
-            gateway._process_request(  # noqa: SLF001  # lint-waiver: LW-101026 [SLF001]; exercise traversal rejection directly
-                cast("ServerConnection", None),
-                _http_request("/assets/../secret"),
-            )
-        )
-        assert forbidden is not None
-        assert forbidden.status_code == 404
+        # Traversal out of `/assets/` is covered over real HTTP by
+        # `test_gateway_requires_the_token_for_paths_reachable_only_by_traversal`.
         not_found = asyncio.run(
             gateway._process_request(  # noqa: SLF001  # lint-waiver: LW-101027 [SLF001]; exercise unknown-route handling directly
                 cast("ServerConnection", None),

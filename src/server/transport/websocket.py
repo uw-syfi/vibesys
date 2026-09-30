@@ -6,6 +6,7 @@ import asyncio
 import json
 import mimetypes
 import os
+import posixpath
 import secrets
 import threading
 from contextlib import suppress
@@ -41,6 +42,7 @@ _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _DISCONNECT_POLL_SECONDS = 0.1
 _ALLOWED_ORIGIN_TEMPLATE = "http://127.0.0.1:{port}"
 _WEB_SOCKET_PATH = "/ws"
+_ASSET_PREFIX = "/assets/"
 
 # The gateway renders model- and tool-produced transcript text, so the served
 # page is denied every fetch destination by default and then granted exactly
@@ -252,28 +254,32 @@ class WebSocketGateway:
     async def _process_request(  # noqa: PLR0911  # lint-waiver: LW-101058 [PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
         self, connection: ServerConnection, request: Request
     ) -> HttpResponse | None:
-        path = getattr(request, "path", "")
-        parsed = urlsplit(path)
+        parsed = urlsplit(getattr(request, "path", ""))
         query = parse_qs(parsed.query, keep_blank_values=True)
         token = query.get("token", [""])[0]
-        token_required = not parsed.path.startswith("/assets/")
-        if token_required and not secrets.compare_digest(token, self.token):
+        # Route on one normalized target. Deciding the token requirement from the
+        # raw path and then looking the file up from a decoded, traversal-bearing
+        # copy of it would let `/assets/../index.html` claim the `/assets/`
+        # exemption while resolving to a file outside it.
+        path = _routing_path(parsed.path)
+        serves_asset = path.startswith(_ASSET_PREFIX)
+        if not serves_asset and not secrets.compare_digest(token, self.token):
             return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n")
 
-        if parsed.path == _WEB_SOCKET_PATH:
+        if path == _WEB_SOCKET_PATH:
             origin = _request_header(request, "Origin")
             if origin not in self._allowed_origins():
                 return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid WebSocket origin\n")
             return None
 
-        if parsed.path == "/health":
+        if path == "/health":
             return _response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
 
-        if parsed.path in {"/", "/index.html"}:
+        if path in {"/", "/index.html"}:
             return self._asset_response("index.html")
-        if not parsed.path.startswith("/assets/"):
+        if not serves_asset:
             return _respond(connection, HTTPStatus.NOT_FOUND, "Not found\n")
-        return self._asset_response(unquote(parsed.path.removeprefix("/")))
+        return self._asset_response(path.removeprefix("/"))
 
     def _actual_origin(self) -> str:
         if self._bound_port is None:
@@ -286,10 +292,13 @@ class WebSocketGateway:
     def _asset_response(self, relative: str) -> HttpResponse:
         if self.assets_dir is None:
             return _response(HTTPStatus.NOT_FOUND, "Web assets are not installed\n", "text/plain")
-        candidate = (self.assets_dir / relative).resolve()
         try:
+            candidate = (self.assets_dir / relative).resolve()
             candidate.relative_to(self.assets_dir)
-        except ValueError:
+        except (OSError, ValueError):
+            # `resolve` rejects a NUL byte and an unresolvable symlink chain;
+            # `relative_to` rejects a symlink inside the directory that escapes
+            # it. Both mean the target is not a bundle file.
             return _response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         if not candidate.is_file():
             return _response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
@@ -449,6 +458,16 @@ def _request_metadata(raw: str) -> tuple[str, str]:
 def _request_header(request: Request, name: str) -> str | None:
     headers = getattr(request, "headers", {})
     return headers.get(name)
+
+
+def _routing_path(raw_path: str) -> str:
+    """Return the request path percent-decoded and lexically normalized.
+
+    The result is rooted at exactly one `/` and holds no `.` or `..` segment,
+    so one prefix test on it decides both the capability-token requirement and
+    the asset lookup, for the same target.
+    """
+    return posixpath.normpath("/" + unquote(raw_path).lstrip("/"))
 
 
 def _respond(_connection: ServerConnection, status: HTTPStatus, text: str) -> HttpResponse:
