@@ -130,6 +130,7 @@
         }
       },
       "required": [
+        "kind",
         "mode",
         "summary"
       ],
@@ -163,7 +164,10 @@
         }
       },
       "title": "AgentExecutionFinishedData",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "AgentExecutionStartedData": {
       "description": "Semantic context for one prompt-to-result agent execution.",
@@ -241,6 +245,7 @@
         }
       },
       "required": [
+        "kind",
         "stage",
         "activity"
       ],
@@ -284,6 +289,7 @@
         }
       },
       "required": [
+        "kind",
         "channel",
         "content"
       ],
@@ -366,6 +372,7 @@
         }
       },
       "required": [
+        "kind",
         "metric",
         "value",
         "unit"
@@ -423,6 +430,7 @@
         }
       },
       "required": [
+        "kind",
         "answer"
       ],
       "title": "ChatData",
@@ -505,7 +513,10 @@
         }
       },
       "title": "ChatOptionsQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "ChatProviderOptions": {
       "additionalProperties": false,
@@ -577,6 +588,7 @@
         }
       },
       "required": [
+        "type",
         "text"
       ],
       "title": "ChatQuery",
@@ -704,7 +716,10 @@
         }
       },
       "title": "ChatThreadCreateQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "ChatThreadCreatedData": {
       "description": "Identity and resolved agent settings for one experiment-chat thread.\n\nReplayed by clients to rebuild the thread list; the default thread is\nimplicit and never records one of these.",
@@ -743,6 +758,7 @@
         }
       },
       "required": [
+        "kind",
         "thread_id",
         "driver",
         "provider",
@@ -860,6 +876,7 @@
         }
       },
       "required": [
+        "kind",
         "stdout",
         "stderr"
       ],
@@ -905,6 +922,7 @@
         }
       },
       "required": [
+        "kind",
         "code",
         "stage",
         "message",
@@ -1049,6 +1067,7 @@
         }
       },
       "required": [
+        "type",
         "base",
         "head",
         "path"
@@ -1088,7 +1107,10 @@
         }
       },
       "title": "DesignQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "DesignRound": {
       "additionalProperties": false,
@@ -1318,6 +1340,7 @@
         }
       },
       "required": [
+        "type",
         "events"
       ],
       "title": "EventBatchMessage",
@@ -1338,6 +1361,7 @@
         }
       },
       "required": [
+        "type",
         "event"
       ],
       "title": "EventMessage",
@@ -1458,7 +1482,10 @@
         }
       },
       "title": "EventsQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "ExperimentCursor": {
       "additionalProperties": false,
@@ -1529,7 +1556,10 @@
         }
       },
       "title": "ExperimentQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "ExperimentUpdate": {
       "additionalProperties": false,
@@ -1615,6 +1645,7 @@
         }
       },
       "required": [
+        "kind",
         "reason"
       ],
       "title": "ExperimentsChangedData",
@@ -1676,6 +1707,7 @@
         }
       },
       "required": [
+        "kind",
         "summary"
       ],
       "title": "FrameworkWarningData",
@@ -1776,6 +1808,7 @@
         }
       },
       "required": [
+        "kind",
         "gate"
       ],
       "title": "GateFinishedData",
@@ -1845,6 +1878,7 @@
         }
       },
       "required": [
+        "kind",
         "gate"
       ],
       "title": "GateStartedData",
@@ -1882,7 +1916,10 @@
         }
       },
       "title": "HistoryQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "HypothesisEntry": {
       "additionalProperties": false,
@@ -2368,7 +2405,10 @@
         }
       },
       "title": "InvocationFinishedData",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "InvocationStartedData": {
       "description": "Prompts submitted at the start of a model invocation.",
@@ -2389,6 +2429,7 @@
         }
       },
       "required": [
+        "kind",
         "system_prompt",
         "user_prompt"
       ],
@@ -2419,6 +2460,7 @@
         }
       },
       "required": [
+        "kind",
         "value"
       ],
       "title": "JsonResultPayload",
@@ -2451,6 +2493,7 @@
         }
       },
       "required": [
+        "kind",
         "verdict",
         "feedback",
         "attempt"
@@ -2486,6 +2529,7 @@
         }
       },
       "required": [
+        "kind",
         "stream",
         "content"
       ],
@@ -2530,7 +2574,10 @@
         }
       },
       "title": "PauseCommand",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
@@ -2670,7 +2717,10 @@
         }
       },
       "title": "PerformanceQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "PerformanceRound": {
       "additionalProperties": false,
@@ -2734,6 +2784,7 @@
         }
       },
       "required": [
+        "kind",
         "phase"
       ],
       "title": "PhaseData",
@@ -2787,6 +2838,7 @@
         }
       },
       "required": [
+        "type",
         "code",
         "message"
       ],
@@ -3045,7 +3097,10 @@
         }
       },
       "title": "ResumeCommand",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "RoundFinishedData": {
       "description": "Summary of attempt, judge, and performance outcomes for a round.",
@@ -3099,6 +3154,7 @@
         }
       },
       "required": [
+        "kind",
         "attempts",
         "judge_verdict",
         "profile_skipped"
@@ -3182,6 +3238,7 @@
         }
       },
       "required": [
+        "kind",
         "run_log_path",
         "project_root"
       ],
@@ -3473,6 +3530,7 @@
         }
       },
       "required": [
+        "kind",
         "reason"
       ],
       "title": "RunInterruptedData",
@@ -3585,6 +3643,7 @@
         }
       },
       "required": [
+        "kind",
         "outer_loop",
         "input"
       ],
@@ -3623,6 +3682,7 @@
         }
       },
       "required": [
+        "kind",
         "status",
         "previous"
       ],
@@ -3646,7 +3706,10 @@
         }
       },
       "title": "ServerReadyData",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "SnapshotQuery": {
       "additionalProperties": false,
@@ -3680,7 +3743,10 @@
         }
       },
       "title": "SnapshotQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "SteerCommand": {
       "additionalProperties": false,
@@ -3719,6 +3785,7 @@
         }
       },
       "required": [
+        "type",
         "text"
       ],
       "title": "SteerCommand",
@@ -3762,7 +3829,10 @@
         }
       },
       "title": "StopCommand",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "SubprocessOutputData": {
       "description": "Captured output from a managed subprocess.",
@@ -3795,6 +3865,7 @@
         }
       },
       "required": [
+        "kind",
         "process_id",
         "process_kind",
         "stream",
@@ -3859,7 +3930,10 @@
         }
       },
       "title": "SubscribeRequest",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "SubscribedMessage": {
       "additionalProperties": false,
@@ -3890,6 +3964,7 @@
         }
       },
       "required": [
+        "type",
         "request_id",
         "run_id",
         "latest_sequence"
@@ -3934,7 +4009,10 @@
         }
       },
       "title": "TodoUpdateData",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "ToolCallData": {
       "description": "Tool name, call identity, and arguments emitted by an agent.",
@@ -3979,6 +4057,7 @@
         }
       },
       "required": [
+        "kind",
         "tool"
       ],
       "title": "ToolCallData",
@@ -4046,6 +4125,7 @@
         }
       },
       "required": [
+        "kind",
         "tool",
         "content"
       ],
@@ -4084,7 +4164,10 @@
         }
       },
       "title": "TuiDefaultsQuery",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "type"
+      ]
     },
     "TuiTheme": {
       "description": "Selectable terminal UI themes.",
@@ -4140,6 +4223,7 @@
         }
       },
       "required": [
+        "kind",
         "input_tokens"
       ],
       "title": "UsageUpdateData",
@@ -4197,7 +4281,10 @@
         }
       },
       "title": "WorkspaceSnapshotData",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     }
   },
   "description": "Root schema document for the public server protocol.",

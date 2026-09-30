@@ -608,7 +608,7 @@ export interface PauseCommand {
   request_id?: RequestId;
   client_id?: ClientId;
   timestamp?: Timestamp;
-  type?: Type;
+  type: Type;
   mode?: Mode;
 }
 /**
@@ -619,7 +619,7 @@ export interface ResumeCommand {
   request_id?: RequestId1;
   client_id?: ClientId1;
   timestamp?: Timestamp1;
-  type?: Type1;
+  type: Type1;
 }
 /**
  * Send steering text to the active run.
@@ -629,7 +629,7 @@ export interface SteerCommand {
   request_id?: RequestId2;
   client_id?: ClientId2;
   timestamp?: Timestamp2;
-  type?: Type2;
+  type: Type2;
   text: Text;
 }
 /**
@@ -640,7 +640,7 @@ export interface StopCommand {
   request_id?: RequestId3;
   client_id?: ClientId3;
   timestamp?: Timestamp3;
-  type?: Type3;
+  type: Type3;
   mode?: Mode1;
 }
 /**
@@ -651,7 +651,7 @@ export interface SnapshotQuery {
   request_id?: RequestId4;
   client_id?: ClientId4;
   timestamp?: Timestamp4;
-  type?: Type4;
+  type: Type4;
 }
 /**
  * Send a message to an experiment-chat thread.
@@ -661,7 +661,7 @@ export interface ChatQuery {
   request_id?: RequestId5;
   client_id?: ClientId5;
   timestamp?: Timestamp5;
-  type?: Type5;
+  type: Type5;
   text: Text1;
   thread_id?: ThreadId;
 }
@@ -679,7 +679,7 @@ export interface ChatThreadCreateQuery {
   request_id?: RequestId6;
   client_id?: ClientId6;
   timestamp?: Timestamp6;
-  type?: Type6;
+  type: Type6;
   driver?: Driver;
   provider?: Provider;
   model?: Model;
@@ -693,7 +693,7 @@ export interface ChatOptionsQuery {
   request_id?: RequestId7;
   client_id?: ClientId7;
   timestamp?: Timestamp7;
-  type?: Type7;
+  type: Type7;
 }
 /**
  * Request the launch-directory configuration defaults a TUI applies.
@@ -707,7 +707,7 @@ export interface TuiDefaultsQuery {
   request_id?: RequestId8;
   client_id?: ClientId8;
   timestamp?: Timestamp8;
-  type?: Type8;
+  type: Type8;
 }
 /**
  * Request persisted run history.
@@ -717,7 +717,7 @@ export interface HistoryQuery {
   request_id?: RequestId9;
   client_id?: ClientId9;
   timestamp?: Timestamp9;
-  type?: Type9;
+  type: Type9;
 }
 /**
  * Request the run's performance history.
@@ -727,7 +727,7 @@ export interface PerformanceQuery {
   request_id?: RequestId10;
   client_id?: ClientId10;
   timestamp?: Timestamp10;
-  type?: Type10;
+  type: Type10;
 }
 /**
  * Request the hypothesis-level experiment log for the attached run.
@@ -737,7 +737,7 @@ export interface ExperimentQuery {
   request_id?: RequestId11;
   client_id?: ClientId11;
   timestamp?: Timestamp11;
-  type?: Type11;
+  type: Type11;
   after?: ExperimentCursor | null;
 }
 /**
@@ -760,7 +760,7 @@ export interface DesignQuery {
   request_id?: RequestId12;
   client_id?: ClientId12;
   timestamp?: Timestamp12;
-  type?: Type12;
+  type: Type12;
 }
 /**
  * Request one file's unified patch from a round's commit range.
@@ -776,7 +776,7 @@ export interface DesignPatchQuery {
   request_id?: RequestId13;
   client_id?: ClientId13;
   timestamp?: Timestamp13;
-  type?: Type13;
+  type: Type13;
   base: Base;
   head: Head;
   path: Path;
@@ -789,7 +789,7 @@ export interface EventsQuery {
   request_id?: RequestId14;
   client_id?: ClientId14;
   timestamp?: Timestamp14;
-  type?: Type14;
+  type: Type14;
   after_sequence?: AfterSequence;
   before_sequence?: BeforeSequence;
   timeout_ms?: TimeoutMs;
@@ -802,7 +802,7 @@ export interface SubscribeRequest {
   request_id?: RequestId15;
   client_id?: ClientId15;
   timestamp?: Timestamp15;
-  type?: Type15;
+  type: Type15;
   after_sequence?: AfterSequence1;
   tail?: Tail;
   store_id?: StoreId;
@@ -945,7 +945,7 @@ export interface ActiveAgentExecution {
  * Complete current activity for an active agent execution.
  */
 export interface AgentExecutionActivityData {
-  kind?: Kind;
+  kind: Kind;
   mode: Mode2;
   summary: Summary1;
   tool?: Tool;
@@ -978,7 +978,7 @@ export interface RunEvent {
  * Completed answer and optional thread-turn identity.
  */
 export interface ChatData {
-  kind?: Kind1;
+  kind: Kind1;
   answer: Answer1;
   thread_title?: ThreadTitle;
   invocation_id?: InvocationId1;
@@ -991,7 +991,7 @@ export interface ChatData {
  * implicit and never records one of these.
  */
 export interface ChatThreadCreatedData {
-  kind?: Kind2;
+  kind: Kind2;
   thread_id: ThreadId3;
   title?: Title2;
   driver: Driver3;
@@ -1004,7 +1004,7 @@ export interface ChatThreadCreatedData {
  * Prompts submitted at the start of a model invocation.
  */
 export interface InvocationStartedData {
-  kind?: Kind3;
+  kind: Kind3;
   system_prompt: SystemPrompt;
   user_prompt: UserPrompt;
   [k: string]: unknown;
@@ -1013,7 +1013,7 @@ export interface InvocationStartedData {
  * Result or error recorded when a model invocation ends.
  */
 export interface InvocationFinishedData {
-  kind?: Kind4;
+  kind: Kind4;
   result?: Result;
   error?: Error1;
   [k: string]: unknown;
@@ -1025,7 +1025,7 @@ export interface Result {
  * Semantic context for one prompt-to-result agent execution.
  */
 export interface AgentExecutionStartedData {
-  kind?: Kind5;
+  kind: Kind5;
   stage: Stage1;
   attempt?: Attempt1;
   system_prompt?: SystemPrompt1;
@@ -1040,7 +1040,7 @@ export interface AgentExecutionStartedData {
  * Terminal result for one agent execution.
  */
 export interface AgentExecutionFinishedData {
-  kind?: Kind6;
+  kind: Kind6;
   result?: Result1;
   error?: Error2;
   [k: string]: unknown;
@@ -1052,7 +1052,7 @@ export interface Result1 {
  * Captured line of server output and its stream.
  */
 export interface OutputData {
-  kind?: Kind7;
+  kind: Kind7;
   stream: Stream;
   source?: Source2;
   content: Content;
@@ -1062,7 +1062,7 @@ export interface OutputData {
  * Transport details emitted once the server is ready.
  */
 export interface ServerReadyData {
-  kind?: Kind8;
+  kind: Kind8;
   socket_protocol?: SocketProtocol;
   [k: string]: unknown;
 }
@@ -1070,7 +1070,7 @@ export interface ServerReadyData {
  * Initial input and loop settings for a run.
  */
 export interface RunStartedData {
-  kind?: Kind9;
+  kind: Kind9;
   outer_loop: OuterLoop;
   input: Input;
   max_rounds?: MaxRounds;
@@ -1081,7 +1081,7 @@ export interface RunStartedData {
  * Reason and optional signal for an interrupted run.
  */
 export interface RunInterruptedData {
-  kind?: Kind10;
+  kind: Kind10;
   reason: Reason;
   signal?: Signal;
   [k: string]: unknown;
@@ -1096,7 +1096,7 @@ export interface RunInterruptedData {
  * other execution-scoped fact, not repeated here.
  */
 export interface RunStatusChangedData {
-  kind?: Kind11;
+  kind: Kind11;
   status: RunStatus;
   previous: RunStatus;
   [k: string]: unknown;
@@ -1105,7 +1105,7 @@ export interface RunStatusChangedData {
  * Reason and revision for a changed experiment projection.
  */
 export interface ExperimentsChangedData {
-  kind?: Kind12;
+  kind: Kind12;
   reason: Reason1;
   revision?: Revision1;
   [k: string]: unknown;
@@ -1114,7 +1114,7 @@ export interface ExperimentsChangedData {
  * Diagnostic details for configuration-stage failure.
  */
 export interface ConfigurationFailedData {
-  kind?: Kind13;
+  kind: Kind13;
   code: Code1;
   stage: Stage2;
   message: Message;
@@ -1126,7 +1126,7 @@ export interface ConfigurationFailedData {
  * Name and optional attempt number for a loop phase.
  */
 export interface PhaseData {
-  kind?: Kind14;
+  kind: Kind14;
   phase: Phase;
   attempt?: Attempt2;
   [k: string]: unknown;
@@ -1135,7 +1135,7 @@ export interface PhaseData {
  * Incremental output produced during agent execution.
  */
 export interface AgentOutputChunkData {
-  kind?: Kind15;
+  kind: Kind15;
   channel: Channel;
   content: Content1;
   status?: AgentStatusData | null;
@@ -1160,7 +1160,7 @@ export interface AgentStatusData {
  * Captured output from a managed subprocess.
  */
 export interface SubprocessOutputData {
-  kind?: Kind16;
+  kind: Kind16;
   process_id: ProcessId;
   process_kind: ProcessKind;
   stream: Stream1;
@@ -1171,7 +1171,7 @@ export interface SubprocessOutputData {
  * Verdict and feedback returned by the judge.
  */
 export interface JudgeResultData {
-  kind?: Kind17;
+  kind: Kind17;
   verdict: Verdict;
   feedback: Feedback;
   attempt: Attempt3;
@@ -1181,7 +1181,7 @@ export interface JudgeResultData {
  * Metric result emitted by a benchmark stage.
  */
 export interface BenchmarkResultData {
-  kind?: Kind18;
+  kind: Kind18;
   metric: Metric;
   value: Value;
   unit: Unit;
@@ -1191,7 +1191,7 @@ export interface BenchmarkResultData {
  * Summary of attempt, judge, and performance outcomes for a round.
  */
 export interface RoundFinishedData {
-  kind?: Kind19;
+  kind: Kind19;
   attempts: Attempts;
   judge_verdict: JudgeVerdict;
   perf_metric?: PerfMetric;
@@ -1203,7 +1203,7 @@ export interface RoundFinishedData {
  * Tool name, call identity, and arguments emitted by an agent.
  */
 export interface ToolCallData {
-  kind?: Kind20;
+  kind: Kind20;
   tool: Tool1;
   call_id?: CallId;
   args?: Args;
@@ -1217,7 +1217,7 @@ export interface Args {
  * Raw tool result and optional structured rendering payload.
  */
 export interface ToolResultData {
-  kind?: Kind21;
+  kind: Kind21;
   tool: Tool2;
   call_id?: CallId1;
   content: Content3;
@@ -1229,7 +1229,7 @@ export interface ToolResultData {
  * Structured result of a command-style tool execution.
  */
 export interface CommandResultPayload {
-  kind?: Kind22;
+  kind: Kind22;
   stdout: Stdout;
   stderr: Stderr;
   exit_code?: ExitCode1;
@@ -1240,7 +1240,7 @@ export interface CommandResultPayload {
  * A tool result that is a JSON object or array, already parsed.
  */
 export interface JsonResultPayload {
-  kind?: Kind23;
+  kind: Kind23;
   value: Value1;
   [k: string]: unknown;
 }
@@ -1248,7 +1248,7 @@ export interface JsonResultPayload {
  * Current todo list reported by an agent.
  */
 export interface TodoUpdateData {
-  kind?: Kind24;
+  kind: Kind24;
   todos?: Todos;
   [k: string]: unknown;
 }
@@ -1264,7 +1264,7 @@ export interface TodoItemData {
  * Token usage reported by the active model.
  */
 export interface UsageUpdateData {
-  kind?: Kind25;
+  kind: Kind25;
   input_tokens: InputTokens1;
   context_window?: ContextWindow1;
   model?: Model6;
@@ -1274,7 +1274,7 @@ export interface UsageUpdateData {
  * One framework gate began evaluating the current candidate.
  */
 export interface GateStartedData {
-  kind?: Kind26;
+  kind: Kind26;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -1291,7 +1291,7 @@ export interface GateStartedData {
  * output on failure.
  */
 export interface GateFinishedData {
-  kind?: Kind27;
+  kind: Kind27;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -1312,7 +1312,7 @@ export interface GateFinishedData {
  * change carries ``excluded_paths``.
  */
 export interface WorkspaceSnapshotData {
-  kind?: Kind28;
+  kind: Kind28;
   label?: Label;
   commit?: Commit;
   baseline?: Baseline;
@@ -1324,7 +1324,7 @@ export interface WorkspaceSnapshotData {
  * One per run: the resolved configuration a loop starts with.
  */
 export interface RunConfiguredData {
-  kind?: Kind29;
+  kind: Kind29;
   run_log_path: RunLogPath;
   project_root: ProjectRoot;
   model?: Model7;
@@ -1342,7 +1342,7 @@ export interface RunConfiguredData {
  * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
  */
 export interface FrameworkWarningData {
-  kind?: Kind30;
+  kind: Kind30;
   summary: Summary2;
   detail?: Detail1;
   source?: FrameworkSource4;
@@ -1501,7 +1501,7 @@ export interface DesignPatch {
  * Initial acknowledgment for an event subscription.
  */
 export interface SubscribedMessage {
-  type?: Type16;
+  type: Type16;
   request_id: RequestId17;
   client_id?: ClientId17;
   run_id: RunId4;
@@ -1511,14 +1511,14 @@ export interface SubscribedMessage {
  * Single-event message for the legacy streaming protocol.
  */
 export interface EventMessage {
-  type?: Type17;
+  type: Type17;
   event: RunEvent;
 }
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
 export interface EventBatchMessage {
-  type?: Type18;
+  type: Type18;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions1;
@@ -1529,7 +1529,7 @@ export interface EventBatchMessage {
  * Structured error envelope for protocol failures.
  */
 export interface ProtocolErrorMessage {
-  type?: Type19;
+  type: Type19;
   request_id?: RequestId18;
   client_id?: ClientId18;
   code: Code2;
