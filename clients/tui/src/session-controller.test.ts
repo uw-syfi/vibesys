@@ -24,6 +24,11 @@ function paletteNames(controller: SocketSessionController): string[] {
   return fuzzyMatchCommands('', context).map(command => command.name);
 }
 
+/** How many times the perf pane has been (re)loaded from the backend. */
+function performanceQueries(transport: FakeTransport): number {
+  return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
 /** The chat palette's current matches, by name, for the chat-surface counterpart above. */
 function chatPaletteNames(controller: SocketSessionController): string[] {
   const context = {surface: 'chat' as const, chatDocked: chatPaneVisible(controller.state)};
@@ -376,6 +381,35 @@ describe('session controller', () => {
     expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
     expect(controller.state.layout.right?.content).toContain('best r2 2.4k total_ops_per_sec');
     expect(controller.state.layout.focus).toBe('right');
+  });
+
+  // Post-#692 journals report a benchmark as a completed `gate_finished`
+  // carrying the measurement, not as a `benchmark_result`, so the pane's
+  // refresh trigger has to recognize both or the curve stays stale until an
+  // unrelated event happens to reload it.
+  it('reloads the perf pane when a benchmark arrives as a gate result', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await controller.submitCommand('/perf');
+    const loads = (): number => performanceQueries(transport);
+    const before = loads();
+
+    transport.emit({
+      type: 'event',
+      event: {
+        sequence: 5,
+        timestamp: '2026-01-01T00:00:05Z',
+        type: 'gate_finished',
+        status: 'completed',
+        round_label: 'round-1',
+        data: {kind: 'gate_finished', gate: 'benchmark', metric: 'ops', value: 9, unit: 'ops/s'},
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(loads()).toBe(before + 1);
   });
 
   it('opens a multi-turn chat panel and renders agent answers there', async () => {

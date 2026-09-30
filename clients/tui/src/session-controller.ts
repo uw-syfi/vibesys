@@ -10,7 +10,7 @@ import {
   type ServerTransport,
   type StreamConnectionState,
 } from '@vibesys/backend-client';
-import {DEFAULT_CHAT_THREAD_ID, hasRunEnded} from '@vibesys/core-state';
+import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,
@@ -929,7 +929,13 @@ export class SocketSessionController implements SessionController {
 
   /**
    * Both visualizations are functions of completed rounds and recorded
-   * metrics, so those two events bound every change either can show.
+   * metrics, so a round boundary and a recorded measurement bound every change
+   * either can show. Which events carry a measurement is core-state's fact,
+   * not this controller's: post-#692 journals report one as a completed
+   * benchmark `gate_finished` rather than a `benchmark_result`. The bare
+   * `benchmark_result` type stays as its own clause, since the trigger is
+   * allowed to be broader than the fold and a legacy event carrying no typed
+   * data still means the backend's performance log moved.
    */
   #refreshPaneFor(events: readonly RunEvent[]): void {
     const right = this.#state.layout.right;
@@ -938,7 +944,7 @@ export class SocketSessionController implements SessionController {
       event =>
         event.type === 'round_finished' ||
         event.type === 'benchmark_result' ||
-        event.data?.kind === 'benchmark_result',
+        recordsBenchmark(event),
     );
     if (relevant) void this.#loadPane(right.view);
   }

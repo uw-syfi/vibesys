@@ -1654,6 +1654,47 @@ describe('typed framework events', () => {
     ]);
   });
 
+  // A cache hit repeats the measurement it reused, so folding it as a second
+  // record would flatten the series with a phantom round. The transcript path
+  // already distinguishes reused gates; the benchmark fold did not.
+  it('adds no benchmark record for a reused benchmark gate', () => {
+    const measured = reduceEvent(initialCoreState(), benchmarkGate(7));
+    const reused = reduceEvent(measured, benchmarkGate(8, {reused: true}));
+
+    expect(reused.benchmarks).toEqual([
+      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+    ]);
+    // The reused gate still reports itself in the transcript, as a reused PASS
+    // rather than a Benchmark card; only the series is left alone.
+    expect(reused.transcript.at(-1)).toMatchObject({
+      kind: 'status',
+      content: 'reused PASS: tok_per_sec: 42.5 tok/s',
+    });
+  });
+
+  it('folds exactly the measured benchmark gates of a generated gate series', () => {
+    const choices = new SeededChoices(0xbe0);
+    const events: RunEvent[] = [];
+    const measured: number[] = [];
+    for (let sequence = 1; sequence <= 80; sequence += 1) {
+      const variant = choices.next(4);
+      events.push(
+        benchmarkGate(sequence, {
+          reused: variant === 1,
+          failed: variant === 2,
+          unmeasured: variant === 3,
+        }),
+      );
+      if (variant === 0) measured.push(sequence);
+    }
+    expect(measured.length).toBeGreaterThan(10);
+    expect(measured.length).toBeLessThan(events.length);
+
+    const state = reduceEventBatch(initialCoreState(), events);
+
+    expect(state.benchmarks.map(record => record.sequence)).toEqual(measured);
+  });
+
   it('describes each workspace snapshot aspect', () => {
     type Snapshot = Extract<NonNullable<RunEvent['data']>, {kind?: 'workspace_snapshot'}>;
     const aspects: Partial<Snapshot>[] = [
@@ -2095,6 +2136,29 @@ function frameworkEvent(
     ...overrides,
     data,
   };
+}
+
+/**
+ * A #692 benchmark gate carrying the measurement `benchmark_result` used to.
+ * The variants are the three reasons one carries no measurement for the fold:
+ * a cache hit repeating an earlier round's number, a failed gate, and a gate
+ * whose recipe reported no metric at all.
+ */
+function benchmarkGate(
+  sequence: number,
+  variant: {reused?: boolean; failed?: boolean; unmeasured?: boolean} = {},
+): RunEvent {
+  return frameworkEvent(
+    sequence,
+    'gate_finished',
+    {
+      kind: 'gate_finished',
+      gate: 'benchmark',
+      ...(variant.reused ? {reused: true} : {}),
+      ...(variant.unmeasured ? {} : {metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'}),
+    },
+    {status: variant.failed ? 'failed' : 'completed'},
+  );
 }
 
 function frameworkWarningEvent(sequence: number): RunEvent {

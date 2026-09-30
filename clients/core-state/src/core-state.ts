@@ -815,6 +815,18 @@ function applyRunFacts(state: CoreState, event: RunEvent, sequence: number): Cor
   return state;
 }
 
+/**
+ * Whether `event` contributes a measurement to the benchmark series.
+ *
+ * Exported because a consumer that caches a projection of `state.benchmarks`
+ * needs to know which events can change it, and re-deriving that from event
+ * types misses the gate-shaped form (#692). One predicate, so the fold and
+ * its consumers cannot disagree about what a measurement is.
+ */
+export function recordsBenchmark(event: RunEvent): boolean {
+  return benchmarkFromEvent(event, event.sequence ?? 0) !== null;
+}
+
 function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord | null {
   const data = event.data;
   if (data?.kind === 'benchmark_result') {
@@ -829,10 +841,16 @@ function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord 
   // A completed benchmark gate carries the measurement `benchmark_result`
   // used to, so it feeds the same fold; old journals have only the legacy
   // kind and new journals only this one (#692).
+  //
+  // A reused gate is a cache hit: it re-reports the number an earlier round
+  // measured, so folding it would append a phantom round to the series and
+  // flatten it. `gateFinishedEntry` in `transcript.ts` draws the same line,
+  // rendering a reused gate as a PASS rather than a Benchmark card.
   if (
     data?.kind !== 'gate_finished' ||
     data.gate !== 'benchmark' ||
     event.status === 'failed' ||
+    data.reused === true ||
     data.metric == null ||
     data.value == null
   ) {
