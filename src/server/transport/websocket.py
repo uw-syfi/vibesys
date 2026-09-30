@@ -570,6 +570,14 @@ class WebSocketGateway:
             async with asyncio.timeout(self.limits.write_deadline_seconds):
                 await websocket.send(payload)
         except TimeoutError:
+            # Reported here, where the decision is made, rather than in
+            # ``_handle_connection``'s handler: that handler also absorbs a
+            # browser closing its tab, so it cannot say anything above debug
+            # without either crying wolf or type-sniffing its own exception.
+            _LOG.warning(
+                "abandoning a websocket peer that did not drain within %ss",
+                self.limits.write_deadline_seconds,
+            )
             websocket.transport.abort()
             raise
 
@@ -590,15 +598,12 @@ class WebSocketGateway:
                     return
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101016 [BLE001]; a disconnected browser is normal at the transport boundary
             # The websocket library owns close frames, so a peer disappearing
-            # while the API is writing is a normal stream teardown and stays at
-            # debug. The write deadline re-raised by ``_handle_request`` is
-            # not: it means this gateway abandoned a peer that stopped
-            # draining, and unrecorded it is indistinguishable from a browser
-            # tab closing.
-            if isinstance(error, TimeoutError):
-                _LOG.warning("abandoned a websocket peer at the write deadline: %r", error)
-            else:
-                _LOG.debug("websocket stream ended: %r", error)
+            # while the API is writing is a normal stream teardown. Debug
+            # rather than silence, because this clause is also where the
+            # re-raised write deadline lands, and `del error` made the two
+            # indistinguishable; the deadline itself is reported at warning by
+            # ``_send``, which is what decided to abandon the peer.
+            _LOG.debug("websocket stream ended: %r", error)
             with suppress(Exception):
                 await websocket.close()
 

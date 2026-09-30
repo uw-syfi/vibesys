@@ -1105,10 +1105,11 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
     ``Response`` handler and written a second time to the socket that was just
     aborted.
 
-    The warning is the other half. ``_handle_connection``'s handler absorbs
-    both a browser closing its tab and a peer this gateway gave up on, and
-    those must not be indistinguishable to an operator, so only the second is
-    reported above debug.
+    The warning is the other half. Abandoning a subscriber is an operator-
+    visible decision, and it must not arrive as silence: it is reported by
+    ``_send``, which makes it, rather than by ``_handle_connection``'s handler,
+    which also absorbs a browser closing its tab. Asserted as a count and the
+    bound that was exceeded, not as wording.
     """
     parts = build_server_parts(tmp_path / "logs")
     tracker = SubscriptionTracker()
@@ -1165,7 +1166,7 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
     assert _reaped(lambda: tracker.wait_for_none_active(settle_seconds=0.0))
     reported = [record for record in caplog.records if record.levelno >= logging.WARNING]
     assert len(reported) == 1
-    assert "TimeoutError" in reported[0].getMessage()
+    assert str(gateway.limits.write_deadline_seconds) in reported[0].getMessage()
     parts.close()
 
 
