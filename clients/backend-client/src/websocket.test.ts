@@ -790,6 +790,80 @@ describe('WebSocketTransport', () => {
     expect(gateway.sockets).toHaveLength(1);
   });
 
+  it('ignores a retired connection still reporting after its replacement is live', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeScheduler();
+    const states: ControlChannelState[] = [];
+    const transport = controlTransport(gateway, scheduler, {
+      reconnectDelaysMs: [0],
+      onConnectionState: state => states.push(state),
+    });
+
+    const first = transport.request({type: 'query.snapshot'});
+    await tick();
+    gateway.socket(0).answerAll();
+    await expect(first).resolves.toMatchObject({ok: true});
+
+    gateway.socket(0).drop();
+    scheduler.runDue(0);
+    await tick();
+    expect(gateway.sockets).toHaveLength(2);
+    expect(transport.connected).toBe(true);
+
+    // The old socket is still wired to the handlers its own dial bound, and a
+    // real one can fire again while closing. Attributed to the generation that
+    // opened it, so it cannot take the live connection down or be answered on.
+    gateway.socket(0).drop();
+    gateway.socket(0).receive(JSON.stringify(okResponse('never-issued')));
+    await tick();
+    expect(transport.connected).toBe(true);
+    expect(states.map(trace)).toEqual([
+      'connected',
+      'down:lost',
+      'down:lost:retrying',
+      'connected',
+    ]);
+
+    const second = transport.request({type: 'query.snapshot'});
+    await tick();
+    gateway.socket(1).answerAll();
+    await expect(second).resolves.toMatchObject({ok: true});
+    await transport.close();
+  });
+
+  it('never resends a held request the caller abandoned during the outage', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeScheduler();
+    const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [60_000]});
+
+    const first = transport.request({type: 'query.snapshot'});
+    await tick();
+    gateway.socket(0).answerAll();
+    await expect(first).resolves.toMatchObject({ok: true});
+
+    // Two idempotent requests are held for the recovery; the caller gives up on
+    // one of them while it is still held rather than in flight.
+    const controller = new AbortController();
+    const abandoned = rejection(
+      transport.request({type: 'query.snapshot'}, {signal: controller.signal}),
+    );
+    const kept = transport.request({type: 'query.tui_defaults'});
+    gateway.socket(0).drop();
+    await tick();
+    controller.abort();
+    expect((await abandoned).name).toBe('AbortError');
+
+    transport.reconnect();
+    await tick();
+    // Only the kept request rides the recovery. A held entry removed from the
+    // queue must not be written to the fresh connection, or the caller gets a
+    // command they explicitly abandoned.
+    expect(gateway.socket(1).frames().map(frame => frame['type'])).toEqual(['query.tui_defaults']);
+    gateway.socket(1).answerAll();
+    await expect(kept).resolves.toMatchObject({ok: true});
+    await transport.close();
+  });
+
   it('fails the dial when the socket it was handed is already gone', async () => {
     const scheduler = new FakeScheduler();
     const sockets: FakeSocket[] = [];
