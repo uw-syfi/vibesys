@@ -158,6 +158,16 @@ type ControlPhase =
   | {readonly kind: 'closed'};
 
 /**
+ * A failure a connection reported before the dial that owns it had installed
+ * it. `fault` separates the two dispositions: unreadable bytes are a real
+ * answer about the peer, a close is an outage the schedule may still recover.
+ */
+interface DialReport {
+  readonly error: Error;
+  readonly fault: boolean;
+}
+
+/**
  * The multiplexed request/response half of a client's connection to the server,
  * independent of how its bytes travel.
  *
@@ -204,6 +214,17 @@ export class ControlChannel {
   #generation = 0;
   #cancelRedial: (() => void) | null = null;
   #dialing = false;
+  /**
+   * A failure the connection a dial is still resolving has already reported.
+   * `ControlConnector.open` binds the handlers before it returns the connection,
+   * so a transport can report a close or a fault for a connection the channel
+   * has not installed yet. The phase guards on `#onDrop` and `#onFault` cannot
+   * act on that (there is no live connection to dispose), so the report is
+   * recorded here and the dial fails the attempt instead of installing a
+   * connection it has already been told is dead. Cleared at the start of every
+   * dial, so one attempt's report cannot condemn the next one.
+   */
+  #reportedWhileDialing: DialReport | null = null;
   /**
    * The connectivity the caller has been told about, so one outage that fails
    * several redials in a row reports `disconnected` once rather than per
@@ -403,7 +424,10 @@ export class ControlChannel {
    */
   #onDrop(error: Error): void {
     const phase = this.#phase;
-    if (phase.kind !== 'connected') return;
+    if (phase.kind !== 'connected') {
+      this.#recordWhileDialing(error, false);
+      return;
+    }
     this.#phase = {kind: 'reconnecting'};
     this.#report({status: 'disconnected', error});
     void phase.connection.close();
@@ -423,11 +447,35 @@ export class ControlChannel {
    */
   #onFault(error: Error): void {
     const phase = this.#phase;
-    if (phase.kind !== 'connected') return;
+    if (phase.kind !== 'connected') {
+      this.#recordWhileDialing(error, true);
+      return;
+    }
     this.#phase = {kind: 'disconnected'};
     this.#report({status: 'disconnected', error});
     void phase.connection.close();
     this.#failOwed(error);
+  }
+
+  /**
+   * Keep the first failure a dial's own connection reports before that dial has
+   * installed it. Only the first: it is the one that explains the connection,
+   * and a broken transport may report several. Outside a dial there is nothing
+   * to condemn, so the report is the stale event the phase guard took it for.
+   */
+  #recordWhileDialing(error: Error, fault: boolean): void {
+    if (!this.#dialing) return;
+    this.#reportedWhileDialing ??= {error, fault};
+  }
+
+  /**
+   * Take whatever the dialing connection reported and leave the slot empty, so
+   * one attempt's report cannot be read twice or condemn the next attempt.
+   */
+  #takeDialReport(): DialReport | null {
+    const reported = this.#reportedWhileDialing;
+    this.#reportedWhileDialing = null;
+    return reported;
   }
 
   /**
@@ -437,6 +485,8 @@ export class ControlChannel {
   async #dial(): Promise<void> {
     if (this.#phase.kind !== 'reconnecting' || this.#dialing) return;
     this.#dialing = true;
+    // Discard an earlier attempt's report before this one can be blamed for it.
+    this.#takeDialReport();
     try {
       let connection: ControlConnection;
       const handlers = this.#bindHandlers();
@@ -450,6 +500,25 @@ export class ControlChannel {
       if (this.#phase.kind !== 'reconnecting') {
         // close(), or a revive, raced the dial: this connection is not wanted.
         void connection.close();
+        return;
+      }
+      const reported = this.#takeDialReport();
+      if (reported !== null) {
+        // The connection failed before this dial could install it. Installing it
+        // anyway would make `connected` true for a connection that will never
+        // answer and never report again (a socket emits `close` once), leaving
+        // every later request to wait out its response deadline. So the attempt
+        // takes the failure it was handed: a drop is an outage the schedule may
+        // still recover, a fault is not.
+        void connection.close();
+        if (reported.fault) {
+          this.#phase = {kind: 'disconnected'};
+          this.#report({status: 'disconnected', error: reported.error});
+          this.#failOwed(reported.error);
+        } else {
+          this.#report({status: 'disconnected', error: reported.error});
+          this.#scheduleRedial();
+        }
         return;
       }
       this.#phase = {kind: 'connected', connection};
