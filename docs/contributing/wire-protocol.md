@@ -125,8 +125,8 @@ killed tab) leaves the server with no FIN to read. The disposition:
   it. That case is handled by the send-side write deadline below, and by the optional client
   heartbeat (`WP-HEARTBEAT`).
 
-The bounds are stated, not inherited. `WebSocketLimits` in `websocket.py` names every one of them
-and passes them all to `serve()` (`websocket.py:48-93`, `:231-247`), so a `websockets` upgrade
+The bounds are stated, not inherited. The `WebSocketLimits` dataclass in `websocket.py` names every
+one of them and `_serve_until_stopped` passes them all to `serve()`, so a `websockets` upgrade
 cannot move a bound a subscriber depends on. Three of them compose into the liveness ceiling:
 
 | Bound | Value | Role |
@@ -156,7 +156,7 @@ the send-side high-water mark, and it is the one that carries the contract below
 **The send-side overflow policy is to stall the producer, not to drop events and not to disconnect
 on the first slow read.** Past the high-water mark the producing coroutine suspends in the library's
 `drain()` until the peer catches up. This is deliberately the same shape as the Unix path, where
-`_write_message` does a blocking `wfile.write` plus `flush` (`unix_jsonl.py:218-221`), and it is
+`_write_message` in `unix_jsonl.py` does a blocking `wfile.write` plus `flush`, and it is
 what preserves burst batching on both transports: a stalled stream loop is not reading the journal,
 so the next `subscription_checkpoint` coalesces the whole backlog into one `event_batch` instead of
 one frame per event. Slow consumers get fewer, larger batches rather than lost events.
