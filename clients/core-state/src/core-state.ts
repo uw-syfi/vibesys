@@ -919,6 +919,34 @@ export function latestDiagnosticChange(
   );
 }
 
+/**
+ * Whether `event` is the run reaching a status it never leaves.
+ *
+ * The same fact `applyRunLifecycle` and `applyRunStatus` route to `terminate`,
+ * asked one stage earlier so the per-execution status map closes out with the
+ * rest of the run. Statuses are the reason this is not just a list of event
+ * types: an operator `/stop` ends the run through `run_status_changed` alone,
+ * with no run-scoped terminal event after it.
+ *
+ * `run-map.ts`'s `runClosingStatus` is deliberately narrower: it answers what
+ * to write onto work that was still open, and `completed` and `failed` already
+ * have a terminal event that owns that. Clearing a status map the run has
+ * finished with has no such owner and no ordering hazard.
+ */
+function endsRun(event: RunEvent): boolean {
+  switch (event.type) {
+    case 'run_finished':
+    case 'run_failed':
+    case 'run_interrupted':
+    case 'configuration_failed':
+      return true;
+    default: {
+      const data = event.data;
+      return data?.kind === 'run_status_changed' && endedRunStatus(data.status) !== null;
+    }
+  }
+}
+
 /** Folds one backend-published status, ending the run when that status has. */
 function applyRunStatus(state: CoreState, status: CoreRunStatus): CoreState {
   const ended = endedRunStatus(status);
@@ -1030,11 +1058,7 @@ function applyAgentStatusEvent(state: CoreState, event: RunEvent): CoreState {
     executionStatuses = reconcileExecutionStatuses(executionStatuses, state.activeExecutions);
   } else if (data?.kind === 'agent_execution_finished' && executionId != null) {
     executionStatuses = removeExecutionStatus(executionStatuses, executionId);
-  } else if (
-    event.type === 'run_finished' ||
-    event.type === 'run_failed' ||
-    event.type === 'run_interrupted'
-  ) {
+  } else if (endsRun(event)) {
     executionStatuses = {};
   } else {
     executionStatuses = applyExecutionStatus(executionStatuses, event);

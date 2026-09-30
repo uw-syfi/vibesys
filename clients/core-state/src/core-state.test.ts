@@ -14,6 +14,8 @@ import {
   reduceSnapshot,
 } from './core-state.js';
 import {executionStatusFor} from './execution-status.js';
+import {hasActiveAgentTiming} from './round-timing.js';
+import {roundAgentElapsedMs} from './run-map.js';
 
 describe('core state projection', () => {
   it('projects snapshots without changing event-derived history', () => {
@@ -1160,6 +1162,55 @@ describe('the run lifecycle', () => {
     expect(hasRunEnded(state)).toBe(false);
   });
 
+  // `/stop` lands at an invocation boundary, records the status change, and the
+  // journal stops there: no run-scoped terminal event follows. So the status
+  // event is the only place the fold learns the run ended, and it used to write
+  // nothing but `status` and `activeExecutions`. Rounds stayed active, phases
+  // stayed active or pending, `executionStatuses` were retained, and the
+  // round's agent timing stayed open, which keeps its clock running for as long
+  // as the client is up.
+  it('closes the run map, statuses and timers when an operator stop ends the run', () => {
+    const running = reduceEventBatch(initialCoreState(), stoppableRunEvents());
+    expect(openWork(running)).not.toEqual([]);
+    expect(Object.keys(running.executionStatuses)).not.toEqual([]);
+
+    const stopped = reduceEvent(running, runScopedStatusEvent(9, 'stopped', 'stopping'));
+
+    expect(stopped.status).toBe('stopped');
+    expect(openWork(stopped)).toEqual([]);
+    expect(stopped.executionStatuses).toEqual({});
+    expect(stopped.activeExecutions).toEqual({});
+    const round = stopped.rounds.at(-1);
+    if (round === undefined) throw new Error('the fold projected no rounds');
+    expect(hasActiveAgentTiming(round)).toBe(false);
+    // The clock is a function of the closed intervals now, not of `now`.
+    expect(roundAgentElapsedMs(round, new Date('2026-01-01T00:00:09Z'))).toBe(
+      roundAgentElapsedMs(round, new Date('2026-01-02T00:00:00Z')),
+    );
+  });
+
+  // An operator stop and a signal are the same fact for everything except the
+  // run's own status: nothing will finish the work that was open. Holds at
+  // every cut point of the run, which is what makes it a property of the
+  // closeout rather than of one recorded journal.
+  it('closes an operator-stopped run exactly as an interrupted one, at every cut', () => {
+    const events = stoppableRunEvents();
+
+    for (let cut = 1; cut <= events.length; cut += 1) {
+      const running = reduceEventBatch(initialCoreState(), events.slice(0, cut));
+      const stopped = reduceEvent(running, runScopedStatusEvent(9, 'stopped', 'stopping'));
+      const interrupted = reduceEvent(running, {
+        ...runScoped(9, 'run_interrupted'),
+        data: {kind: 'run_interrupted', reason: 'operator', signal: 'SIGTERM'},
+      });
+
+      expect(stopped.rounds).toEqual(interrupted.rounds);
+      expect(stopped.phases).toEqual(interrupted.phases);
+      expect(stopped.executionStatuses).toEqual(interrupted.executionStatuses);
+      expect(stopped.activeExecutions).toEqual(interrupted.activeExecutions);
+    }
+  });
+
   it('drops the active executions of an operator-stopped run', () => {
     const running = reduceSnapshot(initialCoreState(), {
       run_id: 'run',
@@ -1798,6 +1849,72 @@ describe('typed framework events', () => {
 });
 
 /** One stream touching every transcript merge rule, plus both chat threads. */
+/**
+ * A run stopped mid-round: two roles advertised, the first round's implementer
+ * closed, the second round's still running with structured status reported.
+ * Every closeout the run-scoped terminal events do has something to close here.
+ */
+function stoppableRunEvents(): RunEvent[] {
+  return [
+    {
+      ...runScoped(1, 'run_started'),
+      status: 'active',
+      data: {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '/synthetic/target',
+        max_rounds: 3,
+        expected_roles: ['implementer', 'judge'],
+      },
+    },
+    executionEvent(2, 'agent_execution_started', 'exec-1', startedData('Implement')),
+    statusEvent(3, 'exec-1', 'agent_output_chunk', {progress: 'writing', input_tokens: 8_000}),
+    executionEvent(4, 'agent_execution_finished', 'exec-1', {
+      kind: 'agent_execution_finished',
+      error: null,
+    }),
+    {...roundFinishedEvent(5, {}), status: 'completed'},
+    {
+      ...executionEvent(6, 'agent_execution_started', 'exec-2', startedData('Implement again')),
+      round_label: 'round-2-implementer',
+    },
+    {
+      ...statusEvent(7, 'exec-2', 'agent_output_chunk', {progress: 'still writing'}),
+      round_label: 'round-2-implementer',
+    },
+    {...outputEvent(8, 'partial work', 'exec-2'), round_label: 'round-2-implementer'},
+  ];
+}
+
+/** Rounds and phases nothing has closed yet. */
+function openWork(state: CoreState): string[] {
+  return [
+    ...state.rounds
+      .filter(round => round.status === 'active')
+      .map(round => `round ${round.number}`),
+    ...state.phases
+      .filter(phase => phase.status === 'active' || phase.status === 'pending')
+      .map(phase => `phase ${phase.kind} ${phase.roundNumber}`),
+  ];
+}
+
+/** An event with no agent or round scope, the shape run-scoped events have. */
+function runScoped(sequence: number, type: RunEvent['type']): RunEvent {
+  return {sequence, timestamp: `2026-01-01T00:00:0${sequence}Z`, type};
+}
+
+/** A run-scoped `run_status_changed`, which is what the controller records. */
+function runScopedStatusEvent(
+  sequence: number,
+  status: CoreRunStatus,
+  previous: CoreRunStatus,
+): RunEvent {
+  return {
+    ...runScoped(sequence, 'run_status_changed'),
+    data: {kind: 'run_status_changed', status, previous},
+  } as RunEvent;
+}
+
 /**
  * Deterministic choices for the property tests, mixed the way
  * `core-state-prefix.test.ts`'s generator is. A bare LCG will not do: its low
