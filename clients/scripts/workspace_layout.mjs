@@ -8,25 +8,37 @@
  * (the dependency policy), and `knip.config.ts` (the audited workspaces). The workspace scripts in
  * `package.json` need no list at all: `pnpm -r` runs every member by construction.
  *
+ * Two questions, answered at different layers. **Which directories are packages** is pnpm's
+ * question, so this applies pnpm's rule for `*` and nothing else: a direct child of the workspace
+ * root that holds a `package.json` and is not one of the two names pnpm never treats as a member.
+ * No ignore filter applies there, because `pnpm -r` runs a member's `build`, `check`, and `test`
+ * whether or not `.gitignore` happens to name its directory, and a member that runs while no gate
+ * can see it is the one failure this module exists to prevent. **Which directories inside a
+ * package hold source** is git's question, and that is the only place the ignore filter applies.
+ *
  * Guarantees. `workspaceLayout` returns every directory the workspace file admits that holds a
  * `package.json`, in path order, with the source and tooling directories inside it. A symlink to a
- * directory counts, because pnpm treats it as a workspace member and runs its scripts. It throws,
+ * directory counts, because pnpm treats it as a workspace member and runs its scripts; a link that
+ * does not resolve to a directory is dropped, which is what pnpm does with it too. It throws,
  * naming the offending path, on a workspace file or manifest it cannot interpret.
  *
- * A dot-directory and a directory git ignores are left out; every other directory is reported as
- * tooling rather than dropped, so an unrecognised source directory makes the gates report more,
- * never less. Asking git is what makes that safe rather than merely conservative: untracked output
- * (`dist`, `node_modules`, `web/test-results`, a coverage report, a `web/build` bundle) never
- * reaches the gates at all, so a developer gets the rule set CI has and no red gate with no tracked
- * file to blame.
+ * Inside that set, a dot-directory and a directory git ignores are left out, and every other
+ * directory is reported as tooling rather than dropped, so an unrecognised source directory makes
+ * the gates report more, never less. Asking git is what makes that safe rather than merely
+ * conservative: untracked output (`dist`, `node_modules`, `web/test-results`, a `coverage/`
+ * report, a `web/build` bundle) never reaches the gates at all, so a developer gets the rule set
+ * CI has and no red gate with no tracked file to blame. `ignoredDirectories` says what stands in
+ * for an answer where git has none.
  *
  * `declarationErrors` reports the two facts that cannot be derived away (a tsconfig path map and
  * the scripts `pnpm -r` drives) when they disagree with that layout, so a package that joins the
- * workspace fails the gate instead of joining it unchecked.
+ * workspace fails the gate instead of joining it unchecked. A package whose own directory git
+ * ignores contributes no scan roots, because everything inside it is ignored too, but it is still
+ * a package, so `declarationErrors` names it rather than letting it join unchecked.
  */
 
 import {spawnSync} from 'node:child_process';
-import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs';
+import {existsSync, lstatSync, readdirSync, readFileSync, statSync} from 'node:fs';
 import {join} from 'node:path';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
@@ -39,8 +51,11 @@ const TYPESCRIPT_SUFFIX = '.ts';
 
 // Which directories hold no source is already declared, in `.gitignore`, so this asks git rather
 // than keeping a second list: build output (`dist`), installed dependencies (`node_modules`), tool
-// caches, and local tool output (`web/artifacts`, `web/test-results`) are all ignored there, and a
-// developer who has run Playwright or a coverage report must get the same rule set CI has.
+// caches, and local tool output (`web/artifacts`, `web/test-results`, `coverage`) are all ignored
+// there, and a developer who has run Playwright or a coverage report must get the same rule set CI
+// has. git also honours `.git/info/exclude` and `core.excludesFile`, so the declaration is the
+// effective rule set rather than `.gitignore` alone; neither is set in this repository, and a
+// developer who sets one gets a narrower scan than CI.
 const GIT_IGNORE_QUERY = ['check-ignore', '--stdin', '-z'];
 // `git check-ignore` exits 0 when some input path is ignored and 1 when none is; any other status
 // (128 in a tree with no git metadata) means git could not answer.
@@ -48,13 +63,22 @@ const GIT_STATUS_ANSWERED = new Set([0, 1]);
 
 // A leading dot marks version-control or tool metadata (`.git`, `.cache`, `.browser-dist`), never
 // a package's source. This is not part of the git question: `.git` holds the answers rather than
-// being subject to them, so `git check-ignore` does not report it.
+// being subject to them, so `git check-ignore` does not report it. pnpm agrees: a direct child
+// `.hidden/package.json` is not reported as a workspace member.
 const METADATA_PREFIX = '.';
 
-// The fallback for a tree with no git metadata, such as an unpacked sdist. Such a tree is created
-// from tracked files, so the only untracked directories it can grow are an install
-// (`node_modules`) and a build (`dist`); the dot-directory caches are already excluded above.
-const PACKED_TREE_OUTPUT = new Set(['dist', 'node_modules']);
+// pnpm's own exclusions from `packages:` globbing, transcribed because the package question is
+// pnpm's. Verified against pnpm 11.11.0 with a `package.json` in each of `dist`, `build`,
+// `node_modules`, and `bower_components` as direct children: `pnpm -r list` reports `dist` and
+// `build` as members and never these two. They belong here and not in `OUTPUT_DIRECTORY_NAMES`
+// because they answer "is this a package", not "does this directory hold source".
+const NOT_A_WORKSPACE_MEMBER = new Set(['node_modules', 'bower_components']);
+
+// What stands in for an answer where git has none; see `ignoredDirectories` for the two cases. A
+// tree with no git metadata is created from tracked files, so the only untracked directories it
+// can grow are an install (`node_modules`) and a build (`dist`); the dot-directory caches are
+// already excluded above.
+const OUTPUT_DIRECTORY_NAMES = new Set(['dist', 'node_modules']);
 
 // A workspace pattern this module understands: `*` (every directory, what pnpm is configured with)
 // or a literal directory name. Anything else would need glob semantics to expand correctly, and
@@ -79,17 +103,29 @@ const REQUIRED_SCRIPTS = ['build', 'check', 'test'];
  * }}
  */
 export function workspaceLayout(root) {
-  const packages = readPackages(root);
+  const rootChildren = candidateChildren(root, '', false);
+  const packages = readPackages(root, rootChildren);
   const packageDirectories = new Set(packages.map(({directory}) => directory));
+  // The ignore filter starts here, one layer below the package question: a root directory that is
+  // not a package, and every directory inside a package. The packages themselves are already
+  // settled, by pnpm's rule, and are not re-asked about.
+  const candidates = [
+    ...rootChildren.filter(({path}) => !packageDirectories.has(path)),
+    ...packages.flatMap(({directory}) =>
+      candidateChildren(root, directory, crossesSymlink(root, directory)),
+    ),
+  ];
+  const ignored = ignoredDirectories(root, candidates);
   const source = [];
   const tooling = [];
-  for (const child of childDirectories(root, ['', ...packageDirectories])) {
-    const separator = child.lastIndexOf('/');
+  for (const {path} of candidates) {
+    if (ignored.has(path)) continue;
+    const separator = path.lastIndexOf('/');
     if (separator < 0) {
       // A root directory that is not a package is the workspace's own tooling (`scripts`).
-      if (!packageDirectories.has(child)) tooling.push(child);
+      tooling.push(path);
     } else {
-      (child.slice(separator + 1) === SOURCE_DIRECTORY ? source : tooling).push(child);
+      (path.slice(separator + 1) === SOURCE_DIRECTORY ? source : tooling).push(path);
     }
   }
   return {
@@ -200,13 +236,29 @@ function packageScriptErrors(layout) {
   return errors;
 }
 
-function readPackages(root) {
+/**
+ * The directories `*` admits, by pnpm's rule and nothing else: every direct child of the root that
+ * holds a `package.json` and that pnpm does not exclude by name.
+ *
+ * No ignore filter is applied here, deliberately. Filtering the package question by ignore status
+ * made a member whose directory `.gitignore` happens to name (`clients/lib`, `clients/env`, and 28
+ * other bare directory patterns) run under `pnpm -r` while being invisible to the depcruise scan,
+ * the dependency policy, the knip policy, the tsconfig path check, and the required-script
+ * meta-check. A nested `dist/package.json` cannot become a member by this rule, because `*` matches
+ * direct children only, so keeping the filter out of it costs nothing.
+ */
+function starMembers(root, rootChildren) {
+  return rootChildren
+    .map(({path}) => path)
+    .filter(path => !NOT_A_WORKSPACE_MEMBER.has(path))
+    .filter(path => existsSync(join(root, path, MANIFEST_FILE)));
+}
+
+function readPackages(root, rootChildren) {
   const directories = new Set();
   for (const pattern of packagePatterns(root)) {
     if (pattern === '*') {
-      for (const candidate of childDirectories(root, [''])) {
-        if (existsSync(join(root, candidate, MANIFEST_FILE))) directories.add(candidate);
-      }
+      for (const directory of starMembers(root, rootChildren)) directories.add(directory);
       continue;
     }
     if (!existsSync(join(root, pattern, MANIFEST_FILE))) {
@@ -255,20 +307,30 @@ function packagePatterns(root) {
 }
 
 /**
- * The directories inside each of `directories` that hold repository content, as paths relative to
- * `root`. Everything git ignores is left out, in one query for the whole batch; see
- * `ignoredDirectories` for the tree that has no git to ask.
+ * The children of `directory` that could hold repository content, as paths relative to `root`.
+ * `beyondSymlink` carries whether git has an answer for them; see `ignoredDirectories`.
+ *
+ * @returns {{path: string, beyondSymlink: boolean}[]}
  */
-function childDirectories(root, directories) {
-  const paths = directories
-    .flatMap(directory =>
-      readdirSync(join(root, directory), {withFileTypes: true})
-        .filter(entry => isContentDirectory(root, directory, entry))
-        .map(entry => (directory === '' ? entry.name : `${directory}/${entry.name}`)),
-    )
-    .sort();
-  const ignored = ignoredDirectories(root, paths);
-  return paths.filter(path => !ignored.has(path));
+function candidateChildren(root, directory, beyondSymlink) {
+  return readdirSync(join(root, directory), {withFileTypes: true})
+    .filter(entry => isContentDirectory(root, directory, entry))
+    .map(entry => ({
+      path: directory === '' ? entry.name : `${directory}/${entry.name}`,
+      beyondSymlink,
+    }));
+}
+
+/**
+ * Whether reaching a path inside `directory` crosses a symlink, which is the one case
+ * `git check-ignore` refuses to answer for. Every component is tested, not just the last, so this
+ * stays correct if the workspace file ever admits a nested pattern.
+ */
+function crossesSymlink(root, directory) {
+  const components = directory.split('/');
+  return components.some((_, index) =>
+    lstatSync(join(root, ...components.slice(0, index + 1))).isSymbolicLink(),
+  );
 }
 
 /**
@@ -276,20 +338,50 @@ function childDirectories(root, directories) {
  *
  * `readdirSync` has `lstat` semantics, so a symlink to a directory is reported as a symlink and
  * not as a directory. pnpm resolves such a link and runs the linked package's scripts, so dropping
- * it here would run `build`, `check`, and `test` on a package no gate can see. A dangling link
- * stats to nothing and is dropped.
+ * it here would run `build`, `check`, and `test` on a package no gate can see.
  */
 function isContentDirectory(root, directory, entry) {
   if (entry.name.startsWith(METADATA_PREFIX)) return false;
   if (entry.isDirectory()) return true;
   if (!entry.isSymbolicLink()) return false;
-  const target = statSync(join(root, directory, entry.name), {throwIfNoEntry: false});
-  return target?.isDirectory() === true;
+  return resolvesToDirectory(join(root, directory, entry.name));
 }
 
-function ignoredDirectories(root, paths) {
-  if (paths.length === 0) return new Set();
-  return gitIgnoredDirectories(root, paths) ?? packedTreeOutput(paths);
+/**
+ * Whether `path` resolves to a directory. A link that does not is dropped, however it fails to:
+ * it dangles (ENOENT), it loops (ELOOP), or its target's parent is unreadable (EACCES). All three
+ * mean the same thing for this question, there is no directory here to enumerate, and pnpm cannot
+ * resolve such a link either, so dropping it keeps the derived member set in agreement with
+ * pnpm's. Naming the codes instead would be a list to keep in step with libuv for no gain, and
+ * `statSync`'s own `{throwIfNoEntry: false}` covers only the first, so a symlink loop used to
+ * abort every gate that imports this module with a raw errno.
+ */
+function resolvesToDirectory(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The subset of `candidates` that holds no repository content.
+ *
+ * The question has three answers, not two. `git check-ignore` gives the first two, ignored or not,
+ * for every path it can stat. It has none for a path beyond a symlink: it rejects the whole
+ * pathspec with `fatal: pathspec '...' is beyond a symbolic link` and exit 128, so one such path
+ * costs the answer for every path batched with it. It has none in a tree with no git metadata
+ * either. Neither is git failing, so neither is treated as an error: each is classified by
+ * `OUTPUT_DIRECTORY_NAMES`, and that fallback is confined to the paths that have no answer so the
+ * rest of the workspace keeps git's. Asking about the two together is what let a single symlinked
+ * package put `dist`, a `coverage/` report, and a `web/build` bundle back among the scan roots.
+ */
+function ignoredDirectories(root, candidates) {
+  const reachable = candidates.filter(({beyondSymlink}) => !beyondSymlink).map(({path}) => path);
+  const beyond = candidates.filter(({beyondSymlink}) => beyondSymlink).map(({path}) => path);
+  const answered = reachable.length === 0 ? new Set() : gitIgnoredDirectories(root, reachable);
+  if (answered === undefined) return ignoredByName(candidates.map(({path}) => path));
+  return new Set([...answered, ...ignoredByName(beyond)]);
 }
 
 /** The subset of `paths` git ignores, or `undefined` when git cannot answer for this tree. */
@@ -303,9 +395,10 @@ function gitIgnoredDirectories(root, paths) {
   return new Set(query.stdout.split('\0').filter(path => path !== ''));
 }
 
-function packedTreeOutput(paths) {
+/** The stand-in answer, by directory name, for the paths git has none for. */
+function ignoredByName(paths) {
   return new Set(
-    paths.filter(path => PACKED_TREE_OUTPUT.has(path.slice(path.lastIndexOf('/') + 1))),
+    paths.filter(path => OUTPUT_DIRECTORY_NAMES.has(path.slice(path.lastIndexOf('/') + 1))),
   );
 }
 

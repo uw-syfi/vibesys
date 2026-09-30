@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdir, mkdtemp, symlink, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import test from 'node:test';
@@ -15,14 +15,21 @@ import {declarationErrors, pathAlternation, workspaceLayout} from './workspace_l
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.mjs');
 
+// `.dependency-cruiser.mjs` derives its path patterns from the workspace on disk, so a fixture
+// must use this repository's own directory names or no rule can match it. Deriving the fixture's
+// shape from the same module is what keeps the two in step: a package or a scan root that joins
+// the workspace is covered without anyone editing a list here.
+const REPOSITORY_LAYOUT = workspaceLayout(WORKSPACE_ROOT);
+const PACKAGE_DIRECTORIES = REPOSITORY_LAYOUT.packages.map(({directory}) => directory);
+
 test('dependency-cruiser rule names are unique', async () => {
   const options = await extractDepcruiseOptions(CONFIG);
   const names = options.ruleSet.forbidden.map(rule => rule.name);
   assert.equal(new Set(names).size, names.length);
 });
 
-test('dependency-cruiser rejects forbidden package and runtime edges', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'vibesys-dependency-rules-'));
+test('dependency-cruiser rejects forbidden package and runtime edges', async t => {
+  const root = await scratchDirectory(t, 'vibesys-dependency-rules-');
   await writeFile(
     join(root, 'tsconfig.architecture.json'),
     JSON.stringify({
@@ -252,8 +259,8 @@ const RULE_CASES = [
   },
 ];
 
-async function violatedRules(files) {
-  const root = await workspaceFixture('vibesys-layer-rules-');
+async function violatedRules(t, files) {
+  const root = await workspaceFixture(t, 'vibesys-layer-rules-');
   await writeFile(
     join(root, 'tsconfig.architecture.json'),
     JSON.stringify({
@@ -300,18 +307,18 @@ async function violatedRules(files) {
   return result.output.summary.violations.map(violation => violation.rule.name);
 }
 
-test('valid layering produces no violations', async () => {
-  assert.deepEqual(await violatedRules(VALID_FILES), []);
+test('valid layering produces no violations', async t => {
+  assert.deepEqual(await violatedRules(t, VALID_FILES), []);
 });
 
 for (const {rule, files} of RULE_CASES) {
-  test(`${rule} rejects ${Object.keys(files)[0]}: ${Object.values(files)[0].trim()}`, async () => {
-    assert.ok((await violatedRules({...VALID_FILES, ...files})).includes(rule));
+  test(`${rule} rejects ${Object.keys(files)[0]}: ${Object.values(files)[0].trim()}`, async t => {
+    assert.ok((await violatedRules(t, {...VALID_FILES, ...files})).includes(rule));
   });
 }
 
-test('manifest policy rejects declared reverse dependencies', async () => {
-  const root = await workspaceFixture('vibesys-manifest-rules-');
+test('manifest policy rejects declared reverse dependencies', async t => {
+  const root = await workspaceFixture(t, 'vibesys-manifest-rules-');
   await writeManifest(root, 'backend-client', '@vibesys/backend-client', {
     '@vibesys/core-state': 'workspace:*',
   });
@@ -334,8 +341,8 @@ test('manifest policy rejects declared reverse dependencies', async () => {
   ]);
 });
 
-test('manifest policy names a package that joins the workspace without one', async () => {
-  const root = await workspaceFixture('vibesys-manifest-policy-');
+test('manifest policy names a package that joins the workspace without one', async t => {
+  const root = await workspaceFixture(t, 'vibesys-manifest-policy-');
   await writeManifest(root, 'stub', '@vibesys/stub', {});
 
   assert.deepEqual(manifestErrors(root), [
@@ -351,8 +358,8 @@ test('manifest policy names a package that joins the workspace without one', asy
 const TOOLING_DIRECTORY_SETS = [[], ['bench'], ['e2e'], ['dev', 'e2e']];
 
 for (const tooling of TOOLING_DIRECTORY_SETS) {
-  test(`workspace layout covers a package whose tools are [${tooling.join(' ')}]`, async () => {
-    const root = await workspaceFixture('vibesys-layout-');
+  test(`workspace layout covers a package whose tools are [${tooling.join(' ')}]`, async t => {
+    const root = await workspaceFixture(t, 'vibesys-layout-');
     // Directories that hold no source must stay out, whether or not a build has run.
     await writePackage(root, 'stub', '@vibesys/stub', [
       'src',
@@ -380,8 +387,8 @@ for (const tooling of TOOLING_DIRECTORY_SETS) {
   });
 }
 
-test('workspace layout leaves out a directory git ignores', async () => {
-  const root = await workspaceFixture('vibesys-layout-ignored-');
+test('workspace layout leaves out a directory git ignores', async t => {
+  const root = await workspaceFixture(t, 'vibesys-layout-ignored-');
   // `coverage` and `build` are ordinary local tool output: gitignored, untracked, and named by
   // neither the build-output fallback nor any list in the gates. Only asking git keeps them out.
   await writeFile(join(root, '.gitignore'), 'coverage/\nbuild/\n');
@@ -391,9 +398,9 @@ test('workspace layout leaves out a directory git ignores', async () => {
   assert.deepEqual(workspaceLayout(root).scanRoots, ['stub/e2e', 'stub/src']);
 });
 
-test('workspace layout covers a symlinked package and a symlinked tool directory', async () => {
-  const root = await workspaceFixture('vibesys-layout-symlink-');
-  const outside = await mkdtemp(join(tmpdir(), 'vibesys-layout-target-'));
+test('workspace layout covers a symlinked package and a symlinked tool directory', async t => {
+  const root = await workspaceFixture(t, 'vibesys-layout-symlink-');
+  const outside = await scratchDirectory(t, 'vibesys-layout-target-');
   await writePackage(outside, 'linked', '@vibesys/linked', ['src']);
   await mkdir(join(outside, 'shared-e2e'), {recursive: true});
   await writePackage(root, 'stub', '@vibesys/stub', ['src']);
@@ -415,15 +422,96 @@ test('workspace layout covers a symlinked package and a symlinked tool directory
   assert.deepEqual(layout.scanRoots, ['linked/src', 'stub/e2e', 'stub/src']);
 });
 
-test('workspace layout rejects a packages pattern it cannot expand', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'vibesys-layout-pattern-'));
+test('a symlinked package costs only its own subtree the git answer', async t => {
+  const root = await workspaceFixture(t, 'vibesys-layout-symlink-git-');
+  const outside = await scratchDirectory(t, 'vibesys-layout-target-');
+  await writeFile(join(root, '.gitignore'), 'coverage/\nbuild/\n');
+  execFileSync('git', ['init', '--quiet'], {cwd: root});
+  await writePackage(root, 'stub', '@vibesys/stub', ['src', 'coverage', 'build']);
+  await writePackage(outside, 'linked', '@vibesys/linked', ['src', 'coverage']);
+  // `git check-ignore` answers for no path beyond a symlink and rejects the whole pathspec with
+  // exit 128 rather than skipping the offender, so asking about both subtrees in one batch put
+  // `stub/build` and `stub/coverage` back among the scan roots. This is the interaction the two
+  // features hid from each other: the git case had no symlink and the symlink case had no `git
+  // init`, so each passed while together they disabled the ignore filter for the whole workspace.
+  await symlink(join(outside, 'linked'), join(root, 'linked'));
+
+  const layout = workspaceLayout(root);
+
+  assert.deepEqual(
+    layout.packages.map(({directory}) => directory),
+    ['linked', 'stub'],
+  );
+  // `stub` keeps git's answer, so its report and bundle directories stay out. `linked`'s children
+  // have no git answer, so they fall back to the build and install names, which do not include
+  // `coverage`: that subtree degrades to the documented fallback and nothing else does.
+  assert.deepEqual(layout.scanRoots, ['linked/coverage', 'linked/src', 'stub/src']);
+});
+
+test('workspace layout reports a package whose own directory git ignores', async t => {
+  const root = await workspaceFixture(t, 'vibesys-layout-ignored-member-');
+  // `pnpm -r` runs this member's `build`, `check`, and `test` whatever `.gitignore` says, and this
+  // repository's `.gitignore` names 30 bare directories, `lib/` among them. Filtering the package
+  // question by ignore status dropped such a member from every gate instead of reporting it.
+  await writeFile(join(root, '.gitignore'), 'lib/\n');
+  execFileSync('git', ['init', '--quiet'], {cwd: root});
+  const scripts = {scripts: {build: 'true', check: 'true', test: 'true'}};
+  await writePackage(root, 'lib', '@vibesys/lib', ['src'], scripts);
+  await writePackage(root, 'normal', '@vibesys/normal', ['src'], scripts);
+  await writeFile(join(root, 'lib/src/index.ts'), '');
+  await writeFile(join(root, 'normal/src/index.ts'), '');
+  await writeFile(
+    join(root, 'tsconfig.architecture.json'),
+    JSON.stringify({compilerOptions: {paths: {'@vibesys/normal': ['normal/src/index.ts']}}}),
+  );
+
+  const layout = workspaceLayout(root);
+
+  assert.deepEqual(
+    layout.packages.map(({name, directory}) => ({name, directory})),
+    [
+      {name: '@vibesys/lib', directory: 'lib'},
+      {name: '@vibesys/normal', directory: 'normal'},
+    ],
+  );
+  // Everything inside an ignored package is ignored too, so it contributes no scan root. It is
+  // still a package, so the meta-check names it instead of letting it join unchecked.
+  assert.deepEqual(layout.scanRoots, ['normal/src']);
+  assert.deepEqual(declarationErrors(root, layout), [
+    'tsconfig.architecture.json: @vibesys/lib must map to ["lib/src/index.ts"]',
+  ]);
+});
+
+test('workspace layout drops a symlink it cannot resolve', async t => {
+  const root = await workspaceFixture(t, 'vibesys-layout-broken-link-');
+  await writePackage(root, 'stub', '@vibesys/stub', ['src']);
+  await writeFile(join(root, 'stub/src/index.ts'), '');
+  await symlink('absent', join(root, 'dangling'));
+  await symlink(join(root, 'stub/src/index.ts'), join(root, 'to-a-file'));
+  // A loop is the case `statSync`'s `{throwIfNoEntry: false}` does not cover: it raises ELOOP
+  // instead of returning undefined, which aborted every gate importing this module with a raw
+  // errno. pnpm cannot resolve such a link either, so dropping it agrees with the member set.
+  await symlink('loop-b', join(root, 'loop-a'));
+  await symlink('loop-a', join(root, 'loop-b'));
+
+  const layout = workspaceLayout(root);
+
+  assert.deepEqual(
+    layout.packages.map(({directory}) => directory),
+    ['stub'],
+  );
+  assert.deepEqual(layout.scanRoots, ['stub/src']);
+});
+
+test('workspace layout rejects a packages pattern it cannot expand', async t => {
+  const root = await scratchDirectory(t, 'vibesys-layout-pattern-');
   await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "libs/*"\n');
 
   assert.throws(() => workspaceLayout(root), /unsupported packages pattern "libs\/\*"/);
 });
 
-test('declarations accept a package whose entry points and scripts agree with the layout', async () => {
-  const root = await workspaceFixture('vibesys-declarations-');
+test('declarations accept a package whose entry points and scripts agree with the layout', async t => {
+  const root = await workspaceFixture(t, 'vibesys-declarations-');
   await writePackage(root, 'stub', '@vibesys/stub', ['src'], {
     scripts: {build: 'true', check: 'true', test: 'true'},
   });
@@ -436,8 +524,8 @@ test('declarations accept a package whose entry points and scripts agree with th
   assert.deepEqual(declarationErrors(root, workspaceLayout(root)), []);
 });
 
-test('declarations name a package that joins the workspace unchecked', async () => {
-  const root = await workspaceFixture('vibesys-declarations-stub-');
+test('declarations name a package that joins the workspace unchecked', async t => {
+  const root = await workspaceFixture(t, 'vibesys-declarations-stub-');
   await writePackage(root, 'stub', '@vibesys/stub', ['src']);
   await writeFile(join(root, 'tsconfig.architecture.json'), JSON.stringify({compilerOptions: {}}));
 
@@ -452,8 +540,8 @@ test('declarations name a package that joins the workspace unchecked', async () 
   ]);
 });
 
-test('declarations reject a path map entry no package exports', async () => {
-  const root = await workspaceFixture('vibesys-declarations-extra-');
+test('declarations reject a path map entry no package exports', async t => {
+  const root = await workspaceFixture(t, 'vibesys-declarations-extra-');
   await writePackage(root, 'stub', '@vibesys/stub', ['src'], {
     scripts: {build: 'true', check: 'true', test: 'true'},
     exports: {'.': {import: './dist/index.js'}, './node': {import: './dist/node/index.js'}},
@@ -485,29 +573,20 @@ test('path alternation escapes a directory name', () => {
 
 // The scan roots are the one thing the gate derives with no second declaration to check it
 // against: `cruiseWorkspace` hands them straight to dependency-cruiser, so a root the derivation
-// drops is a rule that cannot fire, silently. Each directory here holds a module that imports an
-// undeclared package, and the gate must report every one.
-const SCAN_ROOT_PROBES = [
-  'backend-client/src/probe.ts',
-  'core-state/bench/probe.ts',
-  'core-state/src/probe.ts',
-  'scripts/probe.mjs',
-  'tui/benchmarks/probe.ts',
-  'tui/dev/probe.ts',
-  'tui/src/probe.ts',
-  'web/e2e/probe.ts',
-  'web/src/probe.ts',
-];
+// drops is a rule that cannot fire, silently. One probe module per scan root this repository has,
+// each importing an undeclared package, and the gate must report every one.
+const SCAN_ROOT_PROBES = REPOSITORY_LAYOUT.scanRoots.map(scanRoot => `${scanRoot}/probe.ts`);
 
-const PACKAGE_DIRECTORIES = ['backend-client', 'core-state', 'tui', 'web'];
-
-test('the architecture gate cruises every directory the layout derives', async () => {
+test('the architecture gate cruises every directory the layout derives', async t => {
   const {output, exitCode} = await cruiseFixture(
+    t,
     Object.fromEntries(SCAN_ROOT_PROBES.map(file => [file, "import 'undeclared-package';\n"])),
   );
 
-  // dependency-cruiser exits with the number of error-severity violations, so one per probe means
-  // every scan root was cruised and none was cruised twice.
+  // dependency-cruiser exits with its error-severity violation count, so this pins the total:
+  // every probe is reported and nothing else is. It cannot detect a duplicated scan root, because
+  // dependency-cruiser deduplicates modules before applying rules, and a repeated root leaves the
+  // count unchanged. The direction that matters is a dropped root, which the loop below catches.
   assert.equal(exitCode, SCAN_ROOT_PROBES.length);
   for (const file of SCAN_ROOT_PROBES) {
     assert.ok(
@@ -517,8 +596,8 @@ test('the architecture gate cruises every directory the layout derives', async (
   }
 });
 
-test('the architecture gate reports a workspace whose layering is clean', async () => {
-  const {output, exitCode} = await cruiseFixture({
+test('the architecture gate reports a workspace whose layering is clean', async t => {
+  const {output, exitCode} = await cruiseFixture(t, {
     'tui/src/index.ts': "import '@vibesys/core-state';\n",
     'web/src/index.ts': "import '@vibesys/core-state';\n",
     'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
@@ -533,8 +612,8 @@ test('the architecture gate reports a workspace whose layering is clean', async 
  * `.dependency-cruiser.mjs` re-exports the repository rule set, so the rules are the real ones
  * while the scan roots come from the fixture's directories.
  */
-async function cruiseFixture(files) {
-  const root = await workspaceFixture('vibesys-cruise-');
+async function cruiseFixture(t, files) {
+  const root = await workspaceFixture(t, 'vibesys-cruise-');
   await writeFile(
     join(root, '.dependency-cruiser.mjs'),
     `export {default} from ${JSON.stringify(pathToFileURL(CONFIG).href)};\n`,
@@ -572,9 +651,22 @@ async function writeSource(root, packageDirectory, file, source) {
   await writeFile(join(directory, file), source);
 }
 
-async function workspaceFixture(prefix) {
-  const root = await mkdtemp(join(tmpdir(), prefix));
+/**
+ * A throwaway workspace root, removed when the test that asked for it ends. The creator owns the
+ * cleanup, on the failing path too: `node:test` runs `t.after` whether the test passed or threw.
+ * `tmpdir()` is NFS on some developer machines, where unlinking a file another process holds open
+ * silly-renames it and a later `rmdir` fails, so a leaked fixture is more than clutter.
+ */
+async function workspaceFixture(t, prefix) {
+  const root = await scratchDirectory(t, prefix);
   await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "*"\n');
+  return root;
+}
+
+/** A throwaway directory that is not a workspace root, removed when the test ends. */
+async function scratchDirectory(t, prefix) {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  t.after(() => rm(root, {recursive: true, force: true}));
   return root;
 }
 
