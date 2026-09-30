@@ -153,10 +153,7 @@ export class WebSocketTransport implements ControlTransport {
   ): Promise<EventSubscription> {
     if (this.#closed) throw disconnectedError('Client is closed');
     const socket = await this.#openSocket();
-    if (this.#closed) {
-      await this.#closeSocket(socket);
-      throw disconnectedError('Client is closed');
-    }
+    await this.#claim(socket, 'Server disconnected before the subscription opened');
     const request = this.#envelope({
       type: 'subscribe',
       after_sequence: afterSequence,
@@ -252,8 +249,15 @@ export class WebSocketTransport implements ControlTransport {
 
   /**
    * Close every socket the transport owns: the control connection, every live
-   * secondary, and any socket still handshaking. Fails every control request
-   * still owed an answer, so nothing is left waiting on a client that is gone.
+   * secondary, and any socket still handshaking or not yet claimed. Fails every
+   * control request still owed an answer, so nothing is left waiting on a client
+   * that is gone.
+   *
+   * A control socket is covered in both of its states. A live one is closed by
+   * `ControlChannel.close`, which this awaits; one whose dial is in flight, or
+   * which has resolved but not yet been claimed, is closed here as an opening
+   * socket. So there is no interleaving that returns from `close()` with a
+   * socket still open.
    */
   async close(): Promise<void> {
     this.#closed = true;
@@ -266,13 +270,45 @@ export class WebSocketTransport implements ControlTransport {
     await Promise.all([channelClosed, ...[...sockets].map(socket => this.#closeSocket(socket))]);
   }
 
-  /** Open one control socket for the channel and route its frames back. */
-  async #openControl(handlers: ControlConnectionHandlers): Promise<ControlConnection> {
-    const socket = await this.#openSocket();
+  /**
+   * Take ownership of a freshly dialed socket, or dispose of it and throw.
+   *
+   * `#openSocket` resolves with the socket still registered as opening, so this
+   * is where it stops being the transport's teardown responsibility and starts
+   * being the caller's. Two things can have happened in the microtask between
+   * the dial settling and the caller running, and both are checked here rather
+   * than assumed away:
+   *
+   * `close()` may have landed, which the pre-existing check covers. And the
+   * socket itself may already be gone, because a socket handed back by an
+   * injected factory that was open on arrival carries no handlers at all, and
+   * even the handshake path's handlers no-op once settled. Either way the event
+   * reached no listener, so `readyState` is the only surviving evidence. Read
+   * before the `delete`, so an interleaving `close()` cannot make a live socket
+   * look dead.
+   *
+   * A dead socket fails the dial rather than reporting a drop, because the
+   * caller has not installed its handlers yet: the control channel treats a
+   * failed dial as an outage and arms its backoff, which is the same recovery a
+   * drop would get.
+   */
+  async #claim(socket: WebSocketLike, lostMessage: string): Promise<void> {
+    const live = socket.readyState === OPEN;
+    this.#openingSockets.delete(socket);
     if (this.#closed) {
       await this.#closeSocket(socket);
       throw disconnectedError('Client is closed');
     }
+    if (!live) {
+      await this.#closeSocket(socket);
+      throw disconnectedError(lostMessage);
+    }
+  }
+
+  /** Open one control socket for the channel and route its frames back. */
+  async #openControl(handlers: ControlConnectionHandlers): Promise<ControlConnection> {
+    const socket = await this.#openSocket();
+    await this.#claim(socket, 'Server disconnected before the control channel opened');
     socket.onmessage = event => {
       const data = event.data;
       // A binary frame on a text protocol is a fault, not an outage: redialing
@@ -303,6 +339,14 @@ export class WebSocketTransport implements ControlTransport {
     };
   }
 
+  /**
+   * Dial one socket and resolve once it is open.
+   *
+   * The socket stays in `#openingSockets` across the resolution, so a `close()`
+   * that lands before the caller has adopted it still tears it down instead of
+   * leaking a live connection past the client's own teardown. Every caller
+   * hands it to `#claim`, which is what moves the responsibility across.
+   */
   async #openSocket(): Promise<WebSocketLike> {
     let socket: WebSocketLike;
     try {
@@ -311,10 +355,9 @@ export class WebSocketTransport implements ControlTransport {
       throw transportFailure(error);
     }
     this.#openingSockets.add(socket);
-    if (socket.readyState === OPEN) {
-      this.#openingSockets.delete(socket);
-      return socket;
-    }
+    // An injected factory may hand back a socket that is already open, in which
+    // case there is no handshake to wait on and no `onopen` to come.
+    if (socket.readyState === OPEN) return socket;
     return new Promise((resolve, reject) => {
       let settled = false;
       const cancelTimeout = this.#scheduleTimeout(() => {
@@ -333,7 +376,8 @@ export class WebSocketTransport implements ControlTransport {
         if (settled) return;
         settled = true;
         cancelTimeout();
-        this.#openingSockets.delete(socket);
+        // Left registered on purpose: `#claim` deregisters it once a caller has
+        // installed its own handlers.
         resolve(socket);
       };
       socket.onerror = () => {
@@ -367,10 +411,7 @@ export class WebSocketTransport implements ControlTransport {
     signal?: AbortSignalLike,
   ): Promise<ProtocolResponse> {
     const socket = await this.#openSocket();
-    if (this.#closed) {
-      await this.#closeSocket(socket);
-      throw disconnectedError('Client is closed');
-    }
+    await this.#claim(socket, 'Server disconnected before the chat socket opened');
     if (signal?.aborted) {
       // Re-checked after the dial, not merely before the call: an abort during
       // the handshake never fires the event the listener below waits on, so

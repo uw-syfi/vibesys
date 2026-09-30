@@ -589,6 +589,12 @@ describe('WebSocketTransport', () => {
     const pending = transport.request({type: 'query.snapshot'}, {timeoutMs: 20});
     await tick();
     scheduler.runDue(20);
+    await tick();
+    // The override fires first, then everything else. A build that ignored the
+    // override used to leave nothing due at 20ms and this test waited on a
+    // promise that could not settle until the runner killed it; firing the 30s
+    // default too makes that failure an assertion on the message instead.
+    scheduler.runPending();
 
     await expect(pending).rejects.toMatchObject({
       kind: 'timeout',
@@ -709,6 +715,137 @@ describe('WebSocketTransport', () => {
     await tick();
     expect(gateway.sockets).toHaveLength(2);
     await transport.close();
+  });
+
+  it('reports a dial in flight, and a second reconnect during it opens nothing', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeScheduler();
+    const states: ControlChannelState[] = [];
+    const transport = controlTransport(gateway, scheduler, {
+      reconnectDelaysMs: [60_000],
+      onConnectionState: state => states.push(state),
+    });
+
+    const first = transport.request({type: 'query.snapshot'});
+    await tick();
+    gateway.socket(0).answerAll();
+    await expect(first).resolves.toMatchObject({ok: true});
+
+    // The peer goes away and the next dial hangs in its handshake. That window
+    // is exactly where `reconnect()` is inert, so the reported state has to say
+    // a dial is already running or the affordance cannot know.
+    gateway.outcome = 'stall';
+    gateway.socket(0).drop();
+    transport.reconnect();
+    await tick();
+    expect(gateway.sockets).toHaveLength(2);
+    expect(states.map(trace)).toEqual(['connected', 'down:lost', 'down:lost:retrying']);
+
+    // A second press while the handshake is outstanding must not stack another
+    // socket onto it, and must not re-report the state it did not change.
+    transport.reconnect();
+    await tick();
+    expect(gateway.sockets).toHaveLength(2);
+    expect(states.map(trace)).toEqual(['connected', 'down:lost', 'down:lost:retrying']);
+
+    // When the stalled handshake expires, the outage is reported again with no
+    // dial in flight, so the affordance comes back to life.
+    scheduler.runDue(5_000);
+    await tick();
+    expect(states.map(trace)).toEqual([
+      'connected',
+      'down:lost',
+      'down:lost:retrying',
+      'down:lost',
+    ]);
+    await transport.close();
+  });
+
+  it('reconnect() is inert on a live channel and after close, which cancels the redial', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeScheduler();
+    const transport = controlTransport(gateway, scheduler, {reconnectDelaysMs: [60_000]});
+
+    const first = transport.request({type: 'query.snapshot'});
+    await tick();
+    gateway.socket(0).answerAll();
+    await expect(first).resolves.toMatchObject({ok: true});
+
+    // Nothing to reconnect: a press on a live channel must not replace the
+    // connection the requests riding it are correlated against.
+    transport.reconnect();
+    await tick();
+    expect(gateway.sockets).toHaveLength(1);
+
+    gateway.socket(0).drop();
+    await transport.close();
+    // The redial the drop armed is cancelled, so a client that is gone does not
+    // dial the gateway a minute after its owner stopped caring.
+    scheduler.runPending();
+    await tick();
+    expect(gateway.sockets).toHaveLength(1);
+    // And the affordance cannot resurrect a closed client either.
+    transport.reconnect();
+    await tick();
+    expect(gateway.sockets).toHaveLength(1);
+  });
+
+  it('fails the dial when the socket it was handed is already gone', async () => {
+    const scheduler = new FakeScheduler();
+    const sockets: FakeSocket[] = [];
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 0,
+      scheduleTimeout: scheduler.schedule,
+      reconnectDelaysMs: [],
+      // An embedded runtime may hand back a socket that is already open, which
+      // skips the handshake and so installs none of its handlers. If it dies in
+      // the microtask before the caller adopts it, no listener hears the close
+      // and `readyState` is the only evidence left.
+      webSocket: () => {
+        const socket = new FakeSocket();
+        socket.readyState = 1;
+        sockets.push(socket);
+        queueMicrotask(() => socket.drop());
+        return socket;
+      },
+    });
+
+    const rejected = rejection(transport.request({type: 'query.snapshot'}));
+    await tick();
+    // Fire whatever is armed, so a build that hands the dead socket to the
+    // channel fails on the request deadline instead of hanging this test.
+    scheduler.runPending();
+
+    expect(sockets).toHaveLength(1);
+    // A dead socket is a failed dial, not a request that sits on a connection
+    // nothing will ever answer.
+    expect(await rejected).toMatchObject({kind: 'disconnected'});
+    expect(sockets[0]?.sent).toEqual([]);
+    await transport.close();
+  });
+
+  it('closes a control socket that close() raced before the dial was claimed', async () => {
+    const scheduler = new FakeScheduler();
+    const socket = new FakeSocket();
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 0,
+      scheduleTimeout: scheduler.schedule,
+      webSocket: () => socket,
+    });
+
+    const rejected = rejection(transport.request({type: 'query.snapshot'}));
+    // Open the socket and close the client in one turn, so `close()` runs in
+    // the window between the dial resolving and the channel adopting it.
+    socket.open();
+    const closing = transport.close();
+
+    // Asserted before yielding: the socket has to be torn down by `close()`
+    // itself, not by the dial's own continuation running afterwards, or
+    // `close()` can return with a live socket behind it.
+    expect(socket.closeCalls).toBe(1);
+    await closing;
+    expect(socket.readyState).toBe(3);
+    expect(await rejected).toMatchObject({kind: 'disconnected'});
   });
 
   it('disposes the rest of a resend batch when one send fails mid-flush', async () => {
