@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 from typing import TYPE_CHECKING, Any
@@ -13,7 +16,7 @@ from tests.server.support import build_server_parts
 
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
 from server.runtime import ServerRuntime
-from server.transport.discovery import WebInstanceRecord
+from server.transport.discovery import WebInstanceHold, WebInstanceRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -111,3 +114,56 @@ def test_stale_instance_record_is_removed(tmp_path: Path) -> None:
 
     assert WebInstanceRecord.discover(path) is None
     assert not path.exists()
+
+
+def test_instance_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> None:
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+    instance_path.parent.mkdir(parents=True)
+    log_path = WebInstanceHold.log_path(instance_path)
+    assert log_path == instance_path.parent / "web-gateway.json.log"
+
+    # Asking whether the instance is in use must not create the file it reads.
+    assert WebInstanceHold.is_held(instance_path) is False
+    assert not log_path.exists()
+
+    descriptor = os.open(log_path, os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(descriptor, "w+b") as output:
+        assert WebInstanceHold.take(descriptor) is True
+        assert WebInstanceHold.is_held(instance_path) is True
+        rival = os.open(log_path, os.O_RDWR)
+        try:
+            # Exclusion is what lets the launcher refuse a second gateway.
+            assert WebInstanceHold.take(rival) is False
+        finally:
+            os.close(rival)
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import signal; signal.pause()"],
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+        _record_for(child.pid).write(instance_path)
+        _record_for(child.pid).remove_if_owner(instance_path)
+
+        # The launcher has closed its descriptor and the record has come and
+        # gone, which is the state a stopping gateway leaves behind. The child
+        # still has the log, so the directory is still in use and the hold is
+        # the only thing that still says so.
+        assert not instance_path.exists()
+        assert WebInstanceHold.is_held(instance_path) is True
+    finally:
+        child.terminate()
+        child.wait()
+
+
+def _record_for(pid: int) -> WebInstanceRecord:
+    token = "held" + "-token"
+    return WebInstanceRecord(
+        pid=pid,
+        port=8765,
+        token=token,
+        url=f"http://127.0.0.1:8765/?token={token}",
+        project_root="/project",
+        started_at=1.0,
+    )

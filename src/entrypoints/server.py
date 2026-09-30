@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -9,12 +10,14 @@ import sys
 import tempfile
 import time
 import webbrowser
+from dataclasses import dataclass
+from enum import StrEnum
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
-from server.runtime import WebInstanceClaim, WebInstanceRecord, browser_origin
+from server.runtime import WebInstanceClaim, WebInstanceHold, WebInstanceRecord, browser_origin
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
@@ -24,7 +27,8 @@ from vs_project.api import Project
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
 _DETACHED_STOP_TIMEOUT_SECONDS = 2.0
-_DETACHED_EXIT_TIMEOUT_SECONDS = 10.0
+GATEWAY_STOP_TIMEOUT_SECONDS = 10.0
+"""How long `stop_detached_gateway` waits for a gateway to release its files."""
 _DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
 
@@ -284,11 +288,14 @@ class _DetachedLaunchEffects:
     def discover(self, instance_path: Path) -> WebInstanceRecord | None:
         return WebInstanceRecord.discover(instance_path, cleanup_stale=False)
 
-    def terminate(self, record: WebInstanceRecord) -> None:
-        os.kill(record.pid, signal.SIGTERM)
+    def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
+        return WebInstanceRecord.read(instance_path)
 
-    def is_running(self, record: WebInstanceRecord) -> bool:
-        return record.process_alive()
+    def instance_held(self, instance_path: Path) -> bool:
+        return WebInstanceHold.is_held(instance_path)
+
+    def terminate(self, pid: int) -> None:
+        os.kill(pid, signal.SIGTERM)
 
     def monotonic(self) -> float:
         return time.monotonic()
@@ -308,10 +315,17 @@ def _spawn_detached(
     """Start the long-lived child and wait for its capability record."""
     environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
     instance_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path = instance_path.with_name(f"{instance_path.name}.log")
-    descriptor = os.open(log_path, os.O_CREAT | os.O_TRUNC | os.O_RDWR, 0o600)
-    os.fchmod(descriptor, 0o600)
+    log_path = WebInstanceHold.log_path(instance_path)
+    descriptor = os.open(log_path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "w+b") as output:
+        # The child inherits this descriptor as its stdout and stderr, so the
+        # hold taken here outlives the gateway's own teardown and is released
+        # by the same close that frees the log. Take it before truncating: if
+        # another gateway still holds the log, its output must survive.
+        if not WebInstanceHold.take(descriptor):
+            raise RuntimeError(_instance_in_use(instance_path))
+        os.fchmod(descriptor, 0o600)
+        output.truncate(0)
         process = effects.spawn(
             [sys.executable, "-m", "entrypoints.server", *arguments],
             environment,
@@ -344,6 +358,13 @@ def _spawn_detached(
         )
 
 
+def _instance_in_use(instance_path: Path) -> str:
+    return (
+        f"Another VibeSys web gateway still has files open under {instance_path.parent}. "
+        f"Stop it with `vibesys web stop --instance {instance_path}` first."
+    )
+
+
 def _stop_detached(process: _DetachedProcess) -> None:
     if process.poll() is not None:
         return
@@ -360,34 +381,95 @@ def _stop_detached(process: _DetachedProcess) -> None:
             return
 
 
-def stop_detached_gateway(
-    record: WebInstanceRecord,
-    effects: _DetachedLaunchEffects = _DETACHED_EFFECTS,
-) -> bool:
-    """Terminate the gateway ``record`` describes and wait for it to be gone.
+class GatewayStopOutcome(StrEnum):
+    """What `stop_detached_gateway` observed about one instance directory."""
 
-    Returns whether the process has exited. A detached gateway is nobody's
-    child (`_spawn_detached` starts a new session), so there is no handle to
-    wait on and `_stop_detached` does not apply; the recorded pid is the only
-    thing an unrelated process can observe. That pid disappearing is also the
-    only signal that the gateway has released the files under its instance
-    directory: it unlinks its instance record as the *first* step of teardown
-    and keeps its claim lock and its startup log open until the interpreter
-    exits, so "the record is gone" says nothing about whether that directory
-    is still in use. A caller that reuses or removes the directory needs this
-    postcondition. A false result means the deadline expired with the process
-    still alive, and the caller must not assume ownership.
+    NOT_RUNNING = "not_running"
+    """Nothing held the instance files, so there was nothing to stop."""
+    STOPPED = "stopped"
+    """A gateway held the instance files and has now released them."""
+    STILL_HOLDING = "still_holding"
+    """The budget expired with the instance files still open."""
+
+
+@dataclass(frozen=True)
+class GatewayStopResult:
+    """The outcome of one stop request, and the pid it was addressed to."""
+
+    outcome: GatewayStopOutcome
+    pid: int | None = None
+
+
+class WebGatewayStopEffects(Protocol):
+    """The process, filesystem, and clock effects a stop request needs."""
+
+    def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
+        """Return the published instance record without probing the gateway."""
+        ...
+
+    def instance_held(self, instance_path: Path) -> bool:
+        """Report whether any process still has the instance files open."""
+        ...
+
+    def terminate(self, pid: int) -> None:
+        """Ask ``pid`` to shut down, raising if it is gone or not ours."""
+        ...
+
+    def monotonic(self) -> float:
+        """Return a monotonic reading used only to enforce the stop budget."""
+        ...
+
+    def sleep(self, seconds: float) -> None:
+        """Wait before observing the hold again."""
+        ...
+
+
+def stop_detached_gateway(
+    instance_path: Path,
+    effects: WebGatewayStopEffects = _DETACHED_EFFECTS,
+) -> GatewayStopResult:
+    """Stop the gateway using ``instance_path`` and wait for its files to close.
+
+    The postcondition of a `STOPPED` result is that no process has files open
+    under the instance directory, so the caller may reuse or remove it. That is
+    what `WebInstanceHold` observes, and it is deliberately not "the instance
+    record is gone" (the gateway unlinks the record as the first step of
+    teardown) nor "the recorded pid is gone" (a descendant can still hold the
+    inherited log). A `STILL_HOLDING` result means the budget expired with
+    files still open, and the caller must not take the directory.
+
+    The record is read without probing the gateway's health endpoint. A probe
+    answers whether the gateway can still serve a browser, which is false
+    throughout teardown and flaky under load; stopping only needs to know which
+    process published the instance, which the record says directly. Signalling
+    a stale record's pid is not a hazard here because a readable record plus a
+    held hold means the holder published that record: a gateway writes its
+    record before serving and replaces it atomically.
+
+    Escalation is the operator's, not this function's: it sends SIGTERM and
+    never SIGKILL, because SIGTERM is what runs the gateway's ordered teardown
+    (release the record, close the transport, close the session) and a killed
+    gateway leaves its record behind for the next launch to trip over.
+    `ProcessLookupError` and `PermissionError` from the signal are absorbed; in
+    both cases this function cannot influence the process, so the hold decides
+    the outcome.
     """
-    try:
-        effects.terminate(record)
-    except ProcessLookupError:
-        return True
-    deadline = effects.monotonic() + _DETACHED_EXIT_TIMEOUT_SECONDS
-    while effects.is_running(record):
+    if not effects.instance_held(instance_path):
+        return GatewayStopResult(GatewayStopOutcome.NOT_RUNNING)
+    deadline = effects.monotonic() + GATEWAY_STOP_TIMEOUT_SECONDS
+    signalled: int | None = None
+    while True:
+        if signalled is None:
+            record = effects.read_record(instance_path)
+            if record is not None:
+                signalled = record.pid
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    effects.terminate(record.pid)
+        if not effects.instance_held(instance_path):
+            return GatewayStopResult(GatewayStopOutcome.STOPPED, signalled)
         if effects.monotonic() >= deadline:
-            return False
+            return GatewayStopResult(GatewayStopOutcome.STILL_HOLDING, signalled)
         effects.sleep(_DETACHED_POLL_SECONDS)
-    return True
 
 
 def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:

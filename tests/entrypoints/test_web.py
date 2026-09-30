@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
+import sys
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from entrypoints import web
+from entrypoints.server import GatewayStopOutcome, GatewayStopResult
 from entrypoints.web import (
     _DEMO_LOG,
     _browser_url,
@@ -25,8 +28,10 @@ from entrypoints.web import (
     _ssh,
     _wait_for_record,
 )
+from server.runtime import WebInstanceHold
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -383,7 +388,7 @@ def test_tunnel_runs_ssh_with_the_capability_url(
     assert "Open locally:" in capsys.readouterr().out
 
 
-def test_status_and_stop_report_gateway_lifecycle(
+def test_status_reports_gateway_lifecycle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     instance = tmp_path / "record.json"
@@ -394,56 +399,118 @@ def test_status_and_stop_report_gateway_lifecycle(
         assert not cleanup_stale
         return record
 
-    # test-isolation: lifecycle status is isolated from a real gateway process.
+    # test-isolation: only a live health endpoint settles what status reports.
     monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
     assert _run_status(argparse.Namespace(instance=instance)) == 0
     assert "VibeSys web UI:" in capsys.readouterr().out
 
-    stopped: list[web.WebInstanceRecord] = []
 
-    def stop_gateway(stopping: web.WebInstanceRecord) -> bool:
-        stopped.append(stopping)
-        return True
+def test_stop_succeeds_only_after_the_gateway_releases_its_instance_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    instance = tmp_path / ".vibesys" / "web-gateway.json"
+    instance.parent.mkdir(parents=True)
+    process = _gateway_holding_its_instance_files(instance)
+    try:
+        assert web.main(["stop", "--instance", str(instance)]) == 0
 
-    assert _run_stop(argparse.Namespace(instance=instance), stop_gateway) == 0
-    assert stopped == [record]
-    assert "Stopped VibeSys web gateway" in capsys.readouterr().out
+        # The regression: this reported success while the gateway still had
+        # the startup log open, because it asked whether the record was
+        # discoverable rather than whether the instance files were free. A
+        # caller that removed the directory next raced the gateway's exit.
+        assert WebInstanceHold.is_held(instance) is False
+        assert f"Stopped VibeSys web gateway {process.pid}." in capsys.readouterr().out
+    finally:
+        if process.poll() is None:  # pragma: no cover - only on an unexpected failure
+            process.kill()
+        process.wait()
 
 
-def test_stop_reports_a_gateway_that_outlives_its_stop_request(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_stop_reports_an_instance_directory_nothing_is_using(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    instance = tmp_path / ".vibesys" / "web-gateway.json"
+
+    assert web.main(["stop", "--instance", str(instance)]) == 0
+    assert "No VibeSys web gateway is running." in capsys.readouterr().out
+
+
+def _gateway_holding_its_instance_files(instance: Path) -> subprocess.Popen[bytes]:
+    """Start a stand-in that holds the instance files the way the launcher's child does.
+
+    `_spawn_detached` opens the startup log, takes the hold on that descriptor,
+    and hands it to the child as stdout and stderr, so the hold is released by
+    the child's exit and not before. This reproduces exactly that, which is
+    what makes the hold survive the record's removal.
+    """
+    descriptor = os.open(WebInstanceHold.log_path(instance), os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(descriptor, "w+b") as output:
+        assert WebInstanceHold.take(descriptor) is True
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import signal; signal.pause()"],
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    token = "held" + "-token"
+    web.WebInstanceRecord(
+        pid=process.pid,
+        port=8765,
+        token=token,
+        url=f"http://127.0.0.1:8765/?token={token}",
+        project_root=str(instance.parent.parent),
+        started_at=0.0,
+    ).write(instance)
+    return process
+
+
+def test_stop_messages_report_each_outcome(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     instance = tmp_path / "runtime" / "record.json"
-    record = _record()
+    args = argparse.Namespace(instance=instance)
 
-    def discover(path: Path, *, cleanup_stale: bool) -> web.WebInstanceRecord:
-        assert path == instance
-        assert not cleanup_stale
-        return record
+    def outcome(result: GatewayStopResult) -> Callable[[Path], GatewayStopResult]:
+        def stop_gateway(path: Path) -> GatewayStopResult:
+            assert path == instance
+            return result
 
-    # test-isolation: lifecycle status is isolated from a real gateway process.
-    monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
+        return stop_gateway
 
-    # A gateway that outlives SIGTERM still owns its instance directory, so
-    # reporting success would hand the caller files another process has open.
-    assert _run_stop(argparse.Namespace(instance=instance), lambda _record: False) == 1
+    assert _run_stop(args, outcome(GatewayStopResult(GatewayStopOutcome.STOPPED, 4321))) == 0
+    assert "Stopped VibeSys web gateway 4321." in capsys.readouterr().out
+
+    assert _run_stop(args, outcome(GatewayStopResult(GatewayStopOutcome.STOPPED, None))) == 0
+    assert "finish releasing" in capsys.readouterr().out
+
+    assert _run_stop(args, outcome(GatewayStopResult(GatewayStopOutcome.NOT_RUNNING))) == 0
+    assert "No VibeSys web gateway is running." in capsys.readouterr().out
+
+    # A gateway that outlives its budget still has files open, so reporting
+    # success would hand the caller a directory another process is using.
+    held = GatewayStopResult(GatewayStopOutcome.STILL_HOLDING, 4321)
+    assert _run_stop(args, outcome(held)) == 1
     output = capsys.readouterr().out
-    assert f"{record.pid} did not exit after SIGTERM" in output
-    assert str(tmp_path / "runtime") in output
+    assert "gateway 4321 still has files open" in output
+    assert "10 seconds after SIGTERM" in output
+    assert str(instance.parent) in output
+    assert "send SIGKILL yourself" in output
+
+    unidentified = GatewayStopResult(GatewayStopOutcome.STILL_HOLDING, None)
+    assert _run_stop(args, outcome(unidentified)) == 1
+    assert "unidentified process still has files open" in capsys.readouterr().out
 
 
-def test_status_and_stop_are_idempotent_when_record_is_absent(
+def test_status_is_reported_when_the_record_is_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def discover(path: Path, *, cleanup_stale: bool) -> None:
         assert path
         assert not cleanup_stale
 
-    # test-isolation: lifecycle status is isolated from a real gateway process.
+    # test-isolation: only a live health endpoint settles what status reports.
     monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
-    args = argparse.Namespace(instance=tmp_path / "missing.json")
-    assert _run_status(args) == 1
-    assert _run_stop(args) == 0
+    assert _run_status(argparse.Namespace(instance=tmp_path / "missing.json")) == 1
 
 
 def test_main_dispatches_each_web_command(monkeypatch: pytest.MonkeyPatch) -> None:

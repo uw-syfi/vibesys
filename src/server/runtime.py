@@ -33,6 +33,9 @@ from server.transport.discovery import (
     WebInstanceClaim as WebInstanceClaim,  # noqa: PLC0414  # lint-waiver: LW-101062 [PLC0414]; re-export discovery locking through the allowed runtime composition boundary
 )
 from server.transport.discovery import (
+    WebInstanceHold as WebInstanceHold,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the discovery instance hold through the allowed runtime composition boundary
+)
+from server.transport.discovery import (
     WebInstanceRecord as WebInstanceRecord,  # noqa: PLC0414  # lint-waiver: LW-101061 [PLC0414]; re-export the discovery record through the allowed runtime composition boundary
 )
 from server.transport.subscriptions import SubscriptionTracker

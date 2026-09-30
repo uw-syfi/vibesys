@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
-from entrypoints.server import stop_detached_gateway
+from entrypoints.server import (
+    GATEWAY_STOP_TIMEOUT_SECONDS,
+    GatewayStopOutcome,
+    GatewayStopResult,
+    stop_detached_gateway,
+)
 from server.runtime import WebInstanceRecord
 from vs_project.api import Project
 
@@ -80,7 +85,9 @@ def _parser() -> argparse.ArgumentParser:
     tunnel.add_argument("--local-port", type=_port, default=None)
     tunnel.add_argument("--browser-origin", default="http://127.0.0.1:5173")
 
-    stop = commands.add_parser("stop", help="stop a detached gateway and wait for it to exit")
+    stop = commands.add_parser(
+        "stop", help="stop a detached gateway and wait for it to release its instance files"
+    )
     stop.add_argument("--instance", type=Path, required=True)
 
     status = commands.add_parser("status", help="show a detached gateway status")
@@ -270,23 +277,30 @@ def _run_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stop_message(instance: Path, result: GatewayStopResult) -> str:
+    directory = instance.parent
+    if result.outcome is GatewayStopOutcome.NOT_RUNNING:
+        return "No VibeSys web gateway is running."
+    if result.outcome is GatewayStopOutcome.STILL_HOLDING:
+        holder = f"gateway {result.pid}" if result.pid is not None else "unidentified process"
+        return (
+            f"A VibeSys web {holder} still has files open under {directory} "
+            f"{GATEWAY_STOP_TIMEOUT_SECONDS:.0f} seconds after SIGTERM. Do not reuse or remove "
+            f"that directory yet: inspect the gateway with `vibesys web status --instance "
+            f"{instance}`, and send SIGKILL yourself if it is wedged."
+        )
+    if result.pid is None:
+        return f"Waited for a VibeSys web gateway to finish releasing {directory}."
+    return f"Stopped VibeSys web gateway {result.pid}."
+
+
 def _run_stop(
     args: argparse.Namespace,
-    stop_gateway: Callable[[WebInstanceRecord], bool] = stop_detached_gateway,
+    stop_gateway: Callable[[Path], GatewayStopResult] = stop_detached_gateway,
 ) -> int:
-    record = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
-    if record is None:
-        print("No VibeSys web gateway is running.", flush=True)  # noqa: T201  # lint-waiver: LW-101099 [T201]; report an already-stopped gateway to the operator
-        return 0
-    if not stop_gateway(record):
-        print(  # noqa: T201  # lint-waiver: LW-101107 [T201]; tell the operator the gateway outlived its stop request
-            f"VibeSys web gateway {record.pid} did not exit after SIGTERM; "
-            f"it may still be using {args.instance.parent}.",
-            flush=True,
-        )
-        return 1
-    print(f"Stopped VibeSys web gateway {record.pid}.", flush=True)  # noqa: T201  # lint-waiver: LW-101100 [T201]; confirm the gateway lifecycle action to the operator
-    return 0
+    result = stop_gateway(args.instance)
+    print(_stop_message(args.instance, result), flush=True)  # noqa: T201  # lint-waiver: LW-101099 [T201]; report the gateway lifecycle outcome to the operator
+    return 1 if result.outcome is GatewayStopOutcome.STILL_HOLDING else 0
 
 
 def main(argv: list[str] | None = None) -> int:

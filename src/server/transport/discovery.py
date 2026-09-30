@@ -44,6 +44,18 @@ class WebInstanceRecord:
         return None
 
     @classmethod
+    def read(cls, path: Path) -> WebInstanceRecord | None:
+        """Return the published record without probing the gateway it names.
+
+        `discover` answers "can I hand this URL to a browser", which needs a
+        health probe and so is both slower and load-sensitive. This answers the
+        weaker "which process published this instance", which is what a caller
+        that only wants to signal or identify the gateway needs, and it stays
+        correct while the gateway is starting up or shutting down.
+        """
+        return _read_record(path)
+
+    @classmethod
     def from_gateway(
         cls, *, pid: int, port: int, token: str, project_root: Path
     ) -> WebInstanceRecord:
@@ -77,16 +89,62 @@ class WebInstanceRecord:
         if current == self:
             path.unlink(missing_ok=True)
 
-    def process_alive(self) -> bool:
-        """Report whether the process that published this record still exists.
 
-        This is the weakest liveness fact the record carries, and the only one
-        that survives the gateway's own teardown: the gateway unlinks its
-        record first and keeps the rest of its instance files open until the
-        interpreter exits, so a caller that needs the instance directory to be
-        quiescent has to wait on the process, not on the record.
-        """
-        return _pid_alive(self.pid)
+class WebInstanceHold:
+    """A detached gateway's observable hold on its instance directory.
+
+    The hold is an exclusive lock on the gateway's startup log, which the
+    launcher opens before spawning and the detached child then keeps as its
+    stdout and stderr until its interpreter exits. Locking that exact
+    descriptor makes the hold and the last open file under the instance
+    directory one open file description, so the kernel releases the hold in the
+    same operation that closes the log. A caller that observes ``is_held`` go
+    false may therefore reuse or remove the directory, including on a
+    filesystem where unlinking a file another process still has open leaves the
+    directory non-empty.
+
+    Nothing weaker carries that guarantee. The instance record is unlinked as
+    the *first* step of teardown, so its absence says nothing about the files.
+    A lock on a separate file is released in an earlier ``__fput`` than the
+    log's, so it reads free while the log is still open. The hold also covers
+    any descendant that inherited the log, which a check on the gateway's own
+    pid would miss.
+    """
+
+    @staticmethod
+    def log_path(instance_path: Path) -> Path:
+        """Return the startup log path the launcher opens for this instance."""
+        return instance_path.with_name(f"{instance_path.name}.log")
+
+    @staticmethod
+    def take(descriptor: int) -> bool:
+        """Hold ``descriptor``, or report that another gateway already holds it."""
+        if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
+            return True
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return True
+
+    @classmethod
+    def is_held(cls, instance_path: Path) -> bool:
+        """Return whether any process still has this instance's files open."""
+        if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
+            return False
+        try:
+            descriptor = os.open(cls.log_path(instance_path), os.O_RDONLY)
+        except OSError:
+            return False
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            return False
+        finally:
+            os.close(descriptor)
 
 
 class WebInstanceClaim:
