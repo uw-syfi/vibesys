@@ -37,12 +37,14 @@ test('renders a recorded run through the live WebSocket gateway', async ({page})
     expect(pageErrors).toEqual([]);
     await page.screenshot({path: 'artifacts/web-live.png', fullPage: true});
   } finally {
-    // Stop exactly once, on every path, and hold the removal to the contract
-    // `stop` now offers: exit 0 means no process has files open under the
-    // runtime directory. `expect.soft` records a bad status without throwing,
-    // so a failure here never masks one from the body above, and leaving the
-    // directory behind is the right outcome when the gateway is still using
-    // it: removing files another process holds open is the original defect.
+    // Stop exactly once, on every path, and make the removal conditional on
+    // the only signal that says the files are free: exit 0, which means no
+    // process this host can observe is using the runtime directory. Keeping
+    // the directory when it is still in use is the point. Unlinking a file
+    // another process holds open is what fails here: on NFS it leaves a
+    // `.nfsXXXX` entry and `rmSync` then throws ENOTEMPTY. `expect.soft`
+    // records a bad status without throwing, so a stop failure never masks a
+    // real assertion failure from the body above.
     const status = stopGateway(gateway.instancePath);
     expect.soft(status).toBe(0);
     if (status === 0) {
@@ -84,8 +86,8 @@ function startGateway(): LiveGateway {
     return {instancePath, runtimeDirectory, url: record.url};
   } catch (error) {
     // A launch that reports failure can still have left a child holding the
-    // runtime files, so stop it before removing anything and keep the
-    // directory if it is still in use.
+    // runtime files, so stop it before removing anything, and keep the
+    // directory on the same condition the test's teardown uses.
     if (stopGateway(instancePath) === 0) {
       rmSync(runtimeDirectory, {recursive: true, force: true});
     }
