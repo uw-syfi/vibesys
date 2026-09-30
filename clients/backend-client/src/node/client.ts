@@ -16,7 +16,7 @@ import {
   streamFailure,
 } from '../protocol-parse.js';
 import {type AbortSignalLike, abortReason, type RequestOptions} from '../request-policy.js';
-import {type EventSubscription, subscribeRequest, type SubscribeOptions} from '../transport.js';
+import {type EventSubscription, type SubscribeOptions, subscribeRequest} from '../transport.js';
 
 export interface ServerClientOptions {
   /** Stable frontend identity reflected by server acknowledgements. */

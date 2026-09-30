@@ -19,8 +19,8 @@ import {type AbortSignalLike, abortReason, type RequestOptions} from './request-
 import {
   type ControlTransport,
   type EventSubscription,
-  subscribeRequest,
   type SubscribeOptions,
+  subscribeRequest,
 } from './transport.js';
 
 const OPEN = 1;
