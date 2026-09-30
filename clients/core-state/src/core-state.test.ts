@@ -334,6 +334,60 @@ describe('core state projection', () => {
     expect(state.usage).toEqual({inputTokens: 8_000, contextWindow: 200_000, model: null});
   });
 
+  // The chat agent runs its own session with its own context window, and the
+  // backend attaches that session's status block to every chat output chunk.
+  // The meter reports the run's context pressure, so chat traffic must not
+  // move it. The exclusion already held for chat `usage_update` events.
+  it('keeps run usage when a chat chunk carries the chat session usage', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {
+        input_tokens: 118_000,
+        context_window: 200_000,
+      }),
+    );
+    const run = {inputTokens: 118_000, contextWindow: 200_000, model: null};
+    expect(state.usage).toEqual(run);
+
+    const chunked = reduceEvent(
+      state,
+      chatStatusEvent(3, {input_tokens: 12_000, context_window: 20_000}),
+    );
+    expect(chunked.usage).toEqual(run);
+
+    const updated = reduceEvent(chunked, chatUsageEvent(4, 13_000));
+    expect(updated.usage).toEqual(run);
+  });
+
+  it('keeps run usage across every generated chat status event', () => {
+    const run = {inputTokens: 118_000, contextWindow: 200_000, model: null};
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {
+        input_tokens: 118_000,
+        context_window: 200_000,
+      }),
+    );
+
+    const choices = new SeededChoices(0x5eed);
+    for (let sequence = 3; sequence <= 60; sequence += 1) {
+      const tokens = choices.next(400_000) + 1;
+      state =
+        choices.next(2) === 0
+          ? reduceEvent(state, chatStatusEvent(sequence, {input_tokens: tokens}))
+          : reduceEvent(state, chatUsageEvent(sequence, tokens));
+      expect(state.usage).toEqual(run);
+    }
+  });
+
   it('reconciles status through checkpoints and clears only the execution that finishes', () => {
     let state = reduceEvent(initialCoreState(), statusEvent(1, 'first', 'agent_output_chunk'));
     state = reduceEvent(state, statusEvent(2, 'second', 'tool_call'));
@@ -1703,6 +1757,29 @@ describe('typed framework events', () => {
 });
 
 /** One stream touching every transcript merge rule, plus both chat threads. */
+/**
+ * Deterministic choices for the property tests, mixed the way
+ * `core-state-prefix.test.ts`'s generator is. A bare LCG will not do: its low
+ * bit alternates, so `state % 2` on consecutive draws is a constant choice
+ * rather than a varying one.
+ */
+class SeededChoices {
+  #state: number;
+
+  constructor(seed: number) {
+    this.#state = (seed * 2_654_435_761) >>> 0;
+  }
+
+  /** A value in `[0, bound)`. */
+  next(bound: number): number {
+    this.#state = (this.#state + 0x6d2b79f5) >>> 0;
+    let value = this.#state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) % bound;
+  }
+}
+
 function mixedTranscriptEvents(): RunEvent[] {
   return [
     outputEvent(1, 'hello '),
@@ -1820,6 +1897,33 @@ function chatAnswerEvent(
       answer,
       ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     },
+  };
+}
+
+/**
+ * A chat chunk carrying the chat session's own status block, which is what the
+ * backend attaches to every published chunk (`vs_agent/callbacks.py`).
+ */
+function chatStatusEvent(
+  sequence: number,
+  status: {input_tokens?: number; context_window?: number},
+): RunEvent {
+  return {
+    ...baseEvent(sequence, 'agent_output_chunk'),
+    agent_kind: 'chat',
+    round_label: 'experiment-chat',
+    invocation_id: `chat-turn-${sequence}`,
+    data: {kind: 'agent_output_chunk', channel: 'assistant', content: `chunk ${sequence}`, status},
+  };
+}
+
+/** A chat-scoped `usage_update`, the meter exclusion that already worked. */
+function chatUsageEvent(sequence: number, inputTokens: number): RunEvent {
+  return {
+    ...baseEvent(sequence, 'usage_update'),
+    agent_kind: 'chat',
+    round_label: 'experiment-chat',
+    data: {kind: 'usage_update', input_tokens: inputTokens, context_window: 20_000},
   };
 }
 

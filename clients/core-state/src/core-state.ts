@@ -756,8 +756,13 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   next.sequence = Math.max(state.sequence, sequence);
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
-  next = applyAgentStatusEvent(next, event);
+  // The chat return sits above the status fold, not below it. The chat agent
+  // runs its own session with its own context window, and the backend attaches
+  // that session's status block to every chat chunk it publishes, so folding
+  // one would report the chat's token count as the run's. The same exclusion
+  // covers chat `usage_update` events, which `applyRunFacts` never sees.
   if (event.agent_kind === 'chat') return applyChatEvent(next, event, folder);
+  next = applyAgentStatusEvent(next, event);
   if (event.agent_kind) next.agentKind = event.agent_kind;
   if (event.round_label) next.roundLabel = event.round_label;
   next = applyRunMapProjection(next, state, event, sequence);
