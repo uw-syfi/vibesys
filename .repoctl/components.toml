@@ -82,11 +82,20 @@ id = "server_protocol"
 files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/protocol.py", "src/server/controller.py", "src/server/diagnostics.py", "src/server/settings.py"]
 
 [[components]]
+id = "server_transport"
+# The browser e2e suite is the only check that the served bundle still loads and
+# still reaches the gateway, so a transport change has to select the `tui` job.
+# Covers the directory rather than `websocket.py` alone: the framing in
+# `unix_jsonl.py` and the fan-out in `subscriptions.py` are equally observable
+# from a client.
+roots = ["src/server/transport"]
+
+[[components]]
 id = "clients"
 class = "manual"
 job = "tui"
 root = "clients"
-depends_on = ["server_protocol", "bun_fetcher"]
+depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 
 [[components]]
 id = "bun_fetcher"
