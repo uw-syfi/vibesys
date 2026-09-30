@@ -571,3 +571,91 @@ def test_failed_input_benchmark_warns_and_runs_without_a_baseline(tmp_path: Path
     assert state.search.input_baseline is None
     assert state.search.rounds[0].perf_baseline_metric is None
     assert state.search.rounds[0].candidate_retained is True
+
+
+def test_resume_inside_round_one_does_not_benchmark_the_edited_tree(tmp_path: Path) -> None:
+    """A failed input benchmark is not retried once round 1 has touched the workspace."""
+
+    async def scenario() -> FakeRun:
+        script = _Script(_plan("H-01"), RuntimeError("agent disconnected"), _response())
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=_GATED,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(executed=True, feedback="deploy flaked"),
+            _throughput(55.0),
+        )
+        options = _options(max_rounds=1, official_eval_every=1)
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, options)
+            assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    assert len(run.evaluation.benchmark_calls) == 2
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    assert state.search.input_baseline is None
+    assert state.search.rounds[0].perf_metric == 55.0
+
+
+def test_unexecuted_input_benchmark_with_feedback_warns(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response())
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(executed=False, feedback="provisioning failed"),
+            _throughput(120.0),
+        )
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=1, official_eval_every=1),
+        facts=_GATED,
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    assert any("provisioning failed" in call.message for call in run.observations.calls)
+
+
+def test_gate_failure_on_every_attempt_keeps_the_tree(tmp_path: Path) -> None:
+    """Only a judge rejection reverts; a gate failure keeps the tree to revalidate."""
+    script = _Script(_plan("H-01"), _response(), _response(), _response())
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_accuracy(
+            AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
+            AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
+        )
+        run.evaluation.script_benchmark(_throughput(100.0), _throughput(120.0))
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(official_eval_every=1),
+        facts=_GATED,
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    gate_failed, _measured = state.search.rounds
+    assert not gate_failed.passed
+    assert gate_failed.judge_verdict == "pass"
+    workspace = run.workspaces.root
+    assert isinstance(workspace, FakeWorkspace)
+    hypothesis = state.search.by_id("H-01")
+    assert hypothesis is not None
+    assert (hypothesis.parent_commit, True) not in workspace.restore_calls[:-1]
+    assert not any("reverted rejected round" in call.message for call in run.observations.calls)

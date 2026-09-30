@@ -185,6 +185,22 @@ def metric_baseline(
     return comparable[-1]
 
 
+def measured_rounds(
+    *,
+    metric: str | None,
+    rounds: Sequence[RoundRecord],
+) -> list[RoundRecord]:
+    """Return the rounds with a trusted official reading on *metric*, in order."""
+    return [
+        item
+        for item in rounds
+        if item.official_evaluation
+        and item.perf_metric is not None
+        and trusted_perf_provenance(item.perf_provenance)
+        and (item.perf_unit == metric or (metric is not None and metric in item.metrics))
+    ]
+
+
 def baseline_candidates(
     *,
     metric: str | None,
@@ -198,12 +214,8 @@ def baseline_candidates(
     """
     return [
         item
-        for item in rounds
-        if item.official_evaluation
-        and item.perf_metric is not None
-        and trusted_perf_provenance(item.perf_provenance)
-        and record_candidate_retained(item) is not False
-        and (item.perf_unit == metric or (metric is not None and metric in item.metrics))
+        for item in measured_rounds(metric=metric, rounds=rounds)
+        if record_candidate_retained(item) is not False
     ]
 
 
@@ -288,7 +300,10 @@ def official_measurement_note(record: RoundRecord) -> str | None:
         lines.append(f"- baseline: {source} ({record.perf_baseline_metric:.6g}), delta {delta}")
     if record.perf_comparison is not None:
         lines.append(f"- versus baseline: {record.perf_comparison.value}")
-    lines.append(f"- retained: {record_candidate_retained(record)}")
+    retained = record_candidate_retained(record)
+    lines.append(
+        "- retained: " + ("not assessed" if retained is None else "yes" if retained else "no")
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -618,7 +633,7 @@ def _measurement(
     ):
         delta_reason = (
             PerfDeltaReason.BASELINE_UNRESOLVED
-            if baseline_candidates(metric=record.perf_unit, rounds=prior_rounds)
+            if measured_rounds(metric=record.perf_unit, rounds=prior_rounds)
             else PerfDeltaReason.NO_BASELINE_YET
         )
     return HypothesisMeasurement(
@@ -664,23 +679,32 @@ class RestorePoint:
 
 
 def round_rejected(record: RoundRecord) -> bool:
-    """Whether review or a framework gate rejected *record*'s final attempt."""
-    return record.reviewed and not record.passed
+    """Whether the independent judge rejected *record*'s final attempt.
 
-
-def rejected_round_restore_point(hypothesis: Hypothesis) -> RestorePoint | None:
-    """Return the tree a rejected round of *hypothesis* is reverted to.
-
-    A rejected tree never becomes a parent. The latest passing round of the
-    same hypothesis keeps its checkpoint; otherwise the hypothesis's own
-    parent tree is restored. ``None`` when that parent has no recorded commit.
+    A round that passed review but failed a framework gate is not rejected:
+    its tree is kept so the next attempt can revalidate it.
     """
-    checkpoint = next(
-        (item for item in reversed(hypothesis.rounds) if item.passed and item.commit),
+    return record.judge_verdict == HypothesisReview.FAIL.value
+
+
+def rejected_round_restore_point(hypothesis: Hypothesis, round_number: int) -> RestorePoint | None:
+    """Return the tree that replaces rejected round *round_number* of *hypothesis*.
+
+    Only the judge-rejected rounds are undone: the latest earlier round of the
+    same hypothesis that the judge did not reject keeps its tree; otherwise
+    the hypothesis's own parent tree is restored. ``None`` when that parent
+    has no recorded commit.
+    """
+    kept = next(
+        (
+            item
+            for item in reversed(hypothesis.rounds)
+            if item.round_number < round_number and item.commit and not round_rejected(item)
+        ),
         None,
     )
-    if checkpoint is not None and checkpoint.commit is not None:
-        return RestorePoint(checkpoint.round_number, checkpoint.commit)
+    if kept is not None and kept.commit is not None:
+        return RestorePoint(kept.round_number, kept.commit)
     if hypothesis.parent_commit is None:
         return None
     return RestorePoint(hypothesis.parent_round, hypothesis.parent_commit)
@@ -767,7 +791,8 @@ def _input_baseline_lines(baseline: InputBaseline | None, space: MetricSpace) ->
     )
     return [
         f"Input baseline (measured before round 1), commit {baseline.commit[:12]}: {row}. "
-        "A round is retained only if it also beats this."
+        "A round is retained only if it also beats this (with objective axes: only if "
+        "this does not dominate it)."
     ]
 
 
@@ -1085,13 +1110,20 @@ def terminal_workspace_notice(records: Sequence[RoundRecord]) -> str | None:
         campaign_records.append(record)
     campaign_records.reverse()
     started_round = campaign_records[0].round_number
+    rooted_at_input = (
+        any(
+            record.hypothesis_parent_round is None and record.hypothesis_parent_commit is not None
+            for record in campaign_records
+        )
+        and started_round > 1
+    )
     parent_round = next(
         (
             record.hypothesis_parent_round
             for record in campaign_records
             if record.hypothesis_parent_round is not None
         ),
-        started_round - 1 if started_round > 1 else None,
+        None if rooted_at_input or started_round <= 1 else started_round - 1,
     )
     parent_guidance = (
         f"The recorded pre-hypothesis parent is round {parent_round}; use "

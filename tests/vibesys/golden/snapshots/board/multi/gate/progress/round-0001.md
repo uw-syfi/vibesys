@@ -27,4 +27,4 @@
 - throughput: 120
 - baseline: input (100), delta +20.0%
 - versus baseline: better
-- retained: True
+- retained: yes

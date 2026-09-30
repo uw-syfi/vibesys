@@ -209,9 +209,15 @@ def _pareto_retained(data: RecordInput, row: dict[str, float]) -> bool:
 
 
 def _scalar_retained(data: RecordInput, measurement: MeasurementEvidence) -> bool | None:
-    """Retain a reading that beats every prior official reading and the input tree."""
+    """Retain a reading that beats every prior official reading and the input tree.
+
+    The input leads *prior* so that a later reading within noise of it does
+    not replace it as the reading to beat.
+    """
     metric = measurement.metric_name
-    prior = [
+    input_reading = input_baseline_measurement(data.state.input_baseline, metric)
+    prior = [input_reading] if input_reading is not None else []
+    prior += [
         Measurement(metric=metric, value=value, direction=measurement.metric_direction)
         for record in data.records
         if metric is not None
@@ -219,9 +225,6 @@ def _scalar_retained(data: RecordInput, measurement: MeasurementEvidence) -> boo
         and trusted_perf_provenance(record.perf_provenance)
         and (value := record_metric_value(record, metric)) is not None
     ]
-    input_reading = input_baseline_measurement(data.state.input_baseline, metric)
-    if input_reading is not None:
-        prior.append(input_reading)
     reading = (
         Measurement(
             metric=metric,

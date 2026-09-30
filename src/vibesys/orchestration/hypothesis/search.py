@@ -107,9 +107,10 @@ class HypothesisSearch:
         """Start a designer's new hypothesis and resolve its rollback target.
 
         ``current_commit`` seeds the parent commit when no earlier round
-        recorded one. The default parent is the previous round, unless that
-        round was rejected: then it is the tree ``close_round`` reverted to.
-        Rollback resolution (``RoundHistory.resolve_rollback_commit``)
+        recorded one. With ``revert_rejected_rounds``, a parent round the judge
+        rejected (the default previous round, or one named by
+        ``revert_to_round``) resolves to the tree ``close_round`` reverted to,
+        so a rejected tree is never restored or inherited. Rollback resolution (``RoundHistory.resolve_rollback_commit``)
         is for orchestration's workspace checkout; it never touches the
         filesystem itself.
         """
@@ -124,22 +125,16 @@ class HypothesisSearch:
         )
         restored = (
             _rejected_parent_restore_point(state, parent)
-            if plan.revert_to_round is None and parent is not None
+            if self.config.revert_rejected_rounds and parent is not None
             else None
         )
         if restored is not None:
             parent_round, parent_commit = restored.round_number, restored.commit
-        rollback: RollbackTarget | None = None
-        if plan.revert_to_round is not None:
-            if parent is None or not parent.commit:
-                rollback = RollbackTarget(commit=None, failed_child_round=None, resolved=False)
-            else:
-                commit, failed_child = RoundHistory(records=records).resolve_rollback_commit(
-                    parent, FAILED_HYPOTHESIS_OUTCOMES
-                )
-                rollback = RollbackTarget(
-                    commit=commit, failed_child_round=failed_child, resolved=commit is not None
-                )
+        rollback = (
+            _rollback_target(records, parent, restored)
+            if plan.revert_to_round is not None
+            else None
+        )
         new_state = transitions.start_hypothesis(
             state,
             plan,
@@ -219,13 +214,14 @@ class HypothesisSearch:
         ``terminal_success_needs_parent_choice`` policy (today's
         ``_TerminalPolicy``) and pass the results in as plain booleans.
 
-        A rejected round's edits are never kept: ``ClosedRound.restore``
-        names the tree orchestration must materialize before the next round,
-        and the continuation feedback and exhaustion notice say so.
+        With ``revert_rejected_rounds``, a round the judge rejected is not
+        kept: ``ClosedRound.restore`` names the tree orchestration must
+        materialize before the next round, and the continuation feedback and
+        exhaustion notice say so.
         """
         restore = (
-            transitions.rejected_round_restore_point(hypothesis)
-            if transitions.round_rejected(record)
+            transitions.rejected_round_restore_point(hypothesis, record.round_number)
+            if self.config.revert_rejected_rounds and transitions.round_rejected(record)
             else None
         )
         next_active = _next_active(
@@ -369,7 +365,27 @@ def _rejected_parent_restore_point(
     if not transitions.round_rejected(parent) or parent.hypothesis_id is None:
         return None
     hypothesis = state.by_id(parent.hypothesis_id)
-    return transitions.rejected_round_restore_point(hypothesis) if hypothesis else None
+    if hypothesis is None:
+        return None
+    return transitions.rejected_round_restore_point(hypothesis, parent.round_number)
+
+
+def _rollback_target(
+    records: list[RoundRecord],
+    parent: RoundRecord | None,
+    restored: transitions.RestorePoint | None,
+) -> RollbackTarget:
+    """Resolve an explicit ``revert_to_round`` to the tree orchestration restores."""
+    if restored is not None:
+        return RollbackTarget(commit=restored.commit, failed_child_round=None, resolved=True)
+    if parent is None or not parent.commit:
+        return RollbackTarget(commit=None, failed_child_round=None, resolved=False)
+    commit, failed_child = RoundHistory(records=records).resolve_rollback_commit(
+        parent, FAILED_HYPOTHESIS_OUTCOMES
+    )
+    return RollbackTarget(
+        commit=commit, failed_child_round=failed_child, resolved=commit is not None
+    )
 
 
 def _revert_notice(record: RoundRecord, restore: transitions.RestorePoint) -> str:
@@ -382,15 +398,10 @@ def _revert_notice(record: RoundRecord, restore: transitions.RestorePoint) -> st
 def _continue_from_restore(
     hypothesis: Hypothesis, record: RoundRecord, restore: transitions.RestorePoint
 ) -> Hypothesis:
-    """Point a continued hypothesis at the restored tree instead of its rejected edits.
-
-    The rejected candidate is gone, so there is nothing left to revalidate:
-    the next attempt is reviewed and gated from scratch.
-    """
+    """Tell a continued hypothesis that its rejected edits were reverted."""
     continued = hypothesis.clone()
     notice = _revert_notice(record, restore)
     continued.feedback = f"{continued.feedback}\n\n{notice}" if continued.feedback else notice
-    continued.gate_revalidation_pending = False
     return continued
 
 

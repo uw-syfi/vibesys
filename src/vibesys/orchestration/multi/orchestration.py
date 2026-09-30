@@ -189,6 +189,7 @@ class _MultiRun:
                 judge_every=options.judge_every,
                 official_eval_every=options.official_eval_every,
                 max_retries_per_round=options.max_retries_per_round,
+                revert_rejected_rounds=True,
             )
         )
         self.files = MultiFiles.open(self.workspace.path)
@@ -246,16 +247,18 @@ class _MultiRun:
         revision = self.workspace.revision
         if (
             not self.run.facts.benchmark_configured
-            or self.records
+            or self.state.search.hypotheses
+            or self.state.last_paid_attempt is not None
             or self.state.search.input_baseline is not None
             or revision is None
         ):
+            # Once round 1 starts, the workspace no longer holds the input tree.
             return
         benchmark = await self.run.evaluation.benchmark(
             self.workspace,
             objectives=_benchmark_objectives(self.options),
         )
-        if not benchmark.executed:
+        if not benchmark.executed and benchmark.feedback is None:
             return
         baseline = self.search.input_baseline(revision, _framework_outcome(benchmark))
         if baseline is None:

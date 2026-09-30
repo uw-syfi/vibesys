@@ -164,7 +164,7 @@ class _DynamicRun:
         benchmark = await self.run.evaluation.benchmark(
             self.run.workspaces.root, objectives=self._objectives()
         )
-        if not benchmark.executed:
+        if not benchmark.executed and benchmark.feedback is None:
             return
         baseline = HypothesisSearch.input_baseline(revision, _framework_outcome(benchmark))
         if baseline is None:

@@ -358,3 +358,23 @@ def test_no_round_is_anchored_below_the_best_retained_tree(
         assert winner.perf_metric == max(readings)
     else:
         assert winner is None
+
+
+def test_reading_within_noise_of_the_input_is_not_retained() -> None:
+    """An earlier non-retained reading near the input does not lower the bar."""
+    space = MetricSpace(relative_noise=0.05)
+    near_input = replace(_official(1, 790.0), candidate_retained=False)
+    data = _measured(_with_input(_record_input(), 800.0), 835.0)
+    data = replace(
+        data,
+        state=data.state.model_copy(update={"metrics": space}),
+        records=[near_input],
+        round_number=2,
+    )
+    data.hypothesis.parent_round = 1
+    data.hypothesis.parent_commit = near_input.commit
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_metric == 800.0
+    assert record.candidate_retained is False

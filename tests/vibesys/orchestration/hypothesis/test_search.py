@@ -755,7 +755,9 @@ def test_rejected_round_is_reverted_and_never_parents_the_next_hypothesis() -> N
     input), became the first retained checkpoint, and later rounds cleared
     ``proven`` against it while still slower than the input.
     """
-    search = HypothesisSearch(HypothesisConfig(max_rounds=5, max_continuation_rounds=0))
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=5, max_continuation_rounds=0, revert_rejected_rounds=True)
+    )
     started = search.start(
         search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
     )
@@ -784,7 +786,7 @@ def test_rejected_round_is_reverted_and_never_parents_the_next_hypothesis() -> N
 
 def test_continued_hypothesis_restarts_from_the_restored_tree() -> None:
     """A continuation after a rejection is told its edits are gone."""
-    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5, revert_rejected_rounds=True))
     started = search.start(
         search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
     )
@@ -811,11 +813,11 @@ def test_continued_hypothesis_restarts_from_the_restored_tree() -> None:
     assert continued.parent_commit == _SEED
     assert (continued.feedback or "").startswith("lost wakeup under contention")
     assert "reverted round 1's rejected edits" in (continued.feedback or "")
-    assert not continued.gate_revalidation_pending
+    assert continued.gate_revalidation_pending
 
 
 def test_rejected_continuation_keeps_the_hypothesis_latest_passing_checkpoint() -> None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5, revert_rejected_rounds=True))
     started = search.start(
         search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
     )
@@ -852,7 +854,7 @@ def test_rejected_continuation_keeps_the_hypothesis_latest_passing_checkpoint() 
 
 def test_unreviewed_round_is_not_reverted() -> None:
     """A deferred round is provisional, not rejected: its tree stays the parent."""
-    search = HypothesisSearch(HypothesisConfig(max_rounds=5))
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5, revert_rejected_rounds=True))
     started = search.start(
         search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
     )
@@ -888,7 +890,11 @@ def test_no_round_starts_from_a_rejected_tree(
     rejected commit is never materialized, inherited, or used as a baseline.
     """
     search = HypothesisSearch(
-        HypothesisConfig(max_rounds=len(verdicts), max_continuation_rounds=continuations)
+        HypothesisConfig(
+            max_rounds=len(verdicts),
+            max_continuation_rounds=continuations,
+            revert_rejected_rounds=True,
+        )
     )
     state = search.initial()
     rejected_commits: set[str] = set()
@@ -935,6 +941,121 @@ def test_no_round_starts_from_a_rejected_tree(
             rejected_commits.add(record.commit)
             tree = closed.restore.commit
         assert tree not in rejected_commits
+
+
+def test_gate_failure_after_review_passed_keeps_its_tree() -> None:
+    """Only a judge rejection reverts; a gate failure keeps the tree to revalidate."""
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=5, max_continuation_rounds=0, revert_rejected_rounds=True)
+    )
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    gate_failed = _round(
+        1, hypothesis_id="H-1", outcome="rejected", passed=False, judge_verdict="pass"
+    )
+    closed = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=gate_failed,
+        records=[],
+        **_closing_kwargs(passed=False),
+    )
+
+    assert closed.restore is None
+    following = search.start(
+        closed.state, _plan("H-2"), round_number=2, current_commit=_SEED, records=[gate_failed]
+    )
+    assert following.hypothesis.parent_commit == gate_failed.commit
+
+
+def test_rejected_rounds_are_kept_unless_the_loop_opts_in() -> None:
+    """Loops that do not opt in (dynamic) keep the previous parent behavior."""
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5, max_continuation_rounds=0))
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    rejected = _rejected(1, started.hypothesis)
+    closed = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=rejected,
+        records=[],
+        **_closing_kwargs(passed=False),
+    )
+
+    assert closed.restore is None
+    following = search.start(
+        closed.state, _plan("H-2"), round_number=2, current_commit=_SEED, records=[rejected]
+    )
+    assert following.hypothesis.parent_round == 1
+    assert following.hypothesis.parent_commit == rejected.commit
+
+
+def test_explicit_revert_to_a_rejected_round_restores_its_replacement() -> None:
+    """Following ``revert_to_round=1`` never materializes round 1's rejected tree."""
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=5, max_continuation_rounds=0, revert_rejected_rounds=True)
+    )
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    rejected = _rejected(1, started.hypothesis)
+    closed = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=rejected,
+        records=[],
+        **_closing_kwargs(passed=False),
+    )
+
+    following = search.start(
+        closed.state,
+        _plan("H-2", revert_to_round=1),
+        round_number=2,
+        current_commit="c" * 40,
+        records=closed.state.rounds,
+    )
+
+    assert following.rollback is not None
+    assert following.rollback.commit == _SEED
+    assert following.hypothesis.parent_round is None
+    assert following.hypothesis.parent_commit == _SEED
+
+
+def test_terminal_notice_for_an_input_rooted_hypothesis_names_no_rejected_round() -> None:
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=5, max_continuation_rounds=0, revert_rejected_rounds=True)
+    )
+    started = search.start(
+        search.initial(), _plan("H-1"), round_number=1, current_commit=_SEED, records=[]
+    )
+    rejected = _rejected(1, started.hypothesis)
+    closed = search.close_round(
+        started.state,
+        hypothesis=started.hypothesis,
+        record=rejected,
+        records=[],
+        **_closing_kwargs(passed=False),
+    )
+    second = search.start(
+        closed.state, _plan("H-2"), round_number=2, current_commit=_SEED, records=[rejected]
+    )
+    disproven = _round(
+        2,
+        hypothesis_id="H-2",
+        outcome="disproven",
+        declared="disproven",
+        retained=False,
+        parent_round=second.hypothesis.parent_round,
+        parent_commit=second.hypothesis.parent_commit,
+    )
+
+    notice = search.initial_carry([rejected, disproven]).regression_info
+
+    assert notice is not None
+    assert "revert_to_round=1" not in notice
+    assert "No earlier recorded round exists" in notice
 
 
 # --- frontier / best / pareto_conflict -----------------------------------
