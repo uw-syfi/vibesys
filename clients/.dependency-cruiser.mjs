@@ -21,7 +21,16 @@ const DEV_HARNESS = 'tui/dev';
 if (!layout.toolingDirectories.includes(DEV_HARNESS)) {
   throw new Error(`.dependency-cruiser.mjs: ${DEV_HARNESS} is no longer a tooling directory`);
 }
-const LEAF_TOOLS = `^(?:${pathAlternation(layout.toolingDirectories.filter(directory => directory !== DEV_HARNESS))})/`;
+const LEAF_TOOL_DIRECTORIES = pathAlternation(
+  layout.toolingDirectories.filter(directory => directory !== DEV_HARNESS),
+);
+const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
+// The importer of a `tools-are-leaves` edge: any file in a leaf tool directory, or any other file
+// in a package. Group 1 is the importer's own leaf tool directory, so `to.pathNot: '^$1/'`
+// excludes exactly that directory and no other tool's. Ordinary package code matches the second
+// alternative, where group 1 does not participate, so `$1` is never substituted and the resulting
+// `^$1/` matches no path: such an importer may reach no tool directory at all.
+const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 
 function packagesAbove(directory) {
   const above = layout.packages.filter(
@@ -89,12 +98,14 @@ export default {
     },
     {
       // Benchmarks, end-to-end specs, and workspace scripts are leaf tools: they consume the
-      // packages, never the other way round, so a package build or test cannot depend on them. A
-      // tool may reach its own directory, which is why the importer is excluded from `from`.
+      // packages, never the other way round, so a package build or test cannot depend on them.
+      // Each tool may reach its own directory and no other's, which is what the `$1`
+      // back-reference on `LEAF_TOOL_IMPORTER` says. Excluding every tool from `from` instead
+      // would permit `web/e2e -> scripts` and `web/e2e -> tui/benchmarks`.
       name: 'tools-are-leaves',
       severity: 'error',
-      from: {path: PACKAGES, pathNot: LEAF_TOOLS},
-      to: {path: LEAF_TOOLS},
+      from: {path: LEAF_TOOL_IMPORTER},
+      to: {path: LEAF_TOOLS, pathNot: '^$1/'},
     },
     {
       // `scripts/` is repository tooling (architecture checks). It reads package manifests

@@ -13,8 +13,8 @@
     "check:web-browser-bundle": "pnpm --filter @vibesys/web build:browser && node scripts/check_web_browser_bundle.mjs",
     "test:conformance": "node --test scripts/check_conformance_corpus.test.mjs",
     "check:knip": "knip",
-    "build:clients": "pnpm -r run build",
-    "check:clients": "pnpm -r run check",
+    "build:clients": "pnpm -r --workspace-concurrency=1 run build",
+    "check:clients": "pnpm -r --workspace-concurrency=1 run check",
     "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm -r --workspace-concurrency=1 run test"
   },
   "devDependencies": {

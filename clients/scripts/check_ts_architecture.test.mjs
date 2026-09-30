@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import {mkdir, mkdtemp, writeFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {mkdir, mkdtemp, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import test from 'node:test';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {cruise} from 'dependency-cruiser';
 import extractDepcruiseOptions from 'dependency-cruiser/config-utl/extract-depcruise-options';
 import extractTSConfig from 'dependency-cruiser/config-utl/extract-ts-config';
+import {cruiseWorkspace} from './check_ts_architecture.mjs';
 import {manifestErrors} from './check_ts_package_manifests.mjs';
 import {declarationErrors, pathAlternation, workspaceLayout} from './workspace_layout.mjs';
 
@@ -94,7 +96,10 @@ const VALID_FILES = {
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   'web/src/index.ts': "import '@vibesys/backend-client';\nimport '@vibesys/core-state';\n",
-  'web/e2e/live.spec.ts': "import 'declared-package';\n",
+  // A leaf tool reaching its own directory is the edge `tools-are-leaves` must keep allowing, and
+  // the only thing its `$1` back-reference permits.
+  'web/e2e/live.spec.ts': "import 'declared-package';\nimport './fixtures.js';\n",
+  'web/e2e/fixtures.ts': '',
   'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
   'tui/src/session-controller.ts': "import './session-model.js';\nimport './ui/theme.js';\n",
   'tui/src/session-model.ts': "import './ui/theme.js';\n",
@@ -133,6 +138,20 @@ const RULE_CASES = [
   {
     rule: 'tools-are-leaves',
     files: {'web/src/index.ts': "import '../e2e/live.spec.js';\n"},
+  },
+  {
+    // One leaf tool reaching another. Excluding every tool from `from` rather than only the
+    // importer's own directory permits this, so this case fails without the `$1` back-reference.
+    rule: 'tools-are-leaves',
+    files: {'web/e2e/live.spec.ts': "import '../../scripts/check.mjs';\n"},
+  },
+  {
+    rule: 'tools-are-leaves',
+    files: {'web/e2e/live.spec.ts': "import '../../tui/benchmarks/bench.js';\n"},
+  },
+  {
+    rule: 'tools-are-leaves',
+    files: {'core-state/bench/run.ts': "import '../../web/e2e/fixtures.js';\n"},
   },
   {
     rule: 'backend-client-is-lowest-layer',
@@ -234,7 +253,7 @@ const RULE_CASES = [
 ];
 
 async function violatedRules(files) {
-  const root = await mkdtemp(join(tmpdir(), 'vibesys-layer-rules-'));
+  const root = await workspaceFixture('vibesys-layer-rules-');
   await writeFile(
     join(root, 'tsconfig.architecture.json'),
     JSON.stringify({
@@ -252,27 +271,23 @@ async function violatedRules(files) {
   await writeExternalPackage(root, '@opentui/core');
   await writeExternalPackage(root, 'declared-package');
   await writeExternalPackage(root, 'undeclared-package');
-  await writeFile(
-    join(root, 'package.json'),
-    JSON.stringify({devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0'}}),
-  );
+  const declared = {devDependencies: {'declared-package': '1.0.0', '@opentui/core': '1.0.0'}};
+  await writeFile(join(root, 'package.json'), JSON.stringify(declared));
+  // Each package declares the same externals, because `production-dependencies-are-declared`
+  // resolves a declaration against the manifest nearest the importing module.
+  for (const directory of PACKAGE_DIRECTORIES) {
+    await writePackage(root, directory, `@vibesys/${directory}`, ['src'], declared);
+  }
   for (const [file, source] of Object.entries(files)) {
     await mkdir(dirname(join(root, file)), {recursive: true});
     await writeFile(join(root, file), source);
   }
   const options = await extractDepcruiseOptions(CONFIG);
   const tsConfigFile = join(root, 'tsconfig.architecture.json');
+  // Derived, not listed: a rule case in a directory the layout finds must be cruised without
+  // anyone adding it here, which is the gap that let `web/e2e` go unscanned.
   const result = await cruise(
-    [
-      'backend-client/src',
-      'core-state/src',
-      'tui/src',
-      'tui/dev',
-      'tui/benchmarks',
-      'web/src',
-      'web/e2e',
-      'scripts',
-    ],
+    workspaceLayout(root).scanRoots,
     {
       ...options,
       baseDir: root,
@@ -330,7 +345,9 @@ test('manifest policy names a package that joins the workspace without one', asy
 });
 
 // The workspace admits directories, so the layout is what every gate enumerates from: a package
-// or a directory that joins it must appear here without anyone editing a list.
+// or a directory that joins it must appear here without anyone editing a list. These fixtures are
+// plain directories with no git metadata, which is the unpacked-sdist case: the layout cannot ask
+// git what is ignored and falls back to excluding build and install output.
 const TOOLING_DIRECTORY_SETS = [[], ['bench'], ['e2e'], ['dev', 'e2e']];
 
 for (const tooling of TOOLING_DIRECTORY_SETS) {
@@ -362,6 +379,41 @@ for (const tooling of TOOLING_DIRECTORY_SETS) {
     );
   });
 }
+
+test('workspace layout leaves out a directory git ignores', async () => {
+  const root = await workspaceFixture('vibesys-layout-ignored-');
+  // `coverage` and `build` are ordinary local tool output: gitignored, untracked, and named by
+  // neither the build-output fallback nor any list in the gates. Only asking git keeps them out.
+  await writeFile(join(root, '.gitignore'), 'coverage/\nbuild/\n');
+  execFileSync('git', ['init', '--quiet'], {cwd: root});
+  await writePackage(root, 'stub', '@vibesys/stub', ['src', 'e2e', 'coverage', 'build']);
+
+  assert.deepEqual(workspaceLayout(root).scanRoots, ['stub/e2e', 'stub/src']);
+});
+
+test('workspace layout covers a symlinked package and a symlinked tool directory', async () => {
+  const root = await workspaceFixture('vibesys-layout-symlink-');
+  const outside = await mkdtemp(join(tmpdir(), 'vibesys-layout-target-'));
+  await writePackage(outside, 'linked', '@vibesys/linked', ['src']);
+  await mkdir(join(outside, 'shared-e2e'), {recursive: true});
+  await writePackage(root, 'stub', '@vibesys/stub', ['src']);
+  // `pnpm -r` resolves a symlinked directory and runs the linked package's scripts, so a layout
+  // that skipped it would build, check, and test a package no gate can see.
+  await symlink(join(outside, 'linked'), join(root, 'linked'));
+  await symlink(join(outside, 'shared-e2e'), join(root, 'stub/e2e'));
+  await symlink(join(outside, 'absent'), join(root, 'dangling'));
+
+  const layout = workspaceLayout(root);
+
+  assert.deepEqual(
+    layout.packages.map(({name, directory}) => ({name, directory})),
+    [
+      {name: '@vibesys/linked', directory: 'linked'},
+      {name: '@vibesys/stub', directory: 'stub'},
+    ],
+  );
+  assert.deepEqual(layout.scanRoots, ['linked/src', 'stub/e2e', 'stub/src']);
+});
 
 test('workspace layout rejects a packages pattern it cannot expand', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-layout-pattern-'));
@@ -430,6 +482,89 @@ test('declarations reject a path map entry no package exports', async () => {
 test('path alternation escapes a directory name', () => {
   assert.equal(pathAlternation(['core-state', 'web.next']), 'core-state|web\\.next');
 });
+
+// The scan roots are the one thing the gate derives with no second declaration to check it
+// against: `cruiseWorkspace` hands them straight to dependency-cruiser, so a root the derivation
+// drops is a rule that cannot fire, silently. Each directory here holds a module that imports an
+// undeclared package, and the gate must report every one.
+const SCAN_ROOT_PROBES = [
+  'backend-client/src/probe.ts',
+  'core-state/bench/probe.ts',
+  'core-state/src/probe.ts',
+  'scripts/probe.mjs',
+  'tui/benchmarks/probe.ts',
+  'tui/dev/probe.ts',
+  'tui/src/probe.ts',
+  'web/e2e/probe.ts',
+  'web/src/probe.ts',
+];
+
+const PACKAGE_DIRECTORIES = ['backend-client', 'core-state', 'tui', 'web'];
+
+test('the architecture gate cruises every directory the layout derives', async () => {
+  const {output, exitCode} = await cruiseFixture(
+    Object.fromEntries(SCAN_ROOT_PROBES.map(file => [file, "import 'undeclared-package';\n"])),
+  );
+
+  // dependency-cruiser exits with the number of error-severity violations, so one per probe means
+  // every scan root was cruised and none was cruised twice.
+  assert.equal(exitCode, SCAN_ROOT_PROBES.length);
+  for (const file of SCAN_ROOT_PROBES) {
+    assert.ok(
+      output.includes(`production-dependencies-are-declared: ${file}`),
+      `${file} is not a scan root, so no rule can reach it. Report:\n${output}`,
+    );
+  }
+});
+
+test('the architecture gate reports a workspace whose layering is clean', async () => {
+  const {output, exitCode} = await cruiseFixture({
+    'tui/src/index.ts': "import '@vibesys/core-state';\n",
+    'web/src/index.ts': "import '@vibesys/core-state';\n",
+    'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
+  });
+
+  assert.equal(exitCode, 0);
+  assert.match(output, /no dependency violations found/);
+});
+
+/**
+ * Runs the real `cruiseWorkspace` over a throwaway workspace. The fixture's own
+ * `.dependency-cruiser.mjs` re-exports the repository rule set, so the rules are the real ones
+ * while the scan roots come from the fixture's directories.
+ */
+async function cruiseFixture(files) {
+  const root = await workspaceFixture('vibesys-cruise-');
+  await writeFile(
+    join(root, '.dependency-cruiser.mjs'),
+    `export {default} from ${JSON.stringify(pathToFileURL(CONFIG).href)};\n`,
+  );
+  await writeFile(
+    join(root, 'tsconfig.architecture.json'),
+    JSON.stringify({
+      compilerOptions: {
+        baseUrl: '.',
+        paths: Object.fromEntries(
+          PACKAGE_DIRECTORIES.map(directory => [
+            `@vibesys/${directory}`,
+            [`${directory}/src/index.ts`],
+          ]),
+        ),
+      },
+    }),
+  );
+  await writeFile(join(root, 'package.json'), JSON.stringify({name: 'fixture-workspace'}));
+  await writeExternalPackage(root, 'undeclared-package');
+  for (const directory of PACKAGE_DIRECTORIES) {
+    await writePackage(root, directory, `@vibesys/${directory}`, ['src']);
+    await writeFile(join(root, directory, 'src/index.ts'), '');
+  }
+  for (const [file, source] of Object.entries(files)) {
+    await mkdir(dirname(join(root, file)), {recursive: true});
+    await writeFile(join(root, file), source);
+  }
+  return cruiseWorkspace(root);
+}
 
 async function writeSource(root, packageDirectory, file, source) {
   const directory = join(root, packageDirectory, 'src');

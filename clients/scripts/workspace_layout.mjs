@@ -9,15 +9,24 @@
  * `package.json` need no list at all: `pnpm -r` runs every member by construction.
  *
  * Guarantees. `workspaceLayout` returns every directory the workspace file admits that holds a
- * `package.json`, in path order, with the source and tooling directories inside it. It throws,
- * naming the offending path, on a workspace file or manifest it cannot interpret. A directory it
- * does not recognise is reported as tooling rather than dropped, so an unknown directory makes the
- * gates report more, never less. `declarationErrors` reports the two facts that cannot be derived
- * away (a tsconfig path map and the scripts `pnpm -r` drives) when they disagree with that layout,
- * so a package that joins the workspace fails the gate instead of joining it unchecked.
+ * `package.json`, in path order, with the source and tooling directories inside it. A symlink to a
+ * directory counts, because pnpm treats it as a workspace member and runs its scripts. It throws,
+ * naming the offending path, on a workspace file or manifest it cannot interpret.
+ *
+ * A dot-directory and a directory git ignores are left out; every other directory is reported as
+ * tooling rather than dropped, so an unrecognised source directory makes the gates report more,
+ * never less. Asking git is what makes that safe rather than merely conservative: untracked output
+ * (`dist`, `node_modules`, `web/test-results`, a coverage report, a `web/build` bundle) never
+ * reaches the gates at all, so a developer gets the rule set CI has and no red gate with no tracked
+ * file to blame.
+ *
+ * `declarationErrors` reports the two facts that cannot be derived away (a tsconfig path map and
+ * the scripts `pnpm -r` drives) when they disagree with that layout, so a package that joins the
+ * workspace fails the gate instead of joining it unchecked.
  */
 
-import {existsSync, readdirSync, readFileSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs';
 import {join} from 'node:path';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
@@ -28,10 +37,24 @@ const BUILD_OUTPUT_PREFIX = './dist/';
 const JAVASCRIPT_SUFFIX = '.js';
 const TYPESCRIPT_SUFFIX = '.ts';
 
-// Directories that hold no source: `dist` is every package's build output, `node_modules` its
-// dependencies, and a leading dot marks a tool cache (`.browser-dist`, `.vibesys-demo`). Anything
-// else counts as source, which is the safe direction: an unrecognised directory is scanned.
-const NON_SOURCE_DIRECTORIES = new Set(['dist', 'node_modules']);
+// Which directories hold no source is already declared, in `.gitignore`, so this asks git rather
+// than keeping a second list: build output (`dist`), installed dependencies (`node_modules`), tool
+// caches, and local tool output (`web/artifacts`, `web/test-results`) are all ignored there, and a
+// developer who has run Playwright or a coverage report must get the same rule set CI has.
+const GIT_IGNORE_QUERY = ['check-ignore', '--stdin', '-z'];
+// `git check-ignore` exits 0 when some input path is ignored and 1 when none is; any other status
+// (128 in a tree with no git metadata) means git could not answer.
+const GIT_STATUS_ANSWERED = new Set([0, 1]);
+
+// A leading dot marks version-control or tool metadata (`.git`, `.cache`, `.browser-dist`), never
+// a package's source. This is not part of the git question: `.git` holds the answers rather than
+// being subject to them, so `git check-ignore` does not report it.
+const METADATA_PREFIX = '.';
+
+// The fallback for a tree with no git metadata, such as an unpacked sdist. Such a tree is created
+// from tracked files, so the only untracked directories it can grow are an install
+// (`node_modules`) and a build (`dist`); the dot-directory caches are already excluded above.
+const PACKED_TREE_OUTPUT = new Set(['dist', 'node_modules']);
 
 // A workspace pattern this module understands: `*` (every directory, what pnpm is configured with)
 // or a literal directory name. Anything else would need glob semantics to expand correctly, and
@@ -60,14 +83,14 @@ export function workspaceLayout(root) {
   const packageDirectories = new Set(packages.map(({directory}) => directory));
   const source = [];
   const tooling = [];
-  for (const {directory} of packages) {
-    for (const child of sourceDirectories(root, directory)) {
-      (child === `${directory}/${SOURCE_DIRECTORY}` ? source : tooling).push(child);
+  for (const child of childDirectories(root, ['', ...packageDirectories])) {
+    const separator = child.lastIndexOf('/');
+    if (separator < 0) {
+      // A root directory that is not a package is the workspace's own tooling (`scripts`).
+      if (!packageDirectories.has(child)) tooling.push(child);
+    } else {
+      (child.slice(separator + 1) === SOURCE_DIRECTORY ? source : tooling).push(child);
     }
-  }
-  // A root directory that is not a package is the workspace's own tooling (`scripts`).
-  for (const child of sourceDirectories(root, '')) {
-    if (!packageDirectories.has(child)) tooling.push(child);
   }
   return {
     packages,
@@ -181,7 +204,7 @@ function readPackages(root) {
   const directories = new Set();
   for (const pattern of packagePatterns(root)) {
     if (pattern === '*') {
-      for (const candidate of directoryNames(root, '')) {
+      for (const candidate of childDirectories(root, [''])) {
         if (existsSync(join(root, candidate, MANIFEST_FILE))) directories.add(candidate);
       }
       continue;
@@ -231,22 +254,59 @@ function packagePatterns(root) {
   return patterns;
 }
 
-function sourceDirectories(root, directory) {
-  return directoryNames(root, directory).map(name =>
-    directory === '' ? name : `${directory}/${name}`,
-  );
+/**
+ * The directories inside each of `directories` that hold repository content, as paths relative to
+ * `root`. Everything git ignores is left out, in one query for the whole batch; see
+ * `ignoredDirectories` for the tree that has no git to ask.
+ */
+function childDirectories(root, directories) {
+  const paths = directories
+    .flatMap(directory =>
+      readdirSync(join(root, directory), {withFileTypes: true})
+        .filter(entry => isContentDirectory(root, directory, entry))
+        .map(entry => (directory === '' ? entry.name : `${directory}/${entry.name}`)),
+    )
+    .sort();
+  const ignored = ignoredDirectories(root, paths);
+  return paths.filter(path => !ignored.has(path));
 }
 
-function directoryNames(root, directory) {
-  return readdirSync(join(root, directory), {withFileTypes: true})
-    .filter(
-      entry =>
-        entry.isDirectory() &&
-        !entry.name.startsWith('.') &&
-        !NON_SOURCE_DIRECTORIES.has(entry.name),
-    )
-    .map(entry => entry.name)
-    .sort();
+/**
+ * Whether the entry is a directory holding repository content.
+ *
+ * `readdirSync` has `lstat` semantics, so a symlink to a directory is reported as a symlink and
+ * not as a directory. pnpm resolves such a link and runs the linked package's scripts, so dropping
+ * it here would run `build`, `check`, and `test` on a package no gate can see. A dangling link
+ * stats to nothing and is dropped.
+ */
+function isContentDirectory(root, directory, entry) {
+  if (entry.name.startsWith(METADATA_PREFIX)) return false;
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  const target = statSync(join(root, directory, entry.name), {throwIfNoEntry: false});
+  return target?.isDirectory() === true;
+}
+
+function ignoredDirectories(root, paths) {
+  if (paths.length === 0) return new Set();
+  return gitIgnoredDirectories(root, paths) ?? packedTreeOutput(paths);
+}
+
+/** The subset of `paths` git ignores, or `undefined` when git cannot answer for this tree. */
+function gitIgnoredDirectories(root, paths) {
+  const query = spawnSync('git', GIT_IGNORE_QUERY, {
+    cwd: root,
+    input: paths.join('\0'),
+    encoding: 'utf8',
+  });
+  if (query.error !== undefined || !GIT_STATUS_ANSWERED.has(query.status)) return undefined;
+  return new Set(query.stdout.split('\0').filter(path => path !== ''));
+}
+
+function packedTreeOutput(paths) {
+  return new Set(
+    paths.filter(path => PACKED_TREE_OUTPUT.has(path.slice(path.lastIndexOf('/') + 1))),
+  );
 }
 
 function readJson(root, relativePath) {

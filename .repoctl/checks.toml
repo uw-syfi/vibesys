@@ -50,8 +50,13 @@ directory = "clients"
 collection = "pnpm_packages"
 timeout_seconds = 1200
 # The fallback when the change filter selects no package: `-r` covers every workspace member, so
-# this does not go stale when one is added. One package at a time, because the package tests spawn
-# processes and share fixed paths under the temporary directory.
+# this does not go stale when one is added. One package at a time because a package's `build` is
+# `rm -rf dist && tsc`, and `tui`'s `prebuild`/`precheck`/`pretest` run it for `backend-client` and
+# `core-state`, whose `dist` `tui` resolves through `tui/node_modules/@vibesys/*` (it declares no
+# tsconfig `paths`). `pnpm -r` starts `tui` and `web` in the same instant, so without the flag a
+# sibling task can read a `dist` that is being deleted. The flag only orders the packages inside
+# one `pnpm` invocation; a second `pnpm` running elsewhere in the same checkout can still delete
+# the same `dist` mid-suite, which this flag cannot prevent and which remains unfixed.
 commands = [["pnpm", "-r", "--workspace-concurrency=1", "run", "test"]]
 package_commands = [["pnpm", "--filter", "{package}", "test"]]
 always_commands = [["pnpm", "test:ts-architecture"], ["pnpm", "test:conformance"]]
