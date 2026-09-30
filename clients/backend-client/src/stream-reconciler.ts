@@ -1,9 +1,9 @@
+import {BackendClientError} from './errors.js';
 import type {EventBatchMessage, RunEvent} from './protocol.js';
 
 /**
- * The two facts about a batch the reconciler cannot know by itself: how the
- * subscription that delivered it was dialed, and where the caller's fold
- * currently floors.
+ * The one fact about a batch the reconciler cannot know by itself: how the
+ * subscription that delivered it was dialed.
  */
 export interface BatchContext {
   /**
@@ -13,13 +13,6 @@ export interface BatchContext {
    * synchronously inside `subscribe` is tagged correctly too.
    */
   readonly resumed: boolean;
-  /**
-   * The history floor of what the caller has folded: the sequence below which
-   * nothing has been read. Authoritative only for a resumed batch that is not
-   * a re-bootstrap, which is the one disposition that declares no new floor;
-   * every other disposition derives the floor from the batch itself.
-   */
-  readonly historyFloor: number;
 }
 
 /**
@@ -34,36 +27,50 @@ export type BatchReconciliation =
   | {readonly kind: 'extend'; readonly historyFloor: number}
   | {readonly kind: 'rebootstrap'; readonly historyFloor: number};
 
+declare const backfillStampBrand: unique symbol;
+
 /**
- * The `query.events` range one backfill covers, and the guard the reconciler
- * needs back to judge the response. Opaque to the caller apart from the two
- * bounds, which go straight into the request.
+ * Identifies one issued range. Opaque: only `settleBackfill` and
+ * `abandonBackfill` read it, and it cannot be constructed outside this module,
+ * so a forged or rehydrated request cannot defeat the supersession guard.
  */
+export type BackfillStamp = number & {readonly [backfillStampBrand]: never};
+
+/** The `query.events` range one backfill covers. Both bounds are exclusive. */
 export interface BackfillRequest {
-  /**
-   * `after_sequence`: the floor this chunk lowers the history floor to once it
-   * is folded.
-   */
+  /** `after_sequence`. The server answers `after_sequence < sequence`. */
   readonly afterSequence: number;
   /**
    * `before_sequence`. Every folded event has `sequence > floor`, so the range
    * has to include the floor itself and stops one above it.
    */
   readonly beforeSequence: number;
-  /**
-   * The log generation this range is addressed in. Only `settleBackfill`
-   * interprets it.
-   */
-  readonly generation: number;
+  readonly stamp: BackfillStamp;
 }
+
+/**
+ * Whether there is a range to ask for.
+ *
+ * `fetch` carries it. `complete` means the folded log already reaches back to
+ * the start, so there is nothing older. `in-flight` means a range is already
+ * outstanding: the floor moves only when a response is folded, so a second
+ * range taken now would duplicate the first. Callers that share one answer
+ * between concurrent readers do that above this, which is where the request
+ * itself lives.
+ */
+export type BackfillPlan =
+  | {readonly kind: 'fetch'; readonly request: BackfillRequest}
+  | {readonly kind: 'complete'}
+  | {readonly kind: 'in-flight'};
 
 /**
  * How to fold one backfill response.
  *
  * `prepend` carries the events to fold as history older than everything
  * already folded, with the spine already filtered out, and the floor to record
- * afterwards. `superseded` means a re-bootstrap landed while the request was
- * in flight: drop the response and leave the floor where it is.
+ * afterwards. `superseded` means the response no longer describes the folded
+ * log: a re-bootstrap landed while the request was in flight, or the request
+ * is not the outstanding one. Drop it and leave the floor where it is.
  */
 export type BackfillReconciliation =
   | {readonly kind: 'prepend'; readonly events: readonly RunEvent[]; readonly historyFloor: number}
@@ -71,14 +78,46 @@ export type BackfillReconciliation =
 
 export interface StreamReconcilerOptions {
   /**
-   * How many events one backfill asks for. Defaults to 1000, matching the
-   * bootstrap tail, so one backfill is one round trip of the same shape as the
-   * boot subscribe; a caller that dials a different tail should pass it here.
+   * How many events one backfill asks for. Required rather than defaulted: the
+   * value belongs with the subscription's bootstrap tail, so that one backfill
+   * is one round trip of the same shape as the boot subscribe, and a default
+   * here would let the two drift apart silently.
    */
-  backfillChunk?: number;
+  readonly backfillChunk: number;
 }
 
-const DEFAULT_BACKFILL_CHUNK = 1_000;
+/** The range currently outstanding, and what it was addressed in. */
+interface OutstandingRange {
+  readonly stamp: number;
+  readonly generation: number;
+  readonly afterSequence: number;
+}
+
+function positiveInteger(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be a positive integer, received ${value}`);
+  }
+  return value;
+}
+
+/**
+ * The floor the batch declares, rejected at the boundary when the wire carries
+ * something that cannot be a sequence. `history_after_sequence` is `ge=0` in
+ * the protocol models, so a conforming server never trips this; validating
+ * here keeps `historyFloor >= 0` an invariant of this module rather than a
+ * precondition every caller has to restate, and stops a negative floor from
+ * reaching `beginBackfill` as a range the server would reject.
+ */
+function declaredFloorOf(message: EventBatchMessage): number {
+  const declared = message.history_after_sequence ?? 0;
+  if (!Number.isSafeInteger(declared) || declared < 0) {
+    throw new BackendClientError(
+      'parse',
+      `event_batch.history_after_sequence must be a non-negative integer, received ${declared}`,
+    );
+  }
+  return declared;
+}
 
 /**
  * Keeps a subscription's folded sequence space correct across resumes,
@@ -91,12 +130,17 @@ const DEFAULT_BACKFILL_CHUNK = 1_000;
  * the reader scrolls back and backfills history below the floor. This owns the
  * arithmetic that keeps those three from corrupting each other: store
  * identity, the history floor, the run-level spine replayed below the floor,
- * and the generation that tells an in-flight backfill its log is gone.
+ * and the range outstanding against a log that may be gone by the time it
+ * answers.
  *
  * It decides; it never folds. Every method returns a disposition the caller
  * applies to its own state, so the same decisions serve any frontend and the
  * module stays free of state and UI types. It holds no I/O: the caller issues
- * the backfill request and hands back the response.
+ * the request and hands back the answer, or says the request failed.
+ *
+ * The floor is this module's own, not a value the caller passes back in, so a
+ * caller that mislays a disposition cannot talk it into a floor below the
+ * range it just fetched.
  */
 export class StreamReconciler {
   readonly #backfillChunk: number;
@@ -108,20 +152,28 @@ export class StreamReconciler {
    * `round_finished`, `chat_thread_created`, the terminal events, ...) so the
    * ordinary reducer can derive what a suffix cannot carry. A backfill chunk
    * covering that range therefore re-delivers those same events, and a prefix
-   * fold has no `sequence <= folded` guard to catch them. The set is
-   * O(rounds), and filtering every chunk through it is what keeps one
+   * fold has no `sequence <= folded` guard to catch them. The set stays
+   * O(rounds) because only events at or below the declaring batch's own floor
+   * go in, and filtering every chunk through it is what keeps one
    * `round_finished` from becoming two.
    */
   readonly #foldedBelowFloor = new Set<number>();
-  /** Lowest history floor seen so far; see `#lowerFloor`. */
-  #historyFloor = Number.POSITIVE_INFINITY;
+  /**
+   * Lowest history floor reached so far, or null before any batch has declared
+   * one. Null rather than zero: a stream whose first delivery is a resume (not
+   * reachable through `PersistentEventStream`, which resumes only from a
+   * cursor a bootstrap established) has declared no floor at all, and must not
+   * be treated as one that declared the start of the log.
+   */
+  #historyFloor: number | null = null;
   /**
    * The floor the stream itself last declared, which is not the same as the
-   * floor the caller holds: backfill lowers the latter and the stream never
-   * sees it. A later batch declaring more than this is a re-bootstrap within
-   * one store, which is what the server does when a burst outruns the tail
-   * bound; see `#rebootstrap`. Null until the first batch, whose floor is the
-   * bootstrap's own and therefore raises nothing.
+   * floor reached: backfill lowers that and the stream never sees it. A later
+   * batch declaring more than this is a re-bootstrap within one store, which
+   * is what the server does when a burst outruns the tail bound. Null until
+   * the first fresh batch, whose floor is the bootstrap's own and therefore
+   * raises nothing. A resume never writes it, because a resume re-declares the
+   * floor its subscription booted with rather than a new one.
    */
   #declaredFloor: number | null = null;
   /**
@@ -134,7 +186,7 @@ export class StreamReconciler {
    */
   #storeId: string | null = null;
   /**
-   * Bumped by every re-bootstrap, so an await that spans one can tell. A
+   * Bumped by every re-bootstrap, so a range that spans one can tell. A
    * backfill response is addressed in the sequence numbering of the log that
    * was streaming when the request left; once a batch swaps the store or
    * raises the floor, that numbering no longer describes the folded state, and
@@ -142,9 +194,12 @@ export class StreamReconciler {
    * one.
    */
   #rebootstrapGeneration = 0;
+  /** Distinguishes every range ever issued, so a late duplicate cannot pass as the live one. */
+  #issued = 0;
+  #outstanding: OutstandingRange | null = null;
 
-  constructor(options: StreamReconcilerOptions = {}) {
-    this.#backfillChunk = options.backfillChunk ?? DEFAULT_BACKFILL_CHUNK;
+  constructor(options: StreamReconcilerOptions) {
+    this.#backfillChunk = positiveInteger('backfillChunk', options.backfillChunk);
   }
 
   /**
@@ -161,14 +216,17 @@ export class StreamReconciler {
    * Decides how one `event_batch` folds, and records what the batch teaches
    * about the stream.
    *
-   * A resumed batch declares no new floor, so it keeps the caller's floor and
-   * scrollback survives the reconnect. A fresh batch re-declares its
-   * subscription's bootstrap floor on every delivery, including live ones, so
-   * the floor is taken as a lower bound rather than literally. Either kind
+   * A resumed batch declares no new floor, so it keeps the floor already
+   * reached and scrollback survives the reconnect. A fresh batch re-declares
+   * its subscription's bootstrap floor on every delivery, including live ones,
+   * so that floor is taken as a lower bound rather than literally. Either kind
    * re-bootstraps when the store it names is not the one the fold belongs to.
+   *
+   * Throws when `history_after_sequence` cannot be a sequence; see
+   * `declaredFloorOf`.
    */
   reconcileBatch(message: EventBatchMessage, context: BatchContext): BatchReconciliation {
-    const declared = message.history_after_sequence ?? 0;
+    const declared = declaredFloorOf(message);
     const store = message.store_id ?? '';
     if (context.resumed) {
       // A changed store invalidates the cursor and its folded state. The
@@ -182,7 +240,7 @@ export class StreamReconciler {
         this.#storeId !== null && this.#storeId !== '' && store !== '' && store !== this.#storeId;
       if (knownStoreChanged) return this.#rebootstrap(store, declared, message.events);
       if (store !== '') this.#storeId = store;
-      return {kind: 'extend', historyFloor: context.historyFloor};
+      return {kind: 'extend', historyFloor: this.#historyFloor ?? 0};
     }
     const rebootstrap =
       (this.#storeId !== null && store !== this.#storeId) ||
@@ -196,24 +254,37 @@ export class StreamReconciler {
   }
 
   /**
-   * The range of the chunk of history just older than `historyFloor`, or null
-   * when history is already complete.
+   * The chunk of history just older than the floor reached so far.
    *
-   * The returned request carries the generation of the log it is addressed in,
-   * so obtaining a range and guarding its response are the same act: hand the
-   * request back to `settleBackfill` once the server answers.
-   *
-   * One range at a time. The floor only moves when a response is folded, so
-   * two requests taken against the same floor cover the same range and settle
-   * to the same events twice. Single-flighting them is the caller's job: the
-   * caller owns the request in flight, which this has no handle on.
+   * Taking a range and guarding its answer are the same act: the returned
+   * request is the only thing `settleBackfill` and `abandonBackfill` accept, so
+   * a caller cannot fold an answer without the stamp that judges it. Exactly
+   * one range is outstanding at a time, and it stays outstanding until the
+   * caller settles or abandons it, so release it on every path.
    */
-  beginBackfill(historyFloor: number): BackfillRequest | null {
-    if (historyFloor === 0) return null;
-    return {
-      afterSequence: Math.max(0, historyFloor - this.#backfillChunk),
-      beforeSequence: historyFloor + 1,
+  beginBackfill(): BackfillPlan {
+    const floor = this.#historyFloor ?? 0;
+    // Complete before outstanding, the order `loadOlderHistory` checks them:
+    // a log with no older history has nothing to wait for either. Equality is
+    // the whole test because the floor is non-negative by construction:
+    // `declaredFloorOf` rejects anything else at the boundary, and the only
+    // other source is the clamped `afterSequence` below.
+    if (floor === 0) return {kind: 'complete'};
+    if (this.#outstanding !== null) return {kind: 'in-flight'};
+    this.#issued += 1;
+    const afterSequence = Math.max(0, floor - this.#backfillChunk);
+    this.#outstanding = {
+      stamp: this.#issued,
       generation: this.#rebootstrapGeneration,
+      afterSequence,
+    };
+    return {
+      kind: 'fetch',
+      request: {
+        afterSequence,
+        beforeSequence: floor + 1,
+        stamp: this.#issued as BackfillStamp,
+      },
     };
   }
 
@@ -227,18 +298,45 @@ export class StreamReconciler {
    * own numbering. Spine events replayed with the tail fall inside this range,
    * and folding them a second time would duplicate their transcript entries.
    *
-   * `events` takes the response's field as it arrives, absent when the server
-   * returned none.
+   * `events` is what the server returned for the range, which is empty when
+   * the range holds nothing. A request that failed is not that: report it
+   * through `abandonBackfill`, which leaves the floor where it was so the same
+   * range is asked for again.
    */
-  settleBackfill(
-    request: BackfillRequest,
-    events: readonly RunEvent[] | undefined,
-  ): BackfillReconciliation {
-    if (request.generation !== this.#rebootstrapGeneration) return {kind: 'superseded'};
-    const fresh = (events ?? []).filter(
-      event => event.sequence === undefined || !this.#foldedBelowFloor.has(event.sequence),
-    );
-    return {kind: 'prepend', events: fresh, historyFloor: this.#lowerFloor(request.afterSequence)};
+  settleBackfill(request: BackfillRequest, events: readonly RunEvent[]): BackfillReconciliation {
+    const settled = this.#release(request);
+    if (settled === null || settled.generation !== this.#rebootstrapGeneration) {
+      return {kind: 'superseded'};
+    }
+    const fresh = events.filter(candidate => {
+      const {sequence} = candidate;
+      // An unsequenced event cannot be recognized in a later chunk, so it is
+      // never recorded and never filtered. The branch is what narrows
+      // `sequence` to the set's element type, so it cannot rot into a no-op.
+      if (sequence === undefined) return true;
+      return !this.#foldedBelowFloor.has(sequence);
+    });
+    // The stored bound, not the request's, so a tampered copy cannot move the
+    // floor somewhere the fetched range does not justify.
+    return {kind: 'prepend', events: fresh, historyFloor: this.#lowerFloor(settled.afterSequence)};
+  }
+
+  /**
+   * Gives up the outstanding range without folding anything, for a request
+   * that failed or was cancelled. The floor stays where it was, so the same
+   * range is asked for again the next time the reader wants it. A no-op for a
+   * range that is not the outstanding one.
+   */
+  abandonBackfill(request: BackfillRequest): void {
+    this.#release(request);
+  }
+
+  /** Takes the outstanding range if `request` is it, else reports nothing to take. */
+  #release(request: BackfillRequest): OutstandingRange | null {
+    const outstanding = this.#outstanding;
+    if (outstanding === null || outstanding.stamp !== request.stamp) return null;
+    this.#outstanding = null;
+    return outstanding;
   }
 
   /**
@@ -250,7 +348,7 @@ export class StreamReconciler {
    * back for history it already holds.
    */
   #lowerFloor(floor: number): number {
-    this.#historyFloor = Math.min(this.#historyFloor, floor);
+    this.#historyFloor = this.#historyFloor === null ? floor : Math.min(this.#historyFloor, floor);
     return this.#historyFloor;
   }
 
@@ -264,6 +362,10 @@ export class StreamReconciler {
    * described a log this one replaces. Descending is not the backfill's
    * descent either: a run log shorter than the tail is replayed whole and
    * declares floor 0, which is the truth about the log now being streamed.
+   *
+   * An outstanding range is left outstanding: it is still a request in flight
+   * that the caller owes an answer for, and the generation recorded with it
+   * now differs, so settling it reports `superseded`.
    */
   #rebootstrap(store: string, declared: number, events: readonly RunEvent[]): BatchReconciliation {
     this.#storeId = store;

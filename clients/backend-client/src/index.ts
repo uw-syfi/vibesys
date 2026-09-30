@@ -44,8 +44,10 @@ export {
   resolveRequestPolicy,
 } from './request-policy.js';
 export {
+  type BackfillPlan,
   type BackfillReconciliation,
   type BackfillRequest,
+  type BackfillStamp,
   type BatchContext,
   type BatchReconciliation,
   StreamReconciler,

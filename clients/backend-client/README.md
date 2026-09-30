@@ -10,7 +10,13 @@ dependency. Consumers interpret its typed messages in their own state model.
 Use the package entries deliberately:
 
 - `@vibesys/backend-client` is runtime-neutral. It exports protocol types,
-  parsing, event-stream policy, and the `ServerTransport` interface.
+  parsing, event-stream policy, `StreamReconciler`, and the `ServerTransport`
+  interface. `StreamReconciler` decides how each `event_batch` and history
+  backfill folds against what a subscription already delivered (store
+  identity, the history floor, the replayed spine, and supersession across a
+  re-bootstrap). It returns dispositions and folds nothing itself, so both
+  clients share the arithmetic without this package learning either state
+  model.
 - `@vibesys/backend-client/node` is the TUI's Unix-domain-socket transport.
 - `@vibesys/backend-client/websocket` is the browser WebSocket transport. It
   uses one WebSocket per protocol role and never imports a Node builtin.
