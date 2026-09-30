@@ -24,6 +24,17 @@ function paletteNames(controller: SocketSessionController): string[] {
   return fuzzyMatchCommands('', context).map(command => command.name);
 }
 
+/** A recorded measurement, the cheapest event to observe as folded or dropped. */
+function benchmark(sequence: number, value: number): RunEvent {
+  return {
+    sequence,
+    timestamp: `2026-01-01T00:00:0${sequence}Z`,
+    type: 'benchmark_result',
+    round_label: 'round-1',
+    data: {kind: 'benchmark_result', metric: 'ops', value, unit: 'ops/s'},
+  };
+}
+
 /** How many times the perf pane has been (re)loaded from the backend. */
 function performanceQueries(transport: FakeTransport): number {
   return transport.requests.filter(request => request.type === 'query.performance').length;
@@ -103,6 +114,46 @@ describe('session controller', () => {
     expect(controller.state.core.sequence).toBe(2);
     await controller.stop();
     expect(transport.closed).toBe(true);
+  });
+
+  // A chat RPC answers with the journal tail written while the request was in
+  // flight, so its events can outrun the subscription by a whole poll
+  // interval. Folding them used to advance the contiguous stream cursor, and
+  // the batch the subscription was still holding was then dropped as already
+  // folded, permanently and across reconnects.
+  it('keeps the events a chat response outran, and folds its own once', async () => {
+    const answer: RunEvent = {
+      sequence: 4,
+      timestamp: '2026-01-01T00:00:04Z',
+      type: 'chat',
+      agent_kind: 'chat',
+      round_label: 'experiment-chat',
+      data: {kind: 'chat', answer: 'the answer'},
+    };
+    const transport = new FakeTransport([answer]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emit({type: 'event', event: event(1, 'agent_output_chunk', 'one\n')});
+
+    await controller.submitChat('what is happening?');
+
+    // Immediate feedback, without claiming the subscription reached sequence 4.
+    expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
+      'what is happening?',
+      'the answer',
+    ]);
+    expect(controller.state.core.sequence).toBe(1);
+
+    // The batch the subscription was holding, then its copies of the response.
+    transport.emit({type: 'event', event: benchmark(2, 11)});
+    transport.emit({type: 'event', event: benchmark(3, 22)});
+    transport.emit({type: 'event', event: answer});
+
+    expect(controller.state.core.benchmarks.map(record => record.value)).toEqual([11, 22]);
+    expect(controller.state.core.sequence).toBe(4);
+    expect(
+      controller.state.core.chatTranscript.filter(entry => entry.content === 'the answer'),
+    ).toHaveLength(1);
   });
 
   it('issues every boot request concurrently', async () => {

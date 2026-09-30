@@ -59,6 +59,7 @@ import {
   applyEventBatch,
   applyEventPrefix,
   applyEventRebootstrap,
+  applyResponseEvents,
   applySnapshot,
   type ChatThreadSettings,
   chatDocked,
@@ -773,8 +774,7 @@ export class SocketSessionController implements SessionController {
         type: 'query.chat_thread_create',
         ...(settings === null ? {} : {provider: settings.provider, model: settings.model}),
       });
-      let state = closeChatMenu(this.#state);
-      for (const event of response.events ?? []) state = applyEvent(state, event);
+      const state = applyResponseEvents(closeChatMenu(this.#state), response.events ?? []);
       const threadId = response.chat_thread?.thread_id;
       this.#setState(threadId === undefined ? state : switchChatThread(state, threadId));
     } catch (error) {
@@ -1302,8 +1302,7 @@ export class SocketSessionController implements SessionController {
         ...(threadId === DEFAULT_CHAT_THREAD_ID ? {} : {thread_id: threadId}),
       });
       const answer = response.chat?.answer ?? 'No chat answer was returned.';
-      let state = this.#state;
-      for (const event of response.events ?? []) state = applyEvent(state, event);
+      let state = applyResponseEvents(this.#state, response.events ?? []);
       if (!(response.events ?? []).some(event => event.data?.kind === 'chat')) {
         state = updateChatConversation(state, threadId, entries => [
           ...entries,

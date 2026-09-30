@@ -26,6 +26,7 @@ import {
   reduceEventBatch,
   reduceEventPrefix,
   reduceEventRebootstrap,
+  reduceResponseEvents,
   reduceSnapshot,
   type TodoItem,
   type TranscriptEntry,
@@ -1654,6 +1655,20 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
   });
   if (diagnostic !== null) next = reportProjectedDiagnostic(next, diagnostic);
   return next;
+}
+
+/**
+ * Fold the events an RPC response carried, as one UI transition.
+ *
+ * A response is a batch, so it takes the batch transition rather than one
+ * `applyEvent` per event. It does not move the stream cursor; see
+ * `reduceResponseEvents`.
+ */
+export function applyResponseEvents(
+  state: SessionState,
+  events: readonly RunEvent[],
+): SessionState {
+  return applyReducedCore(state, reduceResponseEvents(state.core, events));
 }
 
 /**

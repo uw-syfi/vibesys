@@ -3,6 +3,7 @@ import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
   type CoreRunStatus,
   type CoreState,
+  chatTranscriptFor,
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
@@ -11,6 +12,7 @@ import {
   reduceEvent,
   reduceEventBatch,
   reduceEventRebootstrap,
+  reduceResponseEvents,
   reduceSnapshot,
 } from './core-state.js';
 import {executionStatusFor} from './execution-status.js';
@@ -1296,6 +1298,72 @@ describe('the run lifecycle', () => {
   });
 });
 
+// A chat RPC answers with the journal tail written while the request was in
+// flight, so its events are the subscription's events arriving early by a
+// second route. The subscription owns the contiguous cursor; the response must
+// project its facts without moving it, and its own events must fold once
+// however the two routes race.
+describe('events delivered in an RPC response', () => {
+  const chatThread = threadCreatedEvent(4, 'thread-x', 'anthropic');
+  const chatAnswer = chatAnswerEvent(5, 'the answer', 'thread-x');
+
+  it('leaves the stream cursor on the last contiguous stream event', () => {
+    const streamed = reduceEvent(initialCoreState(), outputEvent(1, 'first'));
+
+    const responded = reduceResponseEvents(streamed, [chatThread, chatAnswer]);
+
+    // The thread and its answer are on screen straight away.
+    expect(responded.chatThreads.map(thread => thread.id)).toEqual([
+      DEFAULT_CHAT_THREAD_ID,
+      'thread-x',
+    ]);
+    expect(chatTranscriptFor(responded, 'thread-x').map(entry => entry.content)).toEqual([
+      'the answer',
+    ]);
+    // A reconnect resumes from the stream's position, not from the response's.
+    expect(responded.sequence).toBe(1);
+  });
+
+  it('folds the stream events the response outran, then dedups its own', () => {
+    const streamed = reduceEvent(initialCoreState(), outputEvent(1, 'first'));
+    const responded = reduceResponseEvents(streamed, [chatThread, chatAnswer]);
+
+    // The batch the subscription was holding while the RPC ran.
+    let live = reduceEvent(responded, benchmarkGate(2));
+    live = reduceEvent(live, benchmarkGate(3));
+    expect(live.benchmarks.map(record => record.sequence)).toEqual([2, 3]);
+
+    // The subscription then redelivers the response's own events.
+    live = reduceEvent(live, chatThread);
+    live = reduceEvent(live, chatAnswer);
+
+    expect(live.chatThreads).toHaveLength(2);
+    expect(chatTranscriptFor(live, 'thread-x').map(entry => entry.content)).toEqual(['the answer']);
+    expect(live.sequence).toBe(5);
+  });
+
+  it('reproduces a whole-stream fold however the two routes race', () => {
+    const events = racedRunEvents();
+    const streamOnly = reduceEventBatch(initialCoreState(), events);
+
+    for (let folded = 0; folded < events.length; folded += 1) {
+      for (const ahead of [1, 2, 5, events.length - folded]) {
+        const window = Math.min(ahead, events.length - folded);
+        // What the subscription has folded when the request goes out.
+        const streamed = reduceEventBatch(initialCoreState(), events.slice(0, folded));
+        // The journal tail the response carries, which the subscription has
+        // not reached yet.
+        const responded = reduceResponseEvents(streamed, events.slice(folded, folded + window));
+        expect(responded.sequence).toBe(streamed.sequence);
+        // The subscription catching up, redelivering the response's copies.
+        const caught = reduceEventBatch(responded, events.slice(folded));
+
+        expect(caught).toEqual(streamOnly);
+      }
+    }
+  });
+});
+
 // The run's durable event log is attached after a client subscribes, so a
 // subscription bootstrapped against the server's own short log is later
 // re-bootstrapped at a tail of the run log. The two batches number different
@@ -1849,6 +1917,45 @@ describe('typed framework events', () => {
 });
 
 /** One stream touching every transcript merge rule, plus both chat threads. */
+/**
+ * A short log carrying one of every projection the fold owns (run map, phases,
+ * rounds, transcript, chat threads and their transcripts, todos, usage,
+ * benchmarks, diagnostics), so the equivalence above compares whole states
+ * rather than one field.
+ */
+function racedRunEvents(): RunEvent[] {
+  return [
+    {
+      ...runScoped(1, 'run_started'),
+      status: 'active',
+      data: {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '/synthetic/target',
+        max_rounds: 3,
+        expected_roles: ['implementer', 'judge'],
+      },
+    },
+    executionEvent(2, 'agent_execution_started', 'exec-1', startedData('Implement')),
+    statusEvent(3, 'exec-1', 'agent_output_chunk', {progress: 'writing', input_tokens: 8_000}),
+    outputEvent(4, 'hello ', 'exec-1'),
+    outputEvent(5, 'world', 'exec-1'),
+    toolEvent(6, 'tool_call', 'call-a', 'grep'),
+    toolEvent(7, 'tool_result', 'call-a', 'two hits'),
+    todoEvent(8, 'exec-1', 'Write the fold'),
+    threadCreatedEvent(9, 'thread-x', 'anthropic'),
+    chatStreamEvent(10, 'partial ', 'chat-turn'),
+    chatAnswerEvent(11, 'partial answer', 'thread-x', 'chat-turn'),
+    benchmarkGate(12),
+    diagnosticEvent(13, 'invocation_finished', 'diag-1', 'error', 'the agent failed'),
+    {...roundFinishedEvent(14, {}), status: 'completed'},
+    executionEvent(15, 'agent_execution_finished', 'exec-1', {
+      kind: 'agent_execution_finished',
+      error: null,
+    }),
+  ];
+}
+
 /**
  * A run stopped mid-round: two roles advertised, the first round's implementer
  * closed, the second round's still running with structured status reported.

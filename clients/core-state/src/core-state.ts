@@ -174,7 +174,25 @@ export type EndedRunStatus = Extract<
 >;
 
 export interface CoreState {
+  /**
+   * The contiguous stream position: every event up to and including this
+   * sequence has been folded, so a subscription resumes from here.
+   *
+   * Only `reduceEvent` and the batch reducers, which fold the subscription's
+   * ordered events, move it. `reduceResponseEvents` folds out of band and
+   * leaves it where it was.
+   */
   sequence: number;
+  /**
+   * Sequences folded out of band, all of them strictly above `sequence`.
+   *
+   * `reduceResponseEvents` records what it folded here so the subscription's
+   * copy of the same event is recognized as already folded rather than folded
+   * twice. An entry is dropped once `sequence` reaches it, which is why the
+   * list is bounded by how far one RPC response can outrun the stream rather
+   * than by the length of the run.
+   */
+  foldedOutOfBand: readonly number[];
   status: CoreRunStatus;
   agentKind: string | null;
   roundLabel: string | null;
@@ -228,6 +246,7 @@ export interface CoreState {
 export function initialCoreState(): CoreState {
   return {
     sequence: 0,
+    foldedOutOfBand: [],
     status: 'connecting',
     agentKind: null,
     roundLabel: null,
@@ -451,6 +470,11 @@ export function reduceEventPrefix(
   const chatTranscripts = mergeChatTranscriptsPrefix(older.chatTranscripts, state.chatTranscripts);
   const merged: CoreState = {
     sequence: state.sequence,
+    // A prefix chunk sits entirely below the history floor, and the floor is
+    // never above the cursor, so nothing the chunk carried can be one of the
+    // sequences folded out of band above it. The newer state owns the list for
+    // the same reason it owns the cursor.
+    foldedOutOfBand: state.foldedOutOfBand,
     // The newer events own run termination.
     status: state.status,
     agentKind: state.agentKind ?? older.agentKind,
@@ -749,11 +773,53 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
   return foldEvent(state, event, null);
 }
 
-function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder | null): CoreState {
+/**
+ * Folds the events an RPC response carried, without moving the stream cursor.
+ *
+ * A query's response includes the journal tail written while the request was
+ * in flight (`server/api/service.py`'s chat and thread-create handlers read
+ * the journal directly), so those events are the subscription's own events
+ * arriving early by a second route. The subscription owns `state.sequence`,
+ * because that is where a reconnect resumes from: advancing it here would
+ * claim the intervening events had been folded, and the batch the
+ * subscription was still holding would be dropped as stale, permanently and
+ * across outages.
+ *
+ * The response's facts still project immediately, which is what makes a chat
+ * answer appear without waiting out a poll interval. The sequences it folded
+ * are recorded in `foldedOutOfBand`, so the subscription's copies fold once
+ * and only advance the cursor over them.
+ */
+export function reduceResponseEvents(state: CoreState, events: readonly RunEvent[]): CoreState {
+  const folder = new TranscriptFolder();
+  let folded = state;
+  for (const event of events) folded = foldEvent(folded, event, folder, 'response');
+  return folder.commit(folded);
+}
+
+/** Which of the two routes a journal event reached the fold by. */
+type DeliveryRoute = 'stream' | 'response';
+
+function foldEvent(
+  state: CoreState,
+  event: RunEvent,
+  folder: TranscriptFolder | null,
+  route: DeliveryRoute = 'stream',
+): CoreState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
+  if (sequence > 0 && state.foldedOutOfBand.includes(sequence)) {
+    // Folded already, by the other route. The stream's copy still carries the
+    // contiguous position forward over it; the response's does nothing.
+    return route === 'stream' ? advanceStreamCursor(state, sequence) : state;
+  }
   let next = cloneCoreState(state);
-  next.sequence = Math.max(state.sequence, sequence);
+  if (route === 'stream') {
+    next.sequence = Math.max(state.sequence, sequence);
+    next.foldedOutOfBand = aboveCursor(state.foldedOutOfBand, next.sequence);
+  } else if (sequence > 0) {
+    next.foldedOutOfBand = [...state.foldedOutOfBand, sequence];
+  }
   next = applyDiagnosticEvent(next, event);
   next = applyAgentExecutionEvent(next, event);
   // The chat return sits above the status fold, not below it. The chat agent
@@ -769,6 +835,21 @@ function foldEvent(state: CoreState, event: RunEvent, folder: TranscriptFolder |
   next = applyRunFacts(next, event, sequence);
   next = applyRunTranscript(next, event, folder);
   return applyRunLifecycle(next, event);
+}
+
+/** Carries the contiguous position over an event the response already folded. */
+function advanceStreamCursor(state: CoreState, sequence: number): CoreState {
+  const cursor = Math.max(state.sequence, sequence);
+  return cloneCoreStateWith(state, {
+    sequence: cursor,
+    foldedOutOfBand: aboveCursor(state.foldedOutOfBand, cursor),
+  });
+}
+
+/** Drops the sequences a moved cursor now covers, keeping identity if none do. */
+function aboveCursor(sequences: readonly number[], cursor: number): readonly number[] {
+  const retained = sequences.filter(sequence => sequence > cursor);
+  return retained.length === sequences.length ? sequences : retained;
 }
 
 function applyRunMapProjection(
