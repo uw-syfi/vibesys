@@ -160,6 +160,16 @@ def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> We
     return WebSocketGateway(parts.api, assets_dir=assets, allowed_origins=allowed_origins)
 
 
+_TRAVERSAL_PATHS = (
+    "/assets/index.js",
+    "/assets/../index.html",
+    "/assets/%2e%2e/index.html",
+    "/assets/../operator-notes.txt",
+    "/assets/%2e%2e/operator-notes.txt",
+    "/assets/%2e%2e/%2e%2e/etc/passwd",
+)
+
+
 def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_path: Path) -> None:
     with _asset_gateway(tmp_path) as gateway:
         tokenless = {path: _fetch(gateway.bound_port, path)[0] for path in _TRAVERSAL_PATHS}
@@ -189,15 +199,6 @@ def test_gateway_requires_the_token_for_paths_reachable_only_by_traversal(tmp_pa
         "/assets/%2e%2e/%2e%2e/etc/passwd": 404,
     }
 
-
-_TRAVERSAL_PATHS = (
-    "/assets/index.js",
-    "/assets/../index.html",
-    "/assets/%2e%2e/index.html",
-    "/assets/../operator-notes.txt",
-    "/assets/%2e%2e/operator-notes.txt",
-    "/assets/%2e%2e/%2e%2e/etc/passwd",
-)
 
 _BUNDLE_BODY = b"export {};\n"
 _TRAVERSAL_SEGMENTS = st.sampled_from(["..", "%2e%2e", "%2E%2E", ".", "%2e", "assets", "%61ssets"])
