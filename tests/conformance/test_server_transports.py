@@ -24,6 +24,11 @@ if TYPE_CHECKING:
 
 _SCENARIOS = Path(__file__).parent / "scenarios"
 _HISTORY_EVENTS = 100
+# A burst large enough that one batch per event would be unmistakable, split
+# into chunks so the coalescing bound is a ratio rather than a timing guess.
+_BURST_CHUNKS = 10
+_BURST_CHUNK_EVENTS = 10
+_BURST_EVENTS = _BURST_CHUNKS * _BURST_CHUNK_EVENTS
 
 
 class _Connection(Protocol):
@@ -158,6 +163,59 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
             assert batch["history_after_sequence"] == parts.api.latest_sequence - 50
         else:
             assert batch["history_after_sequence"] == 0
+    finally:
+        parts.close()
+
+
+@pytest.mark.parametrize("transport", ["unix", "websocket"])
+def test_a_burst_behind_a_stalled_consumer_arrives_as_coalesced_batches(
+    tmp_path: Path,
+    socket_dir: Path,
+    transport: str,
+) -> None:
+    """Burst batching is a property of both transports, not a WebSocket accident.
+
+    Both stall the producing stream loop while the consumer is behind: the Unix
+    handler blocks in ``wfile.write``, the gateway suspends in the library's
+    ``drain()`` above its stated send buffer. A stalled loop is not reading the
+    journal, so the next ``subscription_checkpoint`` folds the whole backlog
+    into one batch. That is what keeps a slow consumer cheap instead of
+    repainting once per event.
+
+    Each chunk is published under the shared condition the stream loop waits
+    on, so a chunk can never be observed half-written. The consumer's cursor
+    therefore always sits on a chunk boundary and every batch carries at least
+    one whole chunk, which makes the batch count bounded by construction
+    rather than by how fast the host happens to be.
+
+    What this pins is the coalescing, on both transports. That the WebSocket
+    send path really does stall rather than buffer without bound is a separate
+    claim, asserted in ``tests/server/test_websocket_transport.py`` by the
+    write deadline firing, which can only happen if a write made no progress.
+    """
+    parts = build_server_parts(tmp_path / "logs")
+    try:
+        with _running_connection(transport, parts, socket_dir / "burst.sock") as connection:
+            connection.send({"type": "subscribe", "after_sequence": 0})
+            assert connection.receive()["type"] == "subscribed"
+            assert connection.receive()["type"] == "event_batch"
+
+            for chunk in range(_BURST_CHUNKS):
+                with parts.condition:
+                    for index in range(_BURST_CHUNK_EVENTS):
+                        parts.journal.publish_output("stdout", f"burst-{chunk}-{index}")
+
+            latest = parts.api.latest_sequence
+            batches: list[dict[str, Any]] = []
+            while not batches or batches[-1]["through_sequence"] < latest:
+                batch = connection.receive()
+                assert batch["type"] == "event_batch"
+                batches.append(batch)
+
+            delivered = [event for batch in batches for event in batch["events"]]
+            assert len(delivered) == _BURST_EVENTS
+            assert len(batches) <= _BURST_CHUNKS
+            assert max(len(batch["events"]) for batch in batches) >= _BURST_CHUNK_EVENTS
     finally:
         parts.close()
 

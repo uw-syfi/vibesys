@@ -122,23 +122,70 @@ killed tab) leaves the server with no FIN to read. The disposition:
   whose pong never arrives. Browsers answer a ping automatically below the JavaScript layer, so this
   needs no application protocol.
 - A frozen or throttled tab still answers pings while reading nothing, so ping liveness cannot see
-  it. That case is handled by a send-side write deadline on the gateway, not by this contract, and
-  by the optional client heartbeat below.
+  it. That case is handled by the send-side write deadline below, and by the optional client
+  heartbeat (`WP-HEARTBEAT`).
 
-The exact ping cadence, the write deadline, and the send-buffer overflow policy are connection-health
-mechanics owned by #890. This contract reserves the client-visible surface: an optional application
-heartbeat (`WP-HEARTBEAT`).
+The bounds are stated, not inherited. `WebSocketLimits` in `websocket.py` names every one of them
+and passes them all to `serve()` (`websocket.py:48-93`, `:231-247`), so a `websockets` upgrade
+cannot move a bound a subscriber depends on. Three of them compose into the liveness ceiling:
+
+| Bound | Value | Role |
+| --- | --- | --- |
+| `ping_interval_seconds` | 20s | Idle period before the server probes the peer |
+| `ping_timeout_seconds` | 20s | How long a pong may be outstanding before the peer fails |
+| `close_timeout_seconds` | 10s | How long the server waits for the peer to echo its close frame |
+
+A peer that stops answering is sent a close frame after 40s, and its socket is aborted at 50s when
+that close is never echoed. Only the abort moves the connection to `CLOSED`, which is what the
+stream loop polls for, so the subscription is released about 50.1s after the peer went silent (one
+`_DISCONNECT_POLL_SECONDS`), and a non-detached run may then finish after
+`RECONNECT_SETTLE_SECONDS`. Measured, not inferred: ping at 19.5s, close frame at 39.5s, tracker
+released at 50.1s. A peer that sends a FIN without a close frame needs none of this and is released
+in 0.15s.
+
+Flow control has two separate bounds in opposite directions, and conflating them is the easy
+mistake. `max_queue`, `(32, 8)`, bounds frames arriving *from* the peer. `write_limit`, 32 KiB, is
+the send-side high-water mark, and it is the one that carries the contract below.
+
+**The send-side overflow policy is to stall the producer, not to drop events and not to disconnect
+on the first slow read.** Past the high-water mark the producing coroutine suspends in the library's
+`drain()` until the peer catches up. This is deliberately the same shape as the Unix path, where
+`_write_message` does a blocking `wfile.write` plus `flush` (`unix_jsonl.py:218-221`), and it is
+what preserves burst batching on both transports: a stalled stream loop is not reading the journal,
+so the next `subscription_checkpoint` coalesces the whole backlog into one `event_batch` instead of
+one frame per event. Slow consumers get fewer, larger batches rather than lost events.
+
+The stall is bounded. A single frame may stall for `write_deadline_seconds`, one full keepalive
+reaping window (40s) by default; past that the peer is treated as gone and its socket is aborted.
+That bound is not optional decoration. `websockets` ends *every* write in `drain()`, including its
+own keepalive ping and close frames, so a peer that neither drains its socket nor answers pings
+blocks the very keepalive that was supposed to reap it. Without the deadline such a peer was never
+reaped at all, its subscription was never released, and a non-detached run never exited: measured,
+still counted as active after 90s. The socket is aborted rather than closed because a close frame is
+itself a write and would re-enter the same stalled `drain()`.
+
+The Unix path has no equivalent deadline: its blocking write stalls the handler thread
+indefinitely, which is pre-existing behavior this contract records rather than changes. Its
+gone-client probe fires only while the stream is idle. So the two transports agree on the stall and
+differ on the ceiling.
 
 ### WP-HEARTBEAT: the application heartbeat is optional and probe advertised
 
 Because browsers do not expose WebSocket ping and pong to JavaScript, a client that wants to detect a
 dead server (as opposed to the server detecting a dead client) needs an application-level signal. The
-frame shape is reserved here so both ends agree before either implements it (#890): an optional
+frame shape is reserved here so both ends agree before either implements it: an optional
 `heartbeat_ms` field on `SubscribeRequest`, capability probed like `tail` and `store_id`
 (`WP-CAPABILITY-PROBE`). A server that has the field emits a periodic keepalive frame the client can
 time out against; a server that predates it rejects the field, and the client falls back to no
-application heartbeat. No heartbeat frame is defined until #890 lands; this reservation only fixes
-where it rides so it is additive.
+application heartbeat. This reservation only fixes where the frame rides so it is additive.
+
+No server-side heartbeat frame exists, and the server does not need one. The direction this contract
+governs, the server detecting a dead client, is served entirely by protocol-level pings, because a
+browser's own WebSocket implementation answers them below the JavaScript API (`WP-DISCONNECT`). Only
+the opposite direction, a client detecting a dead server, would use the reserved field, so it stays
+reserved and unimplemented on both transports. The reservation is what
+`tests/conformance/scenarios/heartbeat-probe.json` pins: the field is rejected today, and that
+rejection is the capability probe working, not a gap.
 
 ### WP-CAPABILITY-PROBE: capabilities are probed by rejection, not advertised
 

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import secrets
 import socket
+import struct
+import threading
 from http.client import HTTPConnection, HTTPMessage, HTTPResponse
 from pathlib import Path
 from string import ascii_lowercase, digits
@@ -22,19 +26,36 @@ from websockets.protocol import State
 
 from server.api.protocol import SnapshotQuery, SubscribeRequest
 from server.transport.discovery import WebInstanceRecord
+from server.transport.subscriptions import SubscriptionTracker
+from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WebSocketGateway,
+    WebSocketLimits,
     _connection_closed,
     _content_type,
     _request_id,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
     from websockets.typing import Origin
+
+# A burst has to outrun everything that could absorb it before the producing
+# coroutine stalls: the peer's kernel receive buffer, which is capped here, and
+# the server's send buffer, which is not settable from this side and which
+# Linux autotunes up to ``net.ipv4.tcp_wmem``'s ceiling (4 MiB stock). 8 MiB
+# leaves a factor of two over that ceiling. Absorbing the whole burst would
+# fail this test rather than pass it vacuously, so the margin is not load
+# bearing for correctness, only for not reporting a false regression.
+_PEER_RECEIVE_BUFFER_BYTES = 2048
+_STALL_EVENT_BYTES = 64 * 1024
+_STALL_EVENTS = 128
+# RFC 6455's two payload-length escape values.
+_EXTENDED_LENGTH = 126
+_EXTENDED_LENGTH_64 = 127
 
 
 def _http_request(path: str) -> Request:
@@ -769,6 +790,250 @@ def test_gateway_reports_subscription_bootstrap_failure(
     assert response["type"] == "protocol_error"
     assert response["client_id"] == "failing-browser-client"
     assert response["code"] == "stream_failed"
+
+
+class _HalfOpenPeer:
+    """A subscriber that completes the handshake and then never answers.
+
+    Hand-framed on a raw socket on purpose. Every WebSocket client library,
+    including ``websockets``' own, answers a protocol ping automatically below
+    its public API, so no library client can produce the peer this contract is
+    about: one that is still connected at the TCP level but will never pong
+    and, in ``stop_reading`` mode, never drain its socket either.
+    """
+
+    def __init__(self, gateway: WebSocketGateway, *, receive_buffer: int | None = None) -> None:
+        """Handshake against *gateway*, optionally capping the receive window."""
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if receive_buffer is not None:
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer)
+        self._socket.settimeout(10)
+        self._socket.connect(("127.0.0.1", gateway.bound_port))
+        key = base64.b64encode(secrets.token_bytes(16)).decode()
+        self._socket.sendall(
+            (
+                f"GET /ws?token={gateway.token} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{gateway.bound_port}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                f"Origin: http://127.0.0.1:{gateway.bound_port}\r\n"
+                "\r\n"
+            ).encode()
+        )
+        self._buffer = b""
+        while b"\r\n\r\n" not in self._buffer:
+            self._buffer += self._recv()
+        head, self._buffer = self._buffer.split(b"\r\n\r\n", 1)
+        status = head.split(b"\r\n", 1)[0]
+        assert status == b"HTTP/1.1 101 Switching Protocols", status
+
+    def subscribe(self) -> None:
+        """Send one masked subscribe frame."""
+        payload = SubscribeRequest(client_id="half-open-peer").model_dump_json().encode()
+        mask = secrets.token_bytes(4)
+        masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        length = (
+            bytes([0x80 | len(payload)])
+            if len(payload) < _EXTENDED_LENGTH
+            else bytes([0x80 | _EXTENDED_LENGTH]) + struct.pack("!H", len(payload))
+        )
+        self._socket.sendall(bytes([0x81]) + length + mask + masked)
+
+    def receive_text(self) -> dict[str, Any]:
+        """Read the next server text frame, ignoring control frames."""
+        while True:
+            opcode, payload = self._read_frame()
+            if opcode == 0x1:
+                return cast("dict[str, Any]", json.loads(payload))
+
+    def close(self) -> None:
+        """Drop the socket."""
+        self._socket.close()
+
+    def _recv(self) -> bytes:
+        chunk = self._socket.recv(65536)
+        assert chunk, "gateway closed the connection before the expected frame"
+        return chunk
+
+    def _take(self, count: int) -> bytes:
+        while len(self._buffer) < count:
+            self._buffer += self._recv()
+        taken, self._buffer = self._buffer[:count], self._buffer[count:]
+        return taken
+
+    def _read_frame(self) -> tuple[int, bytes]:
+        header = self._take(2)
+        opcode = header[0] & 0x0F
+        length = header[1] & 0x7F
+        if length == _EXTENDED_LENGTH:
+            length = struct.unpack("!H", self._take(2))[0]
+        elif length == _EXTENDED_LENGTH_64:
+            length = struct.unpack("!Q", self._take(8))[0]
+        return opcode, self._take(length)
+
+
+def _reaped(wait: Callable[[], None], *, ceiling: float = 10.0) -> bool:
+    """Whether *wait* observes the last subscription ending.
+
+    The ceiling only keeps a regression from hanging the suite: the assertion
+    is on the boolean, never on how long it took. Nothing competes with the
+    waiter, so the outcome does not depend on how fast the host is.
+    """
+    observed = threading.Event()
+
+    def run() -> None:
+        wait()
+        observed.set()
+
+    threading.Thread(target=run, name="reap-waiter", daemon=True).start()
+    return observed.wait(timeout=ceiling)
+
+
+def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_finish(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    """The keepalive alone must carry an idle half-open peer through to run exit.
+
+    The write deadline is left far above the ceiling so it cannot be what ends
+    this connection: the only mechanism under test is ping, ping timeout, and
+    the closing handshake giving up on a peer that never echoes the close.
+    """
+    limits = WebSocketLimits(
+        ping_interval_seconds=0.1,
+        ping_timeout_seconds=0.1,
+        close_timeout_seconds=0.1,
+        write_deadline_seconds=300.0,
+    )
+    parts = build_server_parts(tmp_path / "logs")
+    tracker = SubscriptionTracker()
+    try:
+        with (
+            UnixJsonlServer(socket_dir / "half-open.sock", parts.api, tracker) as unix,
+            WebSocketGateway(parts.api, subscriptions=tracker, limits=limits) as gateway,
+        ):
+            peer = _HalfOpenPeer(gateway)
+            try:
+                peer.subscribe()
+                assert peer.receive_text()["type"] == "subscribed"
+                # ``wait_for_subscriber_disconnect`` is the exact call
+                # ``ServerRuntime`` makes to decide a non-detached run may
+                # finish, over the tracker both transports share.
+                assert _reaped(unix.wait_for_subscriber_disconnect)
+            finally:
+                peer.close()
+    finally:
+        parts.close()
+
+
+def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    """Regression: a stalled send must not also block the reaping keepalive.
+
+    ``websockets`` ends every write in ``drain()``, which suspends while the
+    transport is over its high-water mark. A peer that neither drains its
+    socket nor answers pings therefore stalled the gateway's stream loop *and*
+    the library's own keepalive ping and close frames, so before the write
+    deadline this subscription was never released and a non-detached run never
+    exited. Measured against the unfixed gateway the tracker still reported
+    the peer as active after 90 seconds.
+
+    The keepalive is pushed out past the ceiling here, so the write deadline is
+    the only thing that can end the connection. That also makes the pass an
+    assertion about the producer stall itself: had the burst been buffered
+    instead of stalling, the send would have completed and no deadline could
+    have fired.
+    """
+    limits = WebSocketLimits(
+        ping_interval_seconds=600.0,
+        ping_timeout_seconds=600.0,
+        close_timeout_seconds=600.0,
+        write_deadline_seconds=0.3,
+        send_buffer_bytes=1024,
+    )
+    parts = build_server_parts(tmp_path / "logs")
+    tracker = SubscriptionTracker()
+    try:
+        with (
+            UnixJsonlServer(socket_dir / "stalled.sock", parts.api, tracker) as unix,
+            WebSocketGateway(parts.api, subscriptions=tracker, limits=limits) as gateway,
+        ):
+            peer = _HalfOpenPeer(gateway, receive_buffer=_PEER_RECEIVE_BUFFER_BYTES)
+            try:
+                for index in range(_STALL_EVENTS):
+                    parts.journal.publish_output(
+                        "stdout", f"{index:04d}" + "x" * _STALL_EVENT_BYTES
+                    )
+                peer.subscribe()
+                # The acknowledgement precedes the replay, so it arrives before
+                # the buffers fill; the replay behind it is what stalls.
+                assert peer.receive_text()["type"] == "subscribed"
+                assert _reaped(unix.wait_for_subscriber_disconnect)
+            finally:
+                peer.close()
+    finally:
+        parts.close()
+
+
+def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
+    tmp_path: Path,
+) -> None:
+    """The send-side overflow policy, without depending on any socket's buffers."""
+    limits = WebSocketLimits(write_deadline_seconds=0.05)
+    parts = build_server_parts(tmp_path / "logs")
+    tracker = SubscriptionTracker()
+    gateway = WebSocketGateway(parts.api, subscriptions=tracker, limits=limits)
+
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.aborts = 0
+
+        def abort(self) -> None:
+            self.aborts += 1
+
+    class StalledConnection:
+        """A connection whose writes never complete, as a paused transport's do."""
+
+        def __init__(self, frames: list[str]) -> None:
+            self.frames = iter(frames)
+            self.transport = FakeTransport()
+            self.state = "OPEN"
+
+        def __aiter__(self) -> StalledConnection:
+            return self
+
+        async def __anext__(self) -> str:
+            try:
+                return next(self.frames)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+        async def send(self, message: str) -> None:
+            del message
+            await asyncio.Event().wait()
+
+        async def close(self) -> None:
+            self.state = "CLOSED"
+
+    connection = StalledConnection([SubscribeRequest(client_id="stalled").model_dump_json()])
+
+    async def drive() -> None:
+        # The ceiling turns a missing deadline into a failure instead of a
+        # hung suite. It cannot mask one: the deadline under test is 0.05s.
+        await asyncio.wait_for(
+            gateway._handle_connection(  # noqa: SLF001  # lint-waiver: LW-101109 [SLF001]; drive the write deadline without a socket whose buffers the test cannot bound
+                cast("ServerConnection", connection)
+            ),
+            timeout=10.0,
+        )
+
+    asyncio.run(drive())
+
+    assert connection.transport.aborts >= 1
+    assert _reaped(lambda: tracker.wait_for_none_active(settle_seconds=0.0))
+    parts.close()
 
 
 def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) -> None:

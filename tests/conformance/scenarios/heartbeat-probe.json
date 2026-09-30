@@ -1,7 +1,7 @@
 {
   "id": "heartbeat-probe",
   "title": "The reserved application heartbeat is probed like any optional field",
-  "description": "A browser subscribe carrying the reserved heartbeat_ms field is rejected today because the field does not exist yet (#890). The scenario reserves the probe shape so the client heartbeat is additive; it is updated to assert a keepalive frame when #890 lands.",
+  "description": "A browser subscribe carrying the reserved heartbeat_ms field is rejected, because no server implements it and none needs to: the server-detects-dead-client direction is carried by protocol-level pings alone (WP-DISCONNECT), which a browser answers below the JavaScript API. The field stays reserved for the opposite direction, a client detecting a dead server, so this rejection is the capability probe working rather than a gap. Still unexecuted: the expected frame is a Response, which is deliberately outside the type-discriminated server_message union and so carries no type, while the corpus gate requires a string type on every s2c message. The same mismatch blocks the four other response-shaped scenarios.",
   "role": "subscribe",
   "transports": [
     "websocket"
