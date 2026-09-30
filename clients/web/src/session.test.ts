@@ -127,6 +127,50 @@ describe('WebSession', () => {
     ).toBe('ws://127.0.0.1:8765/ws?token=secret');
   });
 
+  test('never forwards the page capability token to a foreign gateway authority', () => {
+    expect(
+      webSocketUrlFromLocation({
+        href: 'http://127.0.0.1:8765/?token=secret&gateway=http%3A%2F%2F127.0.0.1%3A5173%2F',
+      } as Location),
+    ).toBe('ws://127.0.0.1:5173/ws?token=');
+  });
+
+  test('sends a capability token only to the authority whose own URL carried it', () => {
+    const pageOrigins = ['http://127.0.0.1:8765', 'https://gateway.test'];
+    const gatewayValues = [
+      null,
+      '/',
+      'http://127.0.0.1:5173/',
+      'http://127.0.0.1:5173/?token=gateway-token',
+      'https://elsewhere.test/',
+      '//elsewhere.test/',
+      'http://127.0.0.1:8765@elsewhere.test/',
+    ];
+    const cases = pageOrigins.flatMap(origin =>
+      gatewayValues.flatMap(gateway =>
+        [null, 'page-token'].map(pageToken => ({origin, gateway, pageToken})),
+      ),
+    );
+
+    const results = cases.map(({origin, gateway, pageToken}) => {
+      const page = new URL(origin);
+      if (pageToken !== null) page.searchParams.set('token', pageToken);
+      if (gateway !== null) page.searchParams.set('gateway', gateway);
+      const socket = new URL(webSocketUrlFromLocation({href: page.href} as Location));
+      return {
+        page: page.href,
+        socket: socket.href,
+        sent: socket.searchParams.get('token'),
+        pageAuthority: socket.origin === origin.replace(/^http/, 'ws'),
+      };
+    });
+
+    expect(results.filter(result => result.sent === 'page-token' && !result.pageAuthority)).toEqual(
+      [],
+    );
+    expect(results.filter(result => result.sent !== '').length).toBeGreaterThan(0);
+  });
+
   test('maps a direct gateway capability URL to a secure WebSocket endpoint', () => {
     expect(
       webSocketUrlFromLocation({

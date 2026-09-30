@@ -177,7 +177,11 @@ export function webSocketUrlFromLocation(location: Location): string {
   const url = gateway === null ? page : new URL(gateway, page.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/ws';
-  const token = url.searchParams.get('token') ?? page.searchParams.get('token') ?? '';
+  // A capability token is a bearer credential for one authority, so it is read
+  // only from the query of the URL that names the socket's own authority: the
+  // page when there is no `?gateway=`, and otherwise the `?gateway=` value,
+  // which must carry its own token just as the in-app gateway form requires.
+  const token = url.searchParams.get('token') ?? '';
   url.search = new URLSearchParams({token}).toString();
   return url.toString();
 }
