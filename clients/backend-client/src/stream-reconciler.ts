@@ -1,3 +1,4 @@
+import {BackendClientError} from './errors.js';
 import type {EventBatchMessage, RunEvent} from './protocol.js';
 
 /**
@@ -87,6 +88,40 @@ function positiveInteger(name: string, value: number): number {
     throw new RangeError(`${name} must be a positive integer, received ${value}`);
   }
   return value;
+}
+
+/**
+ * The floor the batch declares, refused when the wire carries something that
+ * cannot be a sequence.
+ *
+ * `history_after_sequence` is `int = Field(default=0, ge=0)` in the protocol
+ * model (`src/server/api/protocol.py:569`), so a conforming server never trips
+ * this, but the wire carries JSON, where a negative or fractional number is
+ * representable and `parseServerMessage` checks only that `events` is an array.
+ * Checking here keeps `historyFloor >= 0` an invariant of this module rather
+ * than a precondition every caller restates, and stops a floor no
+ * `query.events` range can express from reaching `backfill`.
+ *
+ * Deliberately here and not at the parse boundary, which is where a wire
+ * contract otherwise belongs. Validating in `parseServerMessage` would apply to
+ * every consumer of that boundary immediately, and the web client reads
+ * `history_after_sequence` (`clients/web/src/store.ts:46,53`) while folding it
+ * through `?? 0` and never reading the stored value back, so a rejection there
+ * turns a value it currently ignores into a torn-down subscription. Keeping the
+ * check in the reconciler leaves this phase inert for every current consumer
+ * and puts the change where the consumer changes: the TUI at phase (b), the web
+ * client at phase (c). Moving it to the boundary is a follow-up, and it needs
+ * the disconnect-suppression defect fixed first.
+ */
+function declaredFloorOf(message: EventBatchMessage): number {
+  const declared = message.history_after_sequence ?? 0;
+  if (!Number.isSafeInteger(declared) || declared < 0) {
+    throw new BackendClientError(
+      'parse',
+      `event_batch.history_after_sequence must be a non-negative integer, received ${declared}`,
+    );
+  }
+  return declared;
 }
 
 /**
@@ -208,14 +243,12 @@ export class StreamReconciler {
    * that floor is taken as a lower bound rather than literally. Either kind
    * re-bootstraps when the store it names is not the one the fold belongs to.
    *
-   * Takes a message that came through `parseServerMessage`, which refuses a
-   * `history_after_sequence` that cannot be a sequence. That is what makes
-   * `historyFloor >= 0` an invariant here instead of a precondition every
-   * caller restates, and it is checked once for both clients rather than split
-   * across them.
+   * Refuses a `history_after_sequence` that cannot be a sequence, through
+   * `declaredFloorOf`, which is what makes `historyFloor >= 0` an invariant
+   * here instead of a precondition every caller restates.
    */
   reconcileBatch(message: EventBatchMessage, context: BatchContext): BatchReconciliation {
-    const declared = message.history_after_sequence ?? 0;
+    const declared = declaredFloorOf(message);
     const store = message.store_id ?? '';
     if (context.resumed) {
       // A changed store invalidates the cursor and its folded state. The
@@ -268,9 +301,9 @@ export class StreamReconciler {
     const floor = this.#historyFloor ?? 0;
     // Complete before outstanding, the order `loadOlderHistory` checks them: a
     // log with no older history has nothing to wait for either. Equality is the
-    // whole test because the floor is non-negative: `parseServerMessage`
-    // refuses any other declared floor, and the only other source is the
-    // clamped `afterSequence` below.
+    // whole test because the floor is non-negative: `declaredFloorOf` refuses
+    // any other declared floor, and the only other source is the clamped
+    // `afterSequence` below.
     if (floor === 0) return Promise.resolve(COMPLETE);
     const outstanding = this.#outstanding;
     if (outstanding !== null) return outstanding;

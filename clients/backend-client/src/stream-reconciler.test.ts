@@ -1,4 +1,5 @@
 import {describe, expect, it} from 'bun:test';
+import {BackendClientError} from './errors.js';
 import type {EventBatchMessage, RunEvent} from './protocol.js';
 import {
   type BackfillFetch,
@@ -48,6 +49,17 @@ function prepended(outcome: BackfillOutcome): {
 } {
   if (outcome.kind !== 'prepend') throw new Error(`expected a prepend, got ${outcome.kind}`);
   return outcome;
+}
+
+/** The rejection `action` threw, so a test can assert on its kind and message. */
+function rejection(action: () => unknown): BackendClientError {
+  try {
+    action();
+  } catch (error) {
+    if (error instanceof BackendClientError) return error;
+    throw error;
+  }
+  throw new Error('expected a rejection');
 }
 
 /** The error `promise` rejected with, so a test can assert on it. */
@@ -340,6 +352,40 @@ describe('StreamReconciler batch dispositions', () => {
 });
 
 describe('StreamReconciler validation', () => {
+  /**
+   * The cases are the ones a JSON line can carry. `NaN` and `Infinity` are not
+   * among them: neither is representable in JSON, so no wire frame can produce
+   * either, and asserting on them would claim coverage of an unreachable input.
+   * `Number.isSafeInteger` refuses them anyway.
+   */
+  it('rejects a declared floor that cannot be a sequence, naming the key', () => {
+    for (const declaredFloor of [-1, -4_096, 12.5]) {
+      const reconciler = new StreamReconciler({backfillChunk: 100});
+      const error = rejection(() => reconciler.reconcileBatch(batch({declaredFloor}), FRESH));
+      expect(error.kind).toBe('parse');
+      expect(error.message).toContain('event_batch.history_after_sequence');
+      expect(error.message).toContain(String(declaredFloor));
+    }
+  });
+
+  it('rejects a declared floor on the resumed path too, which ignores its value', () => {
+    const reconciler = new StreamReconciler({backfillChunk: 100});
+    reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 10}), FRESH);
+    expect(
+      rejection(() => reconciler.reconcileBatch(batch({declaredFloor: -1}), RESUMED)).kind,
+    ).toBe('parse');
+  });
+
+  it('leaves the folded state untouched when it refuses a floor', () => {
+    const reconciler = new StreamReconciler({backfillChunk: 100});
+    reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 400}), FRESH);
+    rejection(() => reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: -1}), FRESH));
+    expect(reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 400}), FRESH)).toEqual({
+      kind: 'extend',
+      historyFloor: 400,
+    });
+  });
+
   it('accepts an omitted declared floor as zero', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     expect(reconciler.reconcileBatch(batch({storeId: 'log'}), FRESH)).toEqual({
@@ -1322,10 +1368,10 @@ describe('StreamReconciler properties', () => {
  * Two things are deliberately not transcribed, because they are where this
  * phase differs from the controller rather than drift:
  *
- * - the declared-floor validation, which is new and lives in
- *   `parseServerMessage` rather than in either of these. The generator only
- *   produces floors a conforming server can send, so it would never fire in a
- *   differential run anyway.
+ * - the declared-floor validation, which is new: the controller has no such
+ *   check, so transcribing one would be inventing a behavior to compare
+ *   against. The generator only produces floors a conforming server can send,
+ *   so it would never fire in a differential run anyway.
  * - the `catch` at 459-464, which turns a failed request into a state report
  *   and a `false`. Whether a failure is worth showing is the caller's decision,
  *   so the reconciler lets the rejection through and the oracle does the same.
