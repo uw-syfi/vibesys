@@ -6,7 +6,7 @@ test('picking the live round follows it again; another round pins and clears row
   const busy = {...INITIAL_UI, expanded: '26', agent: 'x1', agentRound: 6};
   const pinned = uiReducer(busy, {type: 'round', round: 3, live: 6});
   assert.deepEqual([pinned.round, pinned.expanded, pinned.agent], [3, null, null]);
-  assert.equal(uiReducer(pinned, {type: 'round', round: 6, live: 6}).round, null);
+  assert.equal(uiReducer(pinned, {type: 'round', round: 6, live: 6}).round, 'live');
 });
 
 test('toggles: tool rows, disclosures (or set open), the agent filter, evidence', () => {
@@ -81,7 +81,7 @@ test('selection belongs to one run: a replaced run starts clean and keeps the la
       next.evidence,
       next.palette,
     ],
-    ['run-2', null, null, {}, null, null, false],
+    ['run-2', 'live', null, {}, null, null, false],
   );
   assert.deepEqual([next.pane, next.sideWidth], ['agents', 300]);
   assert.deepEqual(uiReducer(busy, {type: 'run', runId: 'run-2'}), next);

@@ -5,13 +5,8 @@ import type {
   PerformanceContext,
   RunEvent,
 } from '@vibesys/backend-client';
-import {
-  type CoreState,
-  hasRunEnded,
-  phasesForRound,
-  roundNumberFromLabel,
-} from '@vibesys/core-state';
-import {formatValue, latestRound, objectiveText, titleCase} from './derive.js';
+import {type CoreState, hasRunEnded, roundNumberFromLabel} from '@vibesys/core-state';
+import {formatValue, latestRound, latestStartedPhase, objectiveText, titleCase} from './derive.js';
 import type {CommandAction} from './session.js';
 
 type RoundState = 'running' | 'kept' | 'reverted' | 'failed';
@@ -298,7 +293,13 @@ const ENDED: Partial<Record<CoreState['status'], string>> = {
   interrupted: 'Interrupted',
 };
 
-function activity(kind: string, label: string | null, round: number): string {
+function activity(
+  kind: string,
+  label: string | null,
+  round: number | null,
+  summary?: string,
+): string {
+  if (round === null) return `${titleCase(kind)}: ${summary || 'Working'}`;
   if (label?.endsWith('-pre')) return `Reviewing before round ${round}`;
   if (label?.endsWith('-plan')) return `Planning round ${round}`;
   if (kind === 'implementer') return `Implementing round ${round}`;
@@ -317,12 +318,7 @@ function pendingText(core: CoreState, sending: CommandAction | null): string | n
 /** What the run is doing now: the title row's only run-level live signal. */
 export function statusLine(core: CoreState, sending: CommandAction | null): StatusLine {
   const round = latestRound(core);
-  const acting =
-    round === null
-      ? undefined
-      : phasesForRound(core.phases, round)
-          .filter(phase => phase.status === 'active')
-          .at(-1);
+  const acting = latestStartedPhase(core.phases.filter(phase => phase.status === 'active'));
   const line = (text: string, busy = false, paused = false): StatusLine => ({
     text,
     busy,
@@ -341,9 +337,9 @@ export function statusLine(core: CoreState, sending: CommandAction | null): Stat
   }
   if (core.status === 'connecting') return line('Connecting', true);
   if (core.status !== 'running') return line('Starting', true);
-  if (round === null) return line('Running');
-  if (acting === undefined) return line(`Round ${round}`);
-  return line(activity(acting.kind, acting.roundLabel, round));
+  if (acting === undefined) return line(round === null ? 'Running' : `Round ${round}`);
+  const summary = core.activeExecutions[acting.executionId ?? '']?.activity.summary;
+  return line(activity(acting.kind, acting.roundLabel, acting.roundNumber, summary));
 }
 
 export interface RetainedText {

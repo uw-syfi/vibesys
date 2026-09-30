@@ -1,6 +1,7 @@
 /** Pure helpers shared by the view modules: formatting, prose, steers, backfill, run control. */
 import type {ProtocolResponse, RunEvent} from '@vibesys/backend-client';
 import {
+  type AgentPhase,
   type CoreState,
   hasRunEnded,
   roundNumberFromLabel,
@@ -27,6 +28,23 @@ export function formatValue(value: number): string {
 /** The latest round the run has started, or null before round 1. */
 export function latestRound(core: CoreState): number | null {
   return core.rounds.filter(round => round.status !== 'planned').at(-1)?.number ?? null;
+}
+
+/** The newest started agent's scope, including run-scoped calls between recorded rounds. */
+export function activityRound(core: CoreState): number | null {
+  const phase = latestStartedPhase(core.phases.filter(candidate => candidate.status !== 'pending'));
+  return phase === undefined ? latestRound(core) : phase.roundNumber;
+}
+
+/** Selects by observed start, since pending role slots are replaced in place. */
+export function latestStartedPhase(phases: readonly AgentPhase[]): AgentPhase | undefined {
+  return [...phases].sort((left, right) => phaseStart(left) - phaseStart(right)).at(-1);
+}
+
+/** Missing starts precede observed starts; stable sorting preserves ties. */
+function phaseStart(phase: AgentPhase): number {
+  const time = Date.parse(phase.startedAt ?? '');
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
 }
 
 /** `perf_eval` as `Perf eval`: how a role or a harness is written as a word. */
@@ -114,10 +132,11 @@ export function toolDuration(entry: TranscriptEntry): string | null {
  * an earlier round's entries above the floor show where this round starts. Spine entries at or
  * below the floor (a replayed `round_finished`) say nothing about what was skipped.
  */
-export function needsOlder(core: CoreState, round: number): boolean {
+export function needsOlder(core: CoreState, round: number | null): boolean {
   const floor = core.historyAfterSequence;
   // R0 is the objective's baseline, not a round: it has no events.
   if (floor === 0 || round === 0) return false;
+  if (round === null) return true;
   const earliest = core.transcript.find(
     entry => entry.roundNumber !== undefined && Number(entry.id) > floor,
   )?.roundNumber;
@@ -135,7 +154,7 @@ export function needsOlder(core: CoreState, round: number): boolean {
 export function steersNeedOlder(
   core: CoreState,
   captured: readonly RunEvent[],
-  round: number,
+  round: number | null,
 ): boolean {
   const floor = core.historyAfterSequence;
   if (floor === 0) return false;

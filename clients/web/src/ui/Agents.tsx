@@ -57,7 +57,7 @@ function AgentCard({data}: NodeProps<CardNode>) {
 const NODE_TYPES = {agent: AgentCard};
 
 export interface AgentsProps {
-  round: number;
+  round: number | null;
   graph: AgentGraph;
   selected: string | null;
   /** The pane's width, to centre the graph at zoom 1. */
@@ -92,18 +92,23 @@ export function Agents({round, graph, selected, width, onSelect, detail}: Agents
     [graph],
   );
   const count = `${graph.nodes.length} invocation${graph.nodes.length === 1 ? '' : 's'}`;
+  const scope = round === null ? 'Run activity' : `Round ${round}`;
   return (
     <>
-      <PaneHead scope={`Round ${round}`}>
+      <PaneHead scope={scope}>
         <span title="Events carry no dependency graph: arrows follow start times">
           {count}, order inferred
         </span>
       </PaneHead>
       {graph.nodes.length === 0 ? (
-        <p className="empty1">No agent has started in round {round} yet.</p>
+        <p className="empty1">
+          {round === null
+            ? 'No agent activity yet.'
+            : `No agent has started in round ${round} yet.`}
+        </p>
       ) : (
         // Zoom and pan are off, so a graph wider than the pane (a wide fan-out) scrolls instead.
-        <figure className="graphwrap" aria-label={`Round ${round} agent invocations`}>
+        <figure className="graphwrap" aria-label={`${scope} agent invocations`}>
           <div
             className="graphcanvas"
             style={{width: Math.max(width, graph.width), height: graph.height}}
@@ -192,7 +197,7 @@ export function AgentDetail({node, turn, filtered, controls, onFilter}: AgentDet
 
 export interface AgentsTabProps {
   core: CoreState;
-  round: number;
+  round: number | null;
   turns: Turn[];
   selected: string | null;
   width: number;

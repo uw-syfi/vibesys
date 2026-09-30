@@ -129,7 +129,7 @@ export function Changes({
       return (
         <>
           <PaneHead scope="Run" />
-          <p className="empty1">No round has started yet.</p>
+          <p className="empty1">No round results yet.</p>
         </>
       );
     case 'running':

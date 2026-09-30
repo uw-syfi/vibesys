@@ -8,8 +8,8 @@ export type Menu = 'more' | 'stop' | 'thread' | 'model' | null;
 export interface UiState {
   /** The run the selection below belongs to; a different run starts from a clean selection. */
   runId: string | null;
-  /** The picked round; null follows the live round. */
-  round: number | null;
+  /** A picked round, explicit run activity (null), or automatic latest activity. */
+  round: number | null | 'live';
   pane: PaneTab | null;
   sidebar: boolean;
   sideWidth: number;
@@ -37,7 +37,7 @@ export interface UiState {
 
 export type UiAction =
   | {type: 'run'; runId: string | null}
-  | {type: 'round'; round: number; live: number | null}
+  | {type: 'round'; round: number | null; live: number | null}
   | {type: 'pane'; pane: PaneTab | null}
   | {type: 'togglePane'}
   | {type: 'sidebar'; open: boolean}
@@ -57,7 +57,7 @@ export const PANE = {min: 340, max: 640, initial: 400} as const;
 
 export const INITIAL_UI: UiState = {
   runId: null,
-  round: null,
+  round: 'live',
   pane: null,
   sidebar: true,
   sideWidth: SIDE.initial,
@@ -96,7 +96,7 @@ export function forRun(state: UiState, runId: string | null): UiState {
   return {
     ...state,
     runId,
-    round: null,
+    round: 'live',
     expanded: null,
     disclosed: {},
     agent: null,
@@ -123,7 +123,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
     case 'round':
       return {
         ...state,
-        round: action.round === action.live ? null : action.round,
+        round: action.round === action.live ? 'live' : action.round,
         expanded: null,
         agent: null,
         agentRound: null,

@@ -70,7 +70,7 @@ function useFollow(round: number | null, model: RoundTranscript | null, follow: 
 export function Transcript(props: TranscriptProps) {
   const {round, row, result, model, history, empty, endline, controls, only, onShowAll} = props;
   const follow = useFollow(round, model, props.follow);
-  if (round === null || model === null) {
+  if (model === null) {
     return (
       <div className="scroll">
         <p className="empty1">{empty}</p>
@@ -83,18 +83,20 @@ export function Transcript(props: TranscriptProps) {
     <div className="scroll" ref={follow.ref} onScroll={follow.onScroll}>
       <div className="sticky">
         <div className="in">
-          <span className="rn">Round {round}</span>
+          <span className="rn">{round === null ? 'Run activity' : `Round ${round}`}</span>
           <span className="ttl" title={row?.title ?? undefined}>
-            {row?.title ?? 'No hypothesis yet'}
+            {transcriptTitle(round, row)}
           </span>
           <Result parts={result} />
         </div>
       </div>
       <div className="col">
         <History history={history} />
-        <p className="claim">
-          {row?.hypothesis ?? 'The hypothesis appears once the orchestrator forms one.'}
-        </p>
+        {round === null ? null : (
+          <p className="claim">
+            {row?.hypothesis ?? 'The hypothesis appears once the orchestrator forms one.'}
+          </p>
+        )}
         {only !== null && shown !== undefined ? (
           <div className="filterbar">
             Showing only {shown.role}
@@ -108,7 +110,9 @@ export function Transcript(props: TranscriptProps) {
           <TurnView key={turn.id} turn={turn} controls={controls} />
         ))}
         {model.turns.length === 0 ? (
-          <p className="endline">No agent calls in this round yet.</p>
+          <p className="endline">
+            {round === null ? 'No agent activity yet.' : 'No agent calls in this round yet.'}
+          </p>
         ) : null}
         {model.queued.map(steer => (
           <Steer key={steer.id} text={steer.text} applied={false} />
@@ -117,6 +121,10 @@ export function Transcript(props: TranscriptProps) {
       </div>
     </div>
   );
+}
+
+function transcriptTitle(round: number | null, row: RoundRow | null): string {
+  return round === null ? '' : (row?.title ?? 'No hypothesis yet');
 }
 
 function Result({parts}: {parts: ResultPart[]}) {
@@ -163,6 +171,11 @@ function TurnView({turn, controls}: {turn: Turn; controls: TranscriptControls}) 
       <div className="who" title={turn.hint}>
         <span className={turn.active ? 'r act' : 'r'}>{turn.role}</span>
         <span className="ph">{turn.phase}</span>
+        {turn.status === null || turn.status === 'active' ? null : (
+          <span className={turn.status === 'failed' ? 'bad' : 'ph'}>
+            {turn.status.charAt(0).toUpperCase() + turn.status.slice(1)}
+          </span>
+        )}
         <Disclosures turn={turn} controls={controls} />
       </div>
       <DisclosureBodies turn={turn} controls={controls} />
@@ -170,6 +183,11 @@ function TurnView({turn, controls}: {turn: Turn; controls: TranscriptControls}) 
         <Item key={item.id} item={item} controls={controls} />
       ))}
       {turn.verdict === null ? null : <Verdict verdict={turn.verdict} />}
+      {turn.error === null ? null : (
+        <p className="bad" role="alert">
+          {turn.error}
+        </p>
+      )}
       {turn.working === null ? null : (
         <div className="working">
           <span className="spin" />

@@ -2,6 +2,7 @@
 import type {RunEvent} from '@vibesys/backend-client';
 import {
   type AgentPhase,
+  type AgentPhaseStatus,
   type CoreState,
   hasRunEnded,
   phasesForRound,
@@ -10,8 +11,8 @@ import {
   type TranscriptEntry,
 } from '@vibesys/core-state';
 import {
+  activityRound,
   formatValue,
-  latestRound,
   pathShortener,
   prose,
   steers,
@@ -54,6 +55,8 @@ export interface Turn {
   phase: string;
   hint: string;
   active: boolean;
+  status: AgentPhaseStatus | null;
+  error: string | null;
   prompt: string | null;
   todos: TodoItem[];
   items: TurnItem[];
@@ -77,7 +80,7 @@ export interface TranscriptInput {
   core: CoreState;
   captured: readonly RunEvent[];
   sent: readonly SentSteer[];
-  round: number;
+  round: number | null;
   runId: string | null;
 }
 
@@ -132,7 +135,7 @@ export function phaseKeys(phases: readonly AgentPhase[]): Map<AgentPhase, string
   return result;
 }
 
-export function phaseName(label: string | null, round: number): string {
+export function phaseName(label: string | null, round: number | null): string {
   if (label?.endsWith('-pre')) {
     return round === 1 ? 'Reviewing the starting point' : 'Reviewing the previous round';
   }
@@ -153,15 +156,15 @@ function byStart(phases: readonly AgentPhase[]): AgentPhase[] {
     .map(({phase}) => phase);
 }
 
-function isLive(core: CoreState, round: number): boolean {
-  return !hasRunEnded(core) && latestRound(core) === round;
+function isLive(core: CoreState, round: number | null): boolean {
+  return !hasRunEnded(core) && activityRound(core) === round;
 }
 
 function newTurn(
   id: string,
   kind: string,
   label: string | null,
-  round: number,
+  round: number | null,
   model: string | null,
 ): Turn {
   return {
@@ -172,6 +175,8 @@ function newTurn(
     phase: phaseName(label, round),
     hint: [label, model].filter(Boolean).join(' · '),
     active: false,
+    status: null,
+    error: null,
     prompt: null,
     todos: [],
     items: [],
@@ -184,7 +189,10 @@ export function roundTranscript(input: TranscriptInput): RoundTranscript {
   const {core, captured, round} = input;
   const turns = new Map<string, Turn>();
   for (const [phase, key] of phaseKeys(phasesForRound(core.phases, round))) {
-    turns.set(key, newTurn(key, phase.kind, phase.roundLabel, round, phase.model ?? null));
+    turns.set(key, {
+      ...newTurn(key, phase.kind, phase.roundLabel, round, phase.model ?? null),
+      status: phase.status,
+    });
   }
   const records = executionRecords(captured);
   // Turns read in the order they started: the execution start event, else their first entry.
@@ -221,7 +229,7 @@ function addEntries(
   const first = new Map<Turn, number>();
   for (const entry of core.transcript) {
     const kind = entry.agentKind;
-    if (entry.roundNumber !== round || kind === undefined || !turnEntry(entry)) continue;
+    if ((entry.roundNumber ?? null) !== round || kind === undefined || !turnEntry(entry)) continue;
     const label = entry.roundLabel ?? null;
     const key = keys.key(entry.invocationId, kind, label, entry.kind === 'status');
     const turn =
@@ -414,7 +422,7 @@ function finishTurns(
 ): void {
   const {core, captured, round} = input;
   const live = isLive(core, round);
-  const passCriteria = planFacts(captured, round)?.passCriteria ?? null;
+  const passCriteria = round === null ? null : (planFacts(captured, round)?.passCriteria ?? null);
   const acting = new Set(
     [...phaseKeys(phasesForRound(core.phases, round))]
       .filter(([phase]) => phase.status === 'active')
@@ -425,19 +433,28 @@ function finishTurns(
   for (const turn of turns) {
     const record = records.get(turn.id);
     turn.prompt = record?.prompt ?? null;
+    turn.error = record?.error ?? null;
     turn.todos = core.todos.find(todos => todos.executionId === turn.id)?.items ?? [];
     const note = record?.note ?? null;
     if (note !== null && !turn.items.some(item => item.kind === 'prose')) {
       turn.items.unshift({kind: 'prose', id: `result-${turn.id}`, paragraphs: prose(note)});
     }
     turn.active = running && acting.has(turn.id);
-    turn.working = turn.active ? workingOf(turn, passCriteria) : null;
+    turn.working = turn.active
+      ? workingOf(turn, passCriteria, round, core.activeExecutions[turn.id]?.activity.summary)
+      : null;
   }
   attachVerdicts(captured, round, turns);
   attachSteers(captured, round, turns);
 }
 
-function workingOf(turn: Turn, passCriteria: string | null): Turn['working'] {
+function workingOf(
+  turn: Turn,
+  passCriteria: string | null,
+  round: number | null,
+  summary?: string,
+): Turn['working'] {
+  if (round === null && summary) return {lead: summary, detail: null};
   if (turn.kind === 'judge') {
     return {lead: 'Checking the change against the pass criteria:', detail: passCriteria};
   }
@@ -446,6 +463,7 @@ function workingOf(turn: Turn, passCriteria: string | null): Turn['working'] {
 
 interface ExecutionRecord {
   prompt: string | null;
+  error: string | null;
   /** What an agent that said nothing still reported: its result's reasoning or analysis. */
   note: string | null;
   /** Sequence of its execution start, which orders turns that have not spoken yet. */
@@ -468,7 +486,7 @@ function executionRecords(captured: readonly RunEvent[]): Map<string, ExecutionR
     const key = keys.key(id, event.agent_kind, event.round_label ?? null, opens);
     records.set(
       key,
-      recordEvent(records.get(key) ?? {prompt: null, note: null, start: null}, event),
+      recordEvent(records.get(key) ?? {prompt: null, error: null, note: null, start: null}, event),
     );
   }
   return records;
@@ -478,7 +496,14 @@ function recordEvent(record: ExecutionRecord, event: RunEvent): ExecutionRecord 
   const data = event.data;
   if (data?.kind === 'agent_execution_finished') {
     const result = data.result ?? null;
-    return {...record, note: resultText(result, 'reasoning') ?? resultText(result, 'analysis')};
+    return {
+      ...record,
+      error: data.error ?? null,
+      note:
+        resultText(result, 'reasoning') ??
+        resultText(result, 'analysis') ??
+        resultText(result, 'summary'),
+    };
   }
   if (data?.kind === 'agent_execution_started' || data?.kind === 'invocation_started') {
     return {
@@ -490,7 +515,7 @@ function recordEvent(record: ExecutionRecord, event: RunEvent): ExecutionRecord 
   return record;
 }
 
-function attachVerdicts(captured: readonly RunEvent[], round: number, turns: Turn[]): void {
+function attachVerdicts(captured: readonly RunEvent[], round: number | null, turns: Turn[]): void {
   for (const event of captured) {
     const data = event.data;
     if (data?.kind !== 'judge_result' || roundNumberFromLabel(event.round_label) !== round)
@@ -505,7 +530,7 @@ function attachVerdicts(captured: readonly RunEvent[], round: number, turns: Tur
 }
 
 /** A consumed steer goes to the execution its control event names; label and kind only without one. */
-function attachSteers(captured: readonly RunEvent[], round: number, turns: Turn[]): void {
+function attachSteers(captured: readonly RunEvent[], round: number | null, turns: Turn[]): void {
   const keys = new ExecutionKeys(invocationAliases(captured));
   for (const steer of steers(captured).consumed) {
     if (steer.round !== round) continue;

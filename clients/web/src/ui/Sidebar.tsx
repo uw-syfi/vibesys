@@ -77,8 +77,9 @@ export interface SidebarProps {
   /** A line under the open run's rounds, in place of the planned count (the project has not attached). */
   note?: string | null;
   selected: number | null;
+  activity?: boolean;
   now: Date;
-  onRound: (round: number) => void;
+  onRound: (round: number | null) => void;
   /** The top row's controls (the hide button). */
   head?: ReactNode;
   /** Navigation rows under the top row (Search and commands). */
@@ -94,6 +95,7 @@ export function Sidebar({
   summary,
   note = null,
   selected,
+  activity = false,
   now,
   onRound,
   head,
@@ -116,6 +118,7 @@ export function Sidebar({
                   summary={summary}
                   note={note}
                   selected={selected}
+                  activity={activity}
                   now={now}
                   onRound={onRound}
                 />
@@ -136,6 +139,7 @@ function CurrentRun({
   summary,
   note,
   selected,
+  activity,
   now,
   onRound,
 }: {
@@ -143,8 +147,9 @@ function CurrentRun({
   summary: RunSummary;
   note: string | null;
   selected: number | null;
+  activity: boolean;
   now: Date;
-  onRound: (round: number) => void;
+  onRound: (round: number | null) => void;
 }) {
   return (
     <>
@@ -156,6 +161,18 @@ function CurrentRun({
         </span>
       </div>
       <div className="rounds">
+        {activity ? (
+          <button
+            type="button"
+            className={selected === null ? 'rnd sel' : 'rnd'}
+            aria-current={selected === null ? 'true' : undefined}
+            onClick={() => onRound(null)}
+          >
+            <span className="ttl" style={{gridColumn: '3 / -1'}}>
+              Run activity
+            </span>
+          </button>
+        ) : null}
         {summary.rows.map(row => (
           <button
             key={row.round}

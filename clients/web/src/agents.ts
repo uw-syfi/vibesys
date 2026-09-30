@@ -130,7 +130,7 @@ function layoutOf(ids: string[], edges: readonly AgentEdge[]): Layout {
   return lastLayout;
 }
 
-export function agentGraph(core: CoreState, round: number): AgentGraph {
+export function agentGraph(core: CoreState, round: number | null): AgentGraph {
   const keys = phaseKeys(phasesForRound(core.phases, round));
   if (keys.size === 0) return {nodes: [], edges: [], width: 0, height: 0};
   const items = [...keys].map(([phase, key]) => ({key, span: spanOf(phase)}));

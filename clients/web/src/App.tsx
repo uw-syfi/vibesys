@@ -14,7 +14,7 @@ import {
 } from 'react';
 import {type AskView, askView, chatOffer} from './ask.js';
 import {copyText} from './clipboard.js';
-import {attachNote, latestRound, needsOlder, runControl, steersNeedOlder} from './derive.js';
+import {activityRound, attachNote, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
 import {useHome, useNewRunShortcut, usePaletteShortcut} from './home-hooks.js';
 import {asDraft, type NoteController, type NotesApi, useNote} from './notes.js';
@@ -118,10 +118,10 @@ function useRunView(state: WorkspaceState, ui: UiState): View {
     () => runSummary(core, captured, experiments, context),
     [core, captured, experiments, context],
   );
-  const live = latestRound(core);
-  const round = ui.round ?? live;
+  const live = activityRound(core);
+  const round = ui.round === 'live' ? live : ui.round;
   const transcript = useMemo(
-    () => (round === null ? null : roundTranscript({core, captured, sent, round, runId})),
+    () => roundTranscript({core, captured, sent, round, runId}),
     [core, captured, sent, round, runId],
   );
   const edits = useMemo(() => roundEdits(core, runId), [core, runId]);
@@ -146,8 +146,7 @@ function useBackfill(
   round: number | null,
 ): History {
   const {core, captured, historyLoading, historyError} = state;
-  const wants =
-    round !== null && (needsOlder(core, round) || steersNeedOlder(core, captured, round));
+  const wants = needsOlder(core, round) || steersNeedOlder(core, captured, round);
   useEffect(() => {
     if (wants && !historyLoading && historyError === null) void session.loadOlder();
   }, [session, wants, historyLoading, historyError]);
@@ -319,6 +318,7 @@ function RunSidebar({
       summary={view.summary}
       note={attachNote(state.queries.experiments.response, view.ended)}
       selected={view.round}
+      activity={state.core.phases.some(phase => phase.roundNumber === null)}
       now={new Date()}
       onRound={round => dispatch({type: 'round', round, live: view.live})}
       head={<SidebarToggle shown onToggle={() => dispatch({type: 'sidebar', open: false})} />}
@@ -466,6 +466,18 @@ interface PaneHostProps extends SectionProps {
 }
 
 function changesTab(props: PaneHostProps) {
+  if (props.view.round === null) {
+    return (
+      <Placeholder
+        scope="Run"
+        text={
+          props.view.summary.rows.length === 0
+            ? 'No round results yet.'
+            : 'Select a round to inspect changes.'
+        }
+      />
+    );
+  }
   const design = props.state.queries.design;
   return (
     <ChangesTab
@@ -484,7 +496,6 @@ function changesTab(props: PaneHostProps) {
 
 function agentsTab(props: PaneHostProps) {
   const {view} = props;
-  if (view.round === null) return <Placeholder scope="Run" text="No round has started yet." />;
   return (
     <AgentsTab
       core={props.state.core}
