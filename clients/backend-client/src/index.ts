@@ -21,6 +21,7 @@ export type {
   DesignPatch,
   DesignRound,
   Diagnostic,
+  EventBatchMessage,
   ExperimentCursor,
   ExperimentUpdate,
   HypothesisEntry,
@@ -42,4 +43,12 @@ export {
   type RequestPolicy,
   resolveRequestPolicy,
 } from './request-policy.js';
+export {
+  type BackfillReconciliation,
+  type BackfillRequest,
+  type BatchContext,
+  type BatchReconciliation,
+  StreamReconciler,
+  type StreamReconcilerOptions,
+} from './stream-reconciler.js';
 export type {EventSubscription, ServerTransport, SubscribeOptions} from './transport.js';
