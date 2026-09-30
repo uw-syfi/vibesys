@@ -31,6 +31,7 @@ commands = [
   ["uv", "run", "tach", "check"],
   ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["python3", "scripts/check_doc_links.py"],
+  ["python3", "-m", "scripts.check_doc_citations"],
   ["uv", "run", "vibesys", "--headless", "--help"],
 ]
 

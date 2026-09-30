@@ -13,6 +13,7 @@ on:
       - 'docs/**'
       - '*.md'
       - 'scripts/check_doc_links.py'
+      - 'scripts/check_doc_citations.py'
       - '.github/workflows/website.yml'
   pull_request:
     branches: [main]
@@ -21,6 +22,7 @@ on:
       - 'docs/**'
       - '*.md'
       - 'scripts/check_doc_links.py'
+      - 'scripts/check_doc_citations.py'
       - '.github/workflows/website.yml'
 
 jobs:
@@ -35,6 +37,12 @@ jobs:
       # repository, and Markdown outside docs/ that the site never renders.
       - name: Check Markdown links
         run: python3 scripts/check_doc_links.py
+
+      # Also stdlib-only. Runs here as well as in the python_quality group
+      # because the Tests workflow ignores docs/**, so a docs-only edit that
+      # drifts a code citation would otherwise reach main ungated.
+      - name: Check doc code citations
+        run: python3 -m scripts.check_doc_citations
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

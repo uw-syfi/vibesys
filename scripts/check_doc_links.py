@@ -15,6 +15,14 @@ Checked: relative links and absolute links back into this repository
 `#anchor` when the target is Markdown. Other external URLs are not fetched,
 so the check stays offline and deterministic.
 
+Not checked: anything inside a fenced code block or an inline `code` span.
+Markdown link syntax written in a code span is a sample, not a link, so the
+spans are stripped before the link patterns run. A `file:symbol` code citation
+lives in exactly those spans and is checked by `scripts/check_doc_citations.py`
+instead. This module owns the lexer both use (`iter_prose_lines`,
+`iter_code_spans`, `strip_code_spans`), so there is one definition of what a
+code span is.
+
 Usage:
     uv run python scripts/check_doc_links.py [PATH ...].
 """
@@ -27,7 +35,11 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 REPO_URL_PREFIXES = (
     "https://github.com/uw-syfi/vibesys/blob/",
@@ -53,6 +65,10 @@ INLINE_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s<>]+)>?(?:\s+[\"'][^\"']*[\"']
 REFERENCE_LINK = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(\S+)>?", re.MULTILINE)
 FENCE = re.compile(r"^\s*(```|~~~)")
 
+# One inline `code` span. Single backticks only, and never across a line break,
+# which is what both doc checkers assume.
+CODE_SPAN = re.compile(r"`([^`]*)`")
+
 EXPLICIT_HEADING_ID = re.compile(r"\{#([^}]+)\}\s*$")
 HTML_ANCHOR = re.compile(r"""(?:id|name)=["']([^"']+)["']""")
 
@@ -72,6 +88,38 @@ class Problem:
 
     link: Link
     reason: str
+
+
+@dataclass(frozen=True)
+class CodeSpan:
+    """One inline `code` span and the 1-based line it was written on."""
+
+    line: int
+    text: str
+
+
+def iter_prose_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(lineno, line)`` for every line outside a fenced code block."""
+    in_fence = False
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        yield lineno, line
+
+
+def iter_code_spans(text: str) -> Iterator[CodeSpan]:
+    """Yield every inline code span in ``text``, skipping fenced blocks."""
+    for lineno, line in iter_prose_lines(text):
+        for match in CODE_SPAN.finditer(line):
+            yield CodeSpan(lineno, match.group(1))
+
+
+def strip_code_spans(line: str) -> str:
+    """Remove inline code spans, whose contents are samples rather than markup."""
+    return CODE_SPAN.sub("", line)
 
 
 def iter_markdown_files(paths: list[Path], repo_root: Path) -> list[Path]:
@@ -104,14 +152,8 @@ def run_git(argv: list[str]) -> str:
 def extract_links(path: Path) -> list[Link]:
     """Collect every inline and reference link in ``path``, skipping code fences."""
     links: list[Link] = []
-    in_fence = False
-    for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        text = re.sub(r"`[^`]*`", "", line)
+    for lineno, line in iter_prose_lines(path.read_text()):
+        text = strip_code_spans(line)
         links.extend(Link(path, lineno, m.group(1)) for m in INLINE_LINK.finditer(text))
         links.extend(Link(path, lineno, m.group(1)) for m in REFERENCE_LINK.finditer(text))
     return links
@@ -134,13 +176,7 @@ def anchors_of(path: Path) -> set[str]:
     """
     anchors: set[str] = set()
     seen: dict[str, int] = {}
-    in_fence = False
-    for line in path.read_text().splitlines():
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
+    for _lineno, line in iter_prose_lines(path.read_text()):
         anchors.update(HTML_ANCHOR.findall(line))
         if not line.lstrip().startswith("#"):
             continue

@@ -44,12 +44,12 @@ a test failing.
 ### WP-GRANULARITY: one frame carries exactly one protocol message
 
 One transport frame is exactly one serialized protocol message. On the Unix transport a frame is one
-JSONL line; `_write_message` serializes one model and appends `\n` (`unix_jsonl.py:192-195`). On the
-WebSocket transport a frame is one WebSocket message.
+JSONL line; `_write_message` serializes one model and appends `\n`
+(`unix_jsonl.py:_write_message`). On the WebSocket transport a frame is one WebSocket message.
 
 Batching is not framing. `event_batch` is one protocol message that carries many events in its
 `events` list. The batch is a payload construct (`EventBatchMessage` in `protocol.py`), produced by
-the server coalescing a watermark-consistent snapshot (`unix_jsonl.py:120-138`), and it crosses the
+the server coalescing a watermark-consistent snapshot (`unix_jsonl.py:_stream`), and it crosses the
 wire as a single frame on either transport. A transport never splits or merges frames.
 
 ### WP-FRAME-TYPE: text frames, UTF-8
@@ -85,36 +85,36 @@ mirrors the three sockets the Unix client opens today and needs no multiplexing.
 | chat | one `query.chat` on its own connection | one long-running request and its single response |
 
 On the Unix transport the control connection reads requests in a loop and writes one response per
-request (`unix_jsonl.py:47-72`); a `subscribe` request takes over its connection and never returns
-to that loop (`unix_jsonl.py:55-63`). A transport must preserve this: a subscription owns its
-connection for the connection's life, and chat is isolated on its own connection so a long agent
-turn does not block control traffic behind it.
+request (`unix_jsonl.py:_RequestHandler.handle`); a `subscribe` request takes over its connection
+and never returns to that loop (`unix_jsonl.py:_stream`). A transport must preserve this: a
+subscription owns its connection for the connection's life, and chat is isolated on its own
+connection so a long agent turn does not block control traffic behind it.
 
 ### WP-SUBSCRIBE-ACK: subscribe is acknowledged before any batch, even on failure
 
 The server answers an accepted `subscribe` with a `subscribed` message carrying `run_id` and
-`latest_sequence` before it sends any `event_batch` (`unix_jsonl.py:96-102`). If the bootstrap replay
-then fails, the server has already sent `subscribed` and reports the failure as a `protocol_error`
-frame (`unix_jsonl.py:80-95`). So a client always sees `subscribed` first on a dial the server
-accepted, and a bootstrap failure is a stream error after the ack, never a rejected dial. A
-transport must not reorder or drop the ack.
+`latest_sequence` before it sends any `event_batch` (`unix_jsonl.py:_stream`). If the bootstrap
+replay then fails, the server has already sent `subscribed` and reports the failure as a
+`protocol_error` frame (`unix_jsonl.py:_write_stream_error`). So a client always sees `subscribed`
+first on a dial the server accepted, and a bootstrap failure is a stream error after the ack, never
+a rejected dial. A transport must not reorder or drop the ack.
 
 ### WP-PROTOCOL-ERROR: a protocol error is an in-band frame then close
 
 `ProtocolErrorMessage` is a normal framed message (`type: "protocol_error"`). The server writes it in
-band and then closes the connection (`unix_jsonl.py:173-182`). It is not expressed as a transport
-close code. This is not cosmetic: the client suppresses its own disconnect callback after it reads a
-`protocol_error`, because the drop that follows is the expected consequence of the error, not a
-separate outage. A WebSocket transport that mapped a protocol error onto a close code instead of an
-in-band text frame would change error semantics with no compile-time signal, so it must send the
-frame and then close.
+band and then closes the connection (`unix_jsonl.py:_write_stream_error`). It is not expressed as a
+transport close code. This is not cosmetic: the client suppresses its own disconnect callback after
+it reads a `protocol_error`, because the drop that follows is the expected consequence of the error,
+not a separate outage. A WebSocket transport that mapped a protocol error onto a close code instead
+of an in-band text frame would change error semantics with no compile-time signal, so it must send
+the frame and then close.
 
 ### WP-DISCONNECT: disconnect detection is transport specific and needs a liveness signal
 
 The Unix server notices a gone client with a non-blocking `recv(1, MSG_PEEK | MSG_DONTWAIT)` that
-returns empty on FIN, checked only while the stream is idle (`unix_jsonl.py:104-108`, `:184-190`).
-That probe has no WebSocket equivalent, and a WebSocket that dies without a close (a slept laptop, a
-killed tab) leaves the server with no FIN to read. The disposition:
+returns empty on FIN (`unix_jsonl.py:_client_disconnected`), checked only while the stream is idle
+(`unix_jsonl.py:_stream`). That probe has no WebSocket equivalent, and a WebSocket that dies without
+a close (a slept laptop, a killed tab) leaves the server with no FIN to read. The disposition:
 
 - A clean browser close (tab closed, navigation) sends a WebSocket close frame, which the gateway
   treats exactly as the Unix FIN: the subscriber count falls and teardown proceeds.
@@ -214,10 +214,10 @@ Two conditions make the server abandon a client's cursor and send a fresh bootst
 a continuation:
 
 - The run attached its durable event store after the client subscribed, so the batch's `store_id`
-  differs from what the client folded (`unix_jsonl.py:121-128`). Sequences are only comparable within
+  differs from what the client folded (`unix_jsonl.py:_stream`). Sequences are only comparable within
   one store.
 - More live output landed in one wait than the `tail` bound was willing to replay
-  (`unix_jsonl.py:110-115`).
+  (`unix_jsonl.py:_stream`).
 
 In both cases the next `event_batch` supersedes the client's fold rather than extending it, and its
 `through_sequence` is not the client's cursor plus one. A client keys continuation on `store_id` and
