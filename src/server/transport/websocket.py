@@ -30,7 +30,7 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from server.transport.subscriptions import SubscriptionTracker
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
@@ -46,37 +46,51 @@ _ASSET_PREFIX = "/assets/"
 
 # The gateway renders model- and tool-produced transcript text, so the served
 # page is denied every fetch destination by default and then granted exactly
-# what the built bundle uses: its own script and stylesheet, and a loopback
-# WebSocket. `connect-src` names the loopback scheme explicitly because `'self'`
-# is not resolved against `ws:` by every browser engine, and the port is left
-# wildcarded because the bound port is only known after startup while this
-# policy is one value shared by every response. The gateway's Origin check is
-# what pins the WebSocket to this instance; `connect-src` only has to keep an
-# injected exfiltration channel on loopback.
-_CONTENT_SECURITY_POLICY = (
-    "default-src 'none'; "
-    "script-src 'self'; "
-    "style-src 'self'; "
-    "img-src 'self'; "
-    "font-src 'none'; "
-    "connect-src 'self' ws://127.0.0.1:*; "
-    "base-uri 'none'; "
-    "form-action 'none'; "
-    "frame-ancestors 'none'; "
-    "object-src 'none'"
-)
-
-# Every gateway response carries the same hygiene headers, so `Cache-Control`
-# has exactly one writer. `Referrer-Policy` is `no-referrer` because the page
-# URL carries the capability token in its query string and a `Referer` header
-# would copy it to whatever the page links or navigates to.
-_HYGIENE_HEADERS = MappingProxyType(
+# what the built bundle uses: its own script and stylesheet, and the WebSocket
+# of the origin it was loaded from. This mapping is the one representation of
+# the policy; the served header is `_content_security_policy` of it, and no
+# other copy in this repository is authoritative.
+_POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": _CONTENT_SECURITY_POLICY,
-        "Referrer-Policy": "no-referrer",
+        "default-src": ("'none'",),
+        "script-src": ("'self'",),
+        "style-src": ("'self'",),
+        "img-src": ("'self'",),
+        "font-src": ("'none'",),
+        # `'self'` is load-bearing beyond the socket and must not be tightened
+        # away: the bundle's first executing statement is Vite's modulepreload
+        # polyfill, which `fetch`es every `link[rel=modulepreload]` href, and a
+        # `fetch` of a script URL is governed by `connect-src`, not
+        # `script-src`. Inert while the build emits a single chunk, live the
+        # moment it code-splits. `_socket_origins` appends the exact WebSocket
+        # authorities, because `'self'` alone is not resolved against `ws:` by
+        # every browser engine.
+        "connect-src": ("'self'",),
+        "base-uri": ("'none'",),
+        "form-action": ("'none'",),
+        "frame-ancestors": ("'none'",),
+        "object-src": ("'none'",),
     }
 )
+
+# Response headers that do not depend on gateway state, merged once by
+# `_response`, so `Cache-Control` has exactly one writer. `Referrer-Policy` is
+# `no-referrer` because the page URL carries the capability token in its query
+# string and a `Referer` header would copy it to whatever the page links or
+# navigates to. `nosniff` is the policy's companion: `_content_type` falls back
+# to `application/octet-stream`, and `/assets/*` is token-free, so no response
+# may be re-typed by content sniffing into something the policy would execute.
+_STATIC_HEADERS = MappingProxyType(
+    {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    }
+)
+
+# A browser page may only open a WebSocket to its own authority, so a declared
+# browser origin maps to exactly one WebSocket origin.
+_WEB_SOCKET_SCHEMES = MappingProxyType({"http": "ws", "https": "wss"})
 
 
 class WebSocketGateway:
@@ -110,6 +124,12 @@ class WebSocketGateway:
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
         self.allowed_origins = frozenset(allowed_origins)
+        # Derive the declared origins' WebSocket authorities here, so a browser
+        # origin the policy cannot express fails at construction rather than on
+        # every response.
+        self._configured_socket_origins = frozenset(
+            _socket_origin(origin) for origin in self.allowed_origins
+        )
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._claim: WebInstanceClaim | None = None
         self._instance_record: WebInstanceRecord | None = None
@@ -252,8 +272,10 @@ class WebSocketGateway:
             claim.close()
 
     async def _process_request(  # noqa: PLR0911  # lint-waiver: LW-101058 [PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
-        self, connection: ServerConnection, request: Request
+        self, _connection: ServerConnection, request: Request
     ) -> HttpResponse | None:
+        # `websockets` calls this with the connection positionally. Responses are
+        # built from gateway state, not from the connection, so it is unused.
         parsed = urlsplit(getattr(request, "path", ""))
         query = parse_qs(parsed.query, keep_blank_values=True)
         token = query.get("token", [""])[0]
@@ -264,21 +286,25 @@ class WebSocketGateway:
         path = _routing_path(parsed.path)
         serves_asset = path.startswith(_ASSET_PREFIX)
         if not serves_asset and not secrets.compare_digest(token, self.token):
-            return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n")
+            return self._response(
+                HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n", "text/plain"
+            )
 
         if path == _WEB_SOCKET_PATH:
             origin = _request_header(request, "Origin")
             if origin not in self._allowed_origins():
-                return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid WebSocket origin\n")
+                return self._response(
+                    HTTPStatus.FORBIDDEN, "Invalid WebSocket origin\n", "text/plain"
+                )
             return None
 
         if path == "/health":
-            return _response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
+            return self._response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
 
         if path in {"/", "/index.html"}:
             return self._asset_response("index.html")
         if not serves_asset:
-            return _respond(connection, HTTPStatus.NOT_FOUND, "Not found\n")
+            return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         return self._asset_response(path.removeprefix("/"))
 
     def _actual_origin(self) -> str:
@@ -289,9 +315,55 @@ class WebSocketGateway:
     def _allowed_origins(self) -> frozenset[str]:
         return frozenset({self._actual_origin(), *self.allowed_origins})
 
+    def _socket_origins(self) -> tuple[str, ...]:
+        """Return the WebSocket origins a page from this gateway may open.
+
+        A page can only reach the gateway at the authority it was loaded from,
+        and the origins it may be loaded from are exactly the ones the handshake
+        accepts, so the union over `_allowed_origins` is the tightest value one
+        shared header can carry. Sorted, so the header is deterministic.
+        """
+        own = _socket_origin(self._actual_origin())
+        return tuple(sorted({own, *self._configured_socket_origins}))
+
+    def _content_security_policy(self) -> str:
+        """Serialize `_POLICY_DIRECTIVES` with this instance's socket origins."""
+        directives = dict(_POLICY_DIRECTIVES)
+        directives["connect-src"] = (*directives["connect-src"], *self._socket_origins())
+        return "; ".join(f"{name} {' '.join(sources)}" for name, sources in directives.items())
+
+    def _response(
+        self, status: HTTPStatus, content: str | bytes, content_type: str
+    ) -> HttpResponse:
+        """Build the single response shape every gateway route returns."""
+        from websockets.datastructures import (  # noqa: PLC0415  # lint-waiver: LW-101019 [PLC0415]; defer optional websocket imports until an HTTP response is needed
+            Headers,
+        )
+        from websockets.http11 import (  # noqa: PLC0415  # lint-waiver: LW-101020 [PLC0415]; defer optional websocket imports until an HTTP response is needed
+            Response as HttpResponse,
+        )
+
+        body = content.encode("utf-8") if isinstance(content, str) else content
+        return HttpResponse(
+            status.value,
+            status.phrase,
+            # One dict literal, so no header can be written twice.
+            Headers(
+                {
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(body)),
+                    **_STATIC_HEADERS,
+                    "Content-Security-Policy": self._content_security_policy(),
+                }
+            ),
+            body,
+        )
+
     def _asset_response(self, relative: str) -> HttpResponse:
         if self.assets_dir is None:
-            return _response(HTTPStatus.NOT_FOUND, "Web assets are not installed\n", "text/plain")
+            return self._response(
+                HTTPStatus.NOT_FOUND, "Web assets are not installed\n", "text/plain"
+            )
         try:
             candidate = (self.assets_dir / relative).resolve()
             candidate.relative_to(self.assets_dir)
@@ -299,16 +371,16 @@ class WebSocketGateway:
             # `resolve` rejects a NUL byte and an unresolvable symlink chain;
             # `relative_to` rejects a symlink inside the directory that escapes
             # it. Both mean the target is not a bundle file.
-            return _response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
+            return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         if not candidate.is_file():
-            return _response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
+            return self._response(HTTPStatus.NOT_FOUND, "Not found\n", "text/plain")
         try:
             body = candidate.read_bytes()
         except OSError:
-            return _response(
+            return self._response(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to read asset\n", "text/plain"
             )
-        return _response(HTTPStatus.OK, body, _content_type(candidate))
+        return self._response(HTTPStatus.OK, body, _content_type(candidate))
 
     async def _handle_connection(self, connection: ServerConnection) -> None:
         websocket = connection
@@ -470,31 +542,13 @@ def _routing_path(raw_path: str) -> str:
     return posixpath.normpath("/" + unquote(raw_path).lstrip("/"))
 
 
-def _respond(_connection: ServerConnection, status: HTTPStatus, text: str) -> HttpResponse:
-    return _response(status, text, "text/plain")
-
-
-def _response(status: HTTPStatus, content: str | bytes, content_type: str) -> HttpResponse:
-    from websockets.datastructures import (  # noqa: PLC0415  # lint-waiver: LW-101019 [PLC0415]; defer optional websocket imports until an HTTP response is needed
-        Headers,
-    )
-    from websockets.http11 import (  # noqa: PLC0415  # lint-waiver: LW-101020 [PLC0415]; defer optional websocket imports until an HTTP response is needed
-        Response as HttpResponse,
-    )
-
-    body = content.encode("utf-8") if isinstance(content, str) else content
-    return HttpResponse(
-        status.value,
-        status.phrase,
-        Headers(
-            {
-                "Content-Type": content_type,
-                "Content-Length": str(len(body)),
-                **_HYGIENE_HEADERS,
-            }
-        ),
-        body,
-    )
+def _socket_origin(origin: str) -> str:
+    """Return the WebSocket origin a page served from `origin` may open."""
+    parsed = urlsplit(origin)
+    scheme = _WEB_SOCKET_SCHEMES.get(parsed.scheme)
+    if scheme is None or not parsed.netloc:
+        raise ValueError(f"Not a browser origin the gateway policy can express: {origin!r}")  # noqa: TRY003  # lint-waiver: LW-101108 [TRY003]; an origin the Content-Security-Policy cannot name is a wiring error, and a dedicated exception class would be a one-call-site type for a value the launcher already validates
+    return f"{scheme}://{parsed.netloc}"
 
 
 def _content_type(path: Path) -> str:

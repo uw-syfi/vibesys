@@ -19,8 +19,7 @@ payload schema changes (for example a version bump), this layer does not.
 It also does not specify how the WebSocket gateway serves the browser bundle over plain HTTP. The
 response headers, the Content-Security-Policy, and the token-free `/assets/*` route are gateway
 serving decisions with no counterpart on the Unix transport, so they are owned by
-[`web-development.md`](web-development.md) and are not `WP-*` tokens: every token here must be
-exercised by a conformance scenario or the corpus gate fails.
+[`web-development.md`](web-development.md) rather than being `WP-*` decision tokens here.
 
 The authoritative message taxonomy is three unions in `src/server/api/protocol.py`:
 

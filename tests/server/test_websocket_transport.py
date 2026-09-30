@@ -64,6 +64,28 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
     assert response["snapshot"]["status"] == "running"
 
 
+def _expected_policy(*socket_origins: str) -> str:
+    """Return the policy the gateway must serve, with no parser on either side.
+
+    This is the cross-check copy of `_POLICY_DIRECTIVES`, so loosening,
+    dropping, or reordering a directive fails here rather than passing a
+    per-directive comparison that a hand-rolled CSP parser could mis-split.
+    """
+    connect = " ".join(("'self'", *socket_origins))
+    return (
+        "default-src 'none'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self'; "
+        "font-src 'none'; "
+        f"connect-src {connect}; "
+        "base-uri 'none'; "
+        "form-action 'none'; "
+        "frame-ancestors 'none'; "
+        "object-src 'none'"
+    )
+
+
 def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -> None:
     with _asset_gateway(tmp_path) as gateway:
         routes = {
@@ -76,6 +98,7 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
                 ("unknown-route", f"/nope?token={gateway.token}"),
             )
         }
+        expected_policy = _expected_policy(f"ws://127.0.0.1:{gateway.bound_port}")
 
     assert {name: status for name, (status, _headers) in routes.items()} == {
         "index": 200,
@@ -87,31 +110,43 @@ def test_gateway_sends_each_hygiene_header_once_on_every_route(tmp_path: Path) -
     for name, (_status, headers) in routes.items():
         assert headers.get_all("Cache-Control") == ["no-store"], name
         assert headers.get_all("Referrer-Policy") == ["no-referrer"], name
-        policies = headers.get_all("Content-Security-Policy")
-        assert policies is not None
-        assert len(policies) == 1, name
-        sources = set(_policy_sources(policies[0]))
-        assert sources <= {"'none'", "'self'", "ws://127.0.0.1:*"}, name
+        assert headers.get_all("X-Content-Type-Options") == ["nosniff"], name
+        assert headers.get_all("Content-Security-Policy") == [expected_policy], name
 
 
-def test_gateway_content_security_policy_denies_every_unused_destination(tmp_path: Path) -> None:
-    with _asset_gateway(tmp_path) as gateway:
+def test_gateway_derives_the_connect_source_from_its_allowed_origins(tmp_path: Path) -> None:
+    origins = ("http://127.0.0.1:5173", "https://localhost:5173")
+    with _asset_gateway(tmp_path, allowed_origins=origins) as gateway:
         _status, headers = _fetch(gateway.bound_port, f"/?token={gateway.token}")
+        expected_sockets = sorted(
+            {
+                f"ws://127.0.0.1:{gateway.bound_port}",
+                "ws://127.0.0.1:5173",
+                "wss://localhost:5173",
+            }
+        )
 
-    policies = headers.get_all("Content-Security-Policy") or []
-    assert len(policies) == 1
-    assert _policy_directives(policies[0]) == {
-        "default-src": "'none'",
-        "script-src": "'self'",
-        "style-src": "'self'",
-        "img-src": "'self'",
-        "font-src": "'none'",
-        "connect-src": "'self' ws://127.0.0.1:*",
-        "base-uri": "'none'",
-        "form-action": "'none'",
-        "frame-ancestors": "'none'",
-        "object-src": "'none'",
-    }
+    # Every declared browser origin contributes its own WebSocket authority,
+    # `https:` as `wss:`, and nothing else. No wildcard port, no bare loopback.
+    assert headers.get_all("Content-Security-Policy") == [_expected_policy(*expected_sockets)]
+
+
+def test_gateway_policy_uses_the_requested_port_before_binding(tmp_path: Path) -> None:
+    gateway = _asset_gateway(tmp_path, allowed_origins=("https://localhost:5173",))
+    gateway.port = 4312
+
+    # Same pre-bind fallback `_actual_origin` uses, so the policy is well formed
+    # on a response served before the listening socket exists.
+    policy = gateway._content_security_policy()  # noqa: SLF001  # lint-waiver: LW-101107 [SLF001]; exercise the pre-bind policy without a listening socket
+
+    assert policy == _expected_policy("ws://127.0.0.1:4312", "wss://localhost:5173")
+
+
+def test_gateway_rejects_a_browser_origin_the_policy_cannot_express(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+
+    with pytest.raises(ValueError, match="Not a browser origin"):
+        WebSocketGateway(parts.api, allowed_origins=("file:///tmp/page.html",))
 
 
 def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> WebSocketGateway:
@@ -211,15 +246,6 @@ def _fetch_body(port: int, path: str) -> tuple[int, bytes]:
         return response.status, response.read()
     finally:
         connection.close()
-
-
-def _policy_directives(policy: str) -> dict[str, str]:
-    parts = (directive.strip().partition(" ") for directive in policy.split(";"))
-    return {name: sources for name, _space, sources in parts}
-
-
-def _policy_sources(policy: str) -> list[str]:
-    return [source for sources in _policy_directives(policy).values() for source in sources.split()]
 
 
 def test_gateway_rejects_wrong_origin_and_capability_token(tmp_path: Path) -> None:

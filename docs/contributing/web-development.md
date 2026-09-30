@@ -68,39 +68,56 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 
 ## Gateway HTTP hygiene
 
-Every gateway HTTP response, including the 403 and 404 bodies, carries the same
-three headers from one writer (`_HYGIENE_HEADERS` in
-`src/server/transport/websocket.py`), so no route can set or duplicate them:
+Every gateway HTTP response, including the 403 and 404 bodies, is built by
+`WebSocketGateway._response` in `src/server/transport/websocket.py`, which
+merges the headers into one dict literal, so no route can set or duplicate one:
 
 | Header | Value | Reason |
 | --- | --- | --- |
 | `Cache-Control` | `no-store` | The page URL carries the capability token and run output is live. |
 | `Referrer-Policy` | `no-referrer` | A `Referer` header would copy that token to any navigation target. |
-| `Content-Security-Policy` | below | Transcripts render model- and tool-produced text. |
+| `X-Content-Type-Options` | `nosniff` | `/assets/*` is token-free and the content type falls back to `application/octet-stream`, so no response may be re-typed by sniffing. |
+| `Content-Security-Policy` | derived | Transcripts render model- and tool-produced text. |
 
-The policy denies every fetch destination and then grants only what the built
-bundle uses:
+`_POLICY_DIRECTIVES` in that module is the authoritative directive map, and
+`_content_security_policy` is its only serializer. Do not copy the header value
+here: the only other copy is `EXPECTED_POLICY` in
+`clients/web/e2e/gateway-hygiene.spec.ts`, which exists on purpose as the
+cross-language check and fails when the two disagree. The shape is
+deny-everything (`default-src 'none'`) plus these grants:
 
-```text
-default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self';
-font-src 'none'; connect-src 'self' ws://127.0.0.1:*; base-uri 'none';
-form-action 'none'; frame-ancestors 'none'; object-src 'none'
-```
+- `script-src 'self'` and `style-src 'self'`, no `'unsafe-inline'`. The Vite
+  production build emits one external script and one external stylesheet. What
+  the policy actually forbids is a `<style>` element and
+  `setAttribute('style', ...)`; it does not govern CSSOM writes, so React's
+  `style={{...}}` prop (which compiles to `el.style.setProperty`) is unaffected.
+  The real constraints on a contributor are therefore: no CSS-in-JS runtime
+  (emotion and styled-components inject `<style>`) and no React 19
+  `<style href precedence>` hoisting.
+- `img-src 'self'` for the browser's own same-origin favicon probe.
+- `font-src 'none'`, stated rather than left to the `default-src` fallback,
+  because "no external font" is the air-gap property being asserted.
+- `connect-src 'self'` plus one WebSocket origin per accepted browser origin.
+  `'self'` is separately load-bearing and must not be removed: Vite's
+  modulepreload polyfill `fetch`es `link[rel=modulepreload]` hrefs, and a
+  `fetch` of a script URL is governed by `connect-src`, not `script-src`.
 
-`script-src` and `style-src` are `'self'` with no `'unsafe-inline'`: the Vite
-production build emits one external script and one external stylesheet, and the
-React tree sets no inline `style` attributes, so nothing inline is needed.
-`connect-src` names `ws://127.0.0.1:*` instead of relying on `'self'` because
-`'self'` is not resolved against `ws:` by every browser engine. Its port is
-wildcarded because the bound port is only known after startup while this policy
-is one value shared by every response; the WebSocket handshake Origin check is
-what pins the socket to this gateway instance, and `connect-src` only has to
-keep an injected exfiltration channel on loopback. `font-src 'none'` keeps the
-bundle usable on an air-gapped host.
+`connect-src` is derived per gateway instance from `_allowed_origins`, mapping
+`http:` to `ws:` and `https:` to `wss:` and sorting the result. A page can only
+reach the gateway at the authority it was loaded from, and the origins it may be
+loaded from are exactly the ones the handshake accepts, so that union is the
+tightest value one shared header can carry. It is not a wildcard: a wildcard
+port (`ws://127.0.0.1:*`) would authorize a socket to any other user's loopback
+listener on a shared host, and a literal `127.0.0.1` host would break a gateway
+reached through a declared `localhost` origin, because CSP host matching is
+textual and performs no name resolution. The bound port being unknown before
+`start()` is not an obstacle: `_actual_origin` already falls back to the
+requested `port`, and the policy is computed per response.
 
 `clients/web/e2e/gateway-hygiene.spec.ts` asserts the whole policy against a
-live gateway, fails on any reported `securitypolicyviolation`, and aborts and
-fails on any request the page makes off loopback.
+live gateway, fails on any reported `securitypolicyviolation` (with a negative
+control that proves the listener fires), and blocks plus fails on any request or
+WebSocket the page attempts off loopback.
 
 ### `/assets/*` is served without a capability token
 
