@@ -1231,7 +1231,7 @@ def test_node_port_access_survives_restart_and_reexposes_after_reset(tmp_path: P
         tmp_path,
         config_dir=tmp_path,
         runner=runner,
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     lifecycle.start()
     endpoints = lifecycle.endpoints
