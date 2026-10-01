@@ -1134,3 +1134,112 @@ def test_forwards_bind_only_ipv4_loopback(tmp_path: Path) -> None:
     for command in commands:
         index = command.index("port-forward")
         assert command[index + 1 : index + 3] == ["--address", "127.0.0.1"]
+
+
+class _NodePortRunner(_Runner):
+    """Answer the node and Service queries that NodePort access makes."""
+
+    def __init__(self, *, selector: dict[str, str] | None = None) -> None:
+        super().__init__()
+        self.selector = {"app": "frontend"} if selector is None else selector
+        self.node_services: list[dict[str, object]] = []
+
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        cwd: Path,
+        input_text: str | None = None,
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str]:
+        if "nodes" in command:
+            self.calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "172.18.0.2", "")
+        if "get" in command and any(part.startswith("service/") for part in command):
+            self.calls.append(command)
+            port = 5000 if "service/frontend" in command else 8080
+            source = {
+                "kind": "Service",
+                "spec": {
+                    "selector": self.selector,
+                    "ports": [{"port": port, "targetPort": "http", "protocol": "TCP"}],
+                },
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps(source), "")
+        if "create" in command and '"NodePort"' in (input_text or ""):
+            self.calls.append(command)
+            service = json.loads(input_text or "")
+            self.node_services.append(service)
+            created = {"spec": {"ports": [{"nodePort": 30000 + len(self.node_services)}]}}
+            return subprocess.CompletedProcess(command, 0, json.dumps(created), "")
+        return super().__call__(
+            command, cwd=cwd, input_text=input_text, timeout_seconds=timeout_seconds
+        )
+
+
+def _node_port_config() -> KubernetesConfig:
+    config = _config(Path("manifest.yaml")).model_copy(
+        update={"access": "node_port", "http_probes": ()}
+    )
+    return KubernetesConfig.model_validate(config.model_dump())
+
+
+def test_node_port_access_exposes_each_forward_without_kubectl_streams(tmp_path: Path) -> None:
+    runner = _NodePortRunner()
+    started: list[object] = []
+
+    def popen(*args: object, **_kwargs: object) -> _Process:
+        started.append(args)
+        return _Process()
+
+    lifecycle, _ = _start_lifecycle(
+        tmp_path, config=_node_port_config(), runner=runner, popen=popen
+    )
+
+    assert started == []
+    assert lifecycle.endpoints == {
+        "frontend": "http://172.18.0.2:30001",
+        "users": "http://172.18.0.2:30002",
+    }
+    assert lifecycle.base_url == "http://172.18.0.2:30001"
+    frontend = runner.node_services[0]
+    assert frontend["metadata"] == {"name": "vibesys-node-frontend"}
+    assert frontend["spec"] == {
+        "type": "NodePort",
+        "selector": {"app": "frontend"},
+        "ports": [{"protocol": "TCP", "port": 5000, "targetPort": "http"}],
+    }
+    lifecycle.close()
+    with pytest.raises(runtime_module.KubernetesLifecycleError):
+        _ = lifecycle.endpoints
+
+
+def test_node_port_access_survives_restart_and_reexposes_after_reset(tmp_path: Path) -> None:
+    _service_manifest(tmp_path)
+    runner = _NodePortRunner()
+    config = _node_port_config().model_copy(
+        update={"restart_deployments": ({"name": "frontend", "pod_selector": "app=frontend"},)}
+    )
+    lifecycle = KubernetesLifecycle(
+        KubernetesConfig.model_validate(config.model_dump()),
+        tmp_path,
+        config_dir=tmp_path,
+        runner=runner,
+        popen=lambda *_args, **_kwargs: _Process(),
+    )
+    lifecycle.start()
+    endpoints = lifecycle.endpoints
+    lifecycle.restart()
+    assert lifecycle.endpoints == endpoints
+    assert len(runner.node_services) == 2
+
+    lifecycle.reset()
+    assert len(runner.node_services) == 4
+    assert lifecycle.endpoints["frontend"] == "http://172.18.0.2:30003"
+    lifecycle.close()
+
+
+def test_node_port_access_requires_a_selector_backed_service(tmp_path: Path) -> None:
+    runner = _NodePortRunner(selector={})
+    with pytest.raises(runtime_module.KubernetesLifecycleError, match="Service with a selector"):
+        _start_lifecycle(tmp_path, config=_node_port_config(), runner=runner)
