@@ -115,6 +115,10 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
         ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(
+            ProfilerKind.NCU,
+            frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING}),
+        ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
         # captures), so torch_profiler/ is staged alongside rocprof_profiler/.
@@ -270,7 +274,7 @@ def resolve_profiler_kind(
 
     # OTel requires an input bundle that provisions instrumentation and a
     # collector. Keep microservice defaults unchanged; users opt in explicitly.
-    if domain_name is DomainName.MICROSERVICES:
+    if domain_name in {DomainName.MICROSERVICES, DomainName.KERNEL_WRITING}:
         return ProfilerKind.NONE
 
     if allowed == frozenset({ProfilerKind.NONE}):

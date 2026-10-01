@@ -22,6 +22,7 @@ from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AgentCapability,
+    AgentTool,
     BenchmarkEvaluation,
     LocalValidationEvaluation,
     RunFacts,
@@ -40,7 +41,11 @@ if TYPE_CHECKING:
 
 DESIGNER, PROFILER, IMPLEMENTER, JUDGE = PLUGIN.agents
 _FAKE_AGENT_CAPABILITIES = frozenset(
-    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+    {
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.SESSION_REUSE,
+        AgentCapability.MCP_SERVERS,
+    }
 )
 
 
@@ -139,6 +144,7 @@ def _run(
             facts=facts,
             responder=script.respond,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            supported_extra_tools=("profiler",),
         )
         if configure is not None:
             configure(run)
@@ -165,6 +171,10 @@ def test_plugin_declares_four_roles_and_plain_production_options() -> None:
         _options(profile_guided={"min_measured_rounds": 2})
     with pytest.raises(ValidationError, match="unexpected_option"):
         _options(unexpected_option=True)
+
+
+def test_profiler_role_requests_selected_profiler_tool() -> None:
+    assert PROFILER.extra_tools == (AgentTool(id="profiler"),)
 
 
 def test_round_uses_fresh_policy_sessions_and_named_implementer(tmp_path: Path) -> None:

@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains import database, generic, llm_serving, microservices
+from vibesys.orchestration.domains import (
+    database,
+    generic,
+    kernel_writing,
+    llm_serving,
+    microservices,
+)
 
 if TYPE_CHECKING:
     from vibesys.orchestration.domains.base import DomainDefinition
@@ -15,6 +21,7 @@ DOMAINS: dict[DomainName, DomainDefinition] = {
     llm_serving.DEFINITION.name: llm_serving.DEFINITION,
     microservices.DEFINITION.name: microservices.DEFINITION,
     database.DEFINITION.name: database.DEFINITION,
+    kernel_writing.DEFINITION.name: kernel_writing.DEFINITION,
 }
 
 

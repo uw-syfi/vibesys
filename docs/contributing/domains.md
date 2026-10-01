@@ -21,6 +21,7 @@ domain = "llm-serving"
 | `llm-serving` | LLM inference server context: the `serving-systems` skill/references, `/model` weights, the accuracy + benchmark + reward-hack judge gates. |
 | `microservices` | Microservice workload context: service lifecycle, protocol correctness, and workload-specific evaluator guidance. |
 | `database`    | Database / dataflow engine context: in-place optimization of a vendored engine, judged by output-equivalence against a pristine round-0 copy of the same engine. |
+| `kernel-writing` | Compute-kernel implementation and optimization against a task-owned reference, accuracy checker, and scored benchmark. |
 | `generic`     | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain package
@@ -30,11 +31,11 @@ the central `vibesys/prompts/` package. Domain-specific environment
 setup/teardown code stays next to the domain definition.
 
 ```text
-src/vibesys/domains/my_domain/
+src/vibesys/orchestration/domains/my_domain/
   __init__.py       # exports DEFINITION
   hooks.py          # optional domain-specific EnvironmentHooks implementation
 
-src/vibesys/prompts/domains/my_domain/
+src/vibesys/orchestration/prompts/domains/my_domain/
     README.md        # optional human documentation
     implementer.md   # injected as {{ domain_implementer }}
     judge.md         # injected as {{ domain_judge }}
@@ -96,11 +97,11 @@ Example (inside `judge.md`):
 
 ## How to add a domain
 
-1. Copy `src/vibesys/domains/generic/` to a new in-repo
-   `src/vibesys/domains/<module_name>/` package, using underscores for the
+1. Copy `src/vibesys/orchestration/domains/generic/` to a new in-repo
+   `src/vibesys/orchestration/domains/<module_name>/` package, using underscores for the
    Python module name when the CLI domain name contains hyphens.
-2. Copy `src/vibesys/prompts/domains/generic/` to
-   `src/vibesys/prompts/domains/<module_name>/` and edit its `README.md` with
+2. Copy `src/vibesys/orchestration/prompts/domains/generic/` to
+   `src/vibesys/orchestration/prompts/domains/<module_name>/` and edit its `README.md` with
    the title and "use for…" line.
 3. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
    (what to check) under the central prompt directory. Leave a file out to
@@ -119,6 +120,26 @@ Example (inside `judge.md`):
 
 Domains are registered explicitly so prompt context, environment hooks, and tests
 stay tied to the same domain identity.
+
+## Kernel-writing tasks and skills
+
+Set the domain in the task's input bundle:
+
+```toml
+[agent]
+domain = "kernel-writing"
+```
+
+The bundle also supplies its objective, candidate contract, reference material,
+accuracy checker, and benchmark. This domain provides role guidance; those task
+files define the actual API, supported inputs, tolerances, and score.
+
+The preset `resources/skills/` root includes `kernel-correctness`,
+`kernel-performance`, and, on CUDA, `kernel-ncu-analysis`. Their sidecar metadata
+loads them only for `kernel-writing`. To add task-specific skills while keeping
+these presets, pass `--extra-skills PATH`. Use `--skills-dir PATH` to replace the
+presets entirely. See [CLI skill flags](../cli-flags.md#skills) for the loading
+rules.
 
 ## Scope
 

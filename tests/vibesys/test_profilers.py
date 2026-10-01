@@ -57,6 +57,28 @@ def test_profiler_definition_needs_no_path_or_dispatch_declaration() -> None:
     assert definition.prompt_template == "profilers/nsys.j2"
 
 
+def test_ncu_is_explicitly_selectable_for_kernel_writing() -> None:
+    assert ProfilerKind.NCU in allowed_profiler_kinds(DomainName.KERNEL_WRITING)
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.KERNEL_WRITING,
+            backend_profiler_kind=ProfilerKind.NSYS,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NONE
+    )
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.NCU,
+            domain=DomainName.KERNEL_WRITING,
+            backend_profiler_kind=ProfilerKind.NSYS,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NCU
+    )
+
+
 def _expected_resolved(
     requested: ProfilerKind,
     *,
@@ -75,7 +97,7 @@ def _expected_resolved(
             "Darwin": ProfilerKind.MACOS_CPU,
             "Linux": ProfilerKind.LINUX_CPU,
         }.get(system, ProfilerKind.NONE)
-    if domain is DomainName.MICROSERVICES:
+    if domain in {DomainName.MICROSERVICES, DomainName.KERNEL_WRITING}:
         return ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE

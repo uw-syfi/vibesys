@@ -1,6 +1,6 @@
 """Fixed agent declarations owned by the multi-agent orchestration."""
 
-from vs_runtime.api import AgentCapability, AgentRole, WorkspaceAccess
+from vs_runtime.api import AgentCapability, AgentRole, AgentTool, WorkspaceAccess
 
 DESIGNER = AgentRole(
     id="orchestrator",
@@ -20,6 +20,7 @@ PROFILER = AgentRole(
         "candidate source or configuration. Return only the requested structured response."
     ),
     workspace_access=WorkspaceAccess.LIMITED,
+    extra_tools=(AgentTool(id="profiler"),),
 )
 
 IMPLEMENTER = AgentRole(
