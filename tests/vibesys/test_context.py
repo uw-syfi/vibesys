@@ -655,6 +655,33 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) ->
     assert f"vibesys-runs/{run_id}" in branch
 
 
+def test_collection_resume_accepts_declared_workspace_sources(tmp_path: Path) -> None:
+    # A repository task keeps [[workspace.sources]] in the copied project, and
+    # the copy already holds them, so resuming it must not demand --runs-dir again.
+    source = tmp_path / "input"
+    evaluator = _write_project(source)
+    runs_dir = tmp_path / "runs"
+    with _create_context(source, runs_dir=runs_dir, evaluator=evaluator) as first:
+        project = first.environment_resources.request.workspace
+        run_id = first.project_resources.state.run_id
+    library = WorkspaceSource(
+        name="library",
+        repo="https://example.invalid/library.git",
+        commit="0123456",
+        dest="library",
+    )
+
+    with _create_context(
+        project,
+        runs_dir=runs_dir,
+        evaluator=project / "_evaluator" / "checker",
+        exp_name=run_id,
+        existing=True,
+        workspace_sources=(library,),
+    ) as resumed:
+        assert resumed.project_resources.state.run_id == run_id
+
+
 def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)

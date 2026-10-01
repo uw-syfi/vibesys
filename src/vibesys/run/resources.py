@@ -238,7 +238,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             project_root = collection_root / run_id if copied_project else input_dir
             evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
 
-            if not copied_project and workspace_sources:
+            # A resumed collection run already holds its materialized sources.
+            if not existing and not copied_project and workspace_sources:
                 raise ConfigurationError(
                     ConfigurationDiagnostic(
                         code="project_materialization_required",
