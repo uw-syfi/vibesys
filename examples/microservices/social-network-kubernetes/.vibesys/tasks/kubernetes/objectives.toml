@@ -1,0 +1,6 @@
+# The benchmark's primary_value is read-path p50 latency in milliseconds
+# (workload.toml [objective]), so lower is better. Without this file the run's
+# metric space defaults to primary_value:max and selects the slowest round.
+[[objective]]
+name = "primary_value"
+direction = "min"
