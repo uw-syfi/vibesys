@@ -148,6 +148,50 @@ def test_scalar_benchmark_decodes_finite_result_and_always_cleans(tmp_path: Path
     assert sandbox.calls[-1].command.startswith("rm -f -- /tmp/vibesys-framework-benchmark-")
 
 
+class _TruncatingSandbox(FakeSandbox):
+    """Return head-truncated benchmark output, then the framed result file on request."""
+
+    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+        super().execute(command, timeout=timeout)
+        if command.startswith("rm -f -- ") and "--output-json" in command:
+            head = "evaluator log line\n" * 10
+            return SandboxExecutionResult(
+                output=head + "\n\n... Output truncated at 100000 characters.",
+                exit_code=0,
+                truncated=True,
+                stdout=head,
+            )
+        if command.startswith("printf "):
+            return SandboxExecutionResult(
+                output=f'\n{_MARKER}\n{{"score": 7.25}}\n{_END_MARKER}\n', exit_code=0
+            )
+        return self.default_result
+
+
+def test_truncated_benchmark_output_reads_the_result_file_alone(tmp_path: Path) -> None:
+    sandbox = _TruncatingSandbox()
+    executor = _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            benchmark_command="bench",
+            benchmark_contract=ScalarBenchmarkContract(
+                output_argument="--output-json",
+                metric="score",
+            ),
+        ),
+        sandbox,
+    )
+
+    result = asyncio.run(executor.benchmark())
+
+    assert result.passed, result.output
+    assert result.row == {"score": 7.25}
+    output_path = sandbox.calls[0].command.split("--output-json ")[1].split(" ")[0]
+    assert sandbox.calls[1].command.startswith("printf ")
+    assert f"cat {output_path}" in sandbox.calls[1].command
+    assert sandbox.calls[-1].command == f"rm -f -- {output_path}"
+
+
 def test_scalar_benchmark_preserves_legacy_nested_result_shape(tmp_path: Path) -> None:
     output = f'{_MARKER}\n[{{"result": {{"score": 4.5}}}}]\n{_END_MARKER}\n'
     sandbox = FakeSandbox(
