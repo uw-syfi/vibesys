@@ -47,9 +47,11 @@ After regeneration, reapply the pinned asset-loader revision and the edits
 listed above.
 
 The expected kind cluster and context are `vibesys-k8s-social` and
-`kind-vibesys-k8s-social`. The evaluator forwards `service/nginx-thrift` to
-`127.0.0.1:28080`; ServiceBench performs its own seeded fixture preparation
-through that gateway before measuring timeline operations.
+`kind-vibesys-k8s-social`. The evaluator exposes `service/nginx-thrift` through a NodePort
+(`access: node_port`) and addresses it at the kind node's InternalIP, so
+measured requests do not stream through `kubectl port-forward`, which added
+about 3 ms to each request. ServiceBench performs its own seeded fixture
+preparation through that gateway before measuring timeline operations.
 
 The Kubernetes workload omits the optional Thrift timing-header captures from
 the Compose task. The pinned upstream gateway does not emit those diagnostic
