@@ -956,7 +956,7 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
     apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
     rendered = runner.inputs[apply_index]
     assert rendered is not None
-    dockerfile = (TRAIN_CONFIG.parent / "Dockerfile").read_text(encoding="utf-8")
+    dockerfile = (TRAIN_CONFIG.parent / "service.Dockerfile").read_text(encoding="utf-8")
 
     assert {build.build_args["MODULE"] for build in config.image_builds} == {
         "ts-config-service",
@@ -972,6 +972,11 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
     assert len(builds) == len(config.image_builds)
     assert {call[-1] for call in builds} == {str(candidate.resolve())}
     assert all(str(build.dockerfile).startswith("${CONFIG_DIR}/") for build in config.image_builds)
+    # A task-level file named Dockerfile would select the Docker run environment.
+    assert not (TRAIN_CONFIG.parent / "Dockerfile").exists()
+    assert all(
+        str(build.dockerfile) == "${CONFIG_DIR}/service.Dockerfile" for build in config.image_builds
+    )
     assert "mvn -B" in dockerfile
     assert "COPY . ." in dockerfile
     assert "COPY target" not in dockerfile
