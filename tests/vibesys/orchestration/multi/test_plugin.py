@@ -500,10 +500,10 @@ def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> No
     assert all(session.closed for session in run.agents.sessions)
 
 
-def test_rejected_round_is_reverted_before_its_continuation_is_measured(
+def test_round_slower_than_the_input_never_becomes_the_anchor(
     tmp_path: Path,
 ) -> None:
-    """Regression: a rejected round's edits were measured and anchored the next round."""
+    """Regression: MPSC round 2 (98K, 8x below the input) became the anchor."""
     script = _Script(
         _pre_round(),
         _plan("H-01"),
@@ -547,13 +547,3 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
     assert "no trusted winner; restored the input baseline" in [
         call.message for call in run.observations.calls
     ]
-    hypothesis = state.search.by_id("H-01")
-    assert hypothesis is not None
-    assert hypothesis.parent_commit is not None
-    workspace = run.workspaces.root
-    assert isinstance(workspace, FakeWorkspace)
-    assert workspace.restore_calls[0] == (hypothesis.parent_commit, True)
-    continuation_prompt = [
-        message for role, _history, message in script.calls if role == IMPLEMENTER.id
-    ][-1]
-    assert "reverted round 1's rejected edits" in continuation_prompt

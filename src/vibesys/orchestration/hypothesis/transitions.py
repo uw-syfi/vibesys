@@ -661,55 +661,6 @@ class CarryOver:
     exhaustion_info: str | None = None
 
 
-@dataclass(frozen=True)
-class RestorePoint:
-    """The last accepted tree that a rejected round's edits are reverted to.
-
-    ``round_number`` names the round that produced ``commit``; ``None`` means
-    the tree predates every recorded round (the run's input).
-    """
-
-    round_number: int | None
-    commit: str
-
-    def describe(self) -> str:
-        """Name this tree for agent-facing guidance."""
-        where = f"round {self.round_number}" if self.round_number is not None else "the run's input"
-        return f"{where} (commit `{self.commit[:12]}`)"
-
-
-def round_rejected(record: RoundRecord) -> bool:
-    """Whether the independent judge rejected *record*'s final attempt.
-
-    A round that passed review but failed a framework gate is not rejected:
-    its tree is kept so the next attempt can revalidate it.
-    """
-    return record.judge_verdict == HypothesisReview.FAIL.value
-
-
-def rejected_round_restore_point(hypothesis: Hypothesis, round_number: int) -> RestorePoint | None:
-    """Return the tree that replaces rejected round *round_number* of *hypothesis*.
-
-    Only the judge-rejected rounds are undone: the latest earlier round of the
-    same hypothesis that the judge did not reject keeps its tree; otherwise
-    the hypothesis's own parent tree is restored. ``None`` when that parent
-    has no recorded commit.
-    """
-    kept = next(
-        (
-            item
-            for item in reversed(hypothesis.rounds)
-            if item.round_number < round_number and item.commit and not round_rejected(item)
-        ),
-        None,
-    )
-    if kept is not None and kept.commit is not None:
-        return RestorePoint(kept.round_number, kept.commit)
-    if hypothesis.parent_commit is None:
-        return None
-    return RestorePoint(hypothesis.parent_round, hypothesis.parent_commit)
-
-
 def record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
     """Return the comparable objective row associated with *record*."""
     if record.official_evaluation and record.metrics:
@@ -1110,20 +1061,13 @@ def terminal_workspace_notice(records: Sequence[RoundRecord]) -> str | None:
         campaign_records.append(record)
     campaign_records.reverse()
     started_round = campaign_records[0].round_number
-    rooted_at_input = (
-        any(
-            record.hypothesis_parent_round is None and record.hypothesis_parent_commit is not None
-            for record in campaign_records
-        )
-        and started_round > 1
-    )
     parent_round = next(
         (
             record.hypothesis_parent_round
             for record in campaign_records
             if record.hypothesis_parent_round is not None
         ),
-        None if rooted_at_input or started_round <= 1 else started_round - 1,
+        started_round - 1 if started_round > 1 else None,
     )
     parent_guidance = (
         f"The recorded pre-hypothesis parent is round {parent_round}; use "

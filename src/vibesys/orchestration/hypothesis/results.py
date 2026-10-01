@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis.transitions import CarryOver, RestorePoint
+from vibesys.orchestration.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState, RoundRecord
@@ -26,7 +26,6 @@ __all__ = [
     "NewHypothesis",
     "NextRoundDecision",
     "PlanningContext",
-    "RestorePoint",
     "RollbackTarget",
     "StartedHypothesis",
 ]
@@ -113,15 +112,9 @@ class StartedHypothesis:
 
 @dataclass(frozen=True, slots=True)
 class ClosedRound:
-    """State and next-turn guidance committed after one completed round.
-
-    ``restore`` is set when the round was rejected: orchestration must
-    materialize that tree before the next round, so the rejected edits are
-    neither measured nor used as a parent.
-    """
+    """State and next-turn guidance committed after one completed round."""
 
     state: HypothesisState
     next_active: Hypothesis | None
     carry: CarryOver
     exhaustion_feedback: str | None
-    restore: RestorePoint | None = None

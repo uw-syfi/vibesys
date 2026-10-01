@@ -440,15 +440,14 @@ def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: 
     assert legacy_progress.read_text() == "legacy progress\n"
 
 
-def test_rejected_round_is_reverted_before_its_continuation_is_measured(
+def test_round_slower_than_the_input_never_becomes_the_anchor(
     tmp_path: Path,
 ) -> None:
-    """Regression: MPSC round 1's rejected edits were measured and anchored round 2.
+    """Regression: MPSC round 2 (98K, 8x below the input) became the anchor.
 
     Every attempt of round 1 fails review. Round 2 continues the hypothesis
-    and passes the official gates; it must run on the pre-hypothesis tree,
-    not on the tree review rejected, and its 98K reading is compared with the
-    800K input, so it is neither retained nor selected.
+    and passes the official gates at 98K; it is compared with the 800K input,
+    so it is neither retained nor selected.
     """
     script = _Script(
         _plan("H-01"),
@@ -488,16 +487,6 @@ def test_rejected_round_is_reverted_before_its_continuation_is_measured(
     assert "no trusted winner; restored the input baseline" in [
         call.message for call in run.observations.calls
     ]
-    hypothesis = state.search.by_id("H-01")
-    assert hypothesis is not None
-    assert hypothesis.parent_commit is not None
-    workspace = run.workspaces.root
-    assert isinstance(workspace, FakeWorkspace)
-    assert workspace.restore_calls[0] == (hypothesis.parent_commit, True)
-    continuation_prompt = [
-        message for role, _history, message in script.calls if role == IMPLEMENTER.id
-    ][-1]
-    assert "reverted round 1's rejected edits" in continuation_prompt
 
 
 _GATED = RunFacts(
@@ -626,36 +615,3 @@ def test_unexecuted_input_benchmark_with_feedback_warns(tmp_path: Path) -> None:
 
     assert status is RunStatus.SUCCEEDED
     assert any("provisioning failed" in call.message for call in run.observations.calls)
-
-
-def test_gate_failure_on_every_attempt_keeps_the_tree(tmp_path: Path) -> None:
-    """Only a judge rejection reverts; a gate failure keeps the tree to revalidate."""
-    script = _Script(_plan("H-01"), _response(), _response(), _response())
-
-    def configure(run: FakeRun) -> None:
-        run.evaluation.script_accuracy(
-            AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
-            AccuracyEvaluation(executed=True, feedback="accuracy regressed"),
-        )
-        run.evaluation.script_benchmark(_throughput(100.0), _throughput(120.0))
-
-    status, run = _run(
-        tmp_path,
-        script,
-        options=_options(official_eval_every=1),
-        facts=_GATED,
-        configure=configure,
-    )
-
-    assert status is RunStatus.SUCCEEDED
-    state = asyncio.run(run.state.load(SingleState))
-    assert state is not None
-    gate_failed, _measured = state.search.rounds
-    assert not gate_failed.passed
-    assert gate_failed.judge_verdict == "pass"
-    workspace = run.workspaces.root
-    assert isinstance(workspace, FakeWorkspace)
-    hypothesis = state.search.by_id("H-01")
-    assert hypothesis is not None
-    assert (hypothesis.parent_commit, True) not in workspace.restore_calls[:-1]
-    assert not any("reverted rejected round" in call.message for call in run.observations.calls)

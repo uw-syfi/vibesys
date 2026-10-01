@@ -49,7 +49,6 @@ from vibesys.orchestration.hypothesis.results import (
     NewHypothesis,
     NextRoundDecision,
     PlanningContext,
-    RestorePoint,
     RollbackTarget,
     StartedHypothesis,
 )
@@ -98,7 +97,6 @@ __all__ = [
     "PerformanceProjection",
     "PlanningContext",
     "RecordInput",
-    "RestorePoint",
     "RollbackTarget",
     "SingleAgentReply",
     "SkillResourceSelection",

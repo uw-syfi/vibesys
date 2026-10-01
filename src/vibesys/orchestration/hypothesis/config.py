@@ -20,9 +20,6 @@ class HypothesisConfig:
     official_eval_every: int = 1
     max_retries_per_round: int = 1
     max_continuation_rounds: int = 2
-    # Restore the last accepted tree after a round the judge rejected, instead
-    # of leaving its edits in the workspace for the next round to inherit.
-    revert_rejected_rounds: bool = False
 
     def __post_init__(self) -> None:
         """Reject configuration that cannot express a valid schedule."""
