@@ -39,9 +39,6 @@ from kubernetes_runtime import (  # noqa: E402  # lint-waiver: LW-006003; import
 from kubernetes_runtime import (  # noqa: E402
     cli as runtime_cli,
 )
-from kubernetes_runtime import (  # noqa: E402
-    runtime as runtime_module,
-)
 from kubernetes_runtime.control import (  # noqa: E402  # lint-waiver: LW-006005; import the fixture module after adding its resource directory to sys.path.
     LifecycleControlServer,
     request_action,
@@ -1087,7 +1084,7 @@ def test_candidate_image_is_built_once_and_reused_across_reset(tmp_path: Path) -
 
 def test_start_rejects_forward_port_owned_by_another_listener(tmp_path: Path) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as foreign:
-        foreign.bind(("0.0.0.0", 0))  # noqa: S104  # a wildcard listener is the collision under test
+        foreign.bind(("0.0.0.0", 0))  # noqa: S104  # lint-waiver: LW-006013; a wildcard listener is the collision under test.
         foreign.listen()
         port = foreign.getsockname()[1]
         config = _config(Path("manifest.yaml")).model_copy(
@@ -1110,7 +1107,7 @@ def test_start_rejects_forward_port_owned_by_another_listener(tmp_path: Path) ->
             started.append(args)
             return _Process()
 
-        with pytest.raises(runtime_module.KubernetesLifecycleError, match=f"local port {port}"):
+        with pytest.raises(RuntimeError, match=f"local port {port} for forward 'gateway'"):
             _start_lifecycle(
                 tmp_path,
                 config=KubernetesConfig.model_validate(config.model_dump()),
