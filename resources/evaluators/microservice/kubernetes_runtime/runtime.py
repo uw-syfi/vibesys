@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -327,6 +328,18 @@ def _require_free_local_port(name: str, port: int) -> None:
             raise KubernetesLifecycleError.forward_port_in_use(name, port) from error
 
 
+@dataclass(frozen=True)
+class ForwardLauncher:
+    """Start port-forward processes on this host.
+
+    ``require_free_port`` receives each forward's name and local port before
+    ``popen`` starts kubectl, and raises when the port cannot be used.
+    """
+
+    popen: Callable[..., ForwardProcess] = subprocess.Popen
+    require_free_port: Callable[[str, int], None] = _require_free_local_port
+
+
 def load_config(path: Path) -> KubernetesConfig:
     """Load a strict JSON or YAML lifecycle configuration."""
     return KubernetesConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
@@ -354,14 +367,14 @@ class KubernetesLifecycle:
         *,
         config_dir: Path | None = None,
         runner: CommandRunner = _default_runner,
-        popen: Callable[..., ForwardProcess] = subprocess.Popen,
+        forwards: ForwardLauncher | None = None,
     ) -> None:
         """Create the namespace-scoped deployment runtime."""
         self.config = config
         self.candidate_dir = candidate_dir.resolve()
         self.config_dir = (config_dir or candidate_dir).resolve()
         self._runner = runner
-        self._popen = popen
+        self._launcher = forwards or ForwardLauncher()
         self._namespace: str | None = None
         self._namespace_uid: str | None = None
         self._ownership_token: str | None = None
@@ -722,9 +735,9 @@ class KubernetesLifecycle:
 
     def _start_forwards(self) -> None:
         for forward in self.config.forwards:
-            _require_free_local_port(forward.name, forward.local_port)
+            self._launcher.require_free_port(forward.name, forward.local_port)
             self._forwards.append(
-                self._popen(
+                self._launcher.popen(
                     self._kubectl(
                         "port-forward",
                         "--address",
