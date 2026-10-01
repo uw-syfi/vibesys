@@ -1216,7 +1216,7 @@ def test_node_port_access_exposes_each_forward_without_kubectl_streams(tmp_path:
         "ports": [{"protocol": "TCP", "port": 5000, "targetPort": "http"}],
     }
     lifecycle.close()
-    with pytest.raises(runtime_module.KubernetesLifecycleError):
+    with pytest.raises(RuntimeError, match="has not started"):
         _ = lifecycle.endpoints
 
 
@@ -1247,5 +1247,5 @@ def test_node_port_access_survives_restart_and_reexposes_after_reset(tmp_path: P
 
 def test_node_port_access_requires_a_selector_backed_service(tmp_path: Path) -> None:
     runner = _NodePortRunner(selector={})
-    with pytest.raises(runtime_module.KubernetesLifecycleError, match="Service with a selector"):
+    with pytest.raises(RuntimeError, match="Service with a selector"):
         _start_lifecycle(tmp_path, config=_node_port_config(), runner=runner)
