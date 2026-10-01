@@ -38,10 +38,22 @@ from kubernetes_runtime import (  # noqa: E402  # lint-waiver: LW-006003; import
 from kubernetes_runtime import (  # noqa: E402
     cli as runtime_cli,
 )
+from kubernetes_runtime import (  # noqa: E402
+    runtime as runtime_module,
+)
 from kubernetes_runtime.control import (  # noqa: E402  # lint-waiver: LW-006005; import the fixture module after adding its resource directory to sys.path.
     LifecycleControlServer,
     request_action,
 )
+
+
+@pytest.fixture(autouse=True)
+def _ignore_host_forward_ports(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep fake-forward tests independent of which loopback ports the host uses."""
+    if request.function.__name__ != "test_start_rejects_forward_port_owned_by_another_listener":
+        monkeypatch.setattr(runtime_module, "_require_free_local_port", lambda _name, _port: None)
 
 
 class _Process:
@@ -1067,3 +1079,50 @@ def test_candidate_image_is_built_once_and_reused_across_reset(tmp_path: Path) -
     assert set_images == [first_image, first_image]
     assert runner.timeouts
     assert set(runner.timeouts) == {180}
+
+
+def test_start_rejects_forward_port_owned_by_another_listener(tmp_path: Path) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as foreign:
+        foreign.bind(("0.0.0.0", 0))  # noqa: S104  # a wildcard listener is the collision under test
+        foreign.listen()
+        port = foreign.getsockname()[1]
+        config = _config(Path("manifest.yaml")).model_copy(
+            update={
+                "forwards": (
+                    ServiceForward(
+                        name="gateway",
+                        resource="service/gateway",
+                        remote_port=8080,
+                        local_port=port,
+                    ),
+                ),
+                "primary_endpoint": "gateway",
+                "http_probes": (),
+            }
+        )
+        started: list[tuple[object, ...]] = []
+
+        def popen(*args: object, **_kwargs: object) -> _Process:
+            started.append(args)
+            return _Process()
+
+        with pytest.raises(runtime_module.KubernetesLifecycleError, match=f"local port {port}"):
+            _start_lifecycle(
+                tmp_path, config=KubernetesConfig.model_validate(config.model_dump()), popen=popen
+            )
+        assert started == []
+
+
+def test_forwards_bind_only_ipv4_loopback(tmp_path: Path) -> None:
+    commands: list[list[str]] = []
+
+    def popen(command: list[str], *_args: object, **_kwargs: object) -> _Process:
+        commands.append(command)
+        return _Process()
+
+    lifecycle, _runner = _start_lifecycle(tmp_path, popen=popen)
+    lifecycle.close()
+    assert commands
+    for command in commands:
+        index = command.index("port-forward")
+        assert command[index + 1 : index + 3] == ["--address", "127.0.0.1"]

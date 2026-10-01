@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -227,6 +228,14 @@ class KubernetesLifecycleError(RuntimeError):
         """Create an error when a port forward exits before readiness."""
         return cls("kubectl port-forward exited before readiness")
 
+    @classmethod
+    def forward_port_in_use(cls, name: str, port: int) -> KubernetesLifecycleError:
+        """Create an error when another process already owns a forward's local port."""
+        return cls(
+            f"local port {port} for forward {name!r} is already in use on 127.0.0.1; "
+            "choose a free local_port"
+        )
+
 
 class KubernetesReadinessTimeoutError(TimeoutError):
     """Report that HTTP readiness probes did not pass before the deadline."""
@@ -300,6 +309,22 @@ def _default_runner(
         raise KubernetesLifecycleError.command_failed(error.returncode, command, detail) from error
     except subprocess.TimeoutExpired as error:
         raise KubernetesLifecycleError.command_timed_out(timeout_seconds, command) from error
+
+
+def _require_free_local_port(name: str, port: int) -> None:
+    """Fail when another process owns ``127.0.0.1:port``.
+
+    Without this check, kubectl may bind only the IPv6 loopback while a foreign
+    IPv4 listener answers readiness probes and evaluator traffic.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # Match kubectl's listener options so TIME_WAIT sockets from an earlier
+        # forward do not count as a conflict; an active listener still does.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as error:
+            raise KubernetesLifecycleError.forward_port_in_use(name, port) from error
 
 
 def load_config(path: Path) -> KubernetesConfig:
@@ -697,10 +722,13 @@ class KubernetesLifecycle:
 
     def _start_forwards(self) -> None:
         for forward in self.config.forwards:
+            _require_free_local_port(forward.name, forward.local_port)
             self._forwards.append(
                 self._popen(
                     self._kubectl(
                         "port-forward",
+                        "--address",
+                        "127.0.0.1",
                         forward.resource,
                         f"{forward.local_port}:{forward.remote_port}",
                         namespaced=True,

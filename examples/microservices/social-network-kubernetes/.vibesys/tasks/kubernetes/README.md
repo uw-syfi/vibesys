@@ -48,7 +48,7 @@ listed above.
 
 The expected kind cluster and context are `vibesys-k8s-social` and
 `kind-vibesys-k8s-social`. The evaluator forwards `service/nginx-thrift` to
-`127.0.0.1:18080`; ServiceBench performs its own seeded fixture preparation
+`127.0.0.1:28080`; ServiceBench performs its own seeded fixture preparation
 through that gateway before measuring timeline operations.
 
 The Kubernetes workload omits the optional Thrift timing-header captures from
