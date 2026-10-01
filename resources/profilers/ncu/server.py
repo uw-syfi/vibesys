@@ -37,7 +37,9 @@ def _invoke(*args: str, output_limit: int = _OUTPUT_LIMIT) -> dict[str, object]:
             "diagnostic": "Nsight Compute executable unavailable; set NCU_PATH to its executable or put ncu on PATH.",
         }
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(  # noqa: S603  # LW-930109 [S603]; run the validated NCU executable with a fixed argv, never a shell.
+            # > A subprocess wrapper would only hide this trust boundary; shell=True would
+            # > weaken the argv safety guarantee without removing the external command.
             [executable, *args],
             capture_output=True,
             text=True,
