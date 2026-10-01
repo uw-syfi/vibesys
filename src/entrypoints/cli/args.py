@@ -252,6 +252,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "Which profiler to use between rounds. "
             "'none' to disable standalone profiling, "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
+            "'ncu' for NVIDIA Nsight Compute (CUDA kernel-writing only), "
             "'rocprof' for AMD rocprofv3 / rocprof-compute (ROCm system trace, "
             "PMC counters, ATT, kernel-altitude counters), "
             "'torch' for torch.profiler (works under the Modal run environment), "

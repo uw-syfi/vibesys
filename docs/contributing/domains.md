@@ -141,6 +141,10 @@ these presets, pass `--extra-skills PATH`. Use `--skills-dir PATH` to replace th
 presets entirely. See [CLI skill flags](../cli-flags.md#skills) for the loading
 rules.
 
+On CUDA, `--profiler auto` selects NCU when the run environment supports it.
+Use `--profiler none` to skip profiling. NCU is unavailable for this domain on
+other compute backends and is not available to other domains.
+
 ## Scope
 
 Domains cover **implementer + judge + profiler (+ single-agent + orchestrator)

@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.constants import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
@@ -24,7 +24,6 @@ from vibesys.orchestration.profilers import (
 
 _DOMAINS = tuple(DomainName)
 _REQUESTED = tuple(ProfilerKind)
-_BACKEND_KINDS = (None, *sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value))
 _ENVIRONMENT_DEFAULTS = (
     ProfilerKind.NONE,
     *sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value),
@@ -34,7 +33,7 @@ _PROFILER_VALUES = frozenset(kind.value for kind in ProfilerKind)
 
 class _ResolutionInputs(TypedDict):
     domain: DomainName
-    backend_profiler_kind: ProfilerKind | None
+    backend: ComputeBackend
     environment_default_profiler_kind: ProfilerKind
 
 
@@ -57,25 +56,91 @@ def test_profiler_definition_needs_no_path_or_dispatch_declaration() -> None:
     assert definition.prompt_template == "profilers/nsys.j2"
 
 
-def test_ncu_is_explicitly_selectable_for_kernel_writing() -> None:
-    assert ProfilerKind.NCU in allowed_profiler_kinds(DomainName.KERNEL_WRITING)
+def test_ncu_is_default_for_cuda_kernel_writing_and_can_be_disabled() -> None:
+    assert ProfilerKind.NCU in allowed_profiler_kinds(
+        DomainName.KERNEL_WRITING, ComputeBackend.CUDA
+    )
     assert (
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.KERNEL_WRITING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
-        is ProfilerKind.NONE
+        is ProfilerKind.NCU
     )
     assert (
         resolve_profiler_kind(
             ProfilerKind.NCU,
             domain=DomainName.KERNEL_WRITING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
         is ProfilerKind.NCU
+    )
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.NONE,
+            domain=DomainName.KERNEL_WRITING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NONE
+    )
+
+
+@pytest.mark.parametrize(
+    "backend", [item for item in ComputeBackend if item is not ComputeBackend.CUDA]
+)
+def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> None:
+    assert ProfilerKind.NCU not in allowed_profiler_kinds(DomainName.KERNEL_WRITING, backend)
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.KERNEL_WRITING,
+            backend=backend,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NONE
+    )
+    with pytest.raises(ValueError, match="Profiler 'ncu' is not supported"):
+        resolve_profiler_kind(
+            ProfilerKind.NCU,
+            domain=DomainName.KERNEL_WRITING,
+            backend=backend,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+
+
+def test_ncu_is_unavailable_for_other_domains_and_serving_keeps_nsys_default() -> None:
+    for domain in DomainName:
+        if domain is DomainName.KERNEL_WRITING:
+            continue
+        assert ProfilerKind.NCU not in allowed_profiler_kinds(domain, ComputeBackend.CUDA)
+
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.LLM_SERVING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NSYS
+    )
+
+
+def test_cuda_kernel_writing_does_not_select_ncu_when_environment_lacks_it() -> None:
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.KERNEL_WRITING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.TORCH,
+            environment_supported_profiler_kinds=frozenset(
+                {ProfilerKind.AUTO, ProfilerKind.NONE, ProfilerKind.TORCH}
+            ),
+        )
+        is ProfilerKind.NONE
     )
 
 
@@ -83,10 +148,9 @@ def _expected_resolved(
     requested: ProfilerKind,
     *,
     domain: DomainName,
-    backend_profiler_kind: ProfilerKind | None,
-    environment_default_profiler_kind: ProfilerKind,
+    backend: ComputeBackend,
 ) -> ProfilerKind:
-    allowed = allowed_profiler_kinds(domain)
+    allowed = allowed_profiler_kinds(domain, backend)
     if requested is not ProfilerKind.AUTO:
         if requested not in allowed:
             raise ValueError
@@ -97,15 +161,19 @@ def _expected_resolved(
             "Darwin": ProfilerKind.MACOS_CPU,
             "Linux": ProfilerKind.LINUX_CPU,
         }.get(system, ProfilerKind.NONE)
-    if domain in {DomainName.MICROSERVICES, DomainName.KERNEL_WRITING}:
+    if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
+    if domain is DomainName.KERNEL_WRITING:
+        return ProfilerKind.NCU if backend is ComputeBackend.CUDA else ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
-    candidate = (
-        backend_profiler_kind
-        if backend_profiler_kind in ACTIVE_PROFILER_KINDS
-        else environment_default_profiler_kind
-    )
+    candidate = {
+        ComputeBackend.CUDA: ProfilerKind.NSYS,
+        ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+        ComputeBackend.METAL: ProfilerKind.TORCH,
+        ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
+        ComputeBackend.CPU: ProfilerKind.LINUX_CPU,
+    }[backend]
     if candidate not in allowed:
         raise ValueError
     return candidate
@@ -113,21 +181,21 @@ def _expected_resolved(
 
 @pytest.mark.parametrize("domain", _DOMAINS)
 @pytest.mark.parametrize("requested", _REQUESTED)
-@pytest.mark.parametrize("backend_profiler_kind", _BACKEND_KINDS)
+@pytest.mark.parametrize("backend", tuple(ComputeBackend))
 @pytest.mark.parametrize("environment_default_profiler_kind", _ENVIRONMENT_DEFAULTS)
 def test_profiler_auto_resolution_exhaustive(
     domain: DomainName,
     requested: ProfilerKind,
-    backend_profiler_kind: ProfilerKind | None,
+    backend: ComputeBackend,
     environment_default_profiler_kind: ProfilerKind,
 ) -> None:
     kwargs: _ResolutionInputs = {
         "domain": domain,
-        "backend_profiler_kind": backend_profiler_kind,
+        "backend": backend,
         "environment_default_profiler_kind": environment_default_profiler_kind,
     }
     try:
-        expected = _expected_resolved(requested, **kwargs)
+        expected = _expected_resolved(requested, domain=domain, backend=backend)
     except ValueError:
         with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
@@ -144,7 +212,7 @@ def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend_profiler_kind=ProfilerKind.LINUX_CPU,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
         is ProfilerKind.NONE
@@ -160,7 +228,7 @@ def test_generic_auto_respects_environment_profiler_capabilities(
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend_profiler_kind=ProfilerKind.LINUX_CPU,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
@@ -175,7 +243,7 @@ def test_explicit_profiler_respects_environment_capabilities() -> None:
         resolve_profiler_kind(
             ProfilerKind.NSYS,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
@@ -188,7 +256,7 @@ def test_auto_profiler_falls_back_by_environment_capability_not_provider_name() 
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
@@ -200,22 +268,22 @@ def test_auto_profiler_falls_back_by_environment_capability_not_provider_name() 
 
 @given(
     domain=st.sampled_from(_DOMAINS),
+    backend=st.sampled_from(tuple(ComputeBackend)),
     requested=st.sampled_from(_REQUESTED),
-    backend_profiler_kind=st.sampled_from(_BACKEND_KINDS),
     environment_default_profiler_kind=st.sampled_from(_ENVIRONMENT_DEFAULTS),
 )
 def test_profiler_resolution_invariants(
     domain: DomainName,
+    backend: ComputeBackend,
     requested: ProfilerKind,
-    backend_profiler_kind: ProfilerKind | None,
     environment_default_profiler_kind: ProfilerKind,
 ) -> None:
     kwargs: _ResolutionInputs = {
         "domain": domain,
-        "backend_profiler_kind": backend_profiler_kind,
+        "backend": backend,
         "environment_default_profiler_kind": environment_default_profiler_kind,
     }
-    allowed = allowed_profiler_kinds(domain)
+    allowed = allowed_profiler_kinds(domain, backend)
     if requested is not ProfilerKind.AUTO and requested not in allowed:
         with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
@@ -248,17 +316,13 @@ def test_unknown_profiler_names_raise(value: str) -> None:
         coerce_profiler_kind(value)
 
 
-@given(
-    backend_profiler_kind=st.text(min_size=1, max_size=12).filter(
-        lambda text: text not in _PROFILER_VALUES
-    )
-)
-def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_kind: str) -> None:
-    with pytest.raises(TypeError, match="backend profiler"):
+@given(backend=st.text(min_size=1, max_size=12))
+def test_resolver_rejects_unparsed_backend_metadata(backend: str) -> None:
+    with pytest.raises(TypeError, match="backend must be a ComputeBackend"):
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=cast("ProfilerKind", backend_profiler_kind),
+            backend=cast("ComputeBackend", backend),
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
 
@@ -306,9 +370,15 @@ def test_headroom_profiler_domains_and_preflight() -> None:
 
     assert definition.domains == frozenset({DomainName.LLM_SERVING})
     assert not definition.requires_domain_torch_support
-    assert ProfilerKind.HEADROOM in allowed_profiler_kinds(DomainName.LLM_SERVING)
-    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(DomainName.GENERIC)
-    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(DomainName.MICROSERVICES)
+    assert ProfilerKind.HEADROOM in allowed_profiler_kinds(
+        DomainName.LLM_SERVING, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(
+        DomainName.GENERIC, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(
+        DomainName.MICROSERVICES, ComputeBackend.CUDA
+    )
     # Capture is target-owned; the analysis side needs no host tooling.
     assert preflight_profiler_kind(ProfilerKind.HEADROOM).usable
 
@@ -318,9 +388,15 @@ def test_rocprof_profiler_domains_and_preflight() -> None:
 
     assert definition.domains == frozenset({DomainName.LLM_SERVING})
     assert not definition.requires_domain_torch_support
-    assert ProfilerKind.ROCPROF in allowed_profiler_kinds(DomainName.LLM_SERVING)
-    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(DomainName.GENERIC)
-    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(DomainName.MICROSERVICES)
+    assert ProfilerKind.ROCPROF in allowed_profiler_kinds(
+        DomainName.LLM_SERVING, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(
+        DomainName.GENERIC, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(
+        DomainName.MICROSERVICES, ComputeBackend.CUDA
+    )
     # rocprofv3/rocprof-compute normally run inside the ROCm container, like
     # nsys on CUDA; no host command-availability check, to avoid a false
     # negative on an editor host that never runs the profiler itself.
@@ -365,7 +441,7 @@ def test_generic_auto_falls_back_to_supported_environment_default(
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend_profiler_kind=None,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.MACOS_CPU,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.MACOS_CPU, ProfilerKind.NSYS}
@@ -386,7 +462,7 @@ def test_generic_auto_errors_when_environment_supports_no_generic_profiler(
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend_profiler_kind=None,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.NSYS,
             environment_supported_profiler_kinds=frozenset({ProfilerKind.NSYS}),
         )
@@ -401,7 +477,7 @@ def test_auto_rejects_environment_default_the_environment_cannot_run() -> None:
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset({ProfilerKind.NONE}),
         )

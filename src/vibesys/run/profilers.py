@@ -6,7 +6,6 @@ from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
     ProfilerPreflightResult,
-    default_profiler_for_backend,
     preflight_profiler_kind,
     profiler_definition,
     resolve_profiler_kind,
@@ -41,7 +40,7 @@ def resolve_run_profiler(request: RunRequest, environment: RunEnvironment) -> Pr
     resolved = resolve_profiler_kind(
         request.profiler_kind,
         domain=request.input_bundle.domain,
-        backend_profiler_kind=default_profiler_for_backend(request.backend),
+        backend=request.backend,
         environment_default_profiler_kind=ProfilerKind(environment.default_profiler_id),
         environment_supported_profiler_kinds=(
             None

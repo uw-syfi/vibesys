@@ -8,7 +8,7 @@ starts its MCP server, renders its prompt, and records the returned `ProfilerSum
 
 Add a uniform identifier to `ProfilerKind` and a `ProfilerDefinition` to the typed registry
 in `vibesys.orchestration.profilers`. Definitions contain behavioral policy that cannot be inferred,
-such as supported domains or interface constraints. Keep backend, environment, and
+such as supported domains, backend restrictions, or interface constraints. Keep environment and
 platform `auto` selection in `resolve_profiler_kind` rather than the packaging definition.
 
 The identifier is used without transformation. For a kind named `perf`, VibeSys derives:
@@ -36,8 +36,9 @@ and reproduction metadata rather than embedding unbounded profiler output in the
 response. Target the process that performs the workload, including child workers when
 necessary.
 
-NCU is an opt-in example: `--profiler ncu` selects it for a kernel-writing run;
-`auto` leaves kernel-writing profiling off. Its bundled MCP server provides
+NCU is the `auto` default for kernel-writing on the CUDA backend when the run
+environment supports it. `--profiler none` disables it. Explicit `--profiler ncu`
+is accepted only for kernel-writing on CUDA. Its bundled MCP server provides
 capability discovery and bounded `.ncu-rep` inspection. The profiler agent
 captures through its shell in the candidate's execution environment. A session
 MCP server runs as a framework child process, so it must not launch candidate
