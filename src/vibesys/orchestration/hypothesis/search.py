@@ -250,15 +250,9 @@ class HypothesisSearch:
         """Return the noise-aware Pareto frontier over trusted, reviewed rounds."""
         return transitions.pareto_frontier_records(records, space)
 
-    def best(
-        self,
-        records: Sequence[RoundRecord],
-        *,
-        space: MetricSpace,
-        baseline: InputBaseline | None = None,
-    ) -> RoundRecord | None:
-        """Select the latest noise-aware winner, or ``None`` if the input still wins."""
-        return transitions.select_final_candidate(records, space, baseline)
+    def best(self, records: Sequence[RoundRecord], *, space: MetricSpace) -> RoundRecord | None:
+        """Select the latest noise-aware winner from trusted retained records."""
+        return transitions.select_final_candidate(records, space)
 
     def pareto_conflict(
         self,

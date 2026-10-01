@@ -798,7 +798,6 @@ class _DynamicRun:
         winner = search.best(
             self.state.search.rounds,
             space=self.options.metric_space,
-            baseline=self.state.search.input_baseline,
         )
         if winner is None:
             return None

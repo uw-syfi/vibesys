@@ -10,7 +10,6 @@ no agents, no prompts, no filesystem, no clock, no global RNG.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import TYPE_CHECKING, assert_never
 
 from vibesys.orchestration.hypothesis.state import (
@@ -27,7 +26,6 @@ from vibesys.orchestration.metrics import (
     Measurement,
     MetricComparison,
     MetricSpace,
-    Objective,
 )
 from vs_loop_state.api import (
     CandidateDisposition,
@@ -919,40 +917,27 @@ def trusted_final_records(records: Sequence[RoundRecord], space: MetricSpace) ->
     ]
 
 
-def _axis_measurement(axis: Objective, record: RoundRecord) -> Measurement:
-    return Measurement(metric=axis.name, value=record.metrics[axis.name], direction=axis.direction)
-
-
 def select_final_candidate(
-    records: Sequence[RoundRecord],
-    space: MetricSpace,
-    baseline: InputBaseline | None = None,
+    records: Sequence[RoundRecord], space: MetricSpace
 ) -> RoundRecord | None:
-    """Select the latest noise-aware winner from trusted retained records.
-
-    ``None`` when no record qualifies, or when the input baseline still beats
-    the winner on the selection axis: the input tree is then the best result.
-    """
+    """Select the latest noise-aware winner from trusted retained records."""
     newest_first = sorted(
         trusted_final_records(records, space), key=lambda record: record.round_number, reverse=True
     )
-    primary = space.primary
-    if primary is None:
-        candidates, reading = newest_first, headline_measurement
-    else:
+    if space.primary is not None:
         frontier_rounds = {
             record.round_number for record in pareto_frontier_records(newest_first, space)
         }
         candidates = [record for record in newest_first if record.round_number in frontier_rounds]
-        reading = partial(_axis_measurement, primary)
-    winner = space.best(candidates, reading)
-    winning = reading(winner) if winner is not None else None
-    input_reading = input_baseline_measurement(
-        baseline, winning.metric if winning is not None else None
-    )
-    if space.compare(input_reading, winning) is MetricComparison.BETTER:
-        return None
-    return winner
+        primary = space.primary
+
+        def primary_measurement(record: RoundRecord) -> Measurement:
+            return Measurement(
+                metric=primary.name, value=record.metrics[primary.name], direction=primary.direction
+            )
+
+        return space.best(candidates, primary_measurement)
+    return space.best(newest_first, headline_measurement)
 
 
 def detect_plateau(

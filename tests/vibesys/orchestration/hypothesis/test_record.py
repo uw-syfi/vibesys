@@ -351,8 +351,7 @@ def test_no_round_is_anchored_below_the_best_retained_tree(
         records.append(record)
 
     search = HypothesisSearch(HypothesisConfig(max_rounds=len(readings)))
-    baseline = _with_input(_record_input(), input_value).state.input_baseline
-    winner = search.best(records, space=space, baseline=baseline)
+    winner = search.best(records, space=space)
     if max(readings) > input_value or (pareto and max(readings) == input_value):
         assert winner is not None
         assert winner.perf_metric == max(readings)

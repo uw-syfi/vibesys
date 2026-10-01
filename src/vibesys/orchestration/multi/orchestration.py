@@ -750,7 +750,6 @@ class _MultiRun:
         winner = self.search.best(
             self.records,
             space=self.state.search.metrics,
-            baseline=self.state.search.input_baseline,
         )
         if winner is None:
             baseline = self.workspace.trusted_input_baseline
