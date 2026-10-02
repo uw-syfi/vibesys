@@ -929,6 +929,21 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
     Otherwise a later workstream reuses the number, and the winner lookup by
     round number resolves to the failed slot's unreviewed revision.
     """
+class _StopRequestedError(RuntimeError):
+    """Synthetic cooperative stop raised at a control checkpoint."""
+
+
+def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
+    tmp_path: Path,
+) -> None:
+    """Two 2-wide epochs, one review rejection, a stop between epochs, and resume.
+
+    The stop lands at the epoch boundary; resume must not replan the finished
+    epoch, must let the planner continue the rejected hypothesis, and must
+    adopt the best trusted candidate across both epochs.
+    """
+    run: FakeRun | None = None
+    planner_calls = 0
 
     def respond(
         role: AgentRole,
@@ -996,6 +1011,35 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
     )
 
     async def scenario() -> FakeRun:
+        nonlocal planner_calls
+        if role.id == ORCHESTRATOR.id:
+            planner_calls += 1
+            if planner_calls == 1:
+                assert run is not None
+                run.control.fail_with(_StopRequestedError("stop requested"))
+                return _portfolio("alpha", "beta")
+            assert '"hypothesis_id":"beta"' in message
+            return {
+                "reasoning": "Retry beta with the review fix; explore gamma.",
+                "workstreams": [
+                    *PortfolioPlan.model_validate(_portfolio("gamma")).workstreams,
+                    *PortfolioPlan.model_validate(
+                        _portfolio("beta", continue_hypothesis=True)
+                    ).workstreams,
+                ],
+            }
+        hypothesis_id = next(name for name in ("alpha", "beta", "gamma") if f"`{name}`" in message)
+        if role.id == IMPLEMENTER.id:
+            return _implementation(hypothesis_id)
+        rejected = hypothesis_id == "beta" and planner_calls == 1
+        return {
+            "passed": not rejected,
+            "analysis": "Reviewed.",
+            "feedback": "Breaks correctness." if rejected else "",
+        }
+
+    async def scenario() -> FakeRun:
+        nonlocal run
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
@@ -1254,3 +1298,34 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
     assert state.workstreams[0].attempts == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
+                for value in (10.0, 12.0, 15.0)
+            )
+        )
+        options = _options(max_rounds=2)
+        with pytest.raises(_StopRequestedError):
+            await PLUGIN.orchestrate(run, options)
+        stopped = await run.state.load(DynamicState)
+        assert stopped is not None
+        assert stopped.next_epoch == 2
+        assert stopped.winner_revision is None
+        run.control.fail_with(None)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return run
+
+    finished = asyncio.run(scenario())
+    assert planner_calls == 2
+    assert len(finished.evaluation.benchmark_calls) == 3
+    assert all(candidate.discarded for candidate in finished.workspaces.candidates)
+    state = asyncio.run(finished.state.load(DynamicState))
+    assert state is not None
+    assert state.next_epoch == 3
+    assert [record.hypothesis_id for record in state.search.rounds].count("beta") == 2
+    assert {record.hypothesis_id for record in state.search.rounds} == {"alpha", "beta", "gamma"}
+    best = max(
+        (record for record in state.search.rounds if record.perf_metric is not None),
+        key=lambda record: record.perf_metric or 0.0,
+    )
+    assert best.perf_metric == 15.0
+    assert state.winner_revision == best.commit
+    assert state.adoption_pending is False
+    assert finished.workspaces.root.restore_calls[-1][0] == state.winner_revision
