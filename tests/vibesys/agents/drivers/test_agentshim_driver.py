@@ -83,6 +83,7 @@ class _DriverOptions(TypedDict, total=False):
     log: Callable[[str], None] | None
     docker_sandboxes: dict[str, Any] | None
     check_timeout: float | None
+    transient_retry_delays: Sequence[float]
 
 
 @dataclass
@@ -209,6 +210,7 @@ def _driver(
         docker_sandboxes=options.get("docker_sandboxes"),
         check_timeout=options.get("check_timeout"),
         executor_factory=lambda: fake,
+        transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
     )
     return driver, fake
 
@@ -1320,6 +1322,136 @@ def test_a_fresh_turn_that_fails_is_not_retried(
     """Nothing was resumed, so the failure is the agent's own."""
     del sandbox_builds
     session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
+
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert len(fake.requests) == 1
+
+
+def _claude_api_error(status: str, *, session_id: str | None = None) -> FakeRun:
+    """A Claude turn that exhausted the CLI's own retries on a provider error."""
+    result = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": True,
+        "result": f"API Error: {status}. This is a server-side issue, usually temporary.",
+        "session_id": session_id,
+    }
+    return FakeRun(stdout=[json.dumps(result) + "\n"], returncode=1)
+
+
+@pytest.mark.parametrize(
+    "status", ["529 Overloaded", "500 Internal server error", "429 Too Many Requests"]
+)
+def test_a_transient_provider_error_is_retried(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    status: str,
+) -> None:
+    """One provider overload must not end a run that can simply wait it out."""
+    del sandbox_builds
+    logs: list[str] = []
+    session, fake = _session(
+        tmp_path,
+        "claude",
+        [_claude_api_error(status), scripted_turn("claude", text="ok", session_id="s-1")],
+        log=logs.append,
+    )
+
+    result = session.run_turn(AgentTurnRequest(message="one"))
+
+    assert result.text == "ok"
+    assert result.disposition is SessionDisposition.REUSABLE
+    assert len(fake.requests) == 2
+    assert any("transient provider error" in line for line in logs)
+
+
+def test_a_transient_error_that_outlasts_every_delay_propagates(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        "claude",
+        lambda _request: _claude_api_error("529 Overloaded"),
+        transient_retry_delays=(0.0, 0.0),
+    )
+
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    # The first attempt and one retry per delay.
+    assert len(fake.requests) == 3
+
+
+def test_a_resumed_turn_keeps_its_conversation_through_a_transient_error(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """An outage says nothing about the conversation, so it is not dropped."""
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        "claude",
+        [
+            scripted_turn("claude", text="ok", session_id="s-1"),
+            _claude_api_error("529 Overloaded", session_id="s-1"),
+            scripted_turn("claude", text="again", session_id="s-1"),
+        ],
+    )
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    result = session.run_turn(AgentTurnRequest(message="two"))
+
+    assert result.text == "again"
+    assert result.disposition is SessionDisposition.REUSABLE
+    assert "s-1" in fake.requests[1].argv
+    assert "s-1" in fake.requests[2].argv
+
+
+def test_error_text_in_tool_output_is_not_mistaken_for_a_provider_error(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """Only the provider's own result line decides, not what a tool printed."""
+    del sandbox_builds
+    failed = scripted_turn(
+        "claude",
+        text="the build broke",
+        tool_calls=[("Bash", {"command": "make"}, "API Error: 529 Overloaded")],
+        returncode=1,
+    )
+    session, fake = _session(tmp_path, "claude", failed)
+
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert len(fake.requests) == 1
+
+
+def test_cancel_stops_a_turn_waiting_out_a_transient_error(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """A cancelled turn raises the provider error instead of retrying it."""
+    del sandbox_builds
+    sessions: list[AgentSession] = []
+
+    def log(line: str) -> None:
+        # Logged just before the wait, so this cancel lands mid-backoff.
+        if "transient provider error" in line:
+            sessions[0].cancel()
+
+    session, fake = _session(
+        tmp_path,
+        "claude",
+        lambda _request: _claude_api_error("529 Overloaded"),
+        log=log,
+        transient_retry_delays=(3600.0,),
+    )
+    sessions.append(session)
 
     with pytest.raises(agentshim.CliExitError):
         session.run_turn(AgentTurnRequest(message="one"))

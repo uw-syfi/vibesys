@@ -123,6 +123,18 @@ raises and deliberately keeps the checkpoint, so a run whose provider cannot
 report a refused resume can still re-adopt a dead conversation ID in the next
 process. Fixing that belongs with the checkpoint, not the driver.
 
+### Transient provider errors are waited out
+
+A turn whose provider reports an overload or a server error (Claude's
+`API Error: 529`, `5xx` or `429` in its final result line) is retried in place
+after each delay in `TRANSIENT_RETRY_DELAYS_S`, about fifteen minutes in total,
+before the error propagates. The CLI has already retried inside the turn by
+then, and without this one overload ends a run that is hours long. The retry
+keeps the conversation: the check runs before the resume-failure handling
+above, because Claude reports every failed resumed turn as
+`SessionResumeError`, and an outage says nothing about whether the
+conversation is gone. `cancel()` ends a wait immediately.
+
 ### Retired after a turn, or replaced during one
 
 A reset says the conversation is gone, not when it went. The two cases differ
