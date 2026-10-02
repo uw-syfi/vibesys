@@ -27,6 +27,7 @@ from vs_runtime.api import (
     Run,
     RunFacts,
     RunStatus,
+    StructuredResponseError,
 )
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
 
@@ -969,6 +970,20 @@ def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> N
             IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
             JUDGE.id: [
                 {"passed": True, "analysis": "Candidate is correct."},
+def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: Path) -> None:
+    """One malformed structured reply costs a follow-up turn, not the run or an attempt."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
+                _portfolio("recover"),
+            ],
+            IMPLEMENTER.id: [
+                StructuredResponseError(IMPLEMENTER.id, BaseModel),
+                _implementation("recover"),
+            ],
+            JUDGE.id: [
+                StructuredResponseError(JUDGE.id, BaseModel),
                 {"passed": True, "analysis": "Candidate is correct."},
             ],
         }
@@ -1025,3 +1040,27 @@ def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> N
     planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
     assert f"`{base.candidate_revision}`" in planner_messages[1]
     assert state.winner_revision == stacked.candidate_revision
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=10.0,
+                metric_direction=MetricDirection.MAXIMIZE,
+                row={"throughput": 10.0},
+            )
+        )
+        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1))
+        assert status is RunStatus.SUCCEEDED
+        return run
+
+    run = asyncio.run(scenario())
+    for role in (ORCHESTRATOR, IMPLEMENTER, JUDGE):
+        sessions = [session for session in run.agents.sessions if session.role.id == role.id]
+        assert len(sessions) == 1
+        messages = [message for role_id, _, message in script.calls if role_id == role.id]
+        assert len(messages) == 2
+        assert messages[1].startswith("Correction required")
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision

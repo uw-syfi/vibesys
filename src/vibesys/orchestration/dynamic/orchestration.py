@@ -31,12 +31,18 @@ from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch,
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.metrics import Measurement
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
-from vs_runtime.api import BenchmarkObjective, MetricDirection, Run, RunStatus
+from vs_runtime.api import (
+    BenchmarkObjective,
+    MetricDirection,
+    Run,
+    RunStatus,
+    StructuredResponseError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_runtime.api import CandidateWorkspace
+    from vs_runtime.api import AgentSession, CandidateWorkspace
 
 
 _READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
@@ -209,7 +215,7 @@ class _DynamicRun:
                 message = (
                     prompt if attempt == 0 else f"{prompt}\n\nCorrection required: {first_error}"
                 )
-                plan = await session.turn(message, response=PortfolioPlan)
+                plan = await _structured_turn(session, message, PortfolioPlan)
                 try:
                     self._validate_plan(plan)
                 except (DynamicPlanError, ValidationError) as error:
@@ -471,7 +477,8 @@ class _DynamicRun:
             member_id=plan.hypothesis_id,
         )
         try:
-            return await session.turn(
+            return await _structured_turn(
+                session,
                 render_implementation(
                     hypothesis_id=plan.hypothesis_id,
                     objective_location=self.run.facts.objective_location,
@@ -482,7 +489,7 @@ class _DynamicRun:
                     evidence=_references_text(plan.evidence),
                     feedback=feedback,
                 ),
-                response=ImplementerResult,
+                ImplementerResult,
             )
         finally:
             await session.close()
@@ -507,7 +514,8 @@ class _DynamicRun:
             member_id=plan.hypothesis_id,
         )
         try:
-            return await session.turn(
+            return await _structured_turn(
+                session,
                 render_review(
                     hypothesis_id=plan.hypothesis_id,
                     objective_location=self.run.facts.objective_location,
@@ -517,7 +525,7 @@ class _DynamicRun:
                     summary=implementation.summary,
                     evidence=_references_text(implementation.evidence),
                 ),
-                response=ReviewResult,
+                ReviewResult,
             )
         finally:
             await session.close()
@@ -887,6 +895,26 @@ class _DynamicRun:
             workspace=self.run.workspaces.root if workspace else None,
             label=label,
         )
+
+
+async def _structured_turn[ResponseT: BaseModel](
+    session: AgentSession,
+    message: str,
+    response: type[ResponseT],
+) -> ResponseT:
+    """Run one turn, asking the same conversation once to re-emit an unparseable reply.
+
+    The follow-up keeps the agent's completed work and workspace edits; failing
+    the turn instead would discard an implementation attempt or the whole run.
+    """
+    try:
+        return await session.turn(message, response=response)
+    except StructuredResponseError as error:
+        correction = (
+            f"Correction required: {error}. Do not redo the work. Return only the "
+            f"schema-valid {response.__name__} JSON for the work already completed."
+        )
+        return await session.turn(correction, response=response)
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
