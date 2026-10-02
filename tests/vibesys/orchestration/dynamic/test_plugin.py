@@ -27,6 +27,7 @@ from vs_runtime.api import (
     Run,
     RunFacts,
     RunStatus,
+    StructuredResponseError,
 )
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
 
@@ -914,3 +915,63 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     }
     winner = next(item for item in state.workstreams if item.hypothesis_id == "fast")
     assert state.winner_revision == winner.candidate_revision
+
+
+def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: Path) -> None:
+    """One malformed structured reply costs a follow-up turn, not the run or an attempt."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
+                _portfolio("recover"),
+            ],
+            IMPLEMENTER.id: [
+                StructuredResponseError(IMPLEMENTER.id, BaseModel),
+                _implementation("recover"),
+            ],
+            JUDGE.id: [
+                StructuredResponseError(JUDGE.id, BaseModel),
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=10.0,
+                metric_direction=MetricDirection.MAXIMIZE,
+                row={"throughput": 10.0},
+            )
+        )
+        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1))
+        assert status is RunStatus.SUCCEEDED
+        return run
+
+    run = asyncio.run(scenario())
+    for role in (ORCHESTRATOR, IMPLEMENTER, JUDGE):
+        sessions = [session for session in run.agents.sessions if session.role.id == role.id]
+        assert len(sessions) == 1
+        messages = [message for role_id, _, message in script.calls if role_id == role.id]
+        assert len(messages) == 2
+        assert messages[1].startswith("Correction required")
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
