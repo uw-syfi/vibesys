@@ -93,7 +93,8 @@ machine-readable diff, captured before paid measurement.
 - Fail closed on controller gates: save diagnostics, make no downstream paid
   calls, and release resources. Relate only same-scope/owner counters; cheaply
   test positive, zero, and mixed cases pre-target.
-- Keep long work observable; clean up local and target resources on every exit.
+- Run long work in the foreground, observably: nothing resumes a turn once you
+  respond. Clean up local and target resources on every exit.
 
 
 This working head is scheduled for framework evaluation after review because

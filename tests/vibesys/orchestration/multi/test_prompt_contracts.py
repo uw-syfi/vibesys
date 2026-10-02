@@ -552,6 +552,15 @@ def test_official_evaluation_due_changes_agent_measurement_contract() -> None:
     assert "fresh canonical artifact" in judge
 
 
+def test_implementer_runs_measurements_within_its_turn() -> None:
+    # Regression: an implementer backgrounded its benchmark, scheduled a wake-up
+    # and returned; nothing resumed the turn, so the round closed unmeasured.
+    implementer = _render_prompt(DomainName.LLM_SERVING, "implementer", _CONTEXTS["full"])
+
+    assert "Run long work in the foreground" in implementer
+    assert "nothing resumes a turn once you\n  respond" in implementer
+
+
 def test_minimal_llm_serving_prompt_omits_optional_checker_paths() -> None:
     context = _CONTEXTS["minimal"]
     judge = _render_prompt(DomainName.LLM_SERVING, "judge", context)
