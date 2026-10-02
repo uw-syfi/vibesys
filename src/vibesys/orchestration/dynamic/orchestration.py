@@ -251,7 +251,15 @@ class _DynamicRun:
                 self.state.search,
                 portfolio.hypothesis_updates,
             )
-            sequence = max((record.round_number for record in self.state.search.rounds), default=0)
+            # A slot that failed before recording a round still owns its
+            # sequence; reusing it would alias that slot in the winner lookup.
+            sequence = max(
+                (
+                    *(record.round_number for record in self.state.search.rounds),
+                    *(item.sequence for item in self.state.workstreams),
+                ),
+                default=0,
+            )
             for plan in portfolio.workstreams:
                 sequence += 1
                 index = by_id.get(plan.hypothesis_id)

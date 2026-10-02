@@ -914,3 +914,65 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     }
     winner = next(item for item in state.workstreams if item.hypothesis_id == "fast")
     assert state.winner_revision == winner.candidate_revision
+
+
+def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) -> None:
+    """A slot that failed before recording a round keeps its sequence to itself.
+
+    Otherwise a later workstream reuses the number, and the winner lookup by
+    round number resolves to the failed slot's unreviewed revision.
+    """
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("winner") if "epoch 2" in message else _portfolio("base", "broken")
+        hypothesis_id = next(
+            name for name in ("base", "broken", "winner") if f"`{name}`" in message
+        )
+        if role.id == IMPLEMENTER.id:
+            return _implementation(hypothesis_id)
+        if hypothesis_id == "broken":
+            raise _JudgeTransportError
+        return {"passed": True, "analysis": "Candidate is correct."}
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 20.0)
+            )
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    sequences = [item.sequence for item in state.workstreams]
+    assert len(sequences) == len(set(sequences))
+    winner = next(item for item in state.workstreams if item.hypothesis_id == "winner")
+    assert state.winner_revision == winner.candidate_revision
