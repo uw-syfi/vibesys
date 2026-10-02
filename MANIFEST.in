@@ -23,9 +23,9 @@ include clients/pnpm-lock.yaml
 include clients/pnpm-workspace.yaml
 include clients/biome.json
 include clients/tsconfig.architecture.json
-include clients/.dependency-cruiser.cjs
-include clients/scripts/check_ts_architecture.test.mjs
-include clients/scripts/check_ts_package_manifests.mjs
+include clients/.dependency-cruiser.mjs
+# The whole tooling directory, so a gate script added there ships without another edit here.
+graft clients/scripts
 graft clients/backend-client/src
 include clients/backend-client/package.json
 include clients/backend-client/tsconfig.json

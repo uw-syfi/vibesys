@@ -1,4 +1,5 @@
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+export {type ControlChannelState, sameControlChannelState} from './control-channel.js';
 export {
   BackendClientError,
   type BackendErrorKind,
@@ -21,6 +22,7 @@ export type {
   DesignPatch,
   DesignRound,
   Diagnostic,
+  EventBatchMessage,
   ExperimentCursor,
   ExperimentUpdate,
   HypothesisEntry,
@@ -44,4 +46,18 @@ export {
   type RequestPolicy,
   resolveRequestPolicy,
 } from './request-policy.js';
-export type {EventSubscription, ServerTransport, SubscribeOptions} from './transport.js';
+export {
+  type BackfillFetch,
+  type BackfillOutcome,
+  type BackfillRequest,
+  type BatchContext,
+  type BatchReconciliation,
+  StreamReconciler,
+  type StreamReconcilerOptions,
+} from './stream-reconciler.js';
+export type {
+  ControlTransport,
+  EventSubscription,
+  ServerTransport,
+  SubscribeOptions,
+} from './transport.js';

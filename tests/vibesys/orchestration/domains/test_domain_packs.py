@@ -44,6 +44,7 @@ def test_registered_domains_present() -> None:
     assert "generic" in names
     assert "microservices" in names
     assert "database" in names
+    assert "kernel-writing" in names
     assert "README" not in names  # the authoring guide is not a domain
 
 
@@ -71,6 +72,20 @@ def test_resolve_database_domain() -> None:
     assert d.prompt_dir.parent.name == "domains"
 
 
+def test_kernel_writing_domain_renders_roles_and_derives_single_agent() -> None:
+    domain = resolve_domain(DomainName.KERNEL_WRITING)
+    implementer = render_domain_section(domain, DomainRole.IMPLEMENTER)
+    judge = render_domain_section(domain, DomainRole.JUDGE)
+    profiler = render_domain_section(domain, DomainRole.PROFILER)
+    single_agent = render_domain_section(domain, DomainRole.SINGLE_AGENT)
+
+    assert domain.prompt_dir.is_dir()
+    assert implementer
+    assert judge
+    assert profiler
+    assert single_agent == f"{implementer}\n\n{judge}"
+
+
 def test_resolve_path_is_not_supported(tmp_path: Path) -> None:
     f = tmp_path / "mine"
     f.mkdir()
@@ -86,6 +101,7 @@ def test_domains_declare_torch_profiler_compatibility() -> None:
     assert not DOMAINS[DomainName.GENERIC].supports_torch_profiler
     assert not DOMAINS[DomainName.MICROSERVICES].supports_torch_profiler
     assert not DOMAINS[DomainName.DATABASE].supports_torch_profiler
+    assert not DOMAINS[DomainName.KERNEL_WRITING].supports_torch_profiler
 
 
 def test_resolve_unknown_raises() -> None:

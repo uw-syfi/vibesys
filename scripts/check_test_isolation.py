@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fail when tests add patching, mocking, sleeps, or private library imports.
+"""Fail when tests add patching, mocking, waiting, or private library imports.
 
 The testing policy is: tests exercise public APIs, use in-memory Fakes instead
-of monkeypatch or mock, and never use sleeps as synchronization. Ruff cannot
-count these per file, so this script scans test modules with the Python AST and
-ratchets the worst offenders.
+of monkeypatch or mock, and never synchronize on a sleep, a timeout, or the
+clock. Ruff cannot count these per file, so this script scans test modules with
+the Python AST and ratchets the worst offenders.
 
 The check is a shrink-only ratchet. Existing violations are recorded per
 (file, rule) in a JSONL baseline, so the check passes today and fails the
@@ -12,7 +12,7 @@ moment a file gains a site. Removing sites is always allowed; the script prints
 the entries worth tightening and refuses to let an entry that has dropped to
 zero linger.
 
-Rules (each site counts once):
+Rules (each site counts once; `timeout_verdict` counts a line once):
 
     patch            `.setattr`, `.setitem`, `.delattr`, `.delitem` on the
                      `monkeypatch` fixture or on a `pytest.MonkeyPatch()`
@@ -26,6 +26,8 @@ Rules (each site counts once):
     sleep            `time.sleep(...)` and `asyncio.sleep(...)` (also a bare
                      `sleep` imported from either), except `asyncio.sleep(0)`,
                      which is a plain scheduler yield.
+    timeout_verdict  A timeout or a clock reading that decides the test's
+                     verdict. See "What counts as a timeout verdict" below.
     private_import   Under `libs/<name>/tests/` and `sdk/<name>/tests/` only:
                      an import of the library's own package (the directory
                      under `src/`) that is not `<pkg>.api` or a submodule of
@@ -35,6 +37,66 @@ A site is exempt when its line, or a standalone comment on the line directly
 above it, carries `# test-isolation: <reason>` with a non-empty reason. An
 exemption with an empty reason is itself a violation (`empty_exemption`) that
 is never baselinable.
+
+What counts as a timeout verdict
+--------------------------------
+
+`threading.Event.wait(timeout=T)` is not decidable from the call site alone:
+the same expression is a deadlock guard when a Fake sets the event and a
+synchronization budget when real timers do. The criterion the rule uses is
+what the expiry can do:
+
+    A timeout is a deadlock guard when expiry can only fail the test on the
+    spot, and a synchronization budget when expiry is consumed as a value.
+
+A guard is monotone in its timeout: raising T can never turn a pass into a
+failure, so the value is not load-bearing and no verdict rests on the clock.
+A budget is not monotone, so the value is the verdict. The counted shapes are:
+
+    assert not ev.wait(timeout=T)   Expiry is the success condition, so
+                                    elapsed time is the whole evidence. Also
+                                    `... is False` and `... == False`.
+    return ev.wait(timeout=T)       The expiry boolean leaves the function as
+                                    its value, invisible at the call site.
+    with pytest.raises(TimeoutError): await asyncio.wait_for(...)
+                                    Expiry is the expected outcome. Also
+                                    `contextlib.suppress` and a `try` whose
+                                    `except` names a timeout-expiry type
+                                    (`TimeoutError`, `TimeoutExpired`,
+                                    `queue.Empty`, `socket.timeout`).
+    while time.monotonic() < deadline:
+                                    A wall-clock deadline loop. Also a clock
+                                    reading compared inside an `assert` or an
+                                    `if` condition, which is asserting on
+                                    elapsed time.
+
+Which waits the shapes look at follows from how each reports expiry. The first
+two shapes need a wait that hands expiry back as a value, so they look at
+`wait`, `wait_for`, and `acquire` with a finite `timeout=` keyword
+(`threading.Event.wait`, `Condition.wait_for`, `Lock.acquire`). The third needs
+a wait that raises on expiry, so it looks at `get`, `result`, `communicate`,
+and `recv` with a finite `timeout=`, plus `asyncio.wait_for`,
+`asyncio.timeout`, `asyncio.timeout_at`, and `socket.settimeout`. A clock
+reading is `monotonic`, `time`, `perf_counter`, `process_time` and their `_ns`
+forms, on the `time` module or imported from it.
+
+Deliberately not counted, so that the gate stays worth reading:
+
+    - `assert ev.wait(timeout=T)`: a guard by the criterion above. This is the
+      bulk of the timed waits in this repository, and flagging them would
+      baseline hundreds of legitimate sites.
+    - A bare `sock.settimeout(T)` or `await asyncio.wait_for(x, timeout=T)`
+      whose expiry nobody catches: expiry fails the test with an error instead
+      of producing a verdict. `return proc.communicate(timeout=T)` is the same
+      case, since `communicate` raises rather than returning the expiry.
+    - A production timeout passed into the system under test, or a timeout
+      constant asserted on. Those are inputs, not synchronization.
+    - `timeout=None`, which arms no deadline.
+    - Dataflow through a local: `ok = ev.wait(timeout=T)` then `assert not ok`,
+      and `elapsed = time.monotonic() - start` then `assert elapsed < T`. The
+      rule reads one expression at a time and does no dataflow analysis, so it
+      errs toward catching too little.
+    - `datetime.now()` and other non-`time` clocks.
 
 Configuration lives in `pyproject.toml` under `[tool.vibesys.test_isolation]`:
 
@@ -84,14 +146,37 @@ SKIPPED_DIR_NAMES = frozenset({"fixtures", "__pycache__"})
 RULE_PATCH = "patch"
 RULE_MOCK = "mock"
 RULE_SLEEP = "sleep"
+RULE_TIMEOUT_VERDICT = "timeout_verdict"
 RULE_PRIVATE_IMPORT = "private_import"
 RULE_EMPTY_EXEMPTION = "empty_exemption"
-BASELINE_RULES = frozenset({RULE_PATCH, RULE_MOCK, RULE_SLEEP, RULE_PRIVATE_IMPORT})
+BASELINE_RULES = frozenset(
+    {RULE_PATCH, RULE_MOCK, RULE_SLEEP, RULE_TIMEOUT_VERDICT, RULE_PRIVATE_IMPORT}
+)
 
 PATCH_METHODS = frozenset({"setattr", "setitem", "delattr", "delitem"})
 MOCK_MODULES = ("unittest.mock", "pytest_mock")
 MOCK_SYMBOLS = frozenset({"patch", "MagicMock", "Mock", "AsyncMock", "create_autospec"})
 SLEEP_MODULES = frozenset({"time", "asyncio"})
+
+TIMEOUT_KEYWORD = "timeout"
+REPORTING_WAIT_METHODS = frozenset({"wait", "wait_for", "acquire"})
+RAISING_WAIT_METHODS = frozenset({"get", "result", "communicate", "recv"})
+DEADLINE_SETTER = "settimeout"
+ASYNCIO_TIMEOUT_HELPERS = frozenset({"wait_for", "timeout", "timeout_at"})
+EXPIRY_EXCEPTIONS = frozenset({"TimeoutError", "TimeoutExpired", "Empty", "timeout"})
+EXPIRY_CONTEXT_FUNCTIONS = frozenset({"raises", "suppress"})
+CLOCK_FUNCTIONS = frozenset(
+    {
+        "monotonic",
+        "monotonic_ns",
+        "time",
+        "time_ns",
+        "perf_counter",
+        "perf_counter_ns",
+        "process_time",
+        "process_time_ns",
+    }
+)
 PACKAGE_API = "api"
 LIBRARY_TESTS_RE = re.compile(r"^(?:libs|sdk)/([^/]+)/tests/")
 EXEMPTION_RE = re.compile(r"#\s*test-isolation:(.*)$")
@@ -270,11 +355,16 @@ class _Sites:
         self.time_modules: set[str] = set()
         self.asyncio_modules: set[str] = set()
         self.sleep_names: dict[str, str] = {}
+        self.clock_names: set[str] = set()
+        self.asyncio_timeout_names: set[str] = set()
+        self.timeout_lines: set[int] = set()
 
     def collect(self, tree: ast.Module) -> list[tuple[str, int]]:
         """Return every site in ``tree``."""
         self._bind_names(tree)
+        self._collect_timeout_verdicts(tree)
         self._walk(tree)
+        self.sites.extend((RULE_TIMEOUT_VERDICT, line) for line in sorted(self.timeout_lines))
         return self.sites
 
     def _bind_names(self, tree: ast.Module) -> None:
@@ -313,6 +403,10 @@ class _Sites:
             bound = alias.asname or alias.name
             if module in SLEEP_MODULES and alias.name == "sleep":
                 self.sleep_names[bound] = module
+            if module == "time" and alias.name in CLOCK_FUNCTIONS:
+                self.clock_names.add(bound)
+            if module == "asyncio" and alias.name in ASYNCIO_TIMEOUT_HELPERS:
+                self.asyncio_timeout_names.add(bound)
             if _is_mock_module(module) and alias.name in MOCK_SYMBOLS:
                 self.mock_names.add(bound)
             elif module == "unittest" and alias.name == "mock":
@@ -404,6 +498,103 @@ class _Sites:
                 return "asyncio"
         return None
 
+    def _collect_timeout_verdicts(self, tree: ast.Module) -> None:
+        """Record every timeout or clock reading that decides a verdict.
+
+        At most one site per line, matching the granularity of the exemption
+        comment that can waive it.
+        """
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assert):
+                self._negated_waits(node.test, negated=False)
+                self._clock_comparisons(node.test)
+            elif isinstance(node, ast.While | ast.If):
+                self._clock_comparisons(node.test)
+            elif isinstance(node, ast.Return) and node.value is not None:
+                self._returned_waits(node.value)
+            elif isinstance(node, ast.With | ast.AsyncWith):
+                if any(_is_expiry_context(item.context_expr) for item in node.items):
+                    self._expected_expiries(node.body)
+            elif isinstance(node, ast.Try | ast.TryStar) and _catches_expiry(node):
+                self._expected_expiries(node.body)
+
+    def _returned_waits(self, node: ast.expr) -> None:
+        """Record waits whose expiry leaves the function as its value."""
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call) and self._is_reporting_wait(inner):
+                self.timeout_lines.add(inner.lineno)
+
+    def _expected_expiries(self, body: Sequence[ast.stmt]) -> None:
+        """Record waits in ``body`` whose expiry the enclosing block expects."""
+        for statement in body:
+            for inner in ast.walk(statement):
+                if isinstance(inner, ast.Call) and self._is_raising_wait(inner):
+                    self.timeout_lines.add(inner.lineno)
+
+    def _negated_waits(self, node: ast.expr, *, negated: bool) -> None:
+        """Record timed waits in ``node`` whose expiry is the wanted outcome."""
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            self._negated_waits(node.operand, negated=not negated)
+            return
+        if isinstance(node, ast.Compare) and _has_false_operand(node):
+            for operand in (node.left, *node.comparators):
+                self._negated_waits(operand, negated=not negated)
+            return
+        if negated and isinstance(node, ast.Call) and self._is_reporting_wait(node):
+            self.timeout_lines.add(node.lineno)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.expr):
+                self._negated_waits(child, negated=negated)
+
+    def _clock_comparisons(self, node: ast.expr) -> None:
+        """Record clock readings that ``node`` compares against a value."""
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Compare):
+                continue
+            for candidate in ast.walk(inner):
+                if isinstance(candidate, ast.Call) and self._is_clock_reading(candidate):
+                    self.timeout_lines.add(candidate.lineno)
+
+    def _is_reporting_wait(self, call: ast.Call) -> bool:
+        """Whether ``call`` waits and reports expiry as a falsy return value."""
+        func = call.func
+        if not isinstance(func, ast.Attribute) or self._is_asyncio_helper(func):
+            return False
+        return func.attr in REPORTING_WAIT_METHODS and _has_finite_timeout(call)
+
+    def _is_raising_wait(self, call: ast.Call) -> bool:
+        """Whether ``call`` waits on, or arms, a deadline whose expiry raises."""
+        func = call.func
+        if isinstance(func, ast.Name):
+            return func.id in self.asyncio_timeout_names
+        if not isinstance(func, ast.Attribute):
+            return False
+        if self._is_asyncio_helper(func):
+            return True
+        if func.attr == DEADLINE_SETTER:
+            return bool(call.args) and not _is_none_literal(call.args[0])
+        return func.attr in RAISING_WAIT_METHODS and _has_finite_timeout(call)
+
+    def _is_asyncio_helper(self, func: ast.Attribute) -> bool:
+        """Whether ``func`` is `asyncio.wait_for`, `.timeout`, or `.timeout_at`."""
+        return (
+            func.attr in ASYNCIO_TIMEOUT_HELPERS
+            and isinstance(func.value, ast.Name)
+            and func.value.id in self.asyncio_modules
+        )
+
+    def _is_clock_reading(self, call: ast.Call) -> bool:
+        """Whether ``call`` reads the wall or monotonic clock."""
+        func = call.func
+        if isinstance(func, ast.Name):
+            return func.id in self.clock_names
+        return (
+            isinstance(func, ast.Attribute)
+            and func.attr in CLOCK_FUNCTIONS
+            and isinstance(func.value, ast.Name)
+            and func.value.id in self.time_modules
+        )
+
     def _is_mock_symbol(self, node: ast.expr) -> bool:
         if isinstance(node, ast.Name):
             return node.id in self.mock_names
@@ -426,6 +617,59 @@ def _is_zero_argument(call: ast.Call) -> bool:
         return False
     arg = call.args[0]
     return isinstance(arg, ast.Constant) and arg.value == 0 and not isinstance(arg.value, bool)
+
+
+def _is_none_literal(expr: ast.expr) -> bool:
+    return isinstance(expr, ast.Constant) and expr.value is None
+
+
+def _has_finite_timeout(call: ast.Call) -> bool:
+    """Return whether ``call`` passes an explicit `timeout=` other than None."""
+    return any(
+        keyword.arg == TIMEOUT_KEYWORD and not _is_none_literal(keyword.value)
+        for keyword in call.keywords
+    )
+
+
+def _has_false_operand(node: ast.Compare) -> bool:
+    """Return whether ``node`` compares something against the literal False."""
+    return any(
+        isinstance(operand, ast.Constant) and operand.value is False
+        for operand in (node.left, *node.comparators)
+    )
+
+
+def _is_expiry_exception(expr: ast.expr) -> bool:
+    """Return whether ``expr`` names a timeout-expiry exception type."""
+    if isinstance(expr, ast.Name):
+        return expr.id in EXPIRY_EXCEPTIONS
+    if isinstance(expr, ast.Attribute):
+        return expr.attr in EXPIRY_EXCEPTIONS
+    if isinstance(expr, ast.Tuple):
+        return any(map(_is_expiry_exception, expr.elts))
+    return False
+
+
+def _is_expiry_context(expr: ast.expr) -> bool:
+    """Return whether ``expr`` is a `with` item that expects a timeout expiry."""
+    if not isinstance(expr, ast.Call):
+        return False
+    func = expr.func
+    if isinstance(func, ast.Attribute):
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = func.id
+    else:
+        return False
+    return name in EXPIRY_CONTEXT_FUNCTIONS and any(map(_is_expiry_exception, expr.args))
+
+
+def _catches_expiry(node: ast.Try | ast.TryStar) -> bool:
+    """Return whether any handler of ``node`` catches a timeout expiry."""
+    return any(
+        handler.type is not None and _is_expiry_exception(handler.type)
+        for handler in node.handlers
+    )
 
 
 def _is_mock_module(module: str) -> bool:

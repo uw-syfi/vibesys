@@ -21,11 +21,19 @@ export type BackendErrorKind = 'rejected' | 'timeout' | 'parse' | 'disconnected'
 const RETRYABLE_KINDS: ReadonlySet<BackendErrorKind> = new Set(['timeout', 'disconnected']);
 
 /**
- * Every rejection out of this package, so callers discriminate on `kind` and
- * `retryable` instead of matching message prose. `retryable` defaults from the
- * kind; a transport that knows better (a dial errno that says the endpoint can
- * never accept) overrides it at construction, which keeps the transport-specific
- * classification at the one site that owns it.
+ * Every failed operation out of this package, so callers discriminate on `kind`
+ * and `retryable` instead of matching message prose. `retryable` defaults from
+ * the kind; a transport that knows better (a dial errno that says the endpoint
+ * can never accept) overrides it at construction, which keeps the
+ * transport-specific classification at the one site that owns it.
+ *
+ * Programmer errors are deliberately outside it and throw a plain `Error` or
+ * `RangeError`: an out-of-range constructor option
+ * (`StreamReconciler`'s `backfillChunk`) or a method called against the wrong
+ * state (`PersistentEventStream.subscribe` twice) is a bug in the calling code,
+ * not an outcome of talking to a server, so there is no `kind` a caller could
+ * usefully branch on and nothing to retry. A `catch` that discriminates on
+ * `kind` is meant to leave them uncaught.
  */
 export class BackendClientError extends Error {
   readonly kind: BackendErrorKind;

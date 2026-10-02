@@ -53,6 +53,15 @@ def build_trusted_benchmark_command(
     )
 
 
+def _framed_result_command(output_path: str) -> str:
+    """Print only an existing benchmark result file between the decoder's markers."""
+    return (
+        f"printf '\\n{_BENCHMARK_MARKER}\\n'"
+        f" && cat {shlex.quote(output_path)}"
+        f" && printf '\\n{_BENCHMARK_END_MARKER}\\n'"
+    )
+
+
 class ScalarBenchmarkContract(BaseModel):
     """One legacy scalar JSON result contract."""
 
@@ -325,8 +334,14 @@ class RuntimeTrustedEvaluation:
             metrics: Mapping[str, TrustedMetricDeclaration] = {}
             if passed:
                 try:
+                    framed = output
+                    if result.truncated:
+                        # The sandbox keeps only the head of long output, which
+                        # drops the framed result appended after the evaluator's
+                        # own logs. Read the result file on its own instead.
+                        framed = self._sandbox.execute(_framed_result_command(output_path)).output
                     row, metrics = decode_trusted_benchmark_output(
-                        output, contract, required_metrics
+                        framed, contract, required_metrics
                     )
                 except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
                     output = f"{output}\n{error}".strip()

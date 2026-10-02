@@ -1,0 +1,7 @@
+# primary_value is read-path p50 latency in milliseconds (workload.toml
+# [objective]), so lower is better. Without this axis, the framework records the
+# benchmark metric as primary_value:max, and the frontier treats higher latency
+# as better.
+[[objective]]
+name = "primary_value"
+direction = "min"

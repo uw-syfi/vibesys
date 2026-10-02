@@ -84,6 +84,29 @@ test('a well-formed temp corpus produces no errors', async () => {
   assert.deepEqual(await corpusErrors(root), []);
 });
 
+test('a multi-client scenario validates named transport actors', async () => {
+  const scenario = validScenario('dual', ['WP-ALPHA', 'WP-BETA']);
+  scenario.clients = {terminal: {transport: 'unix'}, browser: {transport: 'websocket'}};
+  scenario.steps = scenario.steps.map((step, index) => ({
+    ...step,
+    client: index === 0 ? 'terminal' : 'browser',
+  }));
+  const root = await writeTree({
+    events: fullEvents(),
+    scenarios: {'dual.json': scenario},
+  });
+  assert.deepEqual(await corpusErrors(root), []);
+});
+
+test('a multi-client step cannot name an undeclared actor', async () => {
+  const scenario = validScenario('dual', ['WP-ALPHA', 'WP-BETA']);
+  scenario.clients = {terminal: {transport: 'unix'}, browser: {transport: 'websocket'}};
+  scenario.steps = scenario.steps.map(step => ({...step, client: 'missing'}));
+  const root = await writeTree({events: fullEvents(), scenarios: {'dual.json': scenario}});
+  const errors = await corpusErrors(root);
+  assert.ok(errors.some(error => error.includes('must name a client declared by the scenario')));
+});
+
 test('a missing event fixture fails coverage', async () => {
   const root = await writeTree({
     events: {'run_started.json': validEvent('run_started')},

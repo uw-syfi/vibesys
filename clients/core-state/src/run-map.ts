@@ -122,16 +122,14 @@ function applyIndexedRunMapEvent(
     phases: internal.phases,
     lastEventTimestamp: event.timestamp,
   };
-  // Run-scoped terminal events say the run ended, not which agent ended it, so
-  // they carry no `agent_kind` and no `round_label`. Every projection below is
-  // keyed by that scope and would drop them, which is why the closeout runs
-  // first and returns: one owner for "the run ended", sweeping the whole map
-  // rather than the one round a label happened to name.
-  if (event.type === 'run_failed') {
-    return closeOpenRunState(seen, 'failed', event.timestamp, event.sequence ?? null);
-  }
-  if (event.type === 'run_interrupted') {
-    return closeOpenRunState(seen, 'interrupted', event.timestamp, event.sequence ?? null);
+  // Run-ending events say the run ended, not which agent ended it, so they
+  // carry no `agent_kind` and no `round_label`. Every projection below is keyed
+  // by that scope and would drop them, which is why the closeout runs first and
+  // returns: one owner for "the run ended", sweeping the whole map rather than
+  // the one round a label happened to name.
+  const closing = runClosingStatus(event);
+  if (closing !== null) {
+    return closeOpenRunState(seen, closing, event.timestamp, event.sequence ?? null);
   }
   const base =
     event.type === 'run_started'
@@ -153,6 +151,32 @@ function applyIndexedRunMapEvent(
     phases,
     lastEventTimestamp: event.timestamp,
   };
+}
+
+/**
+ * What an agent that was running becomes because `event` ended the run, or
+ * null when this event is not where the map learns the run ended.
+ *
+ * `run_failed` and `run_interrupted` are the run-scoped terminal events. A
+ * `stopped` status is the third way a run ends and the only one with nothing
+ * after it: the controller lands an operator `/stop` at an invocation
+ * boundary, records the status change, and the journal stops there (see
+ * `server/controller.py`'s `land_stop_at_boundary`), so the status event is
+ * where the map learns nothing will finish what is open. It reads as
+ * `interrupted` for the same reason a signal does: an operator stopped the
+ * run, the agent did not fail.
+ *
+ * The other ended statuses are deliberately absent. `completed` and `failed`
+ * publish their status change immediately before their own terminal event
+ * (`server/integration.py` settles the controller first, so the status change
+ * orders ahead of it in the journal), and that event is the existing owner of
+ * their closeout.
+ */
+function runClosingStatus(event: RunEvent): 'failed' | 'interrupted' | null {
+  if (event.type === 'run_failed') return 'failed';
+  if (event.type === 'run_interrupted') return 'interrupted';
+  const data = event.data;
+  return data?.kind === 'run_status_changed' && data.status === 'stopped' ? 'interrupted' : null;
 }
 
 /** Copies lazy run-map array publication from `source` onto a folded core state. */

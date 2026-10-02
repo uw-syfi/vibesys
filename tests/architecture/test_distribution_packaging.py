@@ -302,7 +302,7 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "clients/core-state/src/index.ts" in members
     assert "clients/tui/src/index.ts" in members
     assert "clients/web/src/App.tsx" in members
-    assert "clients/web/src/tokens.css" in members
+    assert "clients/web/src/theme.css" in members
     assert "clients/web/package.json" in members
     assert "clients/web/vite.config.ts" in members
     assert "clients/web/index.html" in members
@@ -318,9 +318,11 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "clients/tui/package.json" in members
     assert "clients/pnpm-lock.yaml" in members
     assert "clients/tsconfig.architecture.json" in members
-    assert "clients/.dependency-cruiser.cjs" in members
+    assert "clients/.dependency-cruiser.mjs" in members
+    assert "clients/scripts/check_ts_architecture.mjs" in members
     assert "clients/scripts/check_ts_architecture.test.mjs" in members
     assert "clients/scripts/check_ts_package_manifests.mjs" in members
+    assert "clients/scripts/workspace_layout.mjs" in members
     assert not any(
         member.startswith("resources/evaluators/") and "/target/" in member for member in members
     )

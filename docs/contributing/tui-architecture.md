@@ -35,7 +35,11 @@ workspace dependencies that are declared but unused, because they do not appear 
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
 
 The check scans each package's `src/` plus the non-shipping code next to it (`tui/dev`, benchmarks,
-the web end-to-end tests, and `clients/scripts`). Beyond the package direction, it enforces:
+the web end-to-end tests, and `clients/scripts`). That set is derived from the workspace rather
+than listed: `clients/scripts/workspace_layout.mjs` enumerates the packages pnpm admits and the
+source directories inside them, and the scan roots, the rule path patterns, the audited knip
+workspaces, and the dependency policy all read it from there. A new package or directory is
+therefore gated on its first commit. Beyond the package direction, it enforces:
 
 - No deep imports into another workspace package (`@vibesys/x/dist/...`, `@vibesys/x/src/...`,
   relative paths into a sibling package). Only the public `exports` are importable.
@@ -177,15 +181,19 @@ pnpm test:clients
 pnpm build:clients
 ```
 
-`pnpm check:knip` (knip, configured in `clients/knip.jsonc`) fails on unused files, exports,
+`pnpm check:knip` (knip, configured in `clients/knip.config.ts`) fails on unused files, exports,
 dependencies, and unlisted or unresolved imports. Entry points are the package `bin` and `exports`
 plus the declared test, harness, and benchmark files; an export used nowhere in the workspace should
 lose its `export` or be deleted. `backend-client/src/generated/` is ignored because the generator
 exports every schema type, and the `index.ts` of each library package is its public API. Add an
-entry point to `knip.jsonc` (with a comment saying who runs it) rather than suppressing a finding.
+entry point to `knip.config.ts` (with a comment saying who runs it) rather than suppressing a
+finding. The config keys its per-package policy off the derived workspace layout, so a package
+without one fails the gate by name instead of falling back to knip's default heuristics.
 
-Each package also supports its own `check`, `test`, and `build` scripts. Package builds consume only
-public workspace exports. The release build uses the same dependency-aware build chain before pnpm
+Each package declares its own `check`, `test`, and `build` scripts, and the workspace scripts run
+them with `pnpm -r`, which covers every member in dependency order. A package that does not declare
+one is reported by `pnpm check:ts-architecture`, because `pnpm -r` would skip it silently. Package
+builds consume only public workspace exports. The release build uses the same dependency-aware build chain before pnpm
 deploys the self-contained TUI payload.
 
 ### Regression tests for rendering bugs

@@ -10,6 +10,15 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "gateway transport changes reach the browser e2e suite"
+paths = ["src/server/transport/websocket.py"]
+jobs = ["python", "tui"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "core state changes reach downstream TypeScript packages"
 paths = ["clients/core-state/src/core-state.test.ts"]
 jobs = ["tui"]

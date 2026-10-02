@@ -16,6 +16,11 @@ Pydantic models in `src/server/api/protocol.py`, generated into
 `clients/backend-client/src/generated/`. A transport relays whole protocol messages opaquely. If the
 payload schema changes (for example a version bump), this layer does not.
 
+It also does not specify how the WebSocket gateway serves the browser bundle over plain HTTP. The
+response headers, the Content-Security-Policy, and the token-free `/assets/*` route are gateway
+serving decisions with no counterpart on the Unix transport, so they are owned by
+[`web-development.md`](web-development.md) rather than being `WP-*` decision tokens here.
+
 The authoritative message taxonomy is three unions in `src/server/api/protocol.py`:
 
 | Direction | Union | Members |
@@ -39,12 +44,12 @@ a test failing.
 ### WP-GRANULARITY: one frame carries exactly one protocol message
 
 One transport frame is exactly one serialized protocol message. On the Unix transport a frame is one
-JSONL line; `_write_message` serializes one model and appends `\n` (`unix_jsonl.py:192-195`). On the
-WebSocket transport a frame is one WebSocket message.
+JSONL line; `_write_message` serializes one model and appends `\n`
+(`unix_jsonl.py:_write_message`). On the WebSocket transport a frame is one WebSocket message.
 
 Batching is not framing. `event_batch` is one protocol message that carries many events in its
 `events` list. The batch is a payload construct (`EventBatchMessage` in `protocol.py`), produced by
-the server coalescing a watermark-consistent snapshot (`unix_jsonl.py:120-138`), and it crosses the
+the server coalescing a watermark-consistent snapshot (`unix_jsonl.py:_stream`), and it crosses the
 wire as a single frame on either transport. A transport never splits or merges frames.
 
 ### WP-FRAME-TYPE: text frames, UTF-8
@@ -80,36 +85,36 @@ mirrors the three sockets the Unix client opens today and needs no multiplexing.
 | chat | one `query.chat` on its own connection | one long-running request and its single response |
 
 On the Unix transport the control connection reads requests in a loop and writes one response per
-request (`unix_jsonl.py:47-72`); a `subscribe` request takes over its connection and never returns
-to that loop (`unix_jsonl.py:55-63`). A transport must preserve this: a subscription owns its
-connection for the connection's life, and chat is isolated on its own connection so a long agent
-turn does not block control traffic behind it.
+request (`unix_jsonl.py:_RequestHandler.handle`); a `subscribe` request takes over its connection
+and never returns to that loop (`unix_jsonl.py:_stream`). A transport must preserve this: a
+subscription owns its connection for the connection's life, and chat is isolated on its own
+connection so a long agent turn does not block control traffic behind it.
 
 ### WP-SUBSCRIBE-ACK: subscribe is acknowledged before any batch, even on failure
 
 The server answers an accepted `subscribe` with a `subscribed` message carrying `run_id` and
-`latest_sequence` before it sends any `event_batch` (`unix_jsonl.py:96-102`). If the bootstrap replay
-then fails, the server has already sent `subscribed` and reports the failure as a `protocol_error`
-frame (`unix_jsonl.py:80-95`). So a client always sees `subscribed` first on a dial the server
-accepted, and a bootstrap failure is a stream error after the ack, never a rejected dial. A
-transport must not reorder or drop the ack.
+`latest_sequence` before it sends any `event_batch` (`unix_jsonl.py:_stream`). If the bootstrap
+replay then fails, the server has already sent `subscribed` and reports the failure as a
+`protocol_error` frame (`unix_jsonl.py:_write_stream_error`). So a client always sees `subscribed`
+first on a dial the server accepted, and a bootstrap failure is a stream error after the ack, never
+a rejected dial. A transport must not reorder or drop the ack.
 
 ### WP-PROTOCOL-ERROR: a protocol error is an in-band frame then close
 
 `ProtocolErrorMessage` is a normal framed message (`type: "protocol_error"`). The server writes it in
-band and then closes the connection (`unix_jsonl.py:173-182`). It is not expressed as a transport
-close code. This is not cosmetic: the client suppresses its own disconnect callback after it reads a
-`protocol_error`, because the drop that follows is the expected consequence of the error, not a
-separate outage. A WebSocket transport that mapped a protocol error onto a close code instead of an
-in-band text frame would change error semantics with no compile-time signal, so it must send the
-frame and then close.
+band and then closes the connection (`unix_jsonl.py:_write_stream_error`). It is not expressed as a
+transport close code. This is not cosmetic: the client suppresses its own disconnect callback after
+it reads a `protocol_error`, because the drop that follows is the expected consequence of the error,
+not a separate outage. A WebSocket transport that mapped a protocol error onto a close code instead
+of an in-band text frame would change error semantics with no compile-time signal, so it must send
+the frame and then close.
 
 ### WP-DISCONNECT: disconnect detection is transport specific and needs a liveness signal
 
 The Unix server notices a gone client with a non-blocking `recv(1, MSG_PEEK | MSG_DONTWAIT)` that
-returns empty on FIN, checked only while the stream is idle (`unix_jsonl.py:104-108`, `:184-190`).
-That probe has no WebSocket equivalent, and a WebSocket that dies without a close (a slept laptop, a
-killed tab) leaves the server with no FIN to read. The disposition:
+returns empty on FIN (`unix_jsonl.py:_client_disconnected`), checked only while the stream is idle
+(`unix_jsonl.py:_stream`). That probe has no WebSocket equivalent, and a WebSocket that dies without
+a close (a slept laptop, a killed tab) leaves the server with no FIN to read. The disposition:
 
 - A clean browser close (tab closed, navigation) sends a WebSocket close frame, which the gateway
   treats exactly as the Unix FIN: the subscriber count falls and teardown proceeds.
@@ -117,23 +122,77 @@ killed tab) leaves the server with no FIN to read. The disposition:
   whose pong never arrives. Browsers answer a ping automatically below the JavaScript layer, so this
   needs no application protocol.
 - A frozen or throttled tab still answers pings while reading nothing, so ping liveness cannot see
-  it. That case is handled by a send-side write deadline on the gateway, not by this contract, and
-  by the optional client heartbeat below.
+  it. That case is handled by the send-side write deadline below, and by the optional client
+  heartbeat (`WP-HEARTBEAT`).
 
-The exact ping cadence, the write deadline, and the send-buffer overflow policy are connection-health
-mechanics owned by #890. This contract reserves the client-visible surface: an optional application
-heartbeat (`WP-HEARTBEAT`).
+The bounds are stated, not inherited. The `WebSocketLimits` dataclass in `websocket.py` names every
+one of them and `_serve_until_stopped` passes them all to `serve()`, so a `websockets` upgrade
+cannot move a bound a subscriber depends on. Three of them compose into the liveness ceiling:
+
+| Bound | Value | Role |
+| --- | --- | --- |
+| `ping_interval_seconds` | 20s | Idle period before the server probes the peer |
+| `ping_timeout_seconds` | 20s | How long a pong may be outstanding before the peer fails |
+| `close_timeout_seconds` | 10s | How long the server waits for the peer to echo its close frame |
+
+A peer that stops answering is sent a close frame after 40s, and its socket is aborted at 50s when
+that close is never echoed. Only the abort moves the connection to `CLOSED`, which is what the
+stream loop polls for, so the subscription is released about 50.1s after the peer went silent (one
+`_DISCONNECT_POLL_SECONDS`), and a non-detached run may then finish after
+`RECONNECT_SETTLE_SECONDS`. Those are nominal bounds derived from the three values in the table, not
+three independently measured constants. A peer that sends a FIN without a close frame needs none of
+this and is released in 0.15s (measured).
+
+That chain is not unconditional. `websockets` writes its own keepalive ping through the same
+transport and outside the gateway's `_send`, so no write deadline covers it, and it can only go out
+while the transport is below its low-water mark. It always is in practice, because a `_send` that
+returns has drained below the mark and one that does not has aborted the transport, but the bound
+above is a consequence of the send-side deadline holding rather than independent of it.
+
+Flow control has two separate bounds in opposite directions, and conflating them is the easy
+mistake. `max_queue`, `(32, 8)`, bounds frames arriving *from* the peer. `write_limit`, 32 KiB, is
+the send-side high-water mark, and it is the one that carries the contract below.
+
+**The send-side overflow policy is to stall the producer, not to drop events and not to disconnect
+on the first slow read.** Past the high-water mark the producing coroutine suspends in the library's
+`drain()` until the peer catches up. This is deliberately the same shape as the Unix path, where
+`_write_message` in `unix_jsonl.py` does a blocking `wfile.write` plus `flush`, and it is
+what preserves burst batching on both transports: a stalled stream loop is not reading the journal,
+so the next `subscription_checkpoint` coalesces the whole backlog into one `event_batch` instead of
+one frame per event. Slow consumers get fewer, larger batches rather than lost events.
+
+The stall is bounded. A single frame may stall for `write_deadline_seconds`, one full keepalive
+reaping window (40s) by default; past that the peer is treated as gone and its socket is aborted.
+That bound is not optional decoration. `websockets` ends *every* write in `drain()`, including its
+own keepalive ping and close frames, so a peer that neither drains its socket nor answers pings
+blocks the very keepalive that was supposed to reap it. Without the deadline such a peer was never
+reaped at all, its subscription was never released, and a non-detached run never exited: measured,
+still counted as active after 90s. The socket is aborted rather than closed because a close frame is
+itself a write and would re-enter the same stalled `drain()`.
+
+The Unix path has no equivalent deadline: its blocking write stalls the handler thread
+indefinitely, which is pre-existing behavior this contract records rather than changes. Its
+gone-client probe fires only while the stream is idle. So the two transports agree on the stall and
+differ on the ceiling.
 
 ### WP-HEARTBEAT: the application heartbeat is optional and probe advertised
 
 Because browsers do not expose WebSocket ping and pong to JavaScript, a client that wants to detect a
 dead server (as opposed to the server detecting a dead client) needs an application-level signal. The
-frame shape is reserved here so both ends agree before either implements it (#890): an optional
+frame shape is reserved here so both ends agree before either implements it: an optional
 `heartbeat_ms` field on `SubscribeRequest`, capability probed like `tail` and `store_id`
 (`WP-CAPABILITY-PROBE`). A server that has the field emits a periodic keepalive frame the client can
 time out against; a server that predates it rejects the field, and the client falls back to no
-application heartbeat. No heartbeat frame is defined until #890 lands; this reservation only fixes
-where it rides so it is additive.
+application heartbeat. This reservation only fixes where the frame rides so it is additive.
+
+No server-side heartbeat frame exists, and the server does not need one. The direction this contract
+governs, the server detecting a dead client, is served entirely by protocol-level pings, because a
+browser's own WebSocket implementation answers them below the JavaScript API (`WP-DISCONNECT`). Only
+the opposite direction, a client detecting a dead server, would use the reserved field, so it stays
+reserved and unimplemented on both transports. `tests/conformance/scenarios/heartbeat-probe.json`
+records the reservation: the field is rejected today, and that rejection is the capability probe
+working, not a gap. It records rather than pins, because no runner executes it yet
+(`tests/conformance/README.md`).
 
 ### WP-CAPABILITY-PROBE: capabilities are probed by rejection, not advertised
 
@@ -155,10 +214,10 @@ Two conditions make the server abandon a client's cursor and send a fresh bootst
 a continuation:
 
 - The run attached its durable event store after the client subscribed, so the batch's `store_id`
-  differs from what the client folded (`unix_jsonl.py:121-128`). Sequences are only comparable within
+  differs from what the client folded (`unix_jsonl.py:_stream`). Sequences are only comparable within
   one store.
 - More live output landed in one wait than the `tail` bound was willing to replay
-  (`unix_jsonl.py:110-115`).
+  (`unix_jsonl.py:_stream`).
 
 In both cases the next `event_batch` supersedes the client's fold rather than extending it, and its
 `through_sequence` is not the client's cursor plus one. A client keys continuation on `store_id` and
@@ -169,15 +228,15 @@ decision is server logic, not framing.
 
 Two clients on one run is the configuration the browser port creates, and the server must be able to
 say which connection issued a request (for #840's acknowledgment attribution, and for the two-client
-conformance scenario). This is a protocol field, `client_id`, carried on requests and reflected on
-acknowledgments. It is additive and optional: a client that omits it keeps working, matching the
-`extra="forbid"` probe pattern.
+conformance scenario). This is the optional protocol field `client_id`. A frontend transport
+generates one stable id for its client instance and carries it on control requests, subscriptions,
+and dedicated chat requests, including requests sent after a reconnect. `Response`,
+`SubscribedMessage`, and `ProtocolErrorMessage` reflect it. An empty id is the backward-compatible
+default for a peer that predates attribution.
 
-The field itself lands in `src/server/api/protocol.py` with regenerated bindings, which is outside
-the client team's delegated-merge capability, so it is filed as the maintainer half of #888 (888c in
-the port plan). This document specifies it; the corpus reserves a two-client scenario that asserts
-independent attribution once the field and a second transport both exist (that scenario lands with
-the gateway, #811, because it needs one Unix and one WebSocket subscriber live in one process).
+The field is defined in `src/server/api/protocol.py` and generated into the TypeScript bindings. The
+corpus reserves a two-client scenario that asserts independent attribution with one Unix and one
+WebSocket subscriber live in one process.
 
 ## The conformance corpus
 

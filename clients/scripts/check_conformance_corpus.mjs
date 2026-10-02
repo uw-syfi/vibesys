@@ -162,13 +162,40 @@ function scenarioShapeErrors(data, stem, label, decisions) {
   return {errors, used};
 }
 
+function scenarioClientErrors(data, label) {
+  if (data?.clients === undefined) return [];
+  if (typeof data.clients !== 'object' || data.clients === null || Array.isArray(data.clients)) {
+    return [`${label}: "clients" must be an object`];
+  }
+  const errors = [];
+  const entries = Object.entries(data.clients);
+  if (entries.length < 2) errors.push(`${label}: "clients" must name at least two clients`);
+  for (const [name, client] of entries) {
+    if (!name) errors.push(`${label}: client names must be non-empty`);
+    if (!KNOWN_TRANSPORTS.has(client?.transport)) {
+      errors.push(`${label}: client "${name}" has unknown transport "${client?.transport}"`);
+    } else if (!Array.isArray(data.transports) || !data.transports.includes(client.transport)) {
+      errors.push(`${label}: client "${name}" uses a transport not listed by the scenario`);
+    }
+  }
+  return errors;
+}
+
 function scenarioStepErrors(data, label, frames) {
   if (!Array.isArray(data?.steps) || data.steps.length === 0) {
     return [`${label}: "steps" must be a non-empty array`];
   }
   const errors = [];
+  const clients = data?.clients;
+  const hasClientMap = typeof clients === 'object' && clients !== null && !Array.isArray(clients);
   for (const [index, step] of data.steps.entries()) {
     errors.push(...checkStep(step, index, label, frames));
+    const where = `${label} step ${index}`;
+    if (clients === undefined && step?.client !== undefined) {
+      errors.push(`${where}: "client" requires a scenario "clients" map`);
+    } else if (hasClientMap && !Object.hasOwn(clients, step?.client)) {
+      errors.push(`${where}: "client" must name a client declared by the scenario`);
+    }
   }
   return errors;
 }
@@ -179,6 +206,7 @@ function checkScenario(scenario, decisions, frames) {
     return {errors: [`${label}: invalid JSON: ${scenario.parseError}`], used: []};
   }
   const {errors, used} = scenarioShapeErrors(scenario.data, scenario.stem, label, decisions);
+  errors.push(...scenarioClientErrors(scenario.data, label));
   errors.push(...scenarioStepErrors(scenario.data, label, frames));
   return {errors, used};
 }

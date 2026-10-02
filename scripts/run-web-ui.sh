@@ -20,4 +20,8 @@ pnpm --dir clients install --frozen-lockfile
 
 # Call the browser entrypoint directly. Going through `vibesys` would involve
 # the interactive launcher, whose default frontend is the OpenTUI client.
-exec uv run python -m entrypoints.web live --demo --open "$@"
+browser_flag="--open"
+if [[ -n "${SSH_CONNECTION:-}" ]]; then
+  browser_flag="--no-open"
+fi
+exec uv run python -m entrypoints.web live --demo "$browser_flag" "$@"

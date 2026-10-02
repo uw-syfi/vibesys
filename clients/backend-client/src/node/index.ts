@@ -1,5 +1,2 @@
-export {
-  type ControlChannelState,
-  ServerClient,
-  type ServerClientOptions,
-} from './client.js';
+export type {ControlChannelState} from '../control-channel.js';
+export {ServerClient, type ServerClientOptions} from './client.js';

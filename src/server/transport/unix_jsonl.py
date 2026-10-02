@@ -72,9 +72,12 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         api = self.server.api
         for line in self.rfile:
             request_id = "unknown"
+            client_id = ""
             try:
                 raw = json.loads(line)
                 request_id = str(raw.get("request_id", request_id))
+                if isinstance(raw.get("client_id"), str):
+                    client_id = raw["client_id"]
                 request = _REQUEST_ADAPTER.validate_python(raw)
                 if isinstance(request, SubscribeRequest):
                     with self.server.subscriptions.track():
@@ -83,7 +86,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                         except (BrokenPipeError, ConnectionResetError):
                             pass
                         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
-                            self._write_stream_error(request.request_id, exc)
+                            self._write_stream_error(request.request_id, request.client_id, exc)
                     return
                 response = api.execute(request)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
@@ -91,7 +94,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                     request_id,
                     exc,
                     operation="Request",
-                )
+                ).model_copy(update={"client_id": client_id})
             self.wfile.write(response.model_dump_json().encode() + b"\n")
             self.wfile.flush()
 
@@ -112,6 +115,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             self._write_message(
                 SubscribedMessage(
                     request_id=request.request_id,
+                    client_id=request.client_id,
                     run_id=api.snapshot().run_id,
                     latest_sequence=api.latest_sequence,
                 )
@@ -120,6 +124,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         self._write_message(
             SubscribedMessage(
                 request_id=request.request_id,
+                client_id=request.client_id,
                 run_id=bootstrap.run_id,
                 latest_sequence=bootstrap.through_sequence,
             )
@@ -194,14 +199,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id
 
-    def _write_stream_error(self, request_id: str, error: Exception) -> None:
+    def _write_stream_error(self, request_id: str, client_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""
         protocol_error = ProtocolErrorMessage.from_exception(
-            error,
-            operation="Event stream",
-            code="stream_failed",
-            request_id=request_id,
-        )
+            error, operation="Event stream", code="stream_failed", request_id=request_id
+        ).model_copy(update={"client_id": client_id})
         with suppress(BrokenPipeError, ConnectionResetError):
             self._write_message(protocol_error)
 

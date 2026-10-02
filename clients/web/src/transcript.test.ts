@@ -241,7 +241,7 @@ test('two executions under one label stay two turns; an invocation alias joins i
       data: {
         kind: 'agent_execution_started',
         stage: 'implementer',
-        activity: {mode: 'thinking', summary: 'Working'},
+        activity: {kind: 'agent_execution_activity_changed', mode: 'thinking', summary: 'Working'},
       },
     }),
     ev(2, 'agent_output_chunk', {
@@ -267,7 +267,7 @@ test('without ids, a repeated label is a new execution at each start, prompts in
         kind: 'agent_execution_started',
         stage: 'implementer',
         user_prompt: prompt,
-        activity: {mode: 'thinking', summary: 'Working'},
+        activity: {kind: 'agent_execution_activity_changed', mode: 'thinking', summary: 'Working'},
       },
     });
   const finish = (sequence: number) =>

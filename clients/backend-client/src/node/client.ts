@@ -1,32 +1,26 @@
 import {createConnection, type Socket} from 'node:net';
-import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from '../backoff.js';
+import {
+  ControlChannel,
+  type ControlChannelState,
+  type ControlConnection,
+  type ControlConnectionHandlers,
+  type IssuedRequest,
+} from '../control-channel.js';
 import {BackendClientError, ServerError} from '../errors.js';
 import {NewlineFramer} from '../newline-framer.js';
-import type {ProtocolRequest, ProtocolResponse, RequestInput, ServerMessage} from '../protocol.js';
+import type {ProtocolResponse, RequestInput, ServerMessage} from '../protocol.js';
 import {
   parseProtocolResponse,
   parseServerMessage,
   responseError,
   streamFailure,
 } from '../protocol-parse.js';
-import {
-  type AbortSignalLike,
-  type RequestOptions,
-  type RequestPolicy,
-  resolveRequestPolicy,
-} from '../request-policy.js';
-import type {EventSubscription, SubscribeOptions} from '../transport.js';
-
-/**
- * Whether the control channel holds a live connection, mirroring the
- * subscription's `StreamConnectionState` vocabulary so a consumer folds both
- * the same way. `disconnected` carries the error that dropped it.
- */
-export type ControlChannelState =
-  | {readonly status: 'connected'}
-  | {readonly status: 'disconnected'; readonly error: Error};
+import {type AbortSignalLike, abortReason, type RequestOptions} from '../request-policy.js';
+import {type EventSubscription, type SubscribeOptions, subscribeRequest} from '../transport.js';
 
 export interface ServerClientOptions {
+  /** Stable frontend identity reflected by server acknowledgements. */
+  clientId?: string;
   connectTimeoutMs?: number;
   requestTimeoutMs?: number;
   /** Delay between connection attempts while the socket does not exist yet. */
@@ -55,7 +49,6 @@ export interface ServerClientOptions {
 }
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CONNECT_RETRY_INTERVAL_MS = 25;
 /**
  * A graceful end on a local socket completes in well under this; the window is
@@ -67,74 +60,50 @@ const DEFAULT_CLOSE_GRACE_MS = 250;
 const RETRYABLE_CONNECT_CODES = new Set(['ENOENT', 'ECONNREFUSED']);
 
 /**
- * One control request the client owes an answer for. It carries everything the
- * send, disconnect, resend, and cancel paths need, so a request outstanding at
- * a drop can be disposed by its policy (resent if idempotent, failed if not)
- * without reconstructing any of it. `request.request_id` is replaced on a
- * resend so an id is never reused; `timeout` is live only while the request is
- * on the wire.
+ * The Node unix-socket transport: one control channel, plus a socket per
+ * subscription and per dedicated request.
+ *
+ * Everything that decides what happens to a control request (policy, redial,
+ * in-flight disposition, cancellation, connectivity reporting) lives in the
+ * runtime-neutral `ControlChannel`; this class supplies the sockets and the
+ * newline framing it runs over, so the browser transport answers those
+ * questions the same way.
  */
-interface ControlRequest {
-  request: ProtocolRequest;
-  /** The `#pending` key: a fresh, never-reused value on every (re)send. */
-  requestId: string;
-  readonly policy: RequestPolicy;
-  readonly resolve: (value: ProtocolResponse) => void;
-  readonly reject: (error: Error) => void;
-  readonly timeoutMs: number;
-  detachAbort: () => void;
-  timeout: ReturnType<typeof setTimeout> | null;
-}
-
 export class ServerClient {
-  #socket: Socket;
   readonly #path: string;
-  readonly #pending = new Map<string, ControlRequest>();
-  /**
-   * Idempotent requests waiting for the channel to recover, to resend once it
-   * does. A request that must not be repeated never lands here: it fails at the
-   * drop instead.
-   */
-  readonly #held: ControlRequest[] = [];
+  readonly #clientId: string;
   readonly #connectTimeoutMs: number;
-  readonly #requestTimeoutMs: number;
   readonly #closeGraceMs: number;
   /**
-   * Every secondary socket the client has opened (subscriptions and chats),
-   * mapped to a hook that suppresses its own disconnect handling. `close()`
-   * calls the hook before destroying, so tearing a socket down as part of a
-   * client-wide close does not surface as a spurious stream disconnect, whatever
-   * order the caller closes the stream and the client in.
+   * Every secondary socket the client has opened (subscriptions and dedicated
+   * requests), mapped to a hook that suppresses its own disconnect handling.
+   * `close()` calls the hook before destroying, so tearing a socket down as
+   * part of a client-wide close does not surface as a spurious stream
+   * disconnect, whatever order the caller closes the stream and the client in.
    */
   readonly #secondarySockets = new Map<Socket, () => void>();
-  readonly #backoff: BackoffSchedule;
-  readonly #onConnectionState: ((state: ControlChannelState) => void) | undefined;
-  /**
-   * The control channel's connectivity. `connected` accepts requests on the
-   * live socket; `reconnecting` is an outage the backoff loop is working;
-   * `disconnected` is a spent schedule that `reconnect()` can revive; `closed`
-   * is terminal. Every send and disconnect path reads it rather than the
-   * socket's `destroyed` flag, which cannot tell an outage from a shutdown.
-   */
-  #controlState: 'connected' | 'reconnecting' | 'disconnected' | 'closed' = 'connected';
-  #redialTimer: ReturnType<typeof setTimeout> | null = null;
-  #redialing = false;
-  /**
-   * Whether the caller currently sees the channel as disconnected. One outage
-   * can fail many redials in a row; this reports `disconnected` once, on the
-   * transition, and `connected` when a redial recovers.
-   */
-  #disconnectedReported = false;
+  readonly #channel: ControlChannel;
 
   private constructor(socket: Socket, path: string, options: ServerClientOptions) {
-    this.#socket = socket;
     this.#path = path;
+    this.#clientId = options.clientId ?? globalThis.crypto.randomUUID();
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
-    this.#backoff = new BackoffSchedule(options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS);
-    this.#onConnectionState = options.onConnectionState;
-    this.#attachControlSocket(socket);
+    this.#channel = new ControlChannel(
+      {
+        open: handlers => this.#dialControl(handlers),
+        runDedicated: (request, signal) => this.#requestLongRunning(request, signal),
+      },
+      {
+        clientId: this.#clientId,
+        requestTimeoutMs: options.requestTimeoutMs,
+        reconnectDelaysMs: options.reconnectDelaysMs,
+        onConnectionState: options.onConnectionState,
+      },
+    );
+    // `connect()` already dialed, so the channel starts connected rather than
+    // waiting for the first request to open it.
+    this.#channel.adopt(handlers => this.#controlConnection(socket, handlers));
   }
 
   /**
@@ -182,51 +151,13 @@ export class ServerClient {
   }
 
   /**
-   * Send a control request and resolve with the server's response.
-   *
-   * The per-request `options` are the one seam for per-type policy: the request
-   * type's table entry (`request-policy.ts`) sets whether it is idempotent,
-   * runs on its own connection, and its deadline; `options` override the
-   * connection and deadline for one call and carry an `AbortSignal`. A chat runs
-   * on its own connection with no deadline because it is bounded by its agent,
-   * not the control RPC timeout; that is now a table entry, not a special case.
+   * Send a control request and resolve with the server's response. See
+   * `ControlChannel.request`: `options` carry the per-call deadline,
+   * connection, and `AbortSignal`, and the request type's table entry
+   * (`request-policy.ts`) supplies the rest.
    */
   request(input: RequestInput, options: RequestOptions = {}): Promise<ProtocolResponse> {
-    if (this.#controlState === 'closed') {
-      return Promise.reject(disconnectedError('Client is closed'));
-    }
-    const policy = resolveRequestPolicy(input.type, options);
-    const requestId = globalThis.crypto.randomUUID();
-    const request = {
-      protocol_version: 1,
-      request_id: requestId,
-      timestamp: new Date().toISOString(),
-      ...input,
-    } as ProtocolRequest;
-    if (policy.dedicatedConnection) return this.#requestLongRunning(request, options.signal);
-    return new Promise((resolve, reject) => {
-      const signal = options.signal;
-      if (signal?.aborted) {
-        reject(abortReason(signal));
-        return;
-      }
-      const entry: ControlRequest = {
-        request,
-        requestId,
-        policy,
-        resolve,
-        reject,
-        timeoutMs: policy.timeoutMs ?? this.#requestTimeoutMs,
-        detachAbort: () => {},
-        timeout: null,
-      };
-      if (signal !== undefined) {
-        const onAbort = (): void => this.#abort(entry, abortReason(signal));
-        signal.addEventListener('abort', onAbort, {once: true});
-        entry.detachAbort = () => signal.removeEventListener('abort', onAbort);
-      }
-      this.#enqueue(entry);
-    });
+    return this.#channel.request(input, options);
   }
 
   subscribe(
@@ -316,7 +247,7 @@ export class ServerClient {
         }
       });
       socket.once('error', error => disconnect(transportFailure(error)));
-      socket.once('close', () => {
+      onPeerEnd(socket, () => {
         this.#secondarySockets.delete(socket);
         disconnect(
           new BackendClientError(
@@ -330,35 +261,28 @@ export class ServerClient {
     });
   }
 
-  /** Send the subscribe request once the subscription socket connects. */
+  /**
+   * Send the subscribe request once the subscription socket connects. The frame
+   * body is `subscribeRequest`'s typed union member, which owns which optional
+   * fields ride along and why.
+   */
   #writeSubscribe(socket: Socket, afterSequence: number, options: SubscribeOptions): void {
-    socket.write(
-      `${JSON.stringify({
-        protocol_version: 1,
-        request_id: globalThis.crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        type: 'subscribe',
-        after_sequence: afterSequence,
-        // Omitted rather than sent as null: an old server forbids unknown fields,
-        // so a default subscribe must stay byte-for-byte what it has always been.
-        ...(options.tail === undefined ? {} : {tail: options.tail}),
-        ...(options.storeId ? {store_id: options.storeId} : {}),
-      })}\n`,
-    );
+    const request: IssuedRequest = {
+      protocol_version: 1,
+      request_id: globalThis.crypto.randomUUID(),
+      client_id: this.#clientId,
+      timestamp: new Date().toISOString(),
+      ...subscribeRequest(afterSequence, options),
+    };
+    socket.write(`${JSON.stringify(request)}\n`);
   }
 
   /**
-   * Redial now, outside the backoff schedule. Once the schedule is spent the
-   * channel stays down with the disconnect as its answer; this is the entry a
-   * caller uses to try again: a reconnect affordance, or a resume-after-sleep
-   * watcher such as #832. It no-ops unless the channel is in that spent state,
-   * so it cannot stack a second dial onto a healthy or already-retrying one.
+   * Redial the control channel now, whatever its backoff schedule was going to
+   * do. See `ControlChannel.reconnect`.
    */
   reconnect(): void {
-    if (this.#controlState !== 'disconnected') return;
-    this.#controlState = 'reconnecting';
-    this.#backoff.reset();
-    this.#scheduleRedial();
+    this.#channel.reconnect();
   }
 
   /**
@@ -368,36 +292,73 @@ export class ServerClient {
    * reports the same transitions as they happen.
    */
   get connected(): boolean {
-    return this.#controlState === 'connected';
+    return this.#channel.connected;
   }
 
   /**
    * Close every socket the client owns: the control connection and every live
-   * secondary (subscription or chat). Cancels a pending redial, fails every
-   * request still owed an answer (outstanding or held for resend), and ends each
-   * socket gracefully, destroying it if it does not close within the grace
-   * window, so an unresponsive server cannot hang shutdown.
+   * secondary (subscription or dedicated request). Cancels a pending redial,
+   * fails every request still owed an answer (in flight or held for resend),
+   * and ends each socket gracefully, destroying it if it does not close within
+   * the grace window, so an unresponsive server cannot hang shutdown.
    */
-  close(graceMs: number = this.#closeGraceMs): Promise<void> {
-    this.#controlState = 'closed';
-    if (this.#redialTimer !== null) {
-      clearTimeout(this.#redialTimer);
-      this.#redialTimer = null;
-    }
-    const owed = [...this.#pending.values(), ...this.#held.splice(0)];
-    this.#pending.clear();
-    for (const entry of owed) this.#settleReject(entry, disconnectedError('Client closed'));
+  close(): Promise<void> {
+    // Closing the channel is the first thing that happens: it marks the client
+    // closed and fails what it owes before any socket teardown can be mistaken
+    // for an outage.
+    const channelClosed = this.#channel.close();
     const secondaries = [...this.#secondarySockets];
     this.#secondarySockets.clear();
     for (const [, suppress] of secondaries) suppress();
     return Promise.all([
-      ...secondaries.map(([socket]) => closeSocketWithin(socket, graceMs)),
-      closeSocketWithin(this.#socket, graceMs),
+      channelClosed,
+      ...secondaries.map(([socket]) => closeSocketWithin(socket, this.#closeGraceMs)),
     ]).then(() => undefined);
   }
 
+  /** Dial one control socket for the channel. */
+  async #dialControl(handlers: ControlConnectionHandlers): Promise<ControlConnection> {
+    const socket = await dialSocket(
+      this.#path,
+      this.#connectTimeoutMs,
+      `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
+    );
+    return this.#controlConnection(socket, handlers);
+  }
+
   /**
-   * Run an agent-backed request on its own connection without a response timer.
+   * Wrap one connected socket as a control connection: a framer of its own, so
+   * a superseded socket's trailing bytes can never splice into the live
+   * socket's stream, and every failure routed to the channel rather than
+   * thrown at whoever happened to be writing.
+   */
+  #controlConnection(socket: Socket, handlers: ControlConnectionHandlers): ControlConnection {
+    const frames = new NewlineFramer();
+    socket.setEncoding('utf8');
+    socket.on('data', chunk => {
+      const lines = frameChunk(frames, chunk.toString(), handlers.onFault);
+      if (lines === null) return;
+      for (const line of lines) {
+        if (line) handlers.onFrame(line);
+      }
+    });
+    socket.on('error', error => handlers.onDrop(transportFailure(error)));
+    onPeerEnd(socket, () =>
+      handlers.onDrop(new BackendClientError('disconnected', 'Server disconnected')),
+    );
+    return {
+      send: frame =>
+        socket.write(`${frame}\n`, error => {
+          // A write failure means the socket is broken; report it as a drop so
+          // the request is disposed by its policy and the redial loop takes over.
+          if (error) handlers.onDrop(transportFailure(error));
+        }),
+      close: () => closeSocketWithin(socket, this.#closeGraceMs),
+    };
+  }
+
+  /**
+   * Run one request on its own connection without a response timer.
    *
    * Chat duration is bounded by the configured agent, not by the control RPC
    * timeout. A dedicated connection also prevents a long chat from blocking
@@ -405,15 +366,12 @@ export class ServerClient {
    * `AbortSignal` cancels it: the socket is torn down and the promise rejects
    * with the abort reason.
    */
-  #requestLongRunning(
-    request: ProtocolRequest,
-    signal?: AbortSignalLike,
-  ): Promise<ProtocolResponse> {
+  #requestLongRunning(request: IssuedRequest, signal?: AbortSignalLike): Promise<ProtocolResponse> {
     return new Promise((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(abortReason(signal));
-        return;
-      }
+      // No already-aborted check: the channel rejects that before it calls
+      // here, and this method reaches its `addEventListener` without awaiting
+      // anything, so there is no window for an abort to be missed. See
+      // `ControlConnector.runDedicated`.
       const socket = createConnection(this.#path);
       // A client-wide close() abandons an in-flight chat: fail it as a
       // disconnect and let close() destroy the socket.
@@ -494,7 +452,7 @@ export class ServerClient {
         }
       });
       socket.once('error', fail);
-      socket.once('close', disconnected);
+      onPeerEnd(socket, disconnected);
       if (signal !== undefined) {
         // Cancellation tears the dedicated socket down and rejects with the
         // abort reason, bypassing the transport-failure wrap so the caller sees
@@ -509,231 +467,6 @@ export class ServerClient {
         signal.addEventListener('abort', onAbort, {once: true});
       }
     });
-  }
-
-  /** Route one request by the channel's state: send, hold, or fail it. */
-  #enqueue(entry: ControlRequest): void {
-    if (this.#controlState === 'connected') {
-      this.#send(entry);
-      return;
-    }
-    // An outage is in progress: hold an idempotent request to resend once the
-    // channel recovers; fail one that must not be repeated so the caller, seeing
-    // the disconnected state, decides whether to reissue it.
-    if (this.#controlState === 'reconnecting' && entry.policy.idempotent) {
-      this.#held.push(entry);
-      return;
-    }
-    this.#settleReject(entry, disconnectedError());
-  }
-
-  /** Write one request to the live socket and arm its response deadline. */
-  #send(entry: ControlRequest): void {
-    const requestId = entry.requestId;
-    entry.timeout = setTimeout(() => {
-      this.#pending.delete(requestId);
-      this.#settleReject(
-        entry,
-        new BackendClientError('timeout', `Server request timed out after ${entry.timeoutMs}ms`),
-      );
-    }, entry.timeoutMs);
-    this.#pending.set(requestId, entry);
-    // Capture the socket: by the time this async callback fires, a drop and
-    // redial may have replaced `#socket`, and the stale-socket guard in
-    // `#onControlDrop` must see the socket the write was actually issued on, not
-    // whatever is live now, or a write error would drop a recovered channel.
-    const socket = this.#socket;
-    socket.write(`${JSON.stringify(entry.request)}\n`, error => {
-      // A write failure means the socket is broken; drive the drop path so the
-      // request is disposed by its policy and the redial loop takes over.
-      if (error) this.#onControlDrop(socket, transportFailure(error));
-    });
-  }
-
-  /** Free an abandoned request's slot and reject it; its id is never reused. */
-  #abort(entry: ControlRequest, error: Error): void {
-    const requestId = entry.requestId;
-    if (this.#pending.get(requestId) === entry) this.#pending.delete(requestId);
-    const heldIndex = this.#held.indexOf(entry);
-    if (heldIndex !== -1) this.#held.splice(heldIndex, 1);
-    this.#settleReject(entry, error);
-  }
-
-  #settle(entry: ControlRequest): void {
-    if (entry.timeout !== null) {
-      clearTimeout(entry.timeout);
-      entry.timeout = null;
-    }
-    entry.detachAbort();
-  }
-
-  #settleReject(entry: ControlRequest, error: Error): void {
-    this.#settle(entry);
-    entry.reject(error);
-  }
-
-  #settleResolve(entry: ControlRequest, response: ProtocolResponse): void {
-    this.#settle(entry);
-    entry.resolve(response);
-  }
-
-  #attachControlSocket(socket: Socket): void {
-    this.#socket = socket;
-    // A framer per socket, so a superseded socket's trailing bytes can never
-    // splice into the live socket's stream.
-    const frames = new NewlineFramer();
-    socket.setEncoding('utf8');
-    socket.on('data', chunk => this.#onData(frames, chunk.toString(), socket));
-    socket.on('error', error => this.#onControlDrop(socket, transportFailure(error)));
-    socket.on('close', () =>
-      this.#onControlDrop(socket, new BackendClientError('disconnected', 'Server disconnected')),
-    );
-  }
-
-  #onData(frames: NewlineFramer, chunk: string, socket: Socket): void {
-    if (socket !== this.#socket) return;
-    const lines = frameChunk(frames, chunk, error => this.#failControl(socket, error));
-    if (lines === null) return;
-    for (const line of lines) {
-      if (!line) continue;
-      let response: ProtocolResponse;
-      try {
-        response = parseProtocolResponse(line);
-      } catch (error) {
-        this.#failControl(socket, streamFailure(error));
-        return;
-      }
-      const pending = this.#pending.get(response.request_id);
-      // No match means a retired, cancelled, or otherwise unknown id: discard
-      // it rather than misroute it onto a later request that reused nothing.
-      if (!pending) continue;
-      this.#pending.delete(response.request_id);
-      if (response.ok) this.#settleResolve(pending, response);
-      else this.#settleReject(pending, responseError(response));
-    }
-  }
-
-  /**
-   * A protocol fault on the live socket: the peer sent bytes this client cannot
-   * read (malformed JSON, an unknown message, an unsupported version, an
-   * unframable stream). Unlike a transport drop, this is not a transient outage
-   * a redial recovers, and it is a real answer about every in-flight request, so
-   * each fails with the typed error rather than being silently resent. The
-   * channel settles into the reportable dead state that `reconnect()` can revive
-   * if a caller decides the fault was one-off.
-   */
-  #failControl(socket: Socket, error: Error): void {
-    if (socket !== this.#socket || this.#controlState !== 'connected') return;
-    this.#controlState = 'disconnected';
-    this.#reportDisconnected(error);
-    const owed = [...this.#pending.values(), ...this.#held.splice(0)];
-    this.#pending.clear();
-    for (const entry of owed) this.#settleReject(entry, error);
-    socket.destroy();
-  }
-
-  /**
-   * A live control socket dropped. Transition to reconnecting once (a stale
-   * socket's late event or a shutdown is ignored), report the disconnect,
-   * dispose the in-flight requests by policy, and start the backoff loop.
-   */
-  #onControlDrop(socket: Socket, error: Error): void {
-    if (socket !== this.#socket || this.#controlState !== 'connected') return;
-    this.#controlState = 'reconnecting';
-    this.#reportDisconnected(error);
-    socket.destroy();
-    this.#disposePending();
-    this.#backoff.reset();
-    this.#scheduleRedial();
-  }
-
-  #disposePending(): void {
-    for (const entry of this.#pending.values()) {
-      if (entry.timeout !== null) {
-        clearTimeout(entry.timeout);
-        entry.timeout = null;
-      }
-      // An idempotent request rides the recovery; one that must not repeat fails
-      // now with a typed disconnect.
-      if (entry.policy.idempotent) this.#held.push(entry);
-      else this.#settleReject(entry, disconnectedError());
-    }
-    this.#pending.clear();
-  }
-
-  #scheduleRedial(): void {
-    if (this.#redialTimer !== null) return;
-    const delayMs = this.#backoff.next();
-    if (delayMs === undefined) {
-      this.#exhaust();
-      return;
-    }
-    this.#redialTimer = setTimeout(() => {
-      this.#redialTimer = null;
-      void this.#redialAttempt();
-    }, delayMs);
-  }
-
-  #exhaust(): void {
-    // The finite schedule is spent: no channel is coming without a caller
-    // asking for one, so fail every held request and settle into a reportable
-    // dead state that `reconnect()` can revive.
-    this.#controlState = 'disconnected';
-    for (const entry of this.#held.splice(0)) this.#settleReject(entry, disconnectedError());
-  }
-
-  async #redialAttempt(): Promise<void> {
-    if (this.#controlState !== 'reconnecting' || this.#redialing) return;
-    this.#redialing = true;
-    try {
-      let socket: Socket;
-      try {
-        socket = await dialSocket(
-          this.#path,
-          this.#connectTimeoutMs,
-          `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
-        );
-      } catch {
-        // This attempt failed; back off again, or exhaust the schedule.
-        if (this.#controlState === 'reconnecting') this.#scheduleRedial();
-        return;
-      }
-      if (this.#controlState !== 'reconnecting') {
-        // close() or a revive raced the dial; the new socket is not wanted.
-        void closeSocketWithin(socket, this.#closeGraceMs);
-        return;
-      }
-      this.#attachControlSocket(socket);
-      this.#controlState = 'connected';
-      this.#backoff.reset();
-      this.#reportConnected();
-      this.#flushHeld();
-    } finally {
-      this.#redialing = false;
-    }
-  }
-
-  #flushHeld(): void {
-    for (const entry of this.#held.splice(0)) {
-      // Mint a fresh id: the id the request last carried was written to a socket
-      // that is now destroyed, so reusing it could let a late frame from that
-      // dead socket match this resend. A never-reused id closes that off.
-      const nextId = globalThis.crypto.randomUUID();
-      entry.request = {...entry.request, request_id: nextId};
-      entry.requestId = nextId;
-      this.#send(entry);
-    }
-  }
-
-  #reportDisconnected(error: Error): void {
-    if (this.#disconnectedReported) return;
-    this.#disconnectedReported = true;
-    this.#onConnectionState?.({status: 'disconnected', error});
-  }
-
-  #reportConnected(): void {
-    this.#disconnectedReported = false;
-    this.#onConnectionState?.({status: 'connected'});
   }
 }
 
@@ -784,25 +517,6 @@ function transportFailure(error: Error): BackendClientError {
   return new BackendClientError('disconnected', error.message, {cause: error});
 }
 
-/** A typed disconnect for a request the client cannot carry right now. */
-function disconnectedError(message = 'Server is disconnected'): BackendClientError {
-  return new BackendClientError('disconnected', message);
-}
-
-/**
- * The error an abort rejects with: the signal's reason when it is an `Error`
- * (the caller's own), otherwise a standard `AbortError`. Kept out of the
- * transport-failure taxonomy so a caller-initiated cancel is never mistaken for
- * a disconnect.
- */
-function abortReason(signal: AbortSignalLike): Error {
-  const reason = signal.reason;
-  if (reason instanceof Error) return reason;
-  const error = new Error(typeof reason === 'string' && reason ? reason : 'Request aborted');
-  error.name = 'AbortError';
-  return error;
-}
-
 /**
  * Frame one socket chunk, or report an unreadable stream. Returns the completed
  * lines, or null when the framer rejects the chunk (an oversized newline-less
@@ -828,6 +542,31 @@ function delay(ms: number): Promise<void> {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Report the peer ending the connection, once, however the runtime says so.
+ *
+ * `'end'` as well as `'close'`, because on the pinned Bun (1.3.9) a write issued
+ * between the peer's FIN and the `'close'` that would follow it suppresses that
+ * `'close'` entirely: the write neither fails nor arrives, and no further event
+ * ever comes. Listening only for `'close'` therefore loses a server-initiated
+ * close exactly when the client is busy, which is when it matters: the
+ * connection keeps reporting itself live and every later request waits out its
+ * full response deadline instead of failing as a disconnect. `'end'` arrives on
+ * the FIN itself, before any write can race it, and is unambiguous for a
+ * protocol that never half-closes as a normal step: a FIN means no further
+ * response is coming.
+ */
+function onPeerEnd(socket: Socket, report: () => void): void {
+  let reported = false;
+  const once = (): void => {
+    if (reported) return;
+    reported = true;
+    report();
+  };
+  socket.once('end', once);
+  socket.once('close', once);
 }
 
 /**

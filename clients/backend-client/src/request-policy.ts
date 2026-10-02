@@ -86,6 +86,21 @@ export interface RequestOptions {
 }
 
 /**
+ * The error an abort rejects with: the signal's reason when it is an `Error`
+ * (the caller's own), otherwise a standard `AbortError`. Kept out of the
+ * transport-failure taxonomy so a caller-initiated cancel is never mistaken for
+ * a disconnect, and kept here, beside the signal it reads, so every transport
+ * reports an abandoned request the same way.
+ */
+export function abortReason(signal: AbortSignalLike): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  const error = new Error(typeof reason === 'string' && reason ? reason : 'Request aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+/**
  * The effective policy for one call: the type's table entry with the caller's
  * overrides applied. Idempotency is a property of the operation, not the call,
  * so it is not overridable; the connection shape and the deadline are.
@@ -94,7 +109,7 @@ export function resolveRequestPolicy(
   type: RequestInput['type'],
   options: RequestOptions = {},
 ): RequestPolicy {
-  const base = (type === undefined ? undefined : REQUEST_POLICIES[type]) ?? DEFAULT_REQUEST_POLICY;
+  const base = REQUEST_POLICIES[type] ?? DEFAULT_REQUEST_POLICY;
   const timeoutMs = options.timeoutMs ?? base.timeoutMs;
   return {
     idempotent: base.idempotent,

@@ -153,9 +153,13 @@ class RunApi:
             replay_filter=lambda _header: False,
         )
 
+    def execute(self, request: ProtocolRequest) -> Response:
+        """Execute a request and reflect the issuing client on its response."""
+        return self._execute(request).model_copy(update={"client_id": request.client_id})
+
     # lint-waiver: LW-009027 [C901, PLR0911]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
-    def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
-        """Execute one typed request and return its protocol response."""
+    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
+        """Route one typed request to its owning service."""
         if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
             return self._execute_command(request)
         if isinstance(request, ChatQuery):

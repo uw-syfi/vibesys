@@ -5,14 +5,16 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import socket
 import subprocess
 import time
 import urllib.error
 import urllib.request
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
@@ -124,6 +126,7 @@ class KubernetesConfig(_StrictModel):
     kind_cluster: str | None = None
     image_overrides: tuple[ImageOverride, ...] = ()
     forwards: tuple[ServiceForward, ...]
+    access: Literal["port_forward", "node_port"] = "port_forward"
     primary_endpoint: str
     http_probes: tuple[HTTPProbe, ...]
     timeout_seconds: float = Field(default=180, gt=0)
@@ -227,6 +230,27 @@ class KubernetesLifecycleError(RuntimeError):
         """Create an error when a port forward exits before readiness."""
         return cls("kubectl port-forward exited before readiness")
 
+    @classmethod
+    def node_address_unavailable(cls) -> KubernetesLifecycleError:
+        """Create an error when no node InternalIP is available for NodePort access."""
+        return cls("node_port access requires a node with an InternalIP address")
+
+    @classmethod
+    def node_port_source_invalid(cls, name: str) -> KubernetesLifecycleError:
+        """Create an error when a forward cannot be exposed through a NodePort."""
+        return cls(
+            f"forward {name!r} must name a Service with a selector and its remote_port "
+            "for node_port access"
+        )
+
+    @classmethod
+    def forward_port_in_use(cls, name: str, port: int) -> KubernetesLifecycleError:
+        """Create an error when another process already owns a forward's local port."""
+        return cls(
+            f"local port {port} for forward {name!r} is already in use on 127.0.0.1; "
+            "choose a free local_port"
+        )
+
 
 class KubernetesReadinessTimeoutError(TimeoutError):
     """Report that HTTP readiness probes did not pass before the deadline."""
@@ -302,6 +326,34 @@ def _default_runner(
         raise KubernetesLifecycleError.command_timed_out(timeout_seconds, command) from error
 
 
+def _require_free_local_port(name: str, port: int) -> None:
+    """Fail when another process owns ``127.0.0.1:port``.
+
+    Without this check, kubectl may bind only the IPv6 loopback while a foreign
+    IPv4 listener answers readiness probes and evaluator traffic.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # Match kubectl's listener options so TIME_WAIT sockets from an earlier
+        # forward do not count as a conflict; an active listener still does.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as error:
+            raise KubernetesLifecycleError.forward_port_in_use(name, port) from error
+
+
+@dataclass(frozen=True)
+class ForwardLauncher:
+    """Start port-forward processes on this host.
+
+    ``require_free_port`` receives each forward's name and local port before
+    ``popen`` starts kubectl, and raises when the port cannot be used.
+    """
+
+    popen: Callable[..., ForwardProcess] = subprocess.Popen
+    require_free_port: Callable[[str, int], None] = _require_free_local_port
+
+
 def load_config(path: Path) -> KubernetesConfig:
     """Load a strict JSON or YAML lifecycle configuration."""
     return KubernetesConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
@@ -329,18 +381,19 @@ class KubernetesLifecycle:
         *,
         config_dir: Path | None = None,
         runner: CommandRunner = _default_runner,
-        popen: Callable[..., ForwardProcess] = subprocess.Popen,
+        forwards: ForwardLauncher | None = None,
     ) -> None:
         """Create the namespace-scoped deployment runtime."""
         self.config = config
         self.candidate_dir = candidate_dir.resolve()
         self.config_dir = (config_dir or candidate_dir).resolve()
         self._runner = runner
-        self._popen = popen
+        self._launcher = forwards or ForwardLauncher()
         self._namespace: str | None = None
         self._namespace_uid: str | None = None
         self._ownership_token: str | None = None
         self._forwards: list[ForwardProcess] = []
+        self._node_endpoints: dict[str, str] | None = None
         self._built_images: dict[str, str] | None = None
         self._stopped_replicas: tuple[tuple[RestartDeployment, int], ...] | None = None
 
@@ -359,9 +412,14 @@ class KubernetesLifecycle:
     @property
     def endpoints(self) -> dict[str, str]:
         """Return service endpoints by name."""
-        endpoints = {
-            item.name: f"http://127.0.0.1:{item.local_port}" for item in self.config.forwards
-        }
+        if self.config.access == "node_port":
+            if self._node_endpoints is None:
+                raise KubernetesLifecycleError.lifecycle_not_started()
+            endpoints = dict(self._node_endpoints)
+        else:
+            endpoints = {
+                item.name: f"http://127.0.0.1:{item.local_port}" for item in self.config.forwards
+            }
         if self.config.primary_endpoint not in endpoints:
             raise PydanticCustomError(
                 "unknown_primary_endpoint",
@@ -550,6 +608,7 @@ class KubernetesLifecycle:
         )
         self._namespace = self._namespace_uid = self._ownership_token = None
         self._stopped_replicas = None
+        self._node_endpoints = None
 
     def _verify_owned_namespace(self) -> None:
         namespace, uid, token = self._namespace, self._namespace_uid, self._ownership_token
@@ -696,11 +755,18 @@ class KubernetesLifecycle:
             )
 
     def _start_forwards(self) -> None:
+        if self.config.access == "node_port":
+            if self._node_endpoints is None:
+                self._node_endpoints = self._expose_node_ports()
+            return
         for forward in self.config.forwards:
+            self._launcher.require_free_port(forward.name, forward.local_port)
             self._forwards.append(
-                self._popen(
+                self._launcher.popen(
                     self._kubectl(
                         "port-forward",
+                        "--address",
+                        "127.0.0.1",
                         forward.resource,
                         f"{forward.local_port}:{forward.remote_port}",
                         namespaced=True,
@@ -711,6 +777,67 @@ class KubernetesLifecycle:
                     start_new_session=True,
                 )
             )
+
+    def _expose_node_ports(self) -> dict[str, str]:
+        """Expose each forwarded Service through a NodePort on the cluster node.
+
+        Requests then reach kube-proxy directly instead of streaming through
+        kubectl, the API server, the kubelet, and the container runtime, which
+        add milliseconds per request and saturate host CPU under load.
+        """
+        node_ip = self._run(
+            "get",
+            "nodes",
+            "--output",
+            'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}',
+        ).stdout.strip()
+        if not node_ip:
+            raise KubernetesLifecycleError.node_address_unavailable()
+        endpoints: dict[str, str] = {}
+        for forward in self.config.forwards:
+            source = json.loads(
+                self._run("get", forward.resource, "--output", "json", namespaced=True).stdout
+            )
+            spec = source.get("spec", {})
+            port = next(
+                (item for item in spec.get("ports", []) if item.get("port") == forward.remote_port),
+                None,
+            )
+            selector = spec.get("selector")
+            if source.get("kind") != "Service" or port is None or not selector:
+                raise KubernetesLifecycleError.node_port_source_invalid(forward.name)
+            name = f"vibesys-node-{forward.name}"
+            created = self._run(
+                "create",
+                "--filename",
+                "-",
+                "--output",
+                "json",
+                namespaced=True,
+                input_text=json.dumps(
+                    {
+                        "apiVersion": "v1",
+                        "kind": "Service",
+                        "metadata": {"name": name},
+                        "spec": {
+                            "type": "NodePort",
+                            "selector": selector,
+                            "ports": [
+                                {
+                                    "protocol": port.get("protocol", "TCP"),
+                                    "port": forward.remote_port,
+                                    "targetPort": port.get("targetPort", forward.remote_port),
+                                }
+                            ],
+                        },
+                    }
+                ),
+            )
+            node_port = json.loads(created.stdout)["spec"]["ports"][0].get("nodePort")
+            if not isinstance(node_port, int):
+                raise KubernetesLifecycleError.node_port_source_invalid(forward.name)
+            endpoints[forward.name] = f"http://{node_ip}:{node_port}"
+        return endpoints
 
     def _wait_http(self) -> None:
         deadline = time.monotonic() + self.config.timeout_seconds

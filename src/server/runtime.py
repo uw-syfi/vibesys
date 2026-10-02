@@ -33,11 +33,17 @@ from server.transport.discovery import (
     WebInstanceClaim as WebInstanceClaim,  # noqa: PLC0414  # lint-waiver: LW-101062 [PLC0414]; re-export discovery locking through the allowed runtime composition boundary
 )
 from server.transport.discovery import (
+    WebInstanceHold as WebInstanceHold,  # noqa: PLC0414  # lint-waiver: LW-101115 [PLC0414]; re-export the discovery instance hold through the allowed runtime composition boundary
+)
+from server.transport.discovery import (
     WebInstanceRecord as WebInstanceRecord,  # noqa: PLC0414  # lint-waiver: LW-101061 [PLC0414]; re-export the discovery record through the allowed runtime composition boundary
 )
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway
+from server.transport.websocket import (
+    browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
+)
 from vibesys.api import ConfigurationError, RunStopped, create_session
 
 if TYPE_CHECKING:

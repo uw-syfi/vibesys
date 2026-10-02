@@ -1,11 +1,13 @@
-import type {
-  DesignPatch,
-  ProtocolResponse,
-  RequestInput,
-  RunEvent,
-  ServerMessage,
-  ServerTransport,
-  StreamTransport,
+import {
+  type ControlChannelState,
+  type ControlTransport,
+  type DesignPatch,
+  type ProtocolResponse,
+  type RequestInput,
+  type RunEvent,
+  type ServerMessage,
+  type StreamTransport,
+  sameControlChannelState,
 } from '@vibesys/backend-client';
 import {
   type CoreState,
@@ -20,7 +22,19 @@ import {
 } from '@vibesys/core-state';
 import {isServerRejection, PersistentEventStream, ServerError} from './browser-entry.js';
 
-export type WorkspaceClient = ServerTransport;
+/**
+ * The transport a session drives. `ControlTransport` rather than
+ * `ServerTransport` because this frontend offers a reconnect affordance for the
+ * command path (`reconnectControls`), and that verb is what the shared
+ * interface exists to declare.
+ */
+export type WorkspaceClient = ControlTransport;
+
+/** What the session wires into the transport it drives. */
+export interface WorkspaceTransportHooks {
+  /** Where the transport reports control-channel connectivity. */
+  readonly onConnectionState: (state: ControlChannelState) => void;
+}
 
 export interface BrowserLifecycle {
   readonly visibilityState: DocumentVisibilityState;
@@ -74,6 +88,28 @@ export interface WorkspaceState {
   connectionError: string | null;
   /** The reconnect schedule is exhausted (or the boot dial failed): only `reconnect()` helps. */
   canRetry: boolean;
+  /**
+   * Whether a control request issued now can be delivered, as the transport's
+   * control channel reports it. A different fact from `connection`, which is
+   * the event stream: the stream and the command path fail independently, and
+   * only this one says the request/response half is inert. A dead channel costs
+   * the page every query and every command (pause, resume, steer, stop, chat)
+   * while leaving the transcript on screen intact.
+   *
+   * `connected` until the channel reports otherwise, because there is nothing
+   * to report before the first dial settles. That is a starting value, not a
+   * claim: a bootstrap runs the queries, so the first dial is already under way
+   * by the time anything renders, and a cold-start failure arrives as a
+   * `disconnected` report like any other.
+   *
+   * An outage is reported whenever the channel reports one, including on a run
+   * that has already ended. Whether it is worth showing then is the frontend's
+   * decision, because the control channel and the event stream are two
+   * independent sockets with no ordering guarantee: a drop can be reported
+   * while the run's terminal event is still buffered, and nothing re-enters
+   * this session when that event lands.
+   */
+  controls: ControlChannelState;
   snapshotError: string | null;
   queries: Record<QueryName, QueryState>;
   /** Enablement comes from `core.status`; this only guards double sends and keeps the last failure. */
@@ -132,6 +168,7 @@ export class WorkspaceSession {
     connection: 'connecting',
     connectionError: null,
     canRetry: false,
+    controls: {status: 'connected'},
     snapshotError: null,
     queries: emptyQueries(),
     command: idleCommand(),
@@ -158,10 +195,21 @@ export class WorkspaceSession {
   readonly #reconnectDelaysMs: readonly number[];
   readonly #lifecycle: BrowserLifecycle | null;
 
+  readonly #client: WorkspaceClient;
+
   constructor(
-    private readonly client: WorkspaceClient,
+    client: WorkspaceClient | ((hooks: WorkspaceTransportHooks) => WorkspaceClient),
     options: WorkspaceSessionOptions = {},
   ) {
+    // A factory as well as an instance, because the session and not the caller
+    // owns what the transport reports to: a transport already constructed
+    // cannot be told after the fact where to report a dead control channel. An
+    // instance keeps `controls` at its starting value, which is what a
+    // transport with no control channel of its own (a replay) reports anyway.
+    this.#client =
+      typeof client === 'function'
+        ? client({onConnectionState: state => this.#onControlState(state)})
+        : client;
     this.#reconnectDelaysMs = options.reconnectDelaysMs ?? RECONNECT_DELAYS_MS;
     this.#lifecycle = options.lifecycle ?? null;
     this.#lifecycle?.addEventListener('visibilitychange', this.#wake);
@@ -195,7 +243,7 @@ export class WorkspaceSession {
       const transport: StreamTransport = {
         subscribe: async (after, onMessage, onDisconnect, options) => {
           try {
-            return await this.client.subscribe(after, onMessage, onDisconnect, options);
+            return await this.#client.subscribe(after, onMessage, onDisconnect, options);
           } catch (error) {
             // A server that refuses `tail` or `store_id` is retried without it in the same
             // attempt, so only other failures count against the reconnect schedule.
@@ -245,6 +293,25 @@ export class WorkspaceSession {
     }
   }
 
+  /**
+   * Redial the control channel now. Deliberately not `reconnect()`: a channel
+   * that reported a drop has a redial already armed, so issuing another request
+   * only queues behind that backoff and a click would change nothing observable
+   * for as long as the schedule says. `ControlTransport.reconnect` cancels the
+   * armed redial and dials, which is the only thing a user asking to reconnect
+   * can mean. It touches the event stream not at all: a dead command path with
+   * a live transcript is exactly the case this exists for.
+   *
+   * Unconditional on the run's status, unlike `reconnect()`, because this does
+   * not decide when it is offered: the frontend does, and it withholds the
+   * affordance on an ended run. The verb stays unconditional so the one place
+   * that judges an ended run is the one place that renders the affordance.
+   */
+  reconnectControls(): void {
+    if (this.#closed) return;
+    this.#client.reconnect();
+  }
+
   /** Snapshot, experiments, design, and performance: once per bootstrap batch, or from a Retry. */
   async refresh(): Promise<void> {
     await Promise.all([
@@ -258,7 +325,7 @@ export class WorkspaceSession {
   async #snapshot(): Promise<void> {
     const generation = this.#runGeneration;
     try {
-      const response = await this.client.request({type: 'query.snapshot'});
+      const response = await this.#client.request({type: 'query.snapshot'});
       if (generation !== this.#runGeneration) return;
       if (!response.snapshot) throw new Error('The backend returned no run snapshot.');
       // Subscription identity owns the event cursor. A query cannot switch it.
@@ -282,7 +349,7 @@ export class WorkspaceSession {
     }
     this.#query(name, {...this.#state.queries[name], loading: true, error: null});
     const generation = this.#runGeneration;
-    const fetch = this.client
+    const fetch = this.#client
       .request({type: `query.${name}`})
       .then(
         response => {
@@ -315,7 +382,7 @@ export class WorkspaceSession {
     const afterSequence = this.#state.core.sequence;
     this.#set({command: {sending: action, error: null}});
     try {
-      const response = await this.client.request(input);
+      const response = await this.#client.request(input);
       if (generation !== this.#runGeneration) return false;
       if (!response.ack) throw new Error('The backend returned no command acknowledgment.');
       // An acknowledgment is not a lifecycle transition. Only events/snapshots set status.
@@ -339,7 +406,7 @@ export class WorkspaceSession {
 
   /** One file's patch for a round's commit range; null when the server is not attached to a run. */
   designPatch = async (base: string, head: string, path: string): Promise<DesignPatch | null> => {
-    const response = await this.client.request({type: 'query.design_patch', base, head, path});
+    const response = await this.#client.request({type: 'query.design_patch', base, head, path});
     return response.design_patch ?? null;
   };
 
@@ -368,7 +435,7 @@ export class WorkspaceSession {
 
   /** Creates a chat thread on `selection`, or on the run's own agent; resolves its id. */
   async createThread(selection: {provider: string; model: string} | null): Promise<string> {
-    const response = await this.client.request({
+    const response = await this.#client.request({
       type: 'query.chat_thread_create',
       ...(selection ?? {}),
     });
@@ -379,7 +446,7 @@ export class WorkspaceSession {
 
   async #answer(sent: SentAsk, generation: number): Promise<void> {
     try {
-      const response = await this.client.request({
+      const response = await this.#client.request({
         type: 'query.chat',
         text: sent.text,
         ...(sent.threadId === DEFAULT_CHAT_THREAD_ID ? {} : {thread_id: sent.threadId}),
@@ -417,7 +484,7 @@ export class WorkspaceSession {
     const nextFloor = Math.max(0, floor - 500);
     this.#set({historyLoading: true, historyError: null});
     try {
-      const response = await this.client.request({
+      const response = await this.#client.request({
         type: 'query.events',
         after_sequence: nextFloor,
         before_sequence: floor + 1,
@@ -444,7 +511,7 @@ export class WorkspaceSession {
     this.#lifecycle?.removeEventListener('online', this.#wake);
     this.#listeners.clear();
     await this.#stream?.close();
-    await this.client.close();
+    await this.#client.close();
   }
 
   #onMessage(message: ServerMessage, resumed: boolean): void {
@@ -540,6 +607,20 @@ export class WorkspaceSession {
     return floor;
   }
 
+  /**
+   * The control channel changed state. Kept apart from `connection`, the event
+   * stream's status: a dead command path with a live transcript, and a stale
+   * transcript with deliverable commands, are both real and read differently.
+   *
+   * Deduplicated, so a report that changes nothing a consumer renders does not
+   * republish; `retrying` is part of that comparison, because a dial starting
+   * is what makes a reconnect affordance go dead.
+   */
+  #onControlState(state: ControlChannelState): void {
+    if (sameControlChannelState(this.#state.controls, state)) return;
+    this.#set({controls: state});
+  }
+
   #wake = (): void => {
     const lifecycle = this.#lifecycle;
     if (lifecycle === null || lifecycle.visibilityState === 'hidden' || !lifecycle.online) return;
@@ -570,7 +651,11 @@ export function webSocketUrlFromLocation(location: Pick<Location, 'href'>): stri
   const url = gateway === null ? page : new URL(gateway, page.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/ws';
-  const token = url.searchParams.get('token') ?? page.searchParams.get('token') ?? '';
+  // A capability token is a bearer credential for one authority, so it is read
+  // only from the query of the URL that names the socket's own authority: the
+  // page when there is no `?gateway=`, and otherwise the `?gateway=` value,
+  // which must carry its own token just as the in-app gateway form requires.
+  const token = url.searchParams.get('token') ?? '';
   url.search = new URLSearchParams({token}).toString();
   return url.toString();
 }

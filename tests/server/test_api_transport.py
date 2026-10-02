@@ -79,9 +79,10 @@ def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
 
     try:
         with UnixJsonlServer(socket_path, parts.api):
-            response = _request(socket_path, StopCommand())
+            response = _request(socket_path, StopCommand(client_id="unix-client"))
 
         assert response["ok"] is True
+        assert response["client_id"] == "unix-client"
         assert response["ack"] == {"action": "stop", "status": "pending"}
         assert parts.controller.run_status() is RunStatus.STOPPING
     finally:
@@ -143,7 +144,12 @@ def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> N
             client.settimeout(2)
             client.connect(str(socket_path))
             stream = client.makefile("rwb")
-            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.write(
+                SubscribeRequest(after_sequence=0, client_id="unix-subscriber")
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             stream.flush()
             subscribed = json.loads(stream.readline())
             replay = json.loads(stream.readline())
@@ -153,6 +159,7 @@ def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> N
             streamed = json.loads(stream.readline())
 
         assert subscribed["type"] == "subscribed"
+        assert subscribed["client_id"] == "unix-subscriber"
         assert replay["type"] == "event_batch"
         assert streamed["type"] == "event_batch"
         assert [event["type"] for event in streamed["events"]] == ["chat", "status_query"]
@@ -183,7 +190,12 @@ def test_subscription_reports_structured_stream_failure(
             client.settimeout(2)
             client.connect(str(socket_path))
             stream = client.makefile("rwb")
-            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.write(
+                SubscribeRequest(after_sequence=0, client_id="failing-unix-client")
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             stream.flush()
             subscribed = json.loads(stream.readline())
             bootstrap = json.loads(stream.readline())
@@ -194,6 +206,7 @@ def test_subscription_reports_structured_stream_failure(
         assert bootstrap["type"] == "event_batch"
         assert failure["type"] == "protocol_error"
         assert failure["request_id"] == subscribed["request_id"]
+        assert failure["client_id"] == "failing-unix-client"
         assert failure["code"] == "stream_failed"
         assert failure["diagnostic"]["detail"] == "RuntimeError: event store is unavailable"
     finally:

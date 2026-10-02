@@ -3,8 +3,77 @@ import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
-import {BackendClientError, ServerError} from '../errors.js';
-import {type ControlChannelState, ServerClient, type ServerClientOptions} from './client.js';
+import {BackendClientError, type ControlChannelState, ServerError} from '../index.js';
+import {ServerClient, type ServerClientOptions} from './client.js';
+
+/** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
+function traceState(state: ControlChannelState): string {
+  if (state.status === 'connected') return 'connected';
+  return `down:${state.everConnected ? 'lost' : 'cold'}${state.retrying ? ':retrying' : ''}`;
+}
+
+/**
+ * The only report that may immediately precede each one, which is the channel's
+ * transition graph written down: down, dialing, up, and round again.
+ */
+const PREDECESSOR: Record<string, string> = {
+  'down:lost': 'connected',
+  'down:lost:retrying': 'down:lost',
+  connected: 'down:lost:retrying',
+};
+
+/**
+ * A one-shot event a test can await, so a wait is woken by the thing it waits
+ * for rather than by a poll interval.
+ */
+class Signal {
+  #fire: () => void = () => undefined;
+  readonly fired = new Promise<void>(resolve => {
+    this.#fire = resolve;
+  });
+
+  fire(): void {
+    this.#fire();
+  }
+}
+
+/**
+ * Collect the channel's connectivity reports and let a test wait on them.
+ *
+ * These tests drive a real socket, so recovery finishes when the OS delivers a
+ * connection, not when a timer the client armed expires. Polling `connected`
+ * against a wall-clock deadline therefore fails spuriously on a loaded machine
+ * and no injectable clock fixes it, because there is no client-side timer to
+ * inject. Waking on the report the channel already emits is exact: `#install`
+ * publishes `connected` in the same turn it takes the connection, so the
+ * predicate is true whenever this resolves.
+ *
+ * Deliberately unbounded. The bound is the runner's own per-test timeout, the
+ * same one every `await client.request(...)` in this file relies on, and unlike
+ * the poll loop it cannot expire while the connection is still on its way.
+ */
+class ConnectionWatcher {
+  readonly states: ControlChannelState[] = [];
+  #waiting: Array<() => void> = [];
+
+  readonly observe = (state: ControlChannelState): void => {
+    this.states.push(state);
+    const waiting = this.#waiting;
+    this.#waiting = [];
+    for (const resolve of waiting) resolve();
+  };
+
+  /** Resolve once the client holds a live control connection. */
+  async live(client: ServerClient): Promise<void> {
+    while (!client.connected) {
+      await new Promise<void>(resolve => this.#waiting.push(resolve));
+    }
+  }
+
+  trace(): string[] {
+    return this.states.map(traceState);
+  }
+}
 
 let socketPath: string | undefined;
 
@@ -241,7 +310,7 @@ describe('ServerClient', () => {
     );
   });
 
-  it('carries a subscribe tail only when one is asked for', async () => {
+  it('carries a subscribe tail and store id only when one is asked for', async () => {
     const frames: Array<Record<string, unknown>> = [];
     await withServer(
       socket =>
@@ -260,14 +329,30 @@ describe('ServerClient', () => {
       async client => {
         const tailed = await client.subscribe(0, () => undefined, noopDisconnect, {tail: 1000});
         const full = await client.subscribe(0, () => undefined, noopDisconnect);
+        const named = await client.subscribe(3, () => undefined, noopDisconnect, {storeId: 'log'});
+        const unnamed = await client.subscribe(3, () => undefined, noopDisconnect, {storeId: ''});
 
         expect(frames[0]).toMatchObject({after_sequence: 0, tail: 1000});
+        expect(frames.map(frame => frame['client_id'])).toEqual([
+          'node-client',
+          'node-client',
+          'node-client',
+          'node-client',
+        ]);
         // An old server forbids unknown fields, so the plain call must not
         // carry the key at all, not even as null.
         expect(frames[1]).not.toHaveProperty('tail');
+        // `subscribeRequest` owns both encodings, so this transport and the
+        // browser one agree: a named store rides along, an empty one is
+        // absence, and neither ever becomes an explicit null.
+        expect(frames[2]).toMatchObject({after_sequence: 3, store_id: 'log'});
+        expect(frames[3]).not.toHaveProperty('store_id');
         await tailed.close();
         await full.close();
+        await named.close();
+        await unnamed.close();
       },
+      {clientId: 'node-client'},
     );
   });
 
@@ -521,6 +606,48 @@ describe('ServerClient', () => {
     expect(Date.now() - start).toBeLessThan(2_000);
   });
 
+  it('reports a peer close that the write racing it hides', async () => {
+    // A request issued in the window between the peer's FIN and the transport
+    // noticing it is written onto a half-closed socket, where it neither fails
+    // nor arrives. On the pinned Bun (1.3.9) that write also suppresses the
+    // socket's own `'close'`, so a transport that waits for `'close'` has
+    // nothing left to learn the outage from: the connection keeps reporting
+    // itself live and the request waits out its full response deadline.
+    let connections = 0;
+    const states: string[] = [];
+    await withServer(
+      socket => {
+        connections += 1;
+        const attempt = connections;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          const response = `${JSON.stringify(successResponse(request['request_id'] as string))}\n`;
+          // The first connection answers and ends in one call, so the FIN lands
+          // together with the bytes the caller was waiting for. The second
+          // stays open, so the recovery settles and the states below are final.
+          if (attempt === 1) socket.end(response);
+          else socket.write(response);
+        });
+      },
+      async client => {
+        await expect(client.request({type: 'command.pause'})).resolves.toMatchObject({ok: true});
+        // Issued with no wait, so it races the close either way round. The
+        // caller gets an answer regardless: the outage is reported, and a
+        // repeatable request rides the redial rather than the dead socket.
+        await expect(client.request({type: 'command.pause'})).resolves.toMatchObject({ok: true});
+
+        // The outage is reported before the recovery is, and one redial covers
+        // it: the dial count is what says nothing reconnected behind the
+        // report. How many times an outage reports itself is the channel's
+        // business, so it is not pinned here.
+        expect(states[0]).toBe('disconnected');
+        expect(states.at(-1)).toBe('connected');
+        expect(connections).toBe(2);
+      },
+      {reconnectDelaysMs: [0], onConnectionState: state => states.push(state.status)},
+    );
+  });
+
   it('close() tears down a live subscription without reporting it as an outage', async () => {
     let disconnects = 0;
     await withServer(
@@ -589,8 +716,8 @@ describe('ServerClient', () => {
   it('rejects a pending request when the control stream cannot be framed', async () => {
     await withServer(
       socket => {
-        // The client drops the connection on the framing error, so swallow the
-        // reset the server sees rather than let it become an uncaught error.
+        // The client releases the connection on the framing error, so swallow
+        // whatever the server sees rather than let it become an uncaught error.
         socket.on('error', () => undefined);
         socket.once('data', () => socket.write('x'.repeat(4 * 1024 * 1024 + 1)));
       },
@@ -623,7 +750,7 @@ describe('ServerClient', () => {
   it('redials the control channel and does not resend a non-idempotent request', async () => {
     let connections = 0;
     const seen: string[] = [];
-    const states: ControlChannelState[] = [];
+    const watcher = new ConnectionWatcher();
     await withServer(
       socket => {
         connections += 1;
@@ -643,14 +770,17 @@ describe('ServerClient', () => {
         await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
           kind: 'disconnected',
         });
-        await waitFor(() => client.connected);
+        await watcher.live(client);
         const response = await client.request({type: 'query.snapshot'});
         expect(response.snapshot?.status).toBe('running');
         // The steer reached only the first connection; the redial did not repeat it.
         expect(seen).toEqual(['command.steer', 'query.snapshot']);
-        expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+        // `everConnected` is true from the first report: the Node client is
+        // handed an open socket and adopts it, so it is never cold-started.
+        // The redial's own start is reported between the drop and the recovery.
+        expect(watcher.trace()).toEqual(['down:lost', 'down:lost:retrying', 'connected']);
       },
-      {reconnectDelaysMs: [0], onConnectionState: state => states.push(state)},
+      {reconnectDelaysMs: [0], onConnectionState: watcher.observe},
     );
   });
 
@@ -700,6 +830,7 @@ describe('ServerClient', () => {
   it('discards the late response of an aborted request and stays routable', async () => {
     let serverSocket: Socket | undefined;
     const deferred: Record<string, unknown>[] = [];
+    const arrived = new Signal();
     await withServer(
       socket => {
         serverSocket = socket;
@@ -708,6 +839,7 @@ describe('ServerClient', () => {
           if (request['type'] === 'query.snapshot') {
             // Hold the snapshot answer back; the caller aborts before it lands.
             deferred.push(request);
+            arrived.fire();
             return;
           }
           socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
@@ -718,7 +850,10 @@ describe('ServerClient', () => {
         const aborted = client
           .request({type: 'query.snapshot'}, {signal: controller.signal})
           .catch(error => error);
-        await waitFor(() => deferred.length === 1);
+        // Woken by the server receiving the request, not by a poll interval:
+        // the abort has to land while the request is genuinely on the wire.
+        await arrived.fired;
+        expect(deferred).toHaveLength(1);
         controller.abort();
         expect((await aborted).name).toBe('AbortError');
         // The abandoned request's late response must resolve nothing.
@@ -791,8 +926,170 @@ describe('ServerClient', () => {
     );
   });
 
+  it('fails a non-idempotent request issued while the control channel is down', async () => {
+    let connections = 0;
+    const seen: string[] = [];
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          seen.push(request['type'] as string);
+          socket.write('{not-json}\n');
+        });
+      },
+      async client => {
+        // A protocol fault takes the channel down with no redial pending: a
+        // redial would fetch the same unreadable bytes back.
+        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+          kind: 'parse',
+        });
+        expect(client.connected).toBe(false);
+        const dialsBefore = connections;
+
+        // A steer issued against that state must fail on the spot. Queueing it
+        // for a later revive would apply, seconds later and invisibly, a
+        // command the caller was already told could not be delivered.
+        await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
+          kind: 'disconnected',
+          retryable: true,
+        });
+        expect(connections).toBe(dialsBefore);
+        expect(seen).toEqual(['query.snapshot']);
+      },
+      // A schedule is configured, so the refusal is the down state's answer and
+      // not an artifact of having nothing to redial on.
+      {reconnectDelaysMs: [0]},
+    );
+  });
+
+  it('revives a spent channel for a repeatable request but still refuses a steer', async () => {
+    let connections = 0;
+    const seen: string[] = [];
+    await withServer(
+      socket => {
+        connections += 1;
+        const attempt = connections;
+        socket.on('error', () => undefined);
+        if (attempt === 1) {
+          socket.once('data', () => socket.destroy());
+          return;
+        }
+        respondToLines(socket, request => {
+          seen.push(request['type'] as string);
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        // The drop spends the empty schedule at once, so the channel is down
+        // with nothing pending, and the caller has been told so.
+        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+          kind: 'disconnected',
+        });
+        expect(client.connected).toBe(false);
+
+        // A steer must not wait out a channel the caller was told is dead: it
+        // fails on the spot and opens nothing. The Node client is connected
+        // before it is constructed, so it is never in the cold-start state that
+        // makes a first request of any type wait.
+        await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
+          kind: 'disconnected',
+        });
+        expect(connections).toBe(1);
+
+        // A repeatable request is what asks for the connection back, so a spent
+        // schedule is not a permanent death sentence for the client.
+        const response = await client.request({type: 'command.pause'});
+        expect(response.ok).toBe(true);
+        expect(seen).toEqual(['command.pause']);
+        expect(connections).toBe(2);
+      },
+      {reconnectDelaysMs: []},
+    );
+  });
+
+  it('recovers repeated outages on a finite schedule', async () => {
+    let connections = 0;
+    const watcher = new ConnectionWatcher();
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          // Answer, then end: every round costs one whole outage, so a schedule
+          // whose cursor survived the previous one would strand a later request.
+          socket.end(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        for (let round = 0; round < 4; round += 1) {
+          await watcher.live(client);
+          const response = await client.request({type: 'command.pause'});
+          expect({round, ok: response.ok}).toEqual({round, ok: true});
+        }
+        expect(connections).toBeGreaterThanOrEqual(4);
+
+        // Properties over the whole run rather than one expected sequence, so
+        // they hold however the last round's drop interleaves with the loop
+        // exiting, and they are checked against four real outages instead of a
+        // hand-built trace.
+        const trace = watcher.trace();
+        // The adopted connection is not announced, so the first thing a caller
+        // ever hears is the first outage.
+        expect(trace[0]).toBe('down:lost');
+        for (const [index, state] of trace.entries()) {
+          if (index === 0) continue;
+          const previous = trace[index - 1];
+          // Well-formedness, which subsumes the dedup: a recovery is reported
+          // only out of a dial that was reported in flight, a dial in flight
+          // only out of a reported outage, and an outage only out of a live
+          // channel. No state can therefore repeat its predecessor.
+          expect({index, state, previous}).toEqual({
+            index,
+            state,
+            previous: PREDECESSOR[state],
+          });
+        }
+        // Liveness: every outage was recovered from, bar at most the one the
+        // last round may still be in when the loop exits.
+        const recoveries = trace.filter(state => state === 'connected').length;
+        const outages = trace.filter(state => state === 'down:lost').length;
+        expect({outages, unrecovered: outages - recoveries}).toEqual({
+          outages,
+          unrecovered: trace.at(-1) === 'connected' ? 0 : 1,
+        });
+      },
+      {reconnectDelaysMs: [0], onConnectionState: watcher.observe},
+    );
+  });
+
+  it('rejects a dedicated request whose signal is already aborted', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, () => undefined);
+      },
+      async client => {
+        const controller = new AbortController();
+        controller.abort();
+        const dialsBefore = connections;
+        const rejected = client
+          .request({type: 'query.chat', text: 'x'}, {signal: controller.signal})
+          .catch(error => error);
+
+        // An already-aborted signal never fires its event, so the refusal has
+        // to happen before the request is routed anywhere.
+        expect((await rejected).name).toBe('AbortError');
+        expect(connections).toBe(dialsBefore);
+      },
+    );
+  });
+
   it('reconnect() revives a channel that a protocol fault took down', async () => {
     let connections = 0;
+    const watcher = new ConnectionWatcher();
     await withServer(
       socket => {
         connections += 1;
@@ -814,24 +1111,19 @@ describe('ServerClient', () => {
         });
         expect(client.connected).toBe(false);
         client.reconnect();
-        await waitFor(() => client.connected);
+        await watcher.live(client);
         const response = await client.request({type: 'query.snapshot'});
         expect(response.snapshot?.status).toBe('running');
+        // A fault is reported as an outage like any other, and the explicit
+        // revive is what the recovery comes out of.
+        expect(watcher.trace()).toEqual(['down:lost', 'down:lost:retrying', 'connected']);
       },
-      {reconnectDelaysMs: [0]},
+      {reconnectDelaysMs: [0], onConnectionState: watcher.observe},
     );
   });
 });
 
-/** Poll until `predicate` holds, since the client uses real timers, not fakes. */
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error('waitFor timed out');
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-}
-
+/** Run one test against a fresh server and client, and tear both down after. */
 async function withServer(
   onConnection: (socket: Socket) => void,
   test: (client: ServerClient) => Promise<void>,

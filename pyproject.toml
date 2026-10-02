@@ -171,9 +171,9 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 [tool.vibesys.test_isolation]
 # Shrink-only ratchet for test isolation, enforced by
 # `scripts/check_test_isolation.py`. Tests should exercise public APIs and use
-# in-memory Fakes instead of monkeypatch or mock, and should never use sleeps
-# as synchronization. Existing violations are recorded per (file, rule) in the
-# baseline; counts may only go down.
+# in-memory Fakes instead of monkeypatch or mock, and should never decide a
+# verdict with a sleep, a timeout, or a clock reading. Existing violations are
+# recorded per (file, rule) in the baseline; counts may only go down.
 #
 # Glob patterns of directories scanned for `*.py`. They mirror
 # `[tool.pytest.ini_options] testpaths`. `__pycache__` and `fixtures`

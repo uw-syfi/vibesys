@@ -1,6 +1,7 @@
 """Owned Kubernetes lifecycle for microservice evaluators."""
 
 from kubernetes_runtime.runtime import (
+    ForwardLauncher,
     HTTPProbe,
     ImageBuild,
     ImageOverride,
@@ -12,6 +13,7 @@ from kubernetes_runtime.runtime import (
 )
 
 __all__ = [
+    "ForwardLauncher",
     "HTTPProbe",
     "ImageBuild",
     "ImageOverride",

@@ -14,19 +14,23 @@ in its default browser. If the browser cannot be opened automatically, open the
 `VibeSys web UI ready` URL printed in the terminal.
 
 This command invokes the browser entrypoint directly. It does not start the
-OpenTUI client. The replay gateway remains detached until explicitly stopped;
-use the printed instance-record path to stop it:
+OpenTUI client. Re-running the command reuses the same live demo gateway. The
+gateway remains detached until explicitly stopped; its stable instance record
+is `clients/web/.vibesys-demo/web-gateway.json`:
 
 ```bash
-uv run python -m entrypoints.web stop --instance /path/from/output.json
+uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
 ```
 
 See [Web UI development](../../docs/contributing/web-development.md) for replay,
-real-project, and remote-host workflows.
+real-project, and remote-host workflows. In an SSH session the script does not
+try to open a browser on the remote host; forward port 8765 and open the printed
+capability URL on the local machine.
 
-Without a gateway (`vibesys web dev`, or `pnpm --filter @vibesys/web dev`),
-the page replays `src/fixtures/demo-run.jsonl` in the browser and offers a
-form to connect to a live gateway URL.
+Without a gateway (`vibesys web dev`, or `pnpm --filter @vibesys/web dev`), the
+page replays `src/fixtures/demo-run.jsonl` in the browser. `?gateway=<url>`
+points the same page at a live gateway, whose URL must carry its own capability
+token: the page never forwards its own.
 
 ## Behavior
 
@@ -76,3 +80,6 @@ CAPTURE_DIR=/tmp/vs-web-frames pnpm --dir clients --filter @vibesys/web exec pla
 `e2e/gateway.ts` mocks the gateway's `/ws` socket over `src/fixtures/demo-run.jsonl`.
 `app.spec.ts` checks behaviour; `screens.spec.ts` writes each screen at 1440 and 1024
 in dark and light when `CAPTURE_DIR` is set. Review every PNG by eye.
+`e2e/live-gateway.ts` boots a real detached gateway for the specs that need one
+(`live.spec.ts`, `gateway-hygiene.spec.ts`, `controls-banner.spec.ts`); those
+run against a `vite build` output, so rebuild before running them.

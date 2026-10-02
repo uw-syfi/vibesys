@@ -59,7 +59,15 @@ uv run pytest path/to/test.py -n auto --no-cov -q  # parallel
 ```
 
 `scripts/check_test_isolation.py` counts patching, mocking, sleeps
-(`time.sleep`, `asyncio.sleep` other than `asyncio.sleep(0)`), and
-non-`api` imports of a library inside its own tests. The baseline is
-`tests/quality/isolation_baseline.jsonl`. CI runs with `-n auto --dist loadgroup`; the
-`serial` marker is a last resort for a host-wide resource.
+(`time.sleep`, `asyncio.sleep` other than `asyncio.sleep(0)`), timeout
+verdicts, and non-`api` imports of a library inside its own tests. The baseline
+is `tests/quality/isolation_baseline.jsonl`. CI runs with `-n auto --dist
+loadgroup`; the `serial` marker is a last resort for a host-wide resource.
+
+A timeout verdict is a timeout or clock reading that decides the outcome rather
+than only failing a hung test: `assert not ev.wait(timeout=T)`,
+`return ev.wait(timeout=T)`, a timed wait inside `pytest.raises(TimeoutError)`,
+and a clock reading compared inside an `assert`, `while`, or `if`.
+`assert ev.wait(timeout=T)` is a deadlock guard and does not count, because
+raising T cannot turn its pass into a failure. The script's docstring states
+the criterion and what it deliberately misses.

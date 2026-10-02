@@ -2,12 +2,15 @@ import {strict as assert} from 'node:assert';
 import {readFileSync} from 'node:fs';
 import {test} from 'node:test';
 import {
+  BackendClientError,
+  type ControlChannelState,
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
   ServerError,
   type ServerMessage,
   type SubscribeOptions,
+  sameControlChannelState,
 } from '@vibesys/backend-client';
 import {replayTransport} from './replay.js';
 import {
@@ -15,6 +18,7 @@ import {
   CAPTURED_TYPES,
   type WorkspaceClient,
   WorkspaceSession,
+  type WorkspaceTransportHooks,
   webSocketUrlFromLocation,
 } from './session.js';
 
@@ -47,6 +51,9 @@ class FakeClient implements WorkspaceClient {
   closedSubscriptions = 0;
   refuseDials = false;
   withholdBatch = false;
+  reconnectCalls = 0;
+  hooks: WorkspaceTransportHooks | null = null;
+  #controls: ControlChannelState = {status: 'connected'};
   replies: (input: RequestInput) => Promise<ProtocolResponse> = async input => {
     if (input.type === 'query.snapshot')
       return response({snapshot: {run_id: 'run-1', sequence: 0, status: 'starting'}});
@@ -93,6 +100,48 @@ class FakeClient implements WorkspaceClient {
   }
   emit(message: ServerMessage) {
     this.messages.at(-1)?.(message);
+  }
+  /**
+   * The factory a session builds its transport through, so the control channel
+   * has somewhere to report. Passing the instance instead leaves `controls` at
+   * its starting value, which is what the other tests here want.
+   */
+  factory = (hooks: WorkspaceTransportHooks): WorkspaceClient => {
+    this.hooks = hooks;
+    return this;
+  };
+  /**
+   * The control channel lost a connection it had and reported the outage.
+   *
+   * Deduplicated like the real `ControlChannel`: a report is emitted only when
+   * something a consumer renders actually changed, so a Fake cannot let the
+   * session get away with behavior the real channel never produces.
+   */
+  dropControlChannel(message: string, retrying = false) {
+    this.#report({
+      status: 'disconnected',
+      error: new BackendClientError('disconnected', message),
+      everConnected: true,
+      retrying,
+    });
+  }
+  /** A redial brought the control channel back. */
+  recoverControlChannel() {
+    this.#report({status: 'connected'});
+  }
+  /**
+   * Redial now. The real one cancels an armed redial and dials; this one
+   * recovers the channel and reports it, so a test asserts the affordance had
+   * an effect rather than that a method was called.
+   */
+  reconnect() {
+    this.reconnectCalls += 1;
+    this.recoverControlChannel();
+  }
+  #report(state: ControlChannelState) {
+    if (sameControlChannelState(this.#controls, state)) return;
+    this.#controls = state;
+    this.hooks?.onConnectionState(state);
   }
   async close() {
     this.closed = true;
@@ -668,8 +717,9 @@ for (const reconnectDelaysMs of [[1], []]) {
   });
 }
 
+const ws = (href: string) => webSocketUrlFromLocation({href});
+
 test('maps page and gateway capability URLs to the gateway WebSocket endpoint', () => {
-  const ws = (href: string) => webSocketUrlFromLocation({href});
   assert.equal(
     ws('http://localhost:4173/runs/demo?token=secret&unused=x'),
     'ws://localhost:4173/ws?token=secret',
@@ -682,6 +732,49 @@ test('maps page and gateway capability URLs to the gateway WebSocket endpoint', 
     ws('http://127.0.0.1:5173/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F%3Ftoken%3Dsecret'),
     'ws://127.0.0.1:8765/ws?token=secret',
   );
+  assert.equal(ws('https://127.0.0.1:8765/?token=secret'), 'wss://127.0.0.1:8765/ws?token=secret');
+});
+
+test('never forwards the page capability token to a foreign gateway authority', () => {
+  assert.equal(
+    ws('http://127.0.0.1:8765/?token=secret&gateway=http%3A%2F%2F127.0.0.1%3A5173%2F'),
+    'ws://127.0.0.1:5173/ws?token=',
+  );
+});
+
+test('sends a capability token only to the authority whose own URL carried it', () => {
+  const pageOrigins = ['http://127.0.0.1:8765', 'https://gateway.test'];
+  const gatewayValues = [
+    null,
+    '/',
+    'http://127.0.0.1:5173/',
+    'http://127.0.0.1:5173/?token=gateway-token',
+    'https://elsewhere.test/',
+    '//elsewhere.test/',
+    'http://127.0.0.1:8765@elsewhere.test/',
+  ];
+  const cases = pageOrigins.flatMap(origin =>
+    gatewayValues.flatMap(gateway =>
+      [null, 'page-token'].map(pageToken => ({origin, gateway, pageToken})),
+    ),
+  );
+
+  const results = cases.map(({origin, gateway, pageToken}) => {
+    const page = new URL(origin);
+    if (pageToken !== null) page.searchParams.set('token', pageToken);
+    if (gateway !== null) page.searchParams.set('gateway', gateway);
+    const socket = new URL(ws(page.href));
+    return {
+      sent: socket.searchParams.get('token'),
+      pageAuthority: socket.origin === origin.replace(/^http/, 'ws'),
+    };
+  });
+
+  assert.deepEqual(
+    results.filter(result => result.sent === 'page-token' && !result.pageAuthority),
+    [],
+  );
+  assert.ok(results.some(result => result.sent !== ''));
 });
 
 test('resumes with the store id, and folds a replaced store as a fresh bootstrap', async () => {
@@ -981,4 +1074,51 @@ test('chat options are loaded on demand, never by a bootstrap', async () => {
     'claude',
   );
   await session.close();
+});
+
+test('a dead control channel is its own state, redialed without touching the stream', async () => {
+  const client = new FakeClient();
+  const session = new WorkspaceSession(client.factory);
+  await session.start();
+  assert.deepEqual(session.getSnapshot().controls, {status: 'connected'});
+  const published: string[] = [];
+  session.subscribe(() => published.push(session.getSnapshot().controls.status));
+
+  client.dropControlChannel('gateway restarted');
+  const dead = session.getSnapshot();
+  // The transcript is still streaming; only the command path is down, and the
+  // two are reported as the separate facts they are.
+  assert.equal(dead.connection, 'connected');
+  assert.equal(dead.connectionError, null);
+  assert.deepEqual(dead.controls, {
+    status: 'disconnected',
+    error: new BackendClientError('disconnected', 'gateway restarted'),
+    everConnected: true,
+    retrying: false,
+  });
+  assert.deepEqual(published, ['disconnected']);
+
+  // A dial starting is a change a frontend renders (the affordance goes dead
+  // while `reconnect()` would no-op), so the dedup must not swallow it.
+  client.dropControlChannel('gateway restarted', true);
+  const retrying = session.getSnapshot().controls;
+  assert.equal(retrying.status === 'disconnected' && retrying.retrying, true);
+
+  const requests = client.requests.length;
+  session.reconnectControls();
+  // The affordance reaches the transport's redial verb and the recovery it
+  // produces reaches the session's state. Issuing a request instead would only
+  // queue behind the backoff the outage already armed.
+  assert.equal(client.reconnectCalls, 1);
+  assert.deepEqual(session.getSnapshot().controls, {status: 'connected'});
+  // And it is the command path only: a live transcript is not resubscribed.
+  await settle();
+  assert.equal(client.subscriptions.length, 1);
+  assert.equal(client.requests.length, requests);
+
+  await session.close();
+  client.dropControlChannel('too late');
+  assert.deepEqual(session.getSnapshot().controls, {status: 'connected'});
+  session.reconnectControls();
+  assert.equal(client.reconnectCalls, 1);
 });

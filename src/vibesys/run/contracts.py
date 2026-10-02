@@ -30,6 +30,7 @@ class ProfilerKind(StrEnum):
     AUTO = "auto"
     NONE = "none"
     NSYS = "nsys"
+    NCU = "ncu"
     ROCPROF = "rocprof"
     OTEL = "otel"
     TORCH = "torch"

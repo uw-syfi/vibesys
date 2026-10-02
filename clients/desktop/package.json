@@ -6,6 +6,7 @@
   "license": "MIT",
   "type": "module",
   "main": "out/main/index.cjs",
+  "exports": {},
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

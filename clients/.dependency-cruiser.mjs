@@ -1,13 +1,49 @@
-// Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it: the
-// replay harness (`tui/dev`), benchmarks, and the workspace's own tooling (`scripts`).
-const PACKAGES = '^(?:backend-client|core-state|tui|web|desktop)/';
-const TOOLING =
-  '^(?:tui/dev|tui/benchmarks|core-state/bench|web/e2e|desktop/e2e|desktop/test|scripts)/';
+import {fileURLToPath} from 'node:url';
+import {pathAlternation, workspaceLayout} from './scripts/workspace_layout.mjs';
+
+// Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it (the
+// replay harness `tui/dev`, the benchmarks, the web end-to-end specs) and the workspace's own
+// tooling (`scripts`). Both sets come from the workspace layout rather than a name list, so a new
+// package, or a new directory inside one, is covered by these rules on its first commit.
+// `scripts/check_ts_architecture.mjs` derives the scan roots from the same place.
+const layout = workspaceLayout(fileURLToPath(new URL('.', import.meta.url)));
+const PACKAGE_DIRECTORIES = pathAlternation(layout.packages.map(({directory}) => directory));
+const PACKAGES = `^(?:${PACKAGE_DIRECTORIES})/`;
+// Capturing, so a rule can exclude the importer's own package with a `$1` back-reference.
+const OWN_PACKAGE = `^(${PACKAGE_DIRECTORIES})/`;
+const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 
+// The replay harness is tooling, but it has its own rule below, with the reason it exists; the
+// remaining tooling directories are plain leaf tools.
+const DEV_HARNESS = 'tui/dev';
+if (!layout.toolingDirectories.includes(DEV_HARNESS)) {
+  throw new Error(`.dependency-cruiser.mjs: ${DEV_HARNESS} is no longer a tooling directory`);
+}
+const LEAF_TOOL_DIRECTORIES = pathAlternation(
+  layout.toolingDirectories.filter(directory => directory !== DEV_HARNESS),
+);
+const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
+// The importer of a `tools-are-leaves` edge: any file in a leaf tool directory, or any other file
+// in a package. Group 1 is the importer's own leaf tool directory, so `to.pathNot: '^$1/'`
+// excludes exactly that directory and no other tool's. Ordinary package code matches the second
+// alternative, where group 1 does not participate, so `$1` is never substituted and the resulting
+// `^$1/` matches no path: such an importer may reach no tool directory at all.
+const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
+
+function packagesAbove(directory) {
+  const above = layout.packages.filter(
+    workspacePackage => workspacePackage.directory !== directory,
+  );
+  return [
+    `^(?:${pathAlternation(above.map(workspacePackage => workspacePackage.directory))})/`,
+    `/node_modules/(?:${pathAlternation(above.map(workspacePackage => workspacePackage.name))})/`,
+  ];
+}
+
 /** @type {import('dependency-cruiser').IConfiguration} */
-module.exports = {
+export default {
   forbidden: [
     {
       name: 'no-circular-dependencies',
@@ -28,20 +64,12 @@ module.exports = {
       },
     },
     {
+      // `backend-client` is the lowest layer, so it may not reach any other package: the set is
+      // derived, because a rule that names the layers above it goes stale when one is added.
       name: 'backend-client-is-lowest-layer',
       severity: 'error',
       from: {path: '^backend-client/src/'},
-      to: {
-        path: ['^(?:core-state|tui)/', '/node_modules/@vibesys/(?:core-state|tui)/'],
-      },
-    },
-    {
-      // The default entry and the WebSocket transport must bundle in a browser.
-      // Only the Node Unix-socket adapter may reach a Node builtin.
-      name: 'backend-client-neutral-has-no-node-runtime',
-      severity: 'error',
-      from: {path: '^backend-client/src/', pathNot: ['^backend-client/src/node/', TEST_FILE]},
-      to: {dependencyTypes: ['core']},
+      to: {path: packagesAbove('backend-client')},
     },
     {
       name: 'web-does-not-depend-on-tui',
@@ -80,16 +108,19 @@ module.exports = {
       // (in any package, test files included) may import it.
       name: 'shipping-path-does-not-depend-on-dev-harness',
       severity: 'error',
-      from: {path: PACKAGES, pathNot: '^tui/dev/'},
-      to: {path: '^tui/dev/'},
+      from: {path: PACKAGES, pathNot: `^${DEV_HARNESS}/`},
+      to: {path: `^${DEV_HARNESS}/`},
     },
     {
-      // Benchmarks and workspace scripts are leaf tools: they consume the packages, never the
-      // other way round, so a package build or test cannot depend on them.
+      // Benchmarks, end-to-end specs, and workspace scripts are leaf tools: they consume the
+      // packages, never the other way round, so a package build or test cannot depend on them.
+      // Each tool may reach its own directory and no other's, which is what the `$1`
+      // back-reference on `LEAF_TOOL_IMPORTER` says. Excluding every tool from `from` instead
+      // would permit `web/e2e -> scripts` and `web/e2e -> tui/benchmarks`.
       name: 'tools-are-leaves',
       severity: 'error',
-      from: {path: PACKAGES, pathNot: '^(?:tui/benchmarks|core-state/bench)/'},
-      to: {path: '^(?:tui/benchmarks|core-state/bench|scripts)/'},
+      from: {path: LEAF_TOOL_IMPORTER},
+      to: {path: LEAF_TOOLS, pathNot: '^$1/'},
     },
     {
       // `scripts/` is repository tooling (architecture checks). It reads package manifests
@@ -117,9 +148,9 @@ module.exports = {
     {
       name: 'workspace-packages-use-public-exports',
       severity: 'error',
-      from: {path: '^([^/]+)/(?:src|dev|benchmarks|bench)/'},
+      from: {path: OWN_PACKAGE},
       to: {
-        path: '^(?:backend-client|core-state|tui)/',
+        path: PACKAGES,
         pathNot: '^$1/',
         dependencyTypes: ['local', 'localmodule'],
         dependencyTypesNot: ['aliased-tsconfig-paths'],
@@ -162,8 +193,8 @@ module.exports = {
     {
       name: 'production-dependencies-are-declared',
       severity: 'error',
-      // Applies to the tooling too (harness, benchmarks, scripts): they must declare what they
-      // import, though they may import any public workspace export.
+      // Applies to the tooling too (harness, benchmarks, end-to-end specs, scripts): they must
+      // declare what they import, though they may import any public workspace export.
       from: {
         path: `^[^/]+/src/|${TOOLING}`,
         pathNot: '^[^/]+/src/.*\\.test\\.[cm]?[jt]sx?$',

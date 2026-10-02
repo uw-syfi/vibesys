@@ -31,10 +31,15 @@ const client = token === null ? null : homeClient(token, (url, init) => fetch(ur
  */
 const showRun = (home: HomeApi, links: RunLinks | null, notes: NotesApi | null) => {
   const live = page.token !== null || page.gateway !== null;
+  // A factory, so the live transport's control channel reports its outages to
+  // the session that owns them (`WorkspaceState.controls`).
   const session = new WorkspaceSession(
-    live
-      ? new WebSocketTransport(webSocketUrlFromLocation(window.location))
-      : replayTransport(fetchReplay()),
+    hooks =>
+      live
+        ? new WebSocketTransport(webSocketUrlFromLocation(window.location), {
+            onConnectionState: hooks.onConnectionState,
+          })
+        : replayTransport(fetchReplay()),
     {lifecycle: browserLifecycle},
   );
   void session.start();

@@ -50,7 +50,7 @@ Semantics:
   `metal`, `trainium`, or `cpu`.
 - `domains` is optional. If absent, the rule does not constrain domain.
 - Every domain value must match a registered domain: `generic`, `llm-serving`,
-  `microservices`, or `database`.
+  `microservices`, `database`, or `kernel-writing`.
 - A skill with no matching rule is globally eligible and may load for any
   backend and domain.
 - When a rule declares both `backends` and `domains`, both constraints must

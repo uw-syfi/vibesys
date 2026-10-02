@@ -31,6 +31,7 @@ commands = [
   ["uv", "run", "tach", "check"],
   ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["python3", "scripts/check_doc_links.py"],
+  ["python3", "-m", "scripts.check_doc_citations"],
   ["uv", "run", "vibesys", "--headless", "--help"],
 ]
 
@@ -49,14 +50,25 @@ language = "typescript"
 directory = "clients"
 collection = "pnpm_packages"
 timeout_seconds = 1200
-commands = [
-  ["pnpm", "--filter", "@vibesys/backend-client", "test"],
-  ["pnpm", "--filter", "@vibesys/core-state", "test"],
-  ["pnpm", "--filter", "@vibesys/tui", "test"],
-  ["pnpm", "--filter", "@vibesys/web", "test"],
-]
+# The fallback when the change filter selects no package: `-r` covers every workspace member, so
+# this does not go stale when one is added. One package at a time because a package's `build` is
+# `rm -rf dist && tsc`, and every dependent package declares hooks that run it for its
+# dependencies: `core-state`'s `prebuild`/`precheck`/`pretest` rebuild `backend-client`, `tui`'s
+# rebuild both `backend-client` and `core-state`, whose `dist` it resolves through
+# `tui/node_modules/@vibesys/*` (it declares no tsconfig `paths`), and `web`'s `pretest` rebuilds
+# both as well. `pnpm -r` starts independent members in the same instant, so without the flag a
+# sibling task can read a `dist` that is being deleted. The flag only orders the packages inside
+# one `pnpm` invocation; a second `pnpm` running elsewhere in the same checkout can still delete
+# the same `dist` mid-suite, which this flag cannot prevent and which remains unfixed.
+# `scripts/run_bun_tests.mjs` is what keeps that from passing silently: it fails the suite, naming
+# the files, when the run collects fewer test files than the package holds.
+commands = [["pnpm", "-r", "--workspace-concurrency=1", "run", "test"]]
 package_commands = [["pnpm", "--filter", "{package}", "test"]]
-always_commands = [["pnpm", "test:ts-architecture"], ["pnpm", "test:conformance"]]
+always_commands = [
+  ["pnpm", "test:ts-architecture"],
+  ["pnpm", "test:conformance"],
+  ["pnpm", "test:bun-runner"],
+]
 
 [[check_groups]]
 name = "tui_quality"

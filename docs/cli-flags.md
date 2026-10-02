@@ -333,7 +333,7 @@ prompts and input-owned candidate-contract documentation.
 
 | Backend | Intended target | Sandbox support | Device handling | Default profiler behavior |
 | --- | --- | --- | --- | --- |
-| `cuda` | NVIDIA GPU serving systems. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Local/Docker use `nsys`; Modal uses `torch` when `--profiler auto`. |
+| `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` locally/in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
 | `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Local/Docker use `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
 | `metal` | Apple Silicon / MPS targets. | Local only. | No device selection or monitor. | Local `auto` resolves through the local runtime default. |
 | `trainium` | AWS Trainium / NeuronCore targets. | Local and Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
@@ -384,6 +384,7 @@ supported by this CLI.
 | --- | --- |
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
+| `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
 | `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |

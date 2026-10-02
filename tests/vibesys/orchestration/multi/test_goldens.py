@@ -41,7 +41,11 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeRun
 
 _FAKE_AGENT_CAPABILITIES = frozenset(
-    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+    {
+        AgentCapability.MCP_SERVERS,
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.SESSION_REUSE,
+    }
 )
 
 if TYPE_CHECKING:
@@ -308,6 +312,7 @@ def test_public_policy_trajectory_matches_golden(
             facts=facts,
             responder=script.respond,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            supported_extra_tools=("profiler",),
         )
         if profile_guided:
             for _round in range(rounds):

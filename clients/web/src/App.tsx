@@ -13,6 +13,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import {type AskView, askView, chatOffer} from './ask.js';
+import {type ControlsBanner, controlsBanner} from './banners.js';
 import {copyText} from './clipboard.js';
 import {activityRound, attachNote, needsOlder, runControl, steersNeedOlder} from './derive.js';
 import {type HomeApi, type Listing, openRun, sidebarSections} from './home.js';
@@ -752,6 +753,10 @@ export function App({session, home, links, notes, theme: opened}: AppProps) {
           onReconnect={() => void session.reconnect()}
           onRetrySnapshot={() => void session.refresh()}
         />
+        <ControlsOutage
+          banner={controlsBanner(state)}
+          onReconnect={() => session.reconnectControls()}
+        />
         <RunTranscript {...section} history={history} />
         <RunComposer {...section} />
       </main>
@@ -786,6 +791,41 @@ export function App({session, home, links, notes, theme: opened}: AppProps) {
           onClose={() => dispatch({type: 'palette', open: false})}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The command path is undeliverable: every query and every control (pause,
+ * resume, steer, stop, chat) is held until the channel comes back, while the
+ * transcript above keeps streaming. A banner of its own and not the connection
+ * one, because the two sockets fail independently and the recovery differs.
+ */
+function ControlsOutage({
+  banner,
+  onReconnect,
+}: {
+  banner: ControlsBanner | null;
+  onReconnect: () => void;
+}) {
+  if (banner === null) return null;
+  return (
+    <div
+      className="banner"
+      role="alert"
+      aria-label="Run controls status"
+      data-testid="controls-banner"
+    >
+      <span>{banner.message}</span>
+      {/*
+        Disabled rather than hidden while a dial is in flight: `reconnect()`
+        no-ops then, so an enabled button would swallow clicks for the whole
+        connect-timeout window and change nothing on screen. Hiding it instead
+        would make the affordance flicker in and out.
+      */}
+      <button type="button" className="btn" disabled={banner.retrying} onClick={onReconnect}>
+        {banner.retrying ? 'Reconnecting…' : 'Reconnect now'}
+      </button>
     </div>
   );
 }

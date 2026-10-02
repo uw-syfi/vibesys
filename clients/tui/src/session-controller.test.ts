@@ -24,6 +24,22 @@ function paletteNames(controller: SocketSessionController): string[] {
   return fuzzyMatchCommands('', context).map(command => command.name);
 }
 
+/** A recorded measurement, the cheapest event to observe as folded or dropped. */
+function benchmark(sequence: number, value: number): RunEvent {
+  return {
+    sequence,
+    timestamp: `2026-01-01T00:00:0${sequence}Z`,
+    type: 'benchmark_result',
+    round_label: 'round-1',
+    data: {kind: 'benchmark_result', metric: 'ops', value, unit: 'ops/s'},
+  };
+}
+
+/** How many times the perf pane has been (re)loaded from the backend. */
+function performanceQueries(transport: FakeTransport): number {
+  return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
 /** The chat palette's current matches, by name, for the chat-surface counterpart above. */
 function chatPaletteNames(controller: SocketSessionController): string[] {
   const context = {surface: 'chat' as const, chatDocked: chatPaneVisible(controller.state)};
@@ -98,6 +114,46 @@ describe('session controller', () => {
     expect(controller.state.core.sequence).toBe(2);
     await controller.stop();
     expect(transport.closed).toBe(true);
+  });
+
+  // A chat RPC answers with the journal tail written while the request was in
+  // flight, so its events can outrun the subscription by a whole poll
+  // interval. Folding them used to advance the contiguous stream cursor, and
+  // the batch the subscription was still holding was then dropped as already
+  // folded, permanently and across reconnects.
+  it('keeps the events a chat response outran, and folds its own once', async () => {
+    const answer: RunEvent = {
+      sequence: 4,
+      timestamp: '2026-01-01T00:00:04Z',
+      type: 'chat',
+      agent_kind: 'chat',
+      round_label: 'experiment-chat',
+      data: {kind: 'chat', answer: 'the answer'},
+    };
+    const transport = new FakeTransport([answer]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emit({type: 'event', event: event(1, 'agent_output_chunk', 'one\n')});
+
+    await controller.submitChat('what is happening?');
+
+    // Immediate feedback, without claiming the subscription reached sequence 4.
+    expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
+      'what is happening?',
+      'the answer',
+    ]);
+    expect(controller.state.core.sequence).toBe(1);
+
+    // The batch the subscription was holding, then its copies of the response.
+    transport.emit({type: 'event', event: benchmark(2, 11)});
+    transport.emit({type: 'event', event: benchmark(3, 22)});
+    transport.emit({type: 'event', event: answer});
+
+    expect(controller.state.core.benchmarks.map(record => record.value)).toEqual([11, 22]);
+    expect(controller.state.core.sequence).toBe(4);
+    expect(
+      controller.state.core.chatTranscript.filter(entry => entry.content === 'the answer'),
+    ).toHaveLength(1);
   });
 
   it('issues every boot request concurrently', async () => {
@@ -376,6 +432,35 @@ describe('session controller', () => {
     expect(controller.state.layout.right?.content).toContain('Performance · total_ops_per_sec');
     expect(controller.state.layout.right?.content).toContain('best r2 2.4k total_ops_per_sec');
     expect(controller.state.layout.focus).toBe('right');
+  });
+
+  // Post-#692 journals report a benchmark as a completed `gate_finished`
+  // carrying the measurement, not as a `benchmark_result`, so the pane's
+  // refresh trigger has to recognize both or the curve stays stale until an
+  // unrelated event happens to reload it.
+  it('reloads the perf pane when a benchmark arrives as a gate result', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await controller.submitCommand('/perf');
+    const loads = (): number => performanceQueries(transport);
+    const before = loads();
+
+    transport.emit({
+      type: 'event',
+      event: {
+        sequence: 5,
+        timestamp: '2026-01-01T00:00:05Z',
+        type: 'gate_finished',
+        status: 'completed',
+        round_label: 'round-1',
+        data: {kind: 'gate_finished', gate: 'benchmark', metric: 'ops', value: 9, unit: 'ops/s'},
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(loads()).toBe(before + 1);
   });
 
   it('opens a multi-turn chat panel and renders agent answers there', async () => {
@@ -2472,6 +2557,55 @@ describe('a stream that re-bootstraps into a log shorter than the tail', () => {
     expect(controller.state.core.maxRounds).toBe(3);
     expect(controller.state.core.rounds.map(round => round.number)).toEqual([1]);
     expect(controller.state.core.transcript.map(item => item.content).join('')).toContain('two\n');
+  });
+});
+
+/**
+ * The mirror of a raised floor: a fresh batch declaring a floor the stream has
+ * already declared. `#declaredFloor` is the highest such floor, not the latest,
+ * so a descent within one store is extra history rather than a gap, and the
+ * climb back to a floor the stream already declared costs no refold. #1036.
+ */
+describe('a stream that re-declares a floor it already declared', () => {
+  it('keeps the fold when the declared floor returns to an earlier level', async () => {
+    const history = longHistory(2_000);
+    const transport = new HistoryTransport(history);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch(history.slice(1_500), 1_500);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    // A second bootstrap dial against the same store, floored lower: more
+    // history offered and no gap, so the fold extends and the floor descends.
+    transport.emitBatch(history.slice(1_000), 1_000);
+    expect(controller.state.core.historyAfterSequence).toBe(1_000);
+    const folded = controller.state.core.transcript.length;
+
+    // Back at a floor the stream already declared: above the last one but not
+    // above the highest, so there is no gap and the fold has to survive.
+    transport.emitBatch([event(2_001, 'agent_output_chunk', 'live\n')], 1_500);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_000);
+    expect(controller.state.core.transcript).toHaveLength(folded + 1);
+    expect(controller.state.core.transcript.at(-1)?.content).toBe('live\n');
+  });
+
+  it('takes a store change that lowers the floor as the new watermark', async () => {
+    const transport = new HistoryTransport(longHistory(2_000));
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch([event(1_501, 'agent_output_chunk', 'server\n')], 1_500, 'server-store');
+    transport.emitBatch([event(301, 'agent_output_chunk', 'run\n')], 300, 'run-store');
+    expect(controller.state.core.historyAfterSequence).toBe(300);
+
+    // 900 is below the superseded store's watermark and above the attached
+    // log's, so it is a burst outrunning the tail bound in the log now
+    // streaming, not a return to a floor this stream declared.
+    transport.emitBatch([event(901, 'agent_output_chunk', 'burst\n')], 900, 'run-store');
+
+    expect(controller.state.core.historyAfterSequence).toBe(900);
+    expect(controller.state.core.transcript.map(item => item.content)).toEqual(['burst\n']);
   });
 });
 

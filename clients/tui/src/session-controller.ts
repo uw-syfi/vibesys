@@ -10,7 +10,7 @@ import {
   type ServerTransport,
   type StreamConnectionState,
 } from '@vibesys/backend-client';
-import {DEFAULT_CHAT_THREAD_ID, hasRunEnded} from '@vibesys/core-state';
+import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,
@@ -59,6 +59,7 @@ import {
   applyEventBatch,
   applyEventPrefix,
   applyEventRebootstrap,
+  applyResponseEvents,
   applySnapshot,
   type ChatThreadSettings,
   chatDocked,
@@ -309,6 +310,17 @@ export class SocketSessionController implements SessionController {
    * which is what the server does when a burst outruns the tail bound; see
    * `#resetHistoryFloor`. Null until the first batch, whose floor is the
    * bootstrap's own and therefore raises nothing.
+   *
+   * Clamped on the fresh path so it is the watermark this says it is, because
+   * of what the comparison decides. Re-bootstrapping discards the fold, so
+   * `declared > this.#declaredFloor` has to be a gap test: a floor above
+   * everything the stream declared means the server re-bootstrapped the
+   * subscription further forward and never delivered the events between the
+   * top of the fold and the new floor. Against the last floor declared
+   * instead, a return to a level the stream already declared reads as a raise
+   * and throws away a fold with no gap in it. `#resetHistoryFloor`'s path
+   * still takes the floor literally, up or down, because it starts a new
+   * folded log whose numbering the old watermark does not describe. #1036.
    */
   #declaredFloor: number | null = null;
   /**
@@ -772,8 +784,7 @@ export class SocketSessionController implements SessionController {
         type: 'query.chat_thread_create',
         ...(settings === null ? {} : {provider: settings.provider, model: settings.model}),
       });
-      let state = closeChatMenu(this.#state);
-      for (const event of response.events ?? []) state = applyEvent(state, event);
+      const state = applyResponseEvents(closeChatMenu(this.#state), response.events ?? []);
       const threadId = response.chat_thread?.thread_id;
       this.#setState(threadId === undefined ? state : switchChatThread(state, threadId));
     } catch (error) {
@@ -939,7 +950,13 @@ export class SocketSessionController implements SessionController {
 
   /**
    * Both visualizations are functions of completed rounds and recorded
-   * metrics, so those two events bound every change either can show.
+   * metrics, so a round boundary and a recorded measurement bound every change
+   * either can show. Which events carry a measurement is core-state's fact,
+   * not this controller's: post-#692 journals report one as a completed
+   * benchmark `gate_finished` rather than a `benchmark_result`. The bare
+   * `benchmark_result` type stays as its own clause, since the trigger is
+   * allowed to be broader than the fold and a legacy event carrying no typed
+   * data still means the backend's performance log moved.
    */
   #refreshPaneFor(events: readonly RunEvent[]): void {
     const right = this.#state.layout.right;
@@ -948,7 +965,7 @@ export class SocketSessionController implements SessionController {
       event =>
         event.type === 'round_finished' ||
         event.type === 'benchmark_result' ||
-        event.data?.kind === 'benchmark_result',
+        recordsBenchmark(event),
     );
     if (relevant) void this.#loadPane(right.view);
   }
@@ -1300,8 +1317,7 @@ export class SocketSessionController implements SessionController {
         ...(threadId === DEFAULT_CHAT_THREAD_ID ? {} : {thread_id: threadId}),
       });
       const answer = response.chat?.answer ?? 'No chat answer was returned.';
-      let state = this.#state;
-      for (const event of response.events ?? []) state = applyEvent(state, event);
+      let state = applyResponseEvents(this.#state, response.events ?? []);
       if (!(response.events ?? []).some(event => event.data?.kind === 'chat')) {
         state = updateChatConversation(state, threadId, entries => [
           ...entries,
@@ -1481,7 +1497,13 @@ export class SocketSessionController implements SessionController {
       (this.#storeId !== null && store !== this.#storeId) ||
       (this.#declaredFloor !== null && declared > this.#declaredFloor);
     this.#storeId = store;
-    this.#declaredFloor = declared;
+    // The watermark, not the last value declared: see the field. Literal on a
+    // re-bootstrap, which starts a new folded log the old watermark does not
+    // number, and on the first batch, which has no watermark to raise.
+    this.#declaredFloor =
+      rebootstrap || this.#declaredFloor === null
+        ? declared
+        : Math.max(this.#declaredFloor, declared);
     const floor = rebootstrap
       ? this.#resetHistoryFloor(declared)
       : this.#lowerHistoryFloor(declared);

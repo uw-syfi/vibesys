@@ -24,7 +24,8 @@
       "dir": "s2c",
       "expect": {
         "type": "response",
-        "ok": true
+        "ok": true,
+        "client_id": "client-1"
       }
     }
   ]

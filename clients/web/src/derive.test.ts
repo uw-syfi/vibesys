@@ -170,6 +170,7 @@ test('tool durations: one decimal under a minute, then minutes and zero-padded s
       kind: 'tool',
       content: '',
       toolResult: {
+        kind: 'tool_result',
         tool: 'Bash',
         content: '',
         is_error: false,

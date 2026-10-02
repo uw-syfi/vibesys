@@ -14,6 +14,8 @@ from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.infrastructure import (
     AgentExecutionScope,
     BlockingOperations,
+    LocalValidationRecipeError,
+    LocalValidationRecipeErrorKind,
     TrustedAccuracyResult,
     TrustedBenchmarkResult,
     WorkspaceEvaluationSpec,
@@ -372,12 +374,29 @@ def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(tmp_path
                 workspace,
                 reuse=accuracy.receipt,
             )
-        with pytest.raises(ValueError, match="writable path"):
+        # An agent-reported artifact path that is not a workspace file is
+        # repairable feedback, including recipe JSON inlined in its place.
+        for artifact in (
+            "../recipes.json",
+            '{"version":1,"recipes":[{"name":"a","command":"python3 -c \\"import re\\nok=True\\""}]}',
+        ):
+            with pytest.raises(
+                LocalValidationRecipeError, match="workspace-relative file path"
+            ) as raised:
+                await runtime.evaluation.validate_local(
+                    workspace,
+                    recipe_artifact=artifact,
+                    report_location="validation/report.json",
+                )
+            assert raised.value.kind is LocalValidationRecipeErrorKind.INVALID_ARTIFACT
+        # The report location is framework-owned, so an invalid one stays a contract error.
+        with pytest.raises(ValueError, match="writable path") as raised_report:
             await runtime.evaluation.validate_local(
                 workspace,
-                recipe_artifact="../recipes.json",
-                report_location="validation/report.json",
+                recipe_artifact="validation/recipes.json",
+                report_location="../report.json",
             )
+        assert not isinstance(raised_report.value, LocalValidationRecipeError)
         await runtime.workspaces.close()
 
     asyncio.run(exercise())

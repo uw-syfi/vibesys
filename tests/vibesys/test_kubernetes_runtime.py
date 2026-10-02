@@ -28,6 +28,7 @@ TRAIN_CONFIG = EXAMPLES_ROOT / "repositories/train-ticket/.vibesys/tasks/kuberne
 sys.path.insert(0, str(EVALUATOR_ROOT))
 
 from kubernetes_runtime import (  # noqa: E402  # lint-waiver: LW-006003; import the fixture module after adding its resource directory to sys.path.
+    ForwardLauncher,
     HTTPProbe,
     KubernetesConfig,
     KubernetesLifecycle,
@@ -42,6 +43,17 @@ from kubernetes_runtime.control import (  # noqa: E402  # lint-waiver: LW-006005
     LifecycleControlServer,
     request_action,
 )
+
+
+def _assume_free_port(_name: str, _port: int) -> None:
+    """Keep fake-forward tests independent of which loopback ports the host uses."""
+
+
+def _launcher(popen: Callable[..., _Process] | None = None) -> ForwardLauncher:
+    return ForwardLauncher(
+        popen=popen or (lambda *_args, **_kwargs: _Process()),
+        require_free_port=_assume_free_port,
+    )
 
 
 class _Process:
@@ -140,6 +152,7 @@ def _start_lifecycle(
     config: KubernetesConfig | None = None,
     runner: _Runner | None = None,
     popen: Callable[..., _Process] | None = None,
+    forwards: ForwardLauncher | None = None,
 ) -> tuple[KubernetesLifecycle, _Runner]:
     _service_manifest(tmp_path)
     active_runner = runner or _Runner()
@@ -149,7 +162,7 @@ def _start_lifecycle(
         tmp_path,
         config_dir=tmp_path,
         runner=active_runner,
-        popen=popen or (lambda *_args, **_kwargs: _Process()),
+        forwards=forwards or _launcher(popen),
     )
     lifecycle.start()
     return lifecycle, active_runner
@@ -175,7 +188,7 @@ def test_manifest_is_config_relative_and_namespace_scoped(tmp_path: Path) -> Non
         candidate,
         config_dir=config_dir,
         runner=runner,
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     lifecycle.start()
     apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
@@ -253,7 +266,7 @@ def test_http_probe_retries_incomplete_response(
         tmp_path,
         config_dir=tmp_path,
         runner=runner,
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     calls = 0
 
@@ -291,7 +304,7 @@ def test_http_probe_waits_for_expected_json(
         tmp_path,
         config_dir=tmp_path,
         runner=_Runner(),
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     responses = iter(
         [
@@ -330,7 +343,7 @@ def test_http_probe_json_timeout_reports_expected_subset(
         tmp_path,
         config_dir=tmp_path,
         runner=_Runner(),
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     times = iter([0.0, 0.0, 2.0])
     monkeypatch.setattr("time.monotonic", lambda: next(times))
@@ -370,7 +383,7 @@ def test_lifecycle_start_restart_reset_and_close(tmp_path: Path) -> None:
         return process
 
     lifecycle = KubernetesLifecycle(
-        config, tmp_path, config_dir=tmp_path, runner=runner, popen=popen
+        config, tmp_path, config_dir=tmp_path, runner=runner, forwards=_launcher(popen)
     )
     lifecycle.start()
     first_namespace = lifecycle.namespace
@@ -872,15 +885,21 @@ def test_social_network_assets_build_and_override_candidate_services() -> None:
     )
 
     lifecycle_config = config.model_copy(update={"http_probes": ()})
-    runner = _Runner()
+    runner = _NodePortRunner(selector={"service": "nginx-thrift"})
     lifecycle = KubernetesLifecycle(
         lifecycle_config,
         Path("examples/microservices/repositories"),
         config_dir=SOCIAL_CONFIG.parent,
         runner=runner,
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     lifecycle.start()
+    # The gateway is reached through a NodePort, not a kubectl stream.
+    assert config.access == "node_port"
+    assert [service["metadata"] for service in runner.node_services] == [
+        {"name": "vibesys-node-gateway"}
+    ]
+    assert lifecycle.base_url.startswith("http://172.18.0.2:")
     apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
     rendered = runner.inputs[apply_index]
     assert rendered is not None
@@ -950,13 +969,13 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
         candidate,
         config_dir=TRAIN_CONFIG.parent,
         runner=runner,
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
     lifecycle.start()
     apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
     rendered = runner.inputs[apply_index]
     assert rendered is not None
-    dockerfile = (TRAIN_CONFIG.parent / "Dockerfile").read_text(encoding="utf-8")
+    dockerfile = (TRAIN_CONFIG.parent / "service.Dockerfile").read_text(encoding="utf-8")
 
     assert {build.build_args["MODULE"] for build in config.image_builds} == {
         "ts-config-service",
@@ -972,6 +991,11 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
     assert len(builds) == len(config.image_builds)
     assert {call[-1] for call in builds} == {str(candidate.resolve())}
     assert all(str(build.dockerfile).startswith("${CONFIG_DIR}/") for build in config.image_builds)
+    # A task-level file named Dockerfile would select the Docker run environment.
+    assert not (TRAIN_CONFIG.parent / "Dockerfile").exists()
+    assert all(
+        str(build.dockerfile) == "${CONFIG_DIR}/service.Dockerfile" for build in config.image_builds
+    )
     assert "mvn -B" in dockerfile
     assert "COPY . ." in dockerfile
     assert "COPY target" not in dockerfile
@@ -1041,7 +1065,7 @@ def test_candidate_image_is_built_once_and_reused_across_reset(tmp_path: Path) -
         tmp_path,
         config_dir=tmp_path,
         runner=runner,
-        popen=lambda *_args, **_kwargs: _Process(),
+        forwards=_launcher(),
     )
 
     lifecycle.start()
@@ -1067,3 +1091,161 @@ def test_candidate_image_is_built_once_and_reused_across_reset(tmp_path: Path) -
     assert set_images == [first_image, first_image]
     assert runner.timeouts
     assert set(runner.timeouts) == {180}
+
+
+def test_start_rejects_forward_port_owned_by_another_listener(tmp_path: Path) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as foreign:
+        foreign.bind(("0.0.0.0", 0))  # noqa: S104  # lint-waiver: LW-006013; a wildcard listener is the collision under test.
+        foreign.listen()
+        port = foreign.getsockname()[1]
+        config = _config(Path("manifest.yaml")).model_copy(
+            update={
+                "forwards": (
+                    ServiceForward(
+                        name="gateway",
+                        resource="service/gateway",
+                        remote_port=8080,
+                        local_port=port,
+                    ),
+                ),
+                "primary_endpoint": "gateway",
+                "http_probes": (),
+            }
+        )
+        started: list[tuple[object, ...]] = []
+
+        def popen(*args: object, **_kwargs: object) -> _Process:
+            started.append(args)
+            return _Process()
+
+        with pytest.raises(RuntimeError, match=f"local port {port} for forward 'gateway'"):
+            _start_lifecycle(
+                tmp_path,
+                config=KubernetesConfig.model_validate(config.model_dump()),
+                forwards=ForwardLauncher(popen=popen),
+            )
+        assert started == []
+
+
+def test_forwards_bind_only_ipv4_loopback(tmp_path: Path) -> None:
+    commands: list[list[str]] = []
+
+    def popen(command: list[str], *_args: object, **_kwargs: object) -> _Process:
+        commands.append(command)
+        return _Process()
+
+    lifecycle, _runner = _start_lifecycle(tmp_path, popen=popen)
+    lifecycle.close()
+    assert commands
+    for command in commands:
+        index = command.index("port-forward")
+        assert command[index + 1 : index + 3] == ["--address", "127.0.0.1"]
+
+
+class _NodePortRunner(_Runner):
+    """Answer the node and Service queries that NodePort access makes."""
+
+    def __init__(self, *, selector: dict[str, str] | None = None) -> None:
+        super().__init__()
+        self.selector = {"app": "frontend"} if selector is None else selector
+        self.node_services: list[dict[str, object]] = []
+
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        cwd: Path,
+        input_text: str | None = None,
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str]:
+        if "nodes" in command:
+            self.calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "172.18.0.2", "")
+        if "get" in command and any(part.startswith("service/") for part in command):
+            self.calls.append(command)
+            port = 5000 if "service/frontend" in command else 8080
+            source = {
+                "kind": "Service",
+                "spec": {
+                    "selector": self.selector,
+                    "ports": [{"port": port, "targetPort": "http", "protocol": "TCP"}],
+                },
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps(source), "")
+        if "create" in command and '"NodePort"' in (input_text or ""):
+            self.calls.append(command)
+            service = json.loads(input_text or "")
+            self.node_services.append(service)
+            created = {"spec": {"ports": [{"nodePort": 30000 + len(self.node_services)}]}}
+            return subprocess.CompletedProcess(command, 0, json.dumps(created), "")
+        return super().__call__(
+            command, cwd=cwd, input_text=input_text, timeout_seconds=timeout_seconds
+        )
+
+
+def _node_port_config() -> KubernetesConfig:
+    config = _config(Path("manifest.yaml")).model_copy(
+        update={"access": "node_port", "http_probes": ()}
+    )
+    return KubernetesConfig.model_validate(config.model_dump())
+
+
+def test_node_port_access_exposes_each_forward_without_kubectl_streams(tmp_path: Path) -> None:
+    runner = _NodePortRunner()
+    started: list[object] = []
+
+    def popen(*args: object, **_kwargs: object) -> _Process:
+        started.append(args)
+        return _Process()
+
+    lifecycle, _ = _start_lifecycle(
+        tmp_path, config=_node_port_config(), runner=runner, popen=popen
+    )
+
+    assert started == []
+    assert lifecycle.endpoints == {
+        "frontend": "http://172.18.0.2:30001",
+        "users": "http://172.18.0.2:30002",
+    }
+    assert lifecycle.base_url == "http://172.18.0.2:30001"
+    frontend = runner.node_services[0]
+    assert frontend["metadata"] == {"name": "vibesys-node-frontend"}
+    assert frontend["spec"] == {
+        "type": "NodePort",
+        "selector": {"app": "frontend"},
+        "ports": [{"protocol": "TCP", "port": 5000, "targetPort": "http"}],
+    }
+    lifecycle.close()
+    with pytest.raises(RuntimeError, match="has not started"):
+        _ = lifecycle.endpoints
+
+
+def test_node_port_access_survives_restart_and_reexposes_after_reset(tmp_path: Path) -> None:
+    _service_manifest(tmp_path)
+    runner = _NodePortRunner()
+    config = _node_port_config().model_copy(
+        update={"restart_deployments": ({"name": "frontend", "pod_selector": "app=frontend"},)}
+    )
+    lifecycle = KubernetesLifecycle(
+        KubernetesConfig.model_validate(config.model_dump()),
+        tmp_path,
+        config_dir=tmp_path,
+        runner=runner,
+        forwards=_launcher(),
+    )
+    lifecycle.start()
+    endpoints = lifecycle.endpoints
+    lifecycle.restart()
+    assert lifecycle.endpoints == endpoints
+    assert len(runner.node_services) == 2
+
+    lifecycle.reset()
+    assert len(runner.node_services) == 4
+    assert lifecycle.endpoints["frontend"] == "http://172.18.0.2:30003"
+    lifecycle.close()
+
+
+def test_node_port_access_requires_a_selector_backed_service(tmp_path: Path) -> None:
+    runner = _NodePortRunner(selector={})
+    with pytest.raises(RuntimeError, match="Service with a selector"):
+        _start_lifecycle(tmp_path, config=_node_port_config(), runner=runner)
