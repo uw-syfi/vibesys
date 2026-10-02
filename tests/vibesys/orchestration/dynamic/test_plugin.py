@@ -1247,3 +1247,60 @@ def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> N
     assert len(planner_messages) == 2
     assert summary in planner_messages[1]
     assert feedback in planner_messages[1]
+
+
+def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> None:
+    """A later epoch's fresh hypothesis starts from the best evaluated candidate.
+
+    Branching every hypothesis from the original root would make the final
+    winner contain at most one hypothesis's change.
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("base"), _portfolio("stacked")],
+            IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Candidate is correct."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 20.0)
+            )
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    base, stacked = state.workstreams
+    assert base.candidate_revision is not None
+    assert stacked.parent_revision == base.candidate_revision
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert f"`{base.candidate_revision}`" in planner_messages[1]
+    assert state.winner_revision == stacked.candidate_revision
