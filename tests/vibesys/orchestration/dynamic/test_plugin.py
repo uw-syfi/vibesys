@@ -941,11 +941,28 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
         return {"passed": True, "analysis": "Candidate is correct."}
 
     async def scenario() -> FakeRun:
+def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> None:
+    """The planner sees what was tried and why the review rejected it."""
+    summary = "Raised the decode batch size to 32."
+    feedback = "The change disables graph capture on the decode path."
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("rejected"), _portfolio("next")],
+            IMPLEMENTER.id: [
+                {**_implementation("rejected"), "summary": summary},
+                {"summary": "No viable change.", "outcome": "disproven"},
+            ],
+            JUDGE.id: [{"passed": False, "analysis": "Incorrect.", "feedback": feedback}],
+        }
+    )
+
+    async def scenario() -> None:
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
             responder=respond,
+            responder=script.respond,
             supported_extra_tools={"evaluation", "profiler"},
             supports_parallel_candidates=True,
             supported_agent_capabilities={
@@ -976,3 +993,10 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
     assert len(sequences) == len(set(sequences))
     winner = next(item for item in state.workstreams if item.hypothesis_id == "winner")
     assert state.winner_revision == winner.candidate_revision
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+
+    asyncio.run(scenario())
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert len(planner_messages) == 2
+    assert summary in planner_messages[1]
+    assert feedback in planner_messages[1]
