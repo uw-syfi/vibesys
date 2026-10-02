@@ -896,8 +896,8 @@ def test_social_network_assets_build_and_override_candidate_services() -> None:
     lifecycle.start()
     # The gateway is reached through a NodePort, not a kubectl stream.
     assert config.access == "node_port"
-    assert [service["metadata"]["name"] for service in runner.node_services] == [
-        "vibesys-node-gateway"
+    assert [service["metadata"] for service in runner.node_services] == [
+        {"name": "vibesys-node-gateway"}
     ]
     assert lifecycle.base_url.startswith("http://172.18.0.2:")
     apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)

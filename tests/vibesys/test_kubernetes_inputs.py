@@ -16,6 +16,7 @@ from tests.support.example_registry import require_external_repo_checkout
 
 from entrypoints.cli.loops import _load_metric_space_toml
 from vibesys.inputs import InputBundle, load_project_task
+from vibesys.orchestration.agent_options import recorded_metric_space
 from vibesys.run.project import ProjectProvisioningSpec, provision_project
 from vibesys.run.workspace_policy import create_project_materializer
 from vs_project.api import Project
@@ -137,7 +138,10 @@ def test_metric_space_direction_matches_workload_objective(scenario: str) -> Non
     task = _task_dir(scenario)
     workload = tomllib.loads((task / "workload.toml").read_text())
     expected = {"minimize": "min", "maximize": "max"}[workload["objective"]["direction"]]
-    space = _load_metric_space_toml(task)
+    project = Project.open(task.parents[2])
+    bundle = load_project_task(project, project.select_task("kubernetes"))
+    # The run records the benchmark metric as max unless objectives.toml declares it.
+    space = recorded_metric_space(_load_metric_space_toml(task), bundle.benchmark_result)
     assert [(axis.name, axis.direction) for axis in space.objectives] == [
         ("primary_value", expected)
     ]
