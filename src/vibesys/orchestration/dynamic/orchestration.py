@@ -161,6 +161,8 @@ class _DynamicRun:
         capacity = self._capacity()
         pending = list(plans)
         fatal_failures: list[BaseException] = []
+        failures = dict.fromkeys((plan.hypothesis_id for plan in plans), 0)
+        retries = self.options.max_retries_per_round
         while pending:
             batch = pending[:capacity]
             del pending[:capacity]
@@ -173,11 +175,21 @@ class _DynamicRun:
                     self.run.observations.note(
                         f"dynamic workstream {plan.hypothesis_id} failed: {result}"
                     )
-                    item = self.state.workstreams[self._index(plan.hypothesis_id)]
+                    index = self._index(plan.hypothesis_id)
+                    item = self.state.workstreams[index]
                     if not isinstance(result, DynamicAttemptError) or item.attempts == 0:
                         fatal_failures.append(result)
-                    elif item.attempts < self.options.max_retries_per_round:
+                        continue
+                    failures[plan.hypothesis_id] += 1
+                    # A failure after a retained implementation keeps its
+                    # checkpoint, so the retry resumes at the failed stage.
+                    retained = item.phase is not WorkstreamPhase.FAILED
+                    if failures[plan.hypothesis_id] < retries and (
+                        retained or item.attempts < retries
+                    ):
                         pending.append(plan)
+                    elif retained:
+                        await self._update(index, phase=WorkstreamPhase.FAILED)
         if fatal_failures:
             raise fatal_failures[0]
 
@@ -382,7 +394,8 @@ class _DynamicRun:
             await self._update(index, phase=WorkstreamPhase.FAILED)
             raise
         except Exception as error:
-            await self._update(index, phase=WorkstreamPhase.FAILED)
+            if self.state.workstreams[index].phase is WorkstreamPhase.IMPLEMENTING:
+                await self._update(index, phase=WorkstreamPhase.FAILED)
             raise DynamicAttemptError.from_cause(plan.hypothesis_id, error) from error
         finally:
             await workspace.discard()
