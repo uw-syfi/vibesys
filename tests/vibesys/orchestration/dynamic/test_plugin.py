@@ -914,3 +914,109 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     }
     winner = next(item for item in state.workstreams if item.hypothesis_id == "fast")
     assert state.winner_revision == winner.candidate_revision
+
+
+class _StopRequestedError(RuntimeError):
+    """Synthetic cooperative stop raised at a control checkpoint."""
+
+
+def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
+    tmp_path: Path,
+) -> None:
+    """Two 2-wide epochs, one review rejection, a stop between epochs, and resume.
+
+    The stop lands at the epoch boundary; resume must not replan the finished
+    epoch, must let the planner continue the rejected hypothesis, and must
+    adopt the best trusted candidate across both epochs.
+    """
+    run: FakeRun | None = None
+    planner_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planner_calls
+        if role.id == ORCHESTRATOR.id:
+            planner_calls += 1
+            if planner_calls == 1:
+                assert run is not None
+                run.control.fail_with(_StopRequestedError("stop requested"))
+                return _portfolio("alpha", "beta")
+            assert '"hypothesis_id":"beta"' in message
+            return {
+                "reasoning": "Retry beta with the review fix; explore gamma.",
+                "workstreams": [
+                    *PortfolioPlan.model_validate(_portfolio("gamma")).workstreams,
+                    *PortfolioPlan.model_validate(
+                        _portfolio("beta", continue_hypothesis=True)
+                    ).workstreams,
+                ],
+            }
+        hypothesis_id = next(name for name in ("alpha", "beta", "gamma") if f"`{name}`" in message)
+        if role.id == IMPLEMENTER.id:
+            return _implementation(hypothesis_id)
+        rejected = hypothesis_id == "beta" and planner_calls == 1
+        return {
+            "passed": not rejected,
+            "analysis": "Reviewed.",
+            "feedback": "Breaks correctness." if rejected else "",
+        }
+
+    async def scenario() -> FakeRun:
+        nonlocal run
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 12.0, 15.0)
+            )
+        )
+        options = _options(max_rounds=2)
+        with pytest.raises(_StopRequestedError):
+            await PLUGIN.orchestrate(run, options)
+        stopped = await run.state.load(DynamicState)
+        assert stopped is not None
+        assert stopped.next_epoch == 2
+        assert stopped.winner_revision is None
+        run.control.fail_with(None)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return run
+
+    finished = asyncio.run(scenario())
+    assert planner_calls == 2
+    assert len(finished.evaluation.benchmark_calls) == 3
+    assert all(candidate.discarded for candidate in finished.workspaces.candidates)
+    state = asyncio.run(finished.state.load(DynamicState))
+    assert state is not None
+    assert state.next_epoch == 3
+    assert [record.hypothesis_id for record in state.search.rounds].count("beta") == 2
+    assert {record.hypothesis_id for record in state.search.rounds} == {"alpha", "beta", "gamma"}
+    best = max(
+        (record for record in state.search.rounds if record.perf_metric is not None),
+        key=lambda record: record.perf_metric or 0.0,
+    )
+    assert best.perf_metric == 15.0
+    assert state.winner_revision == best.commit
+    assert state.adoption_pending is False
+    assert finished.workspaces.root.restore_calls[-1][0] == state.winner_revision
