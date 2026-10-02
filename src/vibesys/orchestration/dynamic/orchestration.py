@@ -64,6 +64,8 @@ _MAX_HISTORY_METRICS = 8
 _MAX_HISTORY_REVISION_CHARS = 256
 _MAX_HISTORY_METRIC_NAME_CHARS = 128
 _MAX_HISTORY_METRIC_UNIT_CHARS = 64
+_MAX_HISTORY_SUMMARY_CHARS = 600
+_MAX_HISTORY_REVIEW_CHARS = 600
 
 
 class DynamicPlanError(ValueError):
@@ -841,9 +843,18 @@ class _DynamicRun:
                 "outcome": (
                     item.implementation.outcome.value if item.implementation is not None else None
                 ),
+                "summary": (
+                    _bounded_optional(
+                        item.implementation.summary,
+                        _MAX_HISTORY_SUMMARY_CHARS,
+                    )
+                    if item.implementation is not None
+                    else None
+                ),
                 "next_step": (
                     item.implementation.next_step if item.implementation is not None else ""
                 ),
+                "review": _compact_review(item.review),
                 "revision": _bounded_optional(
                     item.candidate_revision,
                     _MAX_HISTORY_REVISION_CHARS,
@@ -915,6 +926,17 @@ def _evaluation_feedback(result: EvaluationResult) -> str:
         if passed is False and message
     ]
     return "Trusted evaluation failed: " + "; ".join(feedback or ["no feedback provided"])
+
+
+def _compact_review(review: ReviewResult | None) -> dict[str, object] | None:
+    """Project the verdict and its reason so the planner can avoid a rejected path."""
+    if review is None:
+        return None
+    reason = review.feedback or review.analysis
+    return {
+        "passed": review.passed,
+        "reason": _bounded_optional(reason, _MAX_HISTORY_REVIEW_CHARS),
+    }
 
 
 def _compact_evaluation(result: EvaluationResult | None) -> dict[str, object] | None:
