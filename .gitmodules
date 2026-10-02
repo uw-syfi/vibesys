@@ -35,6 +35,11 @@
 	url = https://github.com/vibesys-playground/train-ticket.git
 	branch = vibesys
 	shallow = true
+[submodule "examples/microservices/repositories/masa"]
+	path = examples/microservices/repositories/masa
+	url = https://github.com/vibesys-playground/masa.git
+	branch = vibesys
+	shallow = true
 [submodule "examples/model-serving/repositories/vllm"]
 	path = examples/model-serving/repositories/vllm
 	url = https://github.com/vibesys-playground/vllm.git
