@@ -161,6 +161,8 @@ class _DynamicRun:
         capacity = self._capacity()
         pending = list(plans)
         fatal_failures: list[BaseException] = []
+        failures = dict.fromkeys((plan.hypothesis_id for plan in plans), 0)
+        retries = self.options.max_retries_per_round
         while pending:
             batch = pending[:capacity]
             del pending[:capacity]
@@ -173,11 +175,21 @@ class _DynamicRun:
                     self.run.observations.note(
                         f"dynamic workstream {plan.hypothesis_id} failed: {result}"
                     )
-                    item = self.state.workstreams[self._index(plan.hypothesis_id)]
+                    index = self._index(plan.hypothesis_id)
+                    item = self.state.workstreams[index]
                     if not isinstance(result, DynamicAttemptError) or item.attempts == 0:
                         fatal_failures.append(result)
-                    elif item.attempts < self.options.max_retries_per_round:
+                        continue
+                    failures[plan.hypothesis_id] += 1
+                    # A failure after a retained implementation keeps its
+                    # checkpoint, so the retry resumes at the failed stage.
+                    retained = item.phase is not WorkstreamPhase.FAILED
+                    if failures[plan.hypothesis_id] < retries and (
+                        retained or item.attempts < retries
+                    ):
                         pending.append(plan)
+                    elif retained:
+                        await self._update(index, phase=WorkstreamPhase.FAILED)
         if fatal_failures:
             raise fatal_failures[0]
 
@@ -306,6 +318,8 @@ class _DynamicRun:
         ):
             await self._record_hypothesis_round(index)
             return
+        if item.phase is WorkstreamPhase.IMPLEMENTING:
+            await self._refund_interrupted_attempt(index)
         parent = item.parent_revision
         resume_implemented = item.phase in {
             WorkstreamPhase.IMPLEMENTED,
@@ -367,13 +381,32 @@ class _DynamicRun:
                 await self._update(index, phase=WorkstreamPhase.FAILED)
             await self._record_hypothesis_round(index)
         except asyncio.CancelledError:
-            await self._update(index, phase=WorkstreamPhase.FAILED)
+            # Keep the durable phase: resume continues from the last checkpoint
+            # and redoes an interrupted implementation.
             raise
         except Exception as error:
-            await self._update(index, phase=WorkstreamPhase.FAILED)
+            if self.state.workstreams[index].phase is WorkstreamPhase.IMPLEMENTING:
+                await self._update(index, phase=WorkstreamPhase.FAILED)
             raise DynamicAttemptError.from_cause(plan.hypothesis_id, error) from error
         finally:
             await workspace.discard()
+
+    async def _refund_interrupted_attempt(self, index: int) -> None:
+        """Uncount an implementation attempt that a stop or crash interrupted.
+
+        A failed attempt is marked ``failed``; ``implementing`` at entry means
+        the attempt never finished, so it must not consume the retry budget.
+        """
+        async with self._state_lock:
+            current = self.state.workstreams[index]
+            self.state.workstreams[index] = current.model_copy(
+                update={
+                    "phase": WorkstreamPhase.PENDING,
+                    "attempts": max(current.attempts - 1, 0),
+                },
+                deep=True,
+            )
+            await self._commit(label=f"dynamic: {current.hypothesis_id} resume interrupted")
 
     async def _assess_candidate(
         self,

@@ -616,6 +616,7 @@ def test_parallel_evaluations_are_drained_before_candidate_discard(
 
 def test_failed_parallel_slot_is_retried_without_canceling_its_sibling(tmp_path: Path) -> None:
     attempts = {"fragile": 0, "steady": 0}
+    reviews = {"fragile": 0, "steady": 0}
 
     def respond(
         role: AgentRole,
@@ -629,7 +630,8 @@ def test_failed_parallel_slot_is_retried_without_canceling_its_sibling(tmp_path:
         if role.id == IMPLEMENTER.id:
             attempts[hypothesis_id] += 1
             return _implementation(hypothesis_id)
-        if hypothesis_id == "fragile" and attempts[hypothesis_id] == 1:
+        reviews[hypothesis_id] += 1
+        if hypothesis_id == "fragile" and reviews[hypothesis_id] == 1:
             raise _JudgeTransportError
         return {"passed": True, "analysis": "Candidate is correct."}
 
@@ -665,9 +667,13 @@ def test_failed_parallel_slot_is_retried_without_canceling_its_sibling(tmp_path:
     run = asyncio.run(scenario())
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert attempts == {"fragile": 2, "steady": 1}
+    # The retained implementation survives the judge failure; only the review is retried.
+    assert attempts == {"fragile": 1, "steady": 1}
+    assert reviews == {"fragile": 2, "steady": 1}
     assert all(item.phase.value == "evaluated" for item in state.workstreams)
-    assert any(commit.label == "dynamic: fragile failed" for commit in run.state.commits)
+    assert any(
+        "dynamic workstream fragile failed" in call.message for call in run.observations.calls
+    )
 
 
 @pytest.mark.parametrize("gate", ["local", "accuracy", "benchmark"])
@@ -995,6 +1001,61 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
             responder=respond,
+class _FlakyBenchmarkEvaluation:
+    """Evaluation fake whose first benchmark call fails in transport."""
+
+    def __init__(self, delegate: FakeEvaluation) -> None:
+        self.delegate = delegate
+        self.benchmark_calls = 0
+
+    async def accuracy(
+        self,
+        workspace: Workspace,
+        *,
+        reuse: AccuracyReceipt | None = None,
+    ) -> AccuracyEvaluation:
+        return await self.delegate.accuracy(workspace, reuse=reuse)
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        self.benchmark_calls += 1
+        if self.benchmark_calls == 1:
+            raise _EvaluationTransportError
+        return await self.delegate.benchmark(workspace, objectives=objectives)
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+    ) -> LocalValidationEvaluation:
+        return await self.delegate.validate_local(
+            workspace,
+            recipe_artifact=recipe_artifact,
+            report_location=report_location,
+        )
+
+
+def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> None:
+    """A stage failure after a retained implementation resumes at that stage."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("stable")],
+            IMPLEMENTER.id: [_implementation("stable")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> tuple[FakeRun, _FlakyBenchmarkEvaluation]:
+        fake = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
             responder=script.respond,
             supported_extra_tools={"evaluation", "profiler"},
             supports_parallel_candidates=True,
@@ -1040,6 +1101,7 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
     planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
     assert f"`{base.candidate_revision}`" in planner_messages[1]
     assert state.winner_revision == stacked.candidate_revision
+        fake.evaluation.script_benchmark(
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -1059,8 +1121,136 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
         messages = [message for role_id, _, message in script.calls if role_id == role.id]
         assert len(messages) == 2
         assert messages[1].startswith("Correction required")
+        evaluation = _FlakyBenchmarkEvaluation(fake.evaluation)
+        run = Run(
+            run_id=fake.run_id,
+            facts=fake.facts,
+            agents=fake.agents,
+            workspaces=fake.workspaces,
+            evaluation=evaluation,
+            state=fake.state,
+            control=fake.control,
+            commands=fake.commands,
+            skills=fake.skills,
+            observations=fake.observations,
+        )
+        status = await PLUGIN.orchestrate(run, _options(max_retries_per_round=2))
+        assert status is RunStatus.SUCCEEDED
+        return fake, evaluation
+
+    run, evaluation = asyncio.run(scenario())
+    assert evaluation.benchmark_calls == 2
+    assert len([s for s in run.agents.sessions if s.role.id == IMPLEMENTER.id]) == 1
+    assert len([s for s in run.agents.sessions if s.role.id == JUDGE.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
+    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
+    """A stage that always fails gives up after the retry budget and marks the slot failed."""
+    judge_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal judge_calls
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("doomed")
+        if role.id == IMPLEMENTER.id:
+            return _implementation("doomed")
+        judge_calls += 1
+        raise _JudgeTransportError
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
+        return run
+
+    run = asyncio.run(scenario())
+    assert judge_calls == 3
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].phase.value == "failed"
+    assert state.winner_revision is None
+
+
+def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path) -> None:
+    """An interrupted implementation is resumed, not counted as a failed attempt."""
+    orchestrating: asyncio.Future[RunStatus] | None = None
+    implementer_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_calls
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("interrupted")
+        if role.id == IMPLEMENTER.id:
+            implementer_calls += 1
+            if implementer_calls == 1:
+                assert orchestrating is not None
+                orchestrating.cancel()
+            return _implementation("interrupted")
+        return {"passed": True, "analysis": "Candidate is correct."}
+
+    async def scenario() -> tuple[FakeRun, RunStatus]:
+        nonlocal orchestrating
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=10.0,
+                metric_direction=MetricDirection.MAXIMIZE,
+                row={"throughput": 10.0},
+            )
+        )
+        options = _options(max_in_flight=1)
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+        with pytest.raises(asyncio.CancelledError):
+            await orchestrating
+        return run, await PLUGIN.orchestrate(run, options)
+
+    run, status = asyncio.run(scenario())
+    assert status is RunStatus.SUCCEEDED
+    assert implementer_calls == 2
+    assert len([s for s in run.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert [item.hypothesis_id for item in state.workstreams] == ["interrupted"]
     assert state.workstreams[0].attempts == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
