@@ -957,6 +957,24 @@ def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> N
     )
 
     async def scenario() -> None:
+def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> None:
+    """A later epoch's fresh hypothesis starts from the best evaluated candidate.
+
+    Branching every hypothesis from the original root would make the final
+    winner contain at most one hypothesis's change.
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("base"), _portfolio("stacked")],
+            IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Candidate is correct."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
@@ -984,6 +1002,7 @@ def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> N
             )
         )
         await PLUGIN.orchestrate(run, _options(max_rounds=2))
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
         return run
 
     run = asyncio.run(scenario())
@@ -1000,3 +1019,9 @@ def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> N
     assert len(planner_messages) == 2
     assert summary in planner_messages[1]
     assert feedback in planner_messages[1]
+    base, stacked = state.workstreams
+    assert base.candidate_revision is not None
+    assert stacked.parent_revision == base.candidate_revision
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert f"`{base.candidate_revision}`" in planner_messages[1]
+    assert state.winner_revision == stacked.candidate_revision

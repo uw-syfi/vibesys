@@ -201,7 +201,7 @@ class _DynamicRun:
                 max_epochs=self.options.max_rounds,
                 capacity=self._capacity(),
                 objective_location=self.run.facts.objective_location,
-                root_revision=self._root_revision(),
+                root_revision=self._base_revision(),
                 history=self._history_projection(),
             )
             first_error: DynamicPlanError | ValidationError | None = None
@@ -245,7 +245,7 @@ class _DynamicRun:
                 raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
 
     async def _record_plans(self, epoch: int, portfolio: PortfolioPlan) -> None:
-        parent = self._root_revision()
+        parent = self._base_revision()
         async with self._state_lock:
             by_id = {item.hypothesis_id: index for index, item in enumerate(self.state.workstreams)}
             search = HypothesisSearch(_hypothesis_config(self.options))
@@ -853,6 +853,18 @@ class _DynamicRun:
             for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]
         ]
         return json.dumps(rows, separators=(",", ":"))
+
+    def _base_revision(self) -> str:
+        """Return the revision fresh hypotheses build on: the best trusted one so far.
+
+        Branching every hypothesis from the original root would keep accepted
+        improvements from compounding; the final winner could then contain at
+        most one hypothesis's change.
+        """
+        winner = self._winner()
+        if winner is not None and winner.candidate_revision is not None:
+            return winner.candidate_revision
+        return self._root_revision()
 
     def _root_revision(self) -> str:
         revision = self.run.workspaces.root.revision
