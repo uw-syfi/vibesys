@@ -923,128 +923,6 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     assert state.winner_revision == winner.candidate_revision
 
 
-def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) -> None:
-    """A slot that failed before recording a round keeps its sequence to itself.
-
-    Otherwise a later workstream reuses the number, and the winner lookup by
-    round number resolves to the failed slot's unreviewed revision.
-    """
-class _StopRequestedError(RuntimeError):
-    """Synthetic cooperative stop raised at a control checkpoint."""
-
-
-def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
-    tmp_path: Path,
-) -> None:
-    """Two 2-wide epochs, one review rejection, a stop between epochs, and resume.
-
-    The stop lands at the epoch boundary; resume must not replan the finished
-    epoch, must let the planner continue the rejected hypothesis, and must
-    adopt the best trusted candidate across both epochs.
-    """
-    run: FakeRun | None = None
-    planner_calls = 0
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        if role.id == ORCHESTRATOR.id:
-            return _portfolio("winner") if "epoch 2" in message else _portfolio("base", "broken")
-        hypothesis_id = next(
-            name for name in ("base", "broken", "winner") if f"`{name}`" in message
-        )
-        if role.id == IMPLEMENTER.id:
-            return _implementation(hypothesis_id)
-        if hypothesis_id == "broken":
-            raise _JudgeTransportError
-        return {"passed": True, "analysis": "Candidate is correct."}
-
-    async def scenario() -> FakeRun:
-def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> None:
-    """The planner sees what was tried and why the review rejected it."""
-    summary = "Raised the decode batch size to 32."
-    feedback = "The change disables graph capture on the decode path."
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [_portfolio("rejected"), _portfolio("next")],
-            IMPLEMENTER.id: [
-                {**_implementation("rejected"), "summary": summary},
-                {"summary": "No viable change.", "outcome": "disproven"},
-            ],
-            JUDGE.id: [{"passed": False, "analysis": "Incorrect.", "feedback": feedback}],
-        }
-    )
-
-    async def scenario() -> None:
-def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> None:
-    """A later epoch's fresh hypothesis starts from the best evaluated candidate.
-
-    Branching every hypothesis from the original root would make the final
-    winner contain at most one hypothesis's change.
-    """
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [_portfolio("base"), _portfolio("stacked")],
-            IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
-            JUDGE.id: [
-                {"passed": True, "analysis": "Candidate is correct."},
-def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: Path) -> None:
-    """One malformed structured reply costs a follow-up turn, not the run or an attempt."""
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [
-                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
-                _portfolio("recover"),
-            ],
-            IMPLEMENTER.id: [
-                StructuredResponseError(IMPLEMENTER.id, BaseModel),
-                _implementation("recover"),
-            ],
-            JUDGE.id: [
-                StructuredResponseError(JUDGE.id, BaseModel),
-                {"passed": True, "analysis": "Candidate is correct."},
-            ],
-        }
-    )
-
-    async def scenario() -> FakeRun:
-        nonlocal planner_calls
-        if role.id == ORCHESTRATOR.id:
-            planner_calls += 1
-            if planner_calls == 1:
-                assert run is not None
-                run.control.fail_with(_StopRequestedError("stop requested"))
-                return _portfolio("alpha", "beta")
-            assert '"hypothesis_id":"beta"' in message
-            return {
-                "reasoning": "Retry beta with the review fix; explore gamma.",
-                "workstreams": [
-                    *PortfolioPlan.model_validate(_portfolio("gamma")).workstreams,
-                    *PortfolioPlan.model_validate(
-                        _portfolio("beta", continue_hypothesis=True)
-                    ).workstreams,
-                ],
-            }
-        hypothesis_id = next(name for name in ("alpha", "beta", "gamma") if f"`{name}`" in message)
-        if role.id == IMPLEMENTER.id:
-            return _implementation(hypothesis_id)
-        rejected = hypothesis_id == "beta" and planner_calls == 1
-        return {
-            "passed": not rejected,
-            "analysis": "Reviewed.",
-            "feedback": "Breaks correctness." if rejected else "",
-        }
-
-    async def scenario() -> FakeRun:
-        nonlocal run
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=respond,
 class _FlakyBenchmarkEvaluation:
     """Evaluation fake whose first benchmark call fails in transport."""
 
@@ -1109,42 +987,6 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        run.evaluation.script_benchmark(
-            *(
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=value,
-                    metric_direction=MetricDirection.MAXIMIZE,
-                    row={"throughput": value},
-                )
-                for value in (10.0, 20.0)
-            )
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=2))
-        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
-        return run
-
-    run = asyncio.run(scenario())
-    state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    sequences = [item.sequence for item in state.workstreams]
-    assert len(sequences) == len(set(sequences))
-    winner = next(item for item in state.workstreams if item.hypothesis_id == "winner")
-    assert state.winner_revision == winner.candidate_revision
-        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
-
-    asyncio.run(scenario())
-    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
-    assert len(planner_messages) == 2
-    assert summary in planner_messages[1]
-    assert feedback in planner_messages[1]
-    base, stacked = state.workstreams
-    assert base.candidate_revision is not None
-    assert stacked.parent_revision == base.candidate_revision
-    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
-    assert f"`{base.candidate_revision}`" in planner_messages[1]
-    assert state.winner_revision == stacked.candidate_revision
         fake.evaluation.script_benchmark(
             BenchmarkEvaluation(
                 executed=True,
@@ -1154,17 +996,6 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
                 row={"throughput": 10.0},
             )
         )
-        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1))
-        assert status is RunStatus.SUCCEEDED
-        return run
-
-    run = asyncio.run(scenario())
-    for role in (ORCHESTRATOR, IMPLEMENTER, JUDGE):
-        sessions = [session for session in run.agents.sessions if session.role.id == role.id]
-        assert len(sessions) == 1
-        messages = [message for role_id, _, message in script.calls if role_id == role.id]
-        assert len(messages) == 2
-        assert messages[1].startswith("Correction required")
         evaluation = _FlakyBenchmarkEvaluation(fake.evaluation)
         run = Run(
             run_id=fake.run_id,
@@ -1298,6 +1129,238 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
     assert state.workstreams[0].attempts == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) -> None:
+    """A slot that failed before recording a round keeps its sequence to itself.
+
+    Otherwise a later workstream reuses the number, and the winner lookup by
+    round number resolves to the failed slot's unreviewed revision.
+    """
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("winner") if "epoch 2" in message else _portfolio("base", "broken")
+        hypothesis_id = next(
+            name for name in ("base", "broken", "winner") if f"`{name}`" in message
+        )
+        if role.id == IMPLEMENTER.id:
+            return _implementation(hypothesis_id)
+        if hypothesis_id == "broken":
+            raise _JudgeTransportError
+        return {"passed": True, "analysis": "Candidate is correct."}
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 20.0)
+            )
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    sequences = [item.sequence for item in state.workstreams]
+    assert len(sequences) == len(set(sequences))
+    winner = next(item for item in state.workstreams if item.hypothesis_id == "winner")
+    assert state.winner_revision == winner.candidate_revision
+
+
+def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> None:
+    """The planner sees what was tried and why the review rejected it."""
+    summary = "Raised the decode batch size to 32."
+    feedback = "The change disables graph capture on the decode path."
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("rejected"), _portfolio("next")],
+            IMPLEMENTER.id: [
+                {**_implementation("rejected"), "summary": summary},
+                {"summary": "No viable change.", "outcome": "disproven"},
+            ],
+            JUDGE.id: [{"passed": False, "analysis": "Incorrect.", "feedback": feedback}],
+        }
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+
+    asyncio.run(scenario())
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert len(planner_messages) == 2
+    assert summary in planner_messages[1]
+    assert feedback in planner_messages[1]
+
+
+def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> None:
+    """A later epoch's fresh hypothesis starts from the best evaluated candidate.
+
+    Branching every hypothesis from the original root would make the final
+    winner contain at most one hypothesis's change.
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("base"), _portfolio("stacked")],
+            IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Candidate is correct."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 20.0)
+            )
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    base, stacked = state.workstreams
+    assert base.candidate_revision is not None
+    assert stacked.parent_revision == base.candidate_revision
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert f"`{base.candidate_revision}`" in planner_messages[1]
+    assert state.winner_revision == stacked.candidate_revision
+
+
+class _StopRequestedError(RuntimeError):
+    """Synthetic cooperative stop raised at a control checkpoint."""
+
+
+def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
+    tmp_path: Path,
+) -> None:
+    """Two 2-wide epochs, one review rejection, a stop between epochs, and resume.
+
+    The stop lands at the epoch boundary; resume must not replan the finished
+    epoch, must let the planner continue the rejected hypothesis, and must
+    adopt the best trusted candidate across both epochs.
+    """
+    run: FakeRun | None = None
+    planner_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planner_calls
+        if role.id == ORCHESTRATOR.id:
+            planner_calls += 1
+            if planner_calls == 1:
+                assert run is not None
+                run.control.fail_with(_StopRequestedError("stop requested"))
+                return _portfolio("alpha", "beta")
+            assert '"hypothesis_id":"beta"' in message
+            return {
+                "reasoning": "Retry beta with the review fix; explore gamma.",
+                "workstreams": [
+                    *PortfolioPlan.model_validate(_portfolio("gamma")).workstreams,
+                    *PortfolioPlan.model_validate(
+                        _portfolio("beta", continue_hypothesis=True)
+                    ).workstreams,
+                ],
+            }
+        hypothesis_id = next(name for name in ("alpha", "beta", "gamma") if f"`{name}`" in message)
+        if role.id == IMPLEMENTER.id:
+            return _implementation(hypothesis_id)
+        rejected = hypothesis_id == "beta" and planner_calls == 1
+        return {
+            "passed": not rejected,
+            "analysis": "Reviewed.",
+            "feedback": "Breaks correctness." if rejected else "",
+        }
+
+    async def scenario() -> FakeRun:
+        nonlocal run
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
                 for value in (10.0, 12.0, 15.0)
             )
         )
@@ -1329,3 +1392,63 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
     assert state.winner_revision == best.commit
     assert state.adoption_pending is False
     assert finished.workspaces.root.restore_calls[-1][0] == state.winner_revision
+
+
+def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: Path) -> None:
+    """One malformed structured reply costs a follow-up turn, not the run or an attempt."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
+                _portfolio("recover"),
+            ],
+            IMPLEMENTER.id: [
+                StructuredResponseError(IMPLEMENTER.id, BaseModel),
+                _implementation("recover"),
+            ],
+            JUDGE.id: [
+                StructuredResponseError(JUDGE.id, BaseModel),
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=10.0,
+                metric_direction=MetricDirection.MAXIMIZE,
+                row={"throughput": 10.0},
+            )
+        )
+        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1))
+        assert status is RunStatus.SUCCEEDED
+        return run
+
+    run = asyncio.run(scenario())
+    for role in (ORCHESTRATOR, IMPLEMENTER, JUDGE):
+        sessions = [session for session in run.agents.sessions if session.role.id == role.id]
+        assert len(sessions) == 1
+        messages = [message for role_id, _, message in script.calls if role_id == role.id]
+        assert len(messages) == 2
+        assert messages[1].startswith("Correction required")
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
