@@ -133,6 +133,7 @@ def agent_spec_from_config(
         model=model if model is not None else config.model.name,
         reasoning_effort=config.thinking.level,
         cli_timeout=agent_cfg.cli_timeout,
+        env_passthrough=agent_cfg.env_passthrough,
     )
 
 

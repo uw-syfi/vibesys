@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 class _EnvironmentRequest:
     workspace: Path
     log_dir: Path
+    agent_homes_dir: Path | None = None
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     agent_backend: str | None = "stub"
     cli_provider: str | None = "codex"

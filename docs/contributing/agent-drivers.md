@@ -394,9 +394,34 @@ project MCP configuration, plugin servers, or account connectors (claude.ai,
 ChatGPT apps). The CLI-specific mechanism is agentshim's
 (`ProviderProfile.mcp_scopes`). A provider without one keeps every server:
 `AgentCapabilities.mcp_isolation` is false for it and the driver logs that once
-per session. Not isolated by either scope: host sessions inherit the
-operator's login-shell environment, and managed policy settings and the
-workspace's own `.claude/` or `.codex/` configuration still apply.
+per session.
+
+The rest of the operator's CLI configuration (user settings, hooks, global
+instructions such as `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md`, notify
+commands, memory) stays out through `ConfigScope.PROJECT`
+(`ProviderProfile.config_scopes`). Codex can only enforce it in a state root of
+its own, so a host session runs against a run-owned `CODEX_HOME` at
+`Project.agent_homes_directory_for(root, run_id)/codex`, prepared by
+`agentshim.prepare_config_home`. One home per run and provider, so a
+conversation resumes across candidates. The home's `auth.json` is a symlink to
+the operator's: Codex rotates its refresh token and writes `auth.json` in
+place, so a copy would log out whichever side did not refresh. For the same
+reason the sandbox grants the auth file read-write. A provider without a
+mechanism (Copilot, Gemini, opencode), a container session, or a driver built
+without an agent-homes directory keeps `ALL`:
+`AgentCapabilities.config_isolation` is false and the driver logs it per
+session. Managed policy settings and the workspace's own `.claude/` or
+`.codex/` configuration still apply.
+
+A host session also inherits only an allowlisted part of the launcher's
+environment (`vs_agent.session_environment`): `PATH`, `HOME`, user, shell,
+`TMPDIR`, `TZ`, `TERM`, locale (`LANG`, `LANGUAGE`, `LC_*`), proxy and CA
+bundle variables, `CARGO_HOME`, `RUSTUP_HOME`, `DOCKER_HOST`, VibeSys's own
+sandbox controls, and the selected provider's credential and state-root
+variables (`ProviderProfile.auth_env_vars`, `state_root_env`). The run's own
+variables are added on top. An operator adds names with `[agent]
+env_passthrough = ["NAME", ...]`; an entry that is not a variable name is
+rejected.
 
 ## Mock driver
 
@@ -461,8 +486,8 @@ or Seatbelt on macOS and never permits an unconfined fallback.
 Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
 because a CLI writes session history and caches there and needs them back on
 resume. Codex is the exception: a Codex checkout may itself live under
-`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`,
-`config.toml`, `sessions`). `sessions` is not optional: a rollout that does
+`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`
+read-write, `sessions`). `sessions` is not optional: a rollout that does
 not outlive its turn makes `codex exec resume` report no rollout for the
 thread, and a confined run then loses the conversation continuity it was told
 it had.

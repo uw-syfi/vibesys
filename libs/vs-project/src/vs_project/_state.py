@@ -855,6 +855,26 @@ class ProjectState:
     @classmethod
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination before the project root is materialized."""
+        return cls._run_local_directory_for(project_root, run_id, "logs", kind="run log directory")
+
+    @classmethod
+    def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the machine-local root of one run's dedicated agent CLI homes.
+
+        A provider CLI that keeps the operator's own configuration in its
+        state root runs against a home under here instead (one per provider,
+        shared by every session of the run so a conversation can resume in
+        a later candidate). Machine-local because a home links the operator's
+        login.
+        """
+        return cls._run_local_directory_for(
+            project_root, run_id, "agent-homes", kind="run agent homes directory"
+        )
+
+    @classmethod
+    def _run_local_directory_for(
+        cls, project_root: Path | str, run_id: str, name: str, *, kind: str
+    ) -> Path:
         root = Path(project_root).expanduser().resolve()
         if root.exists() and not root.is_dir():
             raise ProjectStateError.project_root_not_directory(root)
@@ -865,8 +885,8 @@ class ProjectState:
         _validate_storage_root(local_dir, state_home, name="local metadata")
         return _contained_without_symlinks(
             local_dir,
-            local_dir / "runs" / normalized / "logs",
-            kind="run log directory",
+            local_dir / "runs" / normalized / name,
+            kind=kind,
         )
 
     def sandbox_paths(self) -> ProjectSandboxPaths:

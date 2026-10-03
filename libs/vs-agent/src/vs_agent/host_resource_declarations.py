@@ -198,7 +198,10 @@ def _agent_executable_runtime(ctx: HostResourceContext) -> Iterable[HostResource
 #: default), so granting the directory would expose sibling tasks to the agent.
 #: Bubblewrap creates the ephemeral parent directory these leaf mounts need.
 #: Authentication leaves come from ``ProviderProfile.auth_files`` and are
-#: mounted read-only. This table names only the additional state that VibeSys
+#: mounted read-write: a CLI that refreshes its OAuth login writes the new
+#: tokens back, and when the provider rotates its refresh token on use (Codex
+#: does) a refresh that cannot be saved leaves the stored login holding a token
+#: the server already rejects, logging the operator out. This table names only the additional state that VibeSys
 #: deliberately persists across turns. Every other provider state directory is
 #: granted whole because those CLIs write session history and caches throughout
 #: their declared roots.
@@ -246,8 +249,9 @@ def declare_provider_state_resources(
 
     Profiles own provider facts such as authentication files and state roots.
     VibeSys applies access policy: authentication needed inside a narrowed root
-    is read-only, explicitly persistent session state is writable, and roots
-    without a narrowing policy retain their existing writable grant.
+    and explicitly persistent session state are writable, nothing else in that
+    root is visible, and roots without a narrowing policy retain their
+    existing writable grant.
     """
     home = env.get("HOME")
     if not home:
@@ -282,7 +286,7 @@ def declare_provider_state_resources(
             resources.append(
                 HostResource(
                     root / relative_auth,
-                    HostResourceAccess.READ_ONLY,
+                    HostResourceAccess.READ_WRITE,
                     f"{profile.name} agent authentication",
                 )
             )
@@ -295,6 +299,23 @@ def declare_provider_state_resources(
             for leaf in writable_leaves
         )
     return tuple(resources)
+
+
+def prepare_provider_state(env: Mapping[str, str], *, profile: ProviderProfile) -> None:
+    """Create the persistent state leaves :func:`declare_provider_state_resources` grants.
+
+    A sandbox mounts only paths that exist, so a leaf missing from a fresh
+    state root (a run's dedicated Codex home has no ``sessions`` yet) would
+    land in the sandbox's ephemeral view and vanish after the turn.
+    """
+    home = env.get("HOME")
+    if not home:
+        return
+    ctx = HostResourceContext(env=env, provider=profile.name)
+    for state_dir, leaves in _NARROWED_WRITABLE_STATE_DIRS.get(profile.name, {}).items():
+        root = _state_root(state_dir, home=Path(home), ctx=ctx, profile=profile)
+        for leaf in leaves:
+            (root / leaf).mkdir(parents=True, exist_ok=True)
 
 
 def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:

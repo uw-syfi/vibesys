@@ -219,13 +219,14 @@ class TestBuild:
 
         assert isinstance(sb, hostsandbox.HostSandbox)
         assert codex_home not in sb.write_paths
-        assert auth in sb.read_paths
-        assert auth not in sb.write_paths
+        # Writable so a refreshed (rotated) login is saved, see
+        # host_resource_declarations._NARROWED_WRITABLE_STATE_DIRS.
+        assert auth in sb.write_paths
         assert config not in sb.read_paths
         assert config not in sb.write_paths
         argv = sb.wrap(["codex", "login", "status"])
         assert _has_pair(argv, "--dir", str(codex_home))
-        assert _has_pair(argv, "--ro-bind-try", str(auth), str(auth))
+        assert _has_pair(argv, "--bind-try", str(auth), str(auth))
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +516,7 @@ def test_sandbox_blocks_escape_but_allows_workspace(
 
 
 @requires_sandbox
-def test_sandbox_exposes_read_only_codex_auth_without_user_config(tmp_path: Path) -> None:
+def test_sandbox_exposes_writable_codex_auth_without_user_config(tmp_path: Path) -> None:
     codex_home = tmp_path / ".codex"
     workspace = codex_home / "worktrees" / "run-A" / "workspace"
     sibling = codex_home / "worktrees" / "run-B" / "secret.txt"
@@ -542,13 +543,14 @@ def test_sandbox_exposes_read_only_codex_auth_without_user_config(tmp_path: Path
             (
                 f'test "$(cat {auth})" = "auth token" '
                 f"&& test ! -e {config} && test ! -e {sibling} "
-                f'&& ! printf "changed\\n" > {auth}'
+                f'&& printf "refreshed\\n" > {auth}'
             ),
         ]
     )
     result = run_test_command(command, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert auth.read_text() == "auth token\n"
+    # A login the CLI refreshes inside the sandbox reaches the operator's file.
+    assert auth.read_text() == "refreshed\n"
 
 
 def test_the_executor_transform_wraps_every_command(tmp_path: Path) -> None:

@@ -89,3 +89,8 @@ class Project:
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination, including before a root is materialized."""
         return ProjectState.log_directory_for(project_root, run_id)
+
+    @classmethod
+    def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the machine-local root of one run's dedicated agent CLI homes."""
+        return ProjectState.agent_homes_directory_for(project_root, run_id)

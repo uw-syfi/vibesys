@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         deduplicate_host_resources,
         host_resource_for_mount,
     )
+    from vs_sandbox.host_sandbox import DISABLE_ENV as SANDBOX_DISABLE_ENV
     from vs_sandbox.host_sandbox import (
         HostSandbox,
         LandlockSandbox,
@@ -75,6 +76,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AGENT_HOME",
+    "SANDBOX_DISABLE_ENV",
     "AcceleratorDiscovery",
     "AcceleratorInventory",
     "BeforeReadyContext",
@@ -166,6 +168,7 @@ _LAZY_EXPORTS = {
     "HostSandbox": ("host_sandbox", "HostSandbox"),
     "LandlockSandbox": ("host_sandbox", "LandlockSandbox"),
     "LinuxBackend": ("host_sandbox", "LinuxBackend"),
+    "SANDBOX_DISABLE_ENV": ("host_sandbox", "DISABLE_ENV"),
     "SandboxUnavailableError": ("host_sandbox", "SandboxUnavailableError"),
     "SeatbeltSandbox": ("host_sandbox", "SeatbeltSandbox"),
     "WorkspaceSandbox": ("host_sandbox", "WorkspaceSandbox"),

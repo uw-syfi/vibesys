@@ -45,8 +45,12 @@ from vs_agent.contracts import (
 )
 from vs_agent.docker_executor import CodexRolloutWatchdogExecutor
 from vs_agent.events import CommandResultPayload
-from vs_agent.host_resource_declarations import declare_agent_host_resources
+from vs_agent.host_resource_declarations import (
+    declare_agent_host_resources,
+    prepare_provider_state,
+)
 from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
+from vs_agent.session_environment import session_environment, validate_env_names
 from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
@@ -66,10 +70,12 @@ AGENTSHIM_CAPABILITIES = AgentCapabilities(
 )
 """Capabilities invariant across AgentShim host and container execution.
 
-``provider_session_resume``, ``skill_isolation`` and ``mcp_isolation`` are
-narrowed per provider from :attr:`agentshim.ProviderProfile.supports_resume`,
-:attr:`agentshim.ProviderProfile.skill_scopes` and
-:attr:`agentshim.ProviderProfile.mcp_scopes` when the driver is built.
+``provider_session_resume``, ``skill_isolation``, ``mcp_isolation`` and
+``config_isolation`` are narrowed per provider from
+:attr:`agentshim.ProviderProfile.supports_resume`,
+:attr:`agentshim.ProviderProfile.skill_scopes`,
+:attr:`agentshim.ProviderProfile.mcp_scopes` and
+:attr:`agentshim.ProviderProfile.config_scopes` when the driver is built.
 """
 
 _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
@@ -736,6 +742,25 @@ def _mcp_scope(profile: agentshim.ProviderProfile) -> agentshim.McpScope:
     return agentshim.McpScope.ALL
 
 
+def _config_scope(profile: agentshim.ProviderProfile, *, has_home: bool) -> agentshim.ConfigScope:
+    """Keep the operator's own CLI configuration out of a session where possible.
+
+    Settings, hooks, global instructions, notify commands and memory in the
+    operator's provider state must not change what a run's agents do, so a
+    session gets ``ConfigScope.PROJECT`` wherever the provider can enforce
+    it. A provider that can only enforce it in a dedicated state root
+    (``profile.config_home_files``) needs *has_home*: a run-owned host home
+    the driver can prepare. Otherwise the session keeps ``ALL``; the driver
+    reports it through ``AgentCapabilities.config_isolation`` and logs it per
+    session rather than refusing to run.
+    """
+    if agentshim.ConfigScope.PROJECT not in profile.config_scopes:
+        return agentshim.ConfigScope.ALL
+    if profile.config_home_files and not has_home:
+        return agentshim.ConfigScope.ALL
+    return agentshim.ConfigScope.PROJECT
+
+
 def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
     """Drop ``PWD`` so the CLI trusts its real working directory.
 
@@ -759,8 +784,22 @@ class AgentShimDriver:
         executor_factory: ExecutorFactory | None = None,
         check_timeout: float | None = None,
         transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
+        agent_homes: Path | None = None,
+        env_passthrough: Sequence[str] = (),
+        launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
+
+        ``agent_homes`` is the run's root for dedicated provider CLI homes
+        (one subdirectory per provider, shared by every session the run opens
+        so a conversation resumes across candidates). A host session of a
+        provider that keeps the operator's configuration in its state root
+        runs against that home; see :func:`_config_scope`.
+
+        ``launcher_env`` reads the environment VibeSys was launched with (by
+        default the interactive login shell's); a session inherits only the
+        allowlisted part of it plus ``env_passthrough`` names (see
+        :mod:`vs_agent.session_environment`).
 
         ``docker_sandboxes`` maps a session's role to an already-started
         :class:`~vs_sandbox.DockerSandbox` (built and started by the run
@@ -797,6 +836,9 @@ class AgentShimDriver:
             )
         )
         self._transient_retry_delays = tuple(transient_retry_delays)
+        self._agent_homes = agent_homes
+        self._env_passthrough = validate_env_names(env_passthrough)
+        self._launcher_env = launcher_env
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -814,7 +856,15 @@ class AgentShimDriver:
             is agentshim.SkillScope.PROJECT,
             mcp_isolation=_mcp_scope(agentshim.get_provider(self._provider).profile)
             is agentshim.McpScope.SESSION,
+            config_isolation=self._config_scope_for(agentshim.get_provider(self._provider).profile)
+            is agentshim.ConfigScope.PROJECT,
         )
+
+    def _config_scope_for(self, profile: agentshim.ProviderProfile) -> agentshim.ConfigScope:
+        # A container keeps its own state root inside the container, which a
+        # host-side home cannot replace.
+        has_home = self._agent_homes is not None and self._docker_sandboxes is None
+        return _config_scope(profile, has_home=has_home)
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one configured AgentShim conversation.
@@ -842,8 +892,9 @@ class AgentShimDriver:
             raise ValueError(message)
 
         provider = agentshim.get_provider(spec.provider)
+        config_scope = self._config_scope_for(provider.profile)
         event_handler = _AgentShimEventHandler()
-        sandbox, find_binary = self._sandbox_for(spec)
+        sandbox, find_binary, host_env = self._sandbox_for(spec, config_scope)
 
         executor: agentshim.CommandExecutor = self._executor_factory()
         if sandbox is not None:
@@ -856,7 +907,7 @@ class AgentShimDriver:
                 log=self._log,
             )
 
-        env = sandbox.env if sandbox is not None else self._unconfined_host_env(spec)
+        env = sandbox.env if sandbox is not None else host_env
         agent = agentshim.CliAgent(
             provider,
             model=spec.model,
@@ -878,12 +929,18 @@ class AgentShimDriver:
                 f"{agent.profile.display_name} cannot hide the operator's own MCP servers; "
                 "this session is connected to them beside the run's"
             )
+        if config_scope is not agentshim.ConfigScope.PROJECT:
+            self._log(
+                f"{agent.profile.display_name} cannot hide the operator's own CLI configuration; "
+                "this session loads their settings, hooks and global instructions"
+            )
         session = AgentShimSession(
             session=agent.start_session(
                 cwd=str(spec.workspace),
                 timeout=self._timeout,
                 skill_scope=skill_scope,
                 mcp_scope=mcp_scope,
+                config_scope=config_scope,
             ),
             spec=spec,
             profile=agent.profile,
@@ -899,8 +956,16 @@ class AgentShimDriver:
     def _sandbox_for(
         self,
         spec: AgentSessionSpec,
-    ) -> tuple[WorkspaceSandbox | None, Callable[[str, Mapping[str, str]], str] | None]:
-        """Return the sandbox this session confines to, and its binary lookup.
+        config_scope: agentshim.ConfigScope,
+    ) -> tuple[
+        WorkspaceSandbox | None,
+        Callable[[str, Mapping[str, str]], str] | None,
+        dict[str, str],
+    ]:
+        """Return the sandbox this session confines to, its binary lookup, and host env.
+
+        The host environment (empty for a container session) is what the
+        session runs with when host confinement came back ``None``.
 
         A container session's sandbox already exists, started by the run
         environment; a host session's is built fresh from the declared
@@ -910,18 +975,33 @@ class AgentShimDriver:
         which the container's environment does not describe.
         """
         if self._docker_sandboxes is not None:
-            return self._docker_sandbox_for(spec), _bare_binary_name
-        env = self._unconfined_host_env(spec)
-        return self._host_sandbox(spec, env), _find_host_binary
+            return self._docker_sandbox_for(spec), _bare_binary_name, {}
+        env = self._unconfined_host_env(spec, config_scope)
+        return self._host_sandbox(spec, env), _find_host_binary, env
 
-    def _unconfined_host_env(self, spec: AgentSessionSpec) -> dict[str, str]:
+    def _unconfined_host_env(
+        self, spec: AgentSessionSpec, config_scope: agentshim.ConfigScope
+    ) -> dict[str, str]:
         """Return the host session environment before any sandbox is applied.
 
-        Used both to build the host sandbox (whose own ``env`` then reflects
-        it) and as the session environment when confinement came back
-        unavailable.
+        The allowlisted launcher environment, the run's own variables, and,
+        for ``ConfigScope.PROJECT``, the variables that point the CLI at the
+        run's dedicated home (which this call prepares). Used both to build
+        the host sandbox (whose own ``env`` then reflects it) and as the
+        session environment when confinement came back unavailable.
         """
-        return _without_stale_pwd({**agentshim.interactive_env(), **dict(spec.environment)})
+        profile = agentshim.get_provider(spec.provider).profile
+        env = session_environment(
+            self._launcher_env(),
+            profile=profile,
+            passthrough=self._env_passthrough,
+            run=dict(spec.environment),
+        )
+        if config_scope is agentshim.ConfigScope.PROJECT and self._agent_homes is not None:
+            home = self._agent_homes / spec.provider
+            env.update(agentshim.prepare_config_home(profile, home, env))
+        prepare_provider_state(env, profile=profile)
+        return _without_stale_pwd(env)
 
     def _host_sandbox(
         self,

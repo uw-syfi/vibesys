@@ -198,6 +198,8 @@ class AgentExecutionScope:
     open_environment: ScopedAgentEnvironmentOpener
     current_log_file: Callable[[], TextIO]
     environment_variables: Callable[[], Mapping[str, str]]
+    #: Root of the run's dedicated agent CLI homes (see ``build_agent_client``).
+    agent_homes_directory: Path | None = None
 
 
 class AgentExecutionStatus(StrEnum):
@@ -384,6 +386,7 @@ class RuntimeAgentExecution:
                 run_log_file=scope.current_log_file(),
                 use_docker=environment.use_docker,
                 log_dir=scope.log_directory,
+                agent_homes_dir=scope.agent_homes_directory,
                 host_resources=(*environment.host_resources, *configuration.resources),
                 project_path_policy=environment.project_path_policy,
                 require_host_sandbox=not environment.use_docker,

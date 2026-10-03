@@ -288,6 +288,7 @@ class RuntimeWorkspaceResource:
             open_environment=self._open_agent_environment,
             current_log_file=self._current_log_file,
             environment_variables=self._environment.device.gpu_env,
+            agent_homes_directory=self._environment.request.agent_homes_dir,
         )
 
     def _open_agent_environment(

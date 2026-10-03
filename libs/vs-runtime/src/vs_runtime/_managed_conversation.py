@@ -173,6 +173,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
     agent_events: AgentEventSink,
     additional_host_resources: tuple[HostResource, ...] = (),
     client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
+    agent_homes_directory: Path | None = None,
 ) -> ManagedConversation:
     """Build one auxiliary conversation and own all transferred resources.
 
@@ -195,6 +196,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
             run_log_file=logger.writer,
             use_docker=environment.use_docker,
             log_dir=log_directory,
+            agent_homes_dir=agent_homes_directory,
             project_path_policy=environment.project_path_policy,
             require_host_sandbox=not environment.use_docker,
             host_resources=(*environment.host_resources, *additional_host_resources),

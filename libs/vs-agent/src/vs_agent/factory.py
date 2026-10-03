@@ -62,8 +62,14 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
+    agent_homes_dir: Path | None = None,
 ) -> AgentClientProtocol:
-    """Build the configured application-level agent service from ``spec``."""
+    """Build the configured application-level agent service from ``spec``.
+
+    ``agent_homes_dir`` is the run's root for dedicated provider CLI homes
+    (``Project.agent_homes_directory_for``); without it a provider that can
+    only isolate through such a home runs with the operator's configuration.
+    """
     host_resources = tuple(host_resources)
     backend = spec.backend
 
@@ -129,6 +135,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             timeout=timeout,
             docker_sandboxes=docker_sandboxes,
             log=driver_log,
+            agent_homes=agent_homes_dir,
+            env_passthrough=spec.env_passthrough,
         )
 
     return AgentClient(

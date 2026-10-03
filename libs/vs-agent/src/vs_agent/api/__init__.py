@@ -58,6 +58,11 @@ from vs_agent.provider_policy import (
 )
 from vs_agent.runner import describe_validation_error
 from vs_agent.selection import AgentSelection
+from vs_agent.session_environment import (
+    BASE_ENV_ALLOWLIST,
+    session_env_allowlist,
+    session_environment,
+)
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import (
     AgentSessionState,
@@ -81,6 +86,7 @@ if TYPE_CHECKING:
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
+    "BASE_ENV_ALLOWLIST",
     "CLI_VERSIONS",
     "DEFAULT_CLI_PROVIDER",
     "DOCKER_PROVIDER_ENV",
@@ -141,6 +147,8 @@ __all__ = [
     "expose_as_tools",
     "register_tool",
     "serve_stdio",
+    "session_env_allowlist",
+    "session_environment",
     "task_agent_host_resources",
     "todos_from_tool_call",
 ]
@@ -178,6 +186,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
+    agent_homes_dir: Path | None = None,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
     from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
@@ -197,4 +206,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         require_host_sandbox=require_host_sandbox,
         session_store=session_store,
         events=events,
+        agent_homes_dir=agent_homes_dir,
     )

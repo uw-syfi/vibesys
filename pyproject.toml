@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.12.0,<0.13",
+    "agentshim>=0.13.0,<0.14",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",
@@ -362,3 +362,5 @@ members = ["sdk/*"]
 
 [tool.uv.sources]
 vs-bench = { workspace = true }
+# Until agentshim 0.13.0 is on PyPI; revert to the PyPI pin before merging.
+agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "9eccc52ab1c75eb0f1585b004887d185a05c44ab" }

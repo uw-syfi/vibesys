@@ -278,6 +278,7 @@ class _LocalRunSession:
                     agent_spec=spec,
                     environment=opened,
                     log_directory=environment.request.log_dir,
+                    agent_homes_directory=environment.request.agent_homes_dir,
                     agent_events=self._integration.agent_events,
                     additional_host_resources=readable_resources,
                 )

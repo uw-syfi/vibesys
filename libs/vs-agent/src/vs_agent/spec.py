@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from vs_agent.contracts import AgentExecutionPolicy
 from vs_agent.provider_policy import DEFAULT_CLI_PROVIDER
+from vs_agent.session_environment import validate_env_names
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -55,9 +56,13 @@ class AgentSpec:
     cli_timeout: int | None = None
     role_reasoning_efforts: Mapping[str, str] = field(default_factory=dict)
     execution: AgentExecutionPolicy = field(default_factory=AgentExecutionPolicy)
+    #: Launcher environment variables a session inherits beyond VibeSys's
+    #: allowlist (see ``vs_agent.session_environment``).
+    env_passthrough: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        """Reject a provider the resolved driver does not support."""
+        """Reject a provider the resolved driver does not support, or a bad env name."""
+        validate_env_names(self.env_passthrough)
         from vs_agent.catalog import (  # noqa: PLC0415  # lint-waiver: LW-010190 [PLC0415]; Keep agent_catalog  # avoid import cycle lazy in AgentSpec.__post_init__ so unused providers and import cycles stay unloaded.
             agent_catalog,  # avoid import cycle
         )

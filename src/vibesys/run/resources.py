@@ -526,6 +526,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
             run_environment_request = RunEnvironmentRequest(
                 log_dir=log_dir,
+                agent_homes_dir=Project.agent_homes_directory_for(project_root, run_id),
                 workspace=project_root,
                 seeded_workspace_paths=tuple(source.dest for source in workspace_sources),
                 ref_dir=ref_dir,

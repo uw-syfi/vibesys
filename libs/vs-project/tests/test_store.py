@@ -369,6 +369,17 @@ def test_same_named_projects_have_distinct_external_state_directories(tmp_path: 
     assert second_log.parent.parent.parent.name.startswith("project-")
 
 
+def test_agent_homes_are_machine_local_per_run_and_outside_the_project(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    homes = Project.agent_homes_directory_for(project, "run-1")
+
+    assert homes.parent == Project.log_directory_for(project, "run-1").parent
+    assert homes != Project.agent_homes_directory_for(project, "run-2")
+    assert not homes.is_relative_to(project)
+
+
 def test_repository_local_state_is_not_migrated_or_deleted(
     tmp_path: Path,
 ) -> None:

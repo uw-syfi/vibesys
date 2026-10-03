@@ -281,6 +281,9 @@ class RunEnvironmentRequest:
     log: Callable[[str], None] | None = None
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     state_namespace: StateNamespace | None = None
+    #: Root of the run's dedicated agent CLI homes; ``None`` when the run has
+    #: no machine-local state (agents then keep the provider's default home).
+    agent_homes_dir: Path | None = None
 
 
 class _AgentPathSandbox(Protocol):

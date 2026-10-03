@@ -133,6 +133,14 @@ class AgentCfg(_Strict):
             "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
         ),
     )
+    env_passthrough: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Launcher environment variable names an agent session inherits beyond "
+            "VibeSys's allowlist (PATH, HOME, locale, TERM, proxy and CA variables, "
+            "and the selected provider's credential variables)."
+        ),
+    )
     roles: dict[AgentRoleId, AgentRoleCfg] = Field(
         default_factory=dict,
         description=(

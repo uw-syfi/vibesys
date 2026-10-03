@@ -113,6 +113,9 @@ class AgentCapabilities:
     # configured, never the operator's own (user or project configuration,
     # plugins, account connectors).
     mcp_isolation: bool = False
+    # Whether a session loads none of the operator's own CLI configuration:
+    # user settings, hooks, global instructions, notify commands, memory.
+    config_isolation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
