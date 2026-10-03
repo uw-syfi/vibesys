@@ -21,11 +21,20 @@ from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 _REPOSITORY = Path(__file__).resolve().parents[2]
 
 
-def _write_input(base: Path) -> tuple[Path, Path, Path]:
+def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     cluster = base / "cluster"
     cluster.mkdir()
     os.mkfifo(cluster / SUBMITTED_FILE)
-    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)])
+    program = [sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)]
+    if transport == "connector":
+        table = f'{{ kind = "connector", command = {json.dumps(program)} }}'
+    else:
+        # Production's transport: the gate reaches the cluster through the
+        # run's host-side broker, which the signalled process owns.
+        table = (
+            f'{{ kind = "ssh", host = "fake", ssh_command = {json.dumps([*program, "ssh"])}, '
+            f"rsync_command = {json.dumps([*program, 'rsync'])} }}"
+        )
     config = base / "slurm.toml"
     # A one-hour poll interval: the job leaves the queue only through scancel.
     config.write_text(
@@ -33,7 +42,7 @@ def _write_input(base: Path) -> tuple[Path, Path, Path]:
         'name = "fake"\n'
         'remote_workspace_root = "/remote/runs"\n'
         "poll_interval_seconds = 3600.0\n"
-        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        f"transport = {table}\n",
         encoding="utf-8",
     )
     project = base / "project"
@@ -49,6 +58,7 @@ def _write_input(base: Path) -> tuple[Path, Path, Path]:
     return cluster, config, project
 
 
+@pytest.mark.parametrize("transport", ["connector", "ssh"])
 @pytest.mark.parametrize("closed_stdout", [False, True], ids=["stdout", "closed-stdout"])
 @pytest.mark.parametrize(
     "signals",
@@ -60,9 +70,9 @@ def _write_input(base: Path) -> tuple[Path, Path, Path]:
     ids=["sigterm", "sighup", "sigint-then-sigterm"],
 )
 def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
-    tmp_path: Path, signals: tuple[signal.Signals, ...], *, closed_stdout: bool
+    tmp_path: Path, signals: tuple[signal.Signals, ...], transport: str, *, closed_stdout: bool
 ) -> None:
-    cluster, config, project = _write_input(tmp_path)
+    cluster, config, project = _write_input(tmp_path, transport)
     reader, writer = os.pipe()
     # lint-waiver: LW-731104 [S603]; the run must be its own process to be signalled.
     # > Signalling an in-process run would signal pytest; the argv is fixed.
