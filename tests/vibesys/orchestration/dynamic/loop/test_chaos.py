@@ -17,7 +17,8 @@ from tests.vibesys.orchestration.dynamic.loop._chaos import run_chaos
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PR_SEEDS = "0-11"
+# Seeds 2018 and 2022 completed with zero workstreams before #1228.
+_PR_SEEDS = "0-11,2018,2022"
 
 
 def _seeds() -> list[int]:
