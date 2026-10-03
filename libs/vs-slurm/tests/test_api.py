@@ -624,7 +624,7 @@ def test_service_and_setup_are_request_policy(tmp_path: Path) -> None:
     assert connector.uploaded_script is not None
     assert "source /operator/setup.sh" in connector.uploaded_script
     assert 'python -m server --port "${PORT}"' in connector.uploaded_script
-    assert '"http://127.0.0.1:${PORT}"' in connector.uploaded_script
+    assert 'http://127.0.0.1:"${PORT}"' in connector.uploaded_script
 
 
 @pytest.mark.parametrize("path", ["/outside/out.json", "../out.json", "nested/../out.json"])
@@ -790,7 +790,7 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
     assert script is not None
     assert script.count("service_pid=$!") == 1
     assert "export PORT=" in script
-    assert "http://127.0.0.1:${PORT}" in script
+    assert 'http://127.0.0.1:"${PORT}"' in script
     assert script.index("accuracy.py") < script.index("benchmark.py") < script.index("profile.py")
     assert "timeout --signal=TERM --kill-after=5s 13s python benchmark.py" in script
     assert "exit 0" in script

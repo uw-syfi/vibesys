@@ -13,7 +13,7 @@ import json
 import shlex
 from typing import TYPE_CHECKING
 
-from vs_slurm.api import PORT_PLACEHOLDER
+from vs_slurm.api import shell_join_with_port
 
 if TYPE_CHECKING:
     from vs_sandbox.slurm_policy import SlurmExecutionPolicy
@@ -65,7 +65,7 @@ def configured_capture_lifecycle(
         )
         + f" > {shlex.quote(_PORT_FILE)}"
     )
-    readiness_probe = _shell_join_dynamic(
+    readiness_probe = shell_join_with_port(
         (
             policy.remote_python,
             "-c",
@@ -75,13 +75,13 @@ def configured_capture_lifecycle(
     )
     load = (*benchmark_command, *policy.benchmark_arguments)
     return {
-        "command": f"{read_port}\n{_shell_join_dynamic(service.command)}",
+        "command": f"{read_port}\n{shell_join_with_port(service.command)}",
         "cwd": None,
         "env": {},
         "ready_command": f"{read_port}\n{readiness_probe}",
         "ready_timeout_s": ready_timeout_s,
         "ready_interval_s": 1.0,
-        "load_command": f"{read_port}\n{_shell_join_dynamic(load)}",
+        "load_command": f"{read_port}\n{shell_join_with_port(load)}",
         "setup_command": setup_command,
         "stop_signal": "SIGINT",
         "grace_s": grace_s,
@@ -117,19 +117,6 @@ def trusted_profile_command(
         f"{PROFILE_OUTPUT_ROOT}/captures",
         "--print-output",
     )
-
-
-def _shell_join_dynamic(arguments: tuple[str, ...]) -> str:
-    """Quote argv while substituting the environment-owned dynamic port."""
-    return " ".join(_substitute_dynamic_port(argument) for argument in arguments)
-
-
-def _substitute_dynamic_port(value: str) -> str:
-    """Quote opaque text while retaining one shell port expansion."""
-    if PORT_PLACEHOLDER not in value:
-        return shlex.quote(value)
-    before, after = value.split(PORT_PLACEHOLDER, maxsplit=1)
-    return f'{shlex.quote(before)}"${{PORT}}"{shlex.quote(after)}'
 
 
 __all__ = ["PROFILE_OUTPUT_ROOT", "configured_capture_lifecycle", "trusted_profile_command"]
