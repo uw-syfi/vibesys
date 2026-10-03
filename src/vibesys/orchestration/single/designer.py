@@ -11,6 +11,7 @@ from vibesys.orchestration.hypothesis import (
     SkillResourceSelection,
     normalize_hypothesis_title,
 )
+from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest, StructuredResponseError
@@ -61,16 +62,11 @@ def _validate_plan(
 
 
 def _correction_message(plan: OrchestratorPlan, error: ValueError) -> str:
-    rejected = ", ".join(sorted({item.hypothesis_id for item in plan.hypothesis_updates}))
-    return (
-        f"Your previous plan was rejected: {error}. "
-        f"It proposed hypothesis_id {plan.hypothesis_id!r} and named "
-        f"{rejected or '(no)'} in hypothesis_updates. "
-        "A hypothesis_id names one investigation permanently: never reuse "
-        "an identifier used earlier in this run, and choose one that has "
-        "not appeared before. hypothesis_updates may name each prior "
-        "hypothesis at most once, and never the new one. "
-        "Produce a corrected plan for this round. Return only the JSON object."
+    return render_plan_correction(
+        error=str(error),
+        hypothesis_id=plan.hypothesis_id,
+        updated_hypothesis_ids=[item.hypothesis_id for item in plan.hypothesis_updates],
+        require_unseen_id=True,
     )
 
 

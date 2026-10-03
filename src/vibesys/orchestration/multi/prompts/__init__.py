@@ -55,6 +55,11 @@ def render_judge_prompt(context: JudgeContext) -> str:
     return _RENDERER.render_template("judge_prompt.j2", **context.model_dump())
 
 
+def render_system_prompt(role: str) -> str:
+    """Render the fixed system prompt of one agent role from ``<role>_system.j2``."""
+    return _RENDERER.render_template(f"{role}_system.j2")
+
+
 __all__ = [
     "PROMPT_DIR",
     "render_continuation_prompt",
@@ -63,4 +68,5 @@ __all__ = [
     "render_plan_prompt",
     "render_pre_round_prompt",
     "render_profiler_prompt",
+    "render_system_prompt",
 ]

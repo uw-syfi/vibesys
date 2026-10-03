@@ -26,4 +26,14 @@ def render_single_agent_prompt(context: SingleAgentRoundContext) -> str:
     return _RENDERER.render_template("single_agent_round_prompt.j2", **context.model_dump())
 
 
-__all__ = ["PROMPT_DIR", "render_plan_prompt", "render_single_agent_prompt"]
+def render_system_prompt(role: str) -> str:
+    """Render the fixed system prompt of one agent role from ``<role>_system.j2``."""
+    return _RENDERER.render_template(f"{role}_system.j2")
+
+
+__all__ = [
+    "PROMPT_DIR",
+    "render_plan_prompt",
+    "render_single_agent_prompt",
+    "render_system_prompt",
+]

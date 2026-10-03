@@ -57,18 +57,6 @@ _CANDIDATE_REQUIREMENTS = (
 _CLEANUP_ERROR = "evolve agent cleanup failed"
 _CANDIDATE_CLEANUP_ERROR = "candidate cleanup failed"
 _INTERFACE = "inprocess"
-_PARETO_PROFILER_ADDENDUM = """\
-
-## Pareto-frontier mode — emit *all* configured metrics
-
-This run is in Pareto-frontier mode. In addition to the headline `perf_metric` / `perf_unit`, populate the `metrics` field of `ProfilerSummary` with the numeric value of EVERY objective listed below — read each one from the benchmark tool's JSON output, do not derive, do not invert.
-
-Objectives to report (use these exact key names in `metrics`):
-
-{objective_list}
-
-If the benchmark JSON does not contain a field, set its entry to `null` rather than substituting a derived number — the framework will treat the offspring as missing on that axis and exclude it from the frontier (which is correct: an unmeasured axis cannot be compared).
-"""
 
 
 async def _capture_cleanup(operation: Awaitable[None]) -> BaseException | None:
@@ -521,11 +509,6 @@ class _EvolveRun:
         if kind is ProfilerKind.NONE or session is None:
             return None
         definition = profiler_definition(kind)
-        objectives = "\n".join(
-            f"- `{item.name}` ({'maximize' if item.direction == 'max' else 'minimize'})"
-            for item in self.options.metric_space.objectives
-        )
-        addendum = _PARETO_PROFILER_ADDENDUM.format(objective_list=objectives) if objectives else ""
         context = CandidateProfilerContext(
             benchmark_command=self.run.facts.benchmark_command,
             domain_profiler=render_domain_section(
@@ -533,7 +516,7 @@ class _EvolveRun:
             ),
             modality=self.options.modality,
             objective=self.run.facts.objective,
-            pareto_objectives_addendum=addendum,
+            objectives=list(self.options.metric_space.objectives),
             profile_execution=self.run.facts.profile_execution.value,
             profile_focus=(
                 "Measure the headline metric for this candidate; rank top kernel-level bottlenecks."

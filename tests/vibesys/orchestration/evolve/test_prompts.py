@@ -174,7 +174,7 @@ def _render_prompt(case: _Case, role: str) -> str:
                 domain_profiler=_domain_section(case, DomainRole.PROFILER),
                 modality=case.modality,
                 objective=case.objective,
-                pareto_objectives_addendum="",
+                objectives=[],
                 profile_execution="local",
                 profile_focus=("Measure the headline metric and identify the dominant bottleneck."),
                 profiler_mcp_name=definition.mcp_name,

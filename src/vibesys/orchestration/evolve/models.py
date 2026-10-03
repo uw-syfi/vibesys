@@ -88,7 +88,7 @@ class CandidateProfilerContext(BaseModel):
     domain_profiler: str
     modality: str | None
     objective: str | None
-    pareto_objectives_addendum: str
+    objectives: list[Objective]
     profile_execution: str
     profile_focus: str
     profiler_mcp_name: str

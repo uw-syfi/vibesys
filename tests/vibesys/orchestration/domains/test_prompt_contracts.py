@@ -198,7 +198,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             objective=context["objective"],
             profiler_support_name="nsys_profiler",
             profiler_mcp_name="vibesys-nsys-profiler",
-            profiler_campaign_context="",
+            campaign=None,
         ),
         "profiler_torch": render_template(
             "profilers/torch.j2",
@@ -212,7 +212,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             objective=context["objective"],
             profiler_support_name="torch_profiler",
             profiler_mcp_name="vibesys-torch-profiler",
-            profiler_campaign_context="",
+            campaign=None,
         ),
         "profiler_neuron": render_template(
             "profilers/neuron.j2",
@@ -226,7 +226,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             objective=context["objective"],
             profiler_support_name="neuron_profiler",
             profiler_mcp_name="vibesys-neuron-profiler",
-            profiler_campaign_context="",
+            campaign=None,
         ),
     }
 
@@ -309,7 +309,7 @@ def test_llm_serving_profiler_prompts_point_to_engine_and_rocm_references() -> N
             runtime_notes=context["runtime_notes"],
             profile_execution=context["profile_execution"],
             objective=context["objective"],
-            profiler_campaign_context="",
+            campaign=None,
             **extra_kwargs,
         )
         assert "serving-systems/references/tooling/profiling-serving-engines.md" in rendered
@@ -329,7 +329,7 @@ def test_microservice_otel_profiler_uses_critical_path_as_diagnostic_evidence() 
         objective=context["objective"],
         profiler_support_name="otel_profiler",
         profiler_mcp_name="vibesys-otel-profiler",
-        profiler_campaign_context="",
+        campaign=None,
     )
 
     assert "trace_graphs()" in rendered

@@ -32,12 +32,6 @@ _NOT_YET_MIGRATED: frozenset[str] = frozenset(
         "src/vibesys/orchestration/dynamic/agents.py",
         "src/vibesys/orchestration/dynamic/orchestration.py",
         "src/vibesys/orchestration/dynamic/workstream.py",
-        "src/vibesys/orchestration/evolve/agents.py",
-        "src/vibesys/orchestration/evolve/orchestration.py",
-        "src/vibesys/orchestration/multi/agents.py",
-        "src/vibesys/orchestration/multi/turns.py",
-        "src/vibesys/orchestration/single/agents.py",
-        "src/vibesys/orchestration/single/designer.py",
     }
 )
 

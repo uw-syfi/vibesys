@@ -99,7 +99,7 @@ def _orchestrate(path: Path, script: _Script, facts: RunFacts | None = None) -> 
     asyncio.run(scenario())
 
 
-def _tail(script: _Script) -> tuple[object, ...]:
+def _tail() -> tuple[object, ...]:
     return (
         ImplementerResponse(
             summary="Implemented batching.",
@@ -135,7 +135,7 @@ def test_plan_correction_message_text_is_stable(tmp_path: Path) -> None:
         rejected,
         _plan("H-02"),
     )
-    script.replies.extend(_tail(script))
+    script.replies.extend(_tail())
 
     _orchestrate(tmp_path, script)
 
@@ -154,7 +154,7 @@ def test_profiler_prompt_text_with_campaign_context_is_stable(
         ProfilerSummary(analysis="A.", bottlenecks="B.", suggestions="S."),
         _plan("H-01"),
     )
-    script.replies.extend(_tail(script))
+    script.replies.extend(_tail())
     facts = RunFacts(domain_id=domain, objective="Improve the candidate.", profiler_id=profiler)
 
     _orchestrate(tmp_path, script, facts)

@@ -32,4 +32,9 @@ def render_profiler(template: str, context: CandidateProfilerContext) -> str:
     return _RENDERER.render_template(f"profilers/{template}.j2", **context.model_dump())
 
 
-__all__ = ["render_judge", "render_mutator", "render_profiler"]
+def render_system_prompt(role: str) -> str:
+    """Render the fixed system prompt of one agent role from ``<role>_system.j2``."""
+    return _RENDERER.render_template(f"{role}_system.j2")
+
+
+__all__ = ["render_judge", "render_mutator", "render_profiler", "render_system_prompt"]

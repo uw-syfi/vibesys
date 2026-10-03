@@ -25,6 +25,7 @@ from vibesys.orchestration.multi.contracts import (
     PlanContext,
     PreRoundContext,
     PreRoundDecision,
+    ProfilerCampaign,
     ProfilerContext,
 )
 from vibesys.orchestration.multi.prompts import (
@@ -41,6 +42,7 @@ from vibesys.orchestration.profilers import (
     UnsupportedProfilerError,
     profiler_definition,
 )
+from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AgentTurnTimeoutError,
@@ -330,17 +332,13 @@ class MultiAgentTurns:
                 except ValueError as error:
                     if attempt:
                         raise
-                    rejected = ", ".join(
-                        sorted({item.hypothesis_id for item in plan.hypothesis_updates})
-                    )
-                    feedback = (
-                        f"Your previous plan was rejected: {error}. It proposed "
-                        f"hypothesis_id {plan.hypothesis_id!r} and named "
-                        f"{rejected or '(no)'} in hypothesis_updates. A hypothesis_id "
-                        "names one investigation permanently: never reuse an identifier "
-                        "used earlier in this run. hypothesis_updates may name each prior "
-                        "hypothesis at most once, and never the new one. Produce a corrected "
-                        "plan for this round. Return only the JSON object."
+                    feedback = render_plan_correction(
+                        error=str(error),
+                        hypothesis_id=plan.hypothesis_id,
+                        updated_hypothesis_ids=[
+                            item.hypothesis_id for item in plan.hypothesis_updates
+                        ],
+                        require_unseen_id=False,
                     )
                     self.run.observations.warning(
                         f"[orchestrator] plan rejected ({error}); reprompting once"
@@ -359,22 +357,6 @@ class MultiAgentTurns:
             raise RuntimeError(message)
         finally:
             await session.close()
-
-    def _profiler_campaign_context(self, artifact: str) -> str:
-        return f"""
-
-## Recent campaign context
-
-The durable progress artifact is `{self.files.progress_location}`. Inspect the most
-recent applicable round before older evidence. Write bounded durable profile
-evidence only below `{artifact}` and keep large transient traces under `/tmp`.
-
-## Read-only evidence boundary
-
-Never edit candidate source, configuration, tests, locks, instrumentation,
-endpoints, or entrypoints. Report an observability mismatch when the configured
-production path cannot be measured safely.
-"""
 
     async def profile(self, round_number: int, focus: str) -> ProfilerSummary | None:
         """Collect optional evidence in one fresh bounded-write conversation."""
@@ -400,7 +382,10 @@ production path cannot be measured safely.
             objective=None,
             profiler_support_name=definition.support_name,
             profiler_mcp_name=definition.mcp_name,
-            profiler_campaign_context=self._profiler_campaign_context(artifact),
+            campaign=ProfilerCampaign(
+                progress_location=self.files.progress_location,
+                evidence_location=artifact,
+            ),
         )
         session = await self.run.agents.create_session(
             PROFILER,

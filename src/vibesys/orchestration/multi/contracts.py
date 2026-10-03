@@ -245,6 +245,15 @@ class PreRoundDecision(BaseModel):
     reasoning: str = Field(description="Short explanation of the decision.")
 
 
+class ProfilerCampaign(BaseModel):
+    """Where a profiler reads campaign progress and writes its evidence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    progress_location: str
+    evidence_location: str
+
+
 class ProfilerContext(BaseModel):
     """Changing evidence rendered for a selected profiler kind."""
 
@@ -259,7 +268,7 @@ class ProfilerContext(BaseModel):
     objective: str | None
     profiler_support_name: str
     profiler_mcp_name: str
-    profiler_campaign_context: str
+    campaign: ProfilerCampaign | None
 
 
 __all__ = [
@@ -271,5 +280,6 @@ __all__ = [
     "PlanContext",
     "PreRoundContext",
     "PreRoundDecision",
+    "ProfilerCampaign",
     "ProfilerContext",
 ]

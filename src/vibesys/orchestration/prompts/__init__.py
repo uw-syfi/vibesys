@@ -1,5 +1,6 @@
 """Prompt rendering API and package-owned prompt assets."""
 
+from vibesys.orchestration.prompts.plan_correction import render_plan_correction
 from vibesys.orchestration.prompts.renderer import (
     PROMPTS_DIR,
     BackendPromptRenderer,
@@ -24,6 +25,7 @@ __all__ = [
     "RocmComputeBackendFragment",
     "TrainiumComputeBackendFragment",
     "get_backend_fragment",
+    "render_plan_correction",
     "render_string",
     "render_template",
 ]
