@@ -110,10 +110,10 @@ def _write_plan(
                 id=f"benchmark-rejects-{path}",
             )
             for path in (
-                "/tmp/result.json",  # noqa: S108  # lint-waiver: LW-837218 [S108]; rejected path under test.
+                "/tmp/result.json",  # noqa: S108  # lint-waiver: LW-147672 [S108]; rejected path under test.
                 "/etc/vibesys-framework-benchmark-0.json",
-                "/tmp/x/vibesys-framework-benchmark-0.json",  # noqa: S108  # lint-waiver: LW-837218 [S108]; rejected path under test.
-                "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-837218 [S108]; rejected path under test.
+                "/tmp/x/vibesys-framework-benchmark-0.json",  # noqa: S108  # lint-waiver: LW-954368 [S108]; rejected path under test.
+                "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-805374 [S108]; rejected path under test.
             )
         ),
     ],
@@ -192,7 +192,7 @@ def test_cli_accepts_the_framework_benchmark_transport_path(
             str(plan_path),
             "benchmark",
             "--output",
-            "/tmp/vibesys-framework-benchmark-0123456789abcdef0123456789abcdef.json",  # noqa: S108  # lint-waiver: LW-837218 [S108]; the fixed framework transport path under test.
+            "/tmp/vibesys-framework-benchmark-0123456789abcdef0123456789abcdef.json",  # noqa: S108  # lint-waiver: LW-728881 [S108]; the fixed framework transport path under test.
         )
     )
 

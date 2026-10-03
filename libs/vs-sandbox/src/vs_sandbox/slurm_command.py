@@ -23,7 +23,7 @@ _BENCHMARK_OUTPUT_SUFFIX = ".json"
 # The trusted framework benchmark writes to this fixed transport path with a
 # hex nonce (vs_runtime._trusted_evaluation); accept exactly that shape.
 _FRAMEWORK_BENCHMARK_OUTPUT = re.compile(
-    r"/tmp/vibesys-framework-benchmark-[0-9a-f]+\.json"  # noqa: S108  # lint-waiver: LW-837218 [S108]; the fixed framework benchmark transport path, not a temp file.
+    r"/tmp/vibesys-framework-benchmark-[0-9a-f]+\.json"  # noqa: S108  # lint-waiver: LW-352320 [S108]; the fixed framework benchmark transport path, not a temp file.
 )
 _BENCHMARK_OUTPUT_ARGUMENT_COUNT = 2
 
