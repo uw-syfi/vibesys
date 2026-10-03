@@ -18,6 +18,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,
     SemanticEvaluationIdentity,
 )
+from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
     ContentDigest,
     ProfilerAgentService,
@@ -26,7 +27,10 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import FakeProfilerTurnProvision
 from vs_project.api import StateNamespace
+from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
+from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,5 +89,55 @@ async def test_the_local_executor_and_the_default_fake_cannot_profile(
     try:
         assert await production.can_profile() is False
         assert await production.can_profile() == await FakeEvaluation().can_profile()
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture", [True, False], ids=["capture", "no-capture"])
+async def test_the_slurm_executor_and_its_fake_agree_on_profiling(
+    tmp_path: Path, *, capture: bool
+) -> None:
+    """A Slurm run profiles exactly when its plan carries the trusted capture.
+
+    The loop harness's profiled input stands for the capture case and a
+    ``FakeEvaluation(profiling_supported=True)`` stands for it in unit tests.
+    """
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    config = SlurmConfig(
+        name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="test")
+    )
+    namespace = _namespace(tmp_path, "evaluation-agent")
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            benchmark_command=("python", "benchmark.py"),
+            profile_command=("python", "rocprof_profiler/remote_capture.py") if capture else None,
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        namespace,
+        tmp_path / "handles",
+    )
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+
+    async def no_handles(_scope: str | None) -> tuple[str, ...]:
+        return ()
+
+    production = EvidenceReusingEvaluation(
+        run.evaluation,
+        backend,
+        run_id=run.run_id,
+        scope_handles=no_handles,
+        profiler=_profiler(tmp_path),
+    )
+    try:
+        assert await production.can_profile() is capture
+        fake = FakeEvaluation(profiling_supported=capture)
+        assert await production.can_profile() == await fake.can_profile()
     finally:
         await backend.close()
