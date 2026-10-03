@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import settings
 
+# `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
+pytest_plugins = ["tests.support.sharding"]
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 

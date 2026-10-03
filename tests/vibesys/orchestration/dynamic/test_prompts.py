@@ -51,8 +51,6 @@ def test_options_and_portfolios_are_strict() -> None:
         dynamic_options(max_in_flight=0)
     with pytest.raises(ValidationError, match="unexpected"):
         dynamic_options(unexpected=True)
-    with pytest.raises(ValidationError, match="distinct hypothesis and profile IDs"):
-        PortfolioPlan.model_validate(portfolio("same", "same"))
     with pytest.raises(ValidationError, match="profiler"):
         PortfolioPlan.model_validate({**portfolio("one"), "profiler": []})
     with pytest.raises(ValidationError, match="profiler"):

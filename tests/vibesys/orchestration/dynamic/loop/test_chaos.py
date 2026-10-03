@@ -17,20 +17,24 @@ from tests.vibesys.orchestration.dynamic.loop._chaos import run_chaos
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Seeds 2018 and 2022 completed with zero workstreams before #1228.
-_PR_SEEDS = "0-11,2018,2022"
+# Seeds 2018 and 2022 completed with zero workstreams before #1228. Each seed runs
+# a whole loop (10 to 20 s on a CI runner), so a pull request runs four generic
+# seeds beside those two. The nightly workflow runs 0-11 and sweeps many more.
+_PR_SEEDS = "0-3,2018,2022"
 
 
-def _seeds() -> list[int]:
+def _seeds() -> list[object]:
     spec = os.environ.get("CHAOS_SEEDS", _PR_SEEDS)
-    seeds: list[int] = []
+    seeds: list[object] = []
     for part in spec.split(","):
         low, _, high = part.partition("-")
-        seeds.extend(range(int(low), int(high or low) + 1))
+        seeds.extend(
+            pytest.param(seed, id=f"seed_{seed}") for seed in range(int(low), int(high or low) + 1)
+        )
     return seeds
 
 
-@pytest.mark.parametrize("seed", _seeds(), ids=lambda seed: f"seed_{seed}")
+@pytest.mark.parametrize("seed", _seeds())
 def test_the_loop_keeps_its_invariants_under_generated_agents_and_faults(
     tmp_path: Path, seed: int
 ) -> None:
