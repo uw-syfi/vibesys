@@ -30,6 +30,7 @@ from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
     validate_descriptor,
+    validate_run_request,
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
@@ -328,11 +329,8 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             descriptor = _evolve_policy_descriptor(args, bundle)
             objective = bundle.objective
         validate_descriptor(descriptor)
-        _prepare_experiment_repository(args, config)
-        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
-        if args.resume is not None:
-            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
-        return RunRequest(
+        run_environment = run_environment_spec_from_args(args)
+        request = RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,
             config=config,
@@ -349,6 +347,19 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             backend=backend,
             remote_repo=args.repo,
             repo_visibility=args.repo_visibility,
+        )
+        # Reject invalid execution settings before repository discovery or image builds.
+        validate_run_request(request)
+        _prepare_experiment_repository(args, config)
+        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
+        if args.resume is not None:
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
+        return request.model_copy(
+            update={
+                "run_environment": run_environment,
+                "exp_name": args.exp_name,
+                "remote_repo": args.repo,
+            }
         )
 
 

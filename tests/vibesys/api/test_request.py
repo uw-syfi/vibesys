@@ -23,6 +23,7 @@ from vibesys.api.request import (
     resolve_skill_source_dirs,
     supported_profilers,
     validate_experiment_name,
+    validate_run_request,
     with_operator_constraints,
 )
 from vs_runtime.api.infrastructure import build_run_environment
@@ -42,6 +43,7 @@ _NAMES = [
     "REPOSITORY_SLUG",
     "generate_experiment_name",
     "validate_experiment_name",
+    "validate_run_request",
     "repository_name_from_experiment",
     "default_skill_roots",
     "resolve_skill_source_dirs",
@@ -72,6 +74,7 @@ def test_request_names_are_exported_and_importable() -> None:
     assert REPOSITORY_SLUG is not None
     assert generate_experiment_name is not None
     assert validate_experiment_name is not None
+    assert validate_run_request is not None
     assert repository_name_from_experiment is not None
     assert default_skill_roots is not None
     assert resolve_skill_source_dirs is not None

@@ -104,6 +104,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
     SlurmProcessBroker,
+    configured_capture_lifecycle,
     load_slurm_policy,
     trusted_profile_command,
     write_slurm_capture_plan,
@@ -1500,6 +1501,23 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         return SlurmEnvironment.from_options(spec.options)
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)
+
+
+def validate_run_environment_profile(
+    environment: RunEnvironment, profile_command: tuple[str, ...] | None
+) -> None:
+    """Validate an enabled profiler's workload without provisioning resources.
+
+    Configured Slurm services require a trusted profile command. Other
+    environments and Slurm jobs without a service allow an absent command.
+    Invalid operator policy or workload requirements raise ``ValueError``.
+    """
+    if isinstance(environment, SlurmEnvironment):
+        configured_capture_lifecycle(
+            load_slurm_config(environment.config_path),
+            load_slurm_policy(environment.config_path),
+            profile_command,
+        )
 
 
 def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR0913]; the compatibility builder accepts each independent CLI environment option.
