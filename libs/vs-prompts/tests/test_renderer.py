@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import jinja2
@@ -148,6 +149,18 @@ def test_render_returns_rendered_prompt_with_the_rendered_text(text: str) -> Non
 def test_only_the_renderer_constructs_a_rendered_prompt(text: str) -> None:
     with pytest.raises(TypeError, match="TemplateRenderer"):
         RenderedPrompt(text, token=object())
+
+
+@given(text=_TEXT)
+def test_a_rendered_prompt_survives_copy(text: str) -> None:
+    # Regression: a rendered prompt stored in a Pydantic model broke
+    # ``model_copy(deep=True)``, because copying called the constructor
+    # without the mint token.
+    prompt = TemplateRenderer(Path()).render_string("{{ value }}", value=text)
+
+    for copied in (copy.copy(prompt), copy.deepcopy(prompt)):
+        assert isinstance(copied, RenderedPrompt)
+        assert copied == text
 
 
 @given(text=_TEXT, suffix=_TEXT)

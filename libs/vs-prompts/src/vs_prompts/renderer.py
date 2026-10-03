@@ -57,6 +57,15 @@ class RenderedPrompt(str):
             raise TypeError(message)
         return super().__new__(cls, text)
 
+    def __reduce__(self) -> tuple[object, tuple[str]]:
+        """Copy (and pickle) as the same rendered text; the token stays private."""
+        return _restore_rendered_prompt, (str(self),)
+
+
+def _restore_rendered_prompt(text: str) -> RenderedPrompt:
+    """Rebuild a copied or unpickled prompt; it was rendered when first minted."""
+    return RenderedPrompt(text, token=_RENDER_TOKEN)
+
 
 class TemplateRenderer:
     """Renders ``.j2``/text templates under ``root``, with optional fallback roots.
