@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.prompts import PROMPTS_DIR
+from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
         ArchiveConflict,
         ParetoArchiveView,
     )

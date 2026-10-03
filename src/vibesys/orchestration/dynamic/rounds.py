@@ -6,18 +6,18 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.hypothesis import (
+    HypothesisConfig,
+    HypothesisSearch,
+    normalize_hypothesis_title,
+)
+from vibesys.hypothesis import transitions as hypothesis_transitions
+from vibesys.metrics import Measurement
 from vibesys.orchestration.dynamic.models import (
     DynamicWorkstream,
     InputNotMeasurable,
     WorkstreamPhase,
 )
-from vibesys.orchestration.hypothesis import (
-    HypothesisConfig,
-    HypothesisSearch,
-    normalize_hypothesis_title,
-)
-from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
-from vibesys.orchestration.metrics import Measurement
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 if TYPE_CHECKING:

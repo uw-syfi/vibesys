@@ -32,7 +32,7 @@ from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.api import (
     ComputeBackend,
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from vibesys.events import CoreEvent
+    from vs_agent.api import AgentClientProtocol
     from vs_agent.api.testing import FakeInvocation
 
 # A deadlock guard for the evaluation tools: each evaluation finishes within a
@@ -443,7 +444,13 @@ class LoopInput:
 
     @classmethod
     def create(
-        cls, base: Path, *, profiled: bool = False, profile_capture: bool = True
+        cls,
+        base: Path,
+        *,
+        profiled: bool = False,
+        profile_capture: bool = True,
+        connector: Callable[[list[str]], list[str]] | None = None,
+        poll_interval_s: float = 3600.0,
     ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
@@ -452,6 +459,9 @@ class LoopInput:
         With ``profile_capture`` it also configures a service for the GPU node's
         profiler to capture under load, so the run's evaluation executor
         produces trusted profile evidence; without it, the executor cannot.
+        ``connector`` wraps the Fake cluster's connector command (a fault
+        injector does). A run whose cluster answers a poll wrongly polls again
+        after ``poll_interval_s``.
         """
         domain = "llm-serving" if profiled else "generic"
         root = base / "project"
@@ -469,7 +479,8 @@ class LoopInput:
         cluster = executing_cluster(base / "cluster")
         remote = base / "remote"
         remote.mkdir()
-        connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)])
+        command = [sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)]
+        connector_json = json.dumps(connector(command) if connector is not None else command)
         config = base / "slurm.toml"
         # A one-hour poll interval: a job that is not finished at its first
         # poll stalls the test visibly instead of being waited for.
@@ -494,8 +505,8 @@ class LoopInput:
             "[slurm]\n"
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
-            "poll_interval_seconds = 3600.0\n"
-            f'transport = {{ kind = "connector", command = {connector} }}\n'
+            f"poll_interval_seconds = {poll_interval_s}\n"
+            f'transport = {{ kind = "connector", command = {connector_json} }}\n'
             "[vibesys]\n"
             f'remote_python = "{remote_python}"\n' + service,
             encoding="utf-8",
@@ -560,12 +571,20 @@ def options(**changes: object) -> DynamicOptions:
     )
 
 
+class AgentsSource(Protocol):
+    """Anything that builds the run's agent client (scripted or generated agents)."""
+
+    def client(self) -> AgentClientProtocol:
+        """Return the client every agent turn of the run goes through."""
+        ...
+
+
 # lint-waiver: LW-122303 [PLR0913]; scenarios pass only the hooks they use, by
 # > keyword. A scenario-options object would add a type every scenario builds
 # > for one or two hooks, and positional loop_input/agents/options stay explicit.
 def run_loop(  # noqa: PLR0913
     loop_input: LoopInput,
-    agents: ScriptedAgents,
+    agents: AgentsSource,
     configured: DynamicOptions,
     *,
     resume_run_id: str | None = None,
@@ -617,9 +636,8 @@ def run_loop(  # noqa: PLR0913
         # > own failure together with its events. pytest.raises at each call site
         # > would lose the events and run id the assertions need, and naming one
         # > type would couple the harness to how the host wraps a plugin failure.
-        except Exception as error:  # noqa: BLE001
-            return LoopRun(_run_id(events), None, error, events)
-        except RunStopped as error:
+        except (Exception, RunStopped) as error:  # noqa: BLE001
+            # A stopped run ends with the typed ``RunStopped``, a BaseException.
             return LoopRun(_run_id(events), None, error, events)
         finally:
             session.close()

@@ -37,8 +37,8 @@ file for the exact backend/environment evidence).
 from __future__ import annotations
 
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.prompts import PROMPTS_DIR
-from vibesys.orchestration.prompts.renderer import _build_env
+from vibesys.prompts import PROMPTS_DIR
+from vibesys.prompts.renderer import _build_env
 from vs_prompts.api import filter_skip_marked
 
 _PROFILERS_DIR = PROMPTS_DIR / "shared" / "profilers"

@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
+from vibesys.hypothesis import OrchestratorPlan
 from vibesys.inputs import ProfileGuidedInput
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -20,8 +20,8 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.multi.models import MultiState
-from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vibesys.orchestration.review import Verdict
+from vibesys.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,

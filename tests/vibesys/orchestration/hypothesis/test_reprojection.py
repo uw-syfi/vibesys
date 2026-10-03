@@ -5,7 +5,7 @@
 (``search.resume(previous, configured_metric_space)``) and, on the smaller
 guard cases, ``validate_updates``/``delta_reason``. This file drives all of
 that through the ``HypothesisSearch`` facade, not the underlying
-``vibesys.orchestration.hypothesis.transitions`` functions directly; only the
+``vibesys.hypothesis.transitions`` functions directly; only the
 fixture helpers below (``start_hypothesis``/``append_round``, which build
 test states rather than exercise behavior under test) still call into
 ``transitions`` for convenience.
@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import pytest
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     HypothesisConfig,
     HypothesisResolution,
     HypothesisSearch,
     OrchestratorPlan,
 )
-from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
-from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.hypothesis.transitions import append_round, start_hypothesis
-from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.hypothesis.plan import HypothesisStrategyUpdate
+from vibesys.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.hypothesis.transitions import append_round, start_hypothesis
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vs_loop_state.api import PerfDeltaReason, RoundRecord
 
 _NOISY_OPS = MetricSpace(
@@ -164,7 +164,7 @@ def test_measurement_delta_reason_flags_a_self_reported_headline_with_no_measure
     round carries no ``HypothesisMeasurement`` at all (see
     ``test_self_reported_improvement_never_resolves_proven`` in
     ``hypothesis_search/test_search.py``), so this walks the raw rounds
-    instead. Used by the read model (``orchestration/hypothesis_readmodel.py``), not
+    instead. Used by the read model (``hypothesis/readmodel.py``), not
     by anything inside ``search.hypothesis`` itself.
     """
     record = RoundRecord(

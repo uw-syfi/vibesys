@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.run_execution import run_execution_record
 from tests.vibesys.orchestration.dynamic._support import (
@@ -26,6 +29,7 @@ from vibesys.orchestration.dynamic import (
     ImplementerResult,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import WorkstreamPhase, WorkstreamPlan
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,
@@ -34,8 +38,6 @@ from vs_project.api import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_project.api import StateNamespace
 
 
@@ -132,12 +134,16 @@ def test_version_5_state_with_a_validation_recipe_artifact_loads_without_it(
     loaded = namespace.load("state.json", DynamicState)
 
     assert loaded == current
-    assert loaded.schema_version == 6
+    assert loaded.schema_version == 7
 
 
-def test_current_state_with_a_validation_recipe_artifact_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", [6, 7])
+def test_current_state_with_a_validation_recipe_artifact_is_rejected(
+    tmp_path: Path, version: int
+) -> None:
     current = _finished_state(tmp_path / "scenario")
     stale = current.model_dump(mode="json")
+    stale["schema_version"] = version
     stale["workstreams"][0]["implementation"]["validation_recipe_artifact"] = "validation/r.json"
     namespace = _namespace(tmp_path / "project")
     (namespace.external_directory() / "state.json").write_text(json.dumps(stale), encoding="utf-8")
@@ -166,3 +172,213 @@ def test_input_measurement_state_rejects_unknown_keys(unknown_key: str) -> None:
     )
     with pytest.raises(ValidationError, match=unknown_key):
         DynamicState.model_validate_json(encoded, strict=True)
+
+
+@pytest.mark.parametrize("version", [6, 7])
+@pytest.mark.parametrize("unknown_key", ["eligible_evaluation_candidates", "retry_forever"])
+def test_version_6_migration_does_not_discard_unknown_keys(
+    tmp_path: Path, version: int, unknown_key: str
+) -> None:
+    namespace = _namespace(tmp_path)
+    encoded = json.dumps({"schema_version": version, unknown_key: True})
+    (namespace.external_directory() / "state.json").write_text(encoded, encoding="utf-8")
+
+    with pytest.raises(ProjectStateError, match=unknown_key):
+        namespace.load("state.json", DynamicState)
+
+
+@given(
+    counters=st.tuples(
+        st.integers(min_value=1, max_value=100),
+        st.integers(min_value=0, max_value=1000),
+        st.integers(min_value=0, max_value=12000000),
+    ),
+    phase=st.sampled_from([WorkstreamPhase.PARKED, WorkstreamPhase.CANCELLED]),
+    priority=st.sampled_from(["now", "next", "later"]),
+    minutes=st.floats(min_value=2, max_value=240, allow_nan=False, allow_infinity=False),
+)
+def test_agent_state_and_new_phases_round_trip_through_the_project_state_store(
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    counters: tuple[int, int, int],
+    phase: WorkstreamPhase,
+    priority: str,
+    minutes: float,
+) -> None:
+    generation, turns, tokens = counters
+    encoded = json.loads(
+        (Path(__file__).parent / "fixtures" / "state_v6" / "completed.json").read_bytes()
+    )
+    encoded["schema_version"] = 7
+    encoded["workstreams"][0]["phase"] = phase.value
+    plan = encoded["workstreams"][0]["plan"]
+    expectation = {"milestone": "benchmark passes", "expected_minutes": minutes, "reason": "test"}
+    encoded["agent"] = {
+        "generation": generation,
+        "turns": turns,
+        "input_tokens": tokens,
+        "output_tokens": tokens,
+        "expectations": {"kept": expectation},
+        "queue": [{"spec": plan, "expectation": expectation, "priority": priority}],
+        "steers": {
+            "kept": [
+                {
+                    "note_sha256": "a" * 64,
+                    "text": "Continue",
+                    "sent_at_s": 30.0,
+                    "interrupt": False,
+                    "delivered_to": "turn-1",
+                }
+            ]
+        },
+        "journal": [
+            {"at_s": 30.0, "turn": turns, "kind": "steer", "subject": "kept", "text": "Continue"}
+        ],
+        "next_check_in_s": 120.0,
+        "capabilities_withdrawn": ["profile"],
+        "finished": None,
+    }
+    namespace = _namespace(tmp_path_factory.mktemp("agent-state"))
+    (namespace.external_directory() / "state.json").write_text(
+        json.dumps(encoded), encoding="utf-8"
+    )
+
+    loaded = namespace.load("state.json", DynamicState)
+    assert loaded.agent is not None
+    assert loaded.workstreams[0].phase is phase
+    assert isinstance(loaded.agent.queue[0].spec, WorkstreamPlan)
+    assert loaded.agent.queue[0].spec.evidence
+    namespace.save("state.json", loaded)
+    assert namespace.load("state.json", DynamicState) == loaded
+
+
+@pytest.mark.parametrize(
+    ("value", "field"),
+    [
+        ({"generation": 0}, "generation"),
+        ({"turns": -1}, "turns"),
+        ({"input_tokens": -1}, "input_tokens"),
+        ({"output_tokens": -1}, "output_tokens"),
+        ({"capabilities_withdrawn": ["implement"]}, "capabilities_withdrawn"),
+        ({"unknown": True}, "unknown"),
+        (
+            {
+                "expectations": {
+                    "kept": {"milestone": "pass", "expected_minutes": 1, "reason": "test"}
+                }
+            },
+            "expected_minutes",
+        ),
+        (
+            {
+                "expectations": {
+                    "kept": {"milestone": "pass", "expected_minutes": 241, "reason": "test"}
+                }
+            },
+            "expected_minutes",
+        ),
+        (
+            {
+                "expectations": {
+                    "kept": {
+                        "milestone": "pass",
+                        "expected_minutes": 2,
+                        "reason": "test",
+                        "unknown": True,
+                    }
+                }
+            },
+            "unknown",
+        ),
+        (
+            {
+                "steers": {
+                    "kept": [
+                        {"note_sha256": "a" * 64, "text": "", "sent_at_s": 0, "interrupt": False}
+                    ]
+                }
+            },
+            "text",
+        ),
+        (
+            {
+                "steers": {
+                    "kept": [
+                        {
+                            "note_sha256": "a" * 64,
+                            "text": "x" * 2001,
+                            "sent_at_s": 0,
+                            "interrupt": False,
+                        }
+                    ]
+                }
+            },
+            "text",
+        ),
+        (
+            {
+                "steers": {
+                    "kept": [
+                        {
+                            "note_sha256": "a" * 64,
+                            "text": "continue",
+                            "sent_at_s": 0,
+                            "interrupt": False,
+                            "unknown": True,
+                        }
+                    ]
+                }
+            },
+            "unknown",
+        ),
+        (
+            {
+                "steers": {
+                    "kept": [
+                        {
+                            "note_sha256": "a" * 64,
+                            "text": "continue",
+                            "sent_at_s": 0,
+                            "interrupt": False,
+                            "dropped": "lost",
+                        }
+                    ]
+                }
+            },
+            "dropped",
+        ),
+        (
+            {
+                "journal": [
+                    {"at_s": 0, "turn": 1, "kind": "restart", "subject": None, "text": "test"}
+                ]
+            },
+            "kind",
+        ),
+        (
+            {
+                "journal": [
+                    {
+                        "at_s": 0,
+                        "turn": 1,
+                        "kind": "start",
+                        "subject": None,
+                        "text": "test",
+                        "unknown": True,
+                    }
+                ]
+            },
+            "unknown",
+        ),
+        ({"queue": [{"unknown": True}]}, "unknown"),
+    ],
+)
+def test_agent_state_rejects_invalid_values(
+    tmp_path: Path, value: dict[str, object], field: str
+) -> None:
+    namespace = _namespace(tmp_path)
+    encoded = json.dumps({"schema_version": 7, "agent": value})
+    (namespace.external_directory() / "state.json").write_text(encoded, encoding="utf-8")
+
+    with pytest.raises(ProjectStateError, match=field):
+        namespace.load("state.json", DynamicState)

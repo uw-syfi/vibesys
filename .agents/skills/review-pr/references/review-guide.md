@@ -27,9 +27,9 @@ matching the changed surfaces.
 - Keep example-specific evaluator, checker, benchmark, and reference behavior
   in its standard example bundle. Do not move one workload's policy into the
   framework or create shared infrastructure merely to set up an example.
-- Keep runtime prompt assets under `src/vibesys/prompts/`, organized by loop,
-  domain, and backend. Keep executable domain hooks and definitions in
-  `src/vibesys/domains/`, separate from their prompt context.
+- Keep strategy and domain prompt assets in their owning packages; keep only
+  shared rendering and templates in `src/vibesys/prompts/`. Follow the
+  [package placement rule](../../../../docs/contributing/architecture.md).
 - Keep long-form serving knowledge under `resources/skills/`. Follow
   `resources/skills/serving-systems/CLAUDE.md` for that subtree.
 - Preserve unidirectional data flow: stable interfaces and typed values feed

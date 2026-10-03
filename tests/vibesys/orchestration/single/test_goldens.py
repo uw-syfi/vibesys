@@ -18,7 +18,7 @@ from tests.vibesys.orchestration.single._integration_support import (
     write_input,
 )
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vs_agent.api import AgentCapabilities, AgentTurnTimeoutError

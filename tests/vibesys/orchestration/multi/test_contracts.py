@@ -10,7 +10,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.orchestration.hypothesis import SkillResourceSelection
+from vibesys.hypothesis import SkillResourceSelection
 from vibesys.orchestration.multi.contracts import (
     ImplementerContext,
     ImplementerContinuationContext,
@@ -32,7 +32,7 @@ from vibesys.orchestration.multi.prompts import (
     render_profiler_prompt,
 )
 from vibesys.orchestration.progress import ProgressEntry
-from vibesys.orchestration.prompts import PROMPTS_DIR
+from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import resolve_free_variables
 from vs_runtime.api import ResolvedSkillResources
 

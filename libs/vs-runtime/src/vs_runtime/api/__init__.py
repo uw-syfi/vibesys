@@ -2,12 +2,19 @@
 
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime._artifact_store import (
+    ArtifactCorruptionError,
+    ArtifactReceipt,
+    ArtifactStore,
+    ArtifactStoreError,
+)
 from vs_runtime._local_validation import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ValidationRecipe,
     ValidationRecipeArtifact,
     ValidationRecipeArtifactPath,
 )
+from vs_runtime._slot_meter import SlotLease, SlotMeter, SlotMeterError
 from vs_runtime.api import boot_trace as boot_trace
 from vs_runtime.contracts import (
     AccuracyEvaluation,
@@ -90,6 +97,10 @@ __all__ = [
     "AgentTool",
     "AgentToolBindingContext",
     "AgentTurnTimeoutError",
+    "ArtifactCorruptionError",
+    "ArtifactReceipt",
+    "ArtifactStore",
+    "ArtifactStoreError",
     "BenchmarkEvaluation",
     "BenchmarkFailureKind",
     "BenchmarkObjective",
@@ -121,6 +132,9 @@ __all__ = [
     "SkillResolution",
     "SkillResourceRequest",
     "Skills",
+    "SlotLease",
+    "SlotMeter",
+    "SlotMeterError",
     "State",
     "StateModelError",
     "StructuredResponseError",

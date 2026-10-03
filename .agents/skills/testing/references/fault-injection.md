@@ -20,6 +20,16 @@ faults, deterministically, and check invariants over the result.
   [fakes-and-contracts.md](fakes-and-contracts.md)) remain for single
   scenario tests; fault schedules are for runs that combine many faults.
 
+In this repository the wrappers live in `libs/vs-faults` (import
+`vs_faults.api`): one `FaultPlan` (a seed plus rules naming a boundary, a
+target, the ordinal of the matching call, and the fault) drives
+`FaultyAgentClient` (any `AgentClientProtocol`), `FaultyToolDispatch` (a tool
+dispatcher keyed by tool name), and `python -m vs_faults.connector PLAN STATE
+-- INNER...` (any Slurm connector command). `generated_replies(plan)` answers
+a Fake agent client from each turn's declared schema. The dynamic loop's
+sweep (`tests/vibesys/orchestration/dynamic/loop/test_chaos.py`,
+`scripts/chaos_dynamic_loop.sh N`) shows how to compose them.
+
 ## Agent behavior
 
 Generate replies from the output schema the turn declares, mixing:

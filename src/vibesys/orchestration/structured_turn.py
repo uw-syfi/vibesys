@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from vibesys.orchestration.prompts import render_template
+from vibesys.prompts import render_template
 from vs_runtime.api import AgentTurnTimeoutError, StructuredResponseError
 
 if TYPE_CHECKING:

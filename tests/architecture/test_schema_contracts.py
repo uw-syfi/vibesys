@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
 from server.api.protocol import PerformanceRound
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     HYPOTHESIS_TITLE_MAX_LEN,
     OrchestratorPlan,
     SkillResourceSelection,

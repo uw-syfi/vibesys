@@ -15,14 +15,14 @@ from pathlib import Path
 import pytest
 
 from vibesys.constants import DomainName
-from vibesys.inputs import WorkspaceSource
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import (
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.hypothesis import (
     ExhaustionNotice,
     OrchestratorPlan,
     TerminalWorkspaceEdits,
 )
+from vibesys.inputs import WorkspaceSource
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
@@ -30,9 +30,9 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
-from vibesys.orchestration.prompts import render_template
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.prompts import render_template
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]

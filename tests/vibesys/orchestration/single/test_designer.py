@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     Hypothesis,
     HypothesisConfig,
     HypothesisSearch,

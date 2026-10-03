@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.api import PluginProjection
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.models import EvolveOptions, EvolveState
 from vibesys.orchestration.evolve.plugin import PLUGIN, REGISTRATION
 from vibesys.orchestration.evolve.population import (
@@ -16,7 +17,6 @@ from vibesys.orchestration.evolve.population import (
     PopulationConfig,
     PopulationSearch,
 )
-from vibesys.orchestration.metrics import MetricSpace, Objective
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentRole,

@@ -67,6 +67,11 @@ class EvaluationServiceClientError(RuntimeError):
         return cls(message)
 
     @classmethod
+    def unavailable(cls, error: OSError) -> EvaluationServiceClientError:
+        """Build the error for a service the client could not reach or that dropped the call."""
+        return cls(f"evaluation service unavailable: {type(error).__name__}: {error}")
+
+    @classmethod
     def oversized(cls) -> EvaluationServiceClientError:
         """Build the fixed reply size violation."""
         return cls("evaluation service reply exceeded size limit")
@@ -160,11 +165,16 @@ class _SocketClient:
 
     def call(self, request: BaseModel, *, timeout_s: float = _DEFAULT_TIMEOUT_S) -> str:
         document = request.model_dump_json().encode() + b"\n"
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(timeout_s)
-            client.connect(str(self._path))
-            client.sendall(document)
-            response = _read_line(client)
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(timeout_s)
+                client.connect(str(self._path))
+                client.sendall(document)
+                response = _read_line(client)
+        except OSError as error:
+            # A stopped service, a dropped oversized frame, or a timeout: the
+            # agent gets the typed tool error, never a raw socket exception.
+            raise EvaluationServiceClientError.unavailable(error) from error
         decoded = _REPLY.validate_json(response)
         if isinstance(decoded, SocketFailure):
             raise EvaluationServiceClientError.rejected(decoded.error)

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import (
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.hypothesis import (
     InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
@@ -44,13 +44,13 @@ from vibesys.orchestration.profilers import (
     UnsupportedProfilerError,
     profiler_definition,
 )
-from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.structured_turn import (
     TurnFailed,
     attempt_structured_turn,
     structured_turn,
 )
+from vibesys.prompts import render_plan_correction
 from vs_runtime.api import (
     ResolvedSkillResources,
     Run,
@@ -61,17 +61,17 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
         ArchiveConflict,
         AttemptState,
         HypothesisSearch,
         HypothesisState,
     )
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.multi.files import MultiFiles
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
-    from vibesys.orchestration.profile_focus import FocusView
     from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
+    from vibesys.profile_focus import FocusView
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 
