@@ -602,7 +602,7 @@ class _DynamicRun:
                     # still covers a session the provider could not resume.
                     prior_attempt=(
                         json.dumps(
-                            _history_row(self.state.workstreams[index]),
+                            self._history_row(self.state.workstreams[index]),
                             separators=(",", ":"),
                         )
                         if index is not None
@@ -1250,8 +1250,23 @@ class _DynamicRun:
         return CandidateDisposition.PARETO_FRONTIER, True
 
     def _history_projection(self) -> str:
-        rows = [_history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
+        rows = [self._history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
         return json.dumps(rows, separators=(",", ":"))
+
+    def _history_row(self, item: DynamicWorkstream) -> dict[str, object]:
+        """Project one workstream with the disposition its recorded round received.
+
+        An accepted candidate can still be discarded (it did not beat the input
+        or was dominated); without the disposition it reads as a success.
+        """
+        record = next(
+            (record for record in self.state.search.rounds if record.round_number == item.sequence),
+            None,
+        )
+        return {
+            **_history_row(item),
+            "disposition": record.candidate_disposition if record is not None else None,
+        }
 
     def _base_revision(self) -> str:
         """Return the revision fresh hypotheses build on: the best trusted one so far.
