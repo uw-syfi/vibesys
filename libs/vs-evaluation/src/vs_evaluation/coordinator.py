@@ -384,14 +384,16 @@ class EvaluationCoordinator:
                     record = await self._refresh(handle_id)
                     last_status = record.status
                     last_revision = record.revision
+                    # A finished record is the answer even when reading it
+                    # used up the caller's wait.
+                    terminal = self._terminal_result(record)
+                    if terminal is not None:
+                        return terminal
                     remaining = deadline - self._clock.monotonic()
                     if remaining <= 0:
                         result = EvaluationTimedOut(handle_id=handle_id, status=last_status)
                         self._publish_timeout(handle_id, last_status, last_revision)
                         return result
-                    terminal = self._terminal_result(record)
-                    if terminal is not None:
-                        return terminal
                     await self._executor.wait_for_change(handle_id, remaining)
         except TimeoutError:
             if not hard_deadline.expired():

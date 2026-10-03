@@ -6,6 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_evaluation.api import (
     AvailabilityState,
@@ -499,3 +501,63 @@ async def test_provider_timeout_error_is_not_reported_as_await_deadline() -> Non
 
     with pytest.raises(TimeoutError):
         await handle.await_result(5)
+
+
+class SlowInspection(FakeEvaluationExecutor):
+    """An executor whose every inspection takes ``latency_s`` on the injected clock."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        super().__init__(clock)
+        self.latency_s = 0.0
+
+    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
+        """Spend the inspection latency, then report the executor's state."""
+        self.clock.advance(self.latency_s)
+        return await super().inspect(handle_id)
+
+
+_FINISHED: dict[EvaluationState, tuple[str | None, tuple[EvaluationStepResult, ...]]] = {
+    EvaluationState.SUCCEEDED: (
+        None,
+        (
+            EvaluationStepResult(name="correctness", state=StageState.SUCCEEDED),
+            EvaluationStepResult(name="measurement", state=StageState.SUCCEEDED),
+        ),
+    ),
+    EvaluationState.FAILED: (
+        "correctness stage failed",
+        (
+            EvaluationStepResult(
+                name="correctness", state=StageState.FAILED, failure="assertion failed"
+            ),
+            EvaluationStepResult(name="measurement", state=StageState.SKIPPED),
+        ),
+    ),
+}
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    timeout_s=st.floats(min_value=0.001, max_value=20),
+    latency_s=st.floats(min_value=0, max_value=100),
+    state=st.sampled_from(sorted(_FINISHED)),
+)
+def test_await_on_a_finished_evaluation_returns_its_result_whatever_the_deadline(
+    timeout_s: float, latency_s: float, state: EvaluationState
+) -> None:
+    """A finished evaluation is the answer, even when reading it used up the caller's wait."""
+
+    async def scenario() -> None:
+        clock = FakeClock()
+        executor = SlowInspection(clock)
+        handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
+        failure, stages = _FINISHED[state]
+        executor.set_state(handle.id, state, failure=failure, stage_results=stages)
+        executor.latency_s = latency_s
+
+        result = await handle.await_result(timeout_s)
+
+        expected = EvaluationCompleted if state is EvaluationState.SUCCEEDED else EvaluationFailed
+        assert isinstance(result, expected), result
+
+    asyncio.run(scenario())
