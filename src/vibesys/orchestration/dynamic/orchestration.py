@@ -239,7 +239,7 @@ class _DynamicRun:
             running[self._start(plan)] = plan
         refill = True
         while True:
-            free = min(self._capacity() - len(running), self._remaining_budget())
+            free = min(self.options.max_in_flight - len(running), self._remaining_budget())
             if refill and not fatal and free > 0:
                 in_flight = frozenset(plan.hypothesis_id for plan in running.values())
                 for plan in await self._schedule(free, in_flight):
@@ -409,9 +409,6 @@ class _DynamicRun:
             BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
             for item in self.options.metric_space.objectives
         )
-
-    def _capacity(self) -> int:
-        return self.options.max_in_flight
 
     async def _settle(
         self,
@@ -664,7 +661,6 @@ class _DynamicRun:
                     self.state.search = hypothesis_transitions.finish_hypothesis(started)
                 workstream = DynamicWorkstream(
                     hypothesis_id=plan.hypothesis_id,
-                    member_id=plan.hypothesis_id,
                     sequence=sequence,
                     epoch=epoch,
                     plan=plan,
@@ -1506,7 +1502,6 @@ def _hypothesis_config(options: DynamicOptions) -> HypothesisConfig:
     return HypothesisConfig(
         max_rounds=options.max_rounds * options.max_in_flight,
         judge_every=options.judge_every,
-        official_eval_every=options.official_eval_every,
         max_retries_per_round=options.max_retries_per_round,
     )
 
@@ -1518,7 +1513,6 @@ def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan
         title=plan.title,
         task=plan.task,
         pass_criteria=plan.pass_criteria,
-        request_official_evaluation=plan.request_evaluation,
         reasoning=reasoning,
     )
 

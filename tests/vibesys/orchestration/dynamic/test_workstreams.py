@@ -224,9 +224,9 @@ def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> N
     script = Script(
         {
             ORCHESTRATOR.id: [
-                portfolio("first", "second", request_evaluation=False),
+                portfolio("first", "second"),
                 # Both slots free together; the plan fills both.
-                portfolio("terminal", "last", request_evaluation=False),
+                portfolio("terminal", "last"),
             ],
             IMPLEMENTER.id: [
                 implementation("first"),

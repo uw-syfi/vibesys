@@ -260,7 +260,6 @@ def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
             call = len(calls)
             return portfolio(
                 *(f"c{call}-{slot}" for slot in range(requested_slots(message))),
-                request_evaluation=False,
             )
         return {"summary": "No viable change.", "outcome": "disproven"}
 

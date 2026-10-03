@@ -528,7 +528,7 @@ def test_recorded_hypothesis_lineage_matches_the_branched_revision(tmp_path: Pat
         nonlocal planned
         if role.id == ORCHESTRATOR.id:
             planned += 1
-            return portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
+            return portfolio(f"e{planned}-a", f"e{planned}-b")
         return {"summary": "No viable change.", "outcome": "disproven"}
 
     async def scenario() -> FakeRun:
@@ -577,7 +577,7 @@ def test_projected_round_budget_covers_every_recorded_round(tmp_path: Path) -> N
         nonlocal planned
         if role.id == ORCHESTRATOR.id:
             planned += 1
-            return portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
+            return portfolio(f"e{planned}-a", f"e{planned}-b")
         return {"summary": "No viable change.", "outcome": "disproven"}
 
     options = dynamic_options(max_rounds=2, max_in_flight=2, judge_every=100)

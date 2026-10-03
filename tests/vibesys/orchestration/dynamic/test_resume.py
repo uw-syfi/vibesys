@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     Script,
+    baseline_run,
     dynamic_options,
     implementation,
     portfolio,
+    throughput,
 )
 
 from vibesys.orchestration.dynamic import (
@@ -463,3 +469,58 @@ def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
     assert state.winner_revision == best.commit
     assert state.adoption_pending is False
     assert finished.workspaces.root.restore_calls[-1][0] == state.winner_revision
+
+
+def _finished_state(tmp_path: Path) -> DynamicState:
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("kept")],
+            IMPLEMENTER.id: [implementation("kept")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> DynamicState | None:
+        run = baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(INPUT_BASELINE, throughput(2.0))
+        await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+    assert state is not None
+    return state
+
+
+@settings(max_examples=20, deadline=None)
+@given(
+    counted=st.booleans(),
+    due=st.booleans(),
+    requested=st.booleans(),
+    eligible=st.integers(min_value=0, max_value=50),
+)
+def test_state_written_before_the_retired_fields_were_removed_still_loads(
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    counted: bool,
+    due: bool,
+    requested: bool,
+    eligible: int,
+) -> None:
+    current = _finished_state(tmp_path_factory.mktemp("run"))
+    legacy = current.model_dump(mode="json")
+    legacy["schema_version"] = 1
+    legacy["eligible_evaluation_candidates"] = eligible
+    for item in legacy["workstreams"]:
+        item["member_id"] = item["hypothesis_id"]
+        item["evaluation_eligibility_counted"] = counted
+        item["cadence_evaluation_due"] = due
+        item["plan"]["request_evaluation"] = requested
+
+    assert DynamicState.model_validate_json(json.dumps(legacy)) == current
+
+
+def test_current_state_still_rejects_a_retired_key(tmp_path: Path) -> None:
+    current = _finished_state(tmp_path).model_dump(mode="json")
+    current["workstreams"][0]["member_id"] = current["workstreams"][0]["hypothesis_id"]
+    with pytest.raises(ValidationError, match="member_id"):
+        DynamicState.model_validate_json(json.dumps(current))

@@ -48,9 +48,6 @@ class WorkstreamPlan(BaseModel):
     task: str = Field(min_length=1, max_length=4000)
     pass_criteria: str = Field(min_length=1, max_length=2000)
     continue_hypothesis: bool = False
-    # No effect: every review-passed nominated or supported candidate gets a
-    # trusted evaluation. Kept so existing plans and planner replies validate.
-    request_evaluation: bool = False
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
 
 
@@ -138,7 +135,6 @@ class DynamicWorkstream(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hypothesis_id: str
-    member_id: str
     sequence: Annotated[int, Field(gt=0)]
     epoch: Annotated[int, Field(gt=0)]
     plan: WorkstreamPlan
@@ -149,9 +145,6 @@ class DynamicWorkstream(BaseModel):
     implementation: ImplementerResult | None = None
     review: ReviewResult | None = None
     evaluation: EvaluationResult | None = None
-    # Retired evaluation-cadence bookkeeping, kept so older state loads.
-    evaluation_eligibility_counted: bool = False
-    cadence_evaluation_due: bool = False
     # Interrupted implementation attempts that resume did not count against
     # the retry budget; bounded so a repeatedly crashing attempt ends.
     refunded_attempts: Annotated[int, Field(ge=0)] = 0
@@ -172,9 +165,6 @@ class DynamicWorkstream(BaseModel):
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:
-        if self.member_id != self.hypothesis_id:
-            message = "workstream member_id must equal its stable hypothesis_id"
-            raise ValueError(message)
         if self.plan.hypothesis_id != self.hypothesis_id:
             message = "workstream plan must preserve its hypothesis_id"
             raise ValueError(message)
@@ -203,18 +193,21 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     next_epoch: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
     workstreams: list[DynamicWorkstream] = Field(default_factory=list)
-    # Retired evaluation-cadence counter, kept so older state loads.
-    eligible_evaluation_candidates: Annotated[int, Field(ge=0)] = 0
     # The input (root) revision's trusted benchmark, measured once per run.
     # Candidates must beat it to be adopted or built on.
     baseline: EvaluationResult | None = None
     winner_revision: str | None = None
     adoption_pending: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate(cls, data: object) -> object:
+        return _migrate_state(data)
 
     @model_validator(mode="after")
     def _valid_history(self) -> DynamicState:
@@ -223,6 +216,48 @@ class DynamicState(BaseModel):
             message = "dynamic state contains duplicate hypothesis IDs"
             raise ValueError(message)
         return self
+
+
+# Keys that schema version 1 wrote and version 2 retired: evaluation-cadence
+# bookkeeping (every review-passed candidate is evaluated), a member ID that
+# always equaled the hypothesis ID, and a per-plan evaluation request with no
+# effect.
+_RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
+_RETIRED_WORKSTREAM_KEYS = frozenset(
+    {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
+)
+_RETIRED_PLAN_KEYS = frozenset({"request_evaluation"})
+
+
+def _without(data: object, keys: frozenset[str]) -> object:
+    if not isinstance(data, dict):
+        return data
+    return {key: value for key, value in data.items() if key not in keys}
+
+
+def _migrate_state(data: object) -> object:
+    """Upgrade a version 1 state mapping to version 2 by dropping retired keys.
+
+    Only a mapping that declares version 1 (or no version, which loaded as 1)
+    is rewritten, so a current state with an unknown key is still rejected.
+    """
+    if not isinstance(data, dict) or data.get("schema_version", 1) != 1:
+        return data
+    migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
+    migrated["schema_version"] = 2
+    workstreams = migrated.get("workstreams")
+    if isinstance(workstreams, list):
+        migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
+    return migrated
+
+
+def _migrate_workstream(data: object) -> object:
+    if not isinstance(data, dict):
+        return data
+    item = {key: value for key, value in data.items() if key not in _RETIRED_WORKSTREAM_KEYS}
+    if "plan" in item:
+        item["plan"] = _without(item["plan"], _RETIRED_PLAN_KEYS)
+    return item
 
 
 __all__ = [

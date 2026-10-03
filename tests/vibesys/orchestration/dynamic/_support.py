@@ -46,7 +46,6 @@ def dynamic_options(**changes: object) -> DynamicOptions:
 def portfolio(
     *identifiers: str,
     continue_hypothesis: bool = False,
-    request_evaluation: bool = True,
 ) -> dict[str, object]:
     return {
         "reasoning": "Explore independent limiting mechanisms.",
@@ -57,7 +56,6 @@ def portfolio(
                 "hypothesis": f"Mechanism {identifier} limits the objective.",
                 "task": f"Implement and verify {identifier}.",
                 "pass_criteria": "The change is correct and measurably improves the objective.",
-                "request_evaluation": request_evaluation,
                 "continue_hypothesis": continue_hypothesis,
             }
             for identifier in identifiers
