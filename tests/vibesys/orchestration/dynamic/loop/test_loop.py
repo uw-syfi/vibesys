@@ -389,7 +389,7 @@ def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
     planner = agents.prompts(ORCHESTRATOR.id)
     assert len(planner) == 2
     assert "Correction required" in planner[1]
-    assert "workstreams.0.hypothesis_id" in planner[1]
+    assert "workstreams.0.implement.hypothesis_id" in planner[1]
     assert "'0 ' is not a valid identifier" in planner[1]
     state = load_state(loop_input, run.run_id)
     assert [item.hypothesis_id for item in state.workstreams] == ["0"]

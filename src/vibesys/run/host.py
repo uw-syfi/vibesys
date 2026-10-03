@@ -398,7 +398,11 @@ class _ProductHostFactory:
         self.evaluation_backend = backend
         self.evaluation_service = service
         return EvidenceReusingEvaluation(
-            evaluation, backend, run_id=run_id, scope_handles=service.scope_handles
+            evaluation,
+            backend,
+            run_id=run_id,
+            scope_handles=service.scope_handles,
+            profiler=profiler_service,
         )
 
     @staticmethod

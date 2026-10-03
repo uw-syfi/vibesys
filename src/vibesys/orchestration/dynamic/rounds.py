@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.models import WorkstreamPhase
+from vibesys.orchestration.dynamic.models import DynamicWorkstream, WorkstreamPhase
 from vibesys.orchestration.hypothesis import (
     HypothesisConfig,
     HypothesisSearch,
@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.input_gate import InputGate
     from vibesys.orchestration.dynamic.models import (
         DynamicOptions,
+        DynamicProfile,
         DynamicState,
-        DynamicWorkstream,
         EvaluationResult,
         EvidenceReference,
         ReviewResult,
@@ -42,6 +42,11 @@ _MAX_HISTORY_NEXT_STEP_CHARS = 600
 # Evaluations shown for a running implementer turn, and the end of each failure.
 _MAX_LIVE_EVALUATIONS = 4
 _MAX_LIVE_FAILURE_CHARS = 400
+# A profile's diagnosis is the fact the planner scheduled it for, so it keeps
+# more text than an attempt summary.
+_MAX_PROFILE_QUESTION_CHARS = 600
+_MAX_PROFILE_DIAGNOSIS_CHARS = 2000
+_MAX_PROFILE_COMPONENTS = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,9 +121,15 @@ class Rounds:
                 [_buildable_row(item) for item in buildable], separators=(",", ":")
             ),
             "older_ids": ", ".join(
-                item.hypothesis_id for item in self.state.workstreams[:-_MAX_HISTORY_ROWS]
+                _row_id(item) for item in self._history_entries()[:-_MAX_HISTORY_ROWS]
             ),
         }
+
+    def _history_entries(self) -> list[DynamicWorkstream | DynamicProfile]:
+        """Return every scheduled workstream, implement or profile, in schedule order."""
+        return sorted(
+            [*self.state.workstreams, *self.state.profiles], key=lambda item: item.sequence
+        )
 
     def buildable(self) -> tuple[BuildableCandidate, ...]:
         """Return the finished workstreams a new workstream may start from.
@@ -357,7 +368,9 @@ class Rounds:
     def _history_projection(self, live: Mapping[str, Sequence[AgentEvaluation]]) -> str:
         rows = [
             self.history_row(item, live=live.get(item.hypothesis_id))
-            for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]
+            if isinstance(item, DynamicWorkstream)
+            else _profile_row(item)
+            for item in self._history_entries()[-_MAX_HISTORY_ROWS:]
         ]
         return json.dumps(rows, separators=(",", ":"))
 
@@ -410,6 +423,41 @@ class Rounds:
             ),
             **strategy,
         }
+
+
+def _row_id(item: DynamicWorkstream | DynamicProfile) -> str:
+    return item.hypothesis_id if isinstance(item, DynamicWorkstream) else item.profile_id
+
+
+def _profile_row(item: DynamicProfile) -> dict[str, object]:
+    """Project one profile workstream: its target, question, and trusted outcome."""
+    outcome = item.outcome
+    return {
+        "kind": "profile",
+        "profile_id": item.profile_id,
+        "target_hypothesis_id": item.plan.target_hypothesis_id,
+        "revision": _bounded_optional(item.revision, _MAX_HISTORY_REVISION_CHARS),
+        "question": _bounded_optional(item.plan.question, _MAX_PROFILE_QUESTION_CHARS),
+        # A profile without an outcome is running (or resumes at the next start).
+        "status": outcome.status.value if outcome is not None else "running",
+        "operation_id": outcome.operation_id if outcome is not None else None,
+        "diagnosis": _bounded_optional(
+            outcome.diagnosis if outcome is not None else None, _MAX_PROFILE_DIAGNOSIS_CHARS
+        ),
+        "components": [
+            {"name": component.name[:_MAX_HISTORY_METRIC_NAME_CHARS], "share": component.share}
+            for component in (outcome.components if outcome is not None else ())[
+                :_MAX_PROFILE_COMPONENTS
+            ]
+        ],
+        "evidence_ids": list(outcome.evidence_ids) if outcome is not None else [],
+        # A failure states its cause last.
+        "failure_tail": (
+            outcome.failure[-_MAX_LIVE_FAILURE_CHARS:]
+            if outcome is not None and outcome.failure is not None
+            else None
+        ),
+    }
 
 
 def _buildable_row(item: BuildableCandidate) -> dict[str, object]:

@@ -6,16 +6,27 @@ import json
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    FiniteFloat,
+    Tag,
+    model_validator,
+)
+from pydantic.json_schema import GenerateJsonSchema
 
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.orchestration.hypothesis.state import HypothesisState
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentId, MetricDirection
+from vs_runtime.api import AgentId, CandidateProfile, MetricDirection
 
 if TYPE_CHECKING:
     from pydantic.config import ExtraValues
+    from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue
+    from pydantic_core import core_schema
 
 
 class DynamicOptions(AgentOrchestrationOptions):
@@ -54,11 +65,21 @@ class EvidenceReference(BaseModel):
     revision: str | None = Field(default=None, min_length=1, max_length=256)
 
 
+class WorkstreamKind(StrEnum):
+    """What a scheduled workstream does with its slot."""
+
+    # Implement a hypothesis in a candidate workspace (the default).
+    IMPLEMENT = "implement"
+    # Profile an existing candidate revision to inform later plans.
+    PROFILE = "profile"
+
+
 class WorkstreamPlan(BaseModel):
     """One causally independent hypothesis selected for parallel work."""
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal[WorkstreamKind.IMPLEMENT] = WorkstreamKind.IMPLEMENT
     hypothesis_id: AgentId
     title: str = Field(min_length=1)
     hypothesis: str = Field(min_length=1)
@@ -76,16 +97,89 @@ class WorkstreamPlan(BaseModel):
     )
 
 
+# A profile question is capped wide enough that a paragraph never reaches it,
+# and below the profiler service's request limit.
+MAX_PROFILE_QUESTION_CHARS = 4000
+
+
+class ProfilePlan(BaseModel):
+    """One profile of an existing candidate revision, scheduled in a slot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[WorkstreamKind.PROFILE]
+    profile_id: AgentId = Field(
+        description="A new ID for this profile, distinct from every hypothesis and profile ID."
+    )
+    target_hypothesis_id: AgentId | None = Field(
+        description=(
+            "The ID of a hypothesis listed as a buildable candidate, to profile its revision; "
+            "null to profile the current base revision."
+        ),
+    )
+    question: str = Field(
+        min_length=1,
+        max_length=MAX_PROFILE_QUESTION_CHARS,
+        description="What the profile must answer to inform the next plan.",
+    )
+
+
+def _workstream_kind(value: object) -> str:
+    """Return a planned workstream's kind; an entry without one is an implement workstream."""
+    if isinstance(value, dict):
+        return str(value.get("kind", WorkstreamKind.IMPLEMENT))
+    return str(getattr(value, "kind", WorkstreamKind.IMPLEMENT))
+
+
+# Validation dispatches on ``kind``, so an invalid entry is reported against
+# its own kind's fields only, under ``workstreams.N.<kind>``. ``kind`` defaults
+# to implement, as ``WorkstreamPlan`` declares, so plans written before profile
+# workstreams existed still validate.
+type PlannedWorkstream = Annotated[
+    Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
+    | Annotated[ProfilePlan, Tag(WorkstreamKind.PROFILE.value)],
+    Discriminator(_workstream_kind),
+]
+
+
+class _AnyOfTaggedUnions(GenerateJsonSchema):
+    """Render a tagged union as ``anyOf`` without the ``discriminator`` keyword.
+
+    The strict structured-output subset agent providers accept rejects
+    ``oneOf``. Each member fixes ``kind`` to its own constant, so at most one
+    member matches any instance and ``anyOf`` accepts exactly what ``oneOf``
+    would.
+    """
+
+    @override
+    def tagged_union_schema(self, schema: core_schema.TaggedUnionSchema) -> JsonSchemaValue:
+        rendered = super().tagged_union_schema(schema)
+        members = rendered.get("oneOf")
+        if members is None:
+            return rendered
+        return {"anyOf": members}
+
+
+def planned_id(plan: PlannedWorkstream) -> str:
+    """Return the ID a planned workstream is scheduled and tracked under."""
+    if isinstance(plan, ProfilePlan):
+        return plan.profile_id
+    return plan.hypothesis_id
+
+
 class PortfolioPlan(BaseModel):
     """A bounded batch of distinct hypothesis workstreams."""
 
     model_config = ConfigDict(extra="forbid")
 
     reasoning: str = Field(min_length=1, description="Why this portfolio of workstreams.")
-    workstreams: tuple[WorkstreamPlan, ...] = Field(
+    workstreams: tuple[PlannedWorkstream, ...] = Field(
         min_length=1,
         max_length=32,
-        description="The new workstreams to start, one entry per hypothesis.",
+        description=(
+            "The new workstreams to start: one entry per hypothesis (kind implement) "
+            "or per profile (kind profile)."
+        ),
     )
     hypothesis_updates: tuple[HypothesisStrategyUpdate, ...] = Field(
         default=(),
@@ -93,13 +187,34 @@ class PortfolioPlan(BaseModel):
         description="Parks and abandonments of completed hypotheses; empty when there are none.",
     )
 
+    @classmethod
+    @override
+    def model_json_schema(
+        cls,
+        by_alias: bool = True,
+        ref_template: str = "#/$defs/{model}",
+        schema_generator: type[GenerateJsonSchema] = _AnyOfTaggedUnions,
+        mode: JsonSchemaMode = "validation",
+        *,
+        union_format: Literal["any_of", "primitive_type_array"] = "any_of",
+    ) -> dict[str, object]:
+        """Return the reply schema, with the workstream union as ``anyOf`` for providers."""
+        return super().model_json_schema(
+            by_alias=by_alias,
+            ref_template=ref_template,
+            schema_generator=schema_generator,
+            mode=mode,
+            union_format=union_format,
+        )
+
     @model_validator(mode="after")
     def _distinct_hypotheses(self) -> PortfolioPlan:
-        identifiers = [item.hypothesis_id for item in self.workstreams]
+        identifiers = [planned_id(item) for item in self.workstreams]
         repeated = sorted({item for item in identifiers if identifiers.count(item) > 1})
         if repeated:
             message = (
-                f"portfolio workstreams must use distinct hypothesis IDs; repeated: {repeated}"
+                "portfolio workstreams must use distinct hypothesis and profile IDs; "
+                f"repeated: {repeated}"
             )
             raise ValueError(message)
         return self
@@ -286,6 +401,35 @@ class DynamicWorkstream(BaseModel):
         return self
 
 
+class DynamicProfile(BaseModel):
+    """Durable record of one profile workstream and its trusted outcome.
+
+    It shares the workstream sequence, so it spends one unit of the workstream
+    budget, but records no round: a profile produces no candidate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: AgentId
+    sequence: Annotated[int, Field(gt=0)]
+    planning_call: Annotated[int, Field(gt=0)]
+    plan: ProfilePlan
+    # The exact revision profiled, resolved from the target when scheduled.
+    revision: str = Field(min_length=1)
+    # None until the profile ends; resume runs a profile without an outcome.
+    outcome: CandidateProfile | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> DynamicProfile:
+        if self.plan.profile_id != self.profile_id:
+            message = "profile plan must preserve its profile_id"
+            raise ValueError(message)
+        if self.outcome is not None and self.outcome.revision != self.revision:
+            message = "profile outcome must describe the scheduled revision"
+            raise ValueError(message)
+        return self
+
+
 class DynamicState(BaseModel):
     """The dynamic plugin's complete durable aggregate."""
 
@@ -296,6 +440,7 @@ class DynamicState(BaseModel):
     next_planning_call: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
     workstreams: list[DynamicWorkstream] = Field(default_factory=list)
+    profiles: list[DynamicProfile] = Field(default_factory=list)
     # The input (root) revision's trusted benchmark, measured once per run.
     # Candidates must beat it to be adopted or built on.
     baseline: EvaluationResult | None = None
@@ -345,11 +490,31 @@ class DynamicState(BaseModel):
 
     @model_validator(mode="after")
     def _valid_history(self) -> DynamicState:
-        identifiers = [item.hypothesis_id for item in self.workstreams]
+        identifiers = [
+            *(item.hypothesis_id for item in self.workstreams),
+            *(item.profile_id for item in self.profiles),
+        ]
         if len(identifiers) != len(set(identifiers)):
-            message = "dynamic state contains duplicate hypothesis IDs"
+            message = "dynamic state contains duplicate hypothesis or profile IDs"
+            raise ValueError(message)
+        sequences = [
+            *(item.sequence for item in self.workstreams),
+            *(item.sequence for item in self.profiles),
+        ]
+        if len(sequences) != len(set(sequences)):
+            message = "dynamic state contains duplicate workstream sequences"
             raise ValueError(message)
         return self
+
+    def scheduled(self) -> int:
+        """Return the largest sequence scheduled so far, implement or profile."""
+        return max(
+            (
+                *(item.sequence for item in self.workstreams),
+                *(item.sequence for item in self.profiles),
+            ),
+            default=0,
+        )
 
 
 # Keys that schema version 1 wrote and version 2 retired: evaluation-cadence
@@ -427,16 +592,22 @@ def _migrate_workstream(data: object) -> object:
 
 
 __all__ = [
+    "MAX_PROFILE_QUESTION_CHARS",
     "DynamicOptions",
+    "DynamicProfile",
     "DynamicState",
     "DynamicWorkstream",
     "EvaluationResult",
     "EvidenceReference",
     "ImplementerResult",
+    "PlannedWorkstream",
     "PortfolioPlan",
+    "ProfilePlan",
     "ReviewResult",
     "VerifiedCandidate",
     "WorkstreamBudget",
+    "WorkstreamKind",
     "WorkstreamPhase",
     "WorkstreamPlan",
+    "planned_id",
 ]

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from vs_evaluation.api import (
+    MAX_AGENT_AWAIT_S,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
     AvailabilitySnapshot,
     AvailabilityState,
@@ -33,6 +34,14 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    ProfilerAgentCapacityError,
+    ProfilerAgentService,
+    ProfilerAgentUnavailableError,
+    ProfilerOperation,
+    ProfilerOperationState,
+    ProfilerResultOutcome,
+    ProfilerWorkKey,
+    ProfilerWorkPurpose,
     ResourceRequirements,
     ReuseStatus,
     RevisionConflictError,
@@ -54,6 +63,9 @@ from vs_runtime.api import (
     AgentEvaluationStatus,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateProfile,
+    CandidateProfileComponent,
+    CandidateProfileStatus,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -730,6 +742,46 @@ def _agent_stage(evidence: TrustedEvidence) -> AgentEvaluationStage:
     )
 
 
+_MAX_PROFILE_FOCUS_CHARS = 512
+
+
+def _profile_focus(request: str) -> str:
+    """Return the request's first line as the operation's exact-match work focus."""
+    first = next((line.strip() for line in request.splitlines() if line.strip()), "profile")
+    return first[:_MAX_PROFILE_FOCUS_CHARS].strip()
+
+
+def _candidate_profile(revision: str, operation: ProfilerOperation) -> CandidateProfile:
+    """Project one terminal profiler operation as the policy-facing profile outcome."""
+    result = operation.result
+    if operation.state is not ProfilerOperationState.COMPLETED or result is None:
+        return CandidateProfile(
+            revision=revision,
+            status=CandidateProfileStatus.FAILED,
+            operation_id=operation.operation_id,
+            failure=operation.error or f"the profiler operation ended {operation.state.value}",
+        )
+    report = result.report
+    if report.outcome is ProfilerResultOutcome.UNSUPPORTED:
+        return CandidateProfile(
+            revision=revision,
+            status=CandidateProfileStatus.UNSUPPORTED,
+            operation_id=operation.operation_id,
+            diagnosis=report.unsupported_reason,
+        )
+    return CandidateProfile(
+        revision=revision,
+        status=CandidateProfileStatus.OBSERVED,
+        operation_id=operation.operation_id,
+        diagnosis=report.narrative,
+        components=tuple(
+            CandidateProfileComponent(name=item.name, share=item.share)
+            for item in report.attribution
+        ),
+        evidence_ids=report.evidence_ids,
+    )
+
+
 class EvidenceReusingEvaluation:
     """Reuse exact accepted evidence before invoking official evaluation effects."""
 
@@ -740,16 +792,52 @@ class EvidenceReusingEvaluation:
         *,
         run_id: str,
         scope_handles: Callable[[str | None], Awaitable[tuple[str, ...]]],
+        profiler: ProfilerAgentService | None = None,
     ) -> None:
         """Bind the official evaluator to accepted evidence from one backend.
 
         ``scope_handles`` returns the handles agents submitted from one
-        workspace scope; the agent service owns that record.
+        workspace scope; the agent service owns that record. ``profiler`` is
+        the run's profiler-agent service, when one is provisioned.
         """
         self._delegate = delegate
         self._backend = backend
         self._run_id = run_id
         self._scope_handles = scope_handles
+        self._profiler = profiler
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Run one profiler operation on ``revision`` and return its typed outcome.
+
+        The operation goes through the same profiler service as an agent's
+        ``dispatch_profiler``, so it is a durable, run-observable record.
+        """
+        if self._profiler is None:
+            return await self._delegate.profile(revision, request, member_id=member_id)
+        try:
+            dispatched = await self._profiler.dispatch(
+                principal_id=member_id,
+                scope_id=None,
+                request=request,
+                work=ProfilerWorkKey(
+                    purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE,
+                    focus=_profile_focus(request),
+                ),
+                session_id=None,
+                candidate_snapshot_id=revision,
+            )
+        except (ProfilerAgentUnavailableError, ProfilerAgentCapacityError, ValueError) as error:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=f"the profile could not start: {error}",
+            )
+        while True:
+            reply = await self._profiler.await_result(
+                dispatched.operation_id, member_id, None, MAX_AGENT_AWAIT_S
+            )
+            if not reply.timed_out:
+                return _candidate_profile(revision, reply.operation)
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""
