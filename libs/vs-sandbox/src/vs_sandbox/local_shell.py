@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.process_execution import (
+    ProcessOutcome,
     ProcessStop,
     start_process_group,
     wait_stoppable,
@@ -63,6 +64,27 @@ class LocalShellSandbox:
         """Return the unchanged path seen by a host-local process."""
         return str(Path(host_path))
 
+    def _run(self, command: str, timeout: int, cancel: threading.Event | None) -> ProcessOutcome:
+        if cancel is not None:
+            process = start_process_group(
+                (_SHELL, "-c", command), env=self.env, cwd=str(self.root_dir)
+            )
+            return wait_stoppable(process, timeout=timeout, cancel=cancel)
+        try:
+            completed = subprocess.run(  # noqa: S602  # lint-waiver: LW-007109 [S602]; this host sandbox boundary intentionally executes the requested shell command.
+                command,
+                check=False,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=self.env,
+                cwd=str(self.root_dir),
+            )
+        except subprocess.TimeoutExpired:
+            return ProcessOutcome("", "", _TIMEOUT_EXIT_CODE, ProcessStop.TIMEOUT)
+        return ProcessOutcome(completed.stdout, completed.stderr, completed.returncode)
+
     def execute(
         self,
         command: str,
@@ -74,11 +96,14 @@ class LocalShellSandbox:
 
         Stderr lines are prefixed ``[stderr]``, empty output becomes
         ``<no output>``, output past the cap is cut with a notice, and a
-        non-zero exit appends ``Exit code: N``. The command runs in its own
-        process group; a timeout or a set *cancel* stops the whole group
-        (``SIGTERM``, then ``SIGKILL`` after the grace period). A timeout
-        yields exit code 124, a cancellation ``cancelled=True``, and any other
-        launch failure exit code 1; none raises.
+        non-zero exit appends ``Exit code: N``. A timeout yields exit code 124
+        and any other launch failure exit code 1; neither raises.
+
+        With *cancel*, the command runs in its own process group, and a
+        timeout or a set *cancel* stops the whole group (``SIGTERM``, then
+        ``SIGKILL`` after a grace period); a cancellation returns
+        ``cancelled=True``. Without it, the command stays in the caller's
+        process group, so a terminal interrupt still reaches it directly.
         """
         if not command or not isinstance(command, str):
             return SandboxExecutionResult(
@@ -89,18 +114,11 @@ class LocalShellSandbox:
             message = f"timeout must be positive, got {effective_timeout}"
             raise ValueError(message)
         try:
-            process = start_process_group(
-                (_SHELL, "-c", command), env=self.env, cwd=str(self.root_dir)
-            )
+            proc = self._run(command, effective_timeout, cancel)
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             return SandboxExecutionResult(
                 output=f"Error executing command ({type(exc).__name__}): {exc}", exit_code=1
             )
-        proc = wait_stoppable(
-            process,
-            timeout=effective_timeout,
-            cancel=cancel,
-        )
         if proc.stopped is ProcessStop.TIMEOUT:
             return SandboxExecutionResult(
                 output=f"Error: Command timed out after {effective_timeout} seconds.",
