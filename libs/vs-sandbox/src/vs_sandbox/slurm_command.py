@@ -185,12 +185,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if isinstance(result, int):
         return result
     if cancel.is_set() and isinstance(result, SlurmError):
-        sys.stderr.write(f"Slurm evaluator cancelled: {result}\n")
+        sys.stderr.write(f"Slurm evaluator cancelled: {_described(result)}\n")
         return _CANCELLED_EXIT_CODE
     if isinstance(result, (OSError, ValueError)):
-        sys.stderr.write(f"Slurm evaluator failed: {result}\n")
+        sys.stderr.write(f"Slurm evaluator failed: {_described(result)}\n")
         return 1
     raise result
+
+
+def _described(error: BaseException) -> str:
+    """Return *error* with its notes, which report a job left uncancelled."""
+    return "\n".join((str(error), *getattr(error, "__notes__", ())))
 
 
 if __name__ == "__main__":
