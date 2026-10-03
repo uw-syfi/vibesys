@@ -37,3 +37,17 @@ def test_the_loop_keeps_its_invariants_under_generated_agents_and_faults(
     chaos = run_chaos(tmp_path, seed)
 
     assert chaos.violations == [], chaos.report()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "routed bug: after a stop request the evaluation service still accepts an agent's "
+        "submit_evaluation from a turn that is still running (EVALUATION_AFTER_STOP)"
+    ),
+)
+def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path) -> None:
+    """Seed 4025 stops the run while a profile runs; before the fix it hung there."""
+    chaos = run_chaos(tmp_path, 4025)
+
+    assert chaos.violations == [], chaos.report()

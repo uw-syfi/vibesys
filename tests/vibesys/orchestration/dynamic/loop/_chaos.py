@@ -361,9 +361,11 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     run = finished[0]
     if run.error is not None and not isinstance(run.error, TYPED_ENDS):
         violations.append((ChaosInvariant.UNTYPED_END, repr(run.error)))
-    # A profile that failed because the plan faulted its agent or its job is a
-    # typed failure, not an offered capability the run cannot serve.
-    profiles_faulted = any(PROFILER.id in item or "operation" in item for item in injected)
+    # A profile that failed because the plan faulted its agent or its job, or
+    # because the run stopped, is a typed failure, not an unservable capability.
+    profiles_faulted = agents.stop_at is not None or any(
+        PROFILER.id in item or "operation" in item for item in injected
+    )
     violations += _records_violations(loop_input, run, profiles_faulted=profiles_faulted)
     chaos = ChaosRun(seed, plan, run, violations, injected, agents.stop_at)
     log = os.environ.get("CHAOS_LOG")
