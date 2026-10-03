@@ -124,7 +124,7 @@ class ProfilerAgentResult(BaseModel):
         return value
 
     def model_post_init(self, __context: object) -> None:
-        """Require the reason exactly when profiling is unsupported."""
+        """Require the reason exactly when unsupported, and evidence when observed."""
         if (self.outcome is ProfilerResultOutcome.UNSUPPORTED) != (
             self.unsupported_reason is not None
         ):
@@ -136,6 +136,14 @@ class ProfilerAgentResult(BaseModel):
         # host resolves those ids like any other. It may not attribute cost.
         if self.outcome is ProfilerResultOutcome.UNSUPPORTED and self.attribution:
             raise ValueError("unsupported outcome forbids attribution")  # noqa: TRY003  # lint-waiver: LW-930056 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+        # An observation is a claim about a measured workload; with no trusted
+        # evidence behind it, it is narrative the host cannot check.
+        if self.outcome is ProfilerResultOutcome.OBSERVED and not self.evidence_ids:
+            message = (
+                "an observed outcome must cite at least one trusted profile evidence id; "
+                "report unsupported when no capture measured the workload"
+            )
+            raise ValueError(message)
 
 
 class ProfilerOperationResult(BaseModel):
