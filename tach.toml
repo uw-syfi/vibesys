@@ -246,7 +246,7 @@ depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.orchestration.d
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
 layer = "loops"
-depends_on = ["vs_runtime", "vs_issue_tracker", "vs_prompts", "vibesys.plugin_registration", "vibesys.orchestration.resume", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vs_runtime", "vs_issue_tracker", "vs_prompts", "vibesys.plugin_registration", "vibesys.orchestration.resume", "vibesys.run.contracts"]
 
 [[modules]]
 # Shared memory paths declared by the built-in orchestration plugins.
@@ -284,7 +284,7 @@ depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
 [[modules]]
 path = "vibesys.orchestration.profiler_agent"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vs_evaluation.api", "vs_runtime"]
+depends_on = ["vibesys.orchestration.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.skill_selection"

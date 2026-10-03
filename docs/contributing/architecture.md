@@ -149,6 +149,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.hypothesis.readmodel
     vibesys.orchestration.dynamic --> vibesys.orchestration.metrics
     vibesys.orchestration.dynamic --> vibesys.orchestration.resume
+    vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
     vibesys.orchestration.evolve --> vibesys
@@ -159,6 +160,7 @@ graph TD
     vibesys.orchestration.evolve --> vibesys.orchestration.profilers
     vibesys.orchestration.evolve --> vibesys.orchestration.prompts
     vibesys.orchestration.evolve --> vibesys.orchestration.review
+    vibesys.orchestration.evolve --> vibesys.orchestration.structured_turn
     vibesys.orchestration.evolve --> vibesys.plugin_registration
     vibesys.orchestration.evolve --> vibesys.run.contracts
     vibesys.orchestration.evolve.population --> vibesys.orchestration.metrics
@@ -168,6 +170,7 @@ graph TD
     vibesys.orchestration.hypothesis.readmodel --> vibesys.orchestration.hypothesis
     vibesys.orchestration.hypothesis.readmodel --> vibesys.run.contracts
     vibesys.orchestration.issue_queue --> vibesys.orchestration.resume
+    vibesys.orchestration.issue_queue --> vibesys.orchestration.structured_turn
     vibesys.orchestration.issue_queue --> vibesys.plugin_registration
     vibesys.orchestration.issue_queue --> vibesys.run.contracts
     vibesys.orchestration.multi --> vibesys
@@ -183,9 +186,11 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.prompts
     vibesys.orchestration.multi --> vibesys.orchestration.resume
     vibesys.orchestration.multi --> vibesys.orchestration.review
+    vibesys.orchestration.multi --> vibesys.orchestration.structured_turn
     vibesys.orchestration.multi --> vibesys.plugin_registration
     vibesys.orchestration.multi --> vibesys.run.contracts
     vibesys.orchestration.profiler_agent --> vibesys.orchestration.prompts
+    vibesys.orchestration.profiler_agent --> vibesys.orchestration.structured_turn
     vibesys.orchestration.profilers --> vibesys
     vibesys.orchestration.profilers --> vibesys.run.contracts
     vibesys.orchestration.prompts --> vibesys
@@ -203,9 +208,11 @@ graph TD
     vibesys.orchestration.single --> vibesys.orchestration.prompts
     vibesys.orchestration.single --> vibesys.orchestration.resume
     vibesys.orchestration.single --> vibesys.orchestration.review
+    vibesys.orchestration.single --> vibesys.orchestration.structured_turn
     vibesys.orchestration.single --> vibesys.plugin_registration
     vibesys.orchestration.single --> vibesys.run.contracts
     vibesys.orchestration.skill_selection --> vibesys
+    vibesys.orchestration.structured_turn --> vibesys.orchestration.prompts
     vibesys.plugin_builtins --> vibesys.orchestration.dynamic
     vibesys.plugin_builtins --> vibesys.orchestration.evolve
     vibesys.plugin_builtins --> vibesys.orchestration.issue_queue
@@ -417,6 +424,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.hypothesis.readmodel
     vibesys.orchestration.dynamic --> vibesys.orchestration.metrics
     vibesys.orchestration.dynamic --> vibesys.orchestration.resume
+    vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
     vibesys.orchestration.dynamic --> vs_loop_state
@@ -430,6 +438,7 @@ graph TD
     vibesys.orchestration.evolve --> vibesys.orchestration.profilers
     vibesys.orchestration.evolve --> vibesys.orchestration.prompts
     vibesys.orchestration.evolve --> vibesys.orchestration.review
+    vibesys.orchestration.evolve --> vibesys.orchestration.structured_turn
     vibesys.orchestration.evolve --> vibesys.plugin_registration
     vibesys.orchestration.evolve --> vibesys.run.contracts
     vibesys.orchestration.evolve --> vs_prompts
@@ -444,6 +453,7 @@ graph TD
     vibesys.orchestration.hypothesis.readmodel --> vs_loop_state
     vibesys.orchestration.hypothesis.readmodel --> vs_runtime
     vibesys.orchestration.issue_queue --> vibesys.orchestration.resume
+    vibesys.orchestration.issue_queue --> vibesys.orchestration.structured_turn
     vibesys.orchestration.issue_queue --> vibesys.plugin_registration
     vibesys.orchestration.issue_queue --> vibesys.run.contracts
     vibesys.orchestration.issue_queue --> vs_issue_tracker
@@ -463,12 +473,14 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.prompts
     vibesys.orchestration.multi --> vibesys.orchestration.resume
     vibesys.orchestration.multi --> vibesys.orchestration.review
+    vibesys.orchestration.multi --> vibesys.orchestration.structured_turn
     vibesys.orchestration.multi --> vibesys.plugin_registration
     vibesys.orchestration.multi --> vibesys.run.contracts
     vibesys.orchestration.multi --> vs_loop_state
     vibesys.orchestration.multi --> vs_prompts
     vibesys.orchestration.multi --> vs_runtime
     vibesys.orchestration.profiler_agent --> vibesys.orchestration.prompts
+    vibesys.orchestration.profiler_agent --> vibesys.orchestration.structured_turn
     vibesys.orchestration.profiler_agent --> vs_evaluation.api
     vibesys.orchestration.profiler_agent --> vs_runtime
     vibesys.orchestration.profilers --> vibesys
@@ -491,6 +503,7 @@ graph TD
     vibesys.orchestration.single --> vibesys.orchestration.prompts
     vibesys.orchestration.single --> vibesys.orchestration.resume
     vibesys.orchestration.single --> vibesys.orchestration.review
+    vibesys.orchestration.single --> vibesys.orchestration.structured_turn
     vibesys.orchestration.single --> vibesys.plugin_registration
     vibesys.orchestration.single --> vibesys.run.contracts
     vibesys.orchestration.single --> vs_loop_state
@@ -499,6 +512,8 @@ graph TD
     vibesys.orchestration.skill_selection --> vibesys
     vibesys.orchestration.skill_selection --> vs_agent
     vibesys.orchestration.steering --> vs_prompts
+    vibesys.orchestration.structured_turn --> vibesys.orchestration.prompts
+    vibesys.orchestration.structured_turn --> vs_runtime
     vibesys.plugin_builtins --> vibesys.orchestration.dynamic
     vibesys.plugin_builtins --> vibesys.orchestration.evolve
     vibesys.plugin_builtins --> vibesys.orchestration.issue_queue

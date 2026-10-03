@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.prompts import render_template
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_evaluation.api import ProfilerAgentResult
 
 if TYPE_CHECKING:
@@ -81,7 +82,7 @@ class RuntimeProfilerTurnProvision:
             request=request,
         )
         try:
-            return await conversation.session.turn(prompt, response=ProfilerAgentResult)
+            return await structured_turn(conversation.session, prompt, ProfilerAgentResult)
         except asyncio.CancelledError:
             await self._drop(session_id)
             raise
