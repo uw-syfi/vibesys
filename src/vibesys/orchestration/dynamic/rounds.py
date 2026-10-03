@@ -29,7 +29,7 @@ if TYPE_CHECKING:
         EvidenceReference,
         ReviewResult,
     )
-    from vs_runtime.api import AgentEvaluation
+    from vs_runtime.api import AgentEvaluation, MetricDirection, PartialMeasurement
 
 _MAX_HISTORY_ROWS = 16
 _MAX_HISTORY_METRICS = 8
@@ -66,6 +66,8 @@ class BuildableCandidate:
     metric_name: str | None
     metric_value: float | None
     metric_unit: str | None
+    metric_direction: MetricDirection | None
+    partial_measurement: PartialMeasurement | None
 
 
 class Rounds:
@@ -117,6 +119,13 @@ class Rounds:
                 if baseline is not None and not baseline.benchmark_passed
                 else ""
             ),
+            "input_partial": (
+                json.dumps(_partial_row(baseline.partial_measurement), separators=(",", ":"))
+                if baseline is not None
+                and not baseline.benchmark_passed
+                and baseline.partial_measurement is not None
+                else ""
+            ),
             "history": self._history_projection(live or {}),
             "buildable": json.dumps(
                 [_buildable_row(item) for item in buildable], separators=(",", ":")
@@ -146,6 +155,9 @@ class Rounds:
         wastes their turns. The caller checks that each revision still
         reproduces its content before offering it. The adopted base revision
         stays the default parent.
+
+        Candidates are ranked best first (see :func:`_measured_rank`), so the
+        closest partial candidate leads even when no benchmark passed.
         """
         candidates: list[BuildableCandidate] = []
         for item in self.state.workstreams:
@@ -168,6 +180,8 @@ class Rounds:
                         metric_name=evaluation.metric_name,
                         metric_value=evaluation.metric_value,
                         metric_unit=evaluation.metric_unit,
+                        metric_direction=evaluation.metric_direction,
+                        partial_measurement=evaluation.partial_measurement,
                     )
                 )
             elif item.verified is not None:
@@ -182,9 +196,11 @@ class Rounds:
                         metric_name=verified.metric_name,
                         metric_value=verified.metric_value,
                         metric_unit=verified.metric_unit,
+                        metric_direction=verified.metric_direction,
+                        partial_measurement=verified.partial_measurement,
                     )
                 )
-        return tuple(candidates)
+        return tuple(sorted(candidates, key=_measured_rank))
 
     async def record(self, index: int) -> None:
         """Commit one workstream result through shared hypothesis transitions."""
@@ -429,6 +445,25 @@ class Rounds:
         }
 
 
+def _measured_rank(item: BuildableCandidate) -> tuple[int, str, float]:
+    """Order buildable candidates best first by what their benchmark measured.
+
+    Passing benchmarks lead, by their headline value. Failed benchmarks that
+    reported a partial measurement follow, grouped by measured quantity (only
+    the same quantity is comparable) and ordered within it by its direction.
+    Candidates with neither come last. The sort is stable, so ties keep their
+    recorded order.
+    """
+    if item.benchmark_passed and item.metric_value is not None:
+        sign = -1.0 if item.metric_direction == "min" else 1.0
+        return (0, "", -sign * item.metric_value)
+    partial = item.partial_measurement
+    if partial is not None:
+        sign = -1.0 if partial.direction == "min" else 1.0
+        return (1, partial.name, -sign * partial.value)
+    return (2, "", 0.0)
+
+
 def _profile_row(item: DynamicProfile) -> dict[str, object]:
     """Project one profile workstream: its target, question, and trusted outcome."""
     outcome = item.outcome
@@ -472,6 +507,22 @@ def _buildable_row(item: BuildableCandidate) -> dict[str, object]:
         "metric_name": _bounded_optional(item.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS),
         "metric_value": item.metric_value,
         "metric_unit": _bounded_optional(item.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS),
+        "partial_measurement": _partial_row(item.partial_measurement),
+    }
+
+
+def _partial_row(partial: PartialMeasurement | None) -> dict[str, object] | None:
+    """Project a partial measurement with its free-text fields bounded."""
+    if partial is None:
+        return None
+    return {
+        **partial.model_dump(mode="json", exclude_none=True),
+        "name": partial.name[:_MAX_HISTORY_METRIC_NAME_CHARS],
+        **(
+            {"unit": partial.unit[:_MAX_HISTORY_METRIC_UNIT_CHARS]}
+            if partial.unit is not None
+            else {}
+        ),
     }
 
 
@@ -500,6 +551,7 @@ def _compact_agent_evaluation(evaluation: AgentEvaluation) -> dict[str, object]:
                     }
                     for metric in stage.metrics[:_MAX_HISTORY_METRICS]
                 ],
+                "partial_measurement": _partial_row(stage.partial_measurement),
             }
             for stage in evaluation.stages
         ],
@@ -577,6 +629,7 @@ def _compact_evaluation(result: EvaluationResult | None) -> dict[str, object] | 
         "metrics": {
             name[:_MAX_HISTORY_METRIC_NAME_CHARS]: result.metrics[name] for name in metric_names
         },
+        "partial_measurement": _partial_row(result.partial_measurement),
     }
 
 

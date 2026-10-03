@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from vs_evaluator_protocol.api import PartialMeasurement
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -643,6 +645,16 @@ class BenchmarkEvaluation(BaseModel):
     metric_direction: MetricDirection | None = None
     metric_unit: str | None = None
     row: Mapping[str, FiniteFloat] | None = None
+    # What a failed benchmark measured before it stopped, as its evaluator
+    # reported it; absent when the evaluator reported nothing.
+    partial_measurement: PartialMeasurement | None = None
+
+    @model_validator(mode="after")
+    def _partial_only_when_failed(self) -> BenchmarkEvaluation:
+        if self.partial_measurement is not None and self.feedback is None:
+            message = "only a failed benchmark carries a partial measurement"
+            raise ValueError(message)
+        return self
 
     @property
     def passed(self) -> bool:
@@ -715,6 +727,8 @@ class AgentEvaluationStage(BaseModel):
     kind: str = Field(min_length=1)
     outcome: AgentEvaluationStageOutcome
     metrics: tuple[AgentEvaluationMetric, ...] = ()
+    # What a failed stage measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
 
 
 class AgentEvaluation(BaseModel):

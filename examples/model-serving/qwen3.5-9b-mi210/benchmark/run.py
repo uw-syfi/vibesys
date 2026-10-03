@@ -148,7 +148,60 @@ WARMUP_TRACE_ROWS = 72
 
 
 class HarnessError(RuntimeError):
-    """A domain-level failure: bad config, a missing tool, or a failed run."""
+    """A domain-level failure: bad config, a missing tool, or a failed run.
+
+    `partial` is what a sub-run measured before it was stopped, as an evaluator
+    result protocol `partial` object (see `partial_measurement`), or None when
+    it measured nothing.
+    """
+
+    def __init__(self, message: str, partial: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.partial = partial
+
+
+# The evaluator result protocol VibeSys reads from `--vs-output` (protocol 2;
+# sdk/vs-evaluator/PROTOCOL.md). The headline is the one metric declared.
+PROTOCOL_VERSION = 2
+HEADLINE_METRIC = "output_tokens_per_s"
+HEADLINE_SPEC = {"unit": "output tokens/s", "direction": "max"}
+
+
+class ProtocolReport:
+    """The record stream written to `--vs-output`, or nothing when it is absent.
+
+    `hello` is written at construction, before anything is measured, so a run
+    killed mid-way leaves a declared schema and no outcome. Exactly one of
+    `emit` (the measured row) and `fail` (why there is none, with what was
+    measured before the stop) follows.
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = path
+        self._write(
+            {
+                "kind": "hello",
+                "protocol": PROTOCOL_VERSION,
+                "metrics": {HEADLINE_METRIC: HEADLINE_SPEC},
+            },
+            mode="w",
+        )
+
+    def emit(self, value: float) -> None:
+        self._write({"kind": "result", "label": "", "values": {HEADLINE_METRIC: value}})
+
+    def fail(self, message: str, partial: dict[str, Any] | None) -> None:
+        record: dict[str, Any] = {"kind": "error", "message": message or "benchmark failed"}
+        if partial is not None:
+            record["partial"] = partial
+        self._write(record)
+
+    def _write(self, record: dict[str, Any], mode: str = "a") -> None:
+        if self._path is None:
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open(mode, encoding="utf-8") as handle:
+            handle.write(json.dumps(record, allow_nan=False) + "\n")
 
 
 def hf_home() -> Path:
@@ -269,6 +322,37 @@ class WarmupWatch:
         )
 
 
+def partial_measurement(stderr: str, deadline_s: float, label: str) -> dict[str, Any] | None:
+    """What a stopped sub-run measured, from session_runner's last progress line.
+
+    The measured value is its output rate so far (output tokens over elapsed
+    seconds), the target is the rate that finishes the workload within
+    `deadline_s` (absent without the workload header), and progress is rounds
+    completed out of rounds required. Without a progress line nothing was
+    measured, so the result is None rather than an estimate.
+    """
+    progress_lines = list(_PROGRESS_LINE.finditer(stderr))
+    if not progress_lines:
+        return None
+    progress = Progress.parse(progress_lines[-1].group(0))
+    if progress is None or progress.elapsed_s <= 0 or progress.rounds <= 0:
+        return None
+    partial: dict[str, Any] = {
+        "name": f"{label.split()[0]}_output_tokens_per_s",
+        "value": progress.output_tokens / progress.elapsed_s,
+        "direction": "max",
+        "unit": "output tokens/s",
+        "progress": {
+            "completed": progress.rounds_done,
+            "required": progress.rounds,
+            "unit": "rounds",
+        },
+    }
+    if (workload := _WORKLOAD_LINE.search(stderr)) is not None:
+        partial["target"] = int(workload["output_tokens"]) / deadline_s
+    return partial
+
+
 def describe_timeout(
     command: list[str], timeout_s: float, partial_stderr: str | bytes | None, label: str
 ) -> str:
@@ -379,12 +463,16 @@ def run_session_runner(
             reader.join()
         if not stopped:
             raise HarnessError(
-                describe_timeout(command, timeout_s, "".join(stderr), label)
+                describe_timeout(command, timeout_s, "".join(stderr), label),
+                partial_measurement("".join(stderr), timeout_s, label),
             ) from None
     for reader in readers:
         reader.join()
     if stopped:
-        raise HarnessError(f"{stopped[0]}\ncommand: {' '.join(command)}")
+        raise HarnessError(
+            f"{stopped[0]}\ncommand: {' '.join(command)}",
+            partial_measurement("".join(stderr), timeout_s, label),
+        )
 
     summary: dict[str, Any] | None = None
     if summary_path is not None and summary_path.exists():
@@ -784,6 +872,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--output-json", type=Path, default=None)
     parser.add_argument(
+        "--vs-output",
+        type=Path,
+        default=None,
+        help="Write the evaluator result protocol record stream here (VibeSys passes it).",
+    )
+    parser.add_argument(
         "--request-factory-engine",
         type=Path,
         required=True,
@@ -812,6 +906,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    report = ProtocolReport(args.vs_output)
     try:
         if args.mode == "smoke":
             result = run_smoke(args, resolve_trace(args, args.mode))
@@ -820,7 +915,12 @@ def main(argv: list[str] | None = None) -> int:
             result = run_replay(args, paths, args.mode)
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        report.fail(str(exc), exc.partial)
         return 1
+    if args.mode == "smoke":
+        report.fail("smoke mode validates plumbing only and measures no throughput", None)
+    else:
+        report.emit(result[HEADLINE_METRIC])
 
     text = json.dumps(result, indent=2)
     print(text)

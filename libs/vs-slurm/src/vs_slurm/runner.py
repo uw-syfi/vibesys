@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -66,10 +67,16 @@ class _TransportResponse:
 
 @dataclass(frozen=True)
 class SlurmFileArtifact:
-    """A candidate-relative remote file copied to an explicit local path."""
+    """A candidate-relative remote file copied to an explicit local path.
+
+    Artifacts are copied when the job succeeds. ``collect_on_failure`` also
+    copies this one when the job ran and exited nonzero, if the job wrote it:
+    a failed job may have reported why in it.
+    """
 
     remote_path: str
     local_path: Path
+    collect_on_failure: bool = False
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,7 @@ class SlurmArtifactTarget(BaseModel):
     remote_path: str
     local_path: Path
     kind: Literal["file", "tree"]
+    collect_on_failure: bool = False
 
 
 class SlurmJobHandle(BaseModel):
@@ -579,10 +587,20 @@ class SlurmJobRunner:
             )
             self._transport.put(local_script, remote_script)
             job_id = self._submit(base, remote_script, remote_log)
-        artifacts = tuple(
-            SlurmArtifactTarget(remote_path=path.as_posix(), local_path=target, kind=kind)
-            for kind, entries in (("file", files), ("tree", trees))
-            for path, target in entries
+        artifacts = (
+            *(
+                SlurmArtifactTarget(
+                    remote_path=path.as_posix(),
+                    local_path=target,
+                    kind="file",
+                    collect_on_failure=item.collect_on_failure,
+                )
+                for (path, target), item in zip(files, request.file_artifacts, strict=True)
+            ),
+            *(
+                SlurmArtifactTarget(remote_path=path.as_posix(), local_path=target, kind="tree")
+                for path, target in trees
+            ),
         )
         return SlurmJobHandle(
             job_id=job_id,
@@ -855,14 +873,21 @@ class SlurmJobRunner:
             self._transport.get(PurePosixPath(handle.remote_status_path), local_status, kind="file")
             self._transport.get(PurePosixPath(handle.remote_log_path), local_log, kind="file")
             exit_code = _read_exit_code(local_status)
-            if exit_code == 0 and status == SlurmJobStatus.COMPLETED:
-                for artifact in handle.artifacts:
-                    local_path = artifact.local_path
-                    remote_path = PurePosixPath(handle.remote_workspace) / artifact.remote_path
-                    if artifact.kind == "file":
-                        local_path.parent.mkdir(parents=True, exist_ok=True)
-                    else:
-                        local_path.mkdir(parents=True, exist_ok=True)
+            succeeded = exit_code == 0 and status == SlurmJobStatus.COMPLETED
+            for artifact in handle.artifacts:
+                if not succeeded and not artifact.collect_on_failure:
+                    continue
+                local_path = artifact.local_path
+                remote_path = PurePosixPath(handle.remote_workspace) / artifact.remote_path
+                if artifact.kind == "file":
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    local_path.mkdir(parents=True, exist_ok=True)
+                if succeeded:
+                    self._transport.get(remote_path, local_path, kind=artifact.kind)
+                    continue
+                # A failed job need not have written it; absent stays absent.
+                with suppress(SlurmError):
                     self._transport.get(remote_path, local_path, kind=artifact.kind)
             return SlurmJobResult(
                 job_id=handle.job_id,

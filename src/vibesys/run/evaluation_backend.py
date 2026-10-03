@@ -34,6 +34,7 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    PartialMeasurement,
     ProfilerAgentCapacityError,
     ProfilerAgentService,
     ProfilerAgentUnavailableError,
@@ -318,10 +319,12 @@ class _LocalSemanticExecutor:
             outcome = EvidenceOutcome.PASSED if result.passed else EvidenceOutcome.FAILED
             summary = result.feedback
             metrics: tuple[EvidenceMetric, ...] = ()
+            partial = None
         elif stage.kind is EvidenceKind.BENCHMARK:
             result = await self._evaluation.benchmark(workspace)
             outcome = EvidenceOutcome.PASSED if result.passed else EvidenceOutcome.FAILED
             summary = result.feedback
+            partial = result.partial_measurement
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
@@ -338,16 +341,7 @@ class _LocalSemanticExecutor:
         else:
             message = "direct profile evaluation is not supported by the trusted runtime"
             raise ValueError(message)
-        identity: JsonValue = {
-            "kind": stage.kind.value,
-            "fingerprints": stage.fingerprints.model_dump(mode="json"),
-            "outcome": outcome.value,
-            "summary": summary,
-            "metrics": [item.model_dump(mode="json") for item in metrics],
-        }
-        evidence_id = hashlib.sha256(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
         return TrustedEvidence(
             evidence_id=evidence_id,
             evaluation_id=evidence_id,
@@ -358,6 +352,7 @@ class _LocalSemanticExecutor:
             outcome=outcome,
             semantic_summary=summary,
             metrics=metrics,
+            partial_measurement=partial,
             accepted_round=0,
         )
 
@@ -571,6 +566,7 @@ class SemanticEvaluationBackend:
                     kind=item.kind,
                     outcome=item.outcome,
                     metrics=item.metrics,
+                    partial_measurement=item.partial_measurement,
                     summary_tail=(
                         item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
                         if item.semantic_summary
@@ -635,6 +631,32 @@ class SemanticEvaluationBackend:
             workload=self._identity.workload,
             environment=self._identity.environment,
         )
+
+
+def evidence_identity(
+    stage: SemanticEvaluationStage,
+    outcome: EvidenceOutcome,
+    summary: str | None,
+    metrics: Sequence[EvidenceMetric],
+    partial: PartialMeasurement | None,
+) -> str:
+    """Return the content address of one stage's trusted evidence.
+
+    A partial measurement is part of the identity only when present, so
+    evidence recorded before it existed keeps its identifier.
+    """
+    identity: dict[str, JsonValue] = {
+        "kind": stage.kind.value,
+        "fingerprints": stage.fingerprints.model_dump(mode="json"),
+        "outcome": outcome.value,
+        "summary": summary,
+        "metrics": [item.model_dump(mode="json") for item in metrics],
+    }
+    if partial is not None:
+        identity["partial_measurement"] = partial.model_dump(mode="json")
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 # Evaluation failure text is read by the agent that submitted the evaluation.
@@ -750,6 +772,7 @@ def _agent_stage(evidence: TrustedEvidence) -> AgentEvaluationStage:
             )
             for metric in evidence.metrics
         ),
+        partial_measurement=evidence.partial_measurement,
     )
 
 
@@ -936,6 +959,7 @@ class EvidenceReusingEvaluation:
             metric_direction=direction,
             metric_unit=metric.unit if metric is not None else None,
             row=row or None,
+            partial_measurement=accepted.partial_measurement if feedback is not None else None,
         )
 
     async def validate_local(
@@ -959,4 +983,5 @@ __all__ = [
     "SemanticEvaluationExecutor",
     "SemanticEvaluationIdentity",
     "SemanticEvaluationStage",
+    "evidence_identity",
 ]

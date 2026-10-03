@@ -14,7 +14,10 @@ fake, because they are external:
 
 The input project's benchmark reports ``throughput = VALUE`` from ``queue.py``
 (protocol 2), and its accuracy check raises ``ValueError`` when ``VALUE`` is
-negative, so an agent's edit decides every trusted outcome.
+negative, so an agent's edit decides every trusted outcome. A candidate that
+also sets ``REQUIRED`` above ``VALUE`` fails its benchmark the way a warmup cut
+short does: an ``error`` record whose partial measurement is ``VALUE`` rounds
+per second out of ``REQUIRED``.
 """
 
 from __future__ import annotations
@@ -79,11 +82,27 @@ import json, pathlib, sys
 namespace = {}
 exec(pathlib.Path("queue.py").read_text(), namespace)
 output = sys.argv[sys.argv.index("--vs-output") + 1]
-records = (
-    {"kind": "hello", "protocol": 2, "metrics": {"throughput": {"direction": "max"}}},
-    {"kind": "result", "values": {"throughput": float(namespace["VALUE"])}},
+value, required = namespace["VALUE"], namespace.get("REQUIRED")
+passed = required is None or value >= required
+hello = {"kind": "hello", "protocol": 2, "metrics": {"throughput": {"direction": "max"}}}
+outcome = (
+    {"kind": "result", "values": {"throughput": float(value)}}
+    if passed
+    else {
+        "kind": "error",
+        "message": f"warmup stopped: {value}/{required} rounds",
+        "partial": {
+            "name": "warmup_rounds_per_s",
+            "value": value,
+            "direction": "max",
+            "unit": "rounds/s",
+            "target": required,
+            "progress": {"completed": value, "required": required, "unit": "rounds"},
+        },
+    }
 )
-pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in records))
+pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in (hello, outcome)))
+raise SystemExit(0 if passed else 1)
 """
 
 # The GPU node's profiler, faked like the cluster: the remote interpreter runs

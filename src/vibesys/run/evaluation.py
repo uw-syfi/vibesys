@@ -445,7 +445,11 @@ class _EvaluationAdapter:
                 if not result.executed or provisioning_failure
                 else (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
             )
-            return BenchmarkEvaluation(executed=result.executed, feedback=feedback)
+            return BenchmarkEvaluation(
+                executed=result.executed,
+                feedback=feedback,
+                partial_measurement=result.partial_measurement,
+            )
         if result.row is None:
             return BenchmarkEvaluation(executed=result.executed)
         if objectives:
