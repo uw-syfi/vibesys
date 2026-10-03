@@ -13,6 +13,8 @@ from vibesys.orchestration.prompts.renderer import render_template
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from vs_prompts.api import RenderedPrompt
+
 
 def render_plan_correction(
     *,
@@ -20,17 +22,18 @@ def render_plan_correction(
     hypothesis_id: str,
     updated_hypothesis_ids: Collection[str],
     require_unseen_id: bool,
-) -> str:
+) -> RenderedPrompt:
     """Render the one-shot correction brief for a rejected plan.
 
     ``updated_hypothesis_ids`` names the prior hypotheses the rejected plan
-    updated; ``require_unseen_id`` adds the instruction to pick an identifier
+    updated; ``hypothesis_id`` is quoted as a Python literal, so an
+    agent-supplied id with quotes stays unambiguous; ``require_unseen_id`` adds the instruction to pick an identifier
     that never appeared in the run.
     """
     return render_template(
         "shared/plan_correction_prompt.j2",
         error=error,
-        hypothesis_id=hypothesis_id,
+        quoted_hypothesis_id=repr(hypothesis_id),
         updated_hypothesis_ids=sorted(set(updated_hypothesis_ids)),
         require_unseen_id=require_unseen_id,
     )
