@@ -56,6 +56,7 @@ from vibesys.run.project_policy import (
     trusted_project_input_paths,
 )
 from vibesys.run.workspace_policy import (
+    AGENT_CONFIG_FILES,
     build_workspace_materialization_plan,
     create_project_materializer,
     materialized_skill_dirs,
@@ -400,6 +401,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     objective=objective,
                     provisional_project=workspace_files if copied_project else None,
                     excluded_dirs=frozenset(project_excluded_dirs),
+                    excluded_files=AGENT_CONFIG_FILES,
                     trusted_input_paths=tuple(
                         trusted_project_input_paths(
                             project_root,

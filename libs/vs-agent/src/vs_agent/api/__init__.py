@@ -53,6 +53,7 @@ from vs_agent.provider_policy import (
     NODE_VERSION,
     RUST_TOOLCHAIN_VERSION,
     SHIPPED_PROVIDERS,
+    cli_mcp_config_files,
     cli_skill_dirs,
 )
 from vs_agent.selection import AgentSelection
@@ -132,6 +133,7 @@ __all__ = [
     "auth_env_vars",
     "auth_paths",
     "build_agent_client",
+    "cli_mcp_config_files",
     "cli_skill_dirs",
     "declare_provider_state_resources",
     "expose_as_tools",

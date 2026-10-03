@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.constants import PROJECT_ROOT
-from vs_agent.api import cli_skill_dirs
+from vs_agent.api import cli_mcp_config_files, cli_skill_dirs
 from vs_runtime.api.infrastructure import (
     GitSourceMaterialization,
     InputProjectMaterialization,
@@ -46,6 +46,12 @@ EXCLUDED_WORKSPACE_DIRS: frozenset[str] = frozenset(
 )
 
 _CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
+
+# Drivers write each turn's MCP server config, including the role's evaluation
+# capability token, into the workspace. Committing it would leak the token
+# into candidate history and make a mid-turn snapshot differ from the
+# end-of-turn snapshot of the same candidate content.
+AGENT_CONFIG_FILES: frozenset[str] = frozenset(cli_mcp_config_files())
 
 
 def materialized_skill_dirs(skill_sources: Iterable[Path]) -> frozenset[str]:
@@ -239,6 +245,7 @@ def build_workspace_materialization_plan(  # noqa: PLR0913  # lint-waiver: LW-01
 
 
 __all__ = [
+    "AGENT_CONFIG_FILES",
     "EXCLUDED_WORKSPACE_DIRS",
     "RunEnvironmentMaterializationEffects",
     "build_workspace_materialization_plan",

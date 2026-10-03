@@ -118,6 +118,7 @@ class ProjectRunRequest:
     objective: str | None = None
     provisional_project: ProjectMaterializer | None = None
     excluded_dirs: frozenset[str] = frozenset()
+    excluded_files: frozenset[str] = frozenset()
     trusted_input_paths: tuple[str | Path, ...] = ()
     state: ProjectStateDeclaration | None = None
 
@@ -173,6 +174,7 @@ class ProjectRunResources:
                 run_id=self._request.run_id,
                 events=self._effects.git_events,
                 excluded_dirs=self._request.excluded_dirs,
+                excluded_files=self._request.excluded_files,
                 trusted_input_paths=self._request.trusted_input_paths,
             )
             if self.git.trusted_input_baseline is not None:
@@ -302,6 +304,7 @@ def _assemble_project_run_resources(
             run_id=request.run_id,
             events=effects.git_events,
             excluded_dirs=request.excluded_dirs,
+            excluded_files=request.excluded_files,
             trusted_input_paths=request.trusted_input_paths,
         )
         git.init(existing=request.existing)
