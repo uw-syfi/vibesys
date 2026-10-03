@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
-    from vs_evaluator_protocol.records import MetricSpec, Record
+    from vs_evaluator_protocol.records import MetricSpec, PartialMeasurement, Record
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,11 +34,15 @@ class Measurement:
     protocol lets arrive with no preceding `hello`, so a failed measurement
     need not carry a declaration. A measured row always does, since the row
     was validated against it.
+
+    `partial` is what a failed run measured before it stopped, exactly as its
+    `error` record reported it; it is never set on a measured row.
     """
 
     metrics: Mapping[str, MetricSpec] | None
     values: Mapping[str, float] | None = None
     failure: str | None = None
+    partial: PartialMeasurement | None = None
 
     def __post_init__(self) -> None:
         """Reject an outcome that is neither exactly a row nor a failure."""
@@ -47,6 +51,9 @@ class Measurement:
             raise ValueError(message)
         if self.values is not None and self.metrics is None:
             message = "a measured row carries the metric declaration it was validated against"
+            raise ValueError(message)
+        if self.partial is not None and self.failure is None:
+            message = "only a failed measurement carries a partial measurement"
             raise ValueError(message)
 
     @property
@@ -78,12 +85,14 @@ def read_measurement(records: Iterable[Record]) -> Measurement:
                 # cannot declare anything until that configuration loads, and
                 # a failure before then must still reach the framework as a
                 # reason rather than as a missing file.
-                return Measurement(metrics=None, failure=record.message)
+                return Measurement(metrics=None, failure=record.message, partial=record.partial)
             # A hello may still arrive; whether this is HELLO_NOT_FIRST or
             # MISSING_HELLO is only decided once the stream is exhausted.
             continue
         elif isinstance(record, ErrorRecord):
-            return Measurement(metrics=hello.metrics, failure=record.message)
+            return Measurement(
+                metrics=hello.metrics, failure=record.message, partial=record.partial
+            )
         else:
             values = _read_values(record, hello=hello, values=values, position=position)
 
