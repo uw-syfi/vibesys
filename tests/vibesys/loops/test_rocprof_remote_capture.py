@@ -10,6 +10,8 @@ from resources.profilers.rocprof.remote_capture import capture_runtime
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 _STATUS = capture_runtime.CaptureStatus
 _WORKLOAD_RAN = {_STATUS.OK, _STATUS.KILLED_AFTER_GRACE}
 
@@ -25,10 +27,10 @@ def _capture(profiles: Path, capture_id: str, status: capture_runtime.CaptureSta
 
 @given(statuses=st.lists(st.sampled_from(list(_STATUS)), min_size=1, max_size=4))
 def test_a_trace_is_profile_evidence_only_when_every_workload_ran(
-    tmp_path_factory: object, statuses: list[capture_runtime.CaptureStatus]
+    tmp_path_factory: pytest.TempPathFactory, statuses: list[capture_runtime.CaptureStatus]
 ) -> None:
     """Regression (r18): a load_failed capture printed its load-window trace and exited 0."""
-    profiles = tmp_path_factory.mktemp("profiles")  # type: ignore[attr-defined]
+    profiles = tmp_path_factory.mktemp("profiles")
     ids = [f"timeline-{index}" for index in range(len(statuses))]
     for capture_id, status in zip(ids, statuses, strict=True):
         _capture(profiles, capture_id, status)
