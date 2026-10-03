@@ -1055,11 +1055,18 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
+        # schedule, implementing, implemented, failed; the stop lands on the
+        # epoch-close commit, so resume sees the failed slot in an open epoch.
+        run.state.script_commit(None, None, None, None, RuntimeError("stop"))
+        with pytest.raises(RuntimeError, match="stop"):
+            await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
         await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
         return run
 
     run = asyncio.run(scenario())
     assert judge_calls == 3
+    # Resume does not reimplement the slot that exhausted its stage retries.
+    assert len([s for s in run.agents.sessions if s.role.id == IMPLEMENTER.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "failed"
