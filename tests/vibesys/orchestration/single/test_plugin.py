@@ -474,3 +474,29 @@ def test_designer_prompt_points_at_notices_the_progress_entry_contains(
     else:
         assert expected_detail in entry
         assert expected_detail not in flat
+
+
+_PROFILE_POINTER = "fresh profiler result is recorded in the current progress entry"
+
+
+def test_designer_prompt_points_at_profile_evidence_the_progress_entry_contains(
+    tmp_path: Path,
+) -> None:
+    script = _Script(
+        _plan("H-01"),
+        _response(profile_analysis="Decode dominates at 61% of wall time."),
+        _plan("H-02"),
+        _response(),
+    )
+
+    status, _ = _run(tmp_path, script, options=_options(max_rounds=2, max_retries_per_round=1))
+
+    assert status is RunStatus.SUCCEEDED
+    designer_prompts = [message for role, _, message in script.calls if role == DESIGNER.id]
+    first, second = (" ".join(prompt.split()) for prompt in designer_prompts)
+    entry = (tmp_path / "progress" / "round-0002.md").read_text()
+    assert _PROFILE_POINTER not in first
+    assert _PROFILE_POINTER in second
+    assert (
+        "## Round 2: Profiler summary\n- analysis: Decode dominates at 61% of wall time." in entry
+    )

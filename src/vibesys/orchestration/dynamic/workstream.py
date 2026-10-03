@@ -13,6 +13,7 @@ from vibesys.orchestration.dynamic.models import (
     EvaluationResult,
     ImplementerResult,
     ReviewResult,
+    VerifiedCandidate,
     WorkstreamPhase,
 )
 from vibesys.orchestration.dynamic.prompts import (
@@ -26,7 +27,7 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentEvaluationStatus
+from vs_runtime.api import AgentEvaluationStageOutcome, AgentEvaluationStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -130,6 +131,21 @@ class Workstreams:
     # Agent turns started per hypothesis in this process; an attempt that
     # started none failed in setup, before any agent could act.
     _agent_turns: dict[str, int] = field(default_factory=dict)
+    # Each running implementer turn's workspace and how many evaluations that
+    # workspace had submitted before the turn began.
+    _live_turns: dict[str, tuple[CandidateWorkspace, int]] = field(default_factory=dict)
+
+    async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
+        """Return the evaluations each running implementer turn has submitted so far.
+
+        A turn can run for most of an hour; its durable state changes only when
+        it ends, so these are the only current facts about its candidate.
+        """
+        live = dict(self._live_turns)
+        return {
+            hypothesis_id: (await self.run.evaluation.agent_evaluations(workspace))[before:]
+            for hypothesis_id, (workspace, before) in live.items()
+        }
 
     async def execute(self, plan: WorkstreamPlan) -> None:
         """Run one attempt of a workstream; every failure is a retryable attempt failure.
@@ -258,13 +274,17 @@ class Workstreams:
                 charge=True,
             )
             submitted_before = len(await self.run.evaluation.agent_evaluations(workspace))
-            implementation = await self._implement(
-                plan,
-                workspace,
-                parent,
-                feedback=feedback,
-                reset=reset,
-            )
+            self._live_turns[plan.hypothesis_id] = (workspace, submitted_before)
+            try:
+                implementation = await self._implement(
+                    plan,
+                    workspace,
+                    parent,
+                    feedback=feedback,
+                    reset=reset,
+                )
+            finally:
+                del self._live_turns[plan.hypothesis_id]
             reset = None
             revision = await workspace.snapshot(
                 f"dynamic: {plan.hypothesis_id} implementation planning call {call}"
@@ -282,6 +302,7 @@ class Workstreams:
                 clear_downstream=True,
             )
             submitted = (await self.run.evaluation.agent_evaluations(workspace))[submitted_before:]
+            await self._remember_verified(index, workspace, submitted, call=call)
             repeated = _repeated_failure(submitted, self.options.max_repeated_failures)
             if repeated is not None:
                 # Resubmitting has stopped producing information; the
@@ -299,6 +320,37 @@ class Workstreams:
         if not completed:
             await self._update(index, phase=WorkstreamPhase.FAILED)
         await self.rounds.record(index)
+
+    async def _remember_verified(
+        self,
+        index: int,
+        workspace: CandidateWorkspace,
+        submitted: Sequence[AgentEvaluation],
+        *,
+        call: int,
+    ) -> None:
+        """Retain and record the turn's latest revision whose content passed accuracy.
+
+        The turn may edit past it, so the evaluated revision itself is kept,
+        not the turn's final candidate: it is the content the trusted check saw.
+        """
+        verified = _verified_candidate(submitted, self._headline_metric())
+        if verified is None:
+            return
+        await workspace.retain(
+            verified.revision,
+            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-verified-call-{call}",
+        )
+        async with self.lock:
+            current = self.state.workstreams[index]
+            self.state.workstreams[index] = current.model_copy(
+                update={"verified": verified}, deep=True
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} verified candidate")
+
+    def _headline_metric(self) -> str | None:
+        objectives = self.options.metric_space.objectives
+        return objectives[0].name if objectives else None
 
     async def _remember_feedback(self, index: int, feedback: str | None) -> None:
         """Persist correction guidance so a retry after a failure still receives it."""
@@ -609,6 +661,40 @@ def _evaluation_lines(evaluations: Sequence[AgentEvaluation]) -> list[Evaluation
         )
         for item in evaluations
     ]
+
+
+def _verified_candidate(
+    evaluations: Sequence[AgentEvaluation], headline: str | None
+) -> VerifiedCandidate | None:
+    """Return the latest evaluated revision whose accuracy stage passed, if any."""
+    for item in reversed(evaluations):
+        stages = {stage.kind: stage for stage in item.stages}
+        accuracy = stages.get("accuracy")
+        if (
+            item.content_digest is None
+            or accuracy is None
+            or accuracy.outcome is not AgentEvaluationStageOutcome.PASSED
+        ):
+            continue
+        benchmark = stages.get("benchmark")
+        metrics = benchmark.metrics if benchmark is not None else ()
+        metric = next(
+            (entry for entry in metrics if entry.name == headline),
+            metrics[0] if metrics else None,
+        )
+        return VerifiedCandidate(
+            revision=item.revision,
+            content_digest=item.content_digest,
+            benchmark_passed=(
+                benchmark.outcome is AgentEvaluationStageOutcome.PASSED
+                if benchmark is not None
+                else None
+            ),
+            metric_name=metric.name if metric is not None else None,
+            metric_value=metric.value if metric is not None else None,
+            metric_unit=metric.unit if metric is not None else None,
+        )
+    return None
 
 
 def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str | None:

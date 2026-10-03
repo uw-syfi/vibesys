@@ -1,0 +1,8 @@
+{# Context: `round_number` (int), `plan` (OrchestratorPlan). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Orchestrator plan") %}
+- hypothesis_id: {{ plan.hypothesis_id }}
+- hypothesis: {{ plan.hypothesis }}
+- task: {{ plan.task }}
+- pass criteria: {{ plan.pass_criteria }}
+{% endcall %}

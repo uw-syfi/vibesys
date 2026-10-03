@@ -48,9 +48,9 @@ def _plan(hypothesis_id: str, **changes: object) -> OrchestratorPlan:
 def _context() -> PlanContext:
     return PlanContext(
         objective_location="OBJECTIVE.md",
-        profiler_summary=None,
-        regression_info=None,
-        exhaustion_info=None,
+        profiler_entry=None,
+        regression_entry=None,
+        exhaustion_entry=None,
         progress_location="progress/ledger.md",
         roadmap_location="progress/roadmap.md",
         pareto_archive_location="progress/pareto.md",

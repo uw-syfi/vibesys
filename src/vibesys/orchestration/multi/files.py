@@ -9,11 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.multi.prompts import (
-    render_exhaustion_notice,
-    render_pareto_frontier,
-    render_regression_notice,
-)
+from vibesys.orchestration.multi.prompts import render_pareto_frontier, render_progress
+from vibesys.orchestration.progress import CarriedEntries, ProgressLog
 from vs_runtime.api import ValidationRecipeArtifact
 
 if TYPE_CHECKING:
@@ -27,7 +24,9 @@ if TYPE_CHECKING:
         PreRoundDecision,
     )
     from vibesys.orchestration.profilers import ProfilerSummary
+    from vibesys.orchestration.progress import ProgressEntry
     from vibesys.orchestration.structured_turn import TurnFailed
+    from vs_runtime.api import LocalValidationEvaluation
 
 
 def _location(path: Path, workspace: Path, *, directory: bool = False) -> str:
@@ -159,59 +158,36 @@ class MultiFiles:
         self.pareto_path.parent.mkdir(parents=True, exist_ok=True)
         self.pareto_path.write_text(render_pareto_frontier(archive))
 
-    def note_carry(self, round_number: int, carry: CarryOver) -> None:
+    def note_carry(self, round_number: int, carry: CarryOver) -> CarriedEntries:
         """Append the carried regression and exhausted-review notices the designer reads."""
-        if carry.regression is not None:
-            self._append(
-                round_number,
-                "Regression or terminal-workspace notice",
-                render_regression_notice(carry.regression),
-            )
-        if carry.exhaustion is not None:
-            self._append(
-                round_number,
-                "Exhausted-review feedback",
-                render_exhaustion_notice(carry.exhaustion),
-            )
+        return CarriedEntries(
+            regression=(
+                self._section(round_number, "regression", regression_info=carry.regression)
+                if carry.regression is not None
+                else None
+            ),
+            exhaustion=(
+                self._section(round_number, "exhaustion", exhaustion_info=carry.exhaustion)
+                if carry.exhaustion is not None
+                else None
+            ),
+        )
 
     def note_pre_round(self, round_number: int, decision: PreRoundDecision) -> None:
         """Append one profiling decision to campaign memory."""
-        self._append(
-            round_number,
-            "Pre-round profile decision",
-            f"- profile: {decision.need_profile}\n"
-            f"- focus: {decision.profile_focus or '(none)'}\n"
-            f"- reasoning: {decision.reasoning}\n",
-        )
+        self._section(round_number, "pre_round", decision=decision)
 
-    def note_profile(self, round_number: int, summary: ProfilerSummary) -> None:
+    def note_profile(self, round_number: int, summary: ProfilerSummary) -> ProgressEntry:
         """Append specialist profile evidence to campaign memory."""
-        self._append(
-            round_number,
-            "Profiler summary",
-            f"- analysis: {summary.analysis}\n"
-            f"- bottlenecks: {summary.bottlenecks}\n"
-            f"- suggestions: {summary.suggestions}\n",
-        )
+        return self._section(round_number, "profile", summary=summary)
 
     def note_plan(self, round_number: int, plan: OrchestratorPlan) -> None:
         """Append one selected hypothesis to campaign memory."""
-        self._append(
-            round_number,
-            "Orchestrator plan",
-            f"- hypothesis_id: {plan.hypothesis_id}\n"
-            f"- hypothesis: {plan.hypothesis}\n"
-            f"- task: {plan.task}\n"
-            f"- pass criteria: {plan.pass_criteria}\n",
-        )
+        self._section(round_number, "plan", plan=plan)
 
     def note_continuation(self, round_number: int, hypothesis_id: str, task: str) -> None:
         """Record reuse of an active hypothesis without a designer turn."""
-        self._append(
-            round_number,
-            "Active hypothesis continuation",
-            f"- hypothesis_id: {hypothesis_id}\n- task: {task}\n",
-        )
+        self._section(round_number, "continuation", hypothesis_id=hypothesis_id, task=task)
 
     def note_implementation(
         self,
@@ -220,13 +196,7 @@ class MultiFiles:
         response: ImplementerResponse,
     ) -> None:
         """Append one implementer outcome to campaign memory."""
-        self._append(
-            round_number,
-            f"Implementer attempt {retry}",
-            f"- outcome: {response.hypothesis_outcome.value}\n"
-            f"- disposition: {response.candidate_disposition.value}\n"
-            f"- summary: {response.summary}\n",
-        )
+        self._section(round_number, "implementation", retry=retry, response=response)
 
     def note_implementation_failed(
         self,
@@ -235,52 +205,56 @@ class MultiFiles:
         failure: TurnFailed,
     ) -> None:
         """Append an implementer attempt that returned no valid response."""
-        self._append(
-            round_number,
-            f"Implementer attempt {retry}",
-            f"- outcome: no valid response\n- reason: {failure.reason}\n",
-        )
+        self._section(round_number, "implementation_failed", retry=retry, reason=failure.reason)
 
     def note_judge(self, round_number: int, retry: int, response: JudgeResponse) -> None:
         """Append one independent verdict to campaign memory."""
-        self._append(
-            round_number,
-            f"Judge attempt {retry}",
-            f"- verdict: {response.verdict.value}\n"
-            f"- feedback: {response.feedback or '(none)'}\n"
-            f"- analysis: {response.analysis}\n",
-        )
+        self._section(round_number, "judge", retry=retry, response=response)
 
     def note_review_skipped(self, round_number: int, outcome: str) -> None:
         """Record a sparse-review deferral."""
-        self._append(
-            round_number,
-            "Judge deferred",
-            f"- outcome: {outcome}\n- reason: sparse review policy\n",
-        )
+        self._section(round_number, "review_skipped", outcome=outcome)
 
-    def note_evaluation(self, round_number: int, retry: int, detail: str) -> None:
-        """Append a local or official evaluation decision."""
-        self._append(round_number, f"Official evaluation attempt {retry}", detail)
+    def note_evaluation_deferred(self, round_number: int, retry: int) -> None:
+        """Record that the official-evaluation cadence was not due."""
+        self._section(round_number, "evaluation_deferred", retry=retry)
+
+    def note_evaluation_passed(self, round_number: int, retry: int, reason: str | None) -> None:
+        """Record a passed official evaluation and why it ran."""
+        self._section(round_number, "evaluation_passed", retry=retry, reason=reason)
+
+    def note_evaluation_failed(self, round_number: int, retry: int, feedback: str) -> None:
+        """Record a failed official evaluation and its feedback."""
+        self._section(round_number, "evaluation_failed", retry=retry, feedback=feedback)
+
+    def note_local_validation(
+        self,
+        round_number: int,
+        retry: int,
+        result: LocalValidationEvaluation,
+    ) -> None:
+        """Record the candidate-authored local validation result."""
+        self._section(round_number, "local_validation", retry=retry, result=result)
+
+    def _section(self, round_number: int, section: str, **context: object) -> ProgressEntry:
+        log = ProgressLog(self.workspace, self.progress)
+        return log.append(
+            round_number, render_progress(section, round_number=round_number, **context)
+        )
 
     def _initialize(self) -> None:
         roadmap = self.roadmap / "index.md"
         roadmap.parent.mkdir(parents=True, exist_ok=True)
         if not roadmap.exists():
-            roadmap.write_text("# Roadmap\n\nOwned and maintained by the orchestrator.\n")
+            roadmap.write_text(render_progress("roadmap"))
         self.progress.mkdir(parents=True, exist_ok=True)
         readme = self.progress / "README.md"
         if not readme.exists():
-            readme.write_text("# Progress\n\nOne audit file is written per round.\n")
+            readme.write_text(render_progress("readme"))
         self.validation_root.mkdir(parents=True, exist_ok=True)
         schema_path = self.validation_root / "recipe-schema.json"
         if not schema_path.exists():
             _write_json(schema_path, ValidationRecipeArtifact.model_json_schema())
-
-    def _append(self, round_number: int, title: str, body: str) -> None:
-        path = self.progress / f"round-{round_number:04d}.md"
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(f"## Round {round_number}: {title}\n{body.rstrip()}\n\n")
 
 
 __all__ = ["MultiFiles"]

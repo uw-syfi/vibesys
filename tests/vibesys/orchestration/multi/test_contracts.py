@@ -31,7 +31,7 @@ from vibesys.orchestration.multi.prompts import (
     render_pre_round_prompt,
     render_profiler_prompt,
 )
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.prompts import PROMPTS_DIR
 from vs_prompts.api import resolve_free_variables
 from vs_runtime.api import ResolvedSkillResources
@@ -114,11 +114,10 @@ def _skill_overrides(model: type[BaseModel]) -> dict[str, st.SearchStrategy[obje
 
 def _context_strategy(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
     overrides = _skill_overrides(model)
-    if model is PlanContext:
-        overrides["profiler_summary"] = st.none() | st.builds(
-            ProfilerSummary,
-            metrics=st.just({}),
-        )
+    for name, field in model.model_fields.items():
+        # Only ProgressLog.append mints an entry; contexts here carry none.
+        if field.annotation == ProgressEntry | None:
+            overrides[name] = st.none()
     if "modality" in model.model_fields:
         overrides["modality"] = st.none()
     return st.builds(model, **overrides)

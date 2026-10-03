@@ -209,7 +209,9 @@ def build_evaluation_tools(
                 description=(
                     "List recent host-owned evaluation and profiler operations across the run, "
                     "including hypothesis principal, candidate identity, lifecycle, original "
-                    "profiler request, and whether a result crossed the trust boundary."
+                    "profiler request, whether every stage recorded trusted evidence, and "
+                    "each recorded stage's outcome (passed, failed, or observed) with its "
+                    "metrics. Recorded evidence is not a pass: read the stage outcomes."
                 ),
                 input_schema=_ProfilerOperations,
                 handler=lambda _args: client.call(RunOperationsCall(token=token)),

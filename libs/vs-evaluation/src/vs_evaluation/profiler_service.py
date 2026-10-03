@@ -756,7 +756,7 @@ def _run_observation(record: OperationHandle) -> ProfilerRunObservation:
         work=operation.work,
         candidate_snapshot_id=operation.candidate_snapshot_id,
         state=operation.state,
-        accepted_result=result is not None and bool(result.trusted_evidence),
+        evidence_recorded=result is not None and bool(result.trusted_evidence),
         outcome=result.report.outcome if result is not None else None,
         trusted_evidence_ids=(result.report.evidence_ids if result is not None else ()),
     )

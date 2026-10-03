@@ -213,13 +213,13 @@ class ProfilerRunObservation(BaseModel):
     work: ProfilerWorkKey
     candidate_snapshot_id: str = Field(min_length=1)
     state: ProfilerOperationState
-    accepted_result: bool
+    evidence_recorded: bool
     outcome: ProfilerResultOutcome | None = None
     trusted_evidence_ids: tuple[EvidenceId, ...] = ()
 
     @model_validator(mode="after")
-    def _accepted_means_trusted_evidence(self) -> ProfilerRunObservation:
-        if self.accepted_result != bool(self.trusted_evidence_ids):
+    def _recorded_means_trusted_evidence(self) -> ProfilerRunObservation:
+        if self.evidence_recorded != bool(self.trusted_evidence_ids):
             raise ValueError("accepted profiler result must carry trusted evidence")  # noqa: TRY003  # lint-waiver: LW-092711 [TRY003]; this external contract needs a field-specific validation error; a custom exception would add a public recovery type for invalid serialized data.
         return self
 

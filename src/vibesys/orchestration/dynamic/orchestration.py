@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -23,7 +24,7 @@ from vibesys.orchestration.dynamic.prompts import (
     render_portfolio,
     render_portfolio_correction,
 )
-from vibesys.orchestration.dynamic.rounds import Rounds, hypothesis_config
+from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
 from vibesys.orchestration.dynamic.workstream import (
     DynamicAttemptError,
     Workstreams,
@@ -32,6 +33,7 @@ from vibesys.orchestration.dynamic.workstream import (
 )
 from vibesys.orchestration.hypothesis import (
     HypothesisSearch,
+    HypothesisStrategy,
     OrchestratorPlan,
     normalize_hypothesis_title,
 )
@@ -44,6 +46,8 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vibesys.orchestration.hypothesis import HypothesisStrategyUpdate
 
 
@@ -82,11 +86,87 @@ class DynamicPlanError(ValueError):
         return cls(f"hypothesis {hypothesis_id!r} is still in flight")
 
     @classmethod
+    def unbuildable_parent(cls, position: int, plan: WorkstreamPlan) -> DynamicPlanError:
+        """Reject a parent that is not a listed buildable candidate."""
+        field = f"workstreams[{position}].parent_hypothesis_id"
+        if plan.continue_hypothesis:
+            return cls(f"{field}: a continued hypothesis builds on its own candidate; use null")
+        return cls(
+            f"{field}: {plan.parent_hypothesis_id!r} is not a buildable candidate; name one "
+            "listed under buildable candidates, or use null for the base revision"
+        )
+
+    @classmethod
+    def unreproducible_parent(
+        cls, position: int, hypothesis_id: str, reason: str
+    ) -> DynamicPlanError:
+        """Reject a parent whose evaluated content the framework cannot reproduce."""
+        return cls(
+            f"workstreams[{position}].parent_hypothesis_id: {hypothesis_id!r} cannot be "
+            f"built on ({reason}); name a listed buildable candidate, or use null for the "
+            "base revision"
+        )
+
+    @classmethod
+    def invalid_update(cls, error: ValueError) -> DynamicPlanError:
+        """Reject a strategy update the hypothesis search cannot apply."""
+        return cls(f"hypothesis_updates: {error}")
+
+    @classmethod
+    def in_flight_update(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
+        """Reject parking or abandoning a hypothesis whose workstream is still running."""
+        return cls(
+            f"hypothesis_updates[{position}].hypothesis_id: {hypothesis_id!r} is still "
+            "running; park or abandon it only after its workstream finishes"
+        )
+
+    @classmethod
+    def abandoned_continuation(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
+        """Reject continuing a hypothesis that is (or this plan makes) abandoned."""
+        return cls(
+            f"workstreams[{position}].hypothesis_id: {hypothesis_id!r} is abandoned and "
+            "cannot be continued"
+        )
+
+    @classmethod
     def unchanged_blocked_task(cls, hypothesis_id: str) -> DynamicPlanError:
         """Reject re-dispatching a blocked hypothesis with the task that blocked it."""
         return cls(
             f"hypothesis {hypothesis_id!r} was blocked; continue it only with a task that "
             "removes the recorded blocker, or park or abandon it"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _ParentOptions:
+    """The parents one planning call may name, and the candidates withheld from it."""
+
+    offered: tuple[BuildableCandidate, ...]
+    # Hypothesis ID to why its candidate cannot be reproduced.
+    unreproducible: Mapping[str, str]
+
+    def check(self, position: int, plan: WorkstreamPlan) -> None:
+        """Reject ``plan``'s parent unless it is an offered candidate of a new hypothesis."""
+        chosen = plan.parent_hypothesis_id
+        if chosen is None:
+            return
+        if plan.continue_hypothesis:
+            raise DynamicPlanError.unbuildable_parent(position, plan)
+        if chosen in self.unreproducible:
+            raise DynamicPlanError.unreproducible_parent(
+                position, chosen, self.unreproducible[chosen]
+            )
+        if all(item.hypothesis_id != chosen for item in self.offered):
+            raise DynamicPlanError.unbuildable_parent(position, plan)
+
+    def revision_for(self, plan: WorkstreamPlan, base: str) -> str:
+        """Return the revision a new workstream of ``plan`` starts from (checked already)."""
+        if plan.parent_hypothesis_id is None:
+            return base
+        return next(
+            item.revision
+            for item in self.offered
+            if item.hypothesis_id == plan.parent_hypothesis_id
         )
 
 
@@ -197,8 +277,9 @@ class _DynamicRun:
         await self.run.control.checkpoint()
         self.input_gate.start()
         call = self.state.next_planning_call
-        portfolio = await self._plan(capacity=capacity, in_flight=in_flight)
-        await self._record_plans(call, portfolio)
+        parents = await self._parent_options()
+        portfolio = await self._plan(capacity=capacity, in_flight=in_flight, parents=parents)
+        await self._record_plans(call, portfolio, parents)
         return tuple(portfolio.workstreams)
 
     def _start(self, plan: WorkstreamPlan) -> asyncio.Task[None]:
@@ -207,8 +288,14 @@ class _DynamicRun:
     def _remaining_budget(self) -> int:
         """Return how many more workstreams the run may schedule.
 
-        Sequences are unique and increase with every scheduled workstream, so
-        the largest one counts the workstreams scheduled so far.
+        The budget bounds agent work: ``max_rounds * max_in_flight``
+        workstreams, each one round of the shared hypothesis search. A
+        continued hypothesis counts like a new one, because it runs its own
+        implementer turns with a fresh retry budget and records its own round;
+        not counting it would let a planner that keeps continuing run forever,
+        and would exceed the search's round limit. Sequences are unique and
+        increase with every scheduled workstream, so the largest one counts
+        the workstreams scheduled so far.
         """
         scheduled = max((item.sequence for item in self.state.workstreams), default=0)
         return self.options.max_rounds * self.options.max_in_flight - scheduled
@@ -284,6 +371,7 @@ class _DynamicRun:
         *,
         capacity: int,
         in_flight: frozenset[str],
+        parents: _ParentOptions,
     ) -> PortfolioPlan:
         session = await self.run.agents.create_session(
             ORCHESTRATOR,
@@ -296,7 +384,9 @@ class _DynamicRun:
                 "remaining": self._remaining_budget(),
                 **prompt_context(self.run),
                 "root_revision": self._base_revision(),
-                **self.rounds.planner_context(),
+                **self.rounds.planner_context(
+                    await self.workstreams.live_evaluations(), parents.offered
+                ),
             }
             first_error: DynamicPlanError | ValidationError | None = None
             # A valid plan that leaves slots free; kept if the planner, asked
@@ -314,7 +404,9 @@ class _DynamicRun:
                 )
                 plan = await structured_turn(session, message, PortfolioPlan)
                 try:
-                    self._validate_plan(plan, capacity=capacity, in_flight=in_flight)
+                    self._validate_plan(
+                        plan, capacity=capacity, in_flight=in_flight, parents=parents
+                    )
                 except (DynamicPlanError, ValidationError) as error:
                     first_error = error
                     continue
@@ -332,7 +424,7 @@ class _DynamicRun:
             self.run.observations.note(
                 f"dynamic plan still invalid after correction: {first_error}"
             )
-            return self._valid_part(plan, capacity=capacity, in_flight=in_flight)
+            return self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
         finally:
             await session.close()
 
@@ -342,6 +434,7 @@ class _DynamicRun:
         *,
         capacity: int,
         in_flight: frozenset[str],
+        parents: _ParentOptions,
     ) -> PortfolioPlan:
         """Return ``portfolio`` without the strategy updates and workstreams that fail validation.
 
@@ -351,8 +444,13 @@ class _DynamicRun:
         updates: list[HypothesisStrategyUpdate] = []
         for update in portfolio.hypothesis_updates:
             try:
-                hypothesis_transitions.apply_strategy_updates(self.state.search, (*updates, update))
-            except ValueError as error:
+                self._validate_updates(
+                    portfolio.model_copy(
+                        update={"workstreams": (), "hypothesis_updates": (*updates, update)}
+                    ),
+                    in_flight=in_flight,
+                )
+            except DynamicPlanError as error:
                 self.run.observations.note(f"dynamic plan: dropped strategy update: {error}")
                 continue
             updates.append(update)
@@ -362,7 +460,9 @@ class _DynamicRun:
         for plan in portfolio.workstreams:
             candidate = kept.model_copy(update={"workstreams": (*kept.workstreams, plan)})
             try:
-                self._validate_plan(candidate, capacity=capacity, in_flight=in_flight)
+                self._validate_plan(
+                    candidate, capacity=capacity, in_flight=in_flight, parents=parents
+                )
             except DynamicPlanError as error:
                 self.run.observations.note(f"dynamic plan: dropped workstream: {error}")
                 continue
@@ -375,6 +475,7 @@ class _DynamicRun:
         *,
         capacity: int,
         in_flight: frozenset[str],
+        parents: _ParentOptions,
     ) -> None:
         if len(portfolio.workstreams) > capacity:
             message = (
@@ -383,15 +484,12 @@ class _DynamicRun:
             )
             raise DynamicPlanError(message)
         known = {item.hypothesis_id: item for item in self.state.workstreams}
-        try:
-            hypothesis_transitions.apply_strategy_updates(
-                self.state.search,
-                portfolio.hypothesis_updates,
-            )
-        except ValueError as error:
-            raise DynamicPlanError(str(error)) from error
-        for plan in portfolio.workstreams:
+        abandoned = self._validate_updates(portfolio, in_flight=in_flight)
+        for position, plan in enumerate(portfolio.workstreams):
             prior = known.get(plan.hypothesis_id)
+            parents.check(position, plan)
+            if plan.hypothesis_id in abandoned:
+                raise DynamicPlanError.abandoned_continuation(position, plan.hypothesis_id)
             if plan.hypothesis_id in in_flight:
                 raise DynamicPlanError.in_flight_continuation(plan.hypothesis_id)
             if prior is None and plan.continue_hypothesis:
@@ -408,20 +506,36 @@ class _DynamicRun:
             ):
                 raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
 
-    async def _record_plans(self, call: int, portfolio: PortfolioPlan) -> None:
-        parent = self._base_revision()
+    def _validate_updates(
+        self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]
+    ) -> frozenset[str]:
+        """Check the plan's strategy updates; return the hypotheses abandoned after them.
+
+        A running workstream's direction is unfinished, so it cannot be parked
+        or abandoned until it records its round.
+        """
+        for position, update in enumerate(portfolio.hypothesis_updates):
+            if update.hypothesis_id in in_flight:
+                raise DynamicPlanError.in_flight_update(position, update.hypothesis_id)
+        try:
+            updated = hypothesis_transitions.apply_strategy_updates(
+                self.state.search,
+                portfolio.hypothesis_updates,
+            )
+        except ValueError as error:
+            raise DynamicPlanError.invalid_update(error) from error
+        return frozenset(
+            item.hypothesis_id
+            for item in updated.hypotheses
+            if item.strategy is HypothesisStrategy.ABANDONED
+        )
+
+    async def _record_plans(
+        self, call: int, portfolio: PortfolioPlan, parents: _ParentOptions
+    ) -> None:
+        base = self._base_revision()
         async with self._state_lock:
             by_id = {item.hypothesis_id: index for index, item in enumerate(self.state.workstreams)}
-            # Workstreams branch from `parent`, not from the previous round as in
-            # a sequential loop, so record that lineage directly.
-            parent_round = next(
-                (
-                    record.round_number
-                    for record in reversed(self.state.search.rounds)
-                    if record.commit == parent
-                ),
-                None,
-            )
             self.state.search = hypothesis_transitions.apply_strategy_updates(
                 self.state.search,
                 portfolio.hypothesis_updates,
@@ -438,12 +552,29 @@ class _DynamicRun:
             for plan in portfolio.workstreams:
                 sequence += 1
                 index = by_id.get(plan.hypothesis_id)
+                if index is not None:
+                    # Continuing a parked direction makes it available again;
+                    # its row would otherwise read parked while it runs.
+                    self.state.search = hypothesis_transitions.reopen_parked_hypothesis(
+                        self.state.search, plan.hypothesis_id
+                    )
+                parent = parents.revision_for(plan, base)
                 if index is None:
                     started = hypothesis_transitions.start_hypothesis(
                         self.state.search,
                         _orchestrator_plan(plan, portfolio.reasoning),
                         started_round=sequence,
-                        parent_round=parent_round,
+                        # Workstreams branch from `parent`, not from the
+                        # previous round as in a sequential loop, so record
+                        # that lineage directly.
+                        parent_round=next(
+                            (
+                                record.round_number
+                                for record in reversed(self.state.search.rounds)
+                                if record.commit == parent
+                            ),
+                            None,
+                        ),
                         parent_commit=parent,
                     )
                     self.state.search = hypothesis_transitions.finish_hypothesis(started)
@@ -473,6 +604,10 @@ class _DynamicRun:
                         if index is not None
                         else None
                     ),
+                    # Still buildable once the continuation finishes.
+                    verified=(
+                        self.state.workstreams[index].verified if index is not None else None
+                    ),
                 )
                 if index is None:
                     self.state.workstreams.append(workstream)
@@ -480,6 +615,38 @@ class _DynamicRun:
                     self.state.workstreams[index] = workstream
             self.state.next_planning_call = call + 1
             await self._commit(label=f"dynamic: schedule planning call {call}")
+
+    async def _parent_options(self) -> _ParentOptions:
+        """Return the buildable candidates whose revisions still reproduce their content.
+
+        A candidate verified by an agent-submitted evaluation is offered only if
+        its retained revision exports to the content digest that evaluation
+        recorded; a framework-evaluated candidate only if its revision exports.
+        One that fails is withheld and a plan naming it is corrected, never
+        silently given the base revision.
+        """
+        offered: list[BuildableCandidate] = []
+        unreproducible: dict[str, str] = {}
+        for candidate in self.rounds.buildable():
+            try:
+                patch = await self.run.workspaces.export_patch(candidate.revision)
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-231001 [BLE001]; any export failure means the revision cannot be materialized, which the plan correction reports; narrowing to one runtime error type would let another end the run.
+                unreproducible[candidate.hypothesis_id] = (
+                    f"its revision cannot be exported: {error}"
+                )
+                continue
+            digest = hashlib.sha256(patch.encode()).hexdigest()
+            if candidate.content_digest is not None and digest != candidate.content_digest:
+                unreproducible[candidate.hypothesis_id] = (
+                    "its revision no longer holds the content that passed accuracy"
+                )
+                continue
+            offered.append(candidate)
+        for hypothesis_id, reason in unreproducible.items():
+            self.run.observations.note(
+                f"dynamic: buildable candidate {hypothesis_id} withheld: {reason}"
+            )
+        return _ParentOptions(offered=tuple(offered), unreproducible=unreproducible)
 
     async def _select_and_adopt(self) -> None:
         await self.input_gate.measured()

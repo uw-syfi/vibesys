@@ -6,12 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.orchestration.hypothesis import (
     ArchiveConflict,
-    ExhaustionNotice,
-    RegressionNotice,
     SkillResourceSelection,
 )
 from vibesys.orchestration.profile_focus import FocusLedger
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
@@ -27,9 +25,9 @@ class PlanContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    profiler_summary: ProfilerSummary | None
-    regression_info: RegressionNotice | None
-    exhaustion_info: ExhaustionNotice | None
+    profiler_entry: ProgressEntry | None
+    regression_entry: ProgressEntry | None
+    exhaustion_entry: ProgressEntry | None
     progress_location: str
     roadmap_location: str
     pareto_archive_location: str
@@ -230,8 +228,8 @@ class PreRoundContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    regression_info: RegressionNotice | None
-    exhaustion_info: ExhaustionNotice | None
+    regression_entry: ProgressEntry | None
+    exhaustion_entry: ProgressEntry | None
     progress_location: str
     profiler_kind: str
     profile_execution: str

@@ -361,6 +361,29 @@ def apply_strategy_updates(
     return _validated_state(updated)
 
 
+def reopen_parked_hypothesis(state: HypothesisState, hypothesis_id: str) -> HypothesisState:
+    """Make a parked hypothesis available again, because new work continues it.
+
+    An available hypothesis is returned unchanged. An abandoned one cannot be
+    reopened.
+    """
+    item = state.by_id(hypothesis_id)
+    if item is None:
+        message = f"cannot reopen unknown hypothesis {hypothesis_id!r}"
+        raise ValueError(message)
+    if item.strategy is HypothesisStrategy.AVAILABLE:
+        return state
+    if item.strategy is HypothesisStrategy.ABANDONED:
+        message = f"cannot reopen abandoned hypothesis {hypothesis_id!r}"
+        raise ValueError(message)
+    updated = state.clone()
+    for entry in updated.hypotheses:
+        if entry.hypothesis_id == hypothesis_id:
+            entry.strategy = HypothesisStrategy.AVAILABLE
+            entry.strategy_reason = None
+    return _validated_state(updated)
+
+
 def project_round_evidence(
     hypothesis: Hypothesis,
     record: RoundRecord,

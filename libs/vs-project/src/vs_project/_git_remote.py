@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
+
+from vs_project._git_process import git_environment
 
 GitRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -95,16 +96,7 @@ class GitRemoteRepository:
         *,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-            env.pop(variable, None)
-        env.update(
-            {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "safe.directory",
-                "GIT_CONFIG_VALUE_0": str(self.root.resolve()),
-            }
-        )
+        env = git_environment(safe_directory=self.root.resolve())
         try:
             result = self._runner(
                 command,

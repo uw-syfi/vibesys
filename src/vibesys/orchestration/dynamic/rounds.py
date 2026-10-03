@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
@@ -17,7 +18,7 @@ from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundReco
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
 
     from vibesys.orchestration.dynamic.input_gate import InputGate
     from vibesys.orchestration.dynamic.models import (
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
         EvidenceReference,
         ReviewResult,
     )
+    from vs_runtime.api import AgentEvaluation
 
 _MAX_HISTORY_ROWS = 16
 _MAX_HISTORY_METRICS = 8
@@ -37,6 +39,27 @@ _MAX_HISTORY_METRIC_UNIT_CHARS = 64
 _MAX_HISTORY_SUMMARY_CHARS = 600
 _MAX_HISTORY_REVIEW_CHARS = 600
 _MAX_HISTORY_NEXT_STEP_CHARS = 600
+# Evaluations shown for a running implementer turn, and the end of each failure.
+_MAX_LIVE_EVALUATIONS = 4
+_MAX_LIVE_FAILURE_CHARS = 400
+
+
+@dataclass(frozen=True, slots=True)
+class BuildableCandidate:
+    """A revision whose exact content passed trusted accuracy, offered as a parent.
+
+    ``content_digest`` is set when the pass came from an agent-submitted
+    evaluation; the revision must still export to content with that digest.
+    """
+
+    hypothesis_id: str
+    title: str
+    revision: str
+    content_digest: str | None
+    benchmark_passed: bool | None
+    metric_name: str | None
+    metric_value: float | None
+    metric_unit: str | None
 
 
 class Rounds:
@@ -64,8 +87,18 @@ class Rounds:
         self._lock = lock
         self._commit = commit
 
-    def planner_context(self) -> dict[str, str]:
-        """Return the history and input facts every planning prompt states."""
+    def planner_context(
+        self,
+        live: Mapping[str, Sequence[AgentEvaluation]] | None = None,
+        buildable: Sequence[BuildableCandidate] = (),
+    ) -> dict[str, str]:
+        """Return the history and input facts every planning prompt states.
+
+        ``live`` maps each running implementer turn to the evaluations it has
+        submitted so far; its row shows them in place of the facts of the
+        attempt before it. ``buildable`` lists the candidates a new workstream
+        may name as its parent (see :meth:`buildable`).
+        """
         baseline = self.state.baseline
         return {
             "baseline": (
@@ -78,11 +111,65 @@ class Rounds:
                 if baseline is not None and not baseline.benchmark_passed
                 else ""
             ),
-            "history": self._history_projection(),
+            "history": self._history_projection(live or {}),
+            "buildable": json.dumps(
+                [_buildable_row(item) for item in buildable], separators=(",", ":")
+            ),
             "older_ids": ", ".join(
                 item.hypothesis_id for item in self.state.workstreams[:-_MAX_HISTORY_ROWS]
             ),
         }
+
+    def buildable(self) -> tuple[BuildableCandidate, ...]:
+        """Return the finished workstreams a new workstream may start from.
+
+        A candidate qualifies when trusted accuracy passed on its exact
+        content: the framework evaluation of its latest revision, or else an
+        agent-submitted evaluation recorded as its verified revision. Its
+        benchmark may have failed: work that is correct but not yet fast
+        enough is still worth building on, and rebuilding it in every sibling
+        wastes their turns. The caller checks that each revision still
+        reproduces its content before offering it. The adopted base revision
+        stays the default parent.
+        """
+        candidates: list[BuildableCandidate] = []
+        for item in self.state.workstreams:
+            if item.phase is WorkstreamPhase.IMPLEMENTING:
+                continue
+            evaluation = item.evaluation
+            if (
+                evaluation is not None
+                and evaluation.accuracy_passed is True
+                and item.candidate_revision is not None
+                and evaluation.revision == item.candidate_revision
+            ):
+                candidates.append(
+                    BuildableCandidate(
+                        hypothesis_id=item.hypothesis_id,
+                        title=normalize_hypothesis_title(item.plan.title),
+                        revision=item.candidate_revision,
+                        content_digest=None,
+                        benchmark_passed=evaluation.benchmark_passed,
+                        metric_name=evaluation.metric_name,
+                        metric_value=evaluation.metric_value,
+                        metric_unit=evaluation.metric_unit,
+                    )
+                )
+            elif item.verified is not None:
+                verified = item.verified
+                candidates.append(
+                    BuildableCandidate(
+                        hypothesis_id=item.hypothesis_id,
+                        title=normalize_hypothesis_title(item.plan.title),
+                        revision=verified.revision,
+                        content_digest=verified.content_digest,
+                        benchmark_passed=verified.benchmark_passed,
+                        metric_name=verified.metric_name,
+                        metric_value=verified.metric_value,
+                        metric_unit=verified.metric_unit,
+                    )
+                )
+        return tuple(candidates)
 
     async def record(self, index: int) -> None:
         """Commit one workstream result through shared hypothesis transitions."""
@@ -267,32 +354,117 @@ class Rounds:
             return CandidateDisposition.DISCARD, False
         return CandidateDisposition.PARETO_FRONTIER, True
 
-    def _history_projection(self) -> str:
-        rows = [self.history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
+    def _history_projection(self, live: Mapping[str, Sequence[AgentEvaluation]]) -> str:
+        rows = [
+            self.history_row(item, live=live.get(item.hypothesis_id))
+            for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]
+        ]
         return json.dumps(rows, separators=(",", ":"))
 
-    def history_row(self, item: DynamicWorkstream) -> dict[str, object]:
+    def history_row(
+        self, item: DynamicWorkstream, *, live: Sequence[AgentEvaluation] | None = None
+    ) -> dict[str, object]:
         """Project one workstream with the disposition its recorded round received.
 
         An accepted candidate can still be discarded (it did not beat the input
-        or was dominated); without the disposition it reads as a success.
+        or was dominated); without the disposition it reads as a success. A
+        strategy update (park, abandon) shows as ``strategy``. While an
+        implementer turn runs (``live`` is given, or the phase is
+        ``implementing``), the facts of the attempt before it move under
+        ``previous_attempt`` and ``running_evaluations`` lists what the
+        running turn has measured so far.
         """
         record = next(
             (record for record in self.state.search.rounds if record.round_number == item.sequence),
             None,
         )
-        return {
-            **_attempt_row(item),
+        hypothesis = next(
+            (
+                entry
+                for entry in self.state.search.hypotheses
+                if entry.hypothesis_id == item.hypothesis_id
+            ),
+            None,
+        )
+        attempt = _attempt_row(item)
+        strategy = {
+            "strategy": hypothesis.strategy.value if hypothesis is not None else None,
+            "strategy_reason": (
+                _bounded_optional(hypothesis.strategy_reason, _MAX_HISTORY_REVIEW_CHARS)
+                if hypothesis is not None
+                else None
+            ),
             "disposition": record.candidate_disposition if record is not None else None,
         }
+        if live is None and item.phase is not WorkstreamPhase.IMPLEMENTING:
+            return {**_identity_row(item), **attempt, **strategy}
+        # An implementing workstream's retained result belongs to the attempt
+        # before the current one, also while a resumed turn has not started.
+        return {
+            **_identity_row(item),
+            "running_evaluations": [
+                _compact_agent_evaluation(entry) for entry in (live or ())[-_MAX_LIVE_EVALUATIONS:]
+            ],
+            "previous_attempt": (
+                attempt if item.implementation is not None or item.last_error is not None else None
+            ),
+            **strategy,
+        }
+
+
+def _buildable_row(item: BuildableCandidate) -> dict[str, object]:
+    """Project one buildable candidate with its trusted measurement."""
+    return {
+        "hypothesis_id": item.hypothesis_id,
+        "title": item.title,
+        "revision": _bounded_optional(item.revision, _MAX_HISTORY_REVISION_CHARS),
+        "benchmark_passed": item.benchmark_passed,
+        "metric_name": _bounded_optional(item.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS),
+        "metric_value": item.metric_value,
+        "metric_unit": _bounded_optional(item.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS),
+    }
+
+
+def _identity_row(item: DynamicWorkstream) -> dict[str, object]:
+    return {
+        "hypothesis_id": item.hypothesis_id,
+        "title": normalize_hypothesis_title(item.plan.title),
+        "phase": item.phase.value,
+    }
+
+
+def _compact_agent_evaluation(evaluation: AgentEvaluation) -> dict[str, object]:
+    """Project one agent-submitted evaluation: each finished stage's verdict and metrics."""
+    return {
+        "revision": _bounded_optional(evaluation.revision, _MAX_HISTORY_REVISION_CHARS),
+        "status": evaluation.status.value,
+        "stages": [
+            {
+                "kind": stage.kind,
+                "outcome": stage.outcome.value,
+                "metrics": [
+                    {
+                        "name": metric.name[:_MAX_HISTORY_METRIC_NAME_CHARS],
+                        "value": metric.value,
+                        "unit": _bounded_optional(metric.unit, _MAX_HISTORY_METRIC_UNIT_CHARS),
+                    }
+                    for metric in stage.metrics[:_MAX_HISTORY_METRICS]
+                ],
+            }
+            for stage in evaluation.stages
+        ],
+        # A failure states its cause last.
+        "failure_tail": (
+            evaluation.failure[-_MAX_LIVE_FAILURE_CHARS:]
+            if evaluation.failure is not None
+            else None
+        ),
+    }
 
 
 def _attempt_row(item: DynamicWorkstream) -> dict[str, object]:
     """Project one workstream's latest attempt as bounded decision facts."""
     return {
-        "hypothesis_id": item.hypothesis_id,
-        "title": normalize_hypothesis_title(item.plan.title),
-        "phase": item.phase.value,
         "outcome": item.implementation.outcome.value if item.implementation is not None else None,
         "summary": _bounded_optional(
             item.implementation.summary
@@ -373,4 +545,4 @@ def hypothesis_config(options: DynamicOptions) -> HypothesisConfig:
     )
 
 
-__all__ = ["Rounds", "hypothesis_config"]
+__all__ = ["BuildableCandidate", "Rounds", "hypothesis_config"]

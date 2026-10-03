@@ -183,6 +183,7 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.metrics
     vibesys.orchestration.multi --> vibesys.orchestration.profile_focus
     vibesys.orchestration.multi --> vibesys.orchestration.profilers
+    vibesys.orchestration.multi --> vibesys.orchestration.progress
     vibesys.orchestration.multi --> vibesys.orchestration.prompts
     vibesys.orchestration.multi --> vibesys.orchestration.resume
     vibesys.orchestration.multi --> vibesys.orchestration.review
@@ -205,6 +206,7 @@ graph TD
     vibesys.orchestration.single --> vibesys.orchestration.metrics
     vibesys.orchestration.single --> vibesys.orchestration.profile_focus
     vibesys.orchestration.single --> vibesys.orchestration.profilers
+    vibesys.orchestration.single --> vibesys.orchestration.progress
     vibesys.orchestration.single --> vibesys.orchestration.prompts
     vibesys.orchestration.single --> vibesys.orchestration.resume
     vibesys.orchestration.single --> vibesys.orchestration.review
@@ -471,6 +473,7 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.metrics
     vibesys.orchestration.multi --> vibesys.orchestration.profile_focus
     vibesys.orchestration.multi --> vibesys.orchestration.profilers
+    vibesys.orchestration.multi --> vibesys.orchestration.progress
     vibesys.orchestration.multi --> vibesys.orchestration.prompts
     vibesys.orchestration.multi --> vibesys.orchestration.resume
     vibesys.orchestration.multi --> vibesys.orchestration.review
@@ -486,6 +489,7 @@ graph TD
     vibesys.orchestration.profiler_agent --> vs_runtime
     vibesys.orchestration.profilers --> vibesys
     vibesys.orchestration.profilers --> vibesys.run.contracts
+    vibesys.orchestration.progress --> vs_prompts
     vibesys.orchestration.prompts --> vibesys
     vibesys.orchestration.prompts --> vs_prompts
     vibesys.orchestration.resume --> vibesys.errors
@@ -501,6 +505,7 @@ graph TD
     vibesys.orchestration.single --> vibesys.orchestration.metrics
     vibesys.orchestration.single --> vibesys.orchestration.profile_focus
     vibesys.orchestration.single --> vibesys.orchestration.profilers
+    vibesys.orchestration.single --> vibesys.orchestration.progress
     vibesys.orchestration.single --> vibesys.orchestration.prompts
     vibesys.orchestration.single --> vibesys.orchestration.resume
     vibesys.orchestration.single --> vibesys.orchestration.review
@@ -547,6 +552,7 @@ graph TD
     vibesys.run.evaluation --> vs_runtime
     vibesys.run.evaluation_backend --> vs_evaluation.api
     vibesys.run.evaluation_backend --> vs_project
+    vibesys.run.evaluation_backend --> vs_prompts
     vibesys.run.evaluation_backend --> vs_runtime
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.orchestration.profiler_agent

@@ -226,12 +226,12 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime",
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic"
@@ -276,6 +276,12 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.run.contracts"]
 
 [[modules]]
+# Per-round progress entries; a written entry is the only proof a prompt may point at.
+path = "vibesys.orchestration.progress"
+layer = "orchestration_host"
+depends_on = ["vs_prompts"]
+
+[[modules]]
 # The one correction turn every built-in plugin sends after an invalid structured reply.
 path = "vibesys.orchestration.structured_turn"
 layer = "orchestration_host"
@@ -304,7 +310,7 @@ depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.in
 [[modules]]
 path = "vibesys.run.evaluation_backend"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.api", "vs_project", "vs_runtime"]
+depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.slurm_evaluation"
@@ -630,7 +636,7 @@ expose = ["RuntimeProfilerTurnProvision"]
 from = ["vibesys.orchestration.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage"]
+expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]

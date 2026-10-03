@@ -1,0 +1,13 @@
+{# Context: `issue` (Issue | None): the created issue; otherwise exactly one rejection is set:
+   `invalid_type` (InvalidIssueType), `not_allowed` (TypeNotAllowed), `cap` (CapReached).
+   `issue_types` (list[IssueType]): every type, for the invalid-type message. No trailing newline. #}
+{% macro quoted(types) %}[{% for t in types %}'{{ t.value }}'{% if not loop.last %}, {% endif %}{% endfor %}]{% endmacro %}
+{% if issue is not none %}
+created issue #{{ issue.id }}
+{%- elif invalid_type is not none %}
+error: type must be one of {{ quoted(issue_types) }}, got '{{ invalid_type.given }}'
+{%- elif not_allowed is not none %}
+error: as '{{ not_allowed.creator }}' you may only file types {{ quoted(not_allowed.allowed) }}, not '{{ not_allowed.type.value }}'
+{%- else %}
+error: per-iteration cap reached ({{ cap.already }}/{{ cap.cap }}). Cannot create more issues this iteration. Use search_issues to dedupe before creating, and prioritize the most impactful issues.
+{%- endif %}

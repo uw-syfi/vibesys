@@ -1,0 +1,6 @@
+{# Context: `round_number` (int), `outcome` (str). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Judge deferred") %}
+- outcome: {{ outcome }}
+- reason: sparse review policy
+{% endcall %}

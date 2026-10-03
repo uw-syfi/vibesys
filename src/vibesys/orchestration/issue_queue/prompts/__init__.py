@@ -4,16 +4,27 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from vs_issue_tracker.api import (
+    CapReached,
+    InvalidIssueType,
+    Issue,
+    IssueType,
+    TypeNotAllowed,
+)
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from vibesys.orchestration.issue_queue.models import IssueQueueOptions, IssueQueueState
-    from vs_issue_tracker.api import Issue
+    from vs_issue_tracker.api import CreateRejection, IssueStatus
     from vs_runtime.api import RunFacts
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
+
+ProgressStep = Literal["implement", "review", "performance"]
 
 
 def bootstrap_description(facts: RunFacts) -> RenderedPrompt:
@@ -74,12 +85,68 @@ def performance_system_prompt() -> RenderedPrompt:
     return _RENDERER.render_template("performance_system_prompt.j2")
 
 
+def issue_markdown(issue: Issue) -> RenderedPrompt:
+    """Render the Markdown view of one issue and its history."""
+    return _RENDERER.render_template("board/issue.j2", issue=issue)
+
+
+def issue_index(
+    groups: Sequence[tuple[IssueStatus, Sequence[Issue]]], filenames: Mapping[int, str]
+) -> RenderedPrompt:
+    """Render the board index from non-empty status groups in display order."""
+    return _RENDERER.render_template("board/index.j2", groups=groups, filenames=filenames)
+
+
+def progress_entry(
+    *, iteration: int, step: ProgressStep, issue_id: int | None, payload: Mapping[str, object]
+) -> RenderedPrompt:
+    """Render one paid turn's record for the run progress log."""
+    return _RENDERER.render_template(
+        "board/progress.j2", iteration=iteration, step=step, issue_id=issue_id, payload=payload
+    )
+
+
+def issue_list_result(issues: Sequence[Issue], *, searched: bool) -> RenderedPrompt:
+    """Render the issue-board tool result for a listing or a search."""
+    return _RENDERER.render_template("tools/issue_list.j2", issues=issues, searched=searched)
+
+
+def issue_result(issue_id: int, issue: Issue | None) -> RenderedPrompt:
+    """Render the issue-board tool result for one issue, or its absence."""
+    return _RENDERER.render_template("tools/issue.j2", issue_id=issue_id, issue=issue)
+
+
+def invalid_status_result(status: str) -> RenderedPrompt:
+    """Render the issue-board tool error for an unknown status filter."""
+    return _RENDERER.render_template("tools/invalid_status.j2", status=status)
+
+
+def create_issue_result(outcome: Issue | CreateRejection) -> RenderedPrompt:
+    """Render the issue-board tool result for a created issue or its rejection."""
+    return _RENDERER.render_template(
+        "tools/create_issue.j2",
+        issue=outcome if isinstance(outcome, Issue) else None,
+        invalid_type=outcome if isinstance(outcome, InvalidIssueType) else None,
+        not_allowed=outcome if isinstance(outcome, TypeNotAllowed) else None,
+        cap=outcome if isinstance(outcome, CapReached) else None,
+        issue_types=list(IssueType),
+    )
+
+
 __all__ = [
+    "ProgressStep",
     "bootstrap_description",
+    "create_issue_result",
     "implementer_message",
     "implementer_system_prompt",
+    "invalid_status_result",
+    "issue_index",
+    "issue_list_result",
+    "issue_markdown",
+    "issue_result",
     "judge_message",
     "judge_system_prompt",
     "performance_message",
     "performance_system_prompt",
+    "progress_entry",
 ]

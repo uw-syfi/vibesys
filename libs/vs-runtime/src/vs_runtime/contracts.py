@@ -687,12 +687,44 @@ class AgentEvaluationStatus(StrEnum):
     CANCELED = "canceled"
 
 
+class AgentEvaluationStageOutcome(StrEnum):
+    """Trusted conclusion of one finished stage of an agent-submitted evaluation."""
+
+    PASSED = "passed"
+    FAILED = "failed"
+    # The stage recorded measurements without a pass or fail verdict.
+    OBSERVED = "observed"
+
+
+class AgentEvaluationMetric(BaseModel):
+    """One measurement a finished stage recorded."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    value: FiniteFloat
+    unit: str | None = None
+    direction: MetricDirection | None = None
+
+
+class AgentEvaluationStage(BaseModel):
+    """The trusted outcome of one finished stage (accuracy, benchmark, ...)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: str = Field(min_length=1)
+    outcome: AgentEvaluationStageOutcome
+    metrics: tuple[AgentEvaluationMetric, ...] = ()
+
+
 class AgentEvaluation(BaseModel):
     """One trusted evaluation an agent submitted from a workspace.
 
     The host runs it, so its outcome is trusted even though an agent chose
     when to submit. ``failure`` is the complete failure text, present exactly
-    when the evaluation failed.
+    when the evaluation failed. ``stages`` holds the outcome of each stage that
+    finished with trusted evidence, in stage order; a stage still running, or
+    one that crashed without evidence, has no entry.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -700,6 +732,15 @@ class AgentEvaluation(BaseModel):
     revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
     kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
     status: AgentEvaluationStatus
+    stages: tuple[AgentEvaluationStage, ...] = ()
+    content_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description=(
+            "SHA-256 of the evaluated revision's patch as Workspaces.export_patch returns it: "
+            "two revisions with this digest hold the same candidate content."
+        ),
+    )
     failure: str | None = Field(default=None, min_length=1)
     signature: str | None = Field(
         default=None,

@@ -64,7 +64,6 @@ if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis import (
         ArchiveConflict,
         AttemptState,
-        CarryOver,
         HypothesisSearch,
         HypothesisState,
     )
@@ -72,6 +71,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.multi.files import MultiFiles
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
     from vibesys.orchestration.profile_focus import FocusView
+    from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 
@@ -81,8 +81,8 @@ class PlanRequest:
 
     round_number: int
     state: HypothesisState
-    carry: CarryOver
-    profiler_summary: ProfilerSummary | None
+    carried: CarriedEntries
+    profile: ProgressEntry | None
     plateau_warning: str | None
     provisional_candidates: int
     workspace: Workspace
@@ -175,7 +175,7 @@ class MultiAgentTurns:
     async def pre_round(
         self,
         round_number: int,
-        carry: CarryOver,
+        carried: CarriedEntries,
         *,
         has_history: bool,
     ) -> PreRoundDecision:
@@ -183,8 +183,8 @@ class MultiAgentTurns:
         facts = self.run.facts
         context = PreRoundContext(
             objective_location=facts.objective_location,
-            regression_info=carry.regression,
-            exhaustion_info=carry.exhaustion,
+            regression_entry=carried.regression,
+            exhaustion_entry=carried.exhaustion,
             progress_location=self.files.progress_location,
             profiler_kind=facts.profiler_id,
             profile_execution=facts.profile_execution.value,
@@ -208,9 +208,9 @@ class MultiAgentTurns:
         facts = self.run.facts
         return PlanContext(
             objective_location=facts.objective_location,
-            profiler_summary=request.profiler_summary,
-            regression_info=request.carry.regression,
-            exhaustion_info=request.carry.exhaustion,
+            profiler_entry=request.profile,
+            regression_entry=request.carried.regression,
+            exhaustion_entry=request.carried.exhaustion,
             progress_location=self.files.progress_location,
             roadmap_location=self.files.roadmap_location,
             pareto_archive_location=self.files.pareto_location,
@@ -298,8 +298,12 @@ class MultiAgentTurns:
         finally:
             await session.close()
 
-    async def profile(self, round_number: int, focus: str) -> ProfilerSummary | None:
-        """Collect optional evidence in one fresh bounded-write conversation."""
+    async def profile(self, round_number: int, focus: str) -> ProgressEntry | None:
+        """Collect optional evidence in one fresh bounded-write conversation.
+
+        Returns the progress entry holding the profiler summary, or ``None``
+        when no profiler ran or it failed.
+        """
         facts = self.run.facts
         kind = ProfilerKind(facts.profiler_id)
         if kind is ProfilerKind.NONE:
@@ -341,8 +345,7 @@ class MultiAgentTurns:
             return None
         finally:
             await session.close()
-        self.files.note_profile(round_number, summary)
-        return summary
+        return self.files.note_profile(round_number, summary)
 
     async def _implementer_context(
         self,

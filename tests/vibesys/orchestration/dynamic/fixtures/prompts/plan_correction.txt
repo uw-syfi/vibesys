@@ -1,7 +1,8 @@
 ===== dynamic-orchestrator =====
 Schedule at most 1 new workstreams for free slots. 0 other
 workstreams are still running (their history rows show non-terminal phases), and the
-run may schedule 1 more workstreams in total, including these.
+run may schedule 1 more workstreams in total, including these. Each
+workstream counts once, whether it starts a hypothesis or continues one.
 
 Objective (authoritative, including operator constraints):
 Improve.
@@ -18,6 +19,7 @@ Current base revision (best trusted candidate, or the root): `fake-revision`
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 
+
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring or profiling the base revision.
@@ -32,7 +34,13 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction.
+makes that strategic decision clear. Do not retire an unfinished direction: a running
+workstream cannot be parked or abandoned. A row's strategy field shows the decision in
+effect; continuing a parked hypothesis makes it available again, and an abandoned one
+cannot be continued. A running workstream's row shows the evaluations its current turn
+has submitted under running_evaluations, with each finished stage's outcome, and the
+attempt before that turn under previous_attempt. A stage outcome is the verdict: an
+evaluation is a pass only when each of its stages passed.
 
 The framework provides isolated candidate workspaces, runs selected independent
 reviews, and owns trusted evaluation and winner adoption. Every candidate that an
@@ -58,7 +66,8 @@ the plan in another field or write it as JSON text inside a field.
 ===== dynamic-orchestrator =====
 Schedule at most 1 new workstreams for free slots. 0 other
 workstreams are still running (their history rows show non-terminal phases), and the
-run may schedule 1 more workstreams in total, including these.
+run may schedule 1 more workstreams in total, including these. Each
+workstream counts once, whether it starts a hypothesis or continues one.
 
 Objective (authoritative, including operator constraints):
 Improve.
@@ -75,6 +84,7 @@ Current base revision (best trusted candidate, or the root): `fake-revision`
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 
+
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring or profiling the base revision.
@@ -89,7 +99,13 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction.
+makes that strategic decision clear. Do not retire an unfinished direction: a running
+workstream cannot be parked or abandoned. A row's strategy field shows the decision in
+effect; continuing a parked hypothesis makes it available again, and an abandoned one
+cannot be continued. A running workstream's row shows the evaluations its current turn
+has submitted under running_evaluations, with each finished stage's outcome, and the
+attempt before that turn under previous_attempt. A stage outcome is the verdict: an
+evaluation is a pass only when each of its stages passed.
 
 The framework provides isolated candidate workspaces, runs selected independent
 reviews, and owns trusted evaluation and winner adoption. Every candidate that an

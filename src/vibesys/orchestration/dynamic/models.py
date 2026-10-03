@@ -19,7 +19,11 @@ if TYPE_CHECKING:
 
 
 class DynamicOptions(AgentOrchestrationOptions):
-    """Validated policy controls for the dynamic orchestration."""
+    """Validated policy controls for the dynamic orchestration.
+
+    The run schedules at most ``max_rounds * max_in_flight`` workstreams, new
+    or continued alike: each is one round of agent work.
+    """
 
     max_in_flight: Annotated[int, Field(gt=0, le=32)] = 2
     # An attempt ends once this many of its evaluations in a row fail with
@@ -62,6 +66,14 @@ class WorkstreamPlan(BaseModel):
     pass_criteria: str = Field(min_length=1)
     continue_hypothesis: bool = False
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
+    parent_hypothesis_id: AgentId | None = Field(
+        default=None,
+        description=(
+            "For a new hypothesis only: the ID of an existing hypothesis listed as a "
+            "buildable candidate; the workstream starts from that candidate's revision. "
+            "Null to start from the current base revision."
+        ),
+    )
 
 
 class PortfolioPlan(BaseModel):
@@ -139,6 +151,26 @@ class EvaluationResult(BaseModel):
         accuracy = self.accuracy_passed is not False
         benchmark = self.benchmark_passed is not False
         return local and accuracy and benchmark
+
+
+class VerifiedCandidate(BaseModel):
+    """A revision whose exact content passed trusted accuracy in an agent-submitted evaluation.
+
+    The revision is retained when it is recorded, and ``content_digest`` is the
+    digest the evaluation service computed for it, so a later reader can check
+    that the revision still reproduces the evaluated content.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(min_length=1)
+    content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # The same evaluation's benchmark verdict (None when it ran no benchmark)
+    # and its headline measurement, when it recorded one.
+    benchmark_passed: bool | None = None
+    metric_name: str | None = None
+    metric_value: FiniteFloat | None = None
+    metric_unit: str | None = None
 
 
 class WorkstreamPhase(StrEnum):
@@ -225,6 +257,9 @@ class DynamicWorkstream(BaseModel):
     # Whether an implementer turn of this workstream has started. A setup
     # failure charges the budget without a turn, so the budget cannot say.
     implementer_started: bool = False
+    # The latest revision of this hypothesis whose content passed accuracy in
+    # an agent-submitted evaluation; a new workstream may build on it.
+    verified: VerifiedCandidate | None = None
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:
@@ -400,6 +435,7 @@ __all__ = [
     "ImplementerResult",
     "PortfolioPlan",
     "ReviewResult",
+    "VerifiedCandidate",
     "WorkstreamBudget",
     "WorkstreamPhase",
     "WorkstreamPlan",

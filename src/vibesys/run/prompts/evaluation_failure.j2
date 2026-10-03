@@ -1,0 +1,2 @@
+{# Context: `record_failure`, `stage_failure` (str | None): the failed evaluation's own message, else its first failed stage's. No trailing newline. #}
+{{ record_failure or stage_failure or "evaluation failed without a message" }}

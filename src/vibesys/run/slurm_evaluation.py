@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.run.evaluation_backend import SemanticEvaluationStage, render_stage_failure
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     EvaluationRequest,
@@ -234,7 +234,7 @@ class SlurmSemanticEvaluationExecutor:
         self, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
-        failed_summaries: list[str] = []
+        failed_checks: list[tuple[str | None, EvidenceKind]] = []
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))
@@ -243,9 +243,7 @@ class SlurmSemanticEvaluationExecutor:
             raw = SlurmCommandResult.model_validate(raw_step.result)
             evidence = self._evidence(stage, raw, raw_step.failure)
             if evidence.outcome is EvidenceOutcome.FAILED:
-                failed_summaries.append(
-                    evidence.semantic_summary or f"{stage.kind.value} check failed"
-                )
+                failed_checks.append((evidence.semantic_summary, stage.kind))
             results.append(
                 EvaluationStepResult(
                     name=step.name,
@@ -264,7 +262,7 @@ class SlurmSemanticEvaluationExecutor:
             # stage that skipped the rest makes the evaluation failed, and its
             # diagnostics are the failure the submitting agent reads.
             state = EvaluationState.FAILED
-            failure = "\n".join(failed_summaries) or observed.failure or "a stage failed"
+            failure = render_stage_failure(failed_checks, observed.failure)
         else:
             state = observed.state
         return ExecutorObservation(

@@ -1,0 +1,6 @@
+{# One progress-file section: the round heading, then the caller's body without trailing whitespace. #}
+{% macro section(round_number, title) %}
+## Round {{ round_number }}: {{ title }}
+{{ caller().rstrip() }}
+
+{% endmacro %}

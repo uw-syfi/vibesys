@@ -1,0 +1,7 @@
+{# Context: `round_number`, `retry` (int), `response` (ImplementerResponse). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Implementer attempt " ~ retry) %}
+- outcome: {{ response.hypothesis_outcome.value }}
+- disposition: {{ response.candidate_disposition.value }}
+- summary: {{ response.summary }}
+{% endcall %}

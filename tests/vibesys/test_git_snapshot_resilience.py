@@ -91,7 +91,6 @@ def test_snapshot_excludes_unreadable_project_file(
         command: list[str],
         *,
         check: bool = True,
-        env: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         if command[:3] == ["git", "add", "-A"] and not failed_add[0]:
@@ -105,7 +104,7 @@ def test_snapshot_excludes_unreadable_project_file(
                     b"fatal: adding files failed\n"
                 ),
             )
-        return real_run(command, check=check, env=env, timeout=timeout)
+        return real_run(command, check=check, timeout=timeout)
 
     failed_add = [False]
 

@@ -9,16 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.single.prompts import (
-    render_exhaustion_notice,
-    render_pareto_frontier,
-    render_regression_notice,
-)
+from vibesys.orchestration.progress import CarriedEntries, ProgressLog
+from vibesys.orchestration.single.prompts import render_pareto_frontier, render_progress
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
+    from vibesys.orchestration.profilers import ProfilerSummary
+    from vibesys.orchestration.progress import ProgressEntry
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
     from vibesys.orchestration.structured_turn import TurnFailed
 
@@ -102,79 +101,71 @@ class SingleFiles:
         self.pareto_path.parent.mkdir(parents=True, exist_ok=True)
         self.pareto_path.write_text(render_pareto_frontier(archive))
 
-    def note_carry(self, round_number: int, carry: CarryOver) -> None:
+    def note_carry(self, round_number: int, carry: CarryOver) -> CarriedEntries:
         """Append the carried regression and exhausted-review notices the designer reads."""
-        if carry.regression is not None:
-            self._append(
-                round_number,
-                "Regression or terminal-workspace notice",
-                render_regression_notice(carry.regression),
-            )
-        if carry.exhaustion is not None:
-            self._append(
-                round_number,
-                "Exhausted-review feedback",
-                render_exhaustion_notice(carry.exhaustion),
-            )
+        return CarriedEntries(
+            regression=(
+                self._section(round_number, "regression", regression_info=carry.regression)
+                if carry.regression is not None
+                else None
+            ),
+            exhaustion=(
+                self._section(round_number, "exhaustion", exhaustion_info=carry.exhaustion)
+                if carry.exhaustion is not None
+                else None
+            ),
+        )
+
+    def note_profile(self, round_number: int, summary: ProfilerSummary) -> ProgressEntry:
+        """Append the profile evidence the designer is pointed at."""
+        return self._section(round_number, "profile", summary=summary)
 
     def note_plan(self, round_number: int, plan: OrchestratorPlan) -> None:
         """Append the selected hypothesis and task to the progress memory."""
-        self._append(
-            round_number,
-            "Orchestrator plan",
-            f"- hypothesis_id: {plan.hypothesis_id}\n"
-            f"- hypothesis: {plan.hypothesis}\n"
-            f"- task: {plan.task}\n"
-            f"- pass criteria: {plan.pass_criteria}\n",
-        )
+        self._section(round_number, "plan", plan=plan)
 
     def note_continuation(self, round_number: int, hypothesis_id: str, task: str) -> None:
         """Record reuse of an active hypothesis without a designer turn."""
-        self._append(
-            round_number,
-            "Active hypothesis continuation",
-            f"- hypothesis_id: {hypothesis_id}\n- task: {task}\n",
-        )
+        self._section(round_number, "continuation", hypothesis_id=hypothesis_id, task=task)
 
     def note_response(
         self, round_number: int, retry: int, response: SingleAgentRoundResponse
     ) -> None:
         """Append one combined implementation and self-review outcome."""
-        self._append(
-            round_number,
-            f"Single-agent attempt {retry}",
-            f"- verdict: {response.verdict.value}\n"
-            f"- summary: {response.summary}\n"
-            f"- feedback: {response.feedback or '(none)'}\n",
-        )
+        self._section(round_number, "single_response", retry=retry, response=response)
 
     def note_turn_failed(self, round_number: int, retry: int, failure: TurnFailed) -> None:
         """Append one attempt whose agent returned no valid response."""
-        self._append(
-            round_number,
-            f"Single-agent attempt {retry}",
-            f"- verdict: no valid response\n- reason: {failure.reason}\n",
-        )
+        self._section(round_number, "single_turn_failed", retry=retry, reason=failure.reason)
 
-    def note_evaluation(self, round_number: int, retry: int, detail: str) -> None:
-        """Append the policy's official-evaluation decision or result."""
-        self._append(round_number, f"Official evaluation attempt {retry}", detail)
+    def note_evaluation_deferred(self, round_number: int, retry: int) -> None:
+        """Record that the official-evaluation cadence was not due."""
+        self._section(round_number, "evaluation_deferred", retry=retry)
+
+    def note_evaluation_passed(self, round_number: int, retry: int, reason: str | None) -> None:
+        """Record a passed official evaluation and why it ran."""
+        self._section(round_number, "evaluation_passed", retry=retry, reason=reason)
+
+    def note_evaluation_failed(self, round_number: int, retry: int, feedback: str) -> None:
+        """Record a failed official evaluation and its feedback."""
+        self._section(round_number, "evaluation_failed", retry=retry, feedback=feedback)
+
+    def _section(self, round_number: int, section: str, **context: object) -> ProgressEntry:
+        log = ProgressLog(self.workspace, self.progress)
+        return log.append(
+            round_number, render_progress(section, round_number=round_number, **context)
+        )
 
     def _initialize(self) -> None:
         roadmap = self.roadmap / "index.md"
         roadmap.parent.mkdir(parents=True, exist_ok=True)
         if not roadmap.exists():
-            roadmap.write_text("# Roadmap\n\nOwned and maintained by the orchestrator.\n")
+            roadmap.write_text(render_progress("roadmap"))
         self.progress.mkdir(parents=True, exist_ok=True)
         readme = self.progress / "README.md"
         if not readme.exists():
-            readme.write_text("# Progress\n\nOne audit file is written per round.\n")
+            readme.write_text(render_progress("readme"))
         (self.artifact_root / "validation").mkdir(parents=True, exist_ok=True)
-
-    def _append(self, round_number: int, title: str, body: str) -> None:
-        path = self.progress / f"round-{round_number:04d}.md"
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(f"## Round {round_number}: {title}\n{body.rstrip()}\n\n")
 
 
 __all__ = ["SingleFiles"]

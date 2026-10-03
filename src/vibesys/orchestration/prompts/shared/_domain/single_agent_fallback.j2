@@ -1,0 +1,2 @@
+{# Context: `sections` ((str, ...)): the rendered implementer and judge sections a domain without single_agent.md falls back to. Blank-line separated, no trailing newline. #}
+{{ sections | select | join("\n\n") }}

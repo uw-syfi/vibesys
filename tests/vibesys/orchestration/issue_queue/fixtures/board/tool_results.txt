@@ -1,0 +1,40 @@
+### list_issues {}
+(no issues)
+### search_issues {'query': 'kv'}
+(no matches)
+### get_issue {'issue_id': 1}
+(no issue #1)
+### list_issues {'status': 'nope'}
+error: invalid status 'nope'
+### create_issue {'type': 'bug', 'title': 't', 'description': 'd'}
+error: as 'perf_eval' you may only file types ['perf'], not 'bug'
+### create_issue {'type': 'unknown', 'title': 't', 'description': 'd'}
+error: type must be one of ['bug', 'feature', 'perf'], got 'unknown'
+### create_issue {'type': 'perf', 'title': 'KV fragmentation', 'description': 'Fix.'}
+created issue #1
+### create_issue {'type': 'perf', 'title': 'KV eviction', 'description': 'Tune.'}
+created issue #2
+### create_issue {'type': 'perf', 'title': 'Third', 'description': 'Over cap.'}
+error: per-iteration cap reached (2/2). Cannot create more issues this iteration. Use search_issues to dedupe before creating, and prioritize the most impactful issues.
+### list_issues {}
+#1 [perf] [open] KV fragmentation
+#2 [perf] [open] KV eviction
+### list_issues {'status': 'open'}
+#1 [perf] [open] KV fragmentation
+#2 [perf] [open] KV eviction
+### search_issues {'query': 'kv'}
+#1 [perf] [open] KV fragmentation
+#2 [perf] [open] KV eviction
+### get_issue {'issue_id': 1}
+## Issue #1
+- type: perf
+- status: open
+- created_by: perf_eval (iter 2)
+- attempts: 0
+
+### Title
+KV fragmentation
+
+### Description
+Fix.
+
