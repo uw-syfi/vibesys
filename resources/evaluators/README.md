@@ -42,7 +42,7 @@ revision:
 [tools.request-factory]
 kind = "cargo-git"
 git = "https://github.com/uw-syfi/request-factory"
-rev = "118da6137275fda3a290e9012853214dc437c6c0"
+rev = "89dce4a64ae12e7084fbe464ddda882fa0a4c482"
 package = "req-frontend"
 bins = ["session_runner"]
 

@@ -164,6 +164,25 @@ FAKE_HANG_RUNNER = textwrap.dedent(
     """
 )
 
+# Header, then progress lines as session_runner prints them every 5 s (the status
+# line it also prints every 500 ms is included to show it does not confuse the parse).
+FAKE_PROGRESS_RUNNER = textwrap.dedent(
+    """\
+    #!{python}
+    import sys, time
+    def err(line):
+        print(line, file=sys.stderr, flush=True)
+    err("session workload | sessions=12 rounds=72 max_prompt_len=9000 max_prefix_len=8000 "
+        "max_input_len=3000 max_output_len=900 total_output_len=14343 max_arrival_time_ms=0.000 "
+        "total_tool_wait_after_ms=0.000")
+    err("progress | elapsed_s=5.0 rounds_done=3/72 sessions_done=0/12 output_tokens=610")
+    err("progress | elapsed_s=10.0 rounds_done=9/72 sessions_done=1/12 output_tokens=1800")
+    err("sessions 1/12 | steps 9/72 completed=9 submitted=12 active=3 failed=0 "
+        "runtime_global_queue_depth=0 | elapsed=10.5s")
+    time.sleep(3600)
+    """
+)
+
 
 class SessionRunnerTimeoutTests(unittest.TestCase):
     """A killed session_runner reports the job size and needed rate before the command."""
@@ -179,12 +198,23 @@ class SessionRunnerTimeoutTests(unittest.TestCase):
                 )
         return str(caught.exception)
 
-    def test_timeout_message_leads_with_progress_numbers_then_command(self) -> None:
+    def test_timeout_message_reports_the_last_progress_line_then_the_command(self) -> None:
+        message = self._run_hanging(FAKE_PROGRESS_RUNNER, timeout_s=2.0)
+        headline, _, command_line = message.partition("\n")
+        self.assertIn("warmup sub-run timed out after 2s", headline)
+        self.assertIn("(at 10s): 9/72 rounds, 1/12 sessions, 1800 output tokens", headline)
+        self.assertIn("180.0 output tokens/s achieved", headline)
+        self.assertIn("14343 output tokens within the 2s limit needs 7171.5", headline)
+        self.assertNotIn("610", headline)
+        self.assertTrue(command_line.startswith("command: "))
+
+    def test_timeout_with_only_the_workload_header_falls_back_to_the_needed_rate(self) -> None:
         message = self._run_hanging(FAKE_HANG_RUNNER, timeout_s=2.0)
         headline, _, command_line = message.partition("\n")
         self.assertIn("warmup sub-run timed out after 2s", headline)
         self.assertIn("72 rounds (12 sessions, 14343 output tokens)", headline)
         self.assertIn("at least 7171.5 output tokens/s", headline)
+        self.assertIn("printed no progress line", headline)
         self.assertNotIn("--trace", headline)
         self.assertTrue(command_line.startswith("command: "))
         self.assertIn("--trace t.csv", command_line)

@@ -47,7 +47,7 @@ HF_HUB_OFFLINE=1 uv run python -m reference.server --model Qwen/Qwen3.5-9B --por
 # accuracy gate against a running server (exit 0 = PASS)
 uv run python accuracy_checker/checker.py --base-url http://127.0.0.1:8000
 
-# benchmark (session_runner from request-factory rev 118da613)
+# benchmark (session_runner from request-factory rev 89dce4a6)
 python3 benchmark/run.py --mode quick \
   --request-factory-engine /path/to/session_runner \
   --base-url http://127.0.0.1:8000/v1 --output-json result.json

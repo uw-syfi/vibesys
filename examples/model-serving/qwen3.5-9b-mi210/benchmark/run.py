@@ -169,6 +169,13 @@ _WORKLOAD_LINE = re.compile(
     r"session workload \| sessions=(?P<sessions>\d+) rounds=(?P<rounds>\d+)"
     r".*? total_output_len=(?P<output_tokens>\d+)"
 )
+# Printed by session_runner every 5 s and once at the end (request-factory
+# `executor::ProgressLine`): `progress | elapsed_s=.. rounds_done=a/b
+# sessions_done=c/d output_tokens=e`.
+_PROGRESS_LINE = re.compile(
+    r"progress \| elapsed_s=(?P<elapsed>[\d.]+) rounds_done=(?P<rounds_done>\d+)/(?P<rounds>\d+)"
+    r" sessions_done=(?P<sessions_done>\d+)/(?P<sessions>\d+) output_tokens=(?P<tokens>\d+)"
+)
 
 
 def describe_timeout(
@@ -177,28 +184,49 @@ def describe_timeout(
     """The message for a killed `session_runner`: progress facts first, command last.
 
     `session_runner` writes its request log (1 MiB buffer), timeline (Parquet
-    footer) and summary only at exit, and handles no signals, so how far a killed
-    run got is not observable from disk. What is observable is the workload
-    header it prints to stderr at start; from it this reports the size of the
-    job and the average output rate needed to finish within the limit.
+    footer) and summary only at exit and handles no signals, so how far a killed
+    run got is not observable from disk. It does print to stderr: a workload
+    header at start and a `progress |` line every 5 s. This reports the last
+    progress line with the achieved and the needed output rate, falls back to the
+    job size and needed rate when no progress line was printed, and to "unknown"
+    when not even the header was.
     """
     if isinstance(partial_stderr, bytes):
         partial_stderr = partial_stderr.decode(errors="replace")
-    match = _WORKLOAD_LINE.search(partial_stderr or "")
-    if match is None:
+    stderr = partial_stderr or ""
+    workload = _WORKLOAD_LINE.search(stderr)
+    progress_lines = list(_PROGRESS_LINE.finditer(stderr))
+    if progress_lines:
+        progress = progress_lines[-1]
+        elapsed = float(progress["elapsed"])
+        tokens = int(progress["tokens"])
+        achieved = tokens / elapsed if elapsed > 0 else 0.0
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed. Last progress line "
+            f"(at {elapsed:.0f}s): {progress['rounds_done']}/{progress['rounds']} rounds, "
+            f"{progress['sessions_done']}/{progress['sessions']} sessions, {tokens} output "
+            f"tokens, {achieved:.1f} output tokens/s achieved."
+        )
+        if workload is not None:
+            total = int(workload["output_tokens"])
+            headline += (
+                f" Finishing {total} output tokens within the {timeout_s:.0f}s limit "
+                f"needs {total / timeout_s:.1f} output tokens/s on average (startup included)."
+            )
+    elif workload is not None:
+        tokens = int(workload["output_tokens"])
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed before finishing "
+            f"{workload['rounds']} rounds ({workload['sessions']} sessions, {tokens} output "
+            f"tokens). It needs an average of at least {tokens / timeout_s:.1f} output "
+            f"tokens/s over the whole {timeout_s:.0f}s limit (startup included) to finish. "
+            "How many rounds completed is unknown: session_runner printed no progress line "
+            "before the kill (session_runner before request-factory 89dce4a prints none)."
+        )
+    else:
         headline = (
             f"{label} timed out after {timeout_s:.0f}s and was killed. "
             "Progress is unknown: session_runner printed no workload header before the kill."
-        )
-    else:
-        tokens = int(match["output_tokens"])
-        headline = (
-            f"{label} timed out after {timeout_s:.0f}s and was killed before finishing "
-            f"{match['rounds']} rounds ({match['sessions']} sessions, {tokens} output tokens). "
-            f"It needs an average of at least {tokens / timeout_s:.1f} output tokens/s over "
-            f"the whole {timeout_s:.0f}s limit (startup included) to finish. How many rounds "
-            "completed is not observable: session_runner writes its request log, timeline "
-            "and summary only at exit."
         )
     return f"{headline}\ncommand: {' '.join(command)}"
 
