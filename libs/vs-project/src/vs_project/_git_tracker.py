@@ -58,6 +58,12 @@ class GitTracker:
         "GIT_AUTHOR_EMAIL": "vibesys@local",
         "GIT_COMMITTER_NAME": "vibesys",
         "GIT_COMMITTER_EMAIL": "vibesys@local",
+        # Read-only queries (``git status``, ``git diff``) otherwise try to
+        # write a refreshed index back under ``.git/index.lock``. That races
+        # with a concurrent ``git add``/``reset``/``commit`` and fails it with
+        # "Unable to create index.lock". Commands that must write the index
+        # still take the lock; only the opportunistic refresh is skipped.
+        "GIT_OPTIONAL_LOCKS": "0",
     }
 
     # Compiled-accelerator artifacts an agent may emit into the workspace.

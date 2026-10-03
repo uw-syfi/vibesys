@@ -325,3 +325,20 @@ def test_init_fails_when_project_history_cannot_be_inspected(tmp_path: Path) -> 
     tracker = _tracker(tmp_path)
     with pytest.raises(ValueError, match=r"cannot inspect project Git history for private inputs"):
         tracker.init(existing=False)
+
+
+def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    target = tmp_path / "main.py"
+    # Rewrite identical content with a new mtime: the index entry is now
+    # stat-stale, which is what makes a plain `git status` write a refreshed
+    # index back under .git/index.lock.
+    stat = target.stat()
+    target.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    index = tmp_path / ".git" / "index"
+    before = (index.read_bytes(), index.stat().st_mtime_ns)
+
+    assert tracker.pending_changes() == []
+
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before
