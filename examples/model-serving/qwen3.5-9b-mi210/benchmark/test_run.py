@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -149,6 +151,49 @@ class ResolvePathsWarmupTraceTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 paths = run.resolve_paths(args, mode)
                 self.assertEqual(paths.warmup_trace, run.WARMUP_TRACE)
+
+
+FAKE_HANG_RUNNER = textwrap.dedent(
+    """\
+    #!{python}
+    import sys, time
+    print("session workload | sessions=12 rounds=72 max_prompt_len=9000 max_prefix_len=8000 "
+          "max_input_len=3000 max_output_len=900 total_output_len=14343 max_arrival_time_ms=0.000 "
+          "total_tool_wait_after_ms=0.000", file=sys.stderr, flush=True)
+    time.sleep(3600)  # killed by the harness's limit long before this returns
+    """
+)
+
+
+class SessionRunnerTimeoutTests(unittest.TestCase):
+    """A killed session_runner reports the job size and needed rate before the command."""
+
+    def _run_hanging(self, script_body: str, timeout_s: float) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = Path(tmp) / "fake_session_runner"
+            engine.write_text(script_body.format(python=sys.executable))
+            engine.chmod(0o755)
+            with self.assertRaises(run.HarnessError) as caught:
+                run.run_session_runner(
+                    engine, ["--trace", "t.csv"], timeout_s=timeout_s, label="warmup sub-run"
+                )
+        return str(caught.exception)
+
+    def test_timeout_message_leads_with_progress_numbers_then_command(self) -> None:
+        message = self._run_hanging(FAKE_HANG_RUNNER, timeout_s=2.0)
+        headline, _, command_line = message.partition("\n")
+        self.assertIn("warmup sub-run timed out after 2s", headline)
+        self.assertIn("72 rounds (12 sessions, 14343 output tokens)", headline)
+        self.assertIn("at least 7171.5 output tokens/s", headline)
+        self.assertNotIn("--trace", headline)
+        self.assertTrue(command_line.startswith("command: "))
+        self.assertIn("--trace t.csv", command_line)
+
+    def test_timeout_without_workload_header_says_progress_is_unknown(self) -> None:
+        silent = "#!{python}\nimport time\ntime.sleep(3600)\n"
+        message = self._run_hanging(silent, timeout_s=0.5)
+        self.assertIn("Progress is unknown", message.splitlines()[0])
+        self.assertIn("command: ", message)
 
 
 if __name__ == "__main__":

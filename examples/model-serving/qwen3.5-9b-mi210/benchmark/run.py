@@ -67,6 +67,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -90,6 +91,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
 # candidate engine takes longer; these are session counts, not a wall-clock
 # cap (session_runner has no deadline flag).
 WARMUP_SESSIONS = 12
+WARMUP_TIMEOUT_S = 180.0
 MODE_SESSIONS: dict[Mode, int] = {
     "smoke": 2,
     "quick": 60,
@@ -163,11 +165,50 @@ class SessionRunnerResult:
     summary: dict[str, Any] | None
 
 
+_WORKLOAD_LINE = re.compile(
+    r"session workload \| sessions=(?P<sessions>\d+) rounds=(?P<rounds>\d+)"
+    r".*? total_output_len=(?P<output_tokens>\d+)"
+)
+
+
+def describe_timeout(
+    command: list[str], timeout_s: float, partial_stderr: str | bytes | None, label: str
+) -> str:
+    """The message for a killed `session_runner`: progress facts first, command last.
+
+    `session_runner` writes its request log (1 MiB buffer), timeline (Parquet
+    footer) and summary only at exit, and handles no signals, so how far a killed
+    run got is not observable from disk. What is observable is the workload
+    header it prints to stderr at start; from it this reports the size of the
+    job and the average output rate needed to finish within the limit.
+    """
+    if isinstance(partial_stderr, bytes):
+        partial_stderr = partial_stderr.decode(errors="replace")
+    match = _WORKLOAD_LINE.search(partial_stderr or "")
+    if match is None:
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed. "
+            "Progress is unknown: session_runner printed no workload header before the kill."
+        )
+    else:
+        tokens = int(match["output_tokens"])
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed before finishing "
+            f"{match['rounds']} rounds ({match['sessions']} sessions, {tokens} output tokens). "
+            f"It needs an average of at least {tokens / timeout_s:.1f} output tokens/s over "
+            f"the whole {timeout_s:.0f}s limit (startup included) to finish. How many rounds "
+            "completed is not observable: session_runner writes its request log, timeline "
+            "and summary only at exit."
+        )
+    return f"{headline}\ncommand: {' '.join(command)}"
+
+
 def run_session_runner(
     engine: Path,
     argv: list[str],
     *,
     timeout_s: float,
+    label: str = "session_runner",
 ) -> SessionRunnerResult:
     """Invoke `session_runner` with `argv` and parse its `--summary-path` output.
 
@@ -192,9 +233,7 @@ def run_session_runner(
     except FileNotFoundError as exc:
         raise HarnessError(f"session_runner not found at {engine}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise HarnessError(
-            f"session_runner timed out after {timeout_s:.0f}s: {' '.join(command)}"
-        ) from exc
+        raise HarnessError(describe_timeout(command, timeout_s, exc.stderr, label)) from exc
 
     summary: dict[str, Any] | None = None
     if summary_path is not None and summary_path.exists():
@@ -415,7 +454,12 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         summary_path=work_dir / f"{mode}_warmup_summary.json",
         timeline_path=work_dir / f"{mode}_warmup_timeline.parquet",
     )
-    warmup = run_session_runner(args.request_factory_engine, warmup_argv, timeout_s=180.0)
+    warmup = run_session_runner(
+        args.request_factory_engine,
+        warmup_argv,
+        timeout_s=WARMUP_TIMEOUT_S,
+        label="warmup sub-run",
+    )
     if warmup.returncode != 0:
         raise HarnessError(
             f"{mode}: warmup sub-run failed (this is where a prefix-cache-preflight "
@@ -443,6 +487,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         args.request_factory_engine,
         measured_argv,
         timeout_s=args.timeout_s,
+        label="measured sub-run",
     )
     wall_s = time.monotonic() - start
     if measured.returncode != 0:
