@@ -16,7 +16,9 @@ from vs_evaluation.agent_evidence import (
 )
 from vs_evaluation.models import (
     AvailabilitySnapshot,
-    EvaluationAwaitResult,
+    EvaluationCanceled,
+    EvaluationCompleted,
+    EvaluationFailed,
     EvaluationState,
 )
 from vs_evaluation.profiler_models import (
@@ -224,6 +226,8 @@ class EvaluationOperationSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     handle_id: str = Field(min_length=1)
     state: EvaluationState
+    # The stage executing now; absent before the first stage and once terminal.
+    current_stage: str | None = None
     evidence_recorded: bool
     stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
     evidence_ids: tuple[str, ...] = ()
@@ -308,12 +312,40 @@ class RepeatedFailure(BaseModel):
     instruction: str = Field(min_length=1)
 
 
+class EvaluationStillRunning(BaseModel):
+    """A bounded await returned before the evaluation finished; it keeps running.
+
+    Every field is the evaluation's recorded progress at return time: the
+    lifecycle state, the stage executing now, and the trusted outcome of each
+    stage that already finished. ``state`` is absent only when no durable read
+    completed within the bound.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    outcome: Literal["running"] = "running"
+    handle_id: str = Field(min_length=1)
+    state: EvaluationState | None
+    current_stage: str | None = None
+    stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
+    next_await_s: FiniteFloat = Field(
+        gt=0,
+        le=MAX_AGENT_AWAIT_S,
+        description="timeout_s for the next await_evaluation call on this handle.",
+    )
+
+
+AgentAwaitResult = Annotated[
+    EvaluationCompleted | EvaluationStillRunning | EvaluationFailed | EvaluationCanceled,
+    Field(discriminator="outcome"),
+]
+
+
 class AwaitReply(BaseModel):
-    """Explicit terminal or timed-out bounded-wait result."""
+    """Terminal result, or recorded progress when the bounded wait ended first."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["await_result"] = "await_result"
-    result: EvaluationAwaitResult
+    result: AgentAwaitResult
     repeated_failure: RepeatedFailure | None = None
 
 
@@ -373,6 +405,7 @@ SocketReply = Annotated[SocketSuccess | SocketFailure, Field(discriminator="ok")
 __all__ = [
     "MAX_AGENT_AWAIT_S",
     "MAX_STAGE_SUMMARY_TAIL_CHARS",
+    "AgentAwaitResult",
     "AgentEvaluationCall",
     "AgentEvaluationReply",
     "AvailabilityCall",
@@ -387,6 +420,7 @@ __all__ = [
     "EvaluationOperationObservation",
     "EvaluationOperationSnapshot",
     "EvaluationStageOutcome",
+    "EvaluationStillRunning",
     "EvidenceCall",
     "EvidencePreflightCheck",
     "EvidencePreflightDecision",

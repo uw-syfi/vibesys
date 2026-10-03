@@ -28,16 +28,19 @@ from vs_evaluation.api import (
     EvaluationAgentService,
     EvaluationAgentSocketError,
     EvaluationAwaitResult,
+    EvaluationCompleted,
     EvaluationCoordinator,
     EvaluationOperationSnapshot,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
-    EvaluationTimedOut,
+    EvaluationStepResult,
+    EvaluationStillRunning,
     EvidenceCall,
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceReply,
+    ExecutorObservation,
     ProfilerStatusCall,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
@@ -45,6 +48,7 @@ from vs_evaluation.api import (
     ReuseStatus,
     RunOperationsCall,
     RunOperationsReply,
+    StageState,
     StatusCall,
     StoredEvaluation,
     SubmitCall,
@@ -116,6 +120,7 @@ class _SemanticBackend:
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
             state=record.state,
+            current_stage=record.current_stage,
             evidence_recorded=False,
         )
 
@@ -235,7 +240,7 @@ async def test_submit_returns_without_completion_and_timeout_does_not_cancel(
     )
 
     assert isinstance(awaited, AwaitReply)
-    assert isinstance(awaited.result, EvaluationTimedOut)
+    assert isinstance(awaited.result, EvaluationStillRunning)
     observation = await executor.inspect(submitted.handle_id)
     assert observation is not None
     assert observation.state is EvaluationState.QUEUED
@@ -820,9 +825,122 @@ async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
 
     assert f"{MAX_AGENT_AWAIT_S:.0f} s" in tool.description
     reply = AwaitReply.model_validate_json(raw)
-    assert isinstance(reply.result, EvaluationTimedOut)
+    assert isinstance(reply.result, EvaluationStillRunning)
     assert executor.wait_calls[0][1] == MAX_AGENT_AWAIT_S
     assert clock.monotonic() - started == MAX_AGENT_AWAIT_S
+
+
+# The smallest MCP tool-call timeout a supported agent CLI is known to apply
+# (Codex's documented 60 s default). An await call must return before it.
+_SMALLEST_CLIENT_TOOL_TIMEOUT_S = 60.0
+# The socket read slack the MCP tool adds to the await bound.
+_SOCKET_SLACK_S = 5.0
+
+
+async def _await_through_tool(
+    service: EvaluationAgentService, token: str, handle_id: str, timeout_s: float
+) -> AwaitReply:
+    """Call await_evaluation over the real socket, as an agent CLI does."""
+    await service.start()
+    try:
+        tool = next(
+            tool
+            for tool in build_evaluation_tools(
+                socket_path=service.socket_path,
+                token=token,
+                role=EvaluationAgentRole.IMPLEMENTER,
+            )
+            if tool.name == "await_evaluation"
+        )
+        args = tool.input_schema.model_validate({"handle_id": handle_id, "timeout_s": timeout_s})
+        raw = await asyncio.to_thread(tool.handler, args)
+    finally:
+        await service.close()
+    return AwaitReply.model_validate_json(raw)
+
+
+def _bounded_service(tmp_path: Path) -> tuple[EvaluationAgentService, FakeEvaluationExecutor]:
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
+    service = EvaluationAgentService(
+        _SemanticBackend(
+            EvaluationCoordinator(
+                executor,
+                InMemoryEvaluationStore(),
+                clock,
+                max_await_timeout_s=MAX_AGENT_AWAIT_S,
+            )
+        ),
+        _namespace(tmp_path),
+        tmp_path / "evaluation.sock",
+    )
+    return service, executor
+
+
+_ACCURACY_PASSED = EvaluationStepResult(
+    name="accuracy", state=StageState.SUCCEEDED, result={"passed": True}
+)
+
+
+@pytest.mark.asyncio
+async def test_await_returns_recorded_progress_at_the_bound_before_any_client_timeout(
+    tmp_path: Path,
+) -> None:
+    service, executor = _bounded_service(tmp_path)
+    grant = service.grant(
+        principal_id="implementer-1", role=EvaluationAgentRole.IMPLEMENTER, scope_id=None
+    )
+    submitted = await service.dispatch(
+        SubmitCall(
+            token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+        )
+    )
+    assert isinstance(submitted, SubmittedReply)
+    executor.set_state(
+        submitted.handle_id,
+        EvaluationState.RUNNING,
+        current_stage="benchmark",
+        stage_results=(_ACCURACY_PASSED,),
+    )
+    started = executor.clock.monotonic()
+
+    reply = await _await_through_tool(service, grant.token, submitted.handle_id, 1800.0)
+
+    waited = executor.clock.monotonic() - started
+    assert waited == MAX_AGENT_AWAIT_S
+    assert waited + _SOCKET_SLACK_S < _SMALLEST_CLIENT_TOOL_TIMEOUT_S
+    assert reply.result == EvaluationStillRunning(
+        handle_id=submitted.handle_id,
+        state=EvaluationState.RUNNING,
+        current_stage="benchmark",
+        next_await_s=MAX_AGENT_AWAIT_S,
+    )
+
+
+@pytest.mark.asyncio
+async def test_await_returns_the_result_when_the_evaluation_finishes_within_the_bound(
+    tmp_path: Path,
+) -> None:
+    service, executor = _bounded_service(tmp_path)
+    grant = service.grant(
+        principal_id="implementer-1", role=EvaluationAgentRole.IMPLEMENTER, scope_id=None
+    )
+    submitted = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    executor.script_wait_transition(
+        ExecutorObservation(state=EvaluationState.SUCCEEDED, stage_results=(_ACCURACY_PASSED,)),
+        elapsed_s=MAX_AGENT_AWAIT_S - 1,
+    )
+    started = executor.clock.monotonic()
+
+    reply = await _await_through_tool(service, grant.token, submitted.handle_id, 1800.0)
+
+    assert executor.clock.monotonic() - started == MAX_AGENT_AWAIT_S - 1
+    assert reply.result == EvaluationCompleted(
+        handle_id=submitted.handle_id, stages=(_ACCURACY_PASSED,)
+    )
 
 
 @pytest.mark.asyncio

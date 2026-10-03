@@ -539,6 +539,7 @@ class SemanticEvaluationBackend:
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
             state=record.state,
+            current_stage=record.current_stage,
             evidence_recorded=(
                 record.state is EvaluationState.SUCCEEDED
                 and len(evidence) == len(record.request.stages)

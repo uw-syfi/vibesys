@@ -150,7 +150,7 @@ class Turn:
             reply = self._call("await_evaluation", {"handle_id": handle, "timeout_s": _AWAIT_S})
             result = reply["result"]
             assert isinstance(result, dict)
-            if result["outcome"] != "timed_out":
+            if result["outcome"] != "running":
                 return reply
 
     def trusted_operations(self) -> dict[str, object]:
