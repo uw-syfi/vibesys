@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
@@ -35,6 +35,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import (
     AgentCapability,
+    AgentId,
     AgentRole,
     AgentSession,
     AgentSessions,
@@ -1418,6 +1419,15 @@ GIT = shutil.which("git") or "git"
 _DOTTED_MEMBER_ID = "KV.Cache_v2 / ../Ünïcode"
 
 
+def _is_agent_id(value: str) -> bool:
+    """Whether ``value`` is a member ID an agent is allowed to supply."""
+    try:
+        TypeAdapter(AgentId).validate_python(value)
+    except ValidationError:
+        return False
+    return True
+
+
 def _git_accepts_candidate_ref(workspace_id: str) -> bool:
     ref = f"refs/vibesys/run/candidates/{workspace_id}"
     # lint-waiver: LW-994301 [S603]; the test runs Git's own ref-name validator on a
@@ -1434,9 +1444,9 @@ def _git_accepts_candidate_ref(workspace_id: str) -> bool:
 @example(member_ids=["v1..v2", "v1.-v2", "x.lock", "x.", ".x", "a@{b"])
 @given(
     member_ids=st.lists(
-        st.text(st.characters(blacklist_categories=("Cc", "Cs")), min_size=1)
-        .filter(lambda value: bool(value.strip()))
-        .map(lambda value: value[:200]),
+        st.text(st.characters(blacklist_categories=("Cc", "Cs")), min_size=1, max_size=128).filter(
+            _is_agent_id
+        ),
         min_size=1,
         max_size=6,
         unique=True,
