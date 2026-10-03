@@ -89,8 +89,15 @@ def run_request(
     request_json: str | None,
     result_path: Path,
     profiles_path: Path,
+    *,
+    print_output: bool = False,
 ) -> int:
-    """Execute one existing capture API call and persist its local result envelope."""
+    """Execute one existing capture API call and persist its local result envelope.
+
+    With ``print_output`` the capture's summary is also written to stdout, and
+    a request that produced no capture fails: the trusted evaluation executor
+    reads the job's output as the profile's evidence.
+    """
     try:
         _prefer_active_python()
         request_text = (
@@ -127,12 +134,18 @@ def run_request(
             "capture_ids": new_ids,
             "profiles_path": str(profiles_path),
         }
+        result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
     except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         sys.stderr.write(f"remote ROCprof capture failed: {exc}\n")
         return 1
-    else:
+    if not print_output:
         return 0
+    sys.stdout.write(output if output.endswith("\n") else f"{output}\n")
+    if not new_ids:
+        sys.stderr.write("remote ROCprof capture produced no trace\n")
+        return 1
+    return 0
 
 
 def _prefer_active_python() -> None:
@@ -223,10 +236,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request-json")
     parser.add_argument("--result", type=Path, required=True)
     parser.add_argument("--profiles", type=Path, required=True)
+    parser.add_argument("--print-output", action="store_true")
     parsed = parser.parse_args(argv)
     if (parsed.request is None) == (parsed.request_json is None):
         parser.error("provide exactly one of --request or --request-json")
-    return run_request(parsed.request, parsed.request_json, parsed.result, parsed.profiles)
+    return run_request(
+        parsed.request,
+        parsed.request_json,
+        parsed.result,
+        parsed.profiles,
+        print_output=parsed.print_output,
+    )
 
 
 if __name__ == "__main__":

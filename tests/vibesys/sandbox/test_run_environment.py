@@ -456,6 +456,60 @@ remote_python = "/remote/venv/bin/python"
     )
     assert capture.benchmark_command == evaluation.benchmark_command
     assert capture.support_paths["rocprof_profiler"] == profiler
+    # Without a configured service there is nothing to capture under load.
+    assert evaluation.profile_command is None
+    session.close()
+
+
+def test_a_slurm_service_with_a_staged_profiler_plans_a_trusted_capture(tmp_path: Path) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+job_timeout_seconds = 900
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+
+[vibesys.service]
+command = ["python", "-m", "engine.server", "--port", "VIBESYS_DYNAMIC_PORT"]
+readiness_url = "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health"
+startup_timeout_seconds = 600
+""",
+        encoding="utf-8",
+    )
+    profiler = tmp_path / "rocprof_profiler"
+    profiler.mkdir()
+    environment = build_run_environment(
+        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
+    )
+
+    session = _open(
+        environment,
+        _request(
+            tmp_path,
+            FakeBackend(),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            profiler_support_path=str(profiler),
+            profiler_support_name="rocprof_profiler",
+        ),
+    )
+
+    evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
+    assert evaluation.profile_command is not None
+    assert evaluation.profile_command[:2] == (
+        "/remote/venv/bin/python",
+        "rocprof_profiler/remote_capture.py",
+    )
+    request = json.loads(evaluation.profile_command[3])
+    assert request["kind"] == "timeline"
+    assert "benchmark/benchmark.py" in request["lifecycle"]["load_command"]
     session.close()
 
 

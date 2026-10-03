@@ -105,6 +105,7 @@ from vs_sandbox.api.slurm import (
     SlurmExecutionPolicy,
     SlurmProcessBroker,
     load_slurm_policy,
+    trusted_profile_command,
     write_slurm_capture_plan,
     write_slurm_evaluation_plan,
 )
@@ -656,6 +657,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             )
             if name is not None and path is not None
         }
+        profiler_tree = request.profiler_support_name
         evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = request.log_dir / "slurm-capture-plan.json"
         raw_accuracy = _command_argv(remote.accuracy_command)
@@ -670,6 +672,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 benchmark_command=benchmark,
                 benchmark_output_argument=request.benchmark_output_argument,
                 support_paths=support_paths,
+                profile_command=(
+                    trusted_profile_command(config, policy, benchmark, profiler_tree=profiler_tree)
+                    if profiler_tree is not None and profiler_tree in support_paths
+                    else None
+                ),
             ),
         )
         write_slurm_capture_plan(

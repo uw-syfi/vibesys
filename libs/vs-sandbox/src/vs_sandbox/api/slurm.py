@@ -29,8 +29,14 @@ from vs_sandbox.slurm_policy import (
     SlurmPolicyError,
     load_slurm_policy,
 )
+from vs_sandbox.slurm_profile import (
+    PROFILE_OUTPUT_ROOT,
+    configured_capture_lifecycle,
+    trusted_profile_command,
+)
 
 __all__ = [
+    "PROFILE_OUTPUT_ROOT",
     "SharedSlurmAdmission",
     "SlurmCapturePlan",
     "SlurmCapturePlanError",
@@ -44,10 +50,12 @@ __all__ = [
     "SlurmProcessBrokerError",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
+    "configured_capture_lifecycle",
     "load_slurm_policy",
     "read_slurm_capture_plan",
     "read_slurm_evaluation_plan",
     "run_brokered_process",
+    "trusted_profile_command",
     "write_slurm_capture_plan",
     "write_slurm_evaluation_plan",
 ]
