@@ -209,6 +209,8 @@ class _SingleRun:
             message = "hypothesis search finished before the configured round cursor"
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
+            # The plan prompt points at this entry for the notice text.
+            self.files.note_carry(self.round_number, decision.context.carry)
             guidance = await self._prepare_profile_guidance()
             plan = await request_plan(
                 self.run,

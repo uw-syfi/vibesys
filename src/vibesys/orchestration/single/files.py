@@ -9,12 +9,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.single.prompts import render_pareto_frontier
+from vibesys.orchestration.single.prompts import (
+    render_exhaustion_notice,
+    render_pareto_frontier,
+    render_regression_notice,
+)
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import OrchestratorPlan, ParetoArchiveView
+    from vibesys.orchestration.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
     from vibesys.orchestration.structured_turn import TurnFailed
 
@@ -97,6 +101,21 @@ class SingleFiles:
         """Replace the derived Pareto archive."""
         self.pareto_path.parent.mkdir(parents=True, exist_ok=True)
         self.pareto_path.write_text(render_pareto_frontier(archive))
+
+    def note_carry(self, round_number: int, carry: CarryOver) -> None:
+        """Append the carried regression and exhausted-review notices the designer reads."""
+        if carry.regression is not None:
+            self._append(
+                round_number,
+                "Regression or terminal-workspace notice",
+                render_regression_notice(carry.regression),
+            )
+        if carry.exhaustion is not None:
+            self._append(
+                round_number,
+                "Exhausted-review feedback",
+                render_exhaustion_notice(carry.exhaustion),
+            )
 
     def note_plan(self, round_number: int, plan: OrchestratorPlan) -> None:
         """Append the selected hypothesis and task to the progress memory."""

@@ -497,3 +497,63 @@ def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> No
     assert hypothesis.revert_commit == first.commit
     assert hypothesis.parent_commit == first.commit
     assert all(session.closed for session in run.agents.sessions)
+
+
+_NOTICE_HEADINGS = {
+    "regression or terminal-workspace notice": "Regression or terminal-workspace notice",
+    "exhausted-review feedback": "Exhausted-review feedback",
+}
+
+
+_FAILED_ROUND = (_implementation(), _judge(verdict=Verdict.FAIL, feedback="boundary unchecked"))
+
+
+@pytest.mark.parametrize(
+    ("earlier_rounds", "expected_detail"),
+    [
+        pytest.param(((_implementation(), _judge()),), None, id="passed"),
+        pytest.param(
+            ((_implementation(hypothesis_outcome="disproven"), _judge()),),
+            "its workspace edits are still present",
+            id="terminal-workspace",
+        ),
+        # The failed hypothesis stays active for two continuation rounds before
+        # the designer plans again.
+        pytest.param(
+            (_FAILED_ROUND, _FAILED_ROUND, _FAILED_ROUND),
+            "did not pass after 1 attempts. Last judge feedback: boundary unchecked",
+            id="exhausted-review",
+        ),
+    ],
+)
+def test_designer_prompts_point_at_notices_the_progress_entry_contains(
+    tmp_path: Path,
+    earlier_rounds: tuple[tuple[object, ...], ...],
+    expected_detail: str | None,
+) -> None:
+    replies = [_pre_round(), _plan("H-01"), *earlier_rounds[0]]
+    for later in earlier_rounds[1:]:
+        replies.extend(later)
+    script = _Script(*replies, _pre_round(), _plan("H-02"), _implementation(), _judge())
+    final_round = len(earlier_rounds) + 1
+
+    status, _ = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=final_round, max_retries_per_round=1),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    entry = (tmp_path / "progress" / f"round-{final_round:04d}.md").read_text()
+    final_prompts = [message for role, _, message in script.calls if role == DESIGNER.id][2:]
+    assert len(final_prompts) == 2
+    for prompt in final_prompts:
+        flat = " ".join(prompt.split())
+        for pointer, heading in _NOTICE_HEADINGS.items():
+            assert (pointer in flat) == (f"## Round {final_round}: {heading}" in entry)
+        if expected_detail is not None:
+            assert expected_detail not in flat
+    if expected_detail is None:
+        assert not any(heading in entry for heading in _NOTICE_HEADINGS.values())
+    else:
+        assert expected_detail in entry
