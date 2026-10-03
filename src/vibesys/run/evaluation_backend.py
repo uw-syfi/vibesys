@@ -228,6 +228,7 @@ class _LocalSemanticExecutor:
                 state=EvaluationState.RUNNING, current_stage=request.stages[0].name
             ),
         )
+        failure: str | None = None
         try:
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
@@ -243,16 +244,23 @@ class _LocalSemanticExecutor:
                     evidence.kind is EvidenceKind.ACCURACY
                     and evidence.outcome is EvidenceOutcome.FAILED
                 ):
+                    skipped = request.stages[len(results) :]
                     results.extend(
                         EvaluationStepResult(name=remaining.name, state=StageState.SKIPPED)
-                        for remaining in request.stages[len(results) :]
+                        for remaining in skipped
                     )
+                    if skipped:
+                        # A successful evaluation must complete every planned stage, so
+                        # skipping the rest makes this a failed evaluation. The message
+                        # carries the accuracy diagnostics back to the submitting agent.
+                        failure = evidence.semantic_summary or "Accuracy check failed."
                     break
             self._publish(
                 handle_id,
                 ExecutorObservation(
-                    state=EvaluationState.SUCCEEDED,
+                    state=EvaluationState.SUCCEEDED if failure is None else EvaluationState.FAILED,
                     stage_results=tuple(results),
+                    failure=failure,
                 ),
             )
         except asyncio.CancelledError:
