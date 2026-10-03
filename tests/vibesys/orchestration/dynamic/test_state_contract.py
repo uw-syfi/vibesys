@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
     from pathlib import Path
 
-    from vs_runtime.api import RunState, Workspace
+    from vs_runtime.api import State, Workspace
 
 
 class _Options(BaseModel):
@@ -68,17 +68,17 @@ _PLUGIN = OrchestrationPlugin(
     state=DynamicState,
 )
 
-type _Store = Callable[[Path], AbstractAsyncContextManager[tuple[RunState, Workspace]]]
+type _Store = Callable[[Path], AbstractAsyncContextManager[tuple[State, Workspace]]]
 
 
 @asynccontextmanager
-async def _fake(tmp_path: Path) -> AsyncIterator[tuple[RunState, Workspace]]:
+async def _fake(tmp_path: Path) -> AsyncIterator[tuple[State, Workspace]]:
     run = FakeRun(_PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
     yield run.state, run.workspaces.root
 
 
 @asynccontextmanager
-async def _real(tmp_path: Path) -> AsyncIterator[tuple[RunState, Workspace]]:
+async def _real(tmp_path: Path) -> AsyncIterator[tuple[State, Workspace]]:
     root = tmp_path / "project"
     root.mkdir()
     (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
@@ -172,7 +172,7 @@ REPRESENTATIVE = (
 
 
 def _exercise(
-    store: _Store, tmp_path: Path, check: Callable[[RunState, Workspace], Awaitable[None]]
+    store: _Store, tmp_path: Path, check: Callable[[State, Workspace], Awaitable[None]]
 ) -> None:
     async def run() -> None:
         async with store(tmp_path) as (state, root):
@@ -183,7 +183,7 @@ def _exercise(
 
 @STORES
 def test_nothing_loads_before_the_first_commit(store: _Store, tmp_path: Path) -> None:
-    async def check(state: RunState, _root: Workspace) -> None:
+    async def check(state: State, _root: Workspace) -> None:
         assert await state.load(DynamicState) is None
 
     _exercise(store, tmp_path, check)
@@ -194,7 +194,7 @@ def test_nothing_loads_before_the_first_commit(store: _Store, tmp_path: Path) ->
 def test_a_committed_state_loads_equal_and_detached(
     store: _Store, tmp_path: Path, value: DynamicState
 ) -> None:
-    async def check(state: RunState, root: Workspace) -> None:
+    async def check(state: State, root: Workspace) -> None:
         original = value.model_copy(deep=True)
         await state.commit(original, workspace=root, label="contract")
         original.next_planning_call += 1
@@ -214,7 +214,7 @@ class _Other(BaseModel):
 
 @STORES
 def test_another_model_is_rejected(store: _Store, tmp_path: Path) -> None:
-    async def check(state: RunState, _root: Workspace) -> None:
+    async def check(state: State, _root: Workspace) -> None:
         with pytest.raises(StateModelError):
             await state.load(_Other)
         with pytest.raises(StateModelError):
@@ -225,7 +225,7 @@ def test_another_model_is_rejected(store: _Store, tmp_path: Path) -> None:
 
 @STORES
 def test_only_the_root_workspace_can_be_committed(store: _Store, tmp_path: Path) -> None:
-    async def check(state: RunState, _root: Workspace) -> None:
+    async def check(state: State, _root: Workspace) -> None:
         with pytest.raises(RuntimeContractError):
             await state.commit(DynamicState(), workspace=FakeWorkspace(path=tmp_path / "member"))
 

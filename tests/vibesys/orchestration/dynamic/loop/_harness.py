@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 from collections import defaultdict, deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -144,34 +145,19 @@ class Turn:
 
     def evaluate(self, *kinds: str) -> dict[str, object]:
         """Submit an evaluation through the real MCP tools and wait for its result."""
-        tools = self._evaluation_tools()
-        submitted = json.loads(
-            tools["submit_evaluation"].handler(
-                tools["submit_evaluation"].input_schema.model_validate({"evidence_kinds": kinds})
-            )
-        )
+        handle = self.submit(*kinds)
         while True:
-            reply = json.loads(
-                tools["await_evaluation"].handler(
-                    tools["await_evaluation"].input_schema.model_validate(
-                        {"handle_id": submitted["handle_id"], "timeout_s": _AWAIT_S}
-                    )
-                )
-            )
-            if reply["result"]["outcome"] != "timed_out":
+            reply = self._call("await_evaluation", {"handle_id": handle, "timeout_s": _AWAIT_S})
+            result = reply["result"]
+            assert isinstance(result, dict)
+            if result["outcome"] != "timed_out":
                 return reply
 
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
-        tools = self._evaluation_tools()
-        submitted = json.loads(
-            tools["submit_evaluation"].handler(
-                tools["submit_evaluation"].input_schema.model_validate({"evidence_kinds": kinds})
-            )
-        )
-        return str(submitted["handle_id"])
+        return str(self._call("submit_evaluation", {"evidence_kinds": kinds})["handle_id"])
 
-    def _evaluation_tools(self) -> dict[str, object]:
+    def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         servers = self.invocation.tool_servers or []
         server = next(item for item in servers if item.name == "vs-evaluation")
         env = dict(server.env)
@@ -182,10 +168,13 @@ class Turn:
             profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
             run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
         )
-        return {tool.name: tool for tool in tools}
+        tool = next(item for item in tools if item.name == name)
+        reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
+        assert isinstance(reply, dict)
+        return reply
 
 
-type Reply = dict[str, object] | BaseException | Callable[[Turn], dict[str, object]]
+type Reply = Mapping[str, object] | BaseException | Callable[[Turn], Mapping[str, object]]
 
 
 @dataclass
@@ -252,9 +241,9 @@ class ScriptedAgents:
             reply = queue.popleft()
         if isinstance(reply, BaseException):
             raise reply
-        if callable(reply):
-            return reply(Turn(invocation))
-        return reply
+        if isinstance(reply, Mapping):
+            return dict(reply)
+        return dict(reply(Turn(invocation)))
 
     def _queue(self, kind: str, member: str | None) -> deque[Reply]:
         if kind == ORCHESTRATOR.id:
@@ -292,7 +281,7 @@ def workstream(
 
 
 def portfolio(
-    *workstreams: dict[str, object], updates: Iterable[dict[str, object]] = ()
+    *workstreams: Mapping[str, object], updates: Iterable[Mapping[str, object]] = ()
 ) -> dict[str, object]:
     """Return one planner reply."""
     return {
@@ -313,7 +302,7 @@ def implemented(identifier: str, *, outcome: str = "nominated") -> dict[str, obj
 
 def edit_to(
     value: int, identifier: str, *evaluations: tuple[str, ...]
-) -> Callable[[Turn], dict[str, object]]:
+) -> Callable[[Turn], Mapping[str, object]]:
     """Return an implementer turn that sets ``VALUE`` and runs ``evaluations`` first."""
 
     def turn(agent: Turn) -> dict[str, object]:
@@ -451,12 +440,16 @@ def run_loop(
         run_environment=RunEnvironmentSpec("slurm", {"config_path": str(loop_input.slurm_config)}),
     )
     events: list[CoreEvent] = []
+
+    def sink(event: CoreEvent) -> None:
+        events.append(event)
+
     client = agents.client()
 
     async def run() -> LoopRun:
         session = create_session(
             request,
-            sink=events.append,
+            sink=sink,
             registry=built_in_orchestrations(),
             agent_client_factory=lambda **_kwargs: client,
             backend_factory=create_compute_backend,
@@ -517,7 +510,11 @@ def commit_as_schema_v4(loop_input: LoopInput, run_id: str) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
     for command in (
         ("git", "add", "--force", "--", str(path)),
-        ("git", "commit", "--quiet", "-m", "dynamic: state written by schema version 4"),
+        (
+            "git",
+            *("-c", "user.name=vibesys", "-c", "user.email=vibesys@localhost"),
+            *("commit", "--quiet", "-m", "dynamic: state written by schema version 4"),
+        ),
     ):
         # lint-waiver: LW-140004 [S603]; a fixed argv commits the fixture the way
         # > an older VibeSys did. Committing through vs-project would write the
