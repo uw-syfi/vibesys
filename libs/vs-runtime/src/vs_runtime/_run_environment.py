@@ -276,6 +276,10 @@ class RunEnvironmentRequest:
     # pairs. Meaningless without profiler_support_path/name set.
     profiler_support_extra: tuple[tuple[str, str], ...] = ()
     git_history_root: Path | None = None
+    # Host directories the run owns besides ``workspace``, such as the
+    # directory holding its candidate worktrees. Agent tools bound once per
+    # run (the profiler) may stage any of them to a remote executor.
+    run_owned_roots: tuple[Path, ...] = ()
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     seeded_workspace_paths: tuple[str, ...] = ()
     log: Callable[[str], None] | None = None
@@ -686,7 +690,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             broker = SlurmProcessBroker(
                 config,
                 Path(tempfile.gettempdir()) / f"vss-{secrets.token_hex(8)}.sock",
-                local_roots=(request.workspace, *(path for path in support_paths.values())),
+                local_roots=(
+                    request.workspace,
+                    *request.run_owned_roots,
+                    *support_paths.values(),
+                ),
             )
             broker.start()
             broker_env = (

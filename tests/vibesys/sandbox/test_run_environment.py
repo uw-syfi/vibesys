@@ -62,7 +62,11 @@ from vs_sandbox.api.evaluator_tools import (
     tool_install_root,
     tool_spec_digest,
 )
-from vs_sandbox.api.slurm import read_slurm_capture_plan, read_slurm_evaluation_plan
+from vs_sandbox.api.slurm import (
+    read_slurm_capture_plan,
+    read_slurm_evaluation_plan,
+    run_brokered_process,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -453,6 +457,61 @@ remote_python = "/remote/venv/bin/python"
     assert capture.benchmark_command == evaluation.benchmark_command
     assert capture.support_paths["rocprof_profiler"] == profiler
     session.close()
+
+
+def test_slurm_profiler_broker_stages_candidate_workspaces_of_the_run(tmp_path: Path) -> None:
+    """The run-wide profiler broker must stage a candidate worktree, not only the root.
+
+    The profiler tool is bound once per run, so its server runs in whichever
+    candidate worktree hosts the agent and rsyncs that worktree through the
+    root broker.
+    """
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+ssh_command = ["/usr/bin/true"]
+rsync_command = ["/bin/true"]
+""",
+        encoding="utf-8",
+    )
+    worktrees = tmp_path / "worktrees"
+    candidate = worktrees / "m-member" / "workspace"
+    candidate.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("slurm", {"config_path": str(config_path)})),
+        _request(tmp_path, FakeBackend(), run_owned_roots=(worktrees,)),
+    )
+    profiler_env = dict(session.view.profiler_mcp_env)
+    socket = Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"])
+    token = profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
+
+    def upload(local: Path) -> int:
+        argv = (
+            "/bin/true",
+            "-a",
+            "-e",
+            "/usr/bin/true",
+            "--",
+            f"{local}/",
+            "test-cluster:/remote/vibesys/test-cluster/job/",
+        )
+        return run_brokered_process(socket, token, argv, stdin=None, timeout=5).returncode
+
+    try:
+        assert upload(candidate) == 0
+        assert upload(tmp_path / "workspace") == 0
+        with pytest.raises(PermissionError, match="run-owned roots"):
+            upload(outside)
+    finally:
+        session.close()
 
 
 def test_slurm_prompt_notes_state_the_service_command_and_read_only_inputs(

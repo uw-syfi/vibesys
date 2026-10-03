@@ -915,6 +915,10 @@ class ProjectState:
         )
         return _contained_state_dir(architecture_root, name, kind="machine cache")
 
+    def candidate_worktrees_directory(self, run_id: str) -> Path:
+        """Return the machine-local directory that holds every candidate worktree of one run."""
+        return self._worktrees_dir(run_id)
+
     def candidate_worktree_directory(self, run_id: str, candidate_id: str) -> Path:
         """Return the exact Git worktree directory for one run candidate."""
         candidate_root = _contained_state_dir(

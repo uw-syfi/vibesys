@@ -315,6 +315,9 @@ def test_semantic_runtime_and_sandbox_paths(tmp_path: Path) -> None:
     assert store.state.log_directory(run.run_id).is_relative_to(_local_state_dir(store))
     assert store.state.model_cache_directory("huggingface").is_relative_to(_local_state_dir(store))
     assert store.state.candidate_worktree_directory(run.run_id, "g1c1").is_relative_to(project)
+    assert store.state.candidate_worktree_directory(run.run_id, "g1c1").is_relative_to(
+        store.state.candidate_worktrees_directory(run.run_id)
+    )
     assert store.state.sandbox_paths().read_only_path == Path(".vibesys")
     assert store.state.sandbox_paths().hidden_path is None
     git = store.state.git_integration(run.run_id)

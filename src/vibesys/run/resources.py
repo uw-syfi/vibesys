@@ -543,6 +543,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_name=profiler_support_name,
                 profiler_support_extra=profiler_support_extra,
                 git_history_root=git.history_root,
+                run_owned_roots=(project_state.candidate_worktrees_directory(run_id),),
                 environment_bind_mounts=model_artifacts.bind_mounts,
                 log=logger.lprint,
                 framework_root=PROJECT_ROOT,
