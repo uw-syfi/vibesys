@@ -33,12 +33,21 @@ def prompt_vocabulary(prompt: str) -> tuple[str, ...]:
 
 
 class ReplyGenerator:
-    """Draw JSON values for one schema from a seeded generator."""
+    """Draw JSON values for one schema from a seeded generator.
 
-    def __init__(self, rng: random.Random, vocabulary: tuple[str, ...] = ()) -> None:
+    A plain generator answers the way a careful agent does: required fields
+    only, defaults kept, short arrays, fresh strings. A ``bold`` one fills
+    optional fields, reuses the prompt's identifiers, and draws longer arrays,
+    the way a careless agent does.
+    """
+
+    def __init__(
+        self, rng: random.Random, vocabulary: tuple[str, ...] = (), *, bold: bool = False
+    ) -> None:
         """Use ``rng`` for every choice and ``vocabulary`` as candidate strings."""
         self._rng = rng
         self._vocabulary = vocabulary
+        self._bold = bold
 
     def valid(self, response_cls: type[BaseModel]) -> BaseModel | None:
         """Return a schema-valid instance, or ``None`` if none was found in a few draws.
@@ -89,7 +98,8 @@ class ReplyGenerator:
             items = cast("dict[str, object]", schema.get("items", {}))
             low = cast("int", schema.get("minItems", 0))
             high = cast("int", schema.get("maxItems", low + 3))
-            return [self.value(items, root) for _ in range(rng.randint(low, min(high, low + 3)))]
+            longest = min(high, low + (3 if self._bold else 1))
+            return [self.value(items, root) for _ in range(rng.randint(low, longest))]
         if kind == "string":
             return self._string(schema)
         if kind == "integer":
@@ -111,14 +121,14 @@ class ReplyGenerator:
         return {
             name: self.value(field, root)
             for name, field in properties.items()
-            if name in required or self._rng.getrandbits(1)
+            if name in required or (self._bold and self._rng.getrandbits(1))
         }
 
     def _string(self, schema: dict[str, object]) -> str:
         rng = self._rng
         low = cast("int", schema.get("minLength", 0))
         high = cast("int", schema.get("maxLength", 40))
-        if self._vocabulary and rng.random() < _REUSE_SHARE:
+        if self._bold and self._vocabulary and rng.random() < _REUSE_SHARE:
             text = rng.choice(self._vocabulary)
         else:
             alphabet = string.ascii_letters + string.digits + "-_ ./"

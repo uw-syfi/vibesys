@@ -192,7 +192,10 @@ class FaultyAgentClient:
         if fault is AgentFault.SCHEMA_INVALID:
             return _validate(generator.invalid(response_cls), response_cls)
         if fault is AgentFault.WRONG_VALUES:
-            reply = generator.valid(response_cls)
+            bold = ReplyGenerator(
+                self._plan.rng("bold", kind, ordinal), prompt_vocabulary(user_prompt), bold=True
+            )
+            reply = bold.valid(response_cls)
             if reply is None:
                 raise AgentOutputSchemaError(_NO_JSON)
             assert isinstance(reply, response_cls)
