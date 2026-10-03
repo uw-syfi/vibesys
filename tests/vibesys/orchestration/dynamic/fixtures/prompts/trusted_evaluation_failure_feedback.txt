@@ -41,6 +41,12 @@ cannot be continued. A running workstream's row shows the evaluations its curren
 has submitted under running_evaluations, with each finished stage's outcome, and the
 attempt before that turn under previous_attempt. A stage outcome is the verdict: an
 evaluation is a pass only when each of its stages passed.
+A failed benchmark may report a partial_measurement: the measured value of a named
+quantity before the run stopped, the target a passing run needs, which direction is
+better, and progress (work completed out of work required). It is not a pass, but it
+is trusted and comparable across candidates measuring the same quantity: use it to
+pick the closest candidate to build on and to see which changes moved the measured
+value toward the target.
 
 The framework provides isolated candidate workspaces, runs selected independent
 reviews, and owns trusted evaluation and winner adoption. Every candidate that an
