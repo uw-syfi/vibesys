@@ -7,11 +7,14 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from vs_evaluation.api import (
+    MAX_AGENT_AWAIT_S,
+    MAX_STAGE_SUMMARY_TAIL_CHARS,
     AvailabilitySnapshot,
     AvailabilityState,
     ContentDigest,
@@ -22,6 +25,7 @@ from vs_evaluation.api import (
     EvaluationLifecycleEvent,
     EvaluationOperationSnapshot,
     EvaluationRequest,
+    EvaluationStageOutcome,
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
@@ -30,6 +34,15 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    PartialMeasurement,
+    ProfilerAgentCapacityError,
+    ProfilerAgentService,
+    ProfilerAgentUnavailableError,
+    ProfilerOperation,
+    ProfilerOperationState,
+    ProfilerResultOutcome,
+    ProfilerWorkKey,
+    ProfilerWorkPurpose,
     ResourceRequirements,
     ReuseStatus,
     RevisionConflictError,
@@ -37,13 +50,23 @@ from vs_evaluation.api import (
     StoredEvaluation,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    failure_signature,
     stable_handle_id,
 )
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentEvaluation,
+    AgentEvaluationMetric,
+    AgentEvaluationStage,
+    AgentEvaluationStageOutcome,
+    AgentEvaluationStatus,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateProfile,
+    CandidateProfileComponent,
+    CandidateProfileStatus,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -52,12 +75,16 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from vs_project.api import StateNamespace
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime.api.infrastructure import AgentToolBindingContext
 
 _STATE_DIRECTORY = "semantic-evaluations"
+_RETRYABLE_STATES = frozenset(
+    {EvaluationState.FAILED, EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
+)
 _INDEX_PATH = f"{_STATE_DIRECTORY}/index.json"
 
 
@@ -228,6 +255,7 @@ class _LocalSemanticExecutor:
                 state=EvaluationState.RUNNING, current_stage=request.stages[0].name
             ),
         )
+        failure: str | None = None
         try:
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
@@ -243,16 +271,33 @@ class _LocalSemanticExecutor:
                     evidence.kind is EvidenceKind.ACCURACY
                     and evidence.outcome is EvidenceOutcome.FAILED
                 ):
+                    skipped = request.stages[len(results) :]
                     results.extend(
                         EvaluationStepResult(name=remaining.name, state=StageState.SKIPPED)
-                        for remaining in request.stages[len(results) :]
+                        for remaining in skipped
                     )
+                    if skipped:
+                        # A successful evaluation must complete every planned stage, so
+                        # skipping the rest makes this a failed evaluation. The message
+                        # carries the accuracy diagnostics back to the submitting agent.
+                        failure = evidence.semantic_summary or "Accuracy check failed."
                     break
+                if len(results) < len(request.stages):
+                    # A waiting agent sees each finished stage and the one now running.
+                    self._publish(
+                        handle_id,
+                        ExecutorObservation(
+                            state=EvaluationState.RUNNING,
+                            current_stage=request.stages[len(results)].name,
+                            stage_results=tuple(results),
+                        ),
+                    )
             self._publish(
                 handle_id,
                 ExecutorObservation(
-                    state=EvaluationState.SUCCEEDED,
+                    state=EvaluationState.SUCCEEDED if failure is None else EvaluationState.FAILED,
                     stage_results=tuple(results),
+                    failure=failure,
                 ),
             )
         except asyncio.CancelledError:
@@ -274,10 +319,12 @@ class _LocalSemanticExecutor:
             outcome = EvidenceOutcome.PASSED if result.passed else EvidenceOutcome.FAILED
             summary = result.feedback
             metrics: tuple[EvidenceMetric, ...] = ()
+            partial = None
         elif stage.kind is EvidenceKind.BENCHMARK:
             result = await self._evaluation.benchmark(workspace)
             outcome = EvidenceOutcome.PASSED if result.passed else EvidenceOutcome.FAILED
             summary = result.feedback
+            partial = result.partial_measurement
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
@@ -294,16 +341,7 @@ class _LocalSemanticExecutor:
         else:
             message = "direct profile evaluation is not supported by the trusted runtime"
             raise ValueError(message)
-        identity: JsonValue = {
-            "kind": stage.kind.value,
-            "fingerprints": stage.fingerprints.model_dump(mode="json"),
-            "outcome": outcome.value,
-            "summary": summary,
-            "metrics": [item.model_dump(mode="json") for item in metrics],
-        }
-        evidence_id = hashlib.sha256(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
         return TrustedEvidence(
             evidence_id=evidence_id,
             evaluation_id=evidence_id,
@@ -314,6 +352,7 @@ class _LocalSemanticExecutor:
             outcome=outcome,
             semantic_summary=summary,
             metrics=metrics,
+            partial_measurement=partial,
             accepted_round=0,
         )
 
@@ -357,9 +396,13 @@ class SemanticEvaluationBackend:
         self._workspaces = workspaces
         self._identity = identity
         self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
+        self._store = _NamespaceEvaluationStore(namespace)
+        # Serializes "pick a key, then claim it" so two submissions of identical
+        # content cannot both pick the same fresh key with different snapshots.
+        self._claim_lock = asyncio.Lock()
         self._coordinator = EvaluationCoordinator(
             self._executor,
-            _NamespaceEvaluationStore(namespace),
+            self._store,
             _Clock(),
             events=events or (lambda _event: None),
         )
@@ -388,31 +431,72 @@ class SemanticEvaluationBackend:
         """Snapshot a candidate and submit exact semantic evidence work."""
         workspace = self._require_workspace(scope_id)
         snapshot = await workspace.snapshot("agent-evaluation")
+        return await self.submit_revision_evidence(snapshot, kinds)
+
+    async def submit_revision_evidence(
+        self, snapshot: str, kinds: tuple[EvidenceKind, ...]
+    ) -> SubmittedSemanticEvaluation:
+        """Submit exact semantic evidence work for one recorded revision.
+
+        Work for the same content and kinds is joined, so an agent that later
+        submits the same candidate reads this evaluation instead of a new one.
+        """
         fingerprints = await self._fingerprints(snapshot)
-        key_document = {
+        # Only choosing and claiming the key is serialized. Staging and submitting to
+        # the executor can take tens of seconds, so they run outside the lock.
+        async with self._claim_lock:
+            key, existing = await self._claimable_key(fingerprints, kinds)
+            request = (
+                existing.request
+                if existing is not None
+                else EvaluationRequest(
+                    key=key,
+                    stages=tuple(
+                        EvaluationStep(
+                            name=kind.value,
+                            payload=SemanticEvaluationStage(
+                                snapshot=snapshot,
+                                kind=kind,
+                                fingerprints=fingerprints,
+                            ).model_dump(mode="json"),
+                        )
+                        for kind in kinds
+                    ),
+                )
+            )
+            if existing is None:
+                # Claiming makes the key visible to the next submission's pick. The
+                # coordinator's own claim below returns this same record.
+                await self._store.claim(request, handle_id=stable_handle_id(key))
+        # An existing record means the same content was already submitted from another
+        # snapshot; any snapshot with these fingerprints is the same work, so join it.
+        handle = await self._coordinator.submit(request)
+        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+
+    async def _claimable_key(
+        self, fingerprints: EvidenceFingerprints, kinds: tuple[EvidenceKind, ...]
+    ) -> tuple[str, StoredEvaluation | None]:
+        """Return the key of live or completed work for this content, else a fresh key.
+
+        Identity is the content fingerprints and evidence kinds, never the snapshot
+        commit. An attempt that ended without a result (failed, canceled, or
+        superseded) does not block a new attempt at the same content.
+        """
+        document: dict[str, JsonValue] = {
             "fingerprints": fingerprints.model_dump(mode="json"),
             "kinds": [kind.value for kind in kinds],
         }
-        key = hashlib.sha256(
-            json.dumps(key_document, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        handle = await self._coordinator.submit(
-            EvaluationRequest(
-                key=key,
-                stages=tuple(
-                    EvaluationStep(
-                        name=kind.value,
-                        payload=SemanticEvaluationStage(
-                            snapshot=snapshot,
-                            kind=kind,
-                            fingerprints=fingerprints,
-                        ).model_dump(mode="json"),
-                    )
-                    for kind in kinds
-                ),
-            )
-        )
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+        attempt = 0
+        while True:
+            if attempt:
+                document["attempt"] = attempt
+            key = hashlib.sha256(
+                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            existing = await self._store.get_by_key(key)
+            if existing is None or existing.state not in _RETRYABLE_STATES:
+                return key, existing
+            attempt += 1
 
     async def accepted_evidence(
         self,
@@ -478,19 +562,31 @@ class SemanticEvaluationBackend:
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return lifecycle state and trust-boundary accepted result identity."""
         record = await self._coordinator.snapshot(handle_id)
-        evidence = tuple(
-            TrustedEvidence.model_validate(result.result)
-            for result in record.stage_results
-            if result.state is StageState.SUCCEEDED and result.result is not None
-        )
+        evidence = _stage_evidence(record)
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
             state=record.state,
-            accepted_result=(
+            current_stage=record.current_stage,
+            evidence_recorded=(
                 record.state is EvaluationState.SUCCEEDED
                 and len(evidence) == len(record.request.stages)
             ),
+            stage_outcomes=tuple(
+                EvaluationStageOutcome(
+                    kind=item.kind,
+                    outcome=item.outcome,
+                    metrics=item.metrics,
+                    partial_measurement=item.partial_measurement,
+                    summary_tail=(
+                        item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
+                        if item.semantic_summary
+                        else None
+                    ),
+                )
+                for item in evidence
+            ),
             evidence_ids=tuple(item.evidence_id for item in evidence),
+            failure=_agent_evaluation(record).failure,
         )
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
@@ -500,6 +596,15 @@ class SemanticEvaluationBackend:
     async def cancel(self, handle_id: str) -> StoredEvaluation:
         """Request cancellation and return the durable operation record."""
         return await self._coordinator.cancel(handle_id)
+
+    async def agent_evaluations(self, handle_ids: tuple[str, ...]) -> tuple[AgentEvaluation, ...]:
+        """Describe each handle's current outcome, in the given order."""
+        return tuple(
+            [
+                _agent_evaluation(await self._coordinator.snapshot(handle_id))
+                for handle_id in handle_ids
+            ]
+        )
 
     def _require_workspace(self, scope_id: str | None) -> Workspace:
         workspace = self._workspaces_by_scope.get(scope_id)
@@ -538,6 +643,209 @@ class SemanticEvaluationBackend:
         )
 
 
+def evidence_identity(
+    stage: SemanticEvaluationStage,
+    outcome: EvidenceOutcome,
+    summary: str | None,
+    metrics: Sequence[EvidenceMetric],
+    partial: PartialMeasurement | None,
+) -> str:
+    """Return the content address of one stage's trusted evidence.
+
+    A partial measurement is part of the identity only when present, so
+    evidence recorded before it existed keeps its identifier.
+    """
+    identity: dict[str, JsonValue] = {
+        "kind": stage.kind.value,
+        "fingerprints": stage.fingerprints.model_dump(mode="json"),
+        "outcome": outcome.value,
+        "summary": summary,
+        "metrics": [item.model_dump(mode="json") for item in metrics],
+    }
+    if partial is not None:
+        identity["partial_measurement"] = partial.model_dump(mode="json")
+    return hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+# Evaluation failure text is read by the agent that submitted the evaluation.
+_RENDERER = TemplateRenderer(Path(__file__).with_name("prompts"))
+
+
+def render_rejected_evidence(
+    rejected: Sequence[tuple[str | None, EvidenceKind]],
+) -> RenderedPrompt:
+    """One line per rejected ``(semantic summary, kind)``: the summary, else ``<kind> failed``."""
+    return _RENDERER.render_template("rejected_evidence.j2", rejected=rejected)
+
+
+def render_evaluation_failure(
+    record_failure: str | None, stage_failure: str | None
+) -> RenderedPrompt:
+    """A failed evaluation's own message, else its first stage failure, else a generic one."""
+    return _RENDERER.render_template(
+        "evaluation_failure.j2", record_failure=record_failure, stage_failure=stage_failure
+    )
+
+
+def render_stage_failure(
+    rejected: Sequence[tuple[str | None, EvidenceKind]], observed_failure: str | None
+) -> RenderedPrompt:
+    """The failure of an evaluation whose failed stage skipped the rest.
+
+    One line per failed check (its summary, else ``<kind> check failed``), else
+    the executor's own failure, else a generic stage failure.
+    """
+    return _RENDERER.render_template(
+        "stage_failure.j2", rejected=rejected, observed_failure=observed_failure
+    )
+
+
+def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
+    """Reduce one durable record to the outcome its submitting agent saw."""
+    stage = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
+    kinds = tuple(step.name for step in record.request.stages)
+    evidence = _stage_evidence(record)
+    stages = tuple(_agent_stage(item) for item in evidence)
+    if record.state is EvaluationState.SUCCEEDED:
+        rejected = [item for item in evidence if item.outcome is EvidenceOutcome.FAILED]
+        if not rejected:
+            return AgentEvaluation(
+                revision=stage.snapshot,
+                content_digest=stage.fingerprints.candidate.value,
+                kinds=kinds,
+                status=AgentEvaluationStatus.PASSED,
+                stages=stages,
+            )
+        failure = render_rejected_evidence(
+            [(item.semantic_summary, item.kind) for item in rejected]
+        )
+        return AgentEvaluation(
+            revision=stage.snapshot,
+            content_digest=stage.fingerprints.candidate.value,
+            kinds=kinds,
+            status=AgentEvaluationStatus.FAILED,
+            stages=stages,
+            failure=failure,
+            signature=failure_signature(failure),
+        )
+    if record.state is EvaluationState.FAILED:
+        stage_failure = next(
+            (result.failure for result in record.stage_results if result.failure), None
+        )
+        failure = render_evaluation_failure(record.failure, stage_failure)
+        return AgentEvaluation(
+            revision=stage.snapshot,
+            content_digest=stage.fingerprints.candidate.value,
+            kinds=kinds,
+            status=AgentEvaluationStatus.FAILED,
+            stages=stages,
+            failure=failure,
+            signature=failure_signature(failure),
+        )
+    status = (
+        AgentEvaluationStatus.CANCELED
+        if record.state in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
+        else AgentEvaluationStatus.PENDING
+    )
+    return AgentEvaluation(
+        revision=stage.snapshot,
+        content_digest=stage.fingerprints.candidate.value,
+        kinds=kinds,
+        status=status,
+        stages=stages,
+    )
+
+
+def _stage_evidence(record: StoredEvaluation) -> tuple[TrustedEvidence, ...]:
+    """Return the trusted evidence of each stage that finished with a result, in stage order."""
+    return tuple(
+        TrustedEvidence.model_validate(result.result)
+        for result in record.stage_results
+        if result.state is StageState.SUCCEEDED and result.result is not None
+    )
+
+
+def _agent_stage(evidence: TrustedEvidence) -> AgentEvaluationStage:
+    return AgentEvaluationStage(
+        kind=evidence.kind.value,
+        outcome=AgentEvaluationStageOutcome(evidence.outcome.value),
+        metrics=tuple(
+            AgentEvaluationMetric(
+                name=metric.name,
+                value=metric.value,
+                unit=metric.unit,
+                direction=(
+                    MetricDirection(metric.direction) if metric.direction is not None else None
+                ),
+            )
+            for metric in evidence.metrics
+        ),
+        partial_measurement=evidence.partial_measurement,
+    )
+
+
+_MAX_PROFILE_FOCUS_CHARS = 512
+
+
+def _profile_focus(request: str) -> str:
+    """Return the request's first line as the operation's exact-match work focus."""
+    first = next((line.strip() for line in request.splitlines() if line.strip()), "profile")
+    return first[:_MAX_PROFILE_FOCUS_CHARS].strip()
+
+
+def _candidate_profile(revision: str, operation: ProfilerOperation) -> CandidateProfile:
+    """Project one terminal profiler operation as the policy-facing profile outcome."""
+    result = operation.result
+    if operation.state is not ProfilerOperationState.COMPLETED or result is None:
+        return CandidateProfile(
+            revision=revision,
+            status=CandidateProfileStatus.FAILED,
+            operation_id=operation.operation_id,
+            failure=operation.error or f"the profiler operation ended {operation.state.value}",
+        )
+    report = result.report
+    if report.outcome is ProfilerResultOutcome.UNSUPPORTED:
+        return CandidateProfile(
+            revision=revision,
+            status=CandidateProfileStatus.UNSUPPORTED,
+            operation_id=operation.operation_id,
+            diagnosis=report.unsupported_reason,
+            evidence_ids=report.evidence_ids,
+        )
+    return CandidateProfile(
+        revision=revision,
+        status=CandidateProfileStatus.OBSERVED,
+        operation_id=operation.operation_id,
+        diagnosis=report.narrative,
+        components=tuple(
+            CandidateProfileComponent(name=item.name, share=item.share)
+            for item in report.attribution
+        ),
+        evidence_ids=report.evidence_ids,
+    )
+
+
+_TERMINAL_EVALUATION_STATES = frozenset(
+    {
+        EvaluationState.SUCCEEDED,
+        EvaluationState.FAILED,
+        EvaluationState.CANCELED,
+        EvaluationState.SUPERSEDED,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _CapturedProfile:
+    """The recorded outcome of one host-run trusted profile capture."""
+
+    evidence_id: str
+    outcome: EvidenceOutcome
+    summary_tail: str | None
+
+
 class EvidenceReusingEvaluation:
     """Reuse exact accepted evidence before invoking official evaluation effects."""
 
@@ -547,11 +855,107 @@ class EvidenceReusingEvaluation:
         backend: SemanticEvaluationBackend,
         *,
         run_id: str,
+        scope_handles: Callable[[str | None], Awaitable[tuple[str, ...]]],
+        profiler: ProfilerAgentService | None = None,
     ) -> None:
-        """Bind the official evaluator to accepted evidence from one backend."""
+        """Bind the official evaluator to accepted evidence from one backend.
+
+        ``scope_handles`` returns the handles agents submitted from one
+        workspace scope; the agent service owns that record. ``profiler`` is
+        the run's profiler-agent service, when one is provisioned.
+        """
         self._delegate = delegate
         self._backend = backend
         self._run_id = run_id
+        self._scope_handles = scope_handles
+        self._profiler = profiler
+
+    async def can_profile(self) -> bool:
+        """Return whether a profiler is provisioned and the executor produces profile evidence.
+
+        The executor's availability snapshot is the one source of its supported
+        evidence kinds; the agent service rejects a submission from the same set.
+        """
+        if self._profiler is None:
+            return False
+        snapshot = await self._backend.availability(ResourceRequirements())
+        return EvidenceKind.PROFILE.value in snapshot.supported_evidence_kinds
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Run one profiler operation on ``revision`` and return its typed outcome.
+
+        The operation goes through the same profiler service as an agent's
+        ``dispatch_profiler``, so it is a durable, run-observable record.
+        """
+        if self._profiler is None:
+            return await self._delegate.profile(revision, request, member_id=member_id)
+        captured = await self._trusted_capture(revision)
+        if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
+            # The trusted capture's workload did not run (for example the
+            # engine fails the workload's own preflight), so no profiler turn
+            # can answer the question from it. Report that without a turn.
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                diagnosis=(
+                    "the trusted profile capture failed, so no profiler turn ran: "
+                    f"{captured.summary_tail or 'no output'}"
+                ),
+                evidence_ids=(captured.evidence_id,),
+            )
+        try:
+            dispatched = await self._profiler.dispatch(
+                principal_id=member_id,
+                scope_id=None,
+                request=request,
+                work=ProfilerWorkKey(
+                    purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE,
+                    focus=_profile_focus(request),
+                ),
+                session_id=None,
+                candidate_snapshot_id=revision,
+            )
+        except (ProfilerAgentUnavailableError, ProfilerAgentCapacityError, ValueError) as error:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=f"the profile could not start: {error}",
+            )
+        while True:
+            reply = await self._profiler.await_result(
+                dispatched.operation_id, member_id, None, MAX_AGENT_AWAIT_S
+            )
+            if not reply.timed_out:
+                return _candidate_profile(revision, reply.operation)
+
+    async def _trusted_capture(self, revision: str) -> _CapturedProfile | None:
+        """Run the trusted profile capture of ``revision`` before any profiler turn.
+
+        The host waits for the capture, which costs no agent tokens; the
+        profiler's own submission of the same content then joins the completed
+        evaluation instead of polling a running one. Returns ``None`` when the
+        executor cannot capture or the capture recorded no evidence.
+        """
+        if not await self.can_profile():
+            return None
+        submitted = await self._backend.submit_revision_evidence(revision, (EvidenceKind.PROFILE,))
+        while True:
+            snapshot = await self._backend.operation_snapshot(submitted.handle_id)
+            if snapshot.state in _TERMINAL_EVALUATION_STATES:
+                break
+            await self._backend.await_result(submitted.handle_id, MAX_AGENT_AWAIT_S)
+        if not snapshot.stage_outcomes or not snapshot.evidence_ids:
+            return None
+        (outcome,) = snapshot.stage_outcomes
+        return _CapturedProfile(
+            evidence_id=snapshot.evidence_ids[0],
+            outcome=outcome.outcome,
+            summary_tail=outcome.summary_tail,
+        )
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return the outcomes of evaluations agents submitted from ``workspace``."""
+        return await self._backend.agent_evaluations(await self._scope_handles(workspace.id))
 
     async def accuracy(
         self,
@@ -624,6 +1028,7 @@ class EvidenceReusingEvaluation:
             metric_direction=direction,
             metric_unit=metric.unit if metric is not None else None,
             row=row or None,
+            partial_measurement=accepted.partial_measurement if feedback is not None else None,
         )
 
     async def validate_local(
@@ -647,4 +1052,5 @@ __all__ = [
     "SemanticEvaluationExecutor",
     "SemanticEvaluationIdentity",
     "SemanticEvaluationStage",
+    "evidence_identity",
 ]

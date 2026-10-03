@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import (
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.hypothesis import (
     InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
@@ -25,12 +25,15 @@ from vibesys.orchestration.multi.contracts import (
     PlanContext,
     PreRoundContext,
     PreRoundDecision,
+    ProfilerCampaign,
     ProfilerContext,
 )
 from vibesys.orchestration.multi.prompts import (
+    render_archive_conflict,
     render_continuation_prompt,
     render_implementer_prompt,
     render_judge_prompt,
+    render_pareto_guard,
     render_plan_prompt,
     render_pre_round_prompt,
     render_profiler_prompt,
@@ -42,28 +45,33 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
 )
 from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import (
+    TurnFailed,
+    attempt_structured_turn,
+    structured_turn,
+)
+from vibesys.prompts import render_plan_correction
 from vs_runtime.api import (
-    AgentTurnTimeoutError,
     ResolvedSkillResources,
     Run,
     SkillCatalogError,
     SkillResourceRequest,
-    StructuredResponseError,
 )
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
+        ArchiveConflict,
         AttemptState,
-        CarryOver,
         HypothesisSearch,
         HypothesisState,
     )
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.multi.files import MultiFiles
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
-    from vibesys.orchestration.profile_focus import FocusView
+    from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
+    from vibesys.profile_focus import FocusView
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 
@@ -73,8 +81,8 @@ class PlanRequest:
 
     round_number: int
     state: HypothesisState
-    carry: CarryOver
-    profiler_summary: ProfilerSummary | None
+    carried: CarriedEntries
+    profile: ProgressEntry | None
     plateau_warning: str | None
     provisional_candidates: int
     workspace: Workspace
@@ -92,63 +100,6 @@ class AttemptRequest:
     active_hypothesis: Hypothesis
     workspace: Workspace
     guidance: FocusView | None
-
-
-def _fallback_pre_round() -> PreRoundDecision:
-    return PreRoundDecision(
-        need_profile=False,
-        profile_focus="",
-        reasoning="fallback: default to skip",
-    )
-
-
-def _fallback_plan() -> OrchestratorPlan:
-    return OrchestratorPlan.model_validate(
-        {
-            "task": "Re-check minimal server boots and /health returns 200.",
-            "pass_criteria": "/health returns 200.",
-            "reasoning": "fallback: orchestrator produced no structured response",
-        }
-    )
-
-
-def _fallback_profiler() -> ProfilerSummary:
-    return ProfilerSummary(
-        analysis="Profiler produced no structured response.",
-        bottlenecks="n/a",
-        suggestions="Re-run profiling on the next round.",
-    )
-
-
-def _fallback_implementer() -> ImplementerResponse:
-    return ImplementerResponse(
-        summary="Implementer produced no structured response.",
-        expected_behavior="unknown",
-        hypothesis_outcome="inconclusive",
-        evidence="The implementer output could not be parsed.",
-        next_step="Recover retained evidence and return a schema-valid response before review.",
-    )
-
-
-def _timeout_implementer(timeout_seconds: float) -> ImplementerResponse:
-    return ImplementerResponse(
-        summary="Implementer invocation timed out.",
-        expected_behavior="unknown",
-        hypothesis_outcome="inconclusive",
-        evidence=(
-            f"The framework stopped the implementer after {timeout_seconds:g} seconds "
-            "without a structured response."
-        ),
-        next_step="Inspect retained evidence and return a schema-valid response on retry.",
-    )
-
-
-def _fallback_judge() -> JudgeResponse:
-    return JudgeResponse(
-        analysis="Judge produced no structured response.",
-        feedback="No structured response received.",
-        verdict=Verdict.FAIL,
-    )
 
 
 async def _resolve_skills(
@@ -224,7 +175,7 @@ class MultiAgentTurns:
     async def pre_round(
         self,
         round_number: int,
-        carry: CarryOver,
+        carried: CarriedEntries,
         *,
         has_history: bool,
     ) -> PreRoundDecision:
@@ -232,8 +183,8 @@ class MultiAgentTurns:
         facts = self.run.facts
         context = PreRoundContext(
             objective_location=facts.objective_location,
-            regression_info=carry.regression_info,
-            exhaustion_info=carry.exhaustion_info,
+            regression_entry=carried.regression,
+            exhaustion_entry=carried.exhaustion,
             progress_location=self.files.progress_location,
             profiler_kind=facts.profiler_id,
             profile_execution=facts.profile_execution.value,
@@ -245,12 +196,9 @@ class MultiAgentTurns:
             writable_paths=(self.files.roadmap_location,),
         )
         try:
-            try:
-                decision = await session.turn(
-                    render_pre_round_prompt(context), response=PreRoundDecision
-                )
-            except StructuredResponseError:
-                decision = _fallback_pre_round()
+            decision = await structured_turn(
+                session, render_pre_round_prompt(context), PreRoundDecision
+            )
         finally:
             await session.close()
         self.files.note_pre_round(round_number, decision)
@@ -260,9 +208,9 @@ class MultiAgentTurns:
         facts = self.run.facts
         return PlanContext(
             objective_location=facts.objective_location,
-            profiler_summary=request.profiler_summary,
-            regression_info=request.carry.regression_info,
-            exhaustion_info=request.carry.exhaustion_info,
+            profiler_entry=request.profile,
+            regression_entry=request.carried.regression,
+            exhaustion_entry=request.carried.exhaustion,
             progress_location=self.files.progress_location,
             roadmap_location=self.files.roadmap_location,
             pareto_archive_location=self.files.pareto_location,
@@ -282,7 +230,7 @@ class MultiAgentTurns:
             active_component=(
                 request.guidance.active_component if request.guidance is not None else None
             ),
-            ledger_text=(request.guidance.ledger_text if request.guidance is not None else None),
+            ledger=(request.guidance.ledger if request.guidance is not None else None),
             ranked_bottlenecks=(
                 [
                     {
@@ -316,10 +264,7 @@ class MultiAgentTurns:
             writable_paths=(self.files.roadmap_location,),
         )
         try:
-            try:
-                plan = await session.turn(render_plan_prompt(context), response=OrchestratorPlan)
-            except StructuredResponseError:
-                plan = _fallback_plan()
+            plan = await structured_turn(session, render_plan_prompt(context), OrchestratorPlan)
             for attempt in range(2):
                 plan.hypothesis_id = (
                     plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
@@ -330,25 +275,18 @@ class MultiAgentTurns:
                 except ValueError as error:
                     if attempt:
                         raise
-                    rejected = ", ".join(
-                        sorted({item.hypothesis_id for item in plan.hypothesis_updates})
-                    )
-                    feedback = (
-                        f"Your previous plan was rejected: {error}. It proposed "
-                        f"hypothesis_id {plan.hypothesis_id!r} and named "
-                        f"{rejected or '(no)'} in hypothesis_updates. A hypothesis_id "
-                        "names one investigation permanently: never reuse an identifier "
-                        "used earlier in this run. hypothesis_updates may name each prior "
-                        "hypothesis at most once, and never the new one. Produce a corrected "
-                        "plan for this round. Return only the JSON object."
+                    feedback = render_plan_correction(
+                        error=str(error),
+                        hypothesis_id=plan.hypothesis_id,
+                        updated_hypothesis_ids=[
+                            item.hypothesis_id for item in plan.hypothesis_updates
+                        ],
+                        require_unseen_id=False,
                     )
                     self.run.observations.warning(
                         f"[orchestrator] plan rejected ({error}); reprompting once"
                     )
-                    try:
-                        plan = await session.turn(feedback, response=OrchestratorPlan)
-                    except StructuredResponseError:
-                        plan = _fallback_plan()
+                    plan = await structured_turn(session, feedback, OrchestratorPlan)
                     continue
                 portable, _ = await _resolve_skills(self.run, plan.recommended_skills)
                 plan.recommended_skills = portable
@@ -360,24 +298,12 @@ class MultiAgentTurns:
         finally:
             await session.close()
 
-    def _profiler_campaign_context(self, artifact: str) -> str:
-        return f"""
+    async def profile(self, round_number: int, focus: str) -> ProgressEntry | None:
+        """Collect optional evidence in one fresh bounded-write conversation.
 
-## Recent campaign context
-
-The durable progress artifact is `{self.files.progress_location}`. Inspect the most
-recent applicable round before older evidence. Write bounded durable profile
-evidence only below `{artifact}` and keep large transient traces under `/tmp`.
-
-## Read-only evidence boundary
-
-Never edit candidate source, configuration, tests, locks, instrumentation,
-endpoints, or entrypoints. Report an observability mismatch when the configured
-production path cannot be measured safely.
-"""
-
-    async def profile(self, round_number: int, focus: str) -> ProfilerSummary | None:
-        """Collect optional evidence in one fresh bounded-write conversation."""
+        Returns the progress entry holding the profiler summary, or ``None``
+        when no profiler ran or it failed.
+        """
         facts = self.run.facts
         kind = ProfilerKind(facts.profiler_id)
         if kind is ProfilerKind.NONE:
@@ -400,7 +326,10 @@ production path cannot be measured safely.
             objective=None,
             profiler_support_name=definition.support_name,
             profiler_mcp_name=definition.mcp_name,
-            profiler_campaign_context=self._profiler_campaign_context(artifact),
+            campaign=ProfilerCampaign(
+                progress_location=self.files.progress_location,
+                evidence_location=artifact,
+            ),
         )
         session = await self.run.agents.create_session(
             PROFILER,
@@ -408,20 +337,15 @@ production path cannot be measured safely.
             writable_paths=(artifact,),
         )
         try:
-            try:
-                summary = await session.turn(
-                    render_profiler_prompt(kind.value, context),
-                    response=ProfilerSummary,
-                )
-            except StructuredResponseError:
-                summary = _fallback_profiler()
+            summary = await structured_turn(
+                session, render_profiler_prompt(kind.value, context), ProfilerSummary
+            )
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920440 [BLE001]; profiling is advisory; a failed specialist must not abort the policy round.
             self.run.observations.warning(f"[profiler] failed: {error}")
             return None
         finally:
             await session.close()
-        self.files.note_profile(round_number, summary)
-        return summary
+        return self.files.note_profile(round_number, summary)
 
     async def _implementer_context(
         self,
@@ -506,8 +430,12 @@ production path cannot be measured safely.
         self,
         request: AttemptRequest,
         state: AttemptState,
-    ) -> tuple[ImplementerResponse, bool]:
-        """Run one attempt in the hypothesis's context-preserving conversation."""
+    ) -> ImplementerResponse | TurnFailed:
+        """Run one attempt in the hypothesis's context-preserving conversation.
+
+        A reply that stays invalid after its correction, or a timed-out turn,
+        returns :class:`TurnFailed`; the caller records it as a failed attempt.
+        """
         if self._closed:
             message = "multi-agent turns are closed"
             raise RuntimeError(message)
@@ -534,16 +462,10 @@ production path cannot be measured safely.
             if isinstance(context, ImplementerContinuationContext)
             else render_implementer_prompt(context)
         )
-        try:
-            response = await session.turn(prompt, response=ImplementerResponse)
-        except StructuredResponseError:
-            response = _fallback_implementer()
-        except AgentTurnTimeoutError as error:
-            response = _timeout_implementer(error.timeout_seconds)
-        synthesized = response.summary in {
-            "Implementer produced no structured response.",
-            "Implementer invocation timed out.",
-        }
+        response = await attempt_structured_turn(session, prompt, ImplementerResponse)
+        if isinstance(response, TurnFailed):
+            self.files.note_implementation_failed(request.round_number, state.retry, response)
+            return response
         updates, _ = await _resolve_skills(self.run, response.skill_context_updates)
         if updates:
             plan.recommended_skills, _ = await _resolve_skills(
@@ -553,13 +475,13 @@ production path cannot be measured safely.
             self.files.write_plan(request.round_number, plan)
         self.files.write_implementer(request.round_number, state.retry, response)
         self.files.note_implementation(request.round_number, state.retry, response)
-        return response, synthesized
+        return response
 
     async def review(
         self,
         request: AttemptRequest,
         state: AttemptState,
-        conflict: str | None,
+        conflict: ArchiveConflict | None,
     ) -> JudgeResponse:
         """Audit one implementation using a fresh read-only conversation."""
         implementation = state.implementation
@@ -606,20 +528,14 @@ production path cannot be measured safely.
         )
         session = await self.run.agents.create_session(JUDGE, workspace=request.workspace)
         try:
-            try:
-                response = await session.turn(
-                    render_judge_prompt(context),
-                    response=JudgeResponse,
-                )
-            except StructuredResponseError:
-                response = _fallback_judge()
+            response = await structured_turn(session, render_judge_prompt(context), JudgeResponse)
         finally:
             await session.close()
-        if response.verdict is Verdict.PASS and conflict:
+        if response.verdict is Verdict.PASS and conflict is not None:
             response = response.model_copy(
                 update={
-                    "analysis": f"{response.analysis}\n\nFramework Pareto guard: {conflict}",
-                    "feedback": conflict,
+                    "analysis": render_pareto_guard(response.analysis, conflict),
+                    "feedback": render_archive_conflict(conflict),
                     "verdict": Verdict.FAIL,
                 }
             )

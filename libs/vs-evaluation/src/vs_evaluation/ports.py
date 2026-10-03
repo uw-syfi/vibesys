@@ -26,6 +26,15 @@ class ExecutorSubmissionError(RuntimeError):
         self.__cause__ = cause
 
 
+class ExecutorRejectedError(ValueError):
+    """The executor refused the request before accepting it; a retry cannot succeed.
+
+    Raise it for a request the executor can never run, such as an evidence
+    kind it does not produce. The coordinator records the handle as failed
+    with this reason instead of retrying the submission.
+    """
+
+
 class Clock(Protocol):
     """Monotonic time source used for bounded waits and observations."""
 
@@ -85,7 +94,9 @@ class EvaluationExecutor(Protocol):
         """Ensure work for handle_id exists, idempotently across resume.
 
         Wrap a submission failure in ExecutorSubmissionError. A raised error
-        does not imply that the executor rejected the request.
+        does not imply that the executor rejected the request. Raise
+        ExecutorRejectedError only when the executor definitely did not
+        accept the request and never will.
         """
         ...
 

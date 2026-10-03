@@ -1,6 +1,6 @@
 ---
 name: software-design
-description: Design, structure, or change code in any language in this repository. Applies to every code change, especially adding or moving modules, interfaces, dependencies, data flow, config, or resource handling, and to any refactor, split, migration, or contract change.
+description: Design, structure, or change code in any language in this repository. Applies to every code change, especially adding or moving modules, interfaces, dependencies, data flow, config, resource handling, or calls to agents, clusters, or subprocesses, to every bug fix, and to any refactor, split, migration, or contract change.
 ---
 
 # Software design
@@ -31,6 +31,17 @@ section.
    callers? See rule 5.
 6. **Twice.** Sketch a second, materially different interface. Keep the one
    that hides more.
+7. **Mechanism.** For every bug fix, name the mechanism that allowed the bug
+   before choosing the fix, then search for its other instances: sibling exit
+   paths, roles, backends, tools, and call sites that state the same fact.
+   One instance found is not evidence of one instance. Change the mechanism
+   instead of patching each place: a constrained type where agent output
+   becomes a name or path, one source of truth that consumers project from,
+   one owner that every exit path passes through, a failure type set where
+   the failure happens. Record the class and the instances found (or "none
+   found, searched X") in the PR. If the mechanism fix is too large for the
+   PR, land the instance fix only to unblock, and name the mechanism fix as a
+   follow-up.
 
 ## Rules
 
@@ -57,21 +68,41 @@ section.
 5. **Factor when callers need internals.** Size is the cue to check, not the
    reason to split. When a unit grows until callers must know how it works,
    make it a unit the dependency tooling can track, with a clear interface.
-6. **Policy versus mechanism.** Defaults and selected values live in
+6. **Policy versus mechanism.** Follow the package layout and placement rule
+   in [architecture.md](../../../docs/contributing/architecture.md). Defaults
+   and selected values live in
    configuration; implementations apply what they are given; wiring connects
    them. A new case changes configuration, not a per-type branch in every
    implementation.
 7. **Parse at boundaries, typed inside, fail loudly.** Validate external input
    once, at the edge, into typed values; reject unknown keys and name the
    offender. Define an error away only where the semantics are well defined,
-   and never mask errors on agent-visible contracts.
+   and never mask errors on agent-visible contracts. No fallback may produce a
+   plausible-looking result: a terminal status is derived from the work done
+   (a run that did nothing did not complete), and a missing required input is
+   an error, not a guessed default such as a shared temp path.
 8. **One source of truth.** Store the minimal state and derive the rest.
    Generate downstream definitions from the authoritative one.
 9. **Own resources, inject effects.** The creator of a resource owns its
-   cleanup, on every path. Put side effects (processes, network, clock,
-   filesystem) behind a seam so they can be replaced by a Fake; see the
-   `testing` skill.
-10. **Fit the change to the design.** Make the change as if the design had
+   cleanup, on every path, through one construct that every exit passes
+   through (return, exception, cancellation, signal, stop request), not a
+   handler per exit path. A parent process forwards signals to the owner and
+   never kills it before its cleanup runs. Put side effects (processes,
+   network, clock, filesystem) behind a seam so they can be replaced by a
+   Fake; see the `testing` skill.
+10. **Distrust external boundaries.** Agents, agent CLIs, clusters, MCP
+    clients, and subprocesses delay, fail, and misbehave; design for it at
+    the boundary, once. Read
+    [references/boundaries.md](references/boundaries.md) when you add or
+    change a call across one, or an agent tool server (its own module,
+    library, or standalone server under `resources/`). In short: agent output is untrusted input, and
+    an option the run does not offer is absent from the schema, not rejected
+    after the fact; every call has a deadline derived from the caller's
+    limit; failures are typed (transient, permanent, unsupported);
+    operations are idempotent so retry and cancel are safe; retries are
+    bounded and only for transient failures of idempotent operations; what
+    the system offers is derived from what the executor reports it supports.
+11. **Fit the change to the design.** Make the change as if the design had
     anticipated it, not the smallest diff that works. Prepare first: refactor
     to make the change easy, then make it. Never extend an existing violating
     pattern. Clean only your own path, in a separate commit or PR; otherwise
@@ -80,7 +111,18 @@ section.
     land the contract step. Read
     [references/evolving.md](references/evolving.md) when you refactor, split,
     migrate, or change a contract.
-11. **Lint suppressions are explicit opt-outs.** First consider reasonable
+12. **Agent-bound text is a template.** Prompts, system prompts, and the
+    fragments inside them are rendered by `vs_prompts` from `.j2` files.
+    Python passes data; the template owns the wording, conditionals, and loops.
+    Never build prompt text with `+`, f-strings, `.format`, or `.join`, and
+    never append to rendered output. `tests/architecture/test_prompt_templates.py`
+    enforces this. Text agents read later (progress files, tool results) is
+    agent-bound too: take it as a `RenderedPrompt` parameter, which makes the
+    call a checked sink. A prompt that points the agent at written text takes
+    the proof of the write as data (a `ProgressEntry` from `ProgressLog.append`)
+    and guards the pointer on it; `tests/architecture/test_progress_pointers.py`
+    enforces this.
+13. **Lint suppressions are explicit opt-outs.** First consider reasonable
     lint-compliant fixes. Suppress only when those fixes would make the design
     more hacky than retaining the current code. In the source rationale, list
     the alternatives considered and explain why each is worse. Effort, time,

@@ -24,6 +24,7 @@ from vibesys.orchestration.issue_queue.prompts import (
     judge_message,
     performance_message,
 )
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_issue_tracker.api import (
     Issue,
     IssueStatus,
@@ -205,9 +206,10 @@ def _resume_point(run: _IssueQueueRun) -> tuple[int, IssueQueuePhase, int | None
 
 
 async def _implement(run: _IssueQueueRun, issue: Issue, iteration: int) -> Issue:
-    response = await run.active_sessions.implementer.turn(
+    response = await structured_turn(
+        run.active_sessions.implementer,
         implementer_message(issue, run.run.facts, latest_judge_review(issue)),
-        response=IssueImplementerResponse,
+        IssueImplementerResponse,
     )
     response = response.model_copy(update={"issue_id": issue.id})
     updated = run.board.increment_attempts(
@@ -217,7 +219,9 @@ async def _implement(run: _IssueQueueRun, issue: Issue, iteration: int) -> Issue
         note=response.summary[:200],
         payload=response.model_dump(mode="json"),
     )
-    append_progress(run.progress, f"Iteration {iteration}: implement issue #{issue.id}", response)
+    append_progress(
+        run.progress, response, iteration=iteration, step="implement", issue_id=issue.id
+    )
     return updated
 
 
@@ -230,9 +234,10 @@ async def _judge(run: _IssueQueueRun, issue: Issue, iteration: int) -> IssueJudg
             allowed_types=("bug",),
         )
     )
-    response = await run.active_sessions.judge.turn(
+    response = await structured_turn(
+        run.active_sessions.judge,
         judge_message(issue, run.run.facts),
-        response=IssueJudgeResponse,
+        IssueJudgeResponse,
     )
     response = response.model_copy(update={"issue_id": issue.id})
     run.tracker_session.refresh()
@@ -250,7 +255,7 @@ async def _judge(run: _IssueQueueRun, issue: Issue, iteration: int) -> IssueJudg
         note=note,
         payload=response.model_dump(mode="json"),
     )
-    append_progress(run.progress, f"Iteration {iteration}: review issue #{issue.id}", response)
+    append_progress(run.progress, response, iteration=iteration, step="review", issue_id=issue.id)
     return response
 
 
@@ -353,14 +358,15 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
                 allowed_types=("bug", "feature", "perf"),
             )
         )
-        response = await run.active_sessions.performance.turn(
+        response = await structured_turn(
+            run.active_sessions.performance,
             performance_message(
                 iteration=iteration,
                 facts=run.run.facts,
                 options=run.options,
                 state=run.state,
             ),
-            response=IssuePerfEvalResponse,
+            IssuePerfEvalResponse,
         )
         run.tracker_session.refresh()
         recorded = PerformanceRecord(
@@ -371,7 +377,7 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
             new_issue_ids=response.new_issue_ids,
         )
         run.state = run.state.append_performance(recorded)
-        append_progress(run.progress, f"Iteration {iteration}: performance", response)
+        append_progress(run.progress, response, iteration=iteration, step="performance")
         await run.commit(f"issue_queue: record performance evaluation {iteration}")
 
     if not run.board.list(status=IssueStatus.OPEN) and not recorded.new_issue_ids:

@@ -1,0 +1,2 @@
+No objective axes are configured. Use objectives.toml to enable multi-objective checkpoint retention; official scalar tracking remains active.
+Latest completed round: round 1, commit 010101010101, official metrics: 12.5 tok/s; retained: None.

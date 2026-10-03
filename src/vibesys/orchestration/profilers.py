@@ -48,6 +48,7 @@ class ProfilerDefinition:
 
     kind: ProfilerKind
     domains: frozenset[DomainName]
+    backends: frozenset[ComputeBackend] | None = None
     requires_domain_torch_support: bool = False
     # Other profiler kinds whose support directories are staged alongside
     # this one's, e.g. rocprof also exposes the torch analyzer's tools, so
@@ -115,6 +116,11 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
         ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(
+            ProfilerKind.NCU,
+            frozenset({DomainName.KERNEL_WRITING}),
+            backends=frozenset({ComputeBackend.CUDA}),
+        ),
         # The rocprof MCP server also exposes the torch analyzer's tools
         # (torch.profiler traces are a useful cross-check alongside rocprofv3
         # captures), so torch_profiler/ is staged alongside rocprof_profiler/.
@@ -186,15 +192,19 @@ def require_domain_name(value: object, *, label: str = "domain") -> DomainName:
     return value
 
 
-def allowed_profiler_kinds(domain: DomainName) -> frozenset[ProfilerKind]:
-    """Profiler kinds allowed by a domain."""
+def allowed_profiler_kinds(domain: DomainName, backend: ComputeBackend) -> frozenset[ProfilerKind]:
+    """Profiler kinds allowed by a domain and compute backend."""
     domain_name = require_domain_name(domain)
+    if not isinstance(backend, ComputeBackend):
+        message = f"backend must be a ComputeBackend, got {type(backend).__name__}."
+        raise TypeError(message)
     return frozenset(
         {ProfilerKind.NONE}
         | {
             kind
             for kind, definition in PROFILER_DEFINITIONS.items()
             if domain_name in definition.domains
+            and (definition.backends is None or backend in definition.backends)
         }
     )
 
@@ -231,24 +241,28 @@ def resolve_profiler_kind(
     requested: ProfilerKind,
     *,
     domain: DomainName,
-    backend_profiler_kind: ProfilerKind | None,
+    backend: ComputeBackend,
     environment_default_profiler_kind: ProfilerKind,
     environment_supported_profiler_kinds: frozenset[ProfilerKind] | None = None,
 ) -> ProfilerKind:
     """Resolve ``--profiler`` into the effective profiler kind.
 
-    ``auto`` is intentionally domain-aware. Generic workloads pick a native CPU
-    profiler when the host platform has one; LLM-serving workloads pick the
-    backend profiler unless the run environment dictates another safe default.
+    ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
+    the host platform has one; CUDA kernel-writing runs pick NCU when the run
+    environment supports it; LLM-serving runs use their backend profiler unless
+    the run environment dictates another safe default.
     """
     requested_kind = require_profiler_kind(requested, label="requested profiler")
     domain_name = require_domain_name(domain)
-    allowed = allowed_profiler_kinds(domain_name)
+    allowed = allowed_profiler_kinds(domain_name, backend)
 
     if requested_kind is not ProfilerKind.AUTO:
         if requested_kind not in allowed:
             allowed_values = ", ".join(sorted(kind.value for kind in allowed))
-            _exception_message_3 = f"Profiler {requested_kind.value!r} is not supported for domain {domain_name.value!r}; allowed: {allowed_values}."
+            _exception_message_3 = (
+                f"Profiler {requested_kind.value!r} is not supported for domain "
+                f"{domain_name.value!r} on backend {backend.value!r}; allowed: {allowed_values}."
+            )
             raise ValueError(_exception_message_3)
         if (
             environment_supported_profiler_kinds is not None
@@ -261,60 +275,70 @@ def resolve_profiler_kind(
             raise ValueError(_exception_message_4)
         return requested_kind
 
-    if domain_name is DomainName.GENERIC:
-        return _resolve_generic_profiler(
-            allowed,
-            environment_default_profiler_kind,
-            environment_supported_profiler_kinds,
-        )
+    return _resolve_auto_profiler(
+        domain_name,
+        backend,
+        allowed,
+        environment_default_profiler_kind,
+        environment_supported_profiler_kinds,
+    )
 
-    # OTel requires an input bundle that provisions instrumentation and a
-    # collector. Keep microservice defaults unchanged; users opt in explicitly.
-    if domain_name is DomainName.MICROSERVICES:
+
+def _resolve_auto_profiler(
+    domain: DomainName,
+    backend: ComputeBackend,
+    allowed: frozenset[ProfilerKind],
+    environment_default: ProfilerKind,
+    environment_supported: frozenset[ProfilerKind] | None,
+) -> ProfilerKind:
+    if domain is DomainName.GENERIC:
+        return _resolve_generic_profiler(allowed, environment_default, environment_supported)
+
+    # OTel requires an instrumented input bundle; bare microservices use none.
+    if domain is DomainName.MICROSERVICES:
+        return ProfilerKind.NONE
+
+    if domain is DomainName.KERNEL_WRITING:
+        if ProfilerKind.NCU in allowed and (
+            environment_supported is None or ProfilerKind.NCU in environment_supported
+        ):
+            return ProfilerKind.NCU
         return ProfilerKind.NONE
 
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
 
-    environment_default = require_profiler_kind(
-        environment_default_profiler_kind,
-        label="environment default profiler",
-    )
-    backend_profiler = (
-        require_profiler_kind(backend_profiler_kind, label="backend profiler")
-        if backend_profiler_kind is not None
-        else None
+    return _resolve_environment_profiler(
+        domain, backend, allowed, environment_default, environment_supported
     )
 
-    # Prefer the compute backend's native profiler when the selected execution
-    # environment can expose it. Otherwise use the environment's declared
-    # capture path. This is capability-based: the shared resolver must not know
-    # which profiler a concrete remote provider happens to require.
-    if (
-        backend_profiler is not None
-        and backend_profiler in ACTIVE_PROFILER_KINDS
-        and (
-            environment_supported_profiler_kinds is None
-            or backend_profiler in environment_supported_profiler_kinds
-        )
-    ):
+
+def _resolve_environment_profiler(
+    domain: DomainName,
+    backend: ComputeBackend,
+    allowed: frozenset[ProfilerKind],
+    environment_default: ProfilerKind,
+    environment_supported: frozenset[ProfilerKind] | None,
+) -> ProfilerKind:
+    environment_default = require_profiler_kind(
+        environment_default, label="environment default profiler"
+    )
+    backend_profiler = default_profiler_for_backend(backend)
+    # Prefer native capture when the environment supports it; otherwise use
+    # the environment's declared capture path (for example, Modal uses Torch).
+    if environment_supported is None or backend_profiler in environment_supported:
         candidate = backend_profiler
     else:
         candidate = environment_default
 
     if candidate not in allowed:
         allowed_values = ", ".join(sorted(kind.value for kind in allowed))
-        _exception_message = f"Resolved profiler {candidate.value!r} is not supported for domain {domain_name.value!r}; allowed: {allowed_values}."
-        raise ValueError(_exception_message)
-    if (
-        environment_supported_profiler_kinds is not None
-        and candidate not in environment_supported_profiler_kinds
-    ):
-        supported_values = ", ".join(
-            sorted(kind.value for kind in environment_supported_profiler_kinds)
-        )
-        _exception_message_2 = f"Resolved profiler {candidate.value!r} is not supported by the selected run environment; allowed: {supported_values}."
-        raise ValueError(_exception_message_2)
+        message = f"Resolved profiler {candidate.value!r} is not supported for domain {domain.value!r}; allowed: {allowed_values}."
+        raise ValueError(message)
+    if environment_supported is not None and candidate not in environment_supported:
+        supported_values = ", ".join(sorted(kind.value for kind in environment_supported))
+        message = f"Resolved profiler {candidate.value!r} is not supported by the selected run environment; allowed: {supported_values}."
+        raise ValueError(message)
     return candidate
 
 

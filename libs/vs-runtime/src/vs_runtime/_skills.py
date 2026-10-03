@@ -11,6 +11,7 @@ import yaml
 from vs_runtime.contracts import (
     ResolvedSkillResources,
     SkillCatalogError,
+    SkillFact,
     SkillResolution,
     SkillResourceRequest,
     Skills,
@@ -34,6 +35,7 @@ class SkillCatalogEntry:
     """One installed skill addressable by its agent-visible name."""
 
     name: str
+    description: str
     source_dir: Path
 
     @property
@@ -104,7 +106,8 @@ def build_skill_catalog(skill_dirs: Iterable[str | Path]) -> dict[str, SkillCata
             raise _metadata_error(root, "skill catalog root is not a directory")
         for skill_dir in discover_skill_dirs(root):
             source_dir = skill_dir.resolve()
-            raw_name = load_skill_frontmatter(source_dir).get("name")
+            frontmatter = load_skill_frontmatter(source_dir)
+            raw_name = frontmatter.get("name")
             if not isinstance(raw_name, str) or not raw_name.strip():
                 raise _metadata_error(source_dir / "SKILL.md", "`name` must be a string")
             name = raw_name.strip()
@@ -113,8 +116,25 @@ def build_skill_catalog(skill_dirs: Iterable[str | Path]) -> dict[str, SkillCata
                     source_dir / "SKILL.md",
                     f"frontmatter name {name!r} must match directory name {source_dir.name!r}",
                 )
-            catalog[name] = SkillCatalogEntry(name=name, source_dir=source_dir)
+            raw_description = frontmatter.get("description")
+            if not isinstance(raw_description, str) or not raw_description.strip():
+                raise _metadata_error(
+                    source_dir / "SKILL.md", "`description` must be a non-empty string"
+                )
+            catalog[name] = SkillCatalogEntry(
+                name=name,
+                description=" ".join(raw_description.split()),
+                source_dir=source_dir,
+            )
     return catalog
+
+
+def offered_skill_facts(skill_dirs: Iterable[str | Path]) -> tuple[SkillFact, ...]:
+    """Return the prompt-visible facts for every skill in one installed catalog."""
+    return tuple(
+        SkillFact(name=entry.name, description=entry.description)
+        for entry in build_skill_catalog(skill_dirs).values()
+    )
 
 
 def _skill_resource_parts(resource: str) -> PurePosixPath | str:
@@ -236,5 +256,6 @@ __all__ = [
     "create_installed_skills",
     "discover_skill_dirs",
     "load_skill_frontmatter",
+    "offered_skill_facts",
     "resolve_skill_resources",
 ]

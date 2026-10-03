@@ -14,6 +14,10 @@ Two correctness properties every consumer gets for free:
 :class:`~vs_prompts.api.FragmentFamily` generalizes "every variant of
 this discriminator must define every required small fragment, an empty file
 is a deliberate skip" to any per-key fragment set.
+
+:class:`~vs_prompts.api.RenderedPrompt` is the typed result of a render. Only
+the renderer constructs one, so agent-bound text can be told apart from text
+assembled in Python.
 """
 
 from vs_prompts.contract import (
@@ -24,11 +28,12 @@ from vs_prompts.contract import (
     resolve_free_variables,
 )
 from vs_prompts.fragments import FragmentFamily
-from vs_prompts.renderer import TemplateRenderer
+from vs_prompts.renderer import RenderedPrompt, TemplateRenderer
 
 __all__ = [
     "ContractViolation",
     "FragmentFamily",
+    "RenderedPrompt",
     "TemplateContract",
     "TemplateRenderer",
     "UnresolvedInclude",

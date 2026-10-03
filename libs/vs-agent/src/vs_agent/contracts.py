@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
     from datetime import timedelta
     from pathlib import Path
     from typing import TextIO
@@ -32,6 +32,21 @@ class AgentTurnTimeoutError(TimeoutError):
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
+class AgentOutputSchemaError(RuntimeError):
+    """The provider gave up producing output that matches the requested response schema.
+
+    Raised instead of a provider exit error so a caller can treat it like any
+    other invalid structured response. ``detail`` is the provider's last
+    validation errors. The conversation survives: the session keeps it, so a
+    correction sent as the next turn continues the same work.
+    """
+
+    def __init__(self, detail: str) -> None:
+        """Record the validation errors the provider reported last."""
+        self.detail = detail
+        super().__init__(f"agent output did not match the response schema: {detail}")
+
+
 class SessionDisposition(StrEnum):
     """Whether a session remains safe to use after a turn."""
 
@@ -47,6 +62,8 @@ class AgentEventKind(StrEnum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     USAGE = "usage"
+    SKILL = "skill"
+    """The agent loaded a skill; ``text`` is its name."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +106,16 @@ class AgentCapabilities:
     # earlier process, so a resumed run continues the same conversation instead
     # of replaying it. ``session_reuse`` only promises reuse within one process.
     provider_session_resume: bool = False
+    # Whether a session is offered only the run's skills, never the operator's
+    # personal or plugin skills from the host's provider state.
+    skill_isolation: bool = False
+    # Whether a session is connected only to the MCP servers the run
+    # configured, never the operator's own (user or project configuration,
+    # plugins, account connectors).
+    mcp_isolation: bool = False
+    # Whether a session loads none of the operator's own CLI configuration:
+    # user settings, hooks, global instructions, notify commands, memory.
+    config_isolation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +197,19 @@ class AgentTurnRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentSkillUse:
+    """Skills a turn was offered and loaded, as the provider reported them.
+
+    ``None`` means the provider cannot say, never zero: a driver without a
+    skill signal leaves both fields unset. ``invoked`` has one entry per load,
+    in order, so its length is the turn's skill-use count.
+    """
+
+    offered: tuple[str, ...] | None = None
+    invoked: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTurnResult:
     """Provider-independent result of one raw agent turn."""
 
@@ -177,6 +217,7 @@ class AgentTurnResult:
     usage: AgentUsage = field(default_factory=AgentUsage)
     provider_session_id: str | None = None
     disposition: SessionDisposition = SessionDisposition.REUSABLE
+    skills: AgentSkillUse = field(default_factory=AgentSkillUse)
 
 
 class AgentSession(Protocol):
@@ -285,7 +326,6 @@ class AgentClientProtocol(Protocol):
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,

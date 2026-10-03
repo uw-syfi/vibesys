@@ -8,13 +8,18 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import NULL_SKILL_SELECTION
+from vs_agent.api import (
+    NULL_SKILL_SELECTION,
+    AgentOutputSchemaError,
+    describe_validation_error,
+)
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
 )
+from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
@@ -22,10 +27,13 @@ from vs_runtime.contracts import (
     AccuracyReceipt,
     AgentBinding,
     AgentCapability,
+    AgentEvaluation,
     AgentRole,
     AgentSession,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateProfile,
+    CandidateProfileStatus,
     CandidateWorkspace,
     CommandResult,
     LocalValidationEvaluation,
@@ -39,10 +47,12 @@ from vs_runtime.contracts import (
     SkillResolution,
     SkillResourceRequest,
     StateModelError,
+    StructuredResponseError,
     UnknownAgentRoleError,
     Workspace,
     WorkspaceAccess,
     WorkspaceRestoreError,
+    member_workspace_id,
     validate_command,
     validate_member_id,
     validate_objectives,
@@ -296,6 +306,8 @@ class _FakeSessionConfig:
     member_id: str | None
     writable_paths: tuple[str, ...]
     writable_directory_paths: tuple[str, ...]
+    #: The resumed conversation's history, shared with earlier sessions.
+    history: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -307,6 +319,7 @@ class _FakeCandidateConfig:
     revision: str
     trusted_input_baseline: str | None
     known_revisions: set[str]
+    revision_prefix: str
 
 
 def _echo_responder(
@@ -329,7 +342,7 @@ class FakeAgentSession:
         responder: TurnResponder,
         config: _FakeSessionConfig,
     ) -> None:
-        """Bind one fresh session to immutable creation configuration."""
+        """Bind a session to its configuration and, if resumed, its conversation."""
         self._role = role
         self._workspace = workspace
         self._member_id = config.member_id
@@ -337,7 +350,7 @@ class FakeAgentSession:
         self._writable_directory_paths = config.writable_directory_paths
         self._binding = binding
         self._responder = responder
-        self._history: list[str] = []
+        self._history: list[str] = [] if config.history is None else config.history
         self._turn_number = 0
         self._turn_lock = asyncio.Lock()
         self._closed = False
@@ -405,20 +418,38 @@ class FakeAgentSession:
         label = f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
-            value = self._responder(self._role, tuple(self._history), message, response)
-            if response is None:
-                if not isinstance(value, str):
-                    error = "text turn responder must return str"
-                    raise TypeError(error)
-                result: str | ResponseT = value
-            else:
-                result = response.model_validate(value)
+            result = self._respond(message, response)
+        except StructuredResponseError:
+            # Production keeps the conversation after an invalid structured
+            # reply, so the correction turn sees this message in its history.
+            self._history.append(message)
+            raise
         finally:
             remaining_changes = await self._enforce_workspace_access(revision)
         self._history.append(message)
         if self._role.workspace_access is WorkspaceAccess.READ_WRITE or remaining_changes:
             await self._workspace.snapshot(label)
         return result
+
+    def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
+        """Answer one turn, reporting invalid structured output as production does."""
+        try:
+            value = self._responder(self._role, tuple(self._history), message, response)
+        except AgentOutputSchemaError as error:
+            if response is None:
+                raise
+            raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
+        if response is None:
+            if not isinstance(value, str):
+                error = "text turn responder must return str"
+                raise TypeError(error)
+            return value
+        try:
+            return response.model_validate(value)
+        except ValidationError as error:
+            raise StructuredResponseError(
+                self._role.id, response, detail=describe_validation_error(error)
+            ) from error
 
     async def _enforce_workspace_access(self, revision: str) -> list[str]:
         if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
@@ -496,6 +527,11 @@ class FakeAgentSessions:
         # what the public fake created and whether runtime ownership closed it.
         self._sessions: list[FakeAgentSession] = []
         self._active_sessions: list[FakeAgentSession] = []
+        # Provider conversations by (role, member): the working directory the
+        # conversation ran in and its shared history. Providers key resumable
+        # history by working directory, so a member session continues only
+        # from the same path.
+        self._conversations: dict[tuple[str, str], tuple[Path, list[str]]] = {}
         self._creation_results: list[BaseException | None] = []
         self._closing = False
         self._closed = False
@@ -550,11 +586,26 @@ class FakeAgentSessions:
                 member_id,
                 validated_paths,
                 tuple(path for path in validated_paths if workspace.is_directory(path)),
+                self._member_history(role, member_id, workspace.path),
             ),
         )
         self._sessions.append(session)
         self._active_sessions.append(session)
         return session
+
+    def _member_history(
+        self, role: AgentRole, member_id: str | None, path: Path
+    ) -> list[str] | None:
+        """Return the conversation a member session resumes, or start one."""
+        if member_id is None:
+            return None
+        key = (role.id, member_id)
+        previous = self._conversations.get(key)
+        if previous is not None and previous[0] == path:
+            return previous[1]
+        history: list[str] = []
+        self._conversations[key] = (path, history)
+        return history
 
     async def close(self) -> None:
         """Close all sessions in reverse creation order, once."""
@@ -603,6 +654,7 @@ class FakeWorkspaces:
         self._sessions = sessions
         self._candidates: list[FakeCandidateWorkspace] = []
         self._patches: dict[str, str] = {}
+        self._default_patch: str | None = None
         self.export_patch_calls: list[str] = []
         self._closing = False
         self._closed = False
@@ -622,7 +674,12 @@ class FakeWorkspaces:
         """Return candidates in creation order, including discarded ones."""
         return tuple(self._candidates)
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
         """Create one isolated workspace from a known root revision."""
         if self._closing or self._closed:
             raise SessionClosedError
@@ -632,7 +689,16 @@ class FakeWorkspaces:
         revision = from_revision or self._root.revision
         if revision is None or not self._root.knows_revision(revision):
             raise WorkspaceRestoreError(from_revision or "")
-        workspace_id = f"candidate-{len(self._candidates) + 1}"
+        if member_id is None:
+            workspace_id = f"candidate-{len(self._candidates) + 1}"
+        else:
+            workspace_id = member_workspace_id(member_id)
+            if any(
+                candidate.id == workspace_id and not candidate.discarded
+                for candidate in self._candidates
+            ):
+                message = f"member {member_id!r} already has a live candidate workspace"
+                raise RuntimeContractError(message)
         candidate = FakeCandidateWorkspace(
             owner=self,
             invalidate_sessions=(
@@ -644,6 +710,7 @@ class FakeWorkspaces:
                 revision=revision,
                 trusted_input_baseline=self._root.trusted_input_baseline,
                 known_revisions=self._root.known_revisions,
+                revision_prefix=f"candidate-{len(self._candidates) + 1}",
             ),
         )
         self._candidates.append(candidate)
@@ -661,13 +728,21 @@ class FakeWorkspaces:
         if not self._root.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         self.export_patch_calls.append(revision)
-        return self._patches.get(revision, f"patch for {revision}")
+        default = self._default_patch or f"patch for {revision}"
+        return self._patches.get(revision, default)
 
     def set_patch(self, revision: str, patch: str) -> None:
         """Configure the canonical patch exported for a retained revision."""
         if not self._root.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         self._patches[revision] = patch
+
+    def set_default_patch(self, patch: str) -> None:
+        """Export ``patch`` for every revision without its own patch.
+
+        Models snapshots that differ only in commits, not in content.
+        """
+        self._default_patch = patch
 
     def retain_candidate_revision(self, revision: str) -> None:
         """Keep a snapshotted candidate revision reachable from the root."""
@@ -903,6 +978,8 @@ class FakeWorkspace:
             value for value in (revision, self._trusted_input_baseline) if value
         }
         self._snapshot_count = 0
+        # Revision names stay unique when a member-keyed candidate reuses an ID.
+        self._revision_prefix = workspace_id or "fake"
         self._retained: dict[str, str] = {}
         self._pending_changes: list[list[str]] = []
         self._directories: set[str] = set()
@@ -938,8 +1015,7 @@ class FakeWorkspace:
         """Record a deterministic new revision for the current fake tree."""
         del label
         self._snapshot_count += 1
-        prefix = self._id or "fake"
-        revision = f"{prefix}-revision-{self._snapshot_count}"
+        revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"
         self._revision = revision
         self._tree_revision = revision
         self._known_revisions.add(revision)
@@ -1033,6 +1109,7 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self._owner = owner
         self._invalidate_sessions = invalidate_sessions
         self._discarded = False
+        self._revision_prefix = config.revision_prefix
 
     @property
     def discarded(self) -> bool:
@@ -1138,7 +1215,7 @@ class FakeState:
         return tuple(
             FakeStateCommit(
                 type(commit.value).model_validate_json(
-                    commit.value.model_dump_json(round_trip=True)
+                    commit.value.model_dump_json(round_trip=True), strict=True
                 ),
                 commit.workspace,
                 commit.label,
@@ -1155,7 +1232,7 @@ class FakeState:
         self._require_model(model)
         if self._value is None:
             return None
-        return model.model_validate_json(self._value.model_dump_json(round_trip=True))
+        return model.model_validate_json(self._value.model_dump_json(round_trip=True), strict=True)
 
     async def commit(
         self,
@@ -1172,13 +1249,13 @@ class FakeState:
         model = self._model
         if model is None:
             raise StateModelError(None, type(value))
-        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
+        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True), strict=True)
         if self._commit_results:
             failure = self._commit_results.pop(0)
             if failure is not None:
                 raise failure
         self._value = snapshot
-        recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True))
+        recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True), strict=True)
         self._commits.append(FakeStateCommit(recorded, workspace, label))
 
     def _require_model(self, model: type[BaseModel]) -> None:
@@ -1203,6 +1280,15 @@ class FakeBenchmarkCall:
 
 
 @dataclass(frozen=True, slots=True)
+class FakeProfileCall:
+    """One recorded policy-requested profile."""
+
+    revision: str
+    request: str
+    member_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class FakeLocalValidationCall:
     """One recorded candidate-authored local validation request."""
 
@@ -1211,9 +1297,57 @@ class FakeLocalValidationCall:
     report_location: str
 
 
+FakeEvaluationKind: TypeAlias = Literal["accuracy", "benchmark"]
+
+
+class FakeEvaluationGate:
+    """Holds one trusted evaluation call until the test releases it.
+
+    The gated call sets :attr:`entered` when it starts and then waits for
+    :meth:`release`, so a test can order events across concurrent work without
+    yielding a counted number of times or reading a clock.
+    """
+
+    def __init__(self) -> None:
+        """Create an unreleased gate."""
+        self.entered = asyncio.Event()
+        self._release = asyncio.Event()
+        self.cancelled_while_live = False
+        self.finished = False
+
+    @property
+    def released(self) -> bool:
+        """Return whether the test has released the held call."""
+        return self._release.is_set()
+
+    def release(self) -> None:
+        """Let the held call continue to its scripted outcome."""
+        self._release.set()
+
+    async def hold(self, workspace: Workspace) -> None:
+        """Wait for release, noting a cancellation that arrives while ``workspace`` is live."""
+        self.entered.set()
+        try:
+            await self._release.wait()
+        except asyncio.CancelledError:
+            discarded = isinstance(workspace, FakeCandidateWorkspace) and workspace.discarded
+            self.cancelled_while_live = not discarded
+            raise
+        finally:
+            self.finished = True
+
+
 @dataclass(slots=True)
 class FakeEvaluation:
-    """Scriptable in-memory implementation of trusted evaluation effects."""
+    """Scriptable in-memory implementation of trusted evaluation effects.
+
+    Scripted results are consumed in call order; a scripted exception is raised
+    by the call that consumes it. Benchmarks of the root workspace (the run's
+    input, whose ``id`` is ``None``) consume :attr:`root_benchmark_results`
+    first, so a test can script the input and candidates independently of how
+    their calls interleave. A gate holds the n-th call of one kind (counted
+    from zero across all workspaces) until the test releases it.
+    """
 
     default_accuracy: AccuracyEvaluation = field(
         default_factory=lambda: AccuracyEvaluation(executed=False)
@@ -1224,25 +1358,100 @@ class FakeEvaluation:
     default_local_validation: LocalValidationEvaluation = field(
         default_factory=lambda: LocalValidationEvaluation(passed=True)
     )
-    accuracy_results: list[AccuracyEvaluation] = field(default_factory=list)
-    benchmark_results: list[BenchmarkEvaluation] = field(default_factory=list)
+    accuracy_results: list[AccuracyEvaluation | BaseException] = field(default_factory=list)
+    benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
+    root_benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
     local_validation_results: list[LocalValidationEvaluation] = field(default_factory=list)
     accuracy_calls: list[FakeAccuracyCall] = field(default_factory=list)
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
+    _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
+    _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
+    # Scripted profile outcomes, consumed in call order. Each is returned for
+    # the requested revision. Unscripted, a profile fails as it does in a run
+    # without a provisioned profiler.
+    profile_results: list[CandidateProfile | BaseException] = field(default_factory=list)
+    profile_calls: list[FakeProfileCall] = field(default_factory=list)
+    # Whether the evaluation executor this Fake stands in for produces profile
+    # evidence. The default matches the production executors, which do not
+    # unless their plan carries a profile capture; a test that profiles sets it
+    # to what the production executor of its run environment reports.
+    profiling_supported: bool = False
 
-    def script_accuracy(self, *results: AccuracyEvaluation) -> None:
-        """Queue accuracy results in call order."""
+    def script_profile(self, *results: CandidateProfile | BaseException) -> None:
+        """Queue profile outcomes or failures in call order."""
+        self.profile_results.extend(results)
+
+    async def can_profile(self) -> bool:
+        """Return the configured executor capability, as production derives it."""
+        return self.profiling_supported
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Return the next scripted outcome for ``revision``, or the unprovisioned failure.
+
+        Without :attr:`profiling_supported` every profile ends unsupported,
+        whatever is scripted, as a production profiler reports when the run's
+        executor cannot produce profile evidence.
+        """
+        self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        if not self.profiling_supported:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
+            )
+        if not self.profile_results:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure="no profiler agent is provisioned",
+            )
+        result = self.profile_results.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return CandidateProfile.model_validate(
+            {**result.model_dump(mode="json"), "revision": revision}
+        )
+
+    def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
+        """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""
+        self._agent_evaluations.setdefault(workspace.id, []).append(evaluation)
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
+        return tuple(self._agent_evaluations.get(workspace.id, ()))
+
+    def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
+        """Queue accuracy results or failures in call order."""
         self.accuracy_results.extend(results)
 
-    def script_benchmark(self, *results: BenchmarkEvaluation) -> None:
-        """Queue benchmark results in call order."""
+    def script_benchmark(self, *results: BenchmarkEvaluation | BaseException) -> None:
+        """Queue benchmark results or failures in call order."""
         self.benchmark_results.extend(results)
+
+    def script_root_benchmark(self, *results: BenchmarkEvaluation | BaseException) -> None:
+        """Queue results or failures for benchmarks of the root workspace only."""
+        self.root_benchmark_results.extend(results)
 
     def script_local_validation(self, *results: LocalValidationEvaluation) -> None:
         """Queue local-validation results in call order."""
         self.local_validation_results.extend(results)
+
+    def gate(self, kind: FakeEvaluationKind, call: int) -> FakeEvaluationGate:
+        """Hold the ``call``-th evaluation of ``kind`` (from zero) until released."""
+        key = (kind, call)
+        if key in self._gates:
+            message = f"{kind} call {call} is already gated"
+            raise ValueError(message)
+        gate = FakeEvaluationGate()
+        self._gates[key] = gate
+        return gate
+
+    async def _pass_gate(self, kind: FakeEvaluationKind, call: int, workspace: Workspace) -> None:
+        gate = self._gates.get((kind, call))
+        if gate is not None:
+            await gate.hold(workspace)
 
     async def accuracy(
         self,
@@ -1252,6 +1461,7 @@ class FakeEvaluation:
     ) -> AccuracyEvaluation:
         """Record the request and return the next scripted result."""
         self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
+        await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace)
         if reuse is not None:
             if reuse.run_id != self.run_id:
                 message = "accuracy receipt belongs to another run"
@@ -1264,6 +1474,8 @@ class FakeEvaluation:
                 raise RuntimeContractError(message)
             return AccuracyEvaluation(executed=False, receipt=reuse)
         result = self.accuracy_results.pop(0) if self.accuracy_results else self.default_accuracy
+        if isinstance(result, BaseException):
+            raise result
         if not result.passed:
             return result
         revision = workspace.revision
@@ -1286,9 +1498,16 @@ class FakeEvaluation:
         """Record the request and return the next scripted result."""
         validate_objectives(objectives)
         self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives))
-        if self.benchmark_results:
-            return self.benchmark_results.pop(0)
-        return self.default_benchmark
+        await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace)
+        if workspace.id is None and self.root_benchmark_results:
+            result = self.root_benchmark_results.pop(0)
+        elif self.benchmark_results:
+            result = self.benchmark_results.pop(0)
+        else:
+            result = self.default_benchmark
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     async def validate_local(
         self,
@@ -1297,11 +1516,18 @@ class FakeEvaluation:
         recipe_artifact: str,
         report_location: str,
     ) -> LocalValidationEvaluation:
-        """Record one semantic local-validation request and return its script."""
-        validate_workspace_writable_paths(
-            WorkspaceAccess.LIMITED,
-            (recipe_artifact, report_location),
-        )
+        """Record one semantic local-validation request and return its script.
+
+        Like the product evaluation, an unusable recipe reference is a failed
+        outcome the agent can correct, while a bad report location is a contract error.
+        """
+        validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (report_location,))
+        try:
+            check_recipe_artifact_path(recipe_artifact)
+        except LocalValidationRecipeError as error:
+            return LocalValidationEvaluation(
+                passed=False, feedback=str(error), recipe_unusable=True
+            )
         self.local_validation_calls.append(
             FakeLocalValidationCall(workspace, recipe_artifact, report_location)
         )

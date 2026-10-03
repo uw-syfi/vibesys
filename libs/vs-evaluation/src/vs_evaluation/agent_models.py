@@ -7,10 +7,19 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
 
-from vs_evaluation.agent_evidence import EvidenceFingerprints, EvidenceKind, TrustedEvidence
+from vs_evaluation.agent_evidence import (
+    EvidenceFingerprints,
+    EvidenceKind,
+    EvidenceMetric,
+    EvidenceOutcome,
+    PartialMeasurement,
+    TrustedEvidence,
+)
 from vs_evaluation.models import (
     AvailabilitySnapshot,
-    EvaluationAwaitResult,
+    EvaluationCanceled,
+    EvaluationCompleted,
+    EvaluationFailed,
     EvaluationState,
 )
 from vs_evaluation.profiler_models import (
@@ -190,14 +199,44 @@ class RunOperationsCall(BaseModel):
     token: str
 
 
+MAX_STAGE_SUMMARY_TAIL_CHARS = 600
+
+
+class EvaluationStageOutcome(BaseModel):
+    """The trusted conclusion of one stage that recorded evidence.
+
+    ``outcome`` is the stage's verdict: a benchmark that ran but missed its
+    requirement is ``failed`` even though its evidence was recorded.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: EvidenceKind
+    outcome: EvidenceOutcome
+    metrics: tuple[EvidenceMetric, ...] = ()
+    # What a failed stage measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
+    # The end of the stage's own summary, where a failure states its cause.
+    summary_tail: str | None = Field(default=None, max_length=MAX_STAGE_SUMMARY_TAIL_CHARS)
+
+
 class EvaluationOperationSnapshot(BaseModel):
-    """Backend-owned lifecycle and accepted-result state for one evaluation."""
+    """Backend-owned lifecycle and per-stage outcomes of one evaluation.
+
+    ``evidence_recorded`` says only that every requested stage recorded
+    trusted evidence; whether each stage passed is in ``stage_outcomes``.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     handle_id: str = Field(min_length=1)
     state: EvaluationState
-    accepted_result: bool
+    # The stage executing now; absent before the first stage and once terminal.
+    current_stage: str | None = None
+    evidence_recorded: bool
+    stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
     evidence_ids: tuple[str, ...] = ()
+    # Complete failure text when the evaluation failed: the run failed, or its
+    # accepted evidence reports a failed outcome.
+    failure: str | None = None
 
 
 class EvaluationOperationObservation(BaseModel):
@@ -210,7 +249,9 @@ class EvaluationOperationObservation(BaseModel):
     candidate_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     evidence_kinds: tuple[EvidenceKind, ...]
     state: EvaluationState
-    accepted_result: bool
+    # Every requested stage recorded trusted evidence; not that each passed.
+    evidence_recorded: bool
+    stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
     evidence_ids: tuple[str, ...] = ()
 
 
@@ -265,12 +306,50 @@ class StatusReply(BaseModel):
     status: EvaluationState
 
 
+class RepeatedFailure(BaseModel):
+    """A failure identical to the ones before it from the same workspace."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    signature: str = Field(min_length=1, description="Exception type and innermost source line.")
+    count: int = Field(ge=2, description="Consecutive failures with this signature, this included.")
+    instruction: str = Field(min_length=1)
+
+
+class EvaluationStillRunning(BaseModel):
+    """A bounded await returned before the evaluation finished; it keeps running.
+
+    Every field is the evaluation's recorded progress at return time: the
+    lifecycle state, the stage executing now, and the trusted outcome of each
+    stage that already finished. ``state`` is absent only when no durable read
+    completed within the bound.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    outcome: Literal["running"] = "running"
+    handle_id: str = Field(min_length=1)
+    state: EvaluationState | None
+    current_stage: str | None = None
+    stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
+    next_await_s: FiniteFloat = Field(
+        gt=0,
+        le=MAX_AGENT_AWAIT_S,
+        description="timeout_s for the next await_evaluation call on this handle.",
+    )
+
+
+AgentAwaitResult = Annotated[
+    EvaluationCompleted | EvaluationStillRunning | EvaluationFailed | EvaluationCanceled,
+    Field(discriminator="outcome"),
+]
+
+
 class AwaitReply(BaseModel):
-    """Explicit terminal or timed-out bounded-wait result."""
+    """Terminal result, or recorded progress when the bounded wait ended first."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["await_result"] = "await_result"
-    result: EvaluationAwaitResult
+    result: AgentAwaitResult
+    repeated_failure: RepeatedFailure | None = None
 
 
 class CanceledReply(BaseModel):
@@ -328,6 +407,8 @@ SocketReply = Annotated[SocketSuccess | SocketFailure, Field(discriminator="ok")
 
 __all__ = [
     "MAX_AGENT_AWAIT_S",
+    "MAX_STAGE_SUMMARY_TAIL_CHARS",
+    "AgentAwaitResult",
     "AgentEvaluationCall",
     "AgentEvaluationReply",
     "AvailabilityCall",
@@ -341,12 +422,15 @@ __all__ = [
     "EvaluationGrant",
     "EvaluationOperationObservation",
     "EvaluationOperationSnapshot",
+    "EvaluationStageOutcome",
+    "EvaluationStillRunning",
     "EvidenceCall",
     "EvidencePreflightCheck",
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
     "HandleAccess",
+    "RepeatedFailure",
     "RunOperationsCall",
     "RunOperationsReply",
     "SocketFailure",

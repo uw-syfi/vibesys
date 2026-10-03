@@ -16,7 +16,7 @@ import {
   streamFailure,
 } from '../protocol-parse.js';
 import {type AbortSignalLike, abortReason, type RequestOptions} from '../request-policy.js';
-import type {EventSubscription, SubscribeOptions} from '../transport.js';
+import {type EventSubscription, type SubscribeOptions, subscribeRequest} from '../transport.js';
 
 export interface ServerClientOptions {
   /** Stable frontend identity reflected by server acknowledgements. */
@@ -261,22 +261,20 @@ export class ServerClient {
     });
   }
 
-  /** Send the subscribe request once the subscription socket connects. */
+  /**
+   * Send the subscribe request once the subscription socket connects. The frame
+   * body is `subscribeRequest`'s typed union member, which owns which optional
+   * fields ride along and why.
+   */
   #writeSubscribe(socket: Socket, afterSequence: number, options: SubscribeOptions): void {
-    socket.write(
-      `${JSON.stringify({
-        protocol_version: 1,
-        request_id: globalThis.crypto.randomUUID(),
-        client_id: this.#clientId,
-        timestamp: new Date().toISOString(),
-        type: 'subscribe',
-        after_sequence: afterSequence,
-        // Omitted rather than sent as null: an old server forbids unknown fields,
-        // so a default subscribe must stay byte-for-byte what it has always been.
-        ...(options.tail === undefined ? {} : {tail: options.tail}),
-        ...(options.storeId ? {store_id: options.storeId} : {}),
-      })}\n`,
-    );
+    const request: IssuedRequest = {
+      protocol_version: 1,
+      request_id: globalThis.crypto.randomUUID(),
+      client_id: this.#clientId,
+      timestamp: new Date().toISOString(),
+      ...subscribeRequest(afterSequence, options),
+    };
+    socket.write(`${JSON.stringify(request)}\n`);
   }
 
   /**

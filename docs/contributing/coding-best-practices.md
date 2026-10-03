@@ -82,11 +82,39 @@ relative link from `docs/` to anything outside `docs/` resolves on GitHub and
 - Elsewhere in the repository, relative links are fine.
 - `scripts/check_doc_links.py` enforces both rules, including `#anchor`
   targets and whether an absolute repo URL still points at a file that exists.
+  Its scope is Markdown link syntax only: it strips fenced blocks and inline
+  `code` spans first, so nothing written inside backticks is checked there.
+
+## Code Citations
+
+Cite code by symbol, not by line: a line range keeps resolving after the file
+grows and then names unrelated code.
+
+- Write a citation as one inline code span, `<path>:<symbol>`
+  (`unix_jsonl.py:_write_message`). The path may be the full repo-relative one
+  or any unambiguous suffix of it, and the symbol may be qualified by its owner
+  (`unix_jsonl.py:_RequestHandler.handle`).
+- `scripts/check_doc_citations.py` enforces that the symbol is still defined in
+  the cited file, and rejects a line-number citation outright. It gates the docs
+  listed in its `GATED_DOCS`; add a doc there once its citations are swept.
+  `python3 -m scripts.check_doc_citations .` surveys the whole repository, which
+  reports citations into vendored trees that are not in this repository.
 
 ## Checks
 
 Run the narrowest relevant test first, then broaden when the change crosses
 module boundaries.
+
+Before opening or updating a PR, run the one command that runs CI's Python
+checks (`python_quality` and `python_types` in `.repoctl/checks.toml`, through
+`support/repoctl`, which needs Go). It stops at the first failing command and
+names it. It does not run the full test suite.
+
+```bash
+./scripts/check_ci.sh
+```
+
+Faster commands for iterating:
 
 ```bash
 ./scripts/format.sh
@@ -95,6 +123,7 @@ module boundaries.
 ./scripts/check_types.sh
 uv run tach check
 uv run python scripts/check_doc_links.py
+python3 -m scripts.check_doc_citations
 uv run pytest path/to/test.py
 ```
 

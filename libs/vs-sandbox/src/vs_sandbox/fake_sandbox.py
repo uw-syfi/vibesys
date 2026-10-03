@@ -13,8 +13,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from vs_sandbox.execution import SandboxExecutionResult
+
+if TYPE_CHECKING:
+    import threading
 
 #: Result an unscripted command receives when no other default was set.
 DEFAULT_RESULT = SandboxExecutionResult(output="", exit_code=0, stdout="", stderr="")
@@ -24,6 +28,11 @@ _INVALID_COMMAND_RESULT = SandboxExecutionResult(
     output="Error: Command must be a non-empty string.", exit_code=1
 )
 
+#: Result a command receives when its cancel event is already set.
+CANCELLED_RESULT = SandboxExecutionResult(
+    output="Error: Command was cancelled.", exit_code=-15, cancelled=True
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FakeExecution:
@@ -31,6 +40,7 @@ class FakeExecution:
 
     command: str
     timeout: int | None
+    cancellable: bool = False
 
 
 @dataclass(slots=True)
@@ -51,15 +61,27 @@ class FakeSandbox:
         """Return *result* the next time (and every time) *command* is executed."""
         self._scripted[command] = result
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
         """Return the scripted result for *command*, or the default result.
 
         Matches :meth:`LocalShellSandbox.execute`'s handling of an empty or
-        non-string command: it never reaches the script table.
+        non-string command: it never reaches the script table. A fake command
+        finishes instantly, so *cancel* is honored when it is already set: the
+        call returns :data:`CANCELLED_RESULT`.
         """
         if not command or not isinstance(command, str):
             return _INVALID_COMMAND_RESULT
-        self.calls.append(FakeExecution(command=command, timeout=timeout))
+        self.calls.append(
+            FakeExecution(command=command, timeout=timeout, cancellable=cancel is not None)
+        )
+        if cancel is not None and cancel.is_set():
+            return CANCELLED_RESULT
         return self._scripted.get(command, self.default_result)
 
 

@@ -11,6 +11,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     ExecutorObservation,
+    ExecutorRejectedError,
     StageState,
 )
 from vs_sandbox.api.slurm import (
@@ -26,6 +27,7 @@ from vs_slurm.api import (
     SlurmBatchStageResult,
     SlurmBatchWaitResult,
     SlurmConfig,
+    SlurmError,
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmSshTransport,
@@ -36,10 +38,22 @@ if TYPE_CHECKING:
 
 
 class _FakeRunner(SlurmJobRunner):
-    def __init__(self, config: SlurmConfig, *, fail_before_stage: bool = False) -> None:
+    def __init__(
+        self,
+        config: SlurmConfig,
+        *,
+        fail_before_stage: bool = False,
+        benchmark_exit_code: int = 0,
+        benchmark_stdout: str = '{"throughput": 10}',
+        service_log_tail: str = "",
+    ) -> None:
         super().__init__(config)
+        self.service_log_tail = service_log_tail
+        self.benchmark_exit_code = benchmark_exit_code
+        self.benchmark_stdout = benchmark_stdout
         self.submissions = 0
         self.cancellations = 0
+        self.cancelled_job_ids: list[str] = []
         self.request: SlurmBatchRequest | None = None
         self.handle = SlurmBatchHandle.model_validate(
             {
@@ -91,6 +105,7 @@ class _FakeRunner(SlurmJobRunner):
             job_id="1234",
             job_exit_code=0,
             job_output="",
+            service_log_tail=self.service_log_tail,
             stages=(
                 SlurmBatchStageResult(
                     name="accuracy",
@@ -102,8 +117,8 @@ class _FakeRunner(SlurmJobRunner):
                 ),
                 SlurmBatchStageResult(
                     name="benchmark",
-                    exit_code=0,
-                    stdout='{"throughput": 10}',
+                    exit_code=self.benchmark_exit_code,
+                    stdout=self.benchmark_stdout,
                     stderr="",
                     elapsed_seconds=4.0,
                     skipped=False,
@@ -114,8 +129,8 @@ class _FakeRunner(SlurmJobRunner):
         )
 
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
-        del handle
         self.cancellations += 1
+        self.cancelled_job_ids.append(handle.job.job_id)
 
 
 class _TimedOutRunner(_FakeRunner):
@@ -172,6 +187,13 @@ class _BlockingRunner(_FakeRunner):
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
         super().cancel_batch(handle)
         self._release_wait.set()
+
+
+class _UnreachableSchedulerRunner(_BlockingRunner):
+    def cancel_batch(self, handle: SlurmBatchHandle) -> None:
+        super().cancel_batch(handle)
+        message = "scancel unreachable"
+        raise SlurmError(message)
 
 
 class _DeadlineClock:
@@ -247,6 +269,43 @@ async def test_executor_fuses_stages_and_preserves_execution_metadata(tmp_path: 
 
 
 @pytest.mark.asyncio
+async def test_executor_rejects_malformed_stages_without_submitting(tmp_path: Path) -> None:
+    config = _config()
+    runner = _FakeRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    mixed = EvaluationRequest(
+        key="mixed",
+        stages=tuple(
+            EvaluationStep(
+                name=name,
+                payload=SlurmStagePayload(
+                    command=f"run-{name}", target_lifecycle=lifecycle
+                ).model_dump(mode="json"),
+            )
+            for name, lifecycle in (
+                ("accuracy", SlurmTargetLifecycle.COMMAND_MANAGED),
+                ("benchmark", SlurmTargetLifecycle.SHARED_SERVICE),
+            )
+        ),
+    )
+
+    with pytest.raises(ExecutorRejectedError, match="one target lifecycle"):
+        await executor.submit(mixed, handle_id="eval-mixed")
+
+    assert await executor.inspect("eval-mixed") is None
+    assert runner.submissions == 0
+    await executor.close()
+
+
+@pytest.mark.asyncio
 async def test_executor_maps_pre_stage_failure_and_skips_remainder(tmp_path: Path) -> None:
     config = _config()
     executor = SlurmEvaluationExecutor(
@@ -265,6 +324,77 @@ async def test_executor_maps_pre_stage_failure_and_skips_remainder(tmp_path: Pat
     assert observed.state is EvaluationState.FAILED
     assert observed.stage_results[0].failure == "service startup failed"
     assert observed.stage_results[1].state is StageState.SKIPPED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exit_code", "expected"),
+    [
+        (124, "stage 'benchmark' hit its time limit after 4 s and printed no output"),
+        (137, "stage 'benchmark' hit its time limit after 4 s and printed no output"),
+        (3, "stage 'benchmark' exited with code 3 after 4 s and printed no output"),
+    ],
+)
+async def test_executor_reports_a_silent_failed_stage(
+    tmp_path: Path, exit_code: int, expected: str
+) -> None:
+    config = _config()
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=_FakeRunner(config, benchmark_exit_code=exit_code, benchmark_stdout=""),
+    )
+
+    await executor.submit(_request(), handle_id="eval-silent")
+    observed = await _terminal(executor, "eval-silent")
+
+    assert observed.state is EvaluationState.FAILED
+    assert observed.stage_results[0].state is StageState.SUCCEEDED
+    assert observed.stage_results[1].state is StageState.FAILED
+    assert observed.stage_results[1].failure == expected
+    assert observed.failure == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("benchmark_stdout", "expected_head"),
+    [
+        ("", "stage 'benchmark' hit its time limit after 4 s and printed no output"),
+        ("warmup timed out", "warmup timed out"),
+    ],
+)
+async def test_failed_stage_reports_the_server_log_tail(
+    tmp_path: Path, benchmark_stdout: str, expected_head: str
+) -> None:
+    config = _config()
+    server_log = "decode: 2600 steps, 112.2 ms/step, 22.7 items/step"
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=_FakeRunner(
+            config,
+            benchmark_exit_code=124,
+            benchmark_stdout=benchmark_stdout,
+            service_log_tail=server_log,
+        ),
+    )
+
+    await executor.submit(_request(), handle_id="eval-server-log")
+    observed = await _terminal(executor, "eval-server-log")
+
+    failure = observed.stage_results[1].failure
+    assert failure is not None
+    assert failure.startswith(expected_head)
+    assert failure.endswith(server_log)
+    assert observed.stage_results[0].failure is None
 
 
 @pytest.mark.asyncio
@@ -411,3 +541,65 @@ def test_command_managed_stage_disables_shared_service() -> None:
     payload = SlurmStagePayload(target_lifecycle=SlurmTargetLifecycle.COMMAND_MANAGED)
 
     assert payload.target_lifecycle is SlurmTargetLifecycle.COMMAND_MANAGED
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runner = _BlockingRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    await executor.submit(_request(), handle_id="eval-interrupted")
+    await asyncio.to_thread(runner.wait_started.wait)
+
+    # What asyncio.run does to leftover tasks on a hard interrupt: cancel them
+    # directly, without going through the executor's own cancel().
+    executions = [
+        task for task in asyncio.all_tasks() if task.get_name().startswith("vibesys-slurm-")
+    ]
+    assert len(executions) == 1
+    executions[0].cancel()
+    await asyncio.gather(*executions, return_exceptions=True)
+
+    assert runner.cancelled_job_ids == ["1234"]
+    observed = await executor.inspect("eval-interrupted")
+    assert observed is not None
+    assert observed.state is EvaluationState.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runner = _UnreachableSchedulerRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    await executor.submit(_request(), handle_id="eval-unreachable")
+    await asyncio.to_thread(runner.wait_started.wait)
+    executions = [
+        task for task in asyncio.all_tasks() if task.get_name().startswith("vibesys-slurm-")
+    ]
+
+    executions[0].cancel()
+    outcomes = await asyncio.gather(*executions, return_exceptions=True)
+
+    assert [type(outcome) for outcome in outcomes] == [asyncio.CancelledError]
+    # A failed scancel may be retried by the next cleanup step, never skipped.
+    assert set(runner.cancelled_job_ids) == {"1234"}

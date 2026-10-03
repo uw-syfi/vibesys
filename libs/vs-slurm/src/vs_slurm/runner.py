@@ -40,6 +40,11 @@ _TERMINAL_STATES = frozenset(
 _ACCOUNTING_FIELD_COUNT = 2
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
+_SERVICE_LOG_TAIL = "service-log-tail.txt"
+_SERVICE_LOG_TAIL_LINES = 400
+_SERVICE_LOG_REPORTED_LINES = 40
+_SERVICE_LOG_LINE_CHARS = 400
+_SERVICE_LOG_TAIL_CHARS = 8_000
 _CONTENT_CACHE_ROOT = ".vibesys-content-cache"
 _STAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
@@ -62,10 +67,16 @@ class _TransportResponse:
 
 @dataclass(frozen=True)
 class SlurmFileArtifact:
-    """A candidate-relative remote file copied to an explicit local path."""
+    """A candidate-relative remote file copied to an explicit local path.
+
+    Artifacts are copied when the job succeeds. ``collect_on_failure`` also
+    copies this one when the job ran and exited nonzero, if the job wrote it:
+    a failed job may have reported why in it.
+    """
 
     remote_path: str
     local_path: Path
+    collect_on_failure: bool = False
 
 
 @dataclass(frozen=True)
@@ -157,6 +168,7 @@ class SlurmArtifactTarget(BaseModel):
     remote_path: str
     local_path: Path
     kind: Literal["file", "tree"]
+    collect_on_failure: bool = False
 
 
 class SlurmJobHandle(BaseModel):
@@ -295,6 +307,8 @@ class SlurmBatchResult:
     stages: tuple[SlurmBatchStageResult, ...]
     phase_timings_seconds: Mapping[str, float]
     content_cache_hits: int
+    service_log_tail: str = ""
+    """Last distinct lines of the shared service's log, empty without a service."""
 
 
 @dataclass(frozen=True)
@@ -354,7 +368,7 @@ class SlurmError(RuntimeError):
 
     @classmethod
     def content_cache_busy(cls, detail: str) -> SlurmError:
-        """Describe a bounded wait on another cache publisher that can be retried."""
+        """Describe a transient staging condition that can be retried."""
         return cls(f"Slurm content staging is temporarily unavailable: {detail}")
 
     @classmethod
@@ -446,7 +460,10 @@ class SlurmError(RuntimeError):
 class SlurmJobRunner:
     """Run a command in Slurm without knowing cluster credentials or transport."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # LW-951301; each keyword is an independent injected effect or local resource.
+        # > A settings object would group unrelated effects (process, clock, pause,
+        # > identity, scratch) into a shallow carrier; carrying scratch on each
+        # > request cannot reach collect(), which receives only a durable handle.
         self,
         config: SlurmConfig,
         *,
@@ -454,9 +471,17 @@ class SlurmJobRunner:
         clock: Callable[[], float] = time.monotonic,
         pause: Callable[[float], None] = time.sleep,
         invocation_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+        scratch_root: Path | None = None,
     ) -> None:
-        """Create a runner with injectable process, clock, and identity effects."""
+        """Create a runner with injectable process, clock, and identity effects.
+
+        ``scratch_root`` holds the runner's own transfer files (the job script,
+        collected status, log, and batch results); the system temporary
+        directory when omitted. A caller whose transport only moves files under
+        declared roots, such as the host-owned Slurm broker, passes one of them.
+        """
         self._config = config
+        self._scratch_root = scratch_root
         self._process = process or _run_process
         self._transport = _make_transport(
             config,
@@ -471,17 +496,14 @@ class SlurmJobRunner:
         if request.cancel_event is not None and request.cancel_event.is_set():
             raise SlurmError.cancelled_before_submission()
         handle = self.submit(request)
-        while True:
-            if request.cancel_event is not None and request.cancel_event.is_set():
-                self.cancel(handle)
-                raise SlurmError.cancelled(handle.job_id)
-            outcome = self.wait(handle, cancel_event=request.cancel_event)
-            if outcome.timed_out:
-                with suppress(SlurmError):
-                    self.cancel(handle)
-                raise SlurmError.job_timed_out(handle.job_id)
-            if outcome.terminal:
-                break
+        try:
+            outcome = self._await_terminal(handle, request.cancel_event)
+        except BaseException as failure:
+            # This call submitted the job, so no other owner can cancel it:
+            # whatever ends the wait (a cancel, a timeout, a failed poll, an
+            # interrupt) cancels the job, and a failed cancel travels with it.
+            self._cancel_abandoned(handle, failure)
+            raise
         if outcome.status == SlurmJobStatus.CANCELLED:
             raise SlurmError.cancelled(handle.job_id)
         return self.collect(handle)
@@ -547,7 +569,7 @@ class SlurmJobRunner:
             raise SlurmError.content_stage_failed() from exc
         staging_seconds = max(0.0, self._clock() - staging_started)
 
-        with tempfile.TemporaryDirectory(prefix="vs-slurm-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="vs-slurm-", dir=self._scratch_root) as temporary:
             temporary_path = Path(temporary)
             local_script = temporary_path / "run.sbatch"
             local_script.write_text(
@@ -565,10 +587,20 @@ class SlurmJobRunner:
             )
             self._transport.put(local_script, remote_script)
             job_id = self._submit(base, remote_script, remote_log)
-        artifacts = tuple(
-            SlurmArtifactTarget(remote_path=path.as_posix(), local_path=target, kind=kind)
-            for kind, entries in (("file", files), ("tree", trees))
-            for path, target in entries
+        artifacts = (
+            *(
+                SlurmArtifactTarget(
+                    remote_path=path.as_posix(),
+                    local_path=target,
+                    kind="file",
+                    collect_on_failure=item.collect_on_failure,
+                )
+                for (path, target), item in zip(files, request.file_artifacts, strict=True)
+            ),
+            *(
+                SlurmArtifactTarget(remote_path=path.as_posix(), local_path=target, kind="tree")
+                for path, target in trees
+            ),
         )
         return SlurmJobHandle(
             job_id=job_id,
@@ -678,7 +710,9 @@ class SlurmJobRunner:
                 content_cache_hits=handle.job.content_cache_hits,
             )
 
-        with tempfile.TemporaryDirectory(prefix="vs-slurm-batch-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-batch-", dir=self._scratch_root
+        ) as temporary:
             temporary_path = Path(temporary)
             results_root = temporary_path / "results"
             results_root.mkdir()
@@ -725,6 +759,7 @@ class SlurmJobRunner:
                 ("service_startup", "service-startup-seconds.txt"),
             ):
                 timings[phase_name] = _read_nonnegative_seconds(phase_root / result_name)
+            service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
         timings["collection"] = max(0.0, self._clock() - collection_started)
         return SlurmBatchResult(
             job_id=job_result.job_id,
@@ -733,6 +768,7 @@ class SlurmJobRunner:
             stages=tuple(stage_results),
             phase_timings_seconds=timings,
             content_cache_hits=handle.job.content_cache_hits,
+            service_log_tail=service_log_tail,
         )
 
     def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
@@ -769,11 +805,21 @@ class SlurmJobRunner:
         timeout = self._config.job_timeout_seconds if timeout_seconds is None else timeout_seconds
         if not math.isfinite(timeout) or timeout <= 0:
             raise SlurmError.invalid_wait_timeout()
+        try:
+            return self._observe(handle, timeout, cancel_event)
+        except SlurmError as failure:
+            if cancel_event is None or not cancel_event.is_set():
+                raise
+            self._cancel_abandoned(handle, failure)
+            raise
+
+    def _observe(
+        self, handle: SlurmJobHandle, timeout: float, cancel_event: Event | None
+    ) -> SlurmJobWaitResult:
+        """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
         deadline = self._clock() + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
-                with suppress(SlurmError):
-                    self.cancel(handle)
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
             if status in _PUBLIC_TERMINAL_STATES:
@@ -782,6 +828,28 @@ class SlurmJobRunner:
             if remaining <= 0:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
             self._pause(min(self._config.poll_interval_seconds, remaining))
+
+    def _await_terminal(
+        self, handle: SlurmJobHandle, cancel_event: Event | None
+    ) -> SlurmJobWaitResult:
+        """Observe within the configured job timeout; running past it raises."""
+        outcome = self._observe(handle, self._config.job_timeout_seconds, cancel_event)
+        if outcome.timed_out:
+            raise SlurmError.job_timed_out(handle.job_id)
+        return outcome
+
+    def _cancel_abandoned(self, handle: SlurmJobHandle, failure: BaseException) -> None:
+        """Cancel a job its waiter gave up on; note a failed cancel on *failure*."""
+        try:
+            self.cancel(handle)
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-731105 [BLE001]; the original failure must still propagate.
+            # > Any cancel failure (transport, timeout, OS) is reported on the
+            # > failure being raised; a narrower catch would replace that failure
+            # > with the cancel's and hide why the wait ended.
+            failure.add_note(
+                f"Slurm job {handle.job_id} may still be queued or running: "
+                f"scancel failed: {type(error).__name__}: {error}"
+            )
 
     def cancel(self, handle: SlurmJobHandle) -> None:
         """Request scheduler cancellation for an existing operation."""
@@ -796,21 +864,30 @@ class SlurmJobRunner:
             raise SlurmError.cancelled(handle.job_id)
         if status not in {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED}:
             raise SlurmError.job_not_terminal(handle.job_id)
-        with tempfile.TemporaryDirectory(prefix="vs-slurm-collect-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-collect-", dir=self._scratch_root
+        ) as temporary:
             temporary_path = Path(temporary)
             local_status = temporary_path / "exit-code.txt"
             local_log = temporary_path / "job.log"
             self._transport.get(PurePosixPath(handle.remote_status_path), local_status, kind="file")
             self._transport.get(PurePosixPath(handle.remote_log_path), local_log, kind="file")
             exit_code = _read_exit_code(local_status)
-            if exit_code == 0 and status == SlurmJobStatus.COMPLETED:
-                for artifact in handle.artifacts:
-                    local_path = artifact.local_path
-                    remote_path = PurePosixPath(handle.remote_workspace) / artifact.remote_path
-                    if artifact.kind == "file":
-                        local_path.parent.mkdir(parents=True, exist_ok=True)
-                    else:
-                        local_path.mkdir(parents=True, exist_ok=True)
+            succeeded = exit_code == 0 and status == SlurmJobStatus.COMPLETED
+            for artifact in handle.artifacts:
+                if not succeeded and not artifact.collect_on_failure:
+                    continue
+                local_path = artifact.local_path
+                remote_path = PurePosixPath(handle.remote_workspace) / artifact.remote_path
+                if artifact.kind == "file":
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    local_path.mkdir(parents=True, exist_ok=True)
+                if succeeded:
+                    self._transport.get(remote_path, local_path, kind=artifact.kind)
+                    continue
+                # A failed job need not have written it; absent stays absent.
+                with suppress(SlurmError):
                     self._transport.get(remote_path, local_path, kind=artifact.kind)
             return SlurmJobResult(
                 job_id=handle.job_id,
@@ -1099,6 +1176,11 @@ def _run_process(
         text=True,
         timeout=timeout,
         encoding="utf-8",
+        # Each call is bounded by its timeout. In its own process group, a
+        # signal aimed at the caller's group (Ctrl-C, a sandbox stopping its
+        # command) cannot kill an in-flight sbatch or squeue, which would lose
+        # the job id or the chance to cancel the job.
+        process_group=0,
     )
 
 
@@ -1289,6 +1371,12 @@ def _job_script(request: _JobScriptRequest) -> str:
         timing_path = workspace / phase_timing_root / "service-startup-seconds.txt"
         lines.append(f"printf '%s\\n' 0 > {shlex.quote(timing_path.as_posix())}")
     lines.extend([_shell_join_dynamic(command), "job_status=$?"])
+    if service is not None and phase_timing_root is not None:
+        tail_path = workspace / phase_timing_root / _SERVICE_LOG_TAIL
+        lines.append(
+            f"tail -n {_SERVICE_LOG_TAIL_LINES} .vs-slurm-service.log"
+            f" > {shlex.quote(tail_path.as_posix())} 2>/dev/null"
+        )
     if service is not None:
         lines.append("fi")
     lines.extend(
@@ -1346,6 +1434,36 @@ def _shell_join_dynamic(arguments: Sequence[str]) -> str:
         else:
             parts.append(shlex.quote(argument))
     return " ".join(parts)
+
+
+def _distinct_tail(path: Path) -> str:
+    """Return the service log's last lines, keeping only the latest copy of a repeated line.
+
+    Servers often repeat one warning hundreds of times; without this the tail
+    would show only that warning and hide the server's own progress lines.
+    """
+    if not path.is_file():
+        return ""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    seen: set[str] = set()
+    kept: list[str] = []
+    size = 0
+    for raw_line in reversed(lines):
+        line = (
+            raw_line
+            if len(raw_line) <= _SERVICE_LOG_LINE_CHARS
+            else raw_line[:_SERVICE_LOG_LINE_CHARS] + " [line truncated]"
+        )
+        if line in seen:
+            continue
+        size += len(line) + 1
+        if size > _SERVICE_LOG_TAIL_CHARS:
+            break
+        seen.add(line)
+        kept.append(line)
+        if len(kept) == _SERVICE_LOG_REPORTED_LINES:
+            break
+    return "\n".join(reversed(kept))
 
 
 def _accounting_state(output: str) -> tuple[str, str] | None:

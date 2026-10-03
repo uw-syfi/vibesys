@@ -15,10 +15,14 @@ from pathlib import Path
 import pytest
 
 from vibesys.constants import DomainName
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.hypothesis import (
+    ExhaustionNotice,
+    OrchestratorPlan,
+    TerminalWorkspaceEdits,
+)
 from vibesys.inputs import WorkspaceSource
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
@@ -26,9 +30,9 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
-from vibesys.orchestration.prompts import render_template
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.prompts import render_template
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]
@@ -241,9 +245,9 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             template_dir=_TEMPLATE_DIR,
             **common,
             roadmap_location=context["roadmap_location"],
-            profiler_summary=None,
-            regression_info=None,
-            exhaustion_info=None,
+            profiler_entry=None,
+            regression_entry=None,
+            exhaustion_entry=None,
             plateau_warning=None,
             domain_orchestrator=_domain_section(domain, "orchestrator", context),
             framework_benchmark_enabled=context.get("framework_benchmark_enabled", False),
@@ -449,6 +453,8 @@ def test_judge_references_framework_evidence_without_embedding_implementer_prose
 
 
 def test_orchestrator_routes_profile_and_failure_details_through_progress() -> None:
+    # The plugin writes the failure details into the progress entry this prompt
+    # points to; test_plugin.py checks that delivery end to end.
     context = _CONTEXTS["full"]
     sentinels = {
         "regression": "REGRESSION_DETAIL_MUST_NOT_BE_EMBEDDED",
@@ -459,9 +465,17 @@ def test_orchestrator_routes_profile_and_failure_details_through_progress() -> N
         "orchestrator_plan_prompt.j2",
         template_dir=_TEMPLATE_DIR,
         objective_location=context["objective_location"],
-        profiler_summary={"analysis": sentinels["profile"]},
-        regression_info=sentinels["regression"],
-        exhaustion_info=sentinels["exhaustion"],
+        profiler_entry={"analysis": sentinels["profile"]},
+        regression_entry=TerminalWorkspaceEdits(
+            hypothesis_id=sentinels["regression"],
+            outcome="disproven",
+            round_number=80,
+            parent_round=79,
+            checkpoint=None,
+        ),
+        exhaustion_entry=ExhaustionNotice(
+            round_number=80, attempts=2, feedback=sentinels["exhaustion"]
+        ),
         progress_location=context["progress_location"],
         roadmap_location=context["roadmap_location"],
         pareto_archive_location=context["pareto_archive_location"],
@@ -502,8 +516,8 @@ def test_pre_round_prompt_is_path_only_and_skips_future_rollback_target() -> Non
         template_dir=_TEMPLATE_DIR,
         objective_location="OBJECTIVE.md",
         objective="OBJECTIVE_CONTENT_MUST_NOT_BE_EMBEDDED",
-        regression_info="REGRESSION_DETAIL_MUST_NOT_BE_EMBEDDED",
-        exhaustion_info=None,
+        regression_entry="REGRESSION_DETAIL_MUST_NOT_BE_EMBEDDED",
+        exhaustion_entry=None,
         progress_location="progress/",
         profiler_kind="torch",
         profile_execution="remote",
@@ -523,8 +537,8 @@ def test_pre_round_prompt_disables_none_profiler_without_fake_capture_path() -> 
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
         objective_location="OBJECTIVE.md",
-        regression_info=None,
-        exhaustion_info=None,
+        regression_entry=None,
+        exhaustion_entry=None,
         progress_location="progress/",
         profiler_kind="none",
         profile_execution="remote",
@@ -625,8 +639,8 @@ def test_pre_round_prompt_byte_budgets() -> None:
         template_dir=_TEMPLATE_DIR,
         objective_location="OBJECTIVE.md",
         progress_location="progress/",
-        regression_info="recorded in progress",
-        exhaustion_info="recorded in progress",
+        regression_entry="recorded in progress",
+        exhaustion_entry="recorded in progress",
         profiler_kind="torch",
         profile_execution="remote",
     )
@@ -648,8 +662,8 @@ def test_pre_round_prompt_byte_budgets_on_a_cold_start() -> None:
         template_dir=_TEMPLATE_DIR,
         objective_location="OBJECTIVE.md",
         progress_location="progress/",
-        regression_info="recorded in progress",
-        exhaustion_info="recorded in progress",
+        regression_entry="recorded in progress",
+        exhaustion_entry="recorded in progress",
         profiler_kind="torch",
         profile_execution="remote",
         has_history=False,
@@ -667,8 +681,8 @@ def test_pre_round_prompt_defaults_to_the_campaign_history_reading() -> None:
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
         objective_location="OBJECTIVE.md",
-        regression_info=None,
-        exhaustion_info=None,
+        regression_entry=None,
+        exhaustion_entry=None,
         progress_location="progress/",
         profiler_kind="torch",
         profile_execution="remote",
@@ -687,8 +701,8 @@ def test_pre_round_prompt_lets_a_cold_start_establish_that_it_runs() -> None:
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
         objective_location="OBJECTIVE.md",
-        regression_info=None,
-        exhaustion_info=None,
+        regression_entry=None,
+        exhaustion_entry=None,
         progress_location="progress/",
         profiler_kind="torch",
         profile_execution="remote",

@@ -110,6 +110,22 @@ def cli_skill_dirs() -> tuple[str, ...]:
     return tuple(seen)
 
 
+def cli_mcp_config_files() -> tuple[str, ...]:
+    """Return every workspace file a shipped provider writes its MCP servers into.
+
+    Some CLIs read MCP servers only from a file in the working directory, so
+    the driver writes one there for each turn. It carries per-turn capability
+    tokens and is never candidate content. Resolved at call time from each
+    provider's ``ProviderProfile.mcp_config_file``.
+    """
+    seen: dict[str, None] = {}
+    for provider in SHIPPED_PROVIDERS:
+        config_file = provider_profiles.provider_profile(provider).mcp_config_file
+        if config_file is not None:
+            seen.setdefault(config_file, None)
+    return tuple(seen)
+
+
 # --- Agent image ------------------------------------------------------------
 #
 # Versions baked into ``vs_agent/images/agent.Dockerfile`` as build args

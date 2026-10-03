@@ -6,12 +6,12 @@ from typing import Annotated, Literal, Self, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.population import (
     Individual,
     OpenEvolveSelectorConfig,
     PopulationState,
 )
-from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
 
 
@@ -88,7 +88,7 @@ class CandidateProfilerContext(BaseModel):
     domain_profiler: str
     modality: str | None
     objective: str | None
-    pareto_objectives_addendum: str
+    objectives: list[Objective]
     profile_execution: str
     profile_focus: str
     profiler_mcp_name: str

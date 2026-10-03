@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from vs_project._git_process import git_environment, run_git
 from vs_project.project import Project
 
 if TYPE_CHECKING:
@@ -48,7 +49,9 @@ class GitTracker:
 
     The project root is also the Git worktree root. Each run advances its own
     ``vibesys-runs/<run-id>`` branch. Machine-local framework state is excluded
-    through repository-local Git configuration.
+    through repository-local Git configuration. ``excluded_dirs`` and
+    ``excluded_files`` name directories and files, at any depth, that are
+    framework inputs rather than candidate content and are never committed.
     """
 
     _GIT_ENV_STATIC: ClassVar[dict[str, str]] = {
@@ -56,8 +59,13 @@ class GitTracker:
         "GIT_AUTHOR_EMAIL": "vibesys@local",
         "GIT_COMMITTER_NAME": "vibesys",
         "GIT_COMMITTER_EMAIL": "vibesys@local",
+        # Read-only queries (``git status``, ``git diff``) otherwise try to
+        # write a refreshed index back under ``.git/index.lock``. That races
+        # with a concurrent ``git add``/``reset``/``commit`` and fails it with
+        # "Unable to create index.lock". Commands that must write the index
+        # still take the lock; only the opportunistic refresh is skipped.
+        "GIT_OPTIONAL_LOCKS": "0",
     }
-
     # Compiled-accelerator artifacts an agent may emit into the workspace.
     # Large and never wanted in a per-round checkpoint. The Neuron compile cache
     # is bind-mounted *outside* the workspace, but a stray trace/compile call
@@ -94,13 +102,14 @@ class GitTracker:
     # caller's thread (a frontend request thread, for instance) open forever.
     _READ_TIMEOUT_SECONDS = 10.0
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-415556 [PLR0913]; all but root are keyword-only and independently optional; grouping the two exclusion sets into a value object would change every caller for no added safety.
         self,
         root: Path,
         *,
         run_id: str,
         events: GitTrackerEvents,
         excluded_dirs: Iterable[str] = (),
+        excluded_files: Iterable[str] = (),
         trusted_input_paths: Iterable[str | Path] = (),
     ) -> None:
         self.root = root.expanduser().resolve()
@@ -109,6 +118,7 @@ class GitTracker:
             raise ValueError(message)
         self._events = events
         self._excluded_dirs = frozenset(excluded_dirs)
+        self._excluded_files = frozenset(excluded_files)
         self.run_id = run_id
         self._trusted_input_paths = tuple(
             dict.fromkeys(_normalize_project_paths(trusted_input_paths))
@@ -124,16 +134,8 @@ class GitTracker:
 
     @property
     def _git_env(self) -> dict[str, str]:
-        """Git env pinned to the repository selected during initialization."""
-        safe_directory = self._work_tree or self.root
-        config = [("safe.directory", str(safe_directory))]
-        result = {
-            **self._GIT_ENV_STATIC,
-            "GIT_CONFIG_COUNT": str(len(config)),
-        }
-        for index, (key, value) in enumerate(config):
-            result[f"GIT_CONFIG_KEY_{index}"] = key
-            result[f"GIT_CONFIG_VALUE_{index}"] = value
+        """Env overrides pinning Git to the repository selected during initialization."""
+        result = dict(self._GIT_ENV_STATIC)
         if self._git_dir is not None and self._work_tree is not None:
             result["GIT_DIR"] = str(self._git_dir)
             result["GIT_WORK_TREE"] = str(self._work_tree)
@@ -144,21 +146,24 @@ class GitTracker:
         cmd: list[str],
         *,
         check: bool = True,
-        env: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         """Run a git command in the workspace, logging stderr on failure.
 
-        ``timeout`` bounds the call and raises ``subprocess.TimeoutExpired``,
-        which callers that must not block (a request thread, say) handle.
+        ``cmd`` starts with ``git``. ``timeout`` bounds the call and raises
+        ``subprocess.TimeoutExpired``, which callers that must not block (a
+        request thread, say) handle.
         """
-        if env is None:
-            env = os.environ.copy()
-            for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-                env.pop(variable, None)
-            env.update(self._git_env)
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007106 [S603]; internally built Git argv operates on this repository without a shell.
-            cmd, cwd=self.root, capture_output=True, env=env, timeout=timeout, check=False
+        if cmd[:1] != ["git"]:
+            message = f"tracker commands must start with 'git': {cmd}"
+            raise ValueError(message)
+        result = run_git(
+            cmd[1:],
+            cwd=self.root,
+            env=git_environment(
+                safe_directory=self._work_tree or self.root, overrides=self._git_env
+            ),
+            timeout=timeout,
         )
         if check and result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
@@ -225,6 +230,9 @@ class GitTracker:
             raise ValueError(message)
         sha = resolved.stdout.decode(errors="replace").strip()
         ref = f"refs/vibesys/{self.run_id}/candidates/{candidate_id}"
+        if self.run(["git", "check-ref-format", ref], check=False).returncode != 0:
+            message = f"candidate id is not a valid Git ref name component: {candidate_id!r}"
+            raise ValueError(message)
         self.run(["git", "update-ref", ref, sha])
         return ref
 
@@ -247,23 +255,10 @@ class GitTracker:
         command: list[str],
     ) -> subprocess.CompletedProcess[bytes]:
         """Run Git against a linked worktree without the main-worktree pins."""
-        env = os.environ.copy()
-        for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-            env.pop(variable, None)
-        env.update(
-            {
-                **self._GIT_ENV_STATIC,
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "safe.directory",
-                "GIT_CONFIG_VALUE_0": str(worktree_dir),
-            }
-        )
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007107 [S603]; internally built Git argv operates on this candidate worktree without a shell.
-            command,
+        result = run_git(
+            command[1:],
             cwd=worktree_dir,
-            capture_output=True,
-            env=env,
-            check=False,
+            env=git_environment(safe_directory=worktree_dir, overrides=self._GIT_ENV_STATIC),
         )
         if result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
@@ -703,10 +698,21 @@ class GitTracker:
         return preserved
 
     def _restore_preserved_paths(self, preserved: dict[Path, bytes]) -> None:
-        """Reapply files captured by :meth:`_capture_preserved_paths`."""
+        """Reapply files captured by :meth:`_capture_preserved_paths`.
+
+        A file whose bytes already match is left alone, and any other file is
+        replaced rather than rewritten in place. An agent can leave a file it
+        may not write, for example one a root container created in the
+        workspace, and only the directory's permissions should decide whether
+        it can be replaced, as they do for ``git restore``.
+        """
         for relative, content in preserved.items():
             destination = self.root / relative
+            if destination.is_file() and destination.read_bytes() == content:
+                continue
             destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.is_file():
+                destination.unlink()
             destination.write_bytes(content)
 
     def trusted_input_changes(self) -> list[str]:
@@ -899,6 +905,7 @@ class GitTracker:
         patterns.extend(
             f"{directory}/" for directory in sorted(self._excluded_dirs) if directory != ".git"
         )
+        patterns.extend(sorted(self._excluded_files))
         patterns.extend(self._ARTIFACT_GITIGNORE_PATTERNS)
         self._append_exclude_patterns(patterns)
 
@@ -1087,6 +1094,7 @@ class GitTracker:
             for directory in sorted(self._excluded_dirs)
             if directory != ".git"
         )
+        protected.extend(f":(glob)**/{name}" for name in sorted(self._excluded_files))
         for pattern in self._ARTIFACT_GITIGNORE_PATTERNS:
             normalized = pattern.removesuffix("/")
             if pattern.endswith("/"):

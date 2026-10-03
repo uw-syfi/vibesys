@@ -1,0 +1,6 @@
+{# Context: `round_number` (int), `hypothesis_id` (str), `task` (str). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Active hypothesis continuation") %}
+- hypothesis_id: {{ hypothesis_id }}
+- task: {{ task }}
+{% endcall %}

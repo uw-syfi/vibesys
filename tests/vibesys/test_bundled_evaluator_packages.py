@@ -65,6 +65,6 @@ def test_bundled_request_factory_package_pins_cargo_git_tool() -> None:
     package = _resolve_bundled_package("vibesys-evaluator-request-factory")
 
     tool = package.metadata.tools["request-factory"]
-    assert tool.rev == "118da6137275fda3a290e9012853214dc437c6c0"
+    assert tool.rev == "89dce4a64ae12e7084fbe464ddda882fa0a4c482"
     assert tool.package == "req-frontend"
     assert tool.bins == ("session_runner",)

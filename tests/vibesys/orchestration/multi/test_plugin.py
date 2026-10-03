@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.orchestration.hypothesis import InvalidPlanError, OrchestratorPlan
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.hypothesis import InvalidPlanError, OrchestratorPlan
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -22,6 +22,8 @@ from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AgentCapability,
+    AgentTool,
+    AgentTurnTimeoutError,
     BenchmarkEvaluation,
     LocalValidationEvaluation,
     RunFacts,
@@ -40,7 +42,11 @@ if TYPE_CHECKING:
 
 DESIGNER, PROFILER, IMPLEMENTER, JUDGE = PLUGIN.agents
 _FAKE_AGENT_CAPABILITIES = frozenset(
-    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+    {
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.SESSION_REUSE,
+        AgentCapability.MCP_SERVERS,
+    }
 )
 
 
@@ -149,6 +155,7 @@ def _run(
             facts=facts,
             responder=script.respond,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            supported_extra_tools=("profiler",),
         )
         if configure is not None:
             configure(run)
@@ -175,6 +182,10 @@ def test_plugin_declares_four_roles_and_plain_production_options() -> None:
         _options(profile_guided={"min_measured_rounds": 2})
     with pytest.raises(ValidationError, match="unexpected_option"):
         _options(unexpected_option=True)
+
+
+def test_profiler_role_requests_selected_profiler_tool() -> None:
+    assert PROFILER.extra_tools == (AgentTool(id="profiler"),)
 
 
 def test_round_uses_fresh_policy_sessions_and_named_implementer(tmp_path: Path) -> None:
@@ -474,6 +485,43 @@ def test_paid_attempt_is_not_replayed_after_interrupted_turn(tmp_path: Path) -> 
     assert all(session.closed for session in run.agents.sessions)
 
 
+def test_failed_implementer_turn_feeds_a_durable_framework_reason_to_the_retry(
+    tmp_path: Path,
+) -> None:
+    timeout = AgentTurnTimeoutError(12.5)
+
+    async def scenario() -> _Script:
+        script = _Script(
+            _pre_round(),
+            _plan("H-01"),
+            timeout,
+            RuntimeError("agent disconnected"),
+            _implementation(),
+            _judge(),
+        )
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
+            resumed = await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
+            assert resumed is RunStatus.SUCCEEDED
+            return script
+        finally:
+            await run.close()
+
+    script = asyncio.run(scenario())
+    retries = [message for role, _, message in script.calls if role == IMPLEMENTER.id][1:]
+    assert len(retries) == 2
+    reason = f"framework: the previous attempt returned no valid response ({timeout})"
+    # The second retry runs after a restart, so the reason must survive in state.
+    assert all(reason in " ".join(message.split()) for message in retries)
+
+
 def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> None:
     script = _Script(
         _pre_round(),
@@ -547,3 +595,63 @@ def test_round_slower_than_the_input_never_becomes_the_anchor(
     assert "no trusted winner; restored the input baseline" in [
         call.message for call in run.observations.calls
     ]
+
+
+_NOTICE_HEADINGS = {
+    "regression or terminal-workspace notice": "Regression or terminal-workspace notice",
+    "exhausted-review feedback": "Exhausted-review feedback",
+}
+
+
+_FAILED_ROUND = (_implementation(), _judge(verdict=Verdict.FAIL, feedback="boundary unchecked"))
+
+
+@pytest.mark.parametrize(
+    ("earlier_rounds", "expected_detail"),
+    [
+        pytest.param(((_implementation(), _judge()),), None, id="passed"),
+        pytest.param(
+            ((_implementation(hypothesis_outcome="disproven"), _judge()),),
+            "its workspace edits are still present",
+            id="terminal-workspace",
+        ),
+        # The failed hypothesis stays active for two continuation rounds before
+        # the designer plans again.
+        pytest.param(
+            (_FAILED_ROUND, _FAILED_ROUND, _FAILED_ROUND),
+            "did not pass after 1 attempts. Last judge feedback: boundary unchecked",
+            id="exhausted-review",
+        ),
+    ],
+)
+def test_designer_prompts_point_at_notices_the_progress_entry_contains(
+    tmp_path: Path,
+    earlier_rounds: tuple[tuple[object, ...], ...],
+    expected_detail: str | None,
+) -> None:
+    replies = [_pre_round(), _plan("H-01"), *earlier_rounds[0]]
+    for later in earlier_rounds[1:]:
+        replies.extend(later)
+    script = _Script(*replies, _pre_round(), _plan("H-02"), _implementation(), _judge())
+    final_round = len(earlier_rounds) + 1
+
+    status, _ = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=final_round, max_retries_per_round=1),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    entry = (tmp_path / "progress" / f"round-{final_round:04d}.md").read_text()
+    final_prompts = [message for role, _, message in script.calls if role == DESIGNER.id][2:]
+    assert len(final_prompts) == 2
+    for prompt in final_prompts:
+        flat = " ".join(prompt.split())
+        for pointer, heading in _NOTICE_HEADINGS.items():
+            assert (pointer in flat) == (f"## Round {final_round}: {heading}" in entry)
+        if expected_detail is not None:
+            assert expected_detail not in flat
+    if expected_detail is None:
+        assert not any(heading in entry for heading in _NOTICE_HEADINGS.values())
+    else:
+        assert expected_detail in entry

@@ -22,6 +22,36 @@ export interface SubscribeOptions {
 }
 
 /**
+ * The subscribe request the options above encode, as the generated union's own
+ * member rather than an object literal each transport asserts its way into.
+ *
+ * One place owns the encoding rules the two option docs state, so the
+ * transports cannot disagree about them, which they did: one omitted an empty
+ * `storeId` while the other sent `store_id: ""`.
+ *
+ * - An option the caller did not set is omitted, never sent as `null`. A server
+ *   that predates a field forbids unknown keys, so a default subscribe has to
+ *   stay byte for byte what it has always been, and `store_id` in particular is
+ *   rejected as an explicit `null` while being accepted as omitted: the server
+ *   model is `store_id: str = ""` and the generated type is `store_id?: string`,
+ *   optional and not nullable. Returning the union member makes `null`
+ *   unrepresentable here instead of guarded against at each call site.
+ * - An empty `storeId` says the caller has not seen a store yet, which is
+ *   absence, so it is omitted as well.
+ */
+export function subscribeRequest(
+  afterSequence: number,
+  options: SubscribeOptions,
+): Extract<RequestInput, {type: 'subscribe'}> {
+  return {
+    type: 'subscribe',
+    after_sequence: afterSequence,
+    ...(options.tail === undefined ? {} : {tail: options.tail}),
+    ...(options.storeId === undefined || options.storeId === '' ? {} : {store_id: options.storeId}),
+  };
+}
+
+/**
  * The transport surface a session consumes: one control request/response verb,
  * a live event subscription, and a bounded close. `ServerClient` (the Node
  * socket transport) satisfies it structurally, and a browser WebSocket

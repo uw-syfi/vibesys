@@ -7,9 +7,14 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
 
-from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
+from vs_evaluation.agent_evidence import EvidenceKind, EvidenceOutcome, TrustedEvidence
 
-MAX_AGENT_AWAIT_S = 300.0
+# How long one agent await call may block before it returns progress instead.
+# An agent CLI abandons an MCP tool call after its own tool-call timeout (Codex
+# reported 300 s in run r15; Codex documents a 60 s default). agentshim exposes
+# no provider's default, so this one bound stays under the smallest known one
+# with room for the 5 s socket slack the MCP client adds.
+MAX_AGENT_AWAIT_S = 45.0
 MAX_PROFILER_REQUEST_CHARS = 16_384
 MAX_PROFILER_NARRATIVE_CHARS = 65_536
 EvidenceId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -126,10 +131,11 @@ class ProfilerAgentResult(BaseModel):
             raise ValueError(  # noqa: TRY003  # lint-waiver: LW-930055 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
                 "unsupported outcome requires unsupported_reason and observed forbids it"
             )
-        if self.outcome is ProfilerResultOutcome.UNSUPPORTED and (
-            self.attribution or self.evidence_ids
-        ):
-            raise ValueError("unsupported outcome forbids attribution and evidence")  # noqa: TRY003  # lint-waiver: LW-930056 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+        # An unsupported report may cite the trusted evidence it examined (for
+        # example the failed capture that made the question unanswerable); the
+        # host resolves those ids like any other. It may not attribute cost.
+        if self.outcome is ProfilerResultOutcome.UNSUPPORTED and self.attribution:
+            raise ValueError("unsupported outcome forbids attribution")  # noqa: TRY003  # lint-waiver: LW-930056 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
 
 
 class ProfilerOperationResult(BaseModel):
@@ -150,6 +156,13 @@ class ProfilerOperationResult(BaseModel):
             raise ValueError(  # noqa: TRY003  # lint-waiver: LW-930058 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
                 "trusted profile evidence references included non-profile evidence"
             )
+        if self.report.outcome is ProfilerResultOutcome.OBSERVED and any(
+            item.outcome is EvidenceOutcome.FAILED for item in self.trusted_evidence
+        ):
+            # A failed capture describes no completed workload, so it cannot
+            # support an observation; the report must say unsupported instead.
+            message = "an observed profile cited failed profile evidence"
+            raise ValueError(message)
         return self
 
 
@@ -213,13 +226,13 @@ class ProfilerRunObservation(BaseModel):
     work: ProfilerWorkKey
     candidate_snapshot_id: str = Field(min_length=1)
     state: ProfilerOperationState
-    accepted_result: bool
+    evidence_recorded: bool
     outcome: ProfilerResultOutcome | None = None
     trusted_evidence_ids: tuple[EvidenceId, ...] = ()
 
     @model_validator(mode="after")
-    def _accepted_means_trusted_evidence(self) -> ProfilerRunObservation:
-        if self.accepted_result != bool(self.trusted_evidence_ids):
+    def _recorded_means_trusted_evidence(self) -> ProfilerRunObservation:
+        if self.evidence_recorded != bool(self.trusted_evidence_ids):
             raise ValueError("accepted profiler result must carry trusted evidence")  # noqa: TRY003  # lint-waiver: LW-092711 [TRY003]; this external contract needs a field-specific validation error; a custom exception would add a public recovery type for invalid serialized data.
         return self
 

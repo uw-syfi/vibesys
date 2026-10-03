@@ -9,7 +9,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+from pydantic import BaseModel, Field
 
 from vibesys.api import CoreAgentEventSink
 from vibesys.events import (
@@ -24,6 +26,7 @@ from vs_agent.api import (
     AgentClient,
     AgentEvent,
     AgentEventKind,
+    AgentOutputSchemaError,
     AgentSessionKey,
     AgentUsage,
     SessionScope,
@@ -34,6 +37,7 @@ from vs_agent.contracts import (
     AgentObserver,
     AgentSession,
     AgentSessionSpec,
+    AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
     MCPServerSpec,
@@ -395,7 +399,6 @@ def test_a_structured_turn_streams_nothing_on_the_assistant_channel(tmp_path: Pa
         system_prompt="system",
         user_prompt="user",
         response_cls=_Response,
-        fallback_factory=lambda: _Response(answer="fallback"),
         round_label="round-1",
         invocation_id="inv-1",
     )
@@ -634,7 +637,6 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
         system_prompt="system",
         user_prompt="user",
         response_cls=_Response,
-        fallback_factory=lambda: _Response(answer="fallback"),
         round_label="judge #1",
         env={"VISIBLE": "1"},
         session_key=_key("review"),
@@ -663,6 +665,62 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
     assert {key: record[key] for key in expected} == expected
 
 
+def test_a_skill_load_is_rendered_on_the_diagnostic_channel(tmp_path: Path) -> None:
+    session = _FakeSession(
+        results=[AgentTurnResult("Done")],
+        events=[AgentEvent(AgentEventKind.SKILL, text="serving-systems")],
+    )
+    seen = []
+    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client.invoke_text(
+        kind="implementer",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        round_label="round-1",
+    )
+
+    assert ("diagnostic", "[skill] serving-systems") in [
+        (event.data.channel, event.data.content)
+        for event in seen
+        if isinstance(event.data, AgentOutputChunkData)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("skills", "expected"),
+    [
+        (
+            AgentSkillUse(offered=("a", "b"), invoked=("a", "a")),
+            {"skill_uses": 2, "skills_invoked": ["a", "a"], "skills_offered": 2},
+        ),
+        (
+            AgentSkillUse(offered=None, invoked=()),
+            {"skill_uses": 0, "skills_invoked": [], "skills_offered": None},
+        ),
+        # A provider that cannot say is recorded as unknown, never as zero.
+        (AgentSkillUse(), {"skill_uses": None, "skills_invoked": None, "skills_offered": None}),
+    ],
+)
+def test_the_usage_record_carries_the_turns_skill_use(
+    tmp_path: Path, skills: AgentSkillUse, expected: dict[str, object]
+) -> None:
+    session = _FakeSession(results=[AgentTurnResult("done", skills=skills)])
+    client = AgentClient(_FakeDriver([session]), log_dir=tmp_path, event_sink=NULL_AGENT_EVENT_SINK)
+
+    client.invoke_text(
+        kind="implementer",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        round_label="impl #1",
+    )
+
+    record = json.loads((tmp_path / "usage.jsonl").read_text())
+    assert record["kind"] == "implementer"
+    assert {key: record[key] for key in expected} == expected
+
+
 def test_runtime_accessors_expose_configured_driver_provider_and_model() -> None:
     client = AgentClient(
         _FakeDriver([]),
@@ -687,28 +745,70 @@ def test_runtime_accessors_default_to_none_or_codex_when_unconfigured() -> None:
     assert client.model_for_kind("implementer") is None
 
 
-def test_invoke_uses_fallback_only_for_unparseable_output(tmp_path: Path) -> None:
-    session = _FakeSession(results=[AgentTurnResult("not json")])
+def test_invoke_reports_an_invalid_reply_as_a_schema_error_naming_its_fields(
+    tmp_path: Path,
+) -> None:
+    """The caller's correction needs the field-named errors, not a synthesized response."""
+    session = _FakeSession(results=[AgentTurnResult('{"answer": 3}')])
     client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
-    fallback_calls = 0
 
-    def fallback() -> _Response:
-        nonlocal fallback_calls
-        fallback_calls += 1
-        return _Response(answer="fallback")
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        client.invoke(
+            kind="judge",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            response_cls=_Response,
+            round_label="judge #1",
+        )
 
-    response = client.invoke(
-        kind="judge",
-        workspace=tmp_path,
+    assert raised.value.detail.startswith("answer: ")
+
+
+class _Plan(BaseModel):
+    title: str = Field(max_length=8)
+    count: int
+
+
+def _invoke_plan(reply: str, workspace: Path) -> _Plan:
+    session = _FakeSession(results=[AgentTurnResult(reply)])
+    client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    return client.invoke(
+        kind="planner",
+        workspace=workspace,
         system_prompt="system",
         user_prompt="user",
-        response_cls=_Response,
-        fallback_factory=fallback,
-        round_label="judge #1",
+        response_cls=_Plan,
+        round_label="plan #1",
     )
 
-    assert response == _Response(answer="fallback")
-    assert fallback_calls == 1
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(title=st.text(min_size=9, max_size=40), count=st.integers())
+def test_invoke_names_each_invalid_field_in_the_schema_error(
+    tmp_path: Path, title: str, count: int
+) -> None:
+    reply = f"Here is the plan:\n```json\n{json.dumps({'title': title, 'count': count})}\n```"
+
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        _invoke_plan(reply, tmp_path)
+
+    assert raised.value.detail.startswith("title: ")
+    assert "8 characters" in raised.value.detail
+
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(title=st.text(max_size=8), count=st.integers())
+def test_invoke_returns_a_valid_reply_unchanged(tmp_path: Path, title: str, count: int) -> None:
+    payload = {"title": title, "count": count}
+
+    assert _invoke_plan(json.dumps(payload), tmp_path) == _Plan(**payload)
+
+
+@pytest.mark.parametrize("reply", ["", "no json here", "{not json}"])
+def test_invoke_says_when_a_reply_has_no_json_object(tmp_path: Path, reply: str) -> None:
+    with pytest.raises(AgentOutputSchemaError, match="no JSON object"):
+        _invoke_plan(reply, tmp_path)
 
 
 def test_invoke_translates_generic_tool_server_for_the_driver(tmp_path: Path) -> None:
@@ -728,7 +828,6 @@ def test_invoke_translates_generic_tool_server_for_the_driver(tmp_path: Path) ->
         system_prompt="system",
         user_prompt="user",
         response_cls=_Response,
-        fallback_factory=lambda: _Response(answer="fallback"),
         round_label="judge #1",
         tool_servers=[descriptor],
     )

@@ -25,6 +25,7 @@ from vibesys.inputs._manifest import (
     load_project_task,
     render_input_manifest,
 )
+from vibesys.inputs._objective import with_operator_constraints
 from vibesys.inputs._synthesis import (
     EVALUATOR_SRC_DIRNAME,
     InputSynthesisError,
@@ -55,4 +56,5 @@ __all__ = [
     "load_project_task",
     "render_input_manifest",
     "synthesize_input_bundle",
+    "with_operator_constraints",
 ]

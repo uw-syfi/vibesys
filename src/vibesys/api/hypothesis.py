@@ -1,6 +1,6 @@
 """Public projection contract for built-in hypothesis-search plugins."""
 
-from vibesys.orchestration.hypothesis.readmodel import (
+from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,

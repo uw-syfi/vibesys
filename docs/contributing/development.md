@@ -52,7 +52,7 @@ The main framework boundaries are:
   applicable. Orchestration policy normally uses
   `vs_runtime.api.testing.FakeRun`. Tach rejects imports of root-level
   exports and internal modules.
-- `src/vibesys/orchestration/domains/` owns domain-specific prompt policy.
+- `src/vibesys/domains/` owns domain-specific prompt policy.
   Generic execution mechanisms belong in `libs/vs-runtime/`; agent harnesses,
   compute isolation, and project persistence belong in `libs/vs-agent/`,
   `libs/vs-sandbox/`, and `libs/vs-project/`, respectively.
@@ -130,6 +130,27 @@ For a focused test, use for example:
 uv run pytest tests/vibesys/orchestration/issue_queue/test_plugin.py
 uv run pytest -k orchestrator
 ```
+
+### Dynamic-loop smoke tier
+
+Run `./scripts/smoke_dynamic_loop.sh` before every live hardware run. It
+launches the installed `vibesys` CLI (launcher and engine) with `--outer-loop
+dynamic --headless` against the Slurm run environment on the Fake cluster
+(`vs_slurm.fake_connector` in executing mode), with real agent CLIs (Claude
+Haiku by default; `VIBESYS_SMOKE_PROVIDER=codex` selects Codex). The input is a
+small CPU task under `tests/e2e/dynamic_smoke/bundle`. A second scenario sends
+Ctrl-C mid-run.
+
+It checks loop invariants from the run's own records
+(`tests/support/loop_invariants.py`): a typed terminal status and no empty
+completion, every offered capability served or withdrawn after `unsupported`,
+no MCP tool timeout, every run path a prompt names present at turn start, no
+evaluation submitted after a stop, the stop grace bound, no Slurm job left
+behind, and recorded token usage. Each run prints one summary line (wall time,
+tokens, cost) to `smoke-summary.txt` under `.logs/smoke-<timestamp>`. One run
+of both scenarios takes about 5 minutes and about $0.60 of Haiku tokens. It is
+opt-in (`VIBESYS_E2E_AGENTS=1`) and not in PR CI, because real agents are
+nondeterministic.
 
 The TypeScript client has its own workflow; see
 [`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:

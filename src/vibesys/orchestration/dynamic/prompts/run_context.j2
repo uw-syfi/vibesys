@@ -1,0 +1,20 @@
+Objective (authoritative, including operator constraints):
+{{ objective }}
+{% if environment_notes %}
+
+Run environment: {{ environment_notes }}
+{% endif %}
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+{% if skills %}
+
+Skills installed for this run hold task and domain knowledge; load the relevant
+ones before planning, implementing, or reviewing. Each skill's entry point is
+<name>/SKILL.md in the workspace, and its reference files sit beside it:
+{% for skill in skills %}
+- {{ skill.name }}: {{ skill.description }}
+{% endfor %}
+{% endif %}

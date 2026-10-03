@@ -13,15 +13,15 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.orchestration.domains.registry import (
+from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
+from vibesys.domains.registry import (
     DOMAINS,
     registered_domains,
     resolve_domain,
 )
-from vibesys.orchestration.domains.rendering import render_domain_section
+from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.prompts import render_template
+from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,6 +44,7 @@ def test_registered_domains_present() -> None:
     assert "generic" in names
     assert "microservices" in names
     assert "database" in names
+    assert "kernel-writing" in names
     assert "README" not in names  # the authoring guide is not a domain
 
 
@@ -51,24 +52,38 @@ def test_resolve_registered_name() -> None:
     d = resolve_domain(DomainName.LLM_SERVING)
     assert d.name is DomainName.LLM_SERVING
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "llm_serving"
-    assert d.prompt_dir.parent.name == "domains"
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "llm_serving"
 
 
 def test_resolve_microservices_domain() -> None:
     d = resolve_domain(DomainName.MICROSERVICES)
     assert d.name is DomainName.MICROSERVICES
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "microservices"
-    assert d.prompt_dir.parent.name == "domains"
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "microservices"
 
 
 def test_resolve_database_domain() -> None:
     d = resolve_domain(DomainName.DATABASE)
     assert d.name is DomainName.DATABASE
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "database"
-    assert d.prompt_dir.parent.name == "domains"
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "database"
+
+
+def test_kernel_writing_domain_renders_roles_and_derives_single_agent() -> None:
+    domain = resolve_domain(DomainName.KERNEL_WRITING)
+    implementer = render_domain_section(domain, DomainRole.IMPLEMENTER)
+    judge = render_domain_section(domain, DomainRole.JUDGE)
+    profiler = render_domain_section(domain, DomainRole.PROFILER)
+    single_agent = render_domain_section(domain, DomainRole.SINGLE_AGENT)
+
+    assert domain.prompt_dir.is_dir()
+    assert implementer
+    assert judge
+    assert profiler
+    assert single_agent == f"{implementer}\n\n{judge}"
 
 
 def test_resolve_path_is_not_supported(tmp_path: Path) -> None:
@@ -86,6 +101,7 @@ def test_domains_declare_torch_profiler_compatibility() -> None:
     assert not DOMAINS[DomainName.GENERIC].supports_torch_profiler
     assert not DOMAINS[DomainName.MICROSERVICES].supports_torch_profiler
     assert not DOMAINS[DomainName.DATABASE].supports_torch_profiler
+    assert not DOMAINS[DomainName.KERNEL_WRITING].supports_torch_profiler
 
 
 def test_resolve_unknown_raises() -> None:
@@ -334,9 +350,9 @@ def _render_orchestrator(domain: DomainName) -> str:
         "orchestrator_plan_prompt.j2",
         template_dir=_TEMPLATE_DIR,
         objective="OBJ",
-        profiler_summary=None,
-        regression_info=None,
-        exhaustion_info=None,
+        profiler_entry=None,
+        regression_entry=None,
+        exhaustion_entry=None,
         roadmap_text="ROADMAP",
         plateau_warning=None,
         domain_orchestrator=section,
@@ -430,7 +446,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
         "domain_profiler": "",
         "profiler_support_name": "torch_profiler",
         "profiler_mcp_name": "vibesys-torch-profiler",
-        "profiler_campaign_context": "",
+        "campaign": None,
     }
 
     local = render_template(

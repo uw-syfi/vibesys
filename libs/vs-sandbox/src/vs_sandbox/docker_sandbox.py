@@ -8,9 +8,7 @@ import logging
 import os
 import re
 import shlex
-import signal
 import subprocess
-import threading
 import uuid
 from contextlib import suppress
 from pathlib import Path
@@ -20,10 +18,11 @@ from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_resul
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
+from vs_sandbox.process_execution import ProcessStop, start_process_group, wait_stoppable
 
 if TYPE_CHECKING:
+    import threading
     from collections.abc import Mapping, Sequence
-    from types import FrameType
 
     from vs_sandbox.host_resources import HostResource
 
@@ -50,6 +49,11 @@ AGENT_HOME = "/home/agent"
 _AGENT_USER = "agent"
 _ROOT_SETUP_TIMEOUT_S = 60
 _CONTAINER_IDENTITY_LINE_COUNT = 2
+# Every ``execute`` tags its in-container processes with this environment
+# variable so a stop can find them: stopping the ``docker exec`` client alone
+# leaves the command running in the container.
+_EXEC_MARKER_ENV = "VIBESYS_EXEC_ID"
+_EXEC_STOP_TIMEOUT_S = 30
 
 
 class DockerSandboxNotStartedError(RuntimeError):
@@ -115,37 +119,6 @@ def _cleanup_containers() -> None:
 
 
 atexit.register(_cleanup_containers)
-
-# Re-raise SIGINT as KeyboardInterrupt so finally/atexit handlers run
-# even if a C extension swallows the default disposition.
-_original_sigint = signal.getsignal(signal.SIGINT)
-
-
-def _sigint_handler(signum: int, frame: FrameType | None) -> None:
-    """Re-raise the interrupt and let normal unwinding precede cleanup.
-
-    Container cleanup is registered with ``atexit``. Removing the editor
-    container here races with caller ``finally`` blocks that still need to run
-    inside it, notably VibeSys' bind-mount ownership repair. Restoring the
-    prior handler and re-raising first lets those blocks finish; process exit
-    then invokes ``_cleanup_containers`` without leaking the container.
-    """
-    # Restore original handler FIRST to prevent recursive re-entry
-    # while the interrupt unwinds through caller cleanup.
-    signal.signal(signal.SIGINT, _original_sigint)
-    # signal.Handlers and signal.Signals are IntEnum, so the int/None test is
-    # the exact complement of callable() for anything getsignal() can return.
-    if _original_sigint is None or isinstance(_original_sigint, int):
-        raise KeyboardInterrupt
-    _original_sigint(signum, frame)
-
-
-# Python only permits installing signal handlers from the main thread. This
-# module may first be imported off the main thread (a run dispatched via
-# asyncio.to_thread imports the Docker backend lazily), so skip registration
-# there rather than raise; atexit cleanup above still runs on process exit.
-if threading.current_thread() is threading.main_thread():
-    signal.signal(signal.SIGINT, _sigint_handler)
 
 
 def _first_component_below(home: str, destination: str) -> str:
@@ -824,13 +797,21 @@ class DockerSandbox(WorkspaceSandbox):
         command: str,
         *,
         timeout: int | None = None,
+        cancel: threading.Event | None = None,
     ) -> SandboxExecutionResult:
-        """Execute a command inside the Docker container."""
+        """Execute a command inside the Docker container.
+
+        With *cancel*, the command's container processes carry a per-call
+        marker; a timeout or a set *cancel* sends them ``SIGTERM`` before the
+        local ``docker exec`` client is stopped, and a cancellation returns
+        ``cancelled=True``.
+        """
         if self._container_id is None:
             raise DockerSandboxNotStartedError.operation_before_start()
 
         effective_timeout = timeout if timeout is not None else self._default_timeout
-
+        if cancel is not None:
+            return self._execute_cancellable(command, effective_timeout, cancel)
         exec_cmd = [
             "docker",
             "exec",
@@ -851,15 +832,66 @@ class DockerSandbox(WorkspaceSandbox):
                 timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired:
-            self._log_cmd(exec_cmd, error=f"timeout after {effective_timeout}s")
-            return bounded_execution_result(
-                stdout="",
-                stderr=f"Command timed out after {effective_timeout}s",
-                exit_code=-1,
-                max_output_chars=self._max_output_bytes,
-            )
+            return self._timed_out(exec_cmd, effective_timeout)
         self._log_cmd(exec_cmd, result)
+        return self._exec_result(result)
 
+    def _execute_cancellable(
+        self, command: str, timeout: int, cancel: threading.Event
+    ) -> SandboxExecutionResult:
+        exec_id = uuid.uuid4().hex
+        exec_cmd = [
+            "docker",
+            "exec",
+            "-e",
+            f"{_EXEC_MARKER_ENV}={exec_id}",
+            "-w",
+            "/workspace",
+            self._container_id or "",
+            "bash",
+            "-c",
+            command,
+        ]
+        self._log_cmd(exec_cmd)
+        outcome = wait_stoppable(
+            start_process_group(exec_cmd, env=None, cwd=None),
+            timeout=timeout,
+            cancel=cancel,
+            before_stop=lambda: self._stop_exec(exec_id),
+        )
+        if outcome.stopped is ProcessStop.TIMEOUT:
+            return self._timed_out(exec_cmd, timeout)
+        result = subprocess.CompletedProcess(
+            exec_cmd, outcome.returncode, outcome.stdout, outcome.stderr
+        )
+        self._log_cmd(exec_cmd, result)
+        if outcome.stopped is not ProcessStop.CANCELLED:
+            return self._exec_result(result)
+        streams = bounded_execution_result(
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+            max_output_chars=self._max_output_bytes,
+        )
+        return SandboxExecutionResult(
+            output="Error: Command was cancelled.",
+            exit_code=result.returncode,
+            truncated=streams.truncated,
+            stdout=streams.stdout,
+            stderr=streams.stderr,
+            cancelled=True,
+        )
+
+    def _timed_out(self, exec_cmd: list[str], timeout: int) -> SandboxExecutionResult:
+        self._log_cmd(exec_cmd, error=f"timeout after {timeout}s")
+        return bounded_execution_result(
+            stdout="",
+            stderr=f"Command timed out after {timeout}s",
+            exit_code=-1,
+            max_output_chars=self._max_output_bytes,
+        )
+
+    def _exec_result(self, result: subprocess.CompletedProcess[str]) -> SandboxExecutionResult:
         # When docker-exec itself fails (e.g. container removed), the error
         # lands in stderr with nothing in stdout.  Treat this as a container-
         # level error so callers that parse stdout don't choke on it.
@@ -870,13 +902,33 @@ class DockerSandbox(WorkspaceSandbox):
                 exit_code=result.returncode,
                 max_output_chars=self._max_output_bytes,
             )
-
         return bounded_execution_result(
             stdout=result.stdout,
             stderr=result.stderr,
             exit_code=result.returncode,
             max_output_chars=self._max_output_bytes,
         )
+
+    def _stop_exec(self, exec_id: str) -> None:
+        """Send ``SIGTERM`` to every container process tagged with *exec_id*."""
+        marker = f"{_EXEC_MARKER_ENV}={exec_id}"
+        script = (
+            "for f in /proc/[0-9]*/environ; do"
+            f" if tr '\\0' '\\n' 2>/dev/null < \"$f\" | grep -qx {shlex.quote(marker)}; then"
+            ' p=${f#/proc/}; kill -TERM "${p%/environ}" 2>/dev/null; fi;'
+            " done; true"
+        )
+        with suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(  # noqa: S603  # lint-waiver: LW-731002 [S603]; internally assembled docker exec argv stops this sandbox's own processes.
+                # > The argv is fixed except the container id and a hex id;
+                # > routing it through execute() would recurse into the stop path.
+                ["docker", "exec", self._container_id or "", "sh", "-c", script],  # noqa: S607  # lint-waiver: LW-731006 [S607]; Docker is a PATH-resolved runtime dependency.
+                # > Every other Docker call in this module resolves ``docker`` on PATH.
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_EXEC_STOP_TIMEOUT_S,
+            )
 
     def __enter__(self) -> DockerSandbox:
         """Start the sandbox and return it as a context manager."""

@@ -16,7 +16,7 @@ from tests.vibesys.orchestration.multi._integration_support import (
     write_input,
 )
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
@@ -245,6 +245,7 @@ def test_judge_write_is_reverted_before_the_next_attempt(tmp_path: Path) -> None
     assert [call.kind for client in clients for call in client.calls].count("judge") == 2
 
 
+@pytest.mark.usefixtures("loose_git_objects")
 def test_failed_rollback_restore_warns_and_continues(tmp_path: Path) -> None:
     input_root = write_input(tmp_path / "input")
 

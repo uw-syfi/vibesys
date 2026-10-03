@@ -167,9 +167,16 @@ remains in the project, while machine-local state defaults to `~/.vibesys`:
     ├── agent/active.json
     ├── round-transaction.json             # during round commit/recovery
     └── logs/
+~/.vibesys/cache/<architecture>/
+└── evaluator-tools/<tool>/<spec-digest>/  # evaluator tools, shared by all projects
 ```
 
 Set `VIBESYS_STATE_HOME` to an absolute directory to override `~/.vibesys`.
+`~/.vibesys/cache/` holds immutable, content-addressed entries that every project
+on the host reuses, such as evaluator tools built from a pinned source revision.
+Entries are keyed by CPU architecture, so a state home on a filesystem shared by
+hosts of different architectures stays correct. Deleting the directory is safe:
+VibeSys rebuilds entries on the next run that needs them.
 VibeSys moves an existing `.vibesys/state/local/` tree on first open, preserving
 the existing bytes and paths; temporary worktrees remain in the project.
 
@@ -197,8 +204,8 @@ worktree must be clean before VibeSys switches to the saved
 
 | Flag | Default | Behavior |
 | --- | ---: | --- |
-| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. |
-| `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. When a benchmark is configured, the input tree is also benchmarked once before round 1: a round with no retained, measured ancestor is compared against it, a checkpoint is retained only if it also beats it (with objective axes, only if it is not dominated by it), and a measured round that is not retained stays on record but never becomes a later round's baseline. |
+| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. The `dynamic` orchestration counts each workstream as a round: it always reviews a nominated or supported candidate, and reviews another terminal outcome on every Nth workstream. Its budget is `--max-rounds` times its `max_in_flight` workstreams, and a continued hypothesis counts as one more workstream. |
+| `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. The `dynamic` orchestration ignores this cadence: its workstreams are parallel branches, so it evaluates every review-passed candidate. In the single- and multi-agent loops, when a benchmark is configured, the input tree is also benchmarked once before round 1: a round with no retained, measured ancestor is compared against it, a checkpoint is retained only if it also beats it (with objective axes, only if it is not dominated by it), and a measured round that is not retained stays on record but never becomes a later round's baseline. |
 | `--memory-layout` | `files` | `files` keeps `roadmap.md` and `progress.md`. `directories` uses `roadmap/index.md` and one `progress/round-NNNN.md` audit file per round; fresh orchestrators receive a bounded recent window and can inspect older files on demand. Existing runs retain their current layout when resumed. |
 | `--constraint TEXT` | none | Add an operator-supplied workload invariant to every agent's objective without changing the input bundle. The framework commits the effective objective under the run's portable `.vibesys/state/` and mounts it read-only in isolated environments, so candidate edits cannot erase it. Repeat for multiple constraints and repeat the same flags when resuming. |
 
@@ -333,7 +340,7 @@ prompts and input-owned candidate-contract documentation.
 
 | Backend | Intended target | Sandbox support | Device handling | Default profiler behavior |
 | --- | --- | --- | --- | --- |
-| `cuda` | NVIDIA GPU serving systems. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Local/Docker use `nsys`; Modal uses `torch` when `--profiler auto`. |
+| `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` locally/in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
 | `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Local/Docker use `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
 | `metal` | Apple Silicon / MPS targets. | Local only. | No device selection or monitor. | Local `auto` resolves through the local runtime default. |
 | `trainium` | AWS Trainium / NeuronCore targets. | Local and Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
@@ -384,6 +391,7 @@ supported by this CLI.
 | --- | --- |
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
+| `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
 | `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |

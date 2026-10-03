@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from vs_agent.base import ResponseFallback
 from vs_agent.catalog import DriverInfo, agent_catalog
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
@@ -28,6 +27,7 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
+    AgentOutputSchemaError,
     AgentTurnTimeoutError,
     AgentUsage,
     MCPServerSpec,
@@ -53,9 +53,17 @@ from vs_agent.provider_policy import (
     NODE_VERSION,
     RUST_TOOLCHAIN_VERSION,
     SHIPPED_PROVIDERS,
+    cli_mcp_config_files,
     cli_skill_dirs,
 )
+from vs_agent.runner import describe_validation_error
 from vs_agent.selection import AgentSelection
+from vs_agent.session_environment import (
+    BASE_ENV_ALLOWLIST,
+    session_env_allowlist,
+    session_environment,
+    validate_env_names,
+)
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import (
     AgentSessionState,
@@ -79,6 +87,7 @@ if TYPE_CHECKING:
     from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
+    "BASE_ENV_ALLOWLIST",
     "CLI_VERSIONS",
     "DEFAULT_CLI_PROVIDER",
     "DOCKER_PROVIDER_ENV",
@@ -97,6 +106,7 @@ __all__ = [
     "AgentEventSink",
     "AgentExecutionPolicy",
     "AgentOutputChannel",
+    "AgentOutputSchemaError",
     "AgentProgress",
     "AgentSelection",
     "AgentSessionKey",
@@ -114,7 +124,6 @@ __all__ = [
     "MCPServerSpec",
     "NullAgentEventSink",
     "NullSessionStore",
-    "ResponseFallback",
     "RoundProgress",
     "SessionScope",
     "SessionStore",
@@ -132,13 +141,18 @@ __all__ = [
     "auth_env_vars",
     "auth_paths",
     "build_agent_client",
+    "cli_mcp_config_files",
     "cli_skill_dirs",
     "declare_provider_state_resources",
+    "describe_validation_error",
     "expose_as_tools",
     "register_tool",
     "serve_stdio",
+    "session_env_allowlist",
+    "session_environment",
     "task_agent_host_resources",
     "todos_from_tool_call",
+    "validate_env_names",
 ]
 
 
@@ -174,6 +188,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
+    agent_homes_dir: Path | None = None,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
     from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
@@ -193,4 +208,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         require_host_sandbox=require_host_sandbox,
         session_store=session_store,
         events=events,
+        agent_homes_dir=agent_homes_dir,
     )

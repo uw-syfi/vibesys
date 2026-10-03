@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import overload
 
 from vibesys.composition import (
-    _vibesys_runtime_host_resource,
+    _vibesys_runtime_host_resources,
     prepare_domain_model_artifacts,
     resolve_agent_driver,
 )
@@ -56,8 +56,10 @@ from vibesys.run.project_policy import (
     trusted_project_input_paths,
 )
 from vibesys.run.workspace_policy import (
+    AGENT_CONFIG_FILES,
     build_workspace_materialization_plan,
     create_project_materializer,
+    materialized_skill_dirs,
 )
 from vs_agent.api import (
     AgentBackend,
@@ -93,6 +95,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_run_environment,
     make_run_environment_spec,
+    offered_skill_facts,
     open_project_run_resources,
     open_run_environment_resources,
     prepare_trusted_evaluator,
@@ -238,7 +241,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             project_root = collection_root / run_id if copied_project else input_dir
             evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
 
-            if not copied_project and workspace_sources:
+            # A resumed collection run already holds its materialized sources.
+            if not existing and not copied_project and workspace_sources:
                 raise ConfigurationError(
                     ConfigurationDiagnostic(
                         code="project_materialization_required",
@@ -370,6 +374,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         if profiler_support_name is not None:
             project_excluded_dirs.add(profiler_support_name)
         project_excluded_dirs.update(name for _path, name in profiler_support_extra)
+        project_excluded_dirs.update(materialized_skill_dirs(skill_source_paths))
 
         def resolve_recorded_run(
             recorded: OrchestrationRunManifest,
@@ -397,6 +402,15 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     objective=objective,
                     provisional_project=workspace_files if copied_project else None,
                     excluded_dirs=frozenset(project_excluded_dirs),
+                    excluded_files=AGENT_CONFIG_FILES,
+                    candidate_support_dirs=frozenset(
+                        name
+                        for name in (
+                            profiler_support_name,
+                            *(name for _path, name in profiler_support_extra),
+                        )
+                        if name is not None
+                    ),
                     trusted_input_paths=tuple(
                         trusted_project_input_paths(
                             project_root,
@@ -432,7 +446,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
         prepared_evaluator = prepare_trusted_evaluator(
             evaluator_package_root,
-            project_state.model_cache_directory("evaluator-tools"),
+            # Tools are installed under their specification digest, so every
+            # project on this machine can reuse one build.
+            project_state.machine_cache_directory("evaluator-tools"),
         )
         evaluator_requirements = prepared_evaluator.requirements
         evaluator_tool_roots = prepared_evaluator.tool_roots
@@ -510,6 +526,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
             run_environment_request = RunEnvironmentRequest(
                 log_dir=log_dir,
+                agent_homes_dir=Project.agent_homes_directory_for(project_root, run_id),
                 workspace=project_root,
                 seeded_workspace_paths=tuple(source.dest for source in workspace_sources),
                 ref_dir=ref_dir,
@@ -527,6 +544,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_name=profiler_support_name,
                 profiler_support_extra=profiler_support_extra,
                 git_history_root=git.history_root,
+                run_owned_roots=(project_state.candidate_worktrees_directory(run_id),),
                 environment_bind_mounts=model_artifacts.bind_mounts,
                 log=logger.lprint,
                 framework_root=PROJECT_ROOT,
@@ -551,7 +569,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             evaluator_tool_roots=evaluator_tool_roots,
         )
         if not session.view.cli_sandboxed:
-            agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
+            agent_host_resources = (*agent_host_resources, *_vibesys_runtime_host_resources())
         result = _PreparedRun(
             backend=backend,
             agent_specs=agent_specs,
@@ -560,6 +578,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 environment_resources,
                 ref_name=ref_name,
                 profiler_kind=resolved_profiler_kind,
+                skill_source_paths=skill_source_paths,
             ),
             skill_source_paths=tuple(skill_source_paths),
             evaluation_plan=trusted_evaluation_plan(bundle, session),
@@ -602,6 +621,7 @@ def _run_facts(
     *,
     ref_name: str,
     profiler_kind: ProfilerKind,
+    skill_source_paths: list[Path],
 ) -> RunFacts:
     """Resolve the immutable policy facts exposed by the runtime host."""
     bundle = request.input_bundle
@@ -624,6 +644,7 @@ def _run_facts(
             WorkspaceSourceFact(name=source.name, dest=source.dest)
             for source in bundle.workspace_sources
         ),
+        skills=offered_skill_facts(skill_source_paths),
     )
 
 

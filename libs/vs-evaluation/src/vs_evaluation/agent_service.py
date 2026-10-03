@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 
 from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
 from vs_evaluation.agent_models import (
+    MAX_AGENT_AWAIT_S,
     AgentEvaluationCall,
     AgentEvaluationReply,
     AvailabilityCall,
@@ -30,6 +31,7 @@ from vs_evaluation.agent_models import (
     EvaluationGrant,
     EvaluationOperationObservation,
     EvaluationOperationSnapshot,
+    EvaluationStillRunning,
     EvidenceCall,
     EvidencePreflightCheck,
     EvidencePreflightDecision,
@@ -38,6 +40,7 @@ from vs_evaluation.agent_models import (
     HandleAccess,
     ProfilerOperationsCall,
     ProfilerStatusCall,
+    RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
     SocketFailure,
@@ -48,7 +51,16 @@ from vs_evaluation.agent_models import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
 )
-from vs_evaluation.models import AvailabilitySnapshot, AvailabilityState, ResourceRequirements
+from vs_evaluation.failure_signature import failure_signature, repeated_failures
+from vs_evaluation.models import (
+    AvailabilitySnapshot,
+    AvailabilityState,
+    EvaluationCompleted,
+    EvaluationFailed,
+    EvaluationState,
+    EvaluationTimedOut,
+    ResourceRequirements,
+)
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
 from vs_project.api import validate_socket_path
 
@@ -56,11 +68,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_evaluation.models import (
-        EvaluationAwaitResult,
-        EvaluationState,
-        StoredEvaluation,
-    )
+    from vs_evaluation.models import EvaluationAwaitResult, StoredEvaluation
     from vs_evaluation.profiler_service import ProfilerAgentService
     from vs_project.api import StateNamespace
 
@@ -69,6 +77,8 @@ _EVALUATION_CLEANUP_FAILED = "evaluation service cleanup failed"
 _CALL_ADAPTER = TypeAdapter(AgentEvaluationCall)
 _REPLY_ADAPTER = TypeAdapter(AgentEvaluationReply)
 _MAX_FRAME_BYTES = 1_048_576
+# The second identical failure in a row is the first repeat.
+_FIRST_REPEAT = 2
 
 
 class EvaluationBackend(Protocol):
@@ -118,6 +128,7 @@ class AccessErrorCode(StrEnum):
     AVAILABILITY_READ_ONLY = "availability_read_only"
     JUDGE_READ_ONLY = "judge_read_only"
     KIND_DENIED = "kind_denied"
+    KIND_UNSUPPORTED = "kind_unsupported"
     EVIDENCE_DENIED = "evidence_denied"
     UNKNOWN_HANDLE = "unknown_handle"
     HANDLE_DENIED = "handle_denied"
@@ -138,6 +149,9 @@ class EvaluationAgentAccessError(PermissionError):
             ),
             AccessErrorCode.JUDGE_READ_ONLY: "judge may read accepted evidence only",
             AccessErrorCode.KIND_DENIED: "role cannot request evidence kind",
+            AccessErrorCode.KIND_UNSUPPORTED: (
+                "this run's evaluation executor cannot produce evidence kind"
+            ),
             AccessErrorCode.EVIDENCE_DENIED: "accepted evidence is unavailable to this role",
             AccessErrorCode.UNKNOWN_HANDLE: "unknown evaluation handle",
             AccessErrorCode.HANDLE_DENIED: "evaluation handle is not visible to this principal",
@@ -397,6 +411,7 @@ class EvaluationAgentService:
             )
         if isinstance(call, SubmitCall):
             kinds = self._authorized_submission_kinds(grant, call.evidence_kinds)
+            await self._require_supported(kinds)
             submitted = await self._backend.submit_evidence(grant.scope_id, kinds)
             await self._remember(submitted, grant, kinds)
             return SubmittedReply(handle_id=submitted.handle_id)
@@ -429,6 +444,18 @@ class EvaluationAgentService:
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
 
+    async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Return the handles last submitted from ``scope_id``, oldest first.
+
+        A handle that another scope submitted again later belongs to that scope.
+        """
+        async with self._state_lock:
+            state = (
+                self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+                or EvaluationAgentState()
+            )
+        return tuple(item.handle_id for item in state.handles if item.scope_id == scope_id)
+
     async def _run_operations(self) -> RunOperationsReply:
         """Join durable access state with host-owned execution records."""
         async with self._state_lock:
@@ -447,7 +474,8 @@ class EvaluationAgentService:
                     candidate_content_digest=access.fingerprints.candidate.value,
                     evidence_kinds=access.kinds,
                     state=snapshot.state,
-                    accepted_result=snapshot.accepted_result,
+                    evidence_recorded=snapshot.evidence_recorded,
+                    stage_outcomes=snapshot.stage_outcomes,
                     evidence_ids=snapshot.evidence_ids,
                 )
             )
@@ -471,8 +499,16 @@ class EvaluationAgentService:
                 handle_id=call.handle_id, status=await self._backend.status(call.handle_id)
             )
         if isinstance(call, AwaitCall):
+            result = await self._backend.await_result(call.handle_id, call.timeout_s)
+            if isinstance(result, EvaluationTimedOut):
+                return AwaitReply(result=await self._progress(result))
             return AwaitReply(
-                result=await self._backend.await_result(call.handle_id, call.timeout_s)
+                result=result,
+                repeated_failure=(
+                    await self._repeated_failure(access)
+                    if isinstance(result, EvaluationFailed | EvaluationCompleted)
+                    else None
+                ),
             )
         if isinstance(call, CancelCall):
             if (
@@ -483,6 +519,58 @@ class EvaluationAgentService:
             record = await self._backend.cancel(call.handle_id)
             return CanceledReply(handle_id=call.handle_id, status=record.state)
         raise AssertionError
+
+    async def _progress(self, timed_out: EvaluationTimedOut) -> EvaluationStillRunning:
+        """Report what a still-running evaluation has recorded so far.
+
+        A timed-out wait never reports completion: a terminal state read here
+        is returned as recorded, and the next await returns its result.
+        """
+        if timed_out.status is None:
+            return EvaluationStillRunning(
+                handle_id=timed_out.handle_id, state=None, next_await_s=MAX_AGENT_AWAIT_S
+            )
+        snapshot = await self._backend.operation_snapshot(timed_out.handle_id)
+        return EvaluationStillRunning(
+            handle_id=timed_out.handle_id,
+            state=snapshot.state,
+            current_stage=snapshot.current_stage,
+            stage_outcomes=snapshot.stage_outcomes,
+            next_await_s=MAX_AGENT_AWAIT_S,
+        )
+
+    async def _repeated_failure(self, access: HandleAccess) -> RepeatedFailure | None:
+        """Describe a failure that repeats the previous ones from the same workspace.
+
+        Failures count in the scope's submission order up to this handle; a
+        passed evaluation ends the run of failures, and an unfinished or
+        canceled one is skipped.
+        """
+        handles = await self.scope_handles(access.scope_id)
+        if access.handle_id not in handles:
+            return None
+        signatures: list[str | None] = []
+        for handle_id in handles[: handles.index(access.handle_id) + 1]:
+            snapshot = await self._backend.operation_snapshot(handle_id)
+            if snapshot.failure is not None:
+                signatures.append(failure_signature(snapshot.failure))
+            elif snapshot.state is EvaluationState.SUCCEEDED:
+                signatures.clear()
+        count = repeated_failures(signatures)
+        signature = signatures[-1] if signatures else None
+        if count < _FIRST_REPEAT or signature is None:
+            return None
+        return RepeatedFailure(
+            signature=signature,
+            count=count,
+            instruction=(
+                f"This is failure {count} in a row with the same error ({signature}). "
+                "Your edits have not reached its cause. Before you edit or submit again, "
+                "read the code at the cited file and line and the code that produces its "
+                "failing values, and state the cause. Repeating an identical failure ends "
+                "your attempt."
+            ),
+        )
 
     def _require_profiler_agents(self) -> ProfilerAgentService:
         if self._profiler_agents is None:
@@ -520,6 +608,17 @@ class EvaluationAgentService:
                 call.timeout_s,
             )
         return await service.cancel(call.operation_id, grant.principal_id, grant.scope_id)
+
+    async def _require_supported(self, kinds: tuple[EvidenceKind, ...]) -> None:
+        """Reject kinds the executor cannot produce before any handle is claimed."""
+        snapshot = await self._backend.availability(ResourceRequirements())
+        unsupported = sorted(
+            kind.value for kind in kinds if kind.value not in snapshot.supported_evidence_kinds
+        )
+        if unsupported:
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.KIND_UNSUPPORTED, ", ".join(unsupported)
+            )
 
     def _require_grant(self, token: str) -> EvaluationGrant:
         grant = self._grants.get(token)

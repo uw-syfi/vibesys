@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+import importlib.util
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -36,6 +38,9 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.run.evaluation_backend import SemanticEvaluationBackend
     from vs_runtime.api import AgentRole, AgentToolBindingContext
+
+_DISTRIBUTION = "vibesys"
+"""The distribution whose top-level packages confined tool servers import."""
 
 
 @dataclass(slots=True)
@@ -77,12 +82,24 @@ def prepare_domain_model_artifacts(
     )
 
 
-def _vibesys_runtime_host_resource() -> HostResource:
-    """Declare the installed product package needed by host-confined agents."""
-    return HostResource(
-        Path(__file__).resolve().parents[1],
-        HostResourceAccess.READ_ONLY,
-        "VibeSys runtime",
+def _vibesys_runtime_host_resources() -> tuple[HostResource, ...]:
+    """Declare the installed product packages needed by host-confined agents.
+
+    Stdio tool servers run ``python -m <first-party module>`` inside the
+    sandbox. A wheel installs every first-party package under one
+    site-packages directory, but an editable checkout keeps each library under
+    its own ``libs/<name>/src`` root, so every distinct root must be readable.
+    """
+    roots = {Path(__file__).resolve().parents[1]}
+    for name, distributions in importlib.metadata.packages_distributions().items():
+        if _DISTRIBUTION not in distributions:
+            continue
+        spec = importlib.util.find_spec(name)
+        if spec is not None and spec.origin is not None:
+            roots.add(Path(spec.origin).resolve().parents[1])
+    return tuple(
+        HostResource(root, HostResourceAccess.READ_ONLY, "VibeSys runtime")
+        for root in sorted(roots)
     )
 
 
@@ -116,6 +133,7 @@ def agent_spec_from_config(
         model=model if model is not None else config.model.name,
         reasoning_effort=config.thinking.level,
         cli_timeout=agent_cfg.cli_timeout,
+        env_passthrough=agent_cfg.env_passthrough,
     )
 
 

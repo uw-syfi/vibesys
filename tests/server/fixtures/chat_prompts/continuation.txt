@@ -1,0 +1,3 @@
+Continue the read-only experiment chat. Consult `/state/threads/thread-1/conversation.jsonl`
+when the question depends on an earlier exchange, and use the `vibesys-run` MCP tools to
+investigate this run's current state before making claims.

@@ -14,9 +14,9 @@ from tests.vibesys.golden.helpers import (
     prompt_text,
 )
 
+from vibesys.hypothesis import OrchestratorPlan
 from vibesys.inputs import ProfileGuidedInput
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import (
     PLUGIN,
     PROFILE_GUIDED_PLUGIN,
@@ -41,7 +41,11 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeRun
 
 _FAKE_AGENT_CAPABILITIES = frozenset(
-    {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.SESSION_REUSE}
+    {
+        AgentCapability.MCP_SERVERS,
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.SESSION_REUSE,
+    }
 )
 
 if TYPE_CHECKING:
@@ -308,6 +312,7 @@ def test_public_policy_trajectory_matches_golden(
             facts=facts,
             responder=script.respond,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            supported_extra_tools=("profiler",),
         )
         if profile_guided:
             for _round in range(rounds):

@@ -250,7 +250,7 @@ def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(
     # itself must never be granted (#185). Authentication is immutable input;
     # sessions persist so a later turn can resume the rollout.
     assert by_path == {
-        ".codex/auth.json": HostResourceAccess.READ_ONLY,
+        ".codex/auth.json": HostResourceAccess.READ_WRITE,
         ".codex/sessions": HostResourceAccess.READ_WRITE,
         ".config/codex": HostResourceAccess.READ_WRITE,
     }
@@ -265,7 +265,7 @@ def test_codex_home_relocates_the_state_leaves(tmp_path: Path) -> None:
         resource.path.relative_to(tmp_path).as_posix(): resource.access for resource in declarations
     }
 
-    assert by_path["relocated-codex/auth.json"] is HostResourceAccess.READ_ONLY
+    assert by_path["relocated-codex/auth.json"] is HostResourceAccess.READ_WRITE
     assert by_path["relocated-codex/sessions"] is HostResourceAccess.READ_WRITE
     assert "relocated-codex/config.toml" not in by_path
     assert ".codex/auth.json" not in by_path
@@ -343,7 +343,7 @@ class TestShippedProfileState:
             resource.path.name: resource.access
             for resource in self._declarations(tmp_path, "codex")
         }
-        assert by_name["auth.json"] is HostResourceAccess.READ_ONLY
+        assert by_name["auth.json"] is HostResourceAccess.READ_WRITE
         assert by_name["sessions"] is HostResourceAccess.READ_WRITE
         assert "config.toml" not in by_name
 

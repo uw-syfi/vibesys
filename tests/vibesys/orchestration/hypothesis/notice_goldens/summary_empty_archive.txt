@@ -1,0 +1,4 @@
+Configured axes: throughput:max, latency:min
+Dominance is variance-aware: a point removes another only when it is no worse within 2% on every axis and better by more than 2% on at least one.
+Latest completed round: none.
+Trusted frontier parents: none recorded yet.

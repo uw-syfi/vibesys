@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable, Iterable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -118,8 +119,15 @@ class ProjectRunRequest:
     objective: str | None = None
     provisional_project: ProjectMaterializer | None = None
     excluded_dirs: frozenset[str] = frozenset()
+    excluded_files: frozenset[str] = frozenset()
     trusted_input_paths: tuple[str | Path, ...] = ()
     state: ProjectStateDeclaration | None = None
+    candidate_support_dirs: frozenset[str] = frozenset()
+    """Unversioned root directories every candidate worktree receives a copy of.
+
+    Agent tool support (for example a profiler's analysis server) is staged in the
+    project root but excluded from Git, so a linked worktree would not contain it.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,10 +170,25 @@ class ProjectRunResources:
             self._request.run_id, workspace_id
         )
         log_dir = self.state.local("runtime").external_directory(f"workspaces/{workspace_id}/logs")
+        if workspace.exists():
+            # A stable (member-keyed) workspace ID reuses one path across
+            # processes. The runtime holds at most one live candidate per ID,
+            # so a directory already here was left by a process that stopped
+            # before discarding it.
+            self.git.remove_worktree(workspace)
         teardown_stack = ExitStack()
         try:
             teardown_stack.callback(self.git.remove_worktree, workspace)
             self.git.add_worktree(workspace, revision)
+            for name in sorted(self._request.candidate_support_dirs):
+                source = self._request.project_root / name
+                if source.is_dir():
+                    shutil.copytree(
+                        source,
+                        workspace / name,
+                        symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__"),
+                    )
             logger = RunLogger(log_dir, tee_stderr=False, emit=self._effects.log_emit)
             teardown_stack.callback(logger.close)
             git = GitTracker(
@@ -173,6 +196,7 @@ class ProjectRunResources:
                 run_id=self._request.run_id,
                 events=self._effects.git_events,
                 excluded_dirs=self._request.excluded_dirs,
+                excluded_files=self._request.excluded_files,
                 trusted_input_paths=self._request.trusted_input_paths,
             )
             if self.git.trusted_input_baseline is not None:
@@ -302,6 +326,7 @@ def _assemble_project_run_resources(
             run_id=request.run_id,
             events=effects.git_events,
             excluded_dirs=request.excluded_dirs,
+            excluded_files=request.excluded_files,
             trusted_input_paths=request.trusted_input_paths,
         )
         git.init(existing=request.existing)

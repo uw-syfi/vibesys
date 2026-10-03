@@ -22,7 +22,8 @@ Otherwise it starts the interactive OpenTUI client, resolving the TUI in order:
 
 The headless path runs ``python -m entrypoints.headless`` in a subprocess.
 Interactive paths run the compiled launcher with ``VIBESYS_PYTHON`` set so it
-drives the current interpreter.
+drives the current interpreter. Every child runs through :func:`call_child`,
+which never kills the child: the child owns its run's teardown.
 """
 
 from __future__ import annotations
@@ -31,8 +32,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from dataclasses import dataclass
@@ -143,9 +146,54 @@ def _run_headless(args: list[str]) -> int:
         command_args = args
     else:
         command_args = _without_option(args, "--theme")
-    return subprocess.call(  # noqa: S603  # lint-waiver: LW-010226 [S603]; this forwards the user's CLI arguments to VibeSys's fixed Python entry module.
-        [sys.executable, "-m", module, *command_args]
+    return call_child([sys.executable, "-m", module, *command_args])
+
+
+# Signals a supervisor or a closed terminal sends to this process alone; the
+# child must see them too, or it runs on (SIGTERM) or is never told to stop.
+_FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+
+
+def call_child(argv: list[str], *, env: dict[str, str] | None = None) -> int:
+    """Run *argv* until it exits and return its exit status.
+
+    The child owns everything a run started, including Slurm jobs that only its
+    teardown cancels, so this process never kills it and never exits first.
+    Ctrl-C reaches the child from the terminal (both share the foreground
+    process group), so SIGINT here only keeps waiting; ``subprocess.call``
+    would instead SIGKILL the child 0.25 seconds later, skipping its teardown.
+    SIGTERM and SIGHUP are forwarded to the child. A child killed by a signal
+    reports ``128 + signal``, as a shell does.
+    """
+    started: list[subprocess.Popen[bytes]] = []
+
+    def forward(signum: int, _frame: object) -> None:
+        for child in started:
+            if child.returncode is None:
+                child.send_signal(signum)
+
+    def wait_for_child(_signum: int, _frame: object) -> None:
+        """The terminal already delivered SIGINT to the child; keep waiting."""
+
+    on_main_thread = threading.current_thread() is threading.main_thread()
+    previous = (
+        {
+            signal.SIGINT: signal.signal(signal.SIGINT, wait_for_child),
+            **{number: signal.signal(number, forward) for number in _FORWARDED_SIGNALS},
+        }
+        if on_main_thread
+        else {}
     )
+    try:
+        # lint-waiver: LW-010226 [S603]; this forwards the user's CLI arguments
+        # > to VibeSys's fixed Python entry module or the verified JS launcher.
+        child = subprocess.Popen(argv, env=env)  # noqa: S603
+        started.append(child)
+        returncode = child.wait()
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+    return 128 - returncode if returncode < 0 else returncode
 
 
 def _without_option(args: list[str], option: str) -> list[str]:
@@ -197,10 +245,7 @@ def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
         # reach clients/tui/src/boot-trace.ts unchanged.
         **boot_trace.child_env(),
     }
-    return subprocess.call(  # noqa: S603  # lint-waiver: LW-010227 [S603]; bundle runtime and launcher paths come from the verified installation manifest.
-        [str(bundle.runtime), str(bundle.launcher), *args],
-        env=env,
-    )
+    return call_child([str(bundle.runtime), str(bundle.launcher), *args], env=env)
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +474,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         # Launch anchor and stderr-trace request; see _run_bundled_tui.
         **boot_trace.child_env(),
     }
-    return subprocess.call([str(node), str(launcher), *args], env=env)  # noqa: S603  # lint-waiver: LW-010231 [S603]; this forwards user CLI args to the verified JS launcher with no shell.
+    return call_child([str(node), str(launcher), *args], env=env)
 
 
 def main(argv: list[str] | None = None) -> int:

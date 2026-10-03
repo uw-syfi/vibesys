@@ -1,5 +1,6 @@
 """Product run-resource composition through its internal module API."""
 
+import shutil
 import sys
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
@@ -38,6 +39,7 @@ from vibesys.run.resources import (
     _PreparedRun,
     open_run_resources,
 )
+from vs_agent.api import cli_mcp_config_files, cli_skill_dirs
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
@@ -85,6 +87,7 @@ class _CreateContextOptions(TypedDict, total=False):
     integration: LocalRunIntegration | None
     agent_roles: tuple[AgentRole, ...]
     backend_factory: _RecordingBackendFactory
+    skills_dirs: list[str] | None
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -195,6 +198,7 @@ def _create_context(
         run_environment=RunEnvironmentSpec("local"),
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
+        skills_dirs=options.get("skills_dirs"),
     )
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
@@ -286,6 +290,45 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
     assert _git(project, "status", "--porcelain") == ""
 
 
+def test_driver_skill_copies_are_not_candidate_changes(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    skills = tmp_path / "skills"
+    (skills / "serving-notes").mkdir(parents=True)
+    (skills / "serving-notes" / "SKILL.md").write_text(
+        "---\nname: serving-notes\ndescription: Notes.\n---\nRead me.\n"
+    )
+    with _create_context(project, evaluator=evaluator, skills_dirs=[str(skills)]) as ctx:
+        workspace = ctx.environment_resources.request.workspace
+        # What an agent driver does before each turn: copy every skill into
+        # the workspace root and into each CLI's skill-discovery directory.
+        for target in (".", *cli_skill_dirs()):
+            shutil.copytree(skills / "serving-notes", workspace / target / "serving-notes")
+        (workspace / "fast_queue.py").write_text("FAST = True\n")
+
+        changed = _git(workspace, "status", "--porcelain", "--untracked-files=all")
+
+    assert changed.splitlines() == ["?? fast_queue.py"]
+
+
+def test_driver_mcp_config_is_never_committed_with_a_candidate(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    with _create_context(project, evaluator=evaluator) as ctx:
+        workspace = ctx.environment_resources.request.workspace
+        # What an agent driver does for a turn: write the role's MCP servers,
+        # with its evaluation capability token, into the working directory.
+        for config_file in cli_mcp_config_files():
+            (workspace / config_file).parent.mkdir(parents=True, exist_ok=True)
+            (workspace / config_file).write_text('{"env": {"TOKEN": "secret"}}\n')
+        (workspace / "fast_queue.py").write_text("FAST = True\n")
+
+        changed = _git(workspace, "status", "--porcelain", "--untracked-files=all")
+
+    assert cli_mcp_config_files()
+    assert changed.splitlines() == ["?? fast_queue.py"]
+
+
 def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_only(
     tmp_path: Path,
 ) -> None:
@@ -301,12 +344,12 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         ),
     )
 
-    tools_root = Project.open(project).state.model_cache_directory("evaluator-tools")
+    tools_root = Project.open(project).state.machine_cache_directory("evaluator-tools")
     for name, spec in package.metadata.tools.items():
         tool_install_root(tools_root, name, spec).mkdir(parents=True)
 
     with _create_context(project, evaluator_package_root=package.root) as ctx:
-        tools_root = ctx.project_resources.project.state.model_cache_directory("evaluator-tools")
+        tools_root = ctx.project_resources.project.state.machine_cache_directory("evaluator-tools")
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
         expected_tool_roots = tuple(
             tool_install_root(tools_root, name, spec)
@@ -318,6 +361,33 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         assert tools_root not in resources
         assert all(root.is_dir() for root in expected_tool_roots)
         assert all(resources[root] is HostResourceAccess.READ_ONLY for root in expected_tool_roots)
+
+
+def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: Path) -> None:
+    packages_root = BUNDLED_RESOURCES.directory("evaluators")
+    assert packages_root is not None
+    package = resolve_evaluator_package(
+        packages_root,
+        EvaluatorPackageRequirement(
+            name="vibesys-evaluator-request-factory",
+            version="0.1.0",
+        ),
+    )
+    earlier = tmp_path / "earlier"
+    _write_project(earlier)
+    built = Project.open(earlier).state.machine_cache_directory("evaluator-tools")
+    built_roots = {
+        tool_install_root(built, name, spec) for name, spec in package.metadata.tools.items()
+    }
+    for root in built_roots:
+        root.mkdir(parents=True)
+
+    project = tmp_path / "queue"
+    _write_project(project)
+    with _create_context(project, evaluator_package_root=package.root) as ctx:
+        resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
+
+    assert all(resources[root] is HostResourceAccess.READ_ONLY for root in built_roots)
 
 
 def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
@@ -653,6 +723,33 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) ->
         text=True,
     ).stdout
     assert f"vibesys-runs/{run_id}" in branch
+
+
+def test_collection_resume_accepts_declared_workspace_sources(tmp_path: Path) -> None:
+    # A repository task keeps [[workspace.sources]] in the copied project, and
+    # the copy already holds them, so resuming it must not demand --runs-dir again.
+    source = tmp_path / "input"
+    evaluator = _write_project(source)
+    runs_dir = tmp_path / "runs"
+    with _create_context(source, runs_dir=runs_dir, evaluator=evaluator) as first:
+        project = first.environment_resources.request.workspace
+        run_id = first.project_resources.state.run_id
+    library = WorkspaceSource(
+        name="library",
+        repo="https://example.invalid/library.git",
+        commit="0123456",
+        dest="library",
+    )
+
+    with _create_context(
+        project,
+        runs_dir=runs_dir,
+        evaluator=project / "_evaluator" / "checker",
+        exp_name=run_id,
+        existing=True,
+        workspace_sources=(library,),
+    ) as resumed:
+        assert resumed.project_resources.state.run_id == run_id
 
 
 def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: Path) -> None:

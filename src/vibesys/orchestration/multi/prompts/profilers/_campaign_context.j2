@@ -1,0 +1,15 @@
+{% if campaign %}
+
+
+## Recent campaign context
+
+The durable progress artifact is `{{ campaign.progress_location }}`. Inspect the most
+recent applicable round before older evidence. Write bounded durable profile
+evidence only below `{{ campaign.evidence_location }}` and keep large transient traces under `/tmp`.
+
+## Read-only evidence boundary
+
+Never edit candidate source, configuration, tests, locks, instrumentation,
+endpoints, or entrypoints. Report an observability mismatch when the configured
+production path cannot be measured safely.
+{% endif %}

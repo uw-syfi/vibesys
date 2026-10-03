@@ -1,7 +1,7 @@
 """Registering compute backends must stay side-effect free.
 
 ``create_compute_backend`` runs on the startup path of every entry point. Importing
-``vs_sandbox.docker_sandbox`` installs a process-wide SIGINT handler and an
+``vs_sandbox.docker_sandbox`` registers an
 ``atexit`` hook, so the backend modules defer it until a Docker sandbox is
 actually constructed.
 

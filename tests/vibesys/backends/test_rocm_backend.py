@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 from tests.support import capture_docker_start_argv
 
 from entrypoints.cli import _add_common_args
-from vibesys.orchestration.prompts import PROMPTS_DIR, RocmComputeBackendFragment
-from vibesys.orchestration.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
+from vibesys.prompts import PROMPTS_DIR, RocmComputeBackendFragment
+from vibesys.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
 from vs_sandbox.api import (
     AcceleratorInventory,
     ComputeBackend,
@@ -210,7 +210,7 @@ class TestRocmCli:
 
 class TestRocmPromptFragments:
     def test_every_fragment_name_exists_for_rocm(self) -> None:
-        """`Prompt.__init__` calls validate(); a missing .j2 fails the run."""
+        """`BackendPromptRenderer.__init__` calls validate(); a missing .j2 fails the run."""
         RocmComputeBackendFragment.validate()
 
     def test_rocm_is_registered_in_the_fragment_impl_table(self) -> None:

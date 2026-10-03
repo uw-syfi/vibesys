@@ -1,6 +1,6 @@
 """Tests for policy-owned operator steering rendering."""
 
-from vibesys.orchestration.steering import splice_steering
+from vibesys.steering import splice_steering
 
 
 def test_empty_steering_preserves_the_prompt() -> None:

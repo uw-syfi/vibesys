@@ -1,0 +1,9 @@
+{# Context: `round_number`, `retry` (int), `result` (LocalValidationEvaluation). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Official evaluation attempt " ~ retry) %}
+- decision: {{ "passed" if result.passed else "failed" }}
+- report: {{ result.report_location or "(no report written)" }}
+{% if result.feedback %}
+- feedback: {{ result.feedback }}
+{% endif %}
+{% endcall %}

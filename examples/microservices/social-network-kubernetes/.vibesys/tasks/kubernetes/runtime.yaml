@@ -55,7 +55,8 @@ forwards:
   - name: gateway
     resource: service/nginx-thrift
     remote_port: 8080
-    local_port: 18080
+    local_port: 28080
+access: node_port
 primary_endpoint: gateway
 http_probes:
   - endpoint: gateway

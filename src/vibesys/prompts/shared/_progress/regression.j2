@@ -1,0 +1,5 @@
+{# Context: `round_number` (int), `regression_info` (RegressionNotice). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Regression or terminal-workspace notice") %}
+{% include "_notices/regression.j2" %}
+{% endcall %}

@@ -7,17 +7,18 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from vs_agent.contracts import AgentCapabilities
+from vs_agent.contracts import AgentCapabilities, AgentOutputSchemaError
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_agent.tools import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
+
+_NO_STRUCTURED_OUTPUT = "the stub backend writes no structured output"
 
 
 class StubAgentClient:
@@ -85,12 +86,16 @@ class StubAgentClient:
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         progress: AgentProgress | None = None,
         **kwargs: object,
     ) -> T:
-        """Emit a deterministic stub response for one requested agent turn."""
+        """Report one requested structured turn as producing no structured output.
+
+        The stub runs no agent, so it has no response to return; it raises
+        :class:`AgentOutputSchemaError` like a real agent whose reply never
+        matched the schema.
+        """
         del workspace, system_prompt, user_prompt, response_cls, progress, kwargs
         self._sink.agent_output(
             f"[stub-agent] {round_label}: starting {kind}\n",
@@ -103,7 +108,7 @@ class StubAgentClient:
             channel="diagnostic",
             agent_kind=kind,
         )
-        return fallback_factory()
+        raise AgentOutputSchemaError(_NO_STRUCTURED_OUTPUT)
 
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010192 [PLR0913]; Preserve StubAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,

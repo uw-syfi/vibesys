@@ -1,0 +1,2 @@
+component | status | rounds_spent | latest_share | stalled_rounds
+attn | open | 0 | - | 0

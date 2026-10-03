@@ -4,7 +4,7 @@ Everything here drives ``HypothesisSearch`` through its public methods
 (``initial``, ``next_round``, ``start``, ``attempts``, ``review_due``,
 ``official_due``, ``close_round``, ``frontier``, ``best``,
 ``pareto_conflict``) and inspects the resulting ``HypothesisState`` /
-``Hypothesis`` values, rather than calling ``vibesys.orchestration.hypothesis.
+``Hypothesis`` values, rather than calling ``vibesys.hypothesis.
 transitions`` directly: ``start`` and ``close_round`` already exercise the
 deep per-round evidence projection (baseline selection, resolution,
 retention) that used to be tested by calling ``transitions.start_hypothesis``/
@@ -20,7 +20,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     CarryOver,
     ClosedRound,
     Continue,
@@ -32,15 +32,15 @@ from vibesys.orchestration.hypothesis import (
     NewHypothesis,
     OrchestratorPlan,
 )
-from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
-from vibesys.orchestration.hypothesis.attempts import (
+from vibesys.hypothesis import cadence as hypothesis_cadence
+from vibesys.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
 )
-from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
@@ -123,7 +123,6 @@ def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independ
 def _closing_kwargs(*, passed: bool, reviewed: bool = True) -> dict:
     """Default ``close_round`` kwargs that finish (do not continue) a hypothesis."""
     return {
-        "carry": CarryOver(),
         "passed": passed,
         "reviewed": reviewed,
         "feedback": None,
@@ -522,7 +521,6 @@ def test_close_round_is_deterministic_and_bounds_the_lease(
             hypothesis=hypothesis,
             record=record,
             records=[],
-            carry=CarryOver(),
             passed=passed,
             reviewed=reviewed,
             feedback=attempt.feedback,

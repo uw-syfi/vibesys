@@ -801,6 +801,79 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
         SlurmBatchHandle.model_validate(handle_document)
 
 
+def _service_log_tail(tmp_path: Path, log_lines: list[str]) -> tuple[str, str | None]:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    connector = _FakeConnector(
+        active_polls=0,
+        batch_stage_results={
+            "phases": {
+                "setup-seconds.txt": "0",
+                "service-startup-seconds.txt": "1",
+                "service-log-tail.txt": "\n".join(log_lines),
+            },
+            "0000": {
+                "exit-code.txt": "124",
+                "stdout.txt": "",
+                "stderr.txt": "",
+                "elapsed-seconds.txt": "600",
+            },
+        },
+    )
+    clock = _FakeClock()
+    runner = SlurmJobRunner(
+        _config(),
+        process=connector,
+        invocation_id=lambda: "batch_tail",
+        clock=clock,
+        pause=clock.advance,
+    )
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            service=SlurmService(
+                command=("python", "-m", "server", "--port", "VIBESYS_DYNAMIC_PORT"),
+                readiness_url="http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health",
+                startup_timeout_seconds=5,
+            ),
+            stages=(SlurmBatchStage(name="benchmark", command=("python", "benchmark.py")),),
+        )
+    )
+
+    result = runner.collect_batch(runner.wait_batch(handle).handle)
+    return result.service_log_tail, connector.uploaded_script
+
+
+def test_batch_result_carries_the_service_log_tail_with_repeats_collapsed(
+    tmp_path: Path,
+) -> None:
+    warnings = ["warning: cache record A", "warning: cache record B"]
+    progress = [f"decode: {step} steps, 120 ms/step" for step in range(0, 4000, 100)]
+    log_lines = [line for step in progress for line in (*warnings, step)] + warnings
+
+    service_log_tail, script = _service_log_tail(tmp_path, log_lines)
+
+    tail = service_log_tail.splitlines()
+    assert len(tail) == 40
+    assert len(set(tail)) == len(tail)
+    assert tail[-2:] == warnings
+    assert tail[:-2] == progress[-38:]
+    assert script is not None
+    assert "tail -n 400 .vs-slurm-service.log > " in script
+
+
+def test_service_log_tail_bounds_line_length_and_total_size(tmp_path: Path) -> None:
+    log_lines = [f"{index}: " + "x" * 10_000 for index in range(40)]
+
+    service_log_tail, _script = _service_log_tail(tmp_path, log_lines)
+
+    tail = service_log_tail.splitlines()
+    assert tail
+    assert tail[-1].startswith("39: ")
+    assert all(len(line) <= 450 for line in tail)
+    assert len(service_log_tail) <= 8_000
+
+
 def test_batch_rejects_duplicate_or_unsafe_stage_names(tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"
     workspace.mkdir()
@@ -888,6 +961,35 @@ def test_content_addressed_staging_reuses_objects_and_keeps_workspaces_fresh(
     assert (
         len([request for request in connector.requests if request["operation"] == "sync_to"]) == 3
     )
+
+
+def test_input_that_changes_during_staging_is_reported_as_a_transient_condition(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    edited = workspace / "engine.py"
+    edited.write_text("v1\n", encoding="utf-8")
+
+    class _EditingConnector(_FilesystemConnector):
+        def __call__(
+            self, argv: Sequence[str], *, stdin: str | None, timeout: float
+        ) -> subprocess.CompletedProcess[str]:
+            assert stdin is not None
+            if json.loads(stdin)["operation"] == "sync_to":
+                edited.write_text("v2\n", encoding="utf-8")
+            return super().__call__(argv, stdin=stdin, timeout=timeout)
+
+    runner = SlurmJobRunner(
+        _config(remote_workspace_root=str(tmp_path / "remote")),
+        process=_EditingConnector(),
+        invocation_id=lambda: "racing_edit",
+    )
+
+    with pytest.raises(SlurmError, match="transient infrastructure condition") as raised:
+        runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
+
+    assert "not a candidate failure" in str(raised.value)
 
 
 def test_support_staging_replaces_a_destination_symlink_without_following_it(

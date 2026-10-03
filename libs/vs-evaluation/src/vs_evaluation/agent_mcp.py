@@ -67,6 +67,11 @@ class EvaluationServiceClientError(RuntimeError):
         return cls(message)
 
     @classmethod
+    def unavailable(cls, error: OSError) -> EvaluationServiceClientError:
+        """Build the error for a service the client could not reach or that dropped the call."""
+        return cls(f"evaluation service unavailable: {type(error).__name__}: {error}")
+
+    @classmethod
     def oversized(cls) -> EvaluationServiceClientError:
         """Build the fixed reply size violation."""
         return cls("evaluation service reply exceeded size limit")
@@ -90,11 +95,24 @@ class _Handle(BaseModel):
     handle_id: str = Field(description="Opaque handle returned by submit_evaluation.")
 
 
+_AWAIT_CAP_TEXT = (
+    f"Each call waits at most {MAX_AGENT_AWAIT_S:.0f} s; a larger timeout_s waits "
+    f"{MAX_AGENT_AWAIT_S:.0f} s."
+)
+
+
+def _capped_await_s(timeout_s: float) -> float:
+    """Clamp an agent's requested wait to the per-call cap the host enforces."""
+    return min(timeout_s, MAX_AGENT_AWAIT_S)
+
+
 class _Await(_Handle):
     timeout_s: FiniteFloat = Field(
         gt=0,
-        le=MAX_AGENT_AWAIT_S,
-        description="Maximum seconds to block. Timing out leaves the evaluation running.",
+        description=(
+            "Maximum seconds to block. Returning before completion leaves the evaluation "
+            "running. " + _AWAIT_CAP_TEXT
+        ),
     )
 
 
@@ -135,8 +153,9 @@ class _ProfilerHandle(BaseModel):
 class _AwaitProfiler(_ProfilerHandle):
     timeout_s: FiniteFloat = Field(
         gt=0,
-        le=MAX_AGENT_AWAIT_S,
-        description="Maximum seconds to wait. Timeout leaves the profiler turn running.",
+        description=(
+            "Maximum seconds to wait. Timeout leaves the profiler turn running. " + _AWAIT_CAP_TEXT
+        ),
     )
 
 
@@ -146,11 +165,16 @@ class _SocketClient:
 
     def call(self, request: BaseModel, *, timeout_s: float = _DEFAULT_TIMEOUT_S) -> str:
         document = request.model_dump_json().encode() + b"\n"
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(timeout_s)
-            client.connect(str(self._path))
-            client.sendall(document)
-            response = _read_line(client)
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(timeout_s)
+                client.connect(str(self._path))
+                client.sendall(document)
+                response = _read_line(client)
+        except OSError as error:
+            # A stopped service, a dropped oversized frame, or a timeout: the
+            # agent gets the typed tool error, never a raw socket exception.
+            raise EvaluationServiceClientError.unavailable(error) from error
         decoded = _REPLY.validate_json(response)
         if isinstance(decoded, SocketFailure):
             raise EvaluationServiceClientError.rejected(decoded.error)
@@ -196,7 +220,9 @@ def build_evaluation_tools(
                 description=(
                     "List recent host-owned evaluation and profiler operations across the run, "
                     "including hypothesis principal, candidate identity, lifecycle, original "
-                    "profiler request, and whether a result crossed the trust boundary."
+                    "profiler request, whether every stage recorded trusted evidence, and "
+                    "each recorded stage's outcome (passed, failed, or observed) with its "
+                    "metrics. Recorded evidence is not a pass: read the stage outcomes."
                 ),
                 input_schema=_ProfilerOperations,
                 handler=lambda _args: client.call(RunOperationsCall(token=token)),
@@ -258,15 +284,22 @@ def build_evaluation_tools(
                 ),
                 ToolSpec(
                     name="await_evaluation",
-                    description="Wait at most timeout_s. A timed_out result does not cancel the evaluation.",
+                    description=(
+                        "Wait at most timeout_s for the evaluation to finish. "
+                        + _AWAIT_CAP_TEXT
+                        + " Before it finishes, the call returns a running result with the "
+                        "progress recorded so far (state, current stage, finished stages) and "
+                        "next_await_s; the evaluation keeps running. Remote evaluations can "
+                        "take many minutes: call again with the same handle to keep waiting."
+                    ),
                     input_schema=_Await,
                     handler=lambda args: client.call(
                         AwaitCall(
                             token=token,
                             handle_id=args.handle_id,
-                            timeout_s=args.timeout_s,
+                            timeout_s=_capped_await_s(args.timeout_s),
                         ),
-                        timeout_s=args.timeout_s + 5.0,
+                        timeout_s=_capped_await_s(args.timeout_s) + 5.0,
                     ),
                 ),
                 ToolSpec(
@@ -322,16 +355,17 @@ def build_evaluation_tools(
                 ToolSpec(
                     name="await_profiler",
                     description=(
-                        "Wait at most timeout_s for a profiler-agent turn; timeout does not cancel it."
+                        "Wait at most timeout_s for a profiler-agent turn; timeout does not cancel "
+                        "it. " + _AWAIT_CAP_TEXT
                     ),
                     input_schema=_AwaitProfiler,
                     handler=lambda args: client.call(
                         AwaitProfilerCall(
                             token=token,
                             operation_id=args.operation_id,
-                            timeout_s=args.timeout_s,
+                            timeout_s=_capped_await_s(args.timeout_s),
                         ),
-                        timeout_s=args.timeout_s + 5.0,
+                        timeout_s=_capped_await_s(args.timeout_s) + 5.0,
                     ),
                 ),
                 ToolSpec(

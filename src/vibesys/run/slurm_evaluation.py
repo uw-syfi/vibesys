@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.run.evaluation_backend import (
+    SemanticEvaluationStage,
+    evidence_identity,
+    render_stage_failure,
+)
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     EvaluationRequest,
@@ -22,6 +24,8 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    ExecutorRejectedError,
+    PartialMeasurement,
     ResourceRequirements,
     StageState,
     TrustedEvidence,
@@ -30,13 +34,16 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
     decode_trusted_benchmark_output,
+    decode_trusted_benchmark_partial,
 )
 from vs_sandbox.api.slurm import (
+    PROFILE_OUTPUT_ROOT,
     SharedSlurmAdmission,
     SlurmCommandResult,
     SlurmEvaluationExecutor,
     SlurmEvaluationPlan,
     SlurmStagePayload,
+    SlurmTargetLifecycle,
 )
 
 if TYPE_CHECKING:
@@ -48,6 +55,9 @@ if TYPE_CHECKING:
     from vs_slurm.api import SlurmConfig, SlurmJobRunner
 
 _CLEANUP_FAILURE = "cleanup failed"
+
+
+_MAX_SUMMARY_CHARS = 16_384  # TrustedEvidence.semantic_summary limit
 
 
 class _DurableSemanticSubmission(BaseModel):
@@ -99,6 +109,9 @@ class SlurmSemanticEvaluationExecutor:
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         """Persist the semantic request before idempotent provider submission."""
+        # Translate first: a stage this executor cannot run is rejected before
+        # any record or candidate worktree exists.
+        provider_request = self._provider_request(request)
         record = self._record(request)
         existing = self._load(handle_id)
         if existing is not None and existing != record:
@@ -106,7 +119,7 @@ class SlurmSemanticEvaluationExecutor:
         if existing is None:
             self._namespace.save(self._path(handle_id), record)
         execution = await self._execution(handle_id, record)
-        await execution.executor.submit(self._provider_request(request), handle_id=handle_id)
+        await execution.executor.submit(provider_request, handle_id=handle_id)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover the candidate worktree and provider handle on demand."""
@@ -181,9 +194,23 @@ class SlurmSemanticEvaluationExecutor:
             service=self._policy.remote_service(),
             support_trees=self._plan.support_paths,
             handle_root=self._handle_root,
+            supported_evidence_kinds=self._supported_evidence_kinds(),
             admission=self._admission,
             runner=self._runner,
         )
+
+    def _supported_evidence_kinds(self) -> tuple[str, ...]:
+        """Return the kinds this plan has a command for.
+
+        A stage without a command would run nothing and exit 0, which the
+        evidence mapping would record as a pass for a workload that never ran.
+        """
+        commands = (
+            (EvidenceKind.ACCURACY, self._plan.accuracy_command),
+            (EvidenceKind.BENCHMARK, self._plan.benchmark_command),
+            (EvidenceKind.PROFILE, self._plan.profile_command),
+        )
+        return tuple(kind.value for kind, command in commands if command is not None)
 
     def _provider_request(self, request: EvaluationRequest) -> EvaluationRequest:
         return request.model_copy(
@@ -218,21 +245,38 @@ class SlurmSemanticEvaluationExecutor:
                     command, contract, ".vibesys-framework-benchmark.json"
                 )
             timeout = self._trusted_plan.benchmark_timeout_seconds
+        elif stage.kind is EvidenceKind.PROFILE and self._plan.profile_command is not None:
+            # The capture starts, loads, and stops the service itself, inside
+            # the job's timeout, and its traces come back into the run-owned
+            # candidate worktree.
+            return SlurmStagePayload(
+                command=shlex.join(self._plan.profile_command),
+                tree_artifact_refs=(PROFILE_OUTPUT_ROOT,),
+                target_lifecycle=SlurmTargetLifecycle.COMMAND_MANAGED,
+            )
         else:
-            raise ValueError("Slurm semantic executor supports accuracy and benchmark only")  # noqa: TRY003  # lint-waiver: LW-930071 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            command = None
+            timeout = None
+        if command is None:
+            supported = ", ".join(self._supported_evidence_kinds())
+            message = f"Slurm semantic executor supports {supported} only, not {stage.kind.value}"
+            raise ExecutorRejectedError(message)
         return SlurmStagePayload(command=command, timeout_seconds=timeout)
 
     def _semantic_observation(
         self, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
+        failed_checks: list[tuple[str | None, EvidenceKind]] = []
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
-            evidence = self._evidence(stage, raw)
+            evidence = self._evidence(stage, raw, raw_step.failure)
+            if evidence.outcome is EvidenceOutcome.FAILED:
+                failed_checks.append((evidence.semantic_summary, stage.kind))
             results.append(
                 EvaluationStepResult(
                     name=step.name,
@@ -242,11 +286,18 @@ class SlurmSemanticEvaluationExecutor:
                 )
             )
         has_semantic_result = any(item.result is not None for item in results)
-        state = (
-            EvaluationState.SUCCEEDED
-            if observed.state is EvaluationState.FAILED and has_semantic_result
-            else observed.state
-        )
+        skipped = any(item.state is StageState.SKIPPED for item in results)
+        failure = observed.failure
+        if observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
+            state = EvaluationState.SUCCEEDED
+        elif skipped and has_semantic_result:
+            # A successful evaluation must complete every planned stage. A failed
+            # stage that skipped the rest makes the evaluation failed, and its
+            # diagnostics are the failure the submitting agent reads.
+            state = EvaluationState.FAILED
+            failure = render_stage_failure(failed_checks, observed.failure)
+        else:
+            state = observed.state
         return ExecutorObservation(
             state=state,
             current_stage=(
@@ -261,47 +312,50 @@ class SlurmSemanticEvaluationExecutor:
                 else observed.current_stage
             ),
             stage_results=tuple(results),
-            failure=None if state is EvaluationState.SUCCEEDED else observed.failure,
+            failure=None if state is EvaluationState.SUCCEEDED else failure,
         )
 
-    def _evidence(self, stage: SemanticEvaluationStage, raw: SlurmCommandResult) -> TrustedEvidence:
+    def _evidence(
+        self, stage: SemanticEvaluationStage, raw: SlurmCommandResult, failure: str | None
+    ) -> TrustedEvidence:
         passed = raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
-        if stage.kind is EvidenceKind.BENCHMARK and passed:
-            contract = self._trusted_plan.benchmark_contract
-            if contract is not None:
-                try:
-                    row, declarations = decode_trusted_benchmark_output(
-                        raw.output, contract, frozenset()
+        partial: PartialMeasurement | None = None
+        contract = self._trusted_plan.benchmark_contract
+        if stage.kind is EvidenceKind.BENCHMARK and not passed and contract is not None:
+            try:
+                partial = decode_trusted_benchmark_partial(raw.output, contract)
+            except ValueError as error:
+                failure = f"{failure or raw.output}\n{error}"
+        if stage.kind is EvidenceKind.BENCHMARK and passed and contract is not None:
+            try:
+                row, declarations = decode_trusted_benchmark_output(
+                    raw.output, contract, frozenset()
+                )
+                metrics = tuple(
+                    EvidenceMetric(
+                        name=name,
+                        value=value,
+                        direction=(declarations[name].direction if name in declarations else None),
+                        unit=declarations[name].unit if name in declarations else None,
                     )
-                    metrics = tuple(
-                        EvidenceMetric(
-                            name=name,
-                            value=value,
-                            direction=(
-                                declarations[name].direction if name in declarations else None
-                            ),
-                            unit=declarations[name].unit if name in declarations else None,
-                        )
-                        for name, value in sorted(row.items())
-                    )
-                except (TypeError, ValueError) as error:
-                    passed = False
-                    summary = str(error)
+                    for name, value in sorted(row.items())
+                )
+            except (TypeError, ValueError) as error:
+                passed = False
+                summary = str(error)
+        if stage.kind is EvidenceKind.PROFILE and passed:
+            # The capture's printed summary is the profile's evidence; its end
+            # holds the attribution tables.
+            summary = (raw.stdout or raw.output)[-_MAX_SUMMARY_CHARS:] or None
         if not passed and summary is None:
-            summary = raw.output[-4000:] or f"{stage.kind.value} command failed"
+            # The provider's stage failure already holds the stage output plus the
+            # server log tail; keep its end, where the cause usually is.
+            detail = failure or raw.output
+            summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
-        identity = {
-            "kind": stage.kind.value,
-            "fingerprints": stage.fingerprints.model_dump(mode="json"),
-            "outcome": outcome.value,
-            "summary": summary,
-            "metrics": [metric.model_dump(mode="json") for metric in metrics],
-        }
-        evidence_id = hashlib.sha256(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
         return TrustedEvidence(
             evidence_id=evidence_id,
             evaluation_id=evidence_id,
@@ -312,6 +366,7 @@ class SlurmSemanticEvaluationExecutor:
             outcome=outcome,
             semantic_summary=summary,
             metrics=metrics,
+            partial_measurement=partial,
             accepted_round=0,
         )
 

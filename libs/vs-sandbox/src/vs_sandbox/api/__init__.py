@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         deduplicate_host_resources,
         host_resource_for_mount,
     )
+    from vs_sandbox.host_sandbox import DISABLE_ENV as SANDBOX_DISABLE_ENV
     from vs_sandbox.host_sandbox import (
         HostSandbox,
         LandlockSandbox,
@@ -66,6 +67,7 @@ if TYPE_CHECKING:
         start_sandbox,
         stop_sandbox,
     )
+    from vs_sandbox.linked_worktree import linked_worktree_git_paths
     from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellSandbox
     from vs_sandbox.modal_model_setup import ensure_model_volume
@@ -74,6 +76,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AGENT_HOME",
+    "SANDBOX_DISABLE_ENV",
     "AcceleratorDiscovery",
     "AcceleratorInventory",
     "BeforeReadyContext",
@@ -117,6 +120,7 @@ __all__ = [
     "deduplicate_host_resources",
     "ensure_model_volume",
     "host_resource_for_mount",
+    "linked_worktree_git_paths",
     "parse_gpu_process_output",
     "pick_gpu",
     "query_gpu_info",
@@ -164,6 +168,7 @@ _LAZY_EXPORTS = {
     "HostSandbox": ("host_sandbox", "HostSandbox"),
     "LandlockSandbox": ("host_sandbox", "LandlockSandbox"),
     "LinuxBackend": ("host_sandbox", "LinuxBackend"),
+    "SANDBOX_DISABLE_ENV": ("host_sandbox", "DISABLE_ENV"),
     "SandboxUnavailableError": ("host_sandbox", "SandboxUnavailableError"),
     "SeatbeltSandbox": ("host_sandbox", "SeatbeltSandbox"),
     "WorkspaceSandbox": ("host_sandbox", "WorkspaceSandbox"),
@@ -175,6 +180,7 @@ _LAZY_EXPORTS = {
     "SandboxLifecycleHooks": ("lifecycle", "SandboxLifecycleHooks"),
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
+    "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
     "LocalShellSandbox": ("local_shell", "LocalShellSandbox"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
 }

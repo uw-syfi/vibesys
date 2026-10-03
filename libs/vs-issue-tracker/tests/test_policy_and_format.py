@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from vs_issue_tracker.api import IssueBoard, IssueType
+from vs_issue_tracker.api import (
+    CapReached,
+    InvalidIssueType,
+    Issue,
+    IssueBoard,
+    IssueType,
+    TypeNotAllowed,
+)
 from vs_issue_tracker.format import format_issue_full, format_issue_short
 from vs_issue_tracker.policy import (
     CreateIssuePolicy,
@@ -66,12 +73,9 @@ class TestCheckCreateAllowed:
             cap=1,
             allowed_types=frozenset({IssueType.BUG}),
         )
-        err = check_create_allowed(store, type_enum=IssueType.PERF, policy=policy)
-        assert err is not None
-        assert err.startswith("error:")
-        assert "may only file types" in err
-        assert "'judge'" in err
-        assert "'perf'" in err
+        assert check_create_allowed(
+            store, type_enum=IssueType.PERF, policy=policy
+        ) == TypeNotAllowed(creator="judge", type=IssueType.PERF, allowed=(IssueType.BUG,))
 
     def test_cap_enforced_against_persisted_store(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
@@ -92,10 +96,9 @@ class TestCheckCreateAllowed:
             iteration=1,
         )
         # Now the cap is reached.
-        err = check_create_allowed(store, type_enum=IssueType.BUG, policy=policy)
-        assert err is not None
-        assert "cap reached" in err
-        assert "(1/1)" in err
+        assert check_create_allowed(store, type_enum=IssueType.BUG, policy=policy) == CapReached(
+            already=1, cap=1
+        )
 
     def test_cap_scoped_per_iteration(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
@@ -140,7 +143,7 @@ class TestCheckCreateAllowed:
 
 
 class TestCreateIssueUnderPolicy:
-    def test_happy_path_returns_issue_and_message(self, tmp_path: Path) -> None:
+    def test_happy_path_returns_the_created_issue(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         policy = CreateIssuePolicy(
             creator="perf_eval",
@@ -148,20 +151,19 @@ class TestCreateIssueUnderPolicy:
             cap=3,
             allowed_types=_all_types(),
         )
-        issue, msg = create_issue_under_policy(
+        issue = create_issue_under_policy(
             store,
             type_str="perf",
             title="t",
             description="d",
             policy=policy,
         )
-        assert issue is not None
+        assert isinstance(issue, Issue)
         assert issue.id == 1
         assert issue.created_by == "perf_eval"
         assert issue.created_iter == 1
-        assert msg == "created issue #1"
 
-    def test_invalid_type_returns_none_and_error(self, tmp_path: Path) -> None:
+    def test_invalid_type_is_rejected_without_writing(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         policy = CreateIssuePolicy(
             creator="perf_eval",
@@ -169,17 +171,14 @@ class TestCreateIssueUnderPolicy:
             cap=3,
             allowed_types=_all_types(),
         )
-        issue, msg = create_issue_under_policy(
+        outcome = create_issue_under_policy(
             store,
             type_str="enhancement",
             title="t",
             description="d",
             policy=policy,
         )
-        assert issue is None
-        assert msg.startswith("error:")
-        assert "must be one of" in msg
-        assert "'enhancement'" in msg
+        assert outcome == InvalidIssueType(given="enhancement")
         # Nothing was written.
         assert store.list() == []
 
@@ -192,25 +191,24 @@ class TestCreateIssueUnderPolicy:
             allowed_types=_all_types(),
         )
         for i in range(2):
-            issue, msg = create_issue_under_policy(
+            issue = create_issue_under_policy(
                 store,
                 type_str="perf",
                 title=f"t{i}",
                 description="d",
                 policy=policy,
             )
-            assert issue is not None
-            assert msg == f"created issue #{i + 1}"
+            assert isinstance(issue, Issue)
+            assert issue.id == i + 1
         # Third call must be rejected.
-        issue, msg = create_issue_under_policy(
+        outcome = create_issue_under_policy(
             store,
             type_str="perf",
             title="t2",
             description="d",
             policy=policy,
         )
-        assert issue is None
-        assert "cap reached" in msg
+        assert outcome == CapReached(already=2, cap=2)
         # Store still has only 2.
         assert len(store.list()) == 2
 
@@ -223,15 +221,15 @@ class TestCreateIssueUnderPolicy:
             allowed_types=_all_types(),
         )
         for i in range(5):
-            issue, msg = create_issue_under_policy(
+            issue = create_issue_under_policy(
                 store,
                 type_str="bug",
                 title=f"t{i}",
                 description="d",
                 policy=policy,
             )
-            assert issue is not None
-            assert msg == f"created issue #{i + 1}"
+            assert isinstance(issue, Issue)
+            assert issue.id == i + 1
 
 
 # ---------------------------------------------------------------------------

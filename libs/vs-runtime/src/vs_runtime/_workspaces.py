@@ -8,10 +8,15 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
-from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError, Workspaces
+from vs_runtime.contracts import (
+    RuntimeContractError,
+    WorkspaceRestoreError,
+    Workspaces,
+    member_workspace_id,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
     from vs_runtime._agent_execution import AgentExecutionScope
@@ -251,6 +256,7 @@ class RuntimeWorkspaces:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: RuntimeAgentSessions | None = None
+        self._evaluations: set[asyncio.Task[object]] = set()
         self.root = RuntimeWorkspace(self, resources.root)
 
     def _attach_sessions(self, sessions: RuntimeAgentSessions) -> None:
@@ -271,7 +277,15 @@ class RuntimeWorkspaces:
     def supports_parallel_candidates(self) -> bool:
         return self._resources.supports_parallel_candidates
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        workspace_id = (
+            f"s{uuid.uuid4().hex}" if member_id is None else member_workspace_id(member_id)
+        )
         async with self._lifecycle_lock:
             if self._closed:
                 message = "workspace collection is closed"
@@ -284,7 +298,9 @@ class RuntimeWorkspaces:
                 if not self.supports_parallel_candidates:
                     message = "run environment cannot open isolated candidate sandboxes"
                     raise RuntimeError(message)
-                workspace_id = f"s{uuid.uuid4().hex}"
+                if workspace_id in self._candidates:
+                    message = f"member {member_id!r} already has a live candidate workspace"
+                    raise RuntimeContractError(message)
                 task = asyncio.create_task(
                     asyncio.to_thread(self._resources.create_candidate, workspace_id, revision)
                 )
@@ -343,6 +359,31 @@ class RuntimeWorkspaces:
         async with lock:
             yield
 
+    async def _evaluate[Result](
+        self,
+        workspace: RuntimeWorkspace,
+        evaluation: Callable[[WorkspaceResource], Awaitable[Result]],
+    ) -> Result:
+        """Run one trusted evaluation that run teardown cancels.
+
+        The evaluation holds the workspace's mutation lock, so teardown, which
+        takes the same lock, would otherwise wait for it to finish on its own:
+        on Slurm, for a job that may still be queued. :meth:`begin_close`
+        cancels it instead; the cancellation stops its command and job.
+        """
+        async with self._mutation(workspace):
+            if self._closed:
+                message = "workspace collection is closed"
+                raise RuntimeContractError(message)
+            task: asyncio.Task[Result] = asyncio.ensure_future(
+                evaluation(self.resource_for(workspace))
+            )
+            self._evaluations.add(task)
+            try:
+                return await task
+            finally:
+                self._evaluations.discard(task)
+
     async def _discard(self, candidate: RuntimeCandidateWorkspace) -> None:
         async with self._lifecycle_lock:
             resource = self.resource_for(candidate)
@@ -366,10 +407,12 @@ class RuntimeWorkspaces:
                 raise BaseExceptionGroup(message, errors)
 
     def begin_close(self) -> None:
-        """Reject new candidates, sessions, and turns before teardown."""
+        """Reject new work and cancel in-flight trusted evaluations before teardown."""
         if self._closed:
             return
         self._closed = True
+        for evaluation in tuple(self._evaluations):
+            evaluation.cancel()
         self._owned_sessions().begin_close()
 
     async def close(self) -> None:

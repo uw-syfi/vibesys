@@ -16,7 +16,12 @@ import {
   streamFailure,
 } from './protocol-parse.js';
 import {type AbortSignalLike, abortReason, type RequestOptions} from './request-policy.js';
-import type {ControlTransport, EventSubscription, SubscribeOptions} from './transport.js';
+import {
+  type ControlTransport,
+  type EventSubscription,
+  type SubscribeOptions,
+  subscribeRequest,
+} from './transport.js';
 
 const OPEN = 1;
 const CLOSED = 3;
@@ -154,12 +159,7 @@ export class WebSocketTransport implements ControlTransport {
     if (this.#closed) throw disconnectedError('Client is closed');
     const socket = await this.#openSocket();
     await this.#claim(socket, 'Server disconnected before the subscription opened');
-    const request = this.#envelope({
-      type: 'subscribe',
-      after_sequence: afterSequence,
-      ...(options.tail === undefined ? {} : {tail: options.tail}),
-      ...(options.storeId === undefined ? {} : {store_id: options.storeId}),
-    } as RequestInput);
+    const request = this.#envelope(subscribeRequest(afterSequence, options));
     return new Promise((resolve, reject) => {
       let subscribed = false;
       let closing = false;

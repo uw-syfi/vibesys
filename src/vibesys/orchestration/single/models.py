@@ -6,12 +6,15 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from vibesys.hypothesis import (
+    SkillResourceSelection,
+)
+from vibesys.hypothesis.state import HypothesisState
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.hypothesis import SkillResourceSelection
-from vibesys.orchestration.hypothesis.state import HypothesisState
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
+from vibesys.profile_focus import FocusLedger
 from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
 
@@ -24,9 +27,9 @@ class PlanContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    profiler_summary: ProfilerSummary | None
-    regression_info: str | None
-    exhaustion_info: str | None
+    profiler_entry: ProgressEntry | None
+    regression_entry: ProgressEntry | None
+    exhaustion_entry: ProgressEntry | None
     progress_location: str
     roadmap_location: str
     pareto_archive_location: str
@@ -38,7 +41,7 @@ class PlanContext(BaseModel):
     provisional_candidates: int
     official_eval_cadence_due: bool
     active_component: str | None = None
-    ledger_text: str | None = None
+    ledger: FocusLedger | None = None
     ranked_bottlenecks: list[dict[str, object]] = Field(default_factory=list)
 
 

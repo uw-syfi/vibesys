@@ -30,7 +30,7 @@
     "check": "tsc -p tsconfig.check.json",
     "prepack": "pnpm run build",
     "pretest": "pnpm --filter @vibesys/tui^... build",
-    "test": "bun test --max-concurrency 1 ./src ./dev"
+    "test": "node ../scripts/run_bun_tests.mjs ./src ./dev"
   },
   "dependencies": {
     "@opentui/core": "0.4.3",

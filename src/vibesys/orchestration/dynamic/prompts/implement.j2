@@ -1,6 +1,14 @@
 Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
-Objective: {{ objective_location }}
+{% include 'run_context.j2' %}
+
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
+with the returned handle. An evaluation can take many minutes; `await_evaluation`
+returns periodically with `outcome: running` and the progress recorded so far. Keep
+calling `await_evaluation` with the same handle until it returns a final result, and do
+not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
+candidate; useful work on files outside it is allowed.
+
 Claim: {{ hypothesis }}
 Task: {{ task }}
 Pass criteria: {{ pass_criteria }}
@@ -8,9 +16,28 @@ Parent revision: `{{ parent_revision }}`
 
 Evidence references:
 {{ evidence }}
+{% if worktree_revision %}
+
+This continues your earlier work on this hypothesis. The worktree is at the
+same path, but it was recreated at `{{ worktree_revision }}`: edits that are not
+in that revision, including files outside version control, are gone. Check the
+tree before relying on what you remember.
+{%- if prior_revision and prior_revision != worktree_revision %}
+Your earlier attempt ended at `{{ prior_revision }}`;
+`git diff {{ prior_revision }} {{ worktree_revision }}` shows what differs.
+{%- elif prior_revision %}
+That is the revision your earlier attempt ended at.
+{%- endif %}
+{% endif %}
+{% if prior_attempt %}
+
+If you do not remember your earlier attempt, its recorded result is:
+{{ prior_attempt }}
+Build on it; do not redo completed work.
+{% endif %}
 {% if feedback %}
 
-Independent review feedback from the prior attempt:
+Feedback from the prior attempt:
 {{ feedback }}
 {% endif %}
 

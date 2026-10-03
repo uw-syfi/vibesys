@@ -6,28 +6,24 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import (
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.hypothesis import (
     AttemptState,
     Continue,
     Finished,
     HypothesisConfig,
     HypothesisSearch,
     JudgeReviewed,
+    JudgeSkipped,
+    JudgeSkipReason,
     NewHypothesis,
     PerformanceProjection,
     RecordInput,
     build_round_record,
 )
-from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
-from vibesys.orchestration.profile_focus import (
-    FocusView,
-    ProfileFocus,
-    ProfileFocusConfig,
-    ProfileFocusState,
-)
+from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,
@@ -48,6 +44,14 @@ from vibesys.orchestration.single.models import (
     SingleOptions,
     SingleState,
 )
+from vibesys.orchestration.single.prompts import render_turn_failed_feedback
+from vibesys.orchestration.structured_turn import TurnFailed
+from vibesys.profile_focus import (
+    FocusView,
+    ProfileFocus,
+    ProfileFocusConfig,
+    ProfileFocusState,
+)
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
@@ -60,13 +64,14 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
         CarryOver,
         OrchestratorPlan,
         PlanningContext,
         RollbackTarget,
     )
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
 
 
 @dataclass(slots=True)
@@ -149,7 +154,7 @@ class _SingleRun:
         self.carry = self.search.initial_carry(resumed.rounds)
         self.round_number = len(resumed.rounds) + 1
         self.files.write_pareto(
-            self.search.archive_summary(
+            self.search.archive_view(
                 resumed.rounds, space=resumed.metrics, baseline=resumed.input_baseline
             )
         )
@@ -167,7 +172,7 @@ class _SingleRun:
                 await self.run.control.checkpoint()
                 self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
-                    self.search.archive_summary(
+                    self.search.archive_view(
                         self.records,
                         space=self.state.search.metrics,
                         baseline=self.state.search.input_baseline,
@@ -209,7 +214,7 @@ class _SingleRun:
         search = self.state.search.model_copy(update={"input_baseline": baseline}, deep=True)
         self.state = self.state.model_copy(update={"search": search}, deep=True)
         self.files.write_pareto(
-            self.search.archive_summary(self.records, space=search.metrics, baseline=baseline)
+            self.search.archive_view(self.records, space=search.metrics, baseline=baseline)
         )
         await self._commit(label=f"{self.label_prefix}: measure input baseline")
 
@@ -261,6 +266,9 @@ class _SingleRun:
             message = "hypothesis search finished before the configured round cursor"
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
+            # The plan prompt points at these entries; it mentions only what they hold.
+            carried = self.files.note_carry(self.round_number, decision.context.carry)
+            profile = self._note_profile()
             guidance = await self._prepare_profile_guidance()
             plan = await request_plan(
                 self.run,
@@ -268,7 +276,7 @@ class _SingleRun:
                 DesignerPlanRequest(
                     round_number=self.round_number,
                     state=self.state.search,
-                    context=self._plan_context(decision.context, guidance),
+                    context=self._plan_context(decision.context, guidance, carried, profile),
                     workspace=self.workspace,
                 ),
             )
@@ -383,6 +391,19 @@ class _SingleRun:
                 )
             )
             self.files.write_plan(self.round_number, selected.plan)
+            if isinstance(response, TurnFailed):
+                selected.attempt.single_agent_response = None
+                selected.attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
+                self.files.note_turn_failed(self.round_number, retry, response)
+                feedback = render_turn_failed_feedback(response.reason)
+                selected.attempt.feedback = feedback
+                selected.hypothesis.feedback = feedback
+                await self._checkpoint_hypothesis(selected)
+                self.run.observations.warning(
+                    f"[single-agent] attempt {retry} returned no valid response "
+                    f"({response.reason}); retrying"
+                )
+                continue
             selected.attempt.single_agent_response = response
             selected.attempt.judge = JudgeReviewed(response.verdict.value)
             self.files.note_response(self.round_number, retry, response)
@@ -399,11 +420,7 @@ class _SingleRun:
             )
             if official_reason is None:
                 selected.attempt.passed = True
-                self.files.note_evaluation(
-                    self.round_number,
-                    retry,
-                    "- decision: deferred\n- reason: cadence not due\n",
-                )
+                self.files.note_evaluation_deferred(self.round_number, retry)
                 return
             selected.attempt.official_reason = official_reason
             if await self._official_evaluation(selected):
@@ -442,10 +459,8 @@ class _SingleRun:
             await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
             return False
         selected.attempt.passed = True
-        self.files.note_evaluation(
-            self.round_number,
-            selected.attempt.retry,
-            f"- decision: passed\n- reason: {selected.official_reason}\n",
+        self.files.note_evaluation_passed(
+            self.round_number, selected.attempt.retry, selected.official_reason
         )
         return True
 
@@ -457,11 +472,7 @@ class _SingleRun:
         hypothesis.gate_candidate_commit = self.workspace.revision
         hypothesis.gate_accuracy_passed = self.state.accuracy_receipt is not None
         hypothesis.feedback = feedback
-        self.files.note_evaluation(
-            self.round_number,
-            selected.attempt.retry,
-            f"- decision: failed\n- feedback: {feedback}\n",
-        )
+        self.files.note_evaluation_failed(self.round_number, selected.attempt.retry, feedback)
         await self._checkpoint_hypothesis(selected)
 
     async def _close_round(self, selected: _SelectedRound) -> None:
@@ -510,9 +521,8 @@ class _SingleRun:
                 model=binding.model,
             )
         )
-        note = self.search.measurement_note(record)
-        if note is not None:
-            self.files.note_measurement(self.round_number, note)
+        if self.search.trusted_measurement(record):
+            self.files.note_measurement(self.round_number, record)
         state = self.state.search
         if self.profile_focus is not None:
             official = record.official_evaluation
@@ -531,7 +541,6 @@ class _SingleRun:
             hypothesis=selected.hypothesis,
             record=record,
             records=self.records,
-            carry=self.carry,
             passed=attempt.passed,
             reviewed=True,
             feedback=attempt.feedback,
@@ -557,16 +566,13 @@ class _SingleRun:
 
     async def _finish(self) -> None:
         self.files.write_pareto(
-            self.search.archive_summary(
+            self.search.archive_view(
                 self.records,
                 space=self.state.search.metrics,
                 baseline=self.state.search.input_baseline,
             )
         )
-        winner = self.search.best(
-            self.records,
-            space=self.state.search.metrics,
-        )
+        winner = self.search.best(self.records, space=self.state.search.metrics)
         if winner is None:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:
@@ -600,30 +606,34 @@ class _SingleRun:
             "workspace_sources": tuple(item.model_dump() for item in facts.workspace_sources),
         }
 
+    def _note_profile(self) -> ProgressEntry | None:
+        """Record the last attempt's profile evidence in this round's progress entry."""
+        last = self.state.last_response
+        if last is None:
+            return None
+        summary = ProfilerSummary(
+            analysis=last.profile_analysis,
+            bottlenecks=last.bottlenecks,
+            suggestions=last.suggestions,
+            perf_metric=last.perf_metric,
+            perf_unit=last.perf_unit,
+        )
+        return self.files.note_profile(self.round_number, summary)
+
     def _plan_context(
         self,
         context: PlanningContext,
         guidance: FocusView | None,
+        carried: CarriedEntries,
+        profile: ProgressEntry | None,
     ) -> PlanContext:
         facts = self.run.facts
         domain = resolve_domain(DomainName(facts.domain_id))
-        last = self.state.last_response
-        summary = (
-            ProfilerSummary(
-                analysis=last.profile_analysis,
-                bottlenecks=last.bottlenecks,
-                suggestions=last.suggestions,
-                perf_metric=last.perf_metric,
-                perf_unit=last.perf_unit,
-            )
-            if last is not None
-            else None
-        )
         return PlanContext(
             objective_location=facts.objective_location,
-            profiler_summary=summary,
-            regression_info=context.carry.regression_info,
-            exhaustion_info=context.carry.exhaustion_info,
+            profiler_entry=profile,
+            regression_entry=carried.regression,
+            exhaustion_entry=carried.exhaustion,
             progress_location=self.files.progress_location,
             roadmap_location=self.files.roadmap_location,
             pareto_archive_location=self.files.pareto_location,
@@ -639,7 +649,7 @@ class _SingleRun:
                 context.provisional_candidates + 1 >= self.options.official_eval_every
             ),
             active_component=guidance.active_component if guidance is not None else None,
-            ledger_text=guidance.ledger_text if guidance is not None else None,
+            ledger=guidance.ledger if guidance is not None else None,
             ranked_bottlenecks=(
                 [
                     {

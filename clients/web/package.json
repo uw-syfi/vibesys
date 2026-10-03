@@ -9,7 +9,8 @@
     "build": "vite build",
     "build:browser": "vite build --config vite.browser.config.ts",
     "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.browser.json",
-    "test": "bun test --max-concurrency 1 ./src",
+    "pretest": "pnpm --filter @vibesys/web^... build",
+    "test": "node ../scripts/run_bun_tests.mjs ./src",
     "test:e2e": "pnpm build && playwright test"
   },
   "dependencies": {

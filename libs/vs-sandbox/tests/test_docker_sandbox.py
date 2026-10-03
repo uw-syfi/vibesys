@@ -5,15 +5,11 @@ import os
 import subprocess
 from collections.abc import Generator
 from pathlib import Path
-from types import FrameType
-from typing import Literal, Never
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vs_sandbox import (
-    docker_sandbox,
-)
 from vs_sandbox.api import BeforeReadyContext, Sandbox, SandboxLifecycleError, SandboxLifecycleHooks
 from vs_sandbox.docker_sandbox import (
     AGENT_HOME,
@@ -955,37 +951,6 @@ class TestCleanupOnExit:
 
         assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
         assert "abc123" not in _live_containers
-
-    def test_sigint_defers_container_cleanup_until_stack_unwinds(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-
-        cleanup_calls: list[bool] = []
-        original_calls: list[tuple[int, FrameType | None]] = []
-
-        def original_handler(signum: int, frame: FrameType | None) -> Never:
-            original_calls.append((signum, frame))
-            raise KeyboardInterrupt
-
-        monkeypatch.setattr(
-            docker_sandbox,
-            "_cleanup_containers",
-            lambda: cleanup_calls.append(True),
-        )
-        monkeypatch.setattr(docker_sandbox, "_original_sigint", original_handler)
-
-        with (
-            patch.object(docker_sandbox.signal, "signal") as restore_handler,
-            pytest.raises(KeyboardInterrupt),
-        ):
-            docker_sandbox._sigint_handler(2, None)  # noqa: SLF001  # lint-waiver: LW-008502 [SLF001]; direct invocation isolates signal-unwind ordering without sending SIGINT to pytest's process.
-
-        restore_handler.assert_called_once_with(
-            docker_sandbox.signal.SIGINT,
-            original_handler,
-        )
-        assert original_calls == [(2, None)]
-        assert cleanup_calls == []
 
 
 class TestEnvVars:

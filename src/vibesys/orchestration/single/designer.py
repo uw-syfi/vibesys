@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
@@ -13,10 +13,12 @@ from vibesys.orchestration.hypothesis import (
 )
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
-from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest, StructuredResponseError
+from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.prompts import render_plan_correction
+from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis import HypothesisSearch, HypothesisState
+    from vibesys.hypothesis import HypothesisSearch, HypothesisState
     from vibesys.orchestration.single.models import PlanContext
     from vs_runtime.api import Workspace
 
@@ -37,16 +39,6 @@ class DesignerPlanRequest:
             raise ValueError(message)
 
 
-def _fallback_plan() -> OrchestratorPlan:
-    return OrchestratorPlan.model_validate(
-        {
-            "task": "Re-check minimal server boots and /health returns 200.",
-            "pass_criteria": "/health returns 200.",
-            "reasoning": "fallback: orchestrator produced no structured response",
-        }
-    )
-
-
 def _validate_plan(
     plan: OrchestratorPlan, state: HypothesisState, search: HypothesisSearch
 ) -> None:
@@ -61,16 +53,11 @@ def _validate_plan(
 
 
 def _correction_message(plan: OrchestratorPlan, error: ValueError) -> str:
-    rejected = ", ".join(sorted({item.hypothesis_id for item in plan.hypothesis_updates}))
-    return (
-        f"Your previous plan was rejected: {error}. "
-        f"It proposed hypothesis_id {plan.hypothesis_id!r} and named "
-        f"{rejected or '(no)'} in hypothesis_updates. "
-        "A hypothesis_id names one investigation permanently: never reuse "
-        "an identifier used earlier in this run, and choose one that has "
-        "not appeared before. hypothesis_updates may name each prior "
-        "hypothesis at most once, and never the new one. "
-        "Produce a corrected plan for this round. Return only the JSON object."
+    return render_plan_correction(
+        error=str(error),
+        hypothesis_id=plan.hypothesis_id,
+        updated_hypothesis_ids=[item.hypothesis_id for item in plan.hypothesis_updates],
+        require_unseen_id=True,
     )
 
 
@@ -119,12 +106,7 @@ async def request_plan(
         writable_paths=(request.context.roadmap_location,),
     )
     try:
-        try:
-            plan = await session.turn(
-                render_plan_prompt(request.context), response=OrchestratorPlan
-            )
-        except StructuredResponseError:
-            plan = _fallback_plan()
+        plan = await structured_turn(session, render_plan_prompt(request.context), OrchestratorPlan)
         for attempt in range(2):
             plan.hypothesis_id = (
                 plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
@@ -138,12 +120,9 @@ async def request_plan(
                 run.observations.warning(
                     f"[orchestrator] plan rejected ({error}); reprompting once"
                 )
-                try:
-                    plan = await session.turn(
-                        _correction_message(plan, error), response=OrchestratorPlan
-                    )
-                except StructuredResponseError:
-                    plan = _fallback_plan()
+                plan = await structured_turn(
+                    session, _correction_message(plan, error), OrchestratorPlan
+                )
                 continue
             await _resolve_recommendations(run, plan)
             return plan

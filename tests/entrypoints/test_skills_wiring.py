@@ -345,7 +345,29 @@ def test_all_repository_skill_metadata_is_valid() -> None:
         for item in validate_skill_tree(PROJECT_ROOT / "resources" / "skills")
     }
     assert metadata["serving-systems"].domains == (DomainName.LLM_SERVING,)
+    assert metadata["kernel-correctness"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["kernel-performance"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["kernel-ncu-analysis"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["kernel-ncu-analysis"].backends == (ComputeBackend.CUDA,)
     assert set(metadata) >= NKI_SKILL_NAMES
+
+
+def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
+    _, kernel_skills, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.CUDA), domain=DomainName.KERNEL_WRITING
+    )
+    _, serving_skills, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.CUDA), domain=DomainName.LLM_SERVING
+    )
+    _, trainium_skills, _ = load_config_and_skills(
+        _args(tmp_path, ComputeBackend.TRAINIUM), domain=DomainName.KERNEL_WRITING
+    )
+
+    kernel_names = {"kernel-correctness", "kernel-performance", "kernel-ncu-analysis"}
+    assert kernel_names <= _skill_names(kernel_skills)
+    assert kernel_names.isdisjoint(_skill_names(serving_skills))
+    assert "kernel-ncu-analysis" not in _skill_names(trainium_skills)
+    assert {"kernel-correctness", "kernel-performance"} <= _skill_names(trainium_skills)
 
 
 def test_all_nki_skills_inherit_trainium_scope_from_wrapper_sidecar() -> None:

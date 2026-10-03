@@ -6,17 +6,31 @@ import inspect
 from pathlib import Path
 
 import vibesys.orchestration.single.prompts as single_prompts
-from vibesys.orchestration.prompts import PROMPTS_DIR
+from vibesys.hypothesis import ExhaustionNotice
+from vibesys.orchestration.progress import ProgressLog
 from vibesys.orchestration.single.models import PlanContext, SingleAgentRoundContext
+from vibesys.profile_focus import (
+    FocusLedger,
+    FocusLedgerRow,
+    ProfileGuidanceStatus,
+)
+from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import resolve_free_variables
 
 
-def _plan_context() -> PlanContext:
+def _plan_context(workspace: Path) -> PlanContext:
+    log = ProgressLog(workspace, workspace / "progress")
+    notice = single_prompts.render_progress(
+        "exhaustion",
+        round_number=4,
+        exhaustion_info=ExhaustionNotice(round_number=3, attempts=2, feedback="Add a test."),
+    )
+    entry = log.append(4, notice)
     return PlanContext(
         objective_location="OBJECTIVE.md",
-        profiler_summary=None,
-        regression_info="The last candidate regressed.",
-        exhaustion_info="The last review exhausted its budget.",
+        profiler_entry=None,
+        regression_entry=entry,
+        exhaustion_entry=entry,
         progress_location="progress/ledger.md",
         roadmap_location="progress/roadmap.md",
         pareto_archive_location="progress/pareto.md",
@@ -28,7 +42,17 @@ def _plan_context() -> PlanContext:
         provisional_candidates=2,
         official_eval_cadence_due=True,
         active_component="decode scheduler",
-        ledger_text="decode scheduler: 43%",
+        ledger=FocusLedger(
+            rows=(
+                FocusLedgerRow(
+                    name="decode scheduler",
+                    status=ProfileGuidanceStatus.ACTIVE,
+                    rounds_spent=1,
+                    latest_share=0.43,
+                    stalled_rounds=0,
+                ),
+            )
+        ),
         ranked_bottlenecks=[
             {"component": "decode scheduler", "cost_share": 43, "evidence": ["trace.json"]}
         ],
@@ -68,12 +92,13 @@ def test_colocated_templates_use_every_field_of_their_typed_contexts() -> None:
         assert variables == set(model.model_fields)
 
 
-def test_plan_prompt_renders_policy_context_and_profile_guidance() -> None:
-    rendered = single_prompts.render_plan_prompt(_plan_context())
+def test_plan_prompt_renders_policy_context_and_profile_guidance(tmp_path: Path) -> None:
+    rendered = single_prompts.render_plan_prompt(_plan_context(tmp_path))
 
     assert "progress/roadmap.md" in rendered
     assert "The throughput curve has flattened." in rendered
     assert "decode scheduler" in rendered
+    assert "decode scheduler | active | 1 | 43.00% | 0" in rendered
     assert "43% of measured cost" in rendered
     assert "latest progress entry contains a regression" in rendered
     assert "latest progress entry contains exhausted-review feedback" in rendered

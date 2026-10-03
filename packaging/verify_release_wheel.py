@@ -50,6 +50,7 @@ FRAMEWORK_PACKAGES = (
     "vs_runtime",
     "vs_sandbox",
     "vs_slurm",
+    "vs_faults",
 )
 _INTERNAL_DISTRIBUTIONS = frozenset(
     {
@@ -65,6 +66,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-runtime",
         "vs-sandbox",
         "vs-slurm",
+        "vs-faults",
     }
 )
 _PACKAGE_SOURCE_ROOTS = {
@@ -86,6 +88,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-runtime/src/vs_runtime"): PurePosixPath("vs_runtime"),
     Path("libs/vs-sandbox/src/vs_sandbox"): PurePosixPath("vs_sandbox"),
     Path("libs/vs-slurm/src/vs_slurm"): PurePosixPath("vs_slurm"),
+    Path("libs/vs-faults/src/vs_faults"): PurePosixPath("vs_faults"),
     Path("resources/evaluators"): PurePosixPath("vibesys/_resources/evaluators"),
     Path("resources/profilers"): PurePosixPath("vibesys/_resources/profilers"),
     Path("resources/skills"): PurePosixPath("vibesys/_resources/skills"),

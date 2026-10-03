@@ -21,7 +21,6 @@ from vibesys.events import (
 )
 from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
 from vibesys.orchestration.skill_selection import platform_skill_selection
-from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import create_evaluation
 from vibesys.run.evaluation_backend import (
@@ -31,6 +30,7 @@ from vibesys.run.evaluation_backend import (
 )
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
+from vibesys.steering import splice_steering
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_evaluation.api import (
     ContentDigest,
@@ -397,7 +397,13 @@ class _ProductHostFactory:
         tool_context.install_evaluation(service, backend)
         self.evaluation_backend = backend
         self.evaluation_service = service
-        return EvidenceReusingEvaluation(evaluation, backend, run_id=run_id)
+        return EvidenceReusingEvaluation(
+            evaluation,
+            backend,
+            run_id=run_id,
+            scope_handles=service.scope_handles,
+            profiler=profiler_service,
+        )
 
     @staticmethod
     def _semantic_executor(

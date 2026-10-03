@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from vibesys.orchestration.issue_queue.prompts import issue_index, issue_markdown, progress_entry
 from vs_issue_tracker.api import Issue, IssueStatus, IssueTracker, ProgressLog
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic import BaseModel
+
+    from vibesys.orchestration.issue_queue.prompts import ProgressStep
+    from vs_prompts.api import RenderedPrompt
 
 _STATUS_ORDER = (
     IssueStatus.IN_PROGRESS,
@@ -32,56 +36,16 @@ def _filename(issue: Issue) -> str:
     return f"{issue.id:04d}-{_slug(issue.title)}.md"
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path: Path, text: RenderedPrompt) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(text, encoding="utf-8")
     temporary.replace(path)
 
 
-def _payload_lines(payload: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    for key in ("summary", "self_check", "verdict", "analysis", "feedback"):
-        value = payload.get(key)
-        if value:
-            lines.append(f"- **{key.replace('_', ' ').title()}**: {value}")
-    for key in ("throughput_trend", "latency_trend"):
-        value = payload.get(key)
-        if value:
-            lines.append(f"- **{key.replace('_', ' ').title()}**: {value}")
-    evaluator_feedback = payload.get("evaluator_feedback") or []
-    if evaluator_feedback:
-        lines.append("- **Evaluator Feedback**:")
-        lines.extend(f"  - {item}" for item in evaluator_feedback)
-    files = payload.get("files_touched") or []
-    if files:
-        lines.append("- **Files touched**: " + ", ".join(f"`{path}`" for path in files))
-    return lines
-
-
-def render_issue(issue: Issue) -> str:
+def render_issue(issue: Issue) -> RenderedPrompt:
     """Render one issue and its attempt history."""
-    lines = [
-        f"# #{issue.id:04d} - {issue.title}",
-        "",
-        f"- **Type**: {issue.type.value}",
-        f"- **Status**: {issue.status.value}",
-        f"- **Attempts**: {issue.attempts}",
-        "",
-        "## Description",
-        "",
-        issue.description,
-        "",
-        "## Timeline",
-        "",
-    ]
-    for event in issue.history:
-        iteration = f" (iteration {event.iteration})" if event.iteration is not None else ""
-        note = f": {event.note}" if event.note else ""
-        lines.append(f"- `{event.timestamp}` **{event.actor}** {event.action}{iteration}{note}")
-        if event.payload:
-            lines.extend(_payload_lines(event.payload))
-    return "\n".join(lines).rstrip() + "\n"
+    return issue_markdown(issue)
 
 
 def render_all(directory: Path, source: IssueTracker | list[Issue]) -> None:
@@ -94,30 +58,33 @@ def render_all(directory: Path, source: IssueTracker | list[Issue]) -> None:
             stale.unlink()
     for issue in issues:
         _write(directory / _filename(issue), render_issue(issue))
-
-    index = ["# Issue Index", ""]
-    for status in _STATUS_ORDER:
-        matching = [issue for issue in issues if issue.status is status]
-        if not matching:
-            continue
-        index.extend((f"## {status.value} ({len(matching)})", ""))
-        for issue in matching:
-            title = issue.title.replace("|", "\\|")
-            index.append(
-                f"- [#{issue.id} {title}]({_filename(issue)}) "
-                f"({issue.type.value}, {issue.attempts} attempts)"
-            )
-        index.append("")
-    if not issues:
-        index.extend(("_(no issues yet)_", ""))
-    _write(directory / "INDEX.md", "\n".join(index))
+    groups = [
+        (status, matching)
+        for status in _STATUS_ORDER
+        if (matching := [issue for issue in issues if issue.status is status])
+    ]
+    filenames = {issue.id: _filename(issue) for issue in issues}
+    _write(directory / "INDEX.md", issue_index(groups, filenames))
 
 
-def append_progress(progress: ProgressLog, heading: str, response: BaseModel) -> None:
+def _append(progress: ProgressLog, entry: RenderedPrompt) -> None:
+    progress.append(entry)
+
+
+def append_progress(
+    progress: ProgressLog,
+    response: BaseModel,
+    *,
+    iteration: int,
+    step: ProgressStep,
+    issue_id: int | None = None,
+) -> None:
     """Append a compact human-readable record of one paid turn."""
     payload = response.model_dump(mode="json")
-    lines = [f"## {heading}", "", *_payload_lines(payload), ""]
-    progress.append("\n".join(lines) + "\n")
+    _append(
+        progress,
+        progress_entry(iteration=iteration, step=step, issue_id=issue_id, payload=payload),
+    )
 
 
 __all__ = ["append_progress", "render_all", "render_issue"]

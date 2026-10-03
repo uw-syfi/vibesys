@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    import threading
 
 _TRUNCATION_MARKER = "\n...[truncated]...\n"
 
 
 @dataclass
 class SandboxExecutionResult:
-    """A command's combined output, exit code, and each process stream."""
+    """A command's combined output, exit code, and each process stream.
+
+    ``cancelled`` is true when the caller's cancel event stopped the command.
+    """
 
     output: str
     exit_code: int | None = None
     truncated: bool = False
     stdout: str = ""
     stderr: str = ""
+    cancelled: bool = False
 
 
 class Sandbox(Protocol):
@@ -31,8 +38,20 @@ class Sandbox(Protocol):
         """Return a stable identifier for this sandbox instance."""
         ...
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
-        """Run a shell command and return its bounded result."""
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        """Run a shell command and return its bounded result.
+
+        Setting *cancel* while the command runs stops the command and every
+        process it started (``SIGTERM``, then ``SIGKILL`` after a grace period)
+        and returns a result with ``cancelled=True``. A sandbox that cannot
+        stop its commands must raise rather than ignore *cancel*.
+        """
         ...
 
 

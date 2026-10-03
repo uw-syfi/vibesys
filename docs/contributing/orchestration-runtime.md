@@ -174,6 +174,11 @@ For a dynamic team, keep a dictionary keyed by a policy-owned member ID and
 pass that ID as `member_id` when the member joins. The policy decides which
 member sees which follow-on message, whether members share a workspace, and
 when a member leaves. The runtime still owns isolation and eventual cleanup.
+A member ID must be a canonical `AgentId` (printable characters in NFC form,
+no leading or trailing whitespace). When an agent chooses the ID, type the
+field of its structured reply as `AgentId`, so a bad ID fails the reply's
+validation and reaches the agent's correction turn instead of failing later
+at workspace or session creation.
 
 Concurrent work is also ordinary Python. Use `asyncio.TaskGroup` only when the
 chosen workspaces and policy state are independent. Do not concurrently call
@@ -199,7 +204,12 @@ implementation objects:
 Workspace and candidate lifetimes are explicit. A plugin creates a candidate
 with `run.workspaces.create_candidate()`, retains or adopts a revision through
 the workspace APIs, and discards the candidate in `finally`. The lower runtime
-owns Git, sandbox, worktree, and cleanup mechanics. Similarly, orchestration
+owns Git, sandbox, worktree, and cleanup mechanics. A policy that runs one
+logical member through a sequence of candidates passes
+`create_candidate(revision, member_id=...)`: each of that member's candidates
+gets the same path, so an agent session created with the same `member_id`
+resumes its provider conversation (providers key history by working
+directory). At most one candidate per member ID is live at a time. Similarly, orchestration
 decides when correctness or performance evaluation is due and interprets the
 typed result; the runtime performs the trusted evaluation.
 
@@ -221,11 +231,15 @@ Keep code near the plugin that owns the decision:
   deterministic transitions;
 - `prompts/`: agent-visible prompt rendering owned by that policy.
 
-Shared modules under `vibesys.orchestration` are policy shared by multiple
-built-in plugins, such as hypothesis search, metric interpretation, profiler
-selection, and domain prompt content. Extract shared policy only when real
-callers need the same semantics. Do not introduce setup objects, registries,
-builders, or callback bundles merely to shorten orchestration code.
+Every direct subfolder of `vibesys.orchestration` is one strategy package.
+Shared policy and resources live beside it under `vibesys`, including
+`hypothesis`, `metrics`, `profile_focus`, `steering`, `domains`, and shared
+`prompts`; these siblings never import orchestration. Domain templates live
+with their domain, and strategy templates with their strategy. Top-level
+orchestration modules remain shared policy helpers. Follow the layout and
+placement rule in [architecture.md](architecture.md). Extract shared policy
+only when real callers need the same semantics. Do not introduce setup objects,
+registries, builders, or callback bundles merely to shorten orchestration code.
 
 ## Adding a plugin
 

@@ -19,8 +19,10 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentExecutionPolicy,
     AgentObserver,
+    AgentOutputSchemaError,
     AgentSession,
     AgentSessionSpec,
+    AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
@@ -30,14 +32,14 @@ from vs_agent.contracts import (
 )
 from vs_agent.events import CommandResultPayload, JsonResultPayload
 from vs_agent.provider_policy import DEFAULT_CLI_PROVIDER
-from vs_agent.runner import parse_typed_response_text
+from vs_agent.runner import parse_typed_response
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -144,6 +146,8 @@ class _LoggerObserver:
             )
         elif event.kind is AgentEventKind.USAGE and event.usage is not None:
             self._logger.update_usage(_usage_dict(event.usage))
+        elif event.kind is AgentEventKind.SKILL:
+            self._logger.on_diagnostic(f"[skill] {event.text or 'unknown'}")
 
     def close(self) -> None:
         """Close any assistant-text segment left open at turn completion."""
@@ -158,6 +162,16 @@ def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
         "output_tokens": usage.output_tokens,
         "total_cost_usd": usage.total_cost_usd,
         "duration_ms": usage.duration_ms,
+    }
+
+
+def _skill_dict(skills: AgentSkillUse) -> dict[str, int | list[str] | None]:
+    """Usage-record fields for skill use; ``None`` where the provider cannot say."""
+    invoked = skills.invoked
+    return {
+        "skill_uses": None if invoked is None else len(invoked),
+        "skills_invoked": None if invoked is None else list(invoked),
+        "skills_offered": None if skills.offered is None else len(skills.offered),
     }
 
 
@@ -272,7 +286,6 @@ class AgentClient:
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
@@ -281,7 +294,12 @@ class AgentClient:
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> T:
-        """Run one turn and parse its structured response."""
+        """Run one turn and parse its structured response.
+
+        Raises ``AgentOutputSchemaError`` naming the offending fields when the
+        reply does not validate as ``response_cls``, and keeps the
+        conversation so the caller can send a correction to it.
+        """
         result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,
@@ -297,8 +315,9 @@ class AgentClient:
             session_key=session_key,
         )
         label = agent_label(kind)
-        parsed = parse_typed_response_text(result.text, response_cls)
-        if parsed is None:
+        try:
+            parsed = parse_typed_response(result.text, response_cls)
+        except AgentOutputSchemaError:
             _emit_and_log(
                 self._sink,
                 f"\n=== {label} ROUND OUTPUT (missing response) ===",
@@ -316,7 +335,8 @@ class AgentClient:
                     self._run_log_file,
                 )
                 _publish_final_text(logger, result.text)
-            return fallback_factory()
+            # The session stays live, so the caller's correction continues it.
+            raise
         _emit_and_log(self._sink, f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
         _emit_and_log(self._sink, parsed.model_dump_json(indent=2), self._run_log_file)
         return parsed
@@ -471,7 +491,7 @@ class AgentClient:
                 round_label=round_label,
                 model=model,
                 reasoning_effort=reasoning_effort,
-                usage=result.usage if result is not None else AgentUsage(),
+                result=result,
             )
         if result is None:
             message = "successful invocation did not produce a result"
@@ -485,10 +505,12 @@ class AgentClient:
         round_label: str,
         model: str | None,
         reasoning_effort: str | None,
-        usage: AgentUsage,
+        result: AgentTurnResult | None,
     ) -> None:
         if self._log_dir is None:
             return
+        usage = result.usage if result is not None else AgentUsage()
+        skills = result.skills if result is not None else AgentSkillUse()
         record = {
             "timestamp": datetime.now(UTC).isoformat(),
             "kind": kind,
@@ -497,6 +519,7 @@ class AgentClient:
             "model": model,
             "reasoning_effort": reasoning_effort,
             **_usage_dict(usage),
+            **_skill_dict(skills),
         }
         target = self._log_dir / "usage.jsonl"
         try:
@@ -542,6 +565,11 @@ class AgentClient:
 
         try:
             result = self._run_session(cached.session, turn, observer)
+        except AgentOutputSchemaError:
+            # The driver kept the conversation that produced the invalid
+            # output, so the session stays live: the caller's correction turn
+            # continues it instead of starting over without the work.
+            raise
         except BaseException as error:
             # The checkpoint is deliberately kept. A turn can fail for reasons
             # that say nothing about the conversation's validity (a timeout, a

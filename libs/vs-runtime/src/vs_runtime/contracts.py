@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import re
 import unicodedata
@@ -15,7 +16,9 @@ from pathlib import (
 )  # Pydantic resolves WorkspaceRef at runtime.
 from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+
+from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -66,12 +69,22 @@ class SessionClosedError(RuntimeContractError):
 
 
 class StructuredResponseError(RuntimeContractError):
-    """An agent turn could not be parsed as its requested response type."""
+    """An agent turn did not produce a valid response of its requested type.
 
-    def __init__(self, role_id: str, response_type: type[BaseModel]) -> None:
-        """Name the role and response contract whose validation failed."""
+    Raised both when the reply cannot be parsed and when the provider gave up
+    producing output that matches the response schema. Either way the session
+    keeps its conversation, so a caller can send a correction as the next
+    turn. ``detail`` holds the validation errors when the provider reported
+    them, and the message includes them.
+    """
+
+    def __init__(self, role_id: str, response_type: type[BaseModel], detail: str = "") -> None:
+        """Name the role and response contract whose validation failed, and why if known."""
+        self.detail = detail
+        reason = f": {detail}" if detail else ""
         super().__init__(
-            f"agent role {role_id!r} did not return a valid {response_type.__name__} response"
+            f"agent role {role_id!r} did not return a valid {response_type.__name__} "
+            f"response{reason}"
         )
 
 
@@ -323,8 +336,23 @@ class Workspaces(Protocol):
         """Return whether independent candidate workspaces can run concurrently."""
         ...
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
-        """Create an isolated candidate from a retained revision or the root head."""
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        """Create an isolated candidate from a retained revision or the root head.
+
+        Without ``member_id`` every candidate gets a fresh path. With it, the
+        path is a fixed function of the member ID, so a member that works in a
+        sequence of candidates (one at a time, each from a new revision) keeps
+        one path, and an agent session created with the same ``member_id``
+        continues its provider conversation, whose provider keys history by
+        working directory. At most one live candidate exists per member ID;
+        creating a second while the first is live raises
+        :class:`RuntimeContractError`.
+        """
         ...
 
     async def adopt(self, revision: str) -> None:
@@ -529,6 +557,20 @@ class WorkspaceSourceFact(BaseModel):
     dest: str = Field(min_length=1)
 
 
+class SkillFact(BaseModel):
+    """One installed skill the run offers its agents.
+
+    ``name`` is the agent-visible skill name, so ``<name>/SKILL.md`` is the
+    skill's router in every agent workspace. ``description`` is the skill's
+    frontmatter description on one line.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
 class RunFacts(BaseModel):
     """Immutable prompt-visible facts resolved before orchestration starts."""
 
@@ -546,6 +588,8 @@ class RunFacts(BaseModel):
     benchmark_configured: bool = False
     profiler_id: str = Field(default="none", min_length=1)
     workspace_sources: tuple[WorkspaceSourceFact, ...] = ()
+    # The same installed catalog that ``Run.skills`` resolves against.
+    skills: tuple[SkillFact, ...] = ()
 
 
 class MetricDirection(StrEnum):
@@ -589,6 +633,13 @@ class AccuracyEvaluation(BaseModel):
         return self.feedback is None
 
 
+class BenchmarkFailureKind(StrEnum):
+    """Whether a benchmark failure describes its workload or execution infrastructure."""
+
+    WORKLOAD = "workload"
+    INFRASTRUCTURE = "infrastructure"
+
+
 class BenchmarkEvaluation(BaseModel):
     """Semantic outcome and measurements from the trusted benchmark."""
 
@@ -596,11 +647,23 @@ class BenchmarkEvaluation(BaseModel):
 
     executed: bool
     feedback: str | None = None
+    # Absent for older or reused evidence that did not retain failure provenance.
+    failure_kind: BenchmarkFailureKind | None = None
     metric_name: str | None = None
     metric_value: FiniteFloat | None = None
     metric_direction: MetricDirection | None = None
     metric_unit: str | None = None
     row: Mapping[str, FiniteFloat] | None = None
+    # What a failed benchmark measured before it stopped, as its evaluator
+    # reported it; absent when the evaluator reported nothing.
+    partial_measurement: PartialMeasurement | None = None
+
+    @model_validator(mode="after")
+    def _partial_only_when_failed(self) -> BenchmarkEvaluation:
+        if self.partial_measurement is not None and self.feedback is None:
+            message = "only a failed benchmark carries a partial measurement"
+            raise ValueError(message)
+        return self
 
     @property
     def passed(self) -> bool:
@@ -616,12 +679,161 @@ class LocalValidationEvaluation(BaseModel):
     passed: bool
     feedback: str | None = None
     report_location: str | None = Field(default=None, min_length=1)
+    recipe_unusable: bool = Field(
+        default=False,
+        description=(
+            "The agent-reported recipe artifact could not be read, so no recipe ran. This "
+            "is an input error the agent can correct in its reply, not a candidate failure."
+        ),
+    )
 
     @model_validator(mode="after")
     def _consistent_outcome(self) -> LocalValidationEvaluation:
         """Keep pass/fail state and policy-facing feedback unambiguous."""
         if self.passed == (self.feedback is not None):
             message = "passing local validation cannot have feedback; failure requires feedback"
+            raise ValueError(message)
+        if self.recipe_unusable and self.passed:
+            message = "a passing local validation cannot report an unusable recipe"
+            raise ValueError(message)
+        return self
+
+
+class AgentEvaluationStatus(StrEnum):
+    """Lifecycle of one evaluation an agent submitted through its evaluation tool."""
+
+    PENDING = "pending"
+    PASSED = "passed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class AgentEvaluationStageOutcome(StrEnum):
+    """Trusted conclusion of one finished stage of an agent-submitted evaluation."""
+
+    PASSED = "passed"
+    FAILED = "failed"
+    # The stage recorded measurements without a pass or fail verdict.
+    OBSERVED = "observed"
+
+
+class AgentEvaluationMetric(BaseModel):
+    """One measurement a finished stage recorded."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    value: FiniteFloat
+    unit: str | None = None
+    direction: MetricDirection | None = None
+
+
+class AgentEvaluationStage(BaseModel):
+    """The trusted outcome of one finished stage (accuracy, benchmark, ...)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: str = Field(min_length=1)
+    outcome: AgentEvaluationStageOutcome
+    metrics: tuple[AgentEvaluationMetric, ...] = ()
+    # What a failed stage measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
+
+
+class AgentEvaluation(BaseModel):
+    """One trusted evaluation an agent submitted from a workspace.
+
+    The host runs it, so its outcome is trusted even though an agent chose
+    when to submit. ``failure`` is the complete failure text, present exactly
+    when the evaluation failed. ``stages`` holds the outcome of each stage that
+    finished with trusted evidence, in stage order; a stage still running, or
+    one that crashed without evidence, has no entry.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
+    kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
+    status: AgentEvaluationStatus
+    stages: tuple[AgentEvaluationStage, ...] = ()
+    content_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description=(
+            "SHA-256 of the evaluated revision's patch as Workspaces.export_patch returns it: "
+            "two revisions with this digest hold the same candidate content."
+        ),
+    )
+    failure: str | None = Field(default=None, min_length=1)
+    signature: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Exception type and innermost source line of the failure, when it holds a "
+            "traceback. Failures with equal signatures are the same defect."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _failure_iff_failed(self) -> AgentEvaluation:
+        if (self.status is AgentEvaluationStatus.FAILED) != (self.failure is not None):
+            message = "a failed agent evaluation requires its failure, and only it has one"
+            raise ValueError(message)
+        if self.signature is not None and self.failure is None:
+            message = "only a failed agent evaluation has a failure signature"
+            raise ValueError(message)
+        return self
+
+
+class CandidateProfileStatus(StrEnum):
+    """How one policy-requested profile of a candidate revision ended."""
+
+    # The profiler observed the candidate and reported a diagnosis.
+    OBSERVED = "observed"
+    # The profiler ran but reported that it cannot profile this candidate.
+    UNSUPPORTED = "unsupported"
+    # No report: the profiler turn failed, was canceled or interrupted, or no
+    # profiler is provisioned for the run.
+    FAILED = "failed"
+
+
+class CandidateProfileComponent(BaseModel):
+    """The share of observed cost the profiler attributed to one component."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    share: FiniteFloat = Field(ge=0, le=1)
+
+
+class CandidateProfile(BaseModel):
+    """The trusted outcome of one profile that policy requested for a revision.
+
+    ``operation_id`` names the host-owned profiler operation, the same record
+    agents read through their trusted operations, and is ``None`` only when no
+    operation started. ``failure`` is the framework's account of a failure and
+    is present exactly when the profile failed; ``diagnosis`` is the profiler's
+    report and is absent then.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(min_length=1)
+    status: CandidateProfileStatus
+    operation_id: str | None = Field(default=None, min_length=1)
+    diagnosis: str | None = None
+    components: tuple[CandidateProfileComponent, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
+    failure: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _failure_iff_failed(self) -> CandidateProfile:
+        failed = self.status is CandidateProfileStatus.FAILED
+        if failed != (self.failure is not None):
+            message = "a failed candidate profile requires its failure, and only it has one"
+            raise ValueError(message)
+        if failed and (self.diagnosis is not None or self.components or self.evidence_ids):
+            message = "a failed candidate profile carries no report"
             raise ValueError(message)
         return self
 
@@ -655,6 +867,34 @@ class Evaluation(Protocol):
         report_location: str,
     ) -> LocalValidationEvaluation:
         """Run audited candidate-authored recipes without permitting workspace mutation."""
+        ...
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return the evaluations agents submitted from ``workspace``, oldest first.
+
+        A candidate workspace keeps its identity across the attempts of one
+        member, so the history spans them. Empty when the run offers agents no
+        evaluation tool.
+        """
+        ...
+
+    async def can_profile(self) -> bool:
+        """Return whether :meth:`profile` can produce trusted profile evidence in this run.
+
+        True only when the run provisions a profiler agent and its evaluation
+        executor produces profile evidence. Policy offers profiling only when
+        this holds; otherwise every profile ends unsupported or failed.
+        """
+        ...
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Profile ``revision`` through the run's profiler agent and wait for its outcome.
+
+        The profile is a host-owned profiler operation recorded under
+        ``member_id``, so it is listed with the run's trusted operations.
+        Every way the profile can end, including a run without a provisioned
+        profiler, is a typed outcome; this raises only on cancellation.
+        """
         ...
 
 
@@ -742,16 +982,90 @@ class OrchestrationPlugin:
             raise ValueError(message)
 
 
-def validate_member_id(member_id: str | None) -> None:
-    """Require a nonempty logical identifier without control characters."""
-    invalid = member_id is not None and (
-        not isinstance(member_id, str)
-        or not member_id.strip()
-        or any(unicodedata.category(character) == "Cc" for character in member_id)
-    )
-    if invalid:
-        message = f"invalid agent member ID {member_id!r}"
+_AGENT_ID_MAX_LENGTH = 128
+
+
+def _agent_id_violation(value: str) -> str | None:
+    """Return why ``value`` is not a canonical agent identifier, or ``None`` if it is.
+
+    An agent identifier is a name an agent chose that the framework later uses
+    as a key: a member ID, a workspace and Git ref name, a state namespace, a
+    lookup ID. It must have exactly one spelling, so two strings that look the
+    same or that a consumer would normalize to one value are never two
+    identifiers. Every character is printable (no control, format, surrogate,
+    private-use, or unassigned characters, and no whitespace except the ASCII
+    space), the text is in Unicode NFC form, and it neither starts nor ends
+    with a space. The check rejects instead of normalizing: normalizing would
+    merge distinct identifiers and leave the agent unaware of the name it
+    must use later.
+    """
+    if not value:
+        return "it is empty"
+    if not value.isprintable():
+        hidden = next(character for character in value if not character.isprintable())
+        return (
+            f"it contains the non-printable character U+{ord(hidden):04X}; use only "
+            "printable characters, with the ASCII space as the only whitespace"
+        )
+    if value != value.strip():
+        return f"it has leading or trailing whitespace; use {value.strip()!r}"
+    if not unicodedata.is_normalized("NFC", value):
+        return f"it is not in Unicode NFC form; use {unicodedata.normalize('NFC', value)!r}"
+    return None
+
+
+def _checked_agent_id(value: str) -> str:
+    if (violation := _agent_id_violation(value)) is not None:
+        message = f"{value!r} is not a valid identifier: {violation}"
         raise ValueError(message)
+    return value
+
+
+# An agent-supplied identifier, parsed where agent output enters the system:
+# 1 to 128 printable characters in NFC form without leading or trailing
+# whitespace (rules and rationale in ``_agent_id_violation``). Validation errors
+# name the value and the fix, so a correction turn can act on them.
+AgentId = Annotated[
+    str,
+    Field(min_length=1, max_length=_AGENT_ID_MAX_LENGTH),
+    AfterValidator(_checked_agent_id),
+]
+
+
+def validate_member_id(member_id: str | None) -> None:
+    """Require a canonical agent identifier (see ``AgentId``) or ``None``.
+
+    The length bound of ``AgentId`` is a schema rule for agent output and is
+    not applied here: a longer member ID still maps to a valid workspace ID.
+    """
+    if member_id is None:
+        return
+    violation = (
+        "it is not a string" if not isinstance(member_id, str) else _agent_id_violation(member_id)
+    )
+    if violation is not None:
+        message = f"invalid agent member ID {member_id!r}: {violation}"
+        raise ValueError(message)
+
+
+def member_workspace_id(member_id: str) -> str:
+    """Return the stable candidate workspace ID for one logical member.
+
+    The ID is valid everywhere it is used: a path component, a project state
+    namespace, and a Git ref component (``refs/vibesys/<run>/candidates/<id>``).
+    It is a readable, lowercased prefix of the member ID plus a digest of the
+    original ID, so members differing only in case or punctuation never share a
+    path. The prefix uses only lowercase letters, digits, single dots,
+    underscores, and hyphens: runs of dots become a hyphen because Git forbids
+    ``..``. The ID starts with ``m-`` and ends with a hex digest, so it never
+    starts with a dot or ends with ``.`` or ``.lock``. IDs that were already
+    lowercase without dot runs keep their previous form.
+    """
+    validate_member_id(member_id)
+    readable = re.sub(r"[^a-z0-9._-]+", "-", member_id.lower())
+    readable = re.sub(r"\.{2,}", "-", readable).strip("-.")[:48]
+    digest = hashlib.sha256(member_id.encode()).hexdigest()[:12]
+    return f"m-{readable}-{digest}" if readable else f"m-{digest}"
 
 
 def validate_command(argv: tuple[str, ...], timeout_seconds: int | None) -> None:

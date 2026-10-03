@@ -26,6 +26,18 @@ exit, malformed output, a missing tool, a permission error. The test asks for
 the failure; the Fake raises it immediately. Never make a test wait for a real
 timeout, and never patch a filesystem or process call to force a failure.
 
+## Never more capable or forgiving than production
+
+A Fake that accepts what production rejects hides bugs until a live run. Pin
+the facts that differ most often:
+
+- Capabilities: derive what the Fake supports from the same definition the
+  production executor uses, not from a list in the Fake.
+- Validation and loading: parse and load state with the production models and
+  the same strictness (unknown keys rejected).
+- Limits: enforce the same deadlines, sizes, and path rules, measured on the
+  injected clock.
+
 ## Keeping a Fake faithful
 
 The developer who changes real behavior updates the Fake in the same PR. Two

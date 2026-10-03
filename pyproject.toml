@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.6.3,<0.7",
+    "agentshim>=0.13.1,<0.14",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",
@@ -49,9 +49,9 @@ vibesys = "entrypoints.launcher:main"
 [tool.setuptools.package-data]
 # ``entrypoints/_tui`` is produced at build time by setup.py's build_py step;
 # the glob keeps it as package data when present.
-vibesys = ["orchestration/prompts/*.j2", "orchestration/prompts/**/*.j2", "orchestration/prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "orchestration/domains/README.md", "_resources/**/*", "_sdk/**/*"]
+vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*"]
 entrypoints = ["py.typed", "_tui/**/*"]
-server = ["py.typed"]
+server = ["py.typed", "chat/prompts/*.j2"]
 vs_evaluator_protocol = ["py.typed"]
 vs_evaluation = ["py.typed"]
 vs_async_ops = ["py.typed"]
@@ -64,6 +64,7 @@ vs_runtime = ["py.typed"]
 vs_sandbox = ["py.typed"]
 vs_agent = ["py.typed", "images/*.Dockerfile"]
 vs_slurm = ["py.typed"]
+vs_faults = ["py.typed"]
 
 [dependency-groups]
 dev = [
@@ -93,7 +94,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-faults/tests", "sdk/vs-bench/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
@@ -117,7 +118,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_loop_state", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_bench"]
+source = ["entrypoints", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_loop_state", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_faults", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
@@ -171,9 +172,9 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 [tool.vibesys.test_isolation]
 # Shrink-only ratchet for test isolation, enforced by
 # `scripts/check_test_isolation.py`. Tests should exercise public APIs and use
-# in-memory Fakes instead of monkeypatch or mock, and should never use sleeps
-# as synchronization. Existing violations are recorded per (file, rule) in the
-# baseline; counts may only go down.
+# in-memory Fakes instead of monkeypatch or mock, and should never decide a
+# verdict with a sleep, a timeout, or a clock reading. Existing violations are
+# recorded per (file, rule) in the baseline; counts may only go down.
 #
 # Glob patterns of directories scanned for `*.py`. They mirror
 # `[tool.pytest.ini_options] testpaths`. `__pycache__` and `fixtures`
@@ -186,13 +187,14 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
 extend-exclude = [
     "resources/skills",
     "examples/microservices/repositories/deathstarbench",
+    "examples/microservices/repositories/masa",
     "examples/microservices/repositories/train-ticket",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
@@ -311,6 +313,7 @@ root = [
     "libs/vs-sandbox/src",
     "libs/vs-agent/src",
     "libs/vs-slurm/src",
+    "libs/vs-faults/src",
     "sdk/vs-bench/src",
 ]
 
@@ -346,6 +349,8 @@ include = [
     "libs/vs-agent/tests",
     "libs/vs-slurm/src",
     "libs/vs-slurm/tests",
+    "libs/vs-faults/src",
+    "libs/vs-faults/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",
 ]

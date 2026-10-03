@@ -56,8 +56,12 @@ class SlurmEvaluationPlan(BaseModel):
     benchmark_command: tuple[str, ...] | None = None
     benchmark_output_argument: str | None = None
     support_paths: dict[str, Path] = Field(default_factory=dict)
+    # The trusted serving profile capture (see ``slurm_profile``); ``None`` when
+    # the run stages no profiler or configures no service, so the executor
+    # cannot produce profile evidence.
+    profile_command: tuple[str, ...] | None = None
 
-    @field_validator("accuracy_command", "benchmark_command")
+    @field_validator("accuracy_command", "benchmark_command", "profile_command")
     @classmethod
     def _valid_commands(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if value is not None and (not value or any(not part for part in value)):

@@ -1,0 +1,7 @@
+{# Context: `round_number` (int), `summary` (ProfilerSummary). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Profiler summary") %}
+- analysis: {{ summary.analysis }}
+- bottlenecks: {{ summary.bottlenecks }}
+- suggestions: {{ summary.suggestions }}
+{% endcall %}

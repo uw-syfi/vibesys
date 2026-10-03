@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from vibesys.orchestration.hypothesis import SkillResourceSelection
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.hypothesis import (
+    ArchiveConflict,
+    SkillResourceSelection,
+)
+from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
+from vibesys.profile_focus import FocusLedger
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
-from vs_runtime.api import ResolvedSkillResources
+from vs_runtime.api import (
+    VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
+    ResolvedSkillResources,
+    ValidationRecipeArtifactPath,
+)
 
 
 class PlanContext(BaseModel):
@@ -17,9 +25,9 @@ class PlanContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    profiler_summary: ProfilerSummary | None
-    regression_info: str | None
-    exhaustion_info: str | None
+    profiler_entry: ProgressEntry | None
+    regression_entry: ProgressEntry | None
+    exhaustion_entry: ProgressEntry | None
     progress_location: str
     roadmap_location: str
     pareto_archive_location: str
@@ -31,7 +39,7 @@ class PlanContext(BaseModel):
     provisional_candidates: int
     official_eval_cadence_due: bool
     active_component: str | None = None
-    ledger_text: str | None = None
+    ledger: FocusLedger | None = None
     ranked_bottlenecks: list[dict[str, object]] = Field(default_factory=list)
 
 
@@ -158,9 +166,9 @@ class ImplementerResponse(BaseModel):
         default_factory=list,
         description="New advisory skill resources consulted or selected this turn.",
     )
-    validation_recipe_artifact: str | None = Field(
+    validation_recipe_artifact: ValidationRecipeArtifactPath | None = Field(
         default=None,
-        description="Workspace-relative framework local-validation recipe JSON.",
+        description=VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     )
 
 
@@ -184,7 +192,7 @@ class JudgeContext(BaseModel):
     objective_location: str
     official_evaluation_due: bool
     official_evaluation_reason: str | None
-    pareto_archive_conflict: str | None
+    pareto_archive_conflict: ArchiveConflict | None
     pareto_archive_location: str
     plan_artifact_location: str
     progress_location: str
@@ -220,8 +228,8 @@ class PreRoundContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    regression_info: str | None
-    exhaustion_info: str | None
+    regression_entry: ProgressEntry | None
+    exhaustion_entry: ProgressEntry | None
     progress_location: str
     profiler_kind: str
     profile_execution: str
@@ -241,6 +249,15 @@ class PreRoundDecision(BaseModel):
     reasoning: str = Field(description="Short explanation of the decision.")
 
 
+class ProfilerCampaign(BaseModel):
+    """Where a profiler reads campaign progress and writes its evidence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    progress_location: str
+    evidence_location: str
+
+
 class ProfilerContext(BaseModel):
     """Changing evidence rendered for a selected profiler kind."""
 
@@ -255,7 +272,7 @@ class ProfilerContext(BaseModel):
     objective: str | None
     profiler_support_name: str
     profiler_mcp_name: str
-    profiler_campaign_context: str
+    campaign: ProfilerCampaign | None
 
 
 __all__ = [
@@ -267,5 +284,6 @@ __all__ = [
     "PlanContext",
     "PreRoundContext",
     "PreRoundDecision",
+    "ProfilerCampaign",
     "ProfilerContext",
 ]

@@ -1,0 +1,20 @@
+Review issue #7: [feature] Implement streaming
+
+## Acceptance criteria
+- stream non-empty token deltas
+
+Performance improvement is out of scope for this verdict. Inspect the candidate,
+maintain relevant pytest tests, run them, and use the accuracy checker when one
+is configured. A failing required correctness check requires a fail verdict.
+Accuracy command: <not configured>
+Benchmark command: <not configured>
+Runtime notes: <none>
+
+Start the real service for an end-to-end `/health` and completion-stream smoke
+test. When the benchmark is configured, run a short sanity workload and require
+positive token throughput plus non-null TTFT and TPOT. For an unrelated bug,
+list and search the issue board before filing at most one bug.
+
+Return exactly one JSON object matching:
+{"issue_id": 7, "analysis": "...", "feedback": "...",
+ "verdict": "pass" | "fail", "new_issues_filed": [1]}

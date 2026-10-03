@@ -8,6 +8,7 @@ Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 """
 
 from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents
+from vs_project._git_process import run_git
 from vs_project._git_remote import GitRemoteRepository
 from vs_project._git_tracker import FrameworkSnapshotStatus, GitTracker
 from vs_project._layout import (
@@ -106,6 +107,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "generate_run_id",
     "is_project_state_path",
+    "run_git",
     "strip_ansi",
     "validate_socket_path",
 ]

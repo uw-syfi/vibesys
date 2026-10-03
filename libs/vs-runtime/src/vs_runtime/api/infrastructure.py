@@ -182,6 +182,7 @@ from vs_runtime._skills import (
     build_skill_catalog,
     discover_skill_dirs,
     load_skill_frontmatter,
+    offered_skill_facts,
     resolve_skill_resources,
 )
 from vs_runtime._state import CommittedStateObserver, create_state
@@ -197,6 +198,7 @@ from vs_runtime._trusted_evaluation import (
     build_trusted_benchmark_command,
     create_trusted_evaluation_executor,
     decode_trusted_benchmark_output,
+    decode_trusted_benchmark_partial,
 )
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -539,6 +541,7 @@ __all__ = [
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",
     "decode_trusted_benchmark_output",
+    "decode_trusted_benchmark_partial",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",
@@ -550,6 +553,7 @@ __all__ = [
     "make_run_environment_spec",
     "materialize_input_project",
     "materialize_objective_document",
+    "offered_skill_facts",
     "open_agent_execution_environment",
     "open_managed_conversation",
     "open_project_run_resources",

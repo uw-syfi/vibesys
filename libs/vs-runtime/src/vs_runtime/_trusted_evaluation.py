@@ -7,21 +7,27 @@ import contextlib
 import json
 import math
 import shlex
+import threading
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vs_evaluator_protocol.api import (
+    ErrorRecord,
     Hello,
+    Measurement,
+    PartialMeasurement,
     ProtocolError,
     check_objectives,
     parse_records,
     read_measurement,
 )
 from vs_runtime._model_requests import ModelRequestError
+from vs_runtime.contracts import BenchmarkFailureKind
 from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
@@ -42,12 +48,30 @@ def build_trusted_benchmark_command(
     contract: TrustedBenchmarkContract,
     output_path: str,
 ) -> str:
-    """Frame one benchmark command for the authoritative result decoder."""
+    """Frame one benchmark command for the authoritative result decoder.
+
+    The result file is printed whether or not the command succeeded, so a
+    failed evaluator's `error` record reaches the decoder too; the framed
+    command still exits with the benchmark's own status. A missing file frames
+    nothing, which the decoder rejects for a passing run.
+    """
+    path = shlex.quote(output_path)
     return (
-        f"rm -f -- {shlex.quote(output_path)}"
-        f" && {command}"
-        f" {shlex.quote(contract.output_argument)} {shlex.quote(output_path)}"
-        f" && printf '\\n{_BENCHMARK_MARKER}\\n'"
+        f"rm -f -- {path}"
+        f" && {{ {command}"
+        f" {shlex.quote(contract.output_argument)} {path};"
+        " status=$?;"
+        f" printf '\\n{_BENCHMARK_MARKER}\\n';"
+        f" cat {path} 2>/dev/null;"
+        f" printf '\\n{_BENCHMARK_END_MARKER}\\n';"
+        ' (exit "$status"); }'
+    )
+
+
+def _framed_result_command(output_path: str) -> str:
+    """Print only an existing benchmark result file between the decoder's markers."""
+    return (
+        f"printf '\\n{_BENCHMARK_MARKER}\\n'"
         f" && cat {shlex.quote(output_path)}"
         f" && printf '\\n{_BENCHMARK_END_MARKER}\\n'"
     )
@@ -127,10 +151,15 @@ class TrustedBenchmarkResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    failure_kind: BenchmarkFailureKind | None = None
+    # The validated evaluator error record's message, without transport framing.
+    failure_reason: str | None = None
     stdout: str = ""
     stderr: str = ""
     row: Mapping[str, FiniteFloat] | None = None
     metrics: Mapping[str, TrustedMetricDeclaration] = Field(default_factory=dict)
+    # What a failed run measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
     provisioned_volumes: tuple[str, ...] = ()
 
 
@@ -198,12 +227,20 @@ class RuntimeTrustedEvaluation:
 
     async def _run_sync[Result](
         self,
-        operation: Callable[[], Result],
+        operation: Callable[[threading.Event], Result],
     ) -> Result:
-        task = asyncio.create_task(asyncio.to_thread(operation))
+        """Run *operation* in a worker; cancelling the caller stops its command.
+
+        On cancellation the operation's cancel event stops the sandbox command
+        (and, on Slurm, cancels its job); the worker is drained before the
+        cancellation propagates, so no command outlives this call.
+        """
+        cancel = threading.Event()
+        task = asyncio.create_task(asyncio.to_thread(operation, cancel))
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError as cancelled:
+            cancel.set()
             await _drain(task)
             if error := task.exception():
                 cancelled.add_note(f"trusted evaluation also failed: {error}")
@@ -218,7 +255,9 @@ class RuntimeTrustedEvaluation:
             return (), f"Model-weight request could not be satisfied: {error}"
         return volumes, None
 
-    def _accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+    def _accuracy(
+        self, command_override: str | None, cancel: threading.Event
+    ) -> TrustedAccuracyResult:
         command = self._plan.accuracy_command
         volumes, failure = self._provision()
         if failure is not None:
@@ -248,6 +287,7 @@ class RuntimeTrustedEvaluation:
             command_override or command,
             timeout=self._timeout(self._plan.accuracy_timeout_seconds),
             label="accuracy",
+            cancel=cancel,
         )
         output = execution_failure or result.output.strip()
         passed = execution_failure is None and result.exit_code == 0
@@ -272,6 +312,7 @@ class RuntimeTrustedEvaluation:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        cancel: threading.Event,
     ) -> TrustedBenchmarkResult:
         contract = self._plan.benchmark_contract
         command = self._plan.benchmark_command
@@ -283,6 +324,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if contract is None:
             return TrustedBenchmarkResult(
@@ -297,6 +339,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
@@ -306,6 +349,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{uuid.uuid4().hex}.json"
         execution = build_trusted_benchmark_command(
@@ -318,19 +362,24 @@ class RuntimeTrustedEvaluation:
                 execution,
                 timeout=self._timeout(self._plan.benchmark_timeout_seconds),
                 label="benchmark",
+                cancel=cancel,
             )
-            output = execution_failure or result.output.strip()
-            passed = execution_failure is None and result.exit_code == 0
-            row: Mapping[str, float] | None = None
-            metrics: Mapping[str, TrustedMetricDeclaration] = {}
-            if passed:
-                try:
-                    row, metrics = decode_trusted_benchmark_output(
-                        output, contract, required_metrics
-                    )
-                except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
-                    output = f"{output}\n{error}".strip()
-                    passed = False
+            decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
+            framed = decoded.output
+            if execution_failure is None:
+                if result.truncated:
+                    # The sandbox keeps only the head of long output, which
+                    # drops the framed result appended after the evaluator's
+                    # own logs. Read the result file on its own instead.
+                    framed = self._sandbox.execute(_framed_result_command(output_path)).output
+                decoded = _decode_framed(
+                    framed,
+                    decoded.output,
+                    contract,
+                    required_metrics,
+                    exited_cleanly=result.exit_code == 0,
+                )
+            output, passed, row = decoded.output, decoded.passed, decoded.row
             if changed := self._git.trusted_input_changes():
                 mutation = "Evaluator-owned files changed during benchmark execution: " + ", ".join(
                     changed
@@ -344,10 +393,15 @@ class RuntimeTrustedEvaluation:
                 passed=passed,
                 output=output,
                 failure=None if passed else output,
+                failure_kind=(
+                    None if passed else _benchmark_failure_kind(framed, result, execution_failure)
+                ),
+                failure_reason=decoded.reason,
                 stdout=result.stdout,
                 stderr=result.stderr,
                 row=row,
-                metrics=metrics,
+                metrics=decoded.metrics,
+                partial_measurement=decoded.partial,
                 provisioned_volumes=volumes,
             )
         finally:
@@ -360,9 +414,10 @@ class RuntimeTrustedEvaluation:
         *,
         timeout: int | None,
         label: str,
+        cancel: threading.Event,
     ) -> tuple[SandboxExecutionResult, str | None]:
         try:
-            result = self._sandbox.execute(command, timeout=timeout)
+            result = self._sandbox.execute(command, timeout=timeout, cancel=cancel)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-837217 [BLE001]; trusted command failures are typed policy-visible outcomes rather than run-fatal exceptions.
             return SandboxExecutionResult(output="", exit_code=None), (
                 f"{label} command could not be executed: {error}"
@@ -373,6 +428,72 @@ class RuntimeTrustedEvaluation:
         if declared is None:
             return None
         return declared + self._plan.framework_setup_timeout_seconds
+
+
+@dataclass(frozen=True, slots=True)
+class _Decoded:
+    """One benchmark run's verdict after its framed result was decoded."""
+
+    output: str
+    passed: bool
+    row: Mapping[str, float] | None = None
+    metrics: Mapping[str, TrustedMetricDeclaration] = field(default_factory=dict)
+    partial: PartialMeasurement | None = None
+    reason: str | None = None
+
+
+def _benchmark_failure_kind(
+    framed: str, result: SandboxExecutionResult, execution_failure: str | None
+) -> BenchmarkFailureKind:
+    """Only a completed framed command proves that the workload rejected the input.
+
+    A shell launch error can also exit 1. The trusted wrapper emits both markers
+    even when the evaluator writes nothing, so empty or absent results remain retryable.
+    Negative or absent exit codes describe cancellation, timeout, or transport loss.
+    """
+    _, marker, framed_result = framed.rpartition(_BENCHMARK_MARKER)
+    encoded, end_marker, _ = framed_result.partition(_BENCHMARK_END_MARKER)
+    if (
+        execution_failure is None
+        and result.exit_code is not None
+        and result.exit_code >= 0
+        and not result.cancelled
+        and marker
+        and end_marker
+        and encoded.strip()
+    ):
+        return BenchmarkFailureKind.WORKLOAD
+    return BenchmarkFailureKind.INFRASTRUCTURE
+
+
+def _decode_framed(
+    framed: str,
+    output: str,
+    contract: TrustedBenchmarkContract,
+    required_metrics: frozenset[str],
+    *,
+    exited_cleanly: bool,
+) -> _Decoded:
+    """Decode a finished run's result: its row when it exited 0, else its partial measurement.
+
+    A result that violates its contract fails the run, and the violation is
+    appended to the output the failure reports.
+    """
+    try:
+        failure = _decode_benchmark_failure(framed, contract)
+    except ValueError as error:
+        return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
+    if failure is not None:
+        return _Decoded(
+            output=output, passed=False, partial=failure.partial, reason=failure.failure
+        )
+    if exited_cleanly:
+        try:
+            row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
+        except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
+            return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
+        return _Decoded(output=output, passed=True, row=row, metrics=metrics)
+    return _Decoded(output=output, passed=False)
 
 
 class _BenchmarkResultError(ValueError):
@@ -446,6 +567,45 @@ def decode_trusted_benchmark_output(
         for name, spec in (measurement.metrics or {}).items()
     }
     return measurement.values, declarations
+
+
+def decode_trusted_benchmark_partial(
+    output: str,
+    contract: TrustedBenchmarkContract,
+) -> PartialMeasurement | None:
+    """Return what a failed benchmark measured, as its `error` record reported it.
+
+    Only the evaluator result protocol carries a partial measurement. A run
+    that framed no result, wrote nothing, or stopped before its `error` record
+    reports none: nothing is inferred from its logs.
+
+    Raises:
+        ValueError: when the run wrote an `error` record but its stream violates
+            the protocol, with the reason code and the offending key.
+    """
+    measurement = _decode_benchmark_failure(output, contract)
+    return measurement.partial if measurement is not None else None
+
+
+def _decode_benchmark_failure(
+    output: str, contract: TrustedBenchmarkContract
+) -> Measurement | None:
+    """Return a validated evaluator failure, preserving its reason and partial row."""
+    if not isinstance(contract, ProtocolBenchmarkContract):
+        return None
+    _, marker, framed = output.rpartition(_BENCHMARK_MARKER)
+    encoded, end_marker, _ = framed.partition(_BENCHMARK_END_MARKER)
+    if not marker or not end_marker:
+        return None
+    hello: Hello | None = None
+    try:
+        records = parse_records(encoded)
+        hello = next((record for record in records if isinstance(record, Hello)), None)
+        if not any(isinstance(record, ErrorRecord) for record in records):
+            return None
+        return read_measurement(records)
+    except ProtocolError as error:
+        raise _BenchmarkResultError.protocol(error, hello) from error
 
 
 def _parse_scalar(encoded: str, metric: str) -> float:

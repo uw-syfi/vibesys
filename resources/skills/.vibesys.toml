@@ -5,3 +5,16 @@ domains = ["llm-serving"]
 [[rule]]
 path = "microservice-optimization"
 domains = ["microservices"]
+
+[[rule]]
+path = "kernel-correctness"
+domains = ["kernel-writing"]
+
+[[rule]]
+path = "kernel-performance"
+domains = ["kernel-writing"]
+
+[[rule]]
+path = "kernel-ncu-analysis"
+backends = ["cuda"]
+domains = ["kernel-writing"]

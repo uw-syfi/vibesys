@@ -7,6 +7,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.prompts import render_template
 from vs_evaluation.api import ProfilerAgentResult
 
 if TYPE_CHECKING:
@@ -19,12 +21,6 @@ if TYPE_CHECKING:
     )
 
 
-_CAPTURE_AUTHORITY = """Use exactly one capture authority for this request. Either collect raw
-profile data with the configured profiler tool and interpret it yourself, or request framework
-semantic evaluation through the evaluation tool. Do not launch both for the same question.
-Return only the requested structured result. Evidence IDs must name framework-trusted profile
-evidence; raw profiler artifacts support your advisory narrative but are not trusted evidence.
-"""
 _CLEANUP_FAILURE = "profiler conversation cleanup failed"
 
 
@@ -80,13 +76,13 @@ class RuntimeProfilerTurnProvision:
             raise RuntimeError(message)
         typed_task = task
         self._operations[operation_id] = typed_task
-        prompt = (
-            f"{_CAPTURE_AUTHORITY}\n"
-            f"Candidate snapshot: `{candidate_snapshot_id}`\n"
-            f"Request: {request}"
+        prompt = render_template(
+            "shared/profiler_turn_prompt.j2",
+            candidate_snapshot_id=candidate_snapshot_id,
+            request=request,
         )
         try:
-            return await conversation.session.turn(prompt, response=ProfilerAgentResult)
+            return await structured_turn(conversation.session, prompt, ProfilerAgentResult)
         except asyncio.CancelledError:
             await self._drop(session_id)
             raise

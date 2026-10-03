@@ -2,6 +2,7 @@ import {describe, expect, it} from 'bun:test';
 import type {
   BackendClientError,
   ControlChannelState,
+  EventBatchMessage,
   ProtocolResponse,
   RequestInput,
 } from './index.js';
@@ -1065,6 +1066,45 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('carries store_id only when the resume names one, and never as null', async () => {
+    const gateway = new FakeGateway();
+    const scheduler = new FakeScheduler();
+    const transport = controlTransport(gateway, scheduler, {});
+
+    const pending = [
+      transport.subscribe(3, noop, noop, {storeId: 'log'}),
+      // An empty store id is "the caller has not seen a store yet", which the
+      // option's contract calls absence. Before `subscribeRequest` owned the
+      // encoding this transport sent it as `store_id: ""` while the Node one
+      // omitted it, so the two disagreed about the same option.
+      transport.subscribe(3, noop, noop, {storeId: ''}),
+      transport.subscribe(3, noop, noop),
+    ];
+    await tick();
+    for (const socket of gateway.sockets) {
+      socket.respond({
+        type: 'subscribed',
+        request_id: 'subscribe-1',
+        run_id: 'run-1',
+        latest_sequence: 3,
+      });
+    }
+    const subscriptions = await Promise.all(pending);
+
+    const frames = subscribeFrames(gateway);
+    expect(frames).toHaveLength(3);
+    expect(frames[0]).toMatchObject({type: 'subscribe', after_sequence: 3, store_id: 'log'});
+    expect(frames[1]).not.toHaveProperty('store_id');
+    expect(frames[2]).not.toHaveProperty('store_id');
+    // An old server forbids unknown keys and rejects an explicit null, so the
+    // typed frame must never be able to put one on the wire.
+    expect(gateway.sockets.flatMap(socket => socket.sent).join('')).not.toContain('null');
+    for (const frame of frames) expect(frame).not.toHaveProperty('tail');
+
+    for (const subscription of subscriptions) await subscription.close();
+    await transport.close();
+  });
+
   /**
    * For any interleaving of requests, answers, drops, refused dials, refused
    * writes, and redials: every request settles exactly once, no request id is
@@ -1095,6 +1135,315 @@ describe('WebSocketTransport', () => {
     expect(total.sendFailures).toBeGreaterThan(2);
   });
 });
+
+/**
+ * The parse boundary as both transports reach it (`protocol-parse.ts` is shared
+ * after #1063), driven through the one transport whose socket is a Fake, so no
+ * case here waits on a real connection.
+ */
+describe('wire payload validation', () => {
+  /**
+   * The frames below are `model_dump_json()` output from the server's own
+   * models, pasted verbatim, because the server dumps every field rather than
+   * omitting defaults: `error`, `request_id` on a protocol error, and every
+   * `RunEvent` tail field arrive as explicit nulls, and `store_id`, `run_id`,
+   * and `client_id` arrive as empty strings. A validator that read any of those
+   * as merely optional would refuse every real frame while passing a suite
+   * built from hand-written fixtures.
+   */
+  it('accepts every frame the server actually serializes', async () => {
+    const event =
+      '{"protocol_version":1,"sequence":0,"run_id":"","timestamp":"2026-01-01T00:00:00Z","type":"agent_output_chunk","text":"hi","diagnostic":null,"status":null,"round_label":null,"agent_kind":null,"invocation_id":null,"execution_id":null,"chat_thread_id":null,"data":null}';
+    const activity =
+      '{"kind":"agent_execution_activity_changed","mode":"thinking","summary":"working","tool":null}';
+    const checkpoint = `{"execution_id":"e","agent_kind":"implementer","round_label":"r","stage":"implement","attempt":null,"assignment":"a","started_at":"2026-01-01T00:00:00Z","activity":${activity},"driver":null,"provider":null,"model":null}`;
+    const diagnostic =
+      '{"id":"a0bb873b","code":"c","summary":"s","detail":null,"hint":null,"scope":"transport","severity":"error","retryability":"unknown","cause_id":null,"debug_ref":null,"source":null}';
+
+    const run = await deliverRawFrames([
+      `{"type":"event_batch","events":[${event}],"through_sequence":0,"active_executions":[${checkpoint}],"store_id":"","history_after_sequence":0}`,
+      `{"type":"protocol_error","request_id":null,"client_id":"","code":"c","message":"m","diagnostic":${diagnostic}}`,
+    ]);
+
+    expect(run.disconnects).toEqual([]);
+    expect(run.batches).toHaveLength(1);
+    expect(run.batches[0]?.active_executions).toHaveLength(1);
+  });
+
+  it('accepts the response envelope the server actually serializes', async () => {
+    const socket = new FakeSocket();
+    const transport = transportFor(socket);
+    const pending = transport.request({type: 'query.snapshot'});
+    await tick();
+    const requestId = String(socket.frames()[0]?.['request_id']);
+    socket.receive(
+      `{"protocol_version":1,"request_id":"${requestId}","client_id":"","timestamp":"2026-09-30T20:08:01.112867Z","ok":true,"error":null,"diagnostic":null,"ack":null,"chat":null,"chat_thread":null,"chat_options":null,"tui_defaults":null,"snapshot":null,"events":[],"performance":[],"performance_context":null,"experiments":[],"experiment_update":null,"experiments_ready":null,"design":[],"design_ready":null,"design_patch":null}`,
+    );
+
+    await expect(pending).resolves.toMatchObject({ok: true, request_id: requestId});
+    await transport.close();
+  });
+
+  it('refuses a corrupt batch and takes the subscription down', async () => {
+    for (const events of ['not-an-array', 42, {}, null, undefined]) {
+      const run = await deliverFrames([{type: 'event_batch', events}]);
+      expect({events, batches: run.batches.length, kind: kindOf(run.disconnects[0])}).toEqual({
+        events,
+        batches: 0,
+        kind: 'parse',
+      });
+      expect(run.disconnects[0]?.message).toContain('events must be an array');
+    }
+  });
+
+  it('refuses a malformed item inside an otherwise valid batch and names it', async () => {
+    const run = await deliverFrames([
+      {
+        type: 'event_batch',
+        events: [runEvent(1), {...runEvent(2), sequence: 'two'}, runEvent(3)],
+        through_sequence: 3,
+      },
+    ]);
+
+    // The whole frame is refused: the two conforming events around the bad one
+    // are not delivered either, so no batch with a hole in it reaches the fold.
+    expect(run.batches).toEqual([]);
+    expect(kindOf(run.disconnects[0])).toBe('parse');
+    expect(run.disconnects[0]?.message).toBe(
+      'Invalid server event-stream message events[1]: sequence must be a number when present',
+    );
+  });
+
+  /**
+   * The table is the point of this case: a declared field the boundary forgets
+   * to check is a field a malformed payload reaches the fold through, so every
+   * field the generated `RunEvent` declares is enumerated rather than sampled.
+   */
+  it('refuses a wrong-kinded value in every field a run event declares', async () => {
+    for (const [field, value] of WRONG_KINDED_EVENT_FIELDS) {
+      const broken = {...runEvent(1), [field]: value};
+      if (value === MISSING) delete broken[field];
+      const run = await deliverFrames([{type: 'event_batch', events: [broken]}]);
+      expect({field, batches: run.batches.length, kind: kindOf(run.disconnects[0])}).toEqual({
+        field,
+        batches: 0,
+        kind: 'parse',
+      });
+      expect({field, named: run.disconnects[0]?.message.includes(field)}).toEqual({
+        field,
+        named: true,
+      });
+    }
+  });
+
+  it('refuses a malformed liveness checkpoint beside a valid batch', async () => {
+    for (const executions of [
+      'not-an-array',
+      [null],
+      [{execution_id: 'exec-1'}],
+      [checkpointless()],
+    ]) {
+      const run = await deliverFrames([
+        {type: 'event_batch', events: [runEvent(1)], active_executions: executions},
+      ]);
+      expect({executions, batches: run.batches.length, kind: kindOf(run.disconnects[0])}).toEqual({
+        executions,
+        batches: 0,
+        kind: 'parse',
+      });
+    }
+  });
+
+  /**
+   * The unknown-enum policy `protocol-parse.ts` states: a closed set's kind is
+   * checked and its membership is not, so a newer server's new member, and any
+   * key this client has no type for, ride through to the fold untouched.
+   */
+  it('carries closed-set members and extra keys this client has no type for', async () => {
+    const run = await deliverFrames([
+      {
+        type: 'event_batch',
+        events: [
+          {
+            ...runEvent(1),
+            type: 'future_event_kind',
+            status: 'renegotiating',
+            data: {kind: 'future_payload', shape: {nested: true}},
+            field_added_later: 'carried',
+          },
+        ],
+        through_sequence: 1,
+        key_added_later: 'carried',
+      },
+    ]);
+
+    expect(run.disconnects).toEqual([]);
+    const event = run.batches[0]?.events[0];
+    // Read through `String`, which is itself the policy: the compiler believes
+    // `type` is one of the members it generated, and the runtime value is not.
+    expect(String(event?.type)).toBe('future_event_kind');
+    expect(String(event?.status)).toBe('renegotiating');
+    expect(String(event?.data?.kind)).toBe('future_payload');
+    expect((event as Record<string, unknown> | undefined)?.['field_added_later']).toBe('carried');
+  });
+
+  /**
+   * Kind, not range. `StreamReconciler.declaredFloorOf` owns whether the floor
+   * is a non-negative safe integer and its comment records why that check must
+   * not move to the boundary, so a negative floor has to still parse.
+   */
+  it('checks the kind of history_after_sequence and leaves its range alone', async () => {
+    const rejected = await deliverFrames([
+      {type: 'event_batch', events: [], history_after_sequence: '4'},
+    ]);
+    expect(kindOf(rejected.disconnects[0])).toBe('parse');
+
+    const accepted = await deliverFrames([
+      {type: 'event_batch', events: [], history_after_sequence: -1},
+    ]);
+    expect(accepted.disconnects).toEqual([]);
+    expect(accepted.batches[0]?.history_after_sequence).toBe(-1);
+  });
+
+  it('refuses a malformed diagnostic on a protocol error and keeps a valid one', async () => {
+    const rejected = await deliverFrames([
+      {
+        type: 'protocol_error',
+        code: 'stream_failed',
+        message: 'not available',
+        diagnostic: {code: 'stream_failed'},
+      },
+    ]);
+    expect(kindOf(rejected.disconnects[0])).toBe('parse');
+    expect(rejected.disconnects[0]?.message).toContain('summary must be a string');
+
+    const accepted = await deliverFrames([
+      {
+        type: 'protocol_error',
+        code: 'stream_failed',
+        message: 'not available',
+        diagnostic: {code: 'stream_failed', summary: 'the stream ended', scope: 'transport'},
+      },
+    ]);
+    expect(accepted.disconnects).toEqual([]);
+  });
+});
+
+/** Stands in for "delete this field" in the wrong-kinded field table. */
+const MISSING = Symbol('missing');
+
+const WRONG_KINDED_EVENT_FIELDS: ReadonlyArray<readonly [string, unknown]> = [
+  ['protocol_version', 2],
+  ['sequence', 'two'],
+  ['run_id', 7],
+  ['timestamp', MISSING],
+  ['timestamp', 7],
+  ['type', MISSING],
+  ['type', 7],
+  ['text', 7],
+  ['status', 7],
+  ['round_label', 7],
+  ['agent_kind', 7],
+  ['invocation_id', 7],
+  ['execution_id', 7],
+  ['chat_thread_id', 7],
+  ['diagnostic', 7],
+  ['data', 7],
+];
+
+/** One conforming event, every optional field populated. */
+function runEvent(sequence: number): Record<string, unknown> {
+  return {
+    protocol_version: 1,
+    sequence,
+    run_id: 'run-1',
+    timestamp: '2026-01-01T00:00:00Z',
+    type: 'agent_output_chunk',
+    text: 'partial output',
+    status: 'active',
+    round_label: 'round-1-implementer',
+    agent_kind: 'implementer',
+    invocation_id: 'inv-1',
+    execution_id: 'exec-1',
+    chat_thread_id: null,
+    diagnostic: null,
+    data: {kind: 'agent_output_chunk', channel: 'stdout'},
+  };
+}
+
+/** A checkpoint whose nested activity is missing, which the batch declares. */
+function checkpointless(): Record<string, unknown> {
+  return {
+    execution_id: 'exec-1',
+    agent_kind: 'implementer',
+    round_label: 'round-1-implementer',
+    stage: 'implement',
+    assignment: 'write the patch',
+    started_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+interface Delivery {
+  readonly batches: EventBatchMessage[];
+  readonly disconnects: BackendClientError[];
+}
+
+/** Push each value at the socket as its JSON encoding. */
+function deliverFrames(frames: readonly unknown[]): Promise<Delivery> {
+  return drive(socket => {
+    for (const frame of frames) socket.respond(frame);
+  });
+}
+
+/** Push each frame's exact bytes, for a payload pasted from the server. */
+function deliverRawFrames(frames: readonly string[]): Promise<Delivery> {
+  return drive(socket => {
+    for (const frame of frames) socket.receive(frame);
+  });
+}
+
+/**
+ * Subscribe, take the acknowledgement, then let `push` drive the socket and
+ * report what the subscription delivered and how it failed. Every step is a
+ * turn of the microtask queue, so nothing here waits on a clock.
+ */
+async function drive(push: (socket: FakeSocket) => void): Promise<Delivery> {
+  const socket = new FakeSocket();
+  const transport = transportFor(socket);
+  const batches: EventBatchMessage[] = [];
+  const disconnects: BackendClientError[] = [];
+  const subscription = transport.subscribe(
+    0,
+    message => {
+      if (message.type === 'event_batch') batches.push(message);
+    },
+    error => disconnects.push(error as BackendClientError),
+  );
+  await tick();
+  socket.respond({
+    type: 'subscribed',
+    request_id: 'subscribe-1',
+    run_id: 'run-1',
+    latest_sequence: 0,
+  });
+  await subscription;
+  push(socket);
+  await transport.close();
+  return {batches, disconnects};
+}
+
+function kindOf(error: BackendClientError | undefined): string | undefined {
+  return error?.kind;
+}
+
+/** Every subscribe frame the gateway's sockets received, in dial order. */
+function subscribeFrames(gateway: FakeGateway): Array<Record<string, unknown>> {
+  return gateway.sockets
+    .flatMap(socket => socket.frames())
+    .filter(frame => frame['type'] === 'subscribe');
+}
+
+function noop(): void {}
 
 const IDEMPOTENT_TYPES = [
   'query.snapshot',

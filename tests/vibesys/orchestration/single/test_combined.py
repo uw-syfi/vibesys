@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     AttemptState,
     HypothesisConfig,
     HypothesisSearch,
@@ -17,7 +17,7 @@ from vibesys.orchestration.hypothesis import (
     OrchestratorPlan,
     SkillResourceSelection,
 )
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.combined import CombinedTurnRequest, SingleAgentWorker
@@ -25,6 +25,7 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundContext,
     SingleAgentRoundResponse,
 )
+from vibesys.orchestration.structured_turn import TurnFailed
 from vs_loop_state.api import CandidateDisposition, RoundRecord
 from vs_runtime.api import AgentCapability, AgentTurnTimeoutError, StructuredResponseError
 from vs_runtime.api.testing import FakeRun
@@ -140,6 +141,11 @@ def _search() -> HypothesisSearch:
     return HypothesisSearch(HypothesisConfig(max_rounds=3))
 
 
+def _valid(response: SingleAgentRoundResponse | TurnFailed) -> SingleAgentRoundResponse:
+    assert isinstance(response, SingleAgentRoundResponse), response
+    return response
+
+
 def test_retry_preserves_one_named_session_and_new_prompt_evidence() -> None:
     script = _Script(_response(verdict=Verdict.FAIL, feedback="Fix validation."), _response())
     run = _host(script)
@@ -148,16 +154,18 @@ def test_retry_preserves_one_named_session_and_new_prompt_evidence() -> None:
         worker = SingleAgentWorker(run, _search())
         try:
             plan = _plan("H-01")
-            first = await worker.turn(_request(run.workspaces.root, plan))
-            second = await worker.turn(
-                _request(
-                    run.workspaces.root,
-                    plan,
-                    attempt=AttemptState(
-                        agent_run_state=HypothesisState(),
-                        feedback=first.feedback,
-                        retry=1,
-                    ),
+            first = _valid(await worker.turn(_request(run.workspaces.root, plan)))
+            second = _valid(
+                await worker.turn(
+                    _request(
+                        run.workspaces.root,
+                        plan,
+                        attempt=AttemptState(
+                            agent_run_state=HypothesisState(),
+                            feedback=first.feedback,
+                            retry=1,
+                        ),
+                    )
                 )
             )
             assert first.verdict is Verdict.FAIL
@@ -222,7 +230,7 @@ def test_plan_recommendations_and_returned_skill_updates_are_resolved() -> None:
     async def scenario() -> SingleAgentRoundResponse:
         worker = SingleAgentWorker(run, _search())
         try:
-            return await worker.turn(_request(run.workspaces.root, plan))
+            return _valid(await worker.turn(_request(run.workspaces.root, plan)))
         finally:
             await worker.close()
             await run.close()
@@ -276,14 +284,16 @@ def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None
     async def scenario() -> SingleAgentRoundResponse:
         worker = SingleAgentWorker(run, _search())
         try:
-            return await worker.turn(
-                _request(
-                    run.workspaces.root,
-                    _plan("H-01"),
-                    records=(previous,),
-                    attempt=AttemptState(
-                        agent_run_state=HypothesisState(metrics=space), feedback=None
-                    ),
+            return _valid(
+                await worker.turn(
+                    _request(
+                        run.workspaces.root,
+                        _plan("H-01"),
+                        records=(previous,),
+                        attempt=AttemptState(
+                            agent_run_state=HypothesisState(metrics=space), feedback=None
+                        ),
+                    )
                 )
             )
         finally:
@@ -297,11 +307,14 @@ def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None
     assert response.candidate_metrics == {"ops_per_sec": 80, "latency_ms": 70}
 
 
-def test_unparseable_turn_yields_failure_and_session_is_cleaned_up() -> None:
-    script = _Script(StructuredResponseError("implementer", SingleAgentRoundResponse))
+def test_unparseable_turn_reports_a_failed_turn_and_session_is_cleaned_up() -> None:
+    script = _Script(
+        StructuredResponseError("implementer", SingleAgentRoundResponse),
+        StructuredResponseError("implementer", SingleAgentRoundResponse),
+    )
     run = _host(script)
 
-    async def scenario() -> SingleAgentRoundResponse:
+    async def scenario() -> SingleAgentRoundResponse | TurnFailed:
         worker = SingleAgentWorker(run, _search())
         try:
             return await worker.turn(_request(run.workspaces.root, _plan("H-01")))
@@ -310,16 +323,18 @@ def test_unparseable_turn_yields_failure_and_session_is_cleaned_up() -> None:
             await run.close()
 
     response = asyncio.run(scenario())
-    assert response.verdict is Verdict.FAIL
-    assert "No structured response" in response.feedback
+    assert isinstance(response, TurnFailed)
+    assert "SingleAgentRoundResponse" in response.reason
     assert run.agents.sessions[0].closed
 
 
-def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -> None:
+def test_timed_out_turn_reports_a_failed_turn_and_preserves_named_session_for_retry() -> None:
     script = _Script(AgentTurnTimeoutError(12.5), _response())
     run = _host(script)
 
-    async def scenario() -> tuple[SingleAgentRoundResponse, SingleAgentRoundResponse]:
+    async def scenario() -> tuple[
+        SingleAgentRoundResponse | TurnFailed, SingleAgentRoundResponse | TurnFailed
+    ]:
         worker = SingleAgentWorker(run, _search())
         try:
             plan = _plan("H-01")
@@ -330,7 +345,7 @@ def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -
                     plan,
                     attempt=AttemptState(
                         agent_run_state=HypothesisState(),
-                        feedback=first.feedback,
+                        feedback=None,
                         retry=1,
                     ),
                 )
@@ -341,11 +356,9 @@ def test_timed_out_turn_reports_budget_and_preserves_named_session_for_retry() -
             await run.close()
 
     first, second = asyncio.run(scenario())
-    assert first.verdict is Verdict.FAIL
-    assert "12.5 seconds" in first.self_review
-    assert (
-        first.feedback == "Inspect retained evidence and return a schema-valid response on retry."
-    )
+    assert isinstance(first, TurnFailed)
+    assert "12.5 seconds" in first.reason
+    assert isinstance(second, SingleAgentRoundResponse)
     assert second.verdict is Verdict.PASS
     assert len(run.agents.sessions) == 1
     assert run.agents.sessions[0].closed

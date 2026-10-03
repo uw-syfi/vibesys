@@ -62,7 +62,11 @@ from vs_sandbox.api.evaluator_tools import (
     tool_install_root,
     tool_spec_digest,
 )
-from vs_sandbox.api.slurm import read_slurm_capture_plan, read_slurm_evaluation_plan
+from vs_sandbox.api.slurm import (
+    read_slurm_capture_plan,
+    read_slurm_evaluation_plan,
+    run_brokered_process,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -452,7 +456,166 @@ remote_python = "/remote/venv/bin/python"
     )
     assert capture.benchmark_command == evaluation.benchmark_command
     assert capture.support_paths["rocprof_profiler"] == profiler
+    # Without a configured service there is nothing to capture under load.
+    assert evaluation.profile_command is None
     session.close()
+
+
+def test_a_slurm_service_with_a_staged_profiler_plans_a_trusted_capture(tmp_path: Path) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+job_timeout_seconds = 900
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+
+[vibesys.service]
+command = ["python", "-m", "engine.server", "--port", "VIBESYS_DYNAMIC_PORT"]
+readiness_url = "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health"
+startup_timeout_seconds = 600
+""",
+        encoding="utf-8",
+    )
+    profiler = tmp_path / "rocprof_profiler"
+    profiler.mkdir()
+    environment = build_run_environment(
+        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
+    )
+
+    session = _open(
+        environment,
+        _request(
+            tmp_path,
+            FakeBackend(),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            profiler_support_path=str(profiler),
+            profiler_support_name="rocprof_profiler",
+        ),
+    )
+
+    evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
+    assert evaluation.profile_command is not None
+    assert evaluation.profile_command[:2] == (
+        "/remote/venv/bin/python",
+        "rocprof_profiler/remote_capture.py",
+    )
+    request = json.loads(evaluation.profile_command[3])
+    assert request["kind"] == "timeline"
+    assert "benchmark/benchmark.py" in request["lifecycle"]["load_command"]
+    session.close()
+
+
+def test_slurm_profiler_broker_stages_candidate_workspaces_of_the_run(tmp_path: Path) -> None:
+    """The run-wide profiler broker must stage a candidate worktree, not only the root.
+
+    The profiler tool is bound once per run, so its server runs in whichever
+    candidate worktree hosts the agent and rsyncs that worktree through the
+    root broker.
+    """
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+ssh_command = ["/usr/bin/true"]
+rsync_command = ["/bin/true"]
+""",
+        encoding="utf-8",
+    )
+    worktrees = tmp_path / "worktrees"
+    candidate = worktrees / "m-member" / "workspace"
+    candidate.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    session = _open(
+        build_run_environment(RunEnvironmentSpec("slurm", {"config_path": str(config_path)})),
+        _request(tmp_path, FakeBackend(), run_owned_roots=(worktrees,)),
+    )
+    profiler_env = dict(session.view.profiler_mcp_env)
+    socket = Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"])
+    token = profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
+
+    def upload(local: Path) -> int:
+        argv = (
+            "/bin/true",
+            "-a",
+            "-e",
+            "/usr/bin/true",
+            "--",
+            f"{local}/",
+            "test-cluster:/remote/vibesys/test-cluster/job/",
+        )
+        return run_brokered_process(socket, token, argv, stdin=None, timeout=5).returncode
+
+    try:
+        assert upload(candidate) == 0
+        assert upload(tmp_path / "workspace") == 0
+        with pytest.raises(PermissionError, match="run-owned roots"):
+            upload(outside)
+    finally:
+        session.close()
+
+
+def test_slurm_prompt_notes_state_the_service_command_and_read_only_inputs(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+
+[vibesys.service]
+command = ["python", "-m", "engine.server", "--model", "m p", "--port", "VIBESYS_DYNAMIC_PORT"]
+readiness_url = "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1/models"
+startup_timeout_seconds = 600
+""",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / "reference").mkdir(parents=True)
+    (workspace / "benchmark").mkdir()
+    environment = build_run_environment(
+        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
+    )
+
+    session = _open(
+        environment,
+        _request(
+            tmp_path,
+            FakeBackend(),
+            project_path_policy=ProjectPathPolicy(read_only_paths=("reference", "benchmark")),
+        ),
+    )
+    notes = session.view.prompt_notes
+    session.close()
+
+    assert (
+        "`/remote/venv/bin/python -m engine.server --model 'm p' --port VIBESYS_DYNAMIC_PORT`"
+        in notes
+    )
+    assert "read-only" in notes
+    assert "`reference`" in notes
+    assert "`benchmark`" in notes
 
 
 def test_run_environment_record_rejects_an_unknown_environment() -> None:

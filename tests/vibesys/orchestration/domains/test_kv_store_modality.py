@@ -7,7 +7,7 @@ from pathlib import Path
 from entrypoints.cli import _MODALITIES
 from vibesys.inputs import load_project_task
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.prompts import render_template
+from vibesys.prompts import render_template
 from vs_project.api import Project
 
 _TEMPLATE_DIR = MULTI_PROMPT_DIR
@@ -66,7 +66,7 @@ def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance() -> None:
         objective="OBJ",
         profiler_support_name="linux_cpu_profiler",
         profiler_mcp_name="vibesys-linux-cpu-profiler",
-        profiler_campaign_context="",
+        campaign=None,
     )
     assert "RESP2" in output
     assert "py-spy record" in output

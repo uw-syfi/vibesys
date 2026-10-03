@@ -127,6 +127,16 @@ def test_project_root_must_be_an_existing_directory(tmp_path: Path) -> None:
         _tracker(file_root)
 
 
+@pytest.mark.parametrize("candidate_id", ["m-a..b-0123", "a.lock", "a.", "a..b"])
+def test_retain_candidate_names_ids_that_git_rejects_as_ref_components(
+    tmp_path: Path, candidate_id: str
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    with pytest.raises(ValueError, match="not a valid Git ref name component"):
+        tracker.retain_candidate(candidate_id, "HEAD")
+    assert tracker.retain_candidate("m-a.b-0123", "HEAD").endswith("/candidates/m-a.b-0123")
+
+
 def test_retain_worktree_reports_git_failure_in_candidate_worktree(tmp_path: Path) -> None:
     tracker = _initialized_tracker(tmp_path)
     worktree = Project.open(tmp_path).state.candidate_worktree_directory("guard-run", "cand-1")
@@ -220,6 +230,29 @@ def test_checkout_tree_reports_failed_restore_of_preserved_memory(
         "failed to restore preserved workspace memory after tree restore error",
         f"git tree restore {sha[:8]} failed",
     ]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")
+def test_checkout_tree_keeps_preserved_memory_the_user_cannot_write(tmp_path: Path) -> None:
+    """A preserved file the user may not write must not fail the restore.
+
+    An agent that writes evidence from a root container leaves a root-owned,
+    mode 0644 file in the workspace. Mode 0444 reproduces that for a non-root
+    user: the directory still allows replacing the file, as ``git restore``
+    does, but opening it for writing fails.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    evidence = memory / "heap.json"
+    evidence.write_text("{}\n", encoding="utf-8")
+    tracker.snapshot("candidate with evidence")
+    winner = tracker.current_sha()
+    assert winner is not None
+    evidence.chmod(0o444)
+
+    assert tracker.checkout_tree(winner, clean=True, preserve_paths=["memory"]) is True
+    assert evidence.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_checkout_tree_keeps_index_clean_when_restoring_an_earlier_revision(
@@ -325,3 +358,20 @@ def test_init_fails_when_project_history_cannot_be_inspected(tmp_path: Path) -> 
     tracker = _tracker(tmp_path)
     with pytest.raises(ValueError, match=r"cannot inspect project Git history for private inputs"):
         tracker.init(existing=False)
+
+
+def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    target = tmp_path / "main.py"
+    # Rewrite identical content with a new mtime: the index entry is now
+    # stat-stale, which is what makes a plain `git status` write a refreshed
+    # index back under .git/index.lock.
+    stat = target.stat()
+    target.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    index = tmp_path / ".git" / "index"
+    before = (index.read_bytes(), index.stat().st_mtime_ns)
+
+    assert tracker.pending_changes() == []
+
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before

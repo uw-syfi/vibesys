@@ -18,8 +18,12 @@ from vibesys.events import (
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentEvaluation,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     BenchmarkObjective,
+    CandidateProfile,
+    CandidateProfileStatus,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -29,7 +33,6 @@ from vs_runtime.api import (
 from vs_runtime.api.infrastructure import (
     FrameworkValidationResult,
     LocalValidationRecipeError,
-    LocalValidationRecipeErrorKind,
     ProtocolBenchmarkContract,
     RuntimeWorkspaceEvaluation,
     ScalarBenchmarkContract,
@@ -141,6 +144,16 @@ class _LocalValidationEvents:
         )
 
 
+def recipe_input_error_feedback(detail: str) -> str:
+    """Tell the agent its validation recipe reference was unusable and how to fix it."""
+    return (
+        f"Your `validation_recipe_artifact` could not be used: {detail}. Set it to the "
+        "workspace-relative path of a JSON file that follows the validation recipe "
+        "contract, or omit it. This is an input error in your reply, not a failure of "
+        "the candidate or of the framework."
+    )
+
+
 async def _validate_local(
     evaluation: RuntimeWorkspaceEvaluation,
     events: CoreEventWriter,
@@ -158,11 +171,13 @@ async def _validate_local(
             events=_LocalValidationEvents(events),
         )
     except LocalValidationRecipeError as error:
-        if error.kind is LocalValidationRecipeErrorKind.DUPLICATE_NAMES:
-            feedback = "Framework local validation recipes contain duplicate names."
-        else:
-            feedback = f"Framework local validation recipe error: {error}."
-        return LocalValidationEvaluation(passed=False, feedback=feedback)
+        # The recipe reference came from the agent's own reply, so this is an
+        # input error the agent can fix, not a candidate or framework failure.
+        return LocalValidationEvaluation(
+            passed=False,
+            feedback=recipe_input_error_feedback(str(error)),
+            recipe_unusable=True,
+        )
 
     failed = next((result for result in results if not result.passed), None)
     if failed is None:
@@ -321,6 +336,24 @@ class _EvaluationAdapter:
             report_location=report_location,
         )
 
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return no history: without the evaluation tool, agents submit nothing."""
+        del workspace
+        return ()
+
+    async def can_profile(self) -> bool:
+        """Return False: without the evaluation tool the run provisions no profiler agent."""
+        return False
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Fail typed: without the evaluation tool the run provisions no profiler agent."""
+        del request, member_id
+        return CandidateProfile(
+            revision=revision,
+            status=CandidateProfileStatus.FAILED,
+            failure="no profiler agent is provisioned",
+        )
+
     def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:
         emit_gate_finished(
             self._events,
@@ -409,11 +442,17 @@ class _EvaluationAdapter:
                 "Model-weight request"
             )
             feedback = (
-                result.failure
+                result.failure_reason or result.failure
                 if not result.executed or provisioning_failure
-                else (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
+                else result.failure_reason
+                or (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
             )
-            return BenchmarkEvaluation(executed=result.executed, feedback=feedback)
+            return BenchmarkEvaluation(
+                executed=result.executed,
+                feedback=feedback,
+                failure_kind=result.failure_kind,
+                partial_measurement=result.partial_measurement,
+            )
         if result.row is None:
             return BenchmarkEvaluation(executed=result.executed)
         if objectives:
@@ -430,6 +469,7 @@ class _EvaluationAdapter:
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
                 row=result.row,
             )
         objective = next((item for item in objectives if item.name == name), None)

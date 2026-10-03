@@ -217,3 +217,29 @@ def prompt_text(system_prompt: str, user_prompt: str) -> str:
 def calls_by_kind(client: FakeAgentClient, kind: str) -> list:
     """Return recorded calls for ``kind`` (thin re-export for readability at call sites)."""
     return client.calls_for(kind)
+
+
+def assert_exact_text(path: Path, text: str) -> None:
+    """Compare ``text`` to the file at ``path`` byte for byte, no normalization.
+
+    Prompt-template migrations must not change agent-visible bytes, trailing
+    newlines included. Regenerate with ``UPDATE_PROMPT_SNAPSHOTS=1``.
+    """
+    if os.environ.get("UPDATE_PROMPT_SNAPSHOTS") == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(text.encode("utf-8"))
+        return
+    if not path.exists():
+        pytest.fail(f"Missing exact prompt snapshot: {path}")
+    expected = path.read_bytes().decode("utf-8")
+    if text == expected:
+        return
+    diff = "".join(
+        difflib.unified_diff(
+            expected.splitlines(keepends=True),
+            text.splitlines(keepends=True),
+            fromfile=str(path),
+            tofile=f"{path} (rendered)",
+        )
+    )
+    pytest.fail(f"Exact prompt snapshot changed: {path}\n{diff!r}")

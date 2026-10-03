@@ -215,7 +215,7 @@ async def test_dispatch_is_nonblocking_and_timeout_is_observational(tmp_path: Pa
     assert completed.operation.result.trusted_evidence == (evidence,)
     assert queries == [("implementer", "candidate", "snapshot:candidate", (evidence.evidence_id,))]
     run_projection = await service.project_run()
-    assert run_projection[0].accepted_result
+    assert run_projection[0].evidence_recorded
     projection = await service.project_candidate("snapshot:candidate")
     assert projection.completed[0].result.trusted_evidence == (evidence,)
     assert (await service.project_candidate("snapshot:other")).completed == ()
@@ -240,7 +240,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
     assert active.scope_id == "candidate-prefill"
     assert active.request == "Measure whether prefill attention saturates memory bandwidth."
     assert active.candidate_snapshot_id == "snapshot:candidate-prefill"
-    assert not active.accepted_result
+    assert not active.evidence_recorded
 
     await provision.wait_started(dispatched.operation_id)
     provision.complete(dispatched.operation_id)
@@ -252,7 +252,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
     )
     completed = (await service.project_run())[0]
     assert completed.state is ProfilerOperationState.COMPLETED
-    assert not completed.accepted_result
+    assert not completed.evidence_recorded
     assert completed.outcome is ProfilerResultOutcome.OBSERVED
 
     unsupported = await service.dispatch(
@@ -271,7 +271,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
         10,
     )
     unsupported_observation = (await service.project_run())[-1]
-    assert not unsupported_observation.accepted_result
+    assert not unsupported_observation.evidence_recorded
     assert unsupported_observation.outcome is ProfilerResultOutcome.UNSUPPORTED
 
 
@@ -561,6 +561,76 @@ async def test_request_specific_unsupported_is_a_successful_turn(tmp_path: Path)
     assert completed.operation.result.trusted_evidence == ()
 
 
+def _resolving(
+    *evidence: TrustedEvidence,
+) -> Callable[[str, str | None, str, tuple[str, ...]], Awaitable[tuple[TrustedEvidence, ...]]]:
+    async def resolve(
+        principal_id: str,
+        scope_id: str | None,
+        candidate_snapshot_id: str,
+        evidence_ids: tuple[str, ...],
+    ) -> tuple[TrustedEvidence, ...]:
+        del principal_id, scope_id, candidate_snapshot_id
+        by_id = {item.evidence_id: item for item in evidence}
+        return tuple(by_id[evidence_id] for evidence_id in evidence_ids)
+
+    return resolve
+
+
+@pytest.mark.asyncio
+async def test_an_unsupported_turn_may_cite_the_evidence_it_examined(tmp_path: Path) -> None:
+    """Regression (r18): citing the examined capture cost two correction turns."""
+    examined = _trusted_evidence().model_copy(update={"outcome": EvidenceOutcome.FAILED})
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision, resolve_evidence=_resolving(examined))
+    dispatched = await service.dispatch(
+        principal_id="implementer",
+        scope_id="candidate",
+        request="Attribute serving time.",
+        work=_WORK,
+        session_id=None,
+    )
+    await provision.wait_started(dispatched.operation_id)
+    provision.unsupported(
+        dispatched.operation_id,
+        "the workload failed its preflight",
+        evidence_ids=(examined.evidence_id,),
+    )
+    completed = await service.await_result(dispatched.operation_id, "implementer", "candidate", 10)
+
+    assert completed.operation.state is ProfilerOperationState.COMPLETED
+    assert completed.operation.result is not None
+    assert completed.operation.result.report.outcome is ProfilerResultOutcome.UNSUPPORTED
+    assert completed.operation.result.trusted_evidence == (examined,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", list(EvidenceOutcome))
+async def test_an_observed_turn_cannot_rest_on_a_failed_capture(
+    tmp_path: Path, outcome: EvidenceOutcome
+) -> None:
+    cited = _trusted_evidence().model_copy(update={"outcome": outcome})
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision, resolve_evidence=_resolving(cited))
+    dispatched = await service.dispatch(
+        principal_id="implementer",
+        scope_id="candidate",
+        request="Attribute serving time.",
+        work=_WORK,
+        session_id=None,
+    )
+    await provision.wait_started(dispatched.operation_id)
+    provision.complete(dispatched.operation_id, evidence_ids=(cited.evidence_id,))
+    completed = await service.await_result(dispatched.operation_id, "implementer", "candidate", 10)
+
+    if outcome is EvidenceOutcome.FAILED:
+        assert completed.operation.state is ProfilerOperationState.FAILED
+        assert completed.operation.error is not None
+        assert "observed profile cited failed profile evidence" in completed.operation.error
+    else:
+        assert completed.operation.state is ProfilerOperationState.COMPLETED
+
+
 @pytest.mark.asyncio
 async def test_dispatch_idempotency_deduplicates_retry_and_rejects_changed_work(
     tmp_path: Path,
@@ -658,3 +728,29 @@ async def test_close_interrupts_hung_provider_before_returning(tmp_path: Path) -
 
     assert provision.canceled == [dispatched.operation_id]
     assert interrupted.operation.state is ProfilerOperationState.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_dispatch_profiles_a_named_revision_instead_of_the_scope_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Policy profiles an existing candidate revision; no live workspace is snapshotted."""
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision)
+
+    dispatched = await service.dispatch(
+        principal_id="profile-a",
+        scope_id=None,
+        request="Where does candidate a spend its time?",
+        work=_WORK,
+        session_id=None,
+        candidate_snapshot_id="rev-a",
+    )
+    await provision.wait_started(dispatched.operation_id)
+    provision.complete(dispatched.operation_id)
+    completed = await service.await_result(dispatched.operation_id, "profile-a", None, 10)
+
+    assert completed.operation.candidate_snapshot_id == "rev-a"
+    assert completed.operation.state is ProfilerOperationState.COMPLETED
+    (observed,) = await service.project_run()
+    assert (observed.principal_id, observed.candidate_snapshot_id) == ("profile-a", "rev-a")

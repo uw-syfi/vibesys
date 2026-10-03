@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.constants import PROJECT_ROOT
-from vs_agent.api import cli_skill_dirs
+from vs_agent.api import cli_mcp_config_files, cli_skill_dirs
 from vs_runtime.api.infrastructure import (
     GitSourceMaterialization,
     InputProjectMaterialization,
@@ -17,11 +17,12 @@ from vs_runtime.api.infrastructure import (
     ProjectTreeCopy,
     SDKRoots,
     WorkspaceSourceValue,
+    discover_skill_dirs,
     resolve_packaged_tree,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from vibesys.inputs import WorkspaceSource
     from vs_runtime.api.infrastructure import RunEnvironment
@@ -45,6 +46,27 @@ EXCLUDED_WORKSPACE_DIRS: frozenset[str] = frozenset(
 )
 
 _CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
+
+# Drivers write each turn's MCP server config, including the role's evaluation
+# capability token, into the workspace. Committing it would leak the token
+# into candidate history and make a mid-turn snapshot differ from the
+# end-of-turn snapshot of the same candidate content.
+AGENT_CONFIG_FILES: frozenset[str] = frozenset(cli_mcp_config_files())
+
+
+def materialized_skill_dirs(skill_sources: Iterable[Path]) -> frozenset[str]:
+    """Return workspace directories that agent drivers refill with skill copies.
+
+    Drivers copy every configured skill into the workspace root (by skill
+    name) and into each CLI's skill-discovery directory before a turn. These
+    copies are framework inputs, not candidate content, so the run keeps them
+    out of Git: otherwise a read-only role's turn reports them as unauthorized
+    edits and a writer's snapshot commits them into its candidate.
+    """
+    names = {
+        skill_dir.name for source in skill_sources for skill_dir in discover_skill_dirs(source)
+    }
+    return frozenset({*names, *_CLI_SKILL_DIRS})
 
 
 @dataclass(frozen=True)
@@ -223,10 +245,12 @@ def build_workspace_materialization_plan(  # noqa: PLR0913  # lint-waiver: LW-01
 
 
 __all__ = [
+    "AGENT_CONFIG_FILES",
     "EXCLUDED_WORKSPACE_DIRS",
     "RunEnvironmentMaterializationEffects",
     "build_workspace_materialization_plan",
     "create_project_materializer",
     "materialization_source",
+    "materialized_skill_dirs",
     "skill_copy",
 ]

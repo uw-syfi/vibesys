@@ -1,0 +1,1 @@
+Choose a small portfolio of distinct, falsifiable optimization hypotheses from the supplied evidence references. Use `trusted_operations` when recent host-owned evaluation or profiler outcomes may inform the next choice. Return only the requested structured response.

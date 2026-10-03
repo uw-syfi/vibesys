@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -130,3 +132,54 @@ def test_launch_failure_is_reported_not_raised(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.output.startswith("Error executing command")
+
+
+def test_cancelling_execute_stops_the_command_and_its_descendants(tmp_path: Path) -> None:
+    ready = tmp_path / "ready"
+    alive = tmp_path / "alive"
+    os.mkfifo(ready)
+    os.mkfifo(alive)
+    # The test holds the read end of `alive`; the shell and its background
+    # `sleep` each hold a write end. Reading end-of-file therefore means every
+    # process the command started has exited, with no probe of a pid that may
+    # vanish mid-read (/proc/<pid>/stat raises ProcessLookupError then).
+    alive_reader = os.open(alive, os.O_RDONLY | os.O_NONBLOCK)
+    sandbox = LocalShellSandbox(tmp_path, inherit_env=True)
+    cancel = threading.Event()
+    outcome: list[SandboxExecutionResult | BaseException] = []
+
+    def run() -> None:
+        try:
+            outcome.append(
+                sandbox.execute(
+                    f"exec 3> {alive}; sleep 1000 & echo go > {ready}; wait",
+                    timeout=3600,
+                    cancel=cancel,
+                )
+            )
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-731004 [BLE001]; the test reports any worker failure.
+            # > Narrower types would leave the main thread blocked on the FIFO.
+            outcome.append(error)
+            ready.write_text("")  # release the reader below
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    try:
+        ready.read_text(encoding="utf-8")
+        cancel.set()
+        worker.join()
+        result = outcome[0]
+        assert isinstance(result, SandboxExecutionResult), result
+        assert result.cancelled
+        # b"" is end-of-file (no writer left); a surviving writer raises BlockingIOError.
+        assert os.read(alive_reader, 1) == b""
+    finally:
+        os.close(alive_reader)
+
+
+def test_an_unset_cancel_event_leaves_the_command_alone(tmp_path: Path) -> None:
+    result = LocalShellSandbox(tmp_path).execute("echo done", cancel=threading.Event())
+
+    assert result.exit_code == 0
+    assert not result.cancelled
+    assert result.stdout == "done\n"

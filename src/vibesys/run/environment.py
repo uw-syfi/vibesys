@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
+import shlex
+
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentFacts,
     LocalEnvironmentFacts,
@@ -36,12 +38,14 @@ def open_run_environment(
         )
     elif isinstance(facts, SlurmEnvironmentFacts):
         presentation = RunEnvironmentPresentation(
-            prompt_notes=(
-                "Candidate edits run in local isolated worktrees. VibeSys dispatches trusted "
-                "accuracy, benchmark, and profiling work through the configured Slurm target. "
-                "The local editor is not the task runtime; use framework evaluation and "
-                "profiler tools without adding cluster setup to candidate code."
-            )
+            prompt_notes=render_template(
+                "slurm/prompt_notes.j2",
+                template_dir=_TEMPLATE_DIR,
+                service_command=shlex.join(facts.service_command),
+                read_only_paths=[
+                    path.as_posix() for path in request.project_path_policy.read_only_paths
+                ],
+            ).strip()
         )
     elif isinstance(facts, SkyPilotEnvironmentFacts):
         presentation = RunEnvironmentPresentation(

@@ -1,14 +1,24 @@
 Review hypothesis `{{ hypothesis_id }}` without editing its candidate.
 
-Objective: {{ objective_location }}
+{% include 'run_context.j2' %}
+
 Claim: {{ hypothesis }}
 Pass criteria: {{ pass_criteria }}
 Candidate revision: `{{ candidate_revision }}`
 Implementer summary: {{ summary }}
 Evidence references:
 {{ evidence }}
+{% if evaluations %}
+
+Trusted evaluations the implementer submitted from this workspace (oldest first; a
+long failure keeps only its end):
+{% include '_agent_evaluations.j2' +%}
+Reject the candidate if it fails one, or if it is not changed to remove the cause of
+an earlier failure.
+{% endif %}
 
 Inspect only the source and referenced evidence needed to decide correctness,
 activation, and whether the declared outcome is supported. The framework owns trusted
-accuracy and performance evaluation, so do not duplicate those commands. Return only
-the schema-valid review JSON.
+accuracy and performance evaluation, so do not duplicate those commands. Passing
+trusted evaluation is not enough: reject a candidate that violates any rule or
+constraint the objective states. Return only the schema-valid review JSON.

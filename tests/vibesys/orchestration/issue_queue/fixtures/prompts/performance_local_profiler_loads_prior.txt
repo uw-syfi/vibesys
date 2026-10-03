@@ -1,0 +1,52 @@
+Run performance evaluation 2.
+
+Accuracy command: uv run check-accuracy
+Benchmark command: uv run benchmark
+Runtime notes: Use CUDA with bfloat16.
+Objective: Maximize measured token throughput without losing correctness.
+Reference: reference/model.py
+Profiler `torch` is available through the fixed `profiler` tool and executes on the local path.
+Configured load levels: [{"duration": 20, "max_tokens": 128, "rate": 1}, {"duration": 20, "max_tokens": 64, "rate": 4}]
+Prior performance records: [{"iteration": 1, "latency_trend": "mixed", "metrics": {"extra": {}, "load_levels": [{"target_rate": 1.0}]}, "new_issue_ids": [2, 3], "throughput_trend": "improved"}]
+
+Use the configured loads as a starting ladder. If they do not expose saturation,
+increase request rate until throughput plateaus, latency rises sharply, or
+requests fail. Add one or two prompt-length or output-length workloads when the
+shape could change the ceiling. Save and read structured benchmark output for
+every run. Diagnose the limiting resource separately at low, medium, and
+saturation load. Compare with both the immediately prior result and the best
+recorded result.
+
+Profiling is optional, limited to one run, and must answer a specific unresolved
+bottleneck question. Do not attempt profiling when profiler is `none`. Always
+stop any server process that this turn started, including after benchmark or
+profiling failure.
+
+Before filing, call list_issues for open work and search relevant keywords.
+File at most 3 non-duplicate issues. Rank them
+by impact over effort. Each issue background must cite code_evidence,
+metric_evidence, or profile_evidence and name expected_impact, effort, and scope.
+Each description must contain `## Background`, `## Acceptance criteria`, and
+`## Notes`.
+
+Return exactly one JSON object with this schema:
+{
+  "analysis": "trend comparison, saturation, resource diagnosis, and profiling decision",
+  "metrics": {
+    "load_levels": [{
+      "target_rate": 1.0, "actual_rate": 1.0,
+      "num_requests": 1, "num_completed": 1, "num_failed": 0,
+      "duration": 1.0,
+      "throughput": {"request_throughput": 1.0, "token_throughput": 1.0},
+      "ttft": {"mean_ms": 1.0, "p50_ms": 1.0, "p90_ms": 1.0,
+                 "p95_ms": 1.0, "p99_ms": 1.0},
+      "tpot": null, "total_latency": null
+    }],
+    "extra": {}
+  },
+  "evaluator_feedback": ["measurement guidance for the next evaluator"],
+  "new_issue_ids": [],
+  "throughput_trend": "improved" | "regressed" | "mixed",
+  "latency_trend": "improved" | "regressed" | "mixed"
+}
+Populate every metric from actual output. Do not fabricate measurements.

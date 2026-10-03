@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_runtime._local_validation import LocalValidationEvents, run_local_validation
-from vs_runtime._workspaces import RuntimeWorkspaces, WorkspaceResource, run_sync
+from vs_runtime._local_validation import (
+    LocalValidationEvents,
+    check_recipe_artifact_path,
+    run_local_validation,
+)
+from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces, WorkspaceResource, run_sync
 from vs_runtime.contracts import (
     AccuracyReceipt,
     CommandResult,
@@ -21,6 +26,8 @@ from vs_runtime.contracts import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from vs_runtime._agent_sessions import RuntimeAgentSessions
     from vs_runtime._local_validation import FrameworkValidationResult
     from vs_runtime._run_host import BlockingOperations
@@ -215,14 +222,17 @@ class RuntimeWorkspaceEvaluation:
             )
 
         candidate_revision = await managed.snapshot("framework-accuracy-input")
-        command_override = _evaluation_command(
-            spec.accuracy_command,
-            candidate_revision,
-            spec.deployment_release_env_var if release else None,
-        )
-        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
-            result = await self._workspaces.resource_for(managed).trusted_accuracy(command_override)
-        if result.executed:
+        async with self._evaluation_target(managed, candidate_revision) as target:
+            spec = self.spec(target)
+            command_override = _evaluation_command(
+                spec.accuracy_command,
+                candidate_revision,
+                spec.deployment_release_env_var if release else None,
+            )
+            result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
+                target, lambda resource: resource.trusted_accuracy(command_override)
+            )
+        if result.executed and target is managed:
             await managed.snapshot("framework-accuracy-evaluation")
         return RuntimeAccuracyRun(
             result=result,
@@ -241,23 +251,45 @@ class RuntimeWorkspaceEvaluation:
         *,
         required_metrics: frozenset[str],
     ) -> RuntimeBenchmarkRun:
-        """Snapshot and benchmark the exact current candidate."""
+        """Snapshot and benchmark the exact submitted candidate revision."""
         managed = self._workspaces.workspace_for(workspace)
-        spec = self.spec(managed)
         candidate_revision = await managed.snapshot("framework-benchmark-input")
-        command_override = _evaluation_command(
-            spec.benchmark_command,
-            candidate_revision,
-            spec.deployment_release_env_var,
-        )
-        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
-            result = await self._workspaces.resource_for(managed).trusted_benchmark(
-                command_override,
-                required_metrics,
+        async with self._evaluation_target(managed, candidate_revision) as target:
+            spec = self.spec(target)
+            command_override = _evaluation_command(
+                spec.benchmark_command,
+                candidate_revision,
+                spec.deployment_release_env_var,
             )
-        if result.executed:
+            result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
+                target,
+                lambda resource: resource.trusted_benchmark(command_override, required_metrics),
+            )
+        if result.executed and target is managed:
             await managed.snapshot("framework-benchmark-evaluation")
         return RuntimeBenchmarkRun(result=result, contract=spec.benchmark_contract)
+
+    @asynccontextmanager
+    async def _evaluation_target(
+        self, managed: RuntimeWorkspace, revision: str
+    ) -> AsyncIterator[RuntimeWorkspace]:
+        """Yield the workspace a trusted command may run in for one submitted revision.
+
+        An agent keeps editing its live workspace while a gate runs, and a remote
+        sandbox stages the directory it executes in. Staging the live tree would
+        race those edits and could evaluate content newer than the submitted
+        revision. Where the environment can open isolated candidates, the gate
+        runs in a throwaway candidate checked out at exactly ``revision``.
+        Otherwise it runs in the live workspace.
+        """
+        if not self._workspaces.supports_parallel_candidates:
+            yield managed
+            return
+        candidate = await self._workspaces.create_candidate(revision)
+        try:
+            yield self._workspaces.workspace_for(candidate)
+        finally:
+            await candidate.discard()
 
     async def validate_local(
         self,
@@ -268,10 +300,8 @@ class RuntimeWorkspaceEvaluation:
         events: LocalValidationEvents | None = None,
     ) -> tuple[FrameworkValidationResult, ...]:
         """Run candidate-authored recipes through runtime-owned commands."""
-        validate_workspace_writable_paths(
-            WorkspaceAccess.LIMITED,
-            (recipe_artifact, report_location),
-        )
+        check_recipe_artifact_path(recipe_artifact)
+        validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (report_location,))
         managed = self._workspaces.workspace_for(workspace)
         return await run_local_validation(
             self._commands,

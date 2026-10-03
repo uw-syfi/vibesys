@@ -3,7 +3,7 @@
 ``FakeAgentClient`` lets a test assert what a caller actually sent (prompts,
 tool servers, session keys), inject specific or failing responses, and observe
 streamed output and session-reuse behavior. With no configured structured
-response it uses the caller's fallback; every call is recorded as a
+response it raises ``AgentOutputSchemaError``; every call is recorded as a
 :class:`FakeInvocation` for direct assertions.
 
 This module stays schema-agnostic (no ``vibesys`` core imports) and driver-
@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Literal, Self, TypeVar
 
 from pydantic import BaseModel
 
-from vs_agent.contracts import AgentCapabilities
+from vs_agent.contracts import AgentCapabilities, AgentOutputSchemaError
+from vs_agent.runner import validate_typed_response
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
@@ -42,10 +43,13 @@ type TextSource = str | Callable[[FakeInvocation], str]
 class _ParseFailure:
     """Queue marker for a turn that returns unparseable output.
 
-    When one is dequeued, the loop falls back to ``fallback_factory()`` (a
-    synthesized response) instead of a parsed model.
+    When one is dequeued, ``invoke`` raises ``AgentOutputSchemaError``, as
+    the real client does for a reply that does not validate.
     """
 
+
+#: The detail of a scripted parse failure, as the real client reports a reply with no JSON.
+_UNPARSEABLE = "the reply contained no JSON object"
 
 #: Singleton enqueued by :meth:`FakeAgentClient.enqueue_parse_failure`.
 _PARSE_FAILURE = _ParseFailure()
@@ -110,7 +114,7 @@ def _pop(queues: dict[str, list[_PopT]], kind: str) -> _PopT | None:
 class FakeAgentClient:
     """Configurable in-memory double for :class:`~vs_agent.contracts.AgentClientProtocol`.
 
-    With no configured response, ``invoke`` calls ``fallback_factory()`` and
+    With no configured response, ``invoke`` raises ``AgentOutputSchemaError`` and
     ``invoke_text`` returns a fixed default sentence. Configured through the
     chained ``enqueue``/``set_*``/
     ``fail``/``on_invoke`` methods, it can return specific responses per agent
@@ -259,8 +263,9 @@ class FakeAgentClient:
         """Queue ``count`` parse failures for ``invoke(kind=...)``, in call order.
 
         Models the real client emitting output the loop cannot parse into
-        ``response_cls``: for that turn the loop falls back to
-        ``fallback_factory()`` (a synthesized response). Queued positionally
+        ``response_cls``: that turn raises ``AgentOutputSchemaError``, as the
+        real client does, and keeps the session. A scripted dict that does
+        not validate raises the same error, naming its fields. Queued positionally
         alongside :meth:`enqueue`, so ``enqueue(kind, ok).enqueue_parse_failure(kind)``
         makes the first turn succeed and the second parse-fail. The call is
         still recorded. Only affects :meth:`invoke`, not :meth:`invoke_text`.
@@ -345,7 +350,6 @@ class FakeAgentClient:
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
@@ -373,7 +377,7 @@ class FakeAgentClient:
         self._maybe_raise(kind)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
-        return self._resolve_response(kind, invocation, response_cls, fallback_factory)
+        return self._resolve_response(kind, invocation, response_cls)
 
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010179 [PLR0913]; Preserve FakeAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
@@ -490,21 +494,22 @@ class FakeAgentClient:
         kind: str,
         invocation: FakeInvocation,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
     ) -> T:
         source = _pop(self._queues, kind)
         if isinstance(source, _ParseFailure):
-            return fallback_factory()
+            raise AgentOutputSchemaError(_UNPARSEABLE)
         if source is None:
             source = self._constants.get(kind)
         if source is None:
-            return fallback_factory()
+            message = f"no scripted response for agent kind {kind!r}"
+            raise AgentOutputSchemaError(message)
         value = _materialize_response(source, invocation)
         if isinstance(value, BaseModel):
-            # A model instance is returned as-is; the caller enqueued it (rather
-            # than a dict) and owns it matching ``response_cls``.
-            return value  # ty: ignore[invalid-return-type]
-        return response_cls.model_validate(value)
+            # Production only ever validates decoded JSON, so a scripted model
+            # takes the same path: an instance of the wrong type fails here
+            # exactly as the equivalent agent reply would.
+            value = value.model_dump(mode="json")
+        return validate_typed_response(value, response_cls)
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:
         source = _pop(self._text_queues, kind)

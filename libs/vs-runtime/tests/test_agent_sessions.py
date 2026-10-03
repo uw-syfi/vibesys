@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 import threading
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
@@ -21,6 +24,7 @@ from vs_agent.api import (
     AgentBackend,
     AgentCapabilities,
     AgentClient,
+    AgentOutputSchemaError,
     AgentSessionKey,
     AgentSessionState,
     AgentSpec,
@@ -32,6 +36,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import (
     AgentCapability,
+    AgentId,
     AgentRole,
     AgentSession,
     AgentSessions,
@@ -40,6 +45,7 @@ from vs_runtime.api import (
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
+    StructuredResponseError,
     Workspace,
     WorkspaceAccess,
 )
@@ -60,9 +66,11 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import (
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
+    FakeAgentSession,
     FakeAgentSessions,
     FakeRunControlEventSink,
     FakeWorkspace,
+    FakeWorkspaces,
 )
 from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
 
@@ -70,6 +78,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_agent.api import AgentClientProtocol, SessionStore, ToolServerDescriptor
+    from vs_project.api import StateSlot
 
 
 class _Reply(BaseModel):
@@ -305,7 +314,7 @@ def _runtime(
     )
 
     def create_candidate(workspace_id: str, revision: str) -> _WorkspaceResource:
-        resource = candidates.popleft() if candidates else _WorkspaceResource()
+        resource = candidates.popleft() if candidates else _WorkspaceResource(workspace_id)
         resource.id = workspace_id
         resource.revision = revision
         resource.scope_factory = lambda: _scope(cast("Workspace", resource), effects.environments)
@@ -580,6 +589,163 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
     assert resumed_provider_session == first_provider_session
     assert drivers[0].resumed_session_ids == ()
     assert drivers[1].resumed_session_ids == (first_provider_session,)
+
+
+def _durable_session_slot(tmp_path: Path) -> StateSlot[AgentSessionState]:
+    project = Project.open(tmp_path)
+    project.state.create_project("member workspace continuity")
+    manifest = project.state.new_run_manifest(
+        "member workspace continuity",
+        run_id="run-1",
+        trusted_input_baseline="a" * 40,
+        branch="vibesys/run-1",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+    )
+    project.state.create_run(manifest)
+    return project.state.local_namespace(manifest.run_id, "agent").slot(
+        "sessions.json",
+        AgentSessionState,
+    )
+
+
+@pytest.mark.parametrize(
+    ("member_id", "resumes"),
+    [("h-batched-decode", True), (None, False)],
+    ids=["member-keyed", "unkeyed"],
+)
+def test_member_keyed_candidate_resumes_its_provider_session_from_a_new_revision(
+    tmp_path: Path,
+    member_id: str | None,
+    *,
+    resumes: bool,
+) -> None:
+    slot = _durable_session_slot(tmp_path)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    session_key = AgentSessionKey(SessionScope.MEMBER, "worker:h-batched-decode")
+    drivers: list[FakeDriver] = []
+    clients: list[AgentClient] = []
+
+    def open_client(**kwargs: object) -> AgentClient:
+        driver = FakeDriver(answer="done")
+        drivers.append(driver)
+        client = AgentClient(
+            driver,
+            provider="fake",
+            model_name="fake-model",
+            driver_name="fake",
+            session_store=cast("SessionStore | None", kwargs["session_store"]),
+        )
+        clients.append(client)
+        return client
+
+    environments = _EnvironmentOpener(_environment(), _environment())
+
+    def create_candidate(workspace_id: str, revision: str) -> _WorkspaceResource:
+        resource = _candidate_resource(workspace_id, revision)
+        resource.scope_factory = lambda: _scope(cast("Workspace", resource), environments)
+        return resource
+
+    root_resource = _WorkspaceResource()
+
+    async def scenario() -> list[Path]:
+        runtime = create_workspace_runtime(
+            (role,),
+            workspace_resources=_WorkspaceResources(root_resource, create_candidate),
+            resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
+                agent_id=selected_role.id,
+                spec=AgentSpec(backend=AgentBackend.STUB),
+                reasoning_effort="high",
+            ),
+            session_store=lambda: DurableSessionStore(slot),
+            control=create_run_control_channel(FakeRunControlEventSink()),
+            lifecycle_events=FakeAgentExecutionLifecycleSink(),
+            agent_events=NULL_AGENT_EVENT_SINK,
+            route_message=lambda message, steering: message + "".join(steering),
+            blocking=BlockingOperations(),
+            client_factory=open_client,
+            log=lambda _message: None,
+        )
+        paths: list[Path] = []
+        # Two successive attempts of one member, each from a new parent.
+        for parent in ("parent-1", "parent-2"):
+            candidate = await runtime.workspaces.create_candidate(parent, member_id=member_id)
+            paths.append(candidate.path)
+            session = await runtime.agents.create_session(
+                role,
+                workspace=candidate,
+                member_id="h-batched-decode",
+            )
+            assert await session.turn(f"attempt from {parent}") == "done"
+            await candidate.discard()
+        await runtime.workspaces.close()
+        return paths
+
+    first_path, second_path = asyncio.run(scenario())
+
+    first_session = clients[0].last_turn_provider_session_id(session_key)
+    assert first_session is not None
+    assert drivers[0].resumed_session_ids == ()
+    if resumes:
+        assert first_path == second_path
+        assert drivers[1].resumed_session_ids == (first_session,)
+        assert clients[1].last_turn_provider_session_id(session_key) == first_session
+    else:
+        assert first_path != second_path
+        assert drivers[1].resumed_session_ids == ()
+
+
+def test_member_keyed_candidates_are_isolated_and_exclusive() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        first = await runtime.workspaces.create_candidate(member_id="h1")
+        second = await runtime.workspaces.create_candidate(member_id="h2")
+        assert first.path != second.path
+        with pytest.raises(RuntimeContractError, match="already has a live candidate"):
+            await runtime.workspaces.create_candidate(member_id="h1")
+        first_path = first.path
+        await first.discard()
+        again = await runtime.workspaces.create_candidate(member_id="h1")
+        assert again.path == first_path
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+def test_fake_member_session_resumes_only_from_the_same_workspace_path() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    sessions = FakeAgentSessions(
+        (role,),
+        supported_agent_capabilities={
+            AgentCapability.SESSION_REUSE,
+            AgentCapability.PROVIDER_SESSION_RESUME,
+        },
+    )
+    root = FakeWorkspace(path=Path("/project"))
+    workspaces = FakeWorkspaces(root, supports_parallel_candidates=True, sessions=sessions)
+
+    async def scenario() -> tuple[tuple[str, ...], tuple[str, ...]]:
+        first = await workspaces.create_candidate(member_id="h1")
+        session = await sessions.create_session(role, workspace=first, member_id="h1")
+        await session.turn("first attempt")
+        await first.discard()
+        resumed_workspace = await workspaces.create_candidate(member_id="h1")
+        resumed = await sessions.create_session(role, workspace=resumed_workspace, member_id="h1")
+        fresh_workspace = await workspaces.create_candidate()
+        fresh = await sessions.create_session(role, workspace=fresh_workspace, member_id="h1")
+        return cast("FakeAgentSession", resumed).history, cast("FakeAgentSession", fresh).history
+
+    resumed_history, fresh_history = asyncio.run(scenario())
+
+    assert resumed_history == ("first attempt",)
+    assert fresh_history == ()
 
 
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
@@ -903,6 +1069,44 @@ def test_session_enforces_declared_workspace_access(
         await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@given(detail=st.text(min_size=1).filter(str.strip))
+def test_a_provider_schema_failure_is_a_structured_response_error_in_the_same_session(
+    detail: str,
+) -> None:
+    """Regression: r10's planner exhausted the provider's schema retries and the run ended.
+
+    The failure reaches plugin code as the same error as an unparseable reply,
+    carrying the validation errors, and the next turn continues the session.
+    """
+    role = AgentRole(id="worker", system_prompt="Work.")
+    failure = AgentOutputSchemaError(detail)
+    client = _client().fail("worker", failure, times=1).enqueue("worker", {"value": 2})
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(client),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        session = await runtime.agents.create_session(
+            role, workspace=runtime.workspaces.root, member_id="m"
+        )
+        with pytest.raises(StructuredResponseError) as raised:
+            await session.turn("work", response=_Reply)
+        assert raised.value.detail == detail
+        assert detail in str(raised.value)
+        assert raised.value.__cause__ is failure
+        assert await session.turn("correct it", response=_Reply) == _Reply(value=2)
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+    first, second = client.calls_for("worker")
+    assert first.session_key == second.session_key
 
 
 def test_timeout_is_normalized_and_capability_failure_cleans_up() -> None:
@@ -1229,3 +1433,125 @@ def test_begin_close_propagates_cancellation_to_agent_clients() -> None:
         await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@pytest.fixture(scope="module")
+def state_project(tmp_path_factory: pytest.TempPathFactory) -> tuple[Project, str]:
+    root = tmp_path_factory.mktemp("member-namespaces")
+    (root / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
+    project = Project.open(root)
+    project.state.create_project("members", now=datetime(2026, 8, 11, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        "members",
+        branch="vibesys/members",
+        vibesys_version="0.2.0",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
+        trusted_input_baseline="a" * 40,
+        now=datetime(2026, 8, 11, tzinfo=UTC),
+    )
+    project.state.create_run(manifest)
+    return project, manifest.run_id
+
+
+GIT = shutil.which("git") or "git"
+_DOTTED_MEMBER_ID = "KV.Cache_v2 / ../Ünïcode"
+
+
+def _is_agent_id(value: str) -> bool:
+    """Whether ``value`` is a member ID an agent is allowed to supply."""
+    try:
+        TypeAdapter(AgentId).validate_python(value)
+    except ValidationError:
+        return False
+    return True
+
+
+def _git_accepts_candidate_ref(workspace_id: str) -> bool:
+    ref = f"refs/vibesys/run/candidates/{workspace_id}"
+    # lint-waiver: LW-994301 [S603]; the test runs Git's own ref-name validator on a
+    # generated ref with a fixed argv and no shell.
+    # > A wrapper only moves this call, and a reimplementation of the rules in
+    # > Python could drift from what Git accepts.
+    result = subprocess.run(  # noqa: S603
+        [GIT, "check-ref-format", ref], check=False, capture_output=True
+    )
+    return result.returncode == 0
+
+
+@example(member_ids=[_DOTTED_MEMBER_ID])
+@example(member_ids=["v1..v2", "v1.-v2", "x.lock", "x.", ".x", "a@{b"])
+@given(
+    member_ids=st.lists(
+        st.text(st.characters(blacklist_categories=("Cc", "Cs")), min_size=1, max_size=128).filter(
+            _is_agent_id
+        ),
+        min_size=1,
+        max_size=6,
+        unique=True,
+    )
+)
+def test_member_candidate_ids_are_distinct_valid_state_namespaces_and_git_refs(
+    member_ids: list[str], state_project: tuple[Project, str]
+) -> None:
+    project, run_id = state_project
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> list[str]:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        ids: list[str] = []
+        for member_id in member_ids:
+            candidate = await runtime.workspaces.create_candidate(member_id=member_id)
+            assert candidate.id is not None
+            ids.append(candidate.id)
+        await runtime.workspaces.close()
+        return ids
+
+    workspace_ids = asyncio.run(scenario())
+
+    for workspace_id in workspace_ids:
+        project.state.local_namespace(run_id, workspace_id)
+        assert _git_accepts_candidate_ref(workspace_id), workspace_id
+    assert len(set(workspace_ids)) == len(member_ids)
+
+
+def test_dotted_unicode_member_id_opens_a_candidate_with_a_valid_git_ref_name() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> str | None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        candidate = await runtime.workspaces.create_candidate(member_id=_DOTTED_MEMBER_ID)
+        workspace_id = candidate.id
+        await runtime.workspaces.close()
+        return workspace_id
+
+    workspace_id = asyncio.run(scenario())
+    assert workspace_id is not None
+    assert _git_accepts_candidate_ref(workspace_id), workspace_id
+
+
+def test_uppercase_member_ids_stay_distinct_from_lowercase_ones() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> tuple[str | None, str | None]:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        upper = await runtime.workspaces.create_candidate(member_id="H1")
+        lower = await runtime.workspaces.create_candidate(member_id="h1")
+        ids = (upper.id, lower.id)
+        await runtime.workspaces.close()
+        return ids
+
+    upper_id, lower_id = asyncio.run(scenario())
+    assert upper_id is not None
+    assert upper_id.startswith("m-h1-")
+    assert upper_id != lower_id

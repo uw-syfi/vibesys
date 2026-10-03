@@ -1,0 +1,4 @@
+{# Context: `exhaustion_info` (ExhaustionNotice). #}
+{% if exhaustion_info %}
+Round {{ exhaustion_info.round_number }} did not pass after {{ exhaustion_info.attempts }} attempts. Last judge feedback: {{ exhaustion_info.feedback or "(empty)" }}
+{%- endif %}

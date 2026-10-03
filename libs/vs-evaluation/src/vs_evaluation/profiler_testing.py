@@ -91,11 +91,14 @@ class FakeProfilerTurnProvision:
         )
         self._release.setdefault(operation_id, asyncio.Event()).set()
 
-    def unsupported(self, operation_id: str, reason: str) -> None:
+    def unsupported(
+        self, operation_id: str, reason: str, *, evidence_ids: tuple[str, ...] = ()
+    ) -> None:
         """Release a turn with a typed request-specific unsupported result."""
         self._results[operation_id] = ProfilerAgentResult(
             outcome=ProfilerResultOutcome.UNSUPPORTED,
             narrative="The requested measurement is unavailable in this environment.",
+            evidence_ids=evidence_ids,
             unsupported_reason=reason,
         )
         self._release.setdefault(operation_id, asyncio.Event()).set()

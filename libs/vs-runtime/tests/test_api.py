@@ -8,11 +8,14 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
 
+from vs_agent.api import AgentOutputSchemaError
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
     AgentBinding,
     AgentCapability,
+    AgentEvaluation,
+    AgentEvaluationStatus,
     AgentRole,
     AgentTool,
     AgentTurnTimeoutError,
@@ -31,6 +34,7 @@ from vs_runtime.api import (
     SkillCatalogError,
     SkillResourceRequest,
     StateModelError,
+    StructuredResponseError,
     UnknownAgentRoleError,
     WorkspaceAccess,
     WorkspaceRestoreError,
@@ -272,6 +276,44 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
     assert observed_history_lengths == [0, 1, 0]
 
 
+def test_fake_session_reports_invalid_structured_output_as_production_does() -> None:
+    replies: list[object] = [
+        AgentOutputSchemaError("answer: provider gave up"),
+        {"answer": 3},
+        {"answer": "fixed"},
+    ]
+    observed_history_lengths: list[int] = []
+
+    def respond(
+        _role: AgentRole,
+        history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        observed_history_lengths.append(len(history))
+        reply = replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    async def scenario() -> None:
+        role = _role()
+        run = FakeRun(_plugin(role), responder=respond)
+        session = await run.agents.create_session(role, workspace=run.workspaces.root)
+        with pytest.raises(StructuredResponseError) as provider:
+            await session.turn("one", response=_Reply)
+        assert provider.value.detail == "answer: provider gave up"
+        with pytest.raises(StructuredResponseError) as invalid:
+            await session.turn("two", response=_Reply)
+        assert invalid.value.detail.startswith("answer: ")
+        assert await session.turn("three", response=_Reply) == _Reply(answer="fixed")
+        await run.close()
+
+    asyncio.run(scenario())
+    # Failed structured turns stay in the conversation, as in production.
+    assert observed_history_lengths == [0, 1, 2]
+
+
 def test_fake_read_write_turns_snapshot_input_and_completed_output() -> None:
     async def scenario() -> None:
         role = _role()
@@ -493,6 +535,13 @@ def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None
         assert (
             await run.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
         )
+        run.workspaces.set_default_patch("diff --git a/base.py b/base.py")
+        assert (
+            await run.workspaces.export_patch(second_revision) == "diff --git a/base.py b/base.py"
+        )
+        assert (
+            await run.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
+        )
 
         await first.discard()
         await first.discard()
@@ -608,7 +657,7 @@ def test_fake_commands_reject_invalid_requests_before_recording(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("member_id", ["", "   ", "member\nline"])
+@pytest.mark.parametrize("member_id", ["", "   ", "member\nline", "0 ", " H1", "a\u200bb"])
 def test_session_rejects_invalid_member_id_before_creation(member_id: str) -> None:
     async def scenario() -> None:
         role = _role()
@@ -651,6 +700,41 @@ def test_plugin_requires_concrete_state_model(invalid_state: object) -> None:
             orchestrate=_orchestrate,
             state=cast("Any", invalid_state),
         )
+
+
+def test_agent_evaluations_are_kept_per_workspace_identity_and_in_order() -> None:
+    async def scenario() -> None:
+        run = FakeRun(_plugin(_role()), supports_parallel_candidates=True)
+        first = await run.workspaces.create_candidate(member_id="cache")
+        other = await run.workspaces.create_candidate(member_id="other")
+        failed = AgentEvaluation(
+            revision="r1", kinds=("accuracy",), status=AgentEvaluationStatus.FAILED, failure="boom"
+        )
+        passed = AgentEvaluation(
+            revision="r2", kinds=("accuracy",), status=AgentEvaluationStatus.PASSED
+        )
+        run.evaluation.record_agent_evaluation(first, failed)
+        run.evaluation.record_agent_evaluation(first, passed)
+        await first.discard()
+        # A later candidate of the same member has the same identity and history.
+        again = await run.workspaces.create_candidate(member_id="cache")
+
+        assert await run.evaluation.agent_evaluations(again) == (failed, passed)
+        assert await run.evaluation.agent_evaluations(other) == ()
+
+    asyncio.run(scenario())
+
+
+def test_agent_evaluation_has_a_failure_exactly_when_it_failed() -> None:
+    for status in AgentEvaluationStatus:
+        failed = status is AgentEvaluationStatus.FAILED
+        AgentEvaluation(
+            revision="r", kinds=("accuracy",), status=status, failure="x" if failed else None
+        )
+        with pytest.raises(ValidationError, match="failure"):
+            AgentEvaluation(
+                revision="r", kinds=("accuracy",), status=status, failure=None if failed else "x"
+            )
 
 
 def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
@@ -717,17 +801,45 @@ def test_local_validation_result_requires_consistent_feedback(
         LocalValidationEvaluation(passed=passed, feedback=feedback)
 
 
-@pytest.mark.parametrize("path", ["../recipe.json", "/recipe.json", ".", "bad\\path"])
-def test_fake_local_validation_rejects_noncanonical_paths(path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../recipe.json",
+        "/recipe.json",
+        ".",
+        "bad\\path.json",
+        "recipes.txt",
+        "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+    ],
+)
+def test_fake_local_validation_reports_unusable_recipe_references_as_input_errors(
+    path: str,
+) -> None:
     async def scenario() -> None:
         run = FakeRun(_plugin(_role()))
-        with pytest.raises(ValueError, match="canonical workspace-relative"):
+        result = await run.evaluation.validate_local(
+            run.workspaces.root,
+            recipe_artifact=path,
+            report_location="progress/validation/round-1.json",
+        )
+        assert not result.passed
+        assert result.recipe_unusable
+        assert result.feedback is not None
+        assert "canonical workspace-relative" in result.feedback
+        assert run.evaluation.local_validation_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_fake_local_validation_rejects_a_noncanonical_report_location() -> None:
+    async def scenario() -> None:
+        run = FakeRun(_plugin(_role()))
+        with pytest.raises(ValueError, match="writable path"):
             await run.evaluation.validate_local(
                 run.workspaces.root,
-                recipe_artifact=path,
-                report_location="progress/validation/round-1.json",
+                recipe_artifact="progress/validation/recipes.json",
+                report_location="../report.json",
             )
-        assert run.evaluation.local_validation_calls == []
 
     asyncio.run(scenario())
 

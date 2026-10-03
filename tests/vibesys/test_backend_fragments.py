@@ -2,7 +2,7 @@
 
 Every :class:`ComputeBackend` the agent can target must have a
 ``ComputeBackendFragment`` registered *and* the fragment ``.j2`` files on
-disk. Otherwise the backend-aware ``Prompt`` path (used by the plain
+disk. Otherwise the backend-aware ``BackendPromptRenderer`` path (used by the plain
 issue-tracker loop) raises at construction for that backend — a compute
 backend can be registered in ``backends/`` yet silently break here.
 """
@@ -12,15 +12,15 @@ from __future__ import annotations
 import pytest
 
 from vibesys.constants import ComputeBackend
-from vibesys.orchestration.prompts import get_backend_fragment
-from vibesys.orchestration.prompts.renderer import _FRAGMENT_IMPLS, _build_env
+from vibesys.prompts import get_backend_fragment
+from vibesys.prompts.renderer import _FRAGMENT_IMPLS, _build_env
 
 
 @pytest.mark.parametrize("backend", list(ComputeBackend), ids=lambda b: b.value)
 def test_every_backend_has_registered_fragment(backend: ComputeBackend) -> None:
     assert backend in _FRAGMENT_IMPLS, (
         f"{backend!r} has a compute backend but no ComputeBackendFragment; "
-        f"the backend-aware Prompt path (plain loop) would raise for it."
+        f"the backend-aware BackendPromptRenderer path (plain loop) would raise for it."
     )
 
 

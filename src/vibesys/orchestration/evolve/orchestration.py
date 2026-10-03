@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration.evolve.agents import JUDGE, MUTATOR, PROFILER
 from vibesys.orchestration.evolve.models import (
     CandidateJudgeContext,
@@ -32,13 +32,17 @@ from vibesys.orchestration.evolve.population import (
 from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
 from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
 from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import (
+    TurnFailed,
+    attempt_structured_turn,
+    structured_turn,
+)
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     MetricDirection,
     Run,
     RunStatus,
-    StructuredResponseError,
     Workspace,
 )
 
@@ -57,18 +61,6 @@ _CANDIDATE_REQUIREMENTS = (
 _CLEANUP_ERROR = "evolve agent cleanup failed"
 _CANDIDATE_CLEANUP_ERROR = "candidate cleanup failed"
 _INTERFACE = "inprocess"
-_PARETO_PROFILER_ADDENDUM = """\
-
-## Pareto-frontier mode — emit *all* configured metrics
-
-This run is in Pareto-frontier mode. In addition to the headline `perf_metric` / `perf_unit`, populate the `metrics` field of `ProfilerSummary` with the numeric value of EVERY objective listed below — read each one from the benchmark tool's JSON output, do not derive, do not invert.
-
-Objectives to report (use these exact key names in `metrics`):
-
-{objective_list}
-
-If the benchmark JSON does not contain a field, set its entry to `null` rather than substituting a derived number — the framework will treat the offspring as missing on that axis and exclude it from the frontier (which is correct: an unmeasured axis cannot be compared).
-"""
 
 
 async def _capture_cleanup(operation: Awaitable[None]) -> BaseException | None:
@@ -122,32 +114,6 @@ async def _open_sessions(run: Run, workspace: Workspace) -> _Sessions:
         else None
     )
     return _Sessions(mutator=mutator, judge=judge, profiler=profiler)
-
-
-def _fallback_mutator() -> MutatorResponse:
-    return MutatorResponse(
-        summary="Mutator produced no structured response.",
-        hypothesis="unknown",
-        expected_behavior="unknown",
-    )
-
-
-def _fallback_judge() -> JudgeResponse:
-    return JudgeResponse(
-        analysis="Judge produced no structured response.",
-        feedback="No structured response received.",
-        verdict=Verdict.FAIL,
-    )
-
-
-def _fallback_profiler() -> ProfilerSummary:
-    return ProfilerSummary(
-        analysis="Profiler produced no structured response.",
-        bottlenecks="n/a",
-        suggestions="n/a",
-        perf_metric=None,
-        perf_unit=None,
-    )
 
 
 class _EvolveRun:
@@ -426,7 +392,11 @@ class _EvolveRun:
             cold_start=task.cold_start,
             repair_seed=task.repair_seed,
         )
+        if isinstance(mutation, TurnFailed):
+            return self._failed_turn("mutator", mutation, task)
         verdict = await self._judge(sessions.judge)
+        if isinstance(verdict, TurnFailed):
+            return self._failed_turn("judge", verdict, task, summary=mutation.summary)
         feedback = verdict.feedback if verdict.verdict is Verdict.FAIL else None
         benchmark = None
         if feedback is None:
@@ -465,6 +435,21 @@ class _EvolveRun:
             code=code,
         )
 
+    @staticmethod
+    def _failed_turn(
+        role: str, failure: TurnFailed, task: _CandidateTask, *, summary: str = ""
+    ) -> CandidateOutcome:
+        """Record a candidate whose agent turn returned no valid response as failed."""
+        return CandidateOutcome(
+            passed=False,
+            parent_id=task.parent.id if task.parent is not None else None,
+            inspiration_ids=tuple(item.id for item in task.inspirations),
+            summary=summary,
+            feedback=f"framework: the {role} returned no valid response ({failure.reason})",
+            policy_parent_id=task.policy_parent_id,
+            target_island=task.target_island,
+        )
+
     async def _mutate(
         self,
         session: AgentSession,
@@ -473,7 +458,7 @@ class _EvolveRun:
         inspirations: tuple[Individual, ...],
         cold_start: bool,
         repair_seed: bool,
-    ) -> MutatorResponse:
+    ) -> MutatorResponse | TurnFailed:
         context = MutatorContext(
             accuracy_command=self.run.facts.accuracy_command,
             benchmark_command=self.run.facts.benchmark_command,
@@ -493,12 +478,9 @@ class _EvolveRun:
             repair_seed=repair_seed,
             runtime_notes=self.run.facts.environment_notes,
         )
-        try:
-            return await session.turn(render_mutator(context), response=MutatorResponse)
-        except StructuredResponseError:
-            return _fallback_mutator()
+        return await attempt_structured_turn(session, render_mutator(context), MutatorResponse)
 
-    async def _judge(self, session: AgentSession) -> JudgeResponse:
+    async def _judge(self, session: AgentSession) -> JudgeResponse | TurnFailed:
         context = CandidateJudgeContext(
             accuracy_command=self.run.facts.accuracy_command,
             benchmark_command=self.run.facts.benchmark_command,
@@ -511,21 +493,13 @@ class _EvolveRun:
             pass_criteria=_CANDIDATE_REQUIREMENTS,
             runtime_notes=self.run.facts.environment_notes,
         )
-        try:
-            return await session.turn(render_judge(context), response=JudgeResponse)
-        except StructuredResponseError:
-            return _fallback_judge()
+        return await attempt_structured_turn(session, render_judge(context), JudgeResponse)
 
     async def _profile(self, session: AgentSession | None) -> ProfilerSummary | None:
         kind = ProfilerKind(self.run.facts.profiler_id)
         if kind is ProfilerKind.NONE or session is None:
             return None
         definition = profiler_definition(kind)
-        objectives = "\n".join(
-            f"- `{item.name}` ({'maximize' if item.direction == 'max' else 'minimize'})"
-            for item in self.options.metric_space.objectives
-        )
-        addendum = _PARETO_PROFILER_ADDENDUM.format(objective_list=objectives) if objectives else ""
         context = CandidateProfilerContext(
             benchmark_command=self.run.facts.benchmark_command,
             domain_profiler=render_domain_section(
@@ -533,7 +507,7 @@ class _EvolveRun:
             ),
             modality=self.options.modality,
             objective=self.run.facts.objective,
-            pareto_objectives_addendum=addendum,
+            objectives=list(self.options.metric_space.objectives),
             profile_execution=self.run.facts.profile_execution.value,
             profile_focus=(
                 "Measure the headline metric for this candidate; rank top kernel-level bottlenecks."
@@ -543,11 +517,9 @@ class _EvolveRun:
             runtime_notes=self.run.facts.environment_notes,
         )
         try:
-            return await session.turn(
-                render_profiler(kind.value, context), response=ProfilerSummary
+            return await structured_turn(
+                session, render_profiler(kind.value, context), ProfilerSummary
             )
-        except StructuredResponseError:
-            return _fallback_profiler()
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920437 [BLE001]; profiling is advisory and provider failures are not normalized to one stable runtime exception yet; restricting this catch would make an optional profile abort accepted candidates.
             self.run.observations.warning(f"profiler failed: {error}")
             return None

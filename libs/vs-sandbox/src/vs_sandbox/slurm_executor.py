@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
+import subprocess
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -19,8 +21,10 @@ from vs_evaluation.api import (
     CostClass,
     EvaluationRequest,
     EvaluationState,
+    EvaluationStep,
     EvaluationStepResult,
     ExecutorObservation,
+    ExecutorRejectedError,
     ExecutorSubmissionError,
     ResourceRequirements,
     ReuseStatus,
@@ -30,6 +34,7 @@ from vs_slurm.api import (
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchStage,
+    SlurmError,
     SlurmJobRunner,
     SlurmTreeArtifact,
 )
@@ -39,6 +44,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_slurm.api import SlurmConfig, SlurmService
+
+_LOG = logging.getLogger(__name__)
 
 
 class SlurmTargetLifecycle(StrEnum):
@@ -169,6 +176,8 @@ class SlurmEvaluationExecutor:
         self._handles: dict[str, SlurmBatchHandle] = {}
         self._observations: dict[str, ExecutorObservation] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # Jobs already sent a cancel, so a cancelled task never repeats it.
+        self._cancel_requested_jobs: set[str] = set()
         self._changes: dict[str, asyncio.Event] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -198,6 +207,11 @@ class SlurmEvaluationExecutor:
             return
         try:
             stages = self._parse_stages(request)
+        except ValueError as exc:
+            # Malformed stages are refused before any provider contact, so a
+            # retry cannot succeed; report a rejection, not an ambiguous error.
+            raise ExecutorRejectedError(str(exc)) from exc
+        try:
             durable = self._read_evaluation(handle_id)
             self._validate_durable_request(handle_id, request, durable)
             self._publish(
@@ -285,6 +299,7 @@ class SlurmEvaluationExecutor:
                 await self._accept_cancellation_safe(handle_id, request, stages)
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
+            await self._cancel_running_best_effort(handle_id)
             self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930042 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
@@ -309,6 +324,7 @@ class SlurmEvaluationExecutor:
             async with self._admission.lease(handle_id):
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
+            await self._cancel_running_best_effort(handle_id)
             self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930043 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
@@ -439,7 +455,11 @@ class SlurmEvaluationExecutor:
                     name=step.name,
                     state=StageState.FAILED if failed else StageState.SUCCEEDED,
                     result=raw.model_dump(mode="json"),
-                    failure=raw.output if failed else None,
+                    failure=(
+                        _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
+                        if failed
+                        else None
+                    ),
                     duration_s=item.elapsed_seconds,
                 )
             )
@@ -485,6 +505,9 @@ class SlurmEvaluationExecutor:
         try:
             waited = await asyncio.shield(wait_call)
         except asyncio.CancelledError:
+            # The worker thread blocks until the job ends, so end the job first;
+            # otherwise this task would not finish cancelling until Slurm does.
+            await self._cancel_running_best_effort(handle_id)
             with contextlib.suppress(Exception):
                 await wait_call
             raise
@@ -517,8 +540,21 @@ class SlurmEvaluationExecutor:
     async def _cancel_running(self, handle_id: str) -> None:
         durable = self._read_evaluation(handle_id)
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
-        if handle is not None:
+        if handle is None or handle.job.job_id in self._cancel_requested_jobs:
+            return
+        self._cancel_requested_jobs.add(handle.job.job_id)
+        try:
             await asyncio.to_thread(self._runner.cancel_batch, handle)
+        except Exception:
+            self._cancel_requested_jobs.discard(handle.job.job_id)
+            raise
+
+    async def _cancel_running_best_effort(self, handle_id: str) -> None:
+        """Cancel the Slurm job of a cancelled task; log, never raise, on failure."""
+        try:
+            await self._cancel_running(handle_id)
+        except (SlurmError, OSError, subprocess.SubprocessError):
+            _LOG.exception("could not cancel the Slurm job of evaluation %s", handle_id)
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
         self._observations[handle_id] = observation
@@ -575,6 +611,40 @@ class SlurmEvaluationExecutor:
     ) -> None:
         if durable is not None and durable.request != request:
             raise _SlurmExecutionError.request_conflict(handle_id)
+
+
+# GNU timeout's exit status when it stopped the command (the job script wraps
+# each stage in ``timeout --kill-after``; 137 is the follow-up SIGKILL).
+_TIMEOUT_EXIT_CODES = frozenset({124, 137})
+
+
+def _stage_failure(
+    step: EvaluationStep,
+    raw: SlurmCommandResult,
+    elapsed_seconds: float | None,
+    service_log_tail: str,
+) -> str:
+    """Return the failure text for a nonzero stage, never empty.
+
+    A stage that is killed by its timeout often prints nothing, and an empty
+    failure would make the whole observation invalid and hide the cause. The
+    shared server's log tail is appended because a slow or hung server is the
+    usual cause of a failed client stage, and the agent cannot read that log.
+    """
+    if raw.output.strip():
+        failure = raw.output
+    else:
+        elapsed = "" if elapsed_seconds is None else f" after {elapsed_seconds:.0f} s"
+        if raw.exit_code in _TIMEOUT_EXIT_CODES:
+            failure = f"stage {step.name!r} hit its time limit{elapsed} and printed no output"
+        else:
+            failure = (
+                f"stage {step.name!r} exited with code {raw.exit_code}{elapsed}"
+                " and printed no output"
+            )
+    if not service_log_tail.strip():
+        return failure
+    return f"{failure.rstrip()}\n--- server log tail (repeated lines collapsed) ---\n{service_log_tail}"
 
 
 class _SlurmExecutionError(RuntimeError):

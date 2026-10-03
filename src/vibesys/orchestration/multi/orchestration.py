@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     AttemptDecision,
     AttemptState,
     Continue,
@@ -21,8 +21,8 @@ from vibesys.orchestration.hypothesis import (
     attempt_was_reviewed,
     build_round_record,
 )
-from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
-from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
+from vibesys.hypothesis import cadence as hypothesis_cadence
+from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles
 from vibesys.orchestration.multi.models import (
@@ -31,14 +31,16 @@ from vibesys.orchestration.multi.models import (
     PaidAttempt,
     ProfileGuidedMultiOptions,
 )
+from vibesys.orchestration.multi.prompts import render_turn_failed_feedback
 from vibesys.orchestration.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
-from vibesys.orchestration.profile_focus import (
+from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import TurnFailed
+from vibesys.profile_focus import (
     FocusView,
     ProfileFocus,
     ProfileFocusConfig,
     ProfileFocusState,
 )
-from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkEvaluation,
@@ -52,9 +54,9 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import CarryOver, RollbackTarget
-    from vibesys.orchestration.hypothesis.attempts import ImplementerReply
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis import CarryOver, RollbackTarget
+    from vibesys.hypothesis.attempts import ImplementerReply
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
 
 
 @dataclass(slots=True)
@@ -230,7 +232,7 @@ class _MultiRun:
         self.carry = self.search.initial_carry(self.records)
         self.round_number = len(self.records) + 1
         self.files.write_pareto(
-            self.search.archive_summary(
+            self.search.archive_view(
                 self.records,
                 space=self.state.search.metrics,
                 baseline=self.state.search.input_baseline,
@@ -269,7 +271,7 @@ class _MultiRun:
         search = self.state.search.model_copy(update={"input_baseline": baseline}, deep=True)
         self.state = self.state.model_copy(update={"search": search}, deep=True)
         self.files.write_pareto(
-            self.search.archive_summary(self.records, space=search.metrics, baseline=baseline)
+            self.search.archive_view(self.records, space=search.metrics, baseline=baseline)
         )
         await self._commit(label=f"{self.label_prefix}: measure input baseline")
 
@@ -281,7 +283,7 @@ class _MultiRun:
                 await self.run.control.checkpoint()
                 self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
-                    self.search.archive_summary(
+                    self.search.archive_view(
                         self.records,
                         space=self.state.search.metrics,
                         baseline=self.state.search.input_baseline,
@@ -308,15 +310,17 @@ class _MultiRun:
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
             context = decision.context
+            # The pre-round and plan prompts point at this entry for the notice text.
+            carried = self.files.note_carry(number, context.carry)
             guidance = await self._prepare_profile_guidance()
             profile_decision = await self.turns.pre_round(
                 number,
-                context.carry,
+                carried,
                 has_history=not (number == 1 and not self.records),
             )
-            summary = None
+            profile = None
             if profile_decision.need_profile:
-                summary = await self.turns.profile(
+                profile = await self.turns.profile(
                     number,
                     profile_decision.profile_focus or "general steady-state benchmark hotspots",
                 )
@@ -324,8 +328,8 @@ class _MultiRun:
                 PlanRequest(
                     round_number=context.round_number,
                     state=self.state.search,
-                    carry=context.carry,
-                    profiler_summary=summary,
+                    carried=carried,
+                    profile=profile,
                     plateau_warning=context.plateau_warning,
                     provisional_candidates=context.provisional_candidates,
                     workspace=self.workspace,
@@ -446,14 +450,20 @@ class _MultiRun:
             attempt.official_reason = None
             attempt.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
             await self._mark_paid(selected, retry)
-            response, synthesized = await self.turns.implement(selected.request, attempt)
-            attempt.implementation = response
-            if synthesized:
+            response = await self.turns.implement(selected.request, attempt)
+            if isinstance(response, TurnFailed):
+                attempt.implementation = None
                 attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
+                feedback = render_turn_failed_feedback(response.reason)
+                attempt.feedback = feedback
+                selected.request.active_hypothesis.feedback = feedback
+                await self._checkpoint_hypothesis(selected)
                 self.run.observations.warning(
-                    f"[implementer] attempt {retry} returned no parseable response; retrying"
+                    f"[implementer] attempt {retry} returned no valid response "
+                    f"({response.reason}); retrying"
                 )
                 continue
+            attempt.implementation = response
             decision = await self._review(selected)
             if decision is AttemptDecision.FINISH:
                 break
@@ -527,11 +537,7 @@ class _MultiRun:
         )
         if reason is None:
             state.passed = True
-            self.files.note_evaluation(
-                self.round_number,
-                state.retry,
-                "- decision: deferred\n- reason: cadence not due\n",
-            )
+            self.files.note_evaluation_deferred(self.round_number, state.retry)
             return AttemptDecision.FINISH
         await self._approve_perf(selected)
         state.official_reason = reason
@@ -554,15 +560,7 @@ class _MultiRun:
             recipe_artifact=artifact,
             report_location=report_location,
         )
-        location = result.report_location or "(no report written)"
-        detail = f"- decision: {'passed' if result.passed else 'failed'}\n- report: {location}\n"
-        if result.feedback:
-            detail += f"- feedback: {result.feedback}\n"
-        self.files.note_evaluation(
-            self.round_number,
-            selected.attempt.retry,
-            detail,
-        )
+        self.files.note_local_validation(self.round_number, selected.attempt.retry, result)
         return result.feedback if not result.passed else None
 
     async def _checkpoint_hypothesis(self, selected: _SelectedRound) -> None:
@@ -633,11 +631,7 @@ class _MultiRun:
             await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
             return False
         attempt.passed = True
-        self.files.note_evaluation(
-            self.round_number,
-            attempt.retry,
-            f"- decision: passed\n- reason: {attempt.official_reason}\n",
-        )
+        self.files.note_evaluation_passed(self.round_number, attempt.retry, attempt.official_reason)
         return True
 
     async def _evaluation_failed(self, selected: _SelectedRound, feedback: str) -> None:
@@ -649,11 +643,7 @@ class _MultiRun:
         hypothesis.gate_candidate_commit = self.workspace.revision
         hypothesis.gate_accuracy_passed = self.state.accuracy_receipt is not None
         hypothesis.feedback = feedback
-        self.files.note_evaluation(
-            self.round_number,
-            attempt.retry,
-            f"- decision: failed\n- feedback: {feedback}\n",
-        )
+        self.files.note_evaluation_failed(self.round_number, attempt.retry, feedback)
         await self._checkpoint_hypothesis(selected)
 
     async def _close_round(self, selected: _SelectedRound) -> None:
@@ -684,9 +674,8 @@ class _MultiRun:
                 model=binding.model,
             )
         )
-        note = self.search.measurement_note(record)
-        if note is not None:
-            self.files.note_measurement(self.round_number, note)
+        if self.search.trusted_measurement(record):
+            self.files.note_measurement(self.round_number, record)
         search_state = self.state.search
         if self.profile_focus is not None:
             focused = self.profile_focus.record(
@@ -707,7 +696,6 @@ class _MultiRun:
             hypothesis=hypothesis,
             record=record,
             records=self.records,
-            carry=self.carry,
             passed=attempt.passed,
             reviewed=self.terminal.reviewed(attempt),
             feedback=attempt.feedback,
@@ -741,16 +729,13 @@ class _MultiRun:
 
     async def _finish(self) -> None:
         self.files.write_pareto(
-            self.search.archive_summary(
+            self.search.archive_view(
                 self.records,
                 space=self.state.search.metrics,
                 baseline=self.state.search.input_baseline,
             )
         )
-        winner = self.search.best(
-            self.records,
-            space=self.state.search.metrics,
-        )
+        winner = self.search.best(self.records, space=self.state.search.metrics)
         if winner is None:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:

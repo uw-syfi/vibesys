@@ -1,0 +1,5 @@
+{# Context: `round_number` (int), `exhaustion_info` (ExhaustionNotice). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Exhausted-review feedback") %}
+{% include "_notices/exhaustion.j2" %}
+{% endcall %}

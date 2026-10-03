@@ -67,13 +67,18 @@ import glob
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # fetch_corpus.py sits next to this script; make it importable however run.py is loaded.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -90,6 +95,19 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
 # candidate engine takes longer; these are session counts, not a wall-clock
 # cap (session_runner has no deadline flag).
 WARMUP_SESSIONS = 12
+WARMUP_TIMEOUT_S = 180.0
+# The most output tokens per second one session can receive, used to stop a warmup
+# that cannot finish by WARMUP_TIMEOUT_S (`WarmupWatch`). Each decode forward pass
+# streams every decoder weight from HBM once. At least half of the 19.3 GB bf16
+# checkpoint is decoder weights that every token passes through (the rest bounds the
+# embedding table and the vision tower, which a text decode step need not read), and
+# the MI210's HBM2e peak is 1.64 TB/s (AMD's figure; ../config/platforms/mi210.toml
+# rounds it to 1.6 and measured 1.38), so a pass takes at least 9.65 GB / 1.64 TB/s =
+# 5.9 ms and emits at most one token per session: at most 170 tokens/s per session,
+# 2,040 for the 12 warmup sessions (tuned vLLM sustains ~500 at 128 sessions).
+# Speculative decoding that accepts more than one token per pass on average could
+# exceed it; nothing in this bundle has done so.
+WARMUP_SESSION_CEILING_TOK_S = 170.0
 MODE_SESSIONS: dict[Mode, int] = {
     "smoke": 2,
     "quick": 60,
@@ -130,7 +148,60 @@ WARMUP_TRACE_ROWS = 72
 
 
 class HarnessError(RuntimeError):
-    """A domain-level failure: bad config, a missing tool, or a failed run."""
+    """A domain-level failure: bad config, a missing tool, or a failed run.
+
+    `partial` is what a sub-run measured before it was stopped, as an evaluator
+    result protocol `partial` object (see `partial_measurement`), or None when
+    it measured nothing.
+    """
+
+    def __init__(self, message: str, partial: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.partial = partial
+
+
+# The evaluator result protocol VibeSys reads from `--vs-output` (protocol 2;
+# sdk/vs-evaluator/PROTOCOL.md). The headline is the one metric declared.
+PROTOCOL_VERSION = 2
+HEADLINE_METRIC = "output_tokens_per_s"
+HEADLINE_SPEC = {"unit": "output tokens/s", "direction": "max"}
+
+
+class ProtocolReport:
+    """The record stream written to `--vs-output`, or nothing when it is absent.
+
+    `hello` is written at construction, before anything is measured, so a run
+    killed mid-way leaves a declared schema and no outcome. Exactly one of
+    `emit` (the measured row) and `fail` (why there is none, with what was
+    measured before the stop) follows.
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = path
+        self._write(
+            {
+                "kind": "hello",
+                "protocol": PROTOCOL_VERSION,
+                "metrics": {HEADLINE_METRIC: HEADLINE_SPEC},
+            },
+            mode="w",
+        )
+
+    def emit(self, value: float) -> None:
+        self._write({"kind": "result", "label": "", "values": {HEADLINE_METRIC: value}})
+
+    def fail(self, message: str, partial: dict[str, Any] | None) -> None:
+        record: dict[str, Any] = {"kind": "error", "message": message or "benchmark failed"}
+        if partial is not None:
+            record["partial"] = partial
+        self._write(record)
+
+    def _write(self, record: dict[str, Any], mode: str = "a") -> None:
+        if self._path is None:
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open(mode, encoding="utf-8") as handle:
+            handle.write(json.dumps(record, allow_nan=False) + "\n")
 
 
 def hf_home() -> Path:
@@ -163,18 +234,194 @@ class SessionRunnerResult:
     summary: dict[str, Any] | None
 
 
+_WORKLOAD_LINE = re.compile(
+    r"session workload \| sessions=(?P<sessions>\d+) rounds=(?P<rounds>\d+)"
+    r".*? total_output_len=(?P<output_tokens>\d+)"
+)
+# Printed by session_runner every 5 s and once at the end (request-factory
+# `executor::ProgressLine`): `progress | elapsed_s=.. rounds_done=a/b
+# sessions_done=c/d output_tokens=e`.
+_PROGRESS_LINE = re.compile(
+    r"progress \| elapsed_s=(?P<elapsed>[\d.]+) rounds_done=(?P<rounds_done>\d+)/(?P<rounds>\d+)"
+    r" sessions_done=(?P<sessions_done>\d+)/(?P<sessions>\d+) output_tokens=(?P<tokens>\d+)"
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class Progress:
+    """One `progress |` line of session_runner."""
+
+    elapsed_s: float
+    rounds_done: int
+    rounds: int
+    sessions_done: int
+    sessions: int
+    output_tokens: int
+
+    @classmethod
+    def parse(cls, line: str) -> Progress | None:
+        m = _PROGRESS_LINE.search(line)
+        if m is None:
+            return None
+        return cls(
+            elapsed_s=float(m["elapsed"]),
+            rounds_done=int(m["rounds_done"]),
+            rounds=int(m["rounds"]),
+            sessions_done=int(m["sessions_done"]),
+            sessions=int(m["sessions"]),
+            output_tokens=int(m["tokens"]),
+        )
+
+
+class WarmupWatch:
+    """Stops a sub-run as soon as its progress proves it cannot finish by its deadline.
+
+    The bound: from the last progress line, each unfinished session receives at most
+    `ceiling_tok_s` more output tokens per second until `deadline_s`. A finished session
+    receives none. session_runner's own clock starts after the harness starts the
+    process, so `deadline_s - elapsed_s` overstates, never understates, the time left.
+    If even this cannot reach the workload's total output tokens, the run cannot pass
+    and waiting for the kill only costs time.
+    """
+
+    def __init__(self, deadline_s: float, ceiling_tok_s: float, label: str) -> None:
+        self.deadline_s = deadline_s
+        self.ceiling_tok_s = ceiling_tok_s
+        self.label = label
+        self.total_output_tokens: int | None = None
+
+    def feed(self, line: str) -> str | None:
+        """None while the run can still finish in time; otherwise why it cannot."""
+        if (workload := _WORKLOAD_LINE.search(line)) is not None:
+            self.total_output_tokens = int(workload["output_tokens"])
+            return None
+        progress = Progress.parse(line)
+        if progress is None or self.total_output_tokens is None:
+            return None
+        return self.verdict(progress, self.total_output_tokens)
+
+    def verdict(self, p: Progress, total: int) -> str | None:
+        left_s = max(0.0, self.deadline_s - p.elapsed_s)
+        unfinished = p.sessions - p.sessions_done
+        reachable = p.output_tokens + unfinished * self.ceiling_tok_s * left_s
+        if reachable >= total:
+            return None
+        achieved = p.output_tokens / p.elapsed_s if p.elapsed_s > 0 else 0.0
+        return (
+            f"{self.label} stopped at {p.elapsed_s:.0f}s: it cannot finish within the "
+            f"{self.deadline_s:.0f}s limit. {p.rounds_done}/{p.rounds} rounds, "
+            f"{p.sessions_done}/{p.sessions} sessions, {p.output_tokens} output tokens, "
+            f"{achieved:.1f} output tokens/s achieved; finishing {total} output tokens needs "
+            f"{total / self.deadline_s:.1f} output tokens/s on average (startup included). "
+            f"The remaining {total - p.output_tokens} tokens in the remaining {left_s:.0f}s "
+            f"need {(total - p.output_tokens) / max(left_s, 1e-9):.0f} output tokens/s, above "
+            f"the {unfinished * self.ceiling_tok_s:.0f} that {unfinished} unfinished sessions "
+            f"can receive at {self.ceiling_tok_s:.0f} tokens/s each (one token per session "
+            "per decode pass at the MI210's peak HBM bandwidth; see "
+            "WARMUP_SESSION_CEILING_TOK_S in benchmark/run.py)."
+        )
+
+
+def partial_measurement(stderr: str, deadline_s: float, label: str) -> dict[str, Any] | None:
+    """What a stopped sub-run measured, from session_runner's last progress line.
+
+    The measured value is its output rate so far (output tokens over elapsed
+    seconds), the target is the rate that finishes the workload within
+    `deadline_s` (absent without the workload header), and progress is rounds
+    completed out of rounds required. Without a progress line nothing was
+    measured, so the result is None rather than an estimate.
+    """
+    progress_lines = list(_PROGRESS_LINE.finditer(stderr))
+    if not progress_lines:
+        return None
+    progress = Progress.parse(progress_lines[-1].group(0))
+    if progress is None or progress.elapsed_s <= 0 or progress.rounds <= 0:
+        return None
+    partial: dict[str, Any] = {
+        "name": f"{label.split()[0]}_output_tokens_per_s",
+        "value": progress.output_tokens / progress.elapsed_s,
+        "direction": "max",
+        "unit": "output tokens/s",
+        "progress": {
+            "completed": progress.rounds_done,
+            "required": progress.rounds,
+            "unit": "rounds",
+        },
+    }
+    if (workload := _WORKLOAD_LINE.search(stderr)) is not None:
+        partial["target"] = int(workload["output_tokens"]) / deadline_s
+    return partial
+
+
+def describe_timeout(
+    command: list[str], timeout_s: float, partial_stderr: str | bytes | None, label: str
+) -> str:
+    """The message for a killed `session_runner`: progress facts first, command last.
+
+    `session_runner` writes its request log (1 MiB buffer), timeline (Parquet
+    footer) and summary only at exit and handles no signals, so how far a killed
+    run got is not observable from disk. It does print to stderr: a workload
+    header at start and a `progress |` line every 5 s. This reports the last
+    progress line with the achieved and the needed output rate, falls back to the
+    job size and needed rate when no progress line was printed, and to "unknown"
+    when not even the header was.
+    """
+    if isinstance(partial_stderr, bytes):
+        partial_stderr = partial_stderr.decode(errors="replace")
+    stderr = partial_stderr or ""
+    workload = _WORKLOAD_LINE.search(stderr)
+    progress_lines = list(_PROGRESS_LINE.finditer(stderr))
+    if progress_lines:
+        progress = progress_lines[-1]
+        elapsed = float(progress["elapsed"])
+        tokens = int(progress["tokens"])
+        achieved = tokens / elapsed if elapsed > 0 else 0.0
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed. Last progress line "
+            f"(at {elapsed:.0f}s): {progress['rounds_done']}/{progress['rounds']} rounds, "
+            f"{progress['sessions_done']}/{progress['sessions']} sessions, {tokens} output "
+            f"tokens, {achieved:.1f} output tokens/s achieved."
+        )
+        if workload is not None:
+            total = int(workload["output_tokens"])
+            headline += (
+                f" Finishing {total} output tokens within the {timeout_s:.0f}s limit "
+                f"needs {total / timeout_s:.1f} output tokens/s on average (startup included)."
+            )
+    elif workload is not None:
+        tokens = int(workload["output_tokens"])
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed before finishing "
+            f"{workload['rounds']} rounds ({workload['sessions']} sessions, {tokens} output "
+            f"tokens). It needs an average of at least {tokens / timeout_s:.1f} output "
+            f"tokens/s over the whole {timeout_s:.0f}s limit (startup included) to finish. "
+            "How many rounds completed is unknown: session_runner printed no progress line "
+            "before the kill (session_runner before request-factory 89dce4a prints none)."
+        )
+    else:
+        headline = (
+            f"{label} timed out after {timeout_s:.0f}s and was killed. "
+            "Progress is unknown: session_runner printed no workload header before the kill."
+        )
+    return f"{headline}\ncommand: {' '.join(command)}"
+
+
 def run_session_runner(
     engine: Path,
     argv: list[str],
     *,
     timeout_s: float,
+    label: str = "session_runner",
+    watch: Callable[[str], str | None] | None = None,
 ) -> SessionRunnerResult:
     """Invoke `session_runner` with `argv` and parse its `--summary-path` output.
 
     Translates a missing binary, a timeout, and a nonzero exit into
     `HarnessError` at the call site (the caller decides which are fatal, since
     a preflight failure and a genuine request failure warrant different
-    messages); this function only reports what happened.
+    messages); this function only reports what happened. `watch` sees each
+    stderr line as it is printed; a non-None return kills the run and becomes
+    the `HarnessError` message.
     """
     summary_path: Path | None = None
     if "--summary-path" in argv:
@@ -182,28 +429,59 @@ def run_session_runner(
 
     command = [str(engine), *argv]
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
+        proc = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace"
         )
     except FileNotFoundError as exc:
         raise HarnessError(f"session_runner not found at {engine}") from exc
-    except subprocess.TimeoutExpired as exc:
+
+    stdout: list[str] = []
+    stderr: list[str] = []
+    stopped: list[str] = []
+
+    def read_stderr() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr.append(line)
+            if watch is not None and not stopped and (why := watch(line)) is not None:
+                stopped.append(why)
+                proc.kill()
+
+    def read_stdout() -> None:
+        assert proc.stdout is not None
+        stdout.extend(proc.stdout)
+
+    readers = [threading.Thread(target=f, daemon=True) for f in (read_stderr, read_stdout)]
+    for reader in readers:
+        reader.start()
+    try:
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for reader in readers:
+            reader.join()
+        if not stopped:
+            raise HarnessError(
+                describe_timeout(command, timeout_s, "".join(stderr), label),
+                partial_measurement("".join(stderr), timeout_s, label),
+            ) from None
+    for reader in readers:
+        reader.join()
+    if stopped:
         raise HarnessError(
-            f"session_runner timed out after {timeout_s:.0f}s: {' '.join(command)}"
-        ) from exc
+            f"{stopped[0]}\ncommand: {' '.join(command)}",
+            partial_measurement("".join(stderr), timeout_s, label),
+        )
 
     summary: dict[str, Any] | None = None
     if summary_path is not None and summary_path.exists():
         summary = json.loads(summary_path.read_text())
 
     return SessionRunnerResult(
-        returncode=completed.returncode,
-        stdout_tail=completed.stdout[-4000:],
-        stderr_tail=completed.stderr[-4000:],
+        returncode=proc.returncode,
+        stdout_tail="".join(stdout)[-4000:],
+        stderr_tail="".join(stderr)[-4000:],
         summary=summary,
     )
 
@@ -415,7 +693,15 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         summary_path=work_dir / f"{mode}_warmup_summary.json",
         timeline_path=work_dir / f"{mode}_warmup_timeline.parquet",
     )
-    warmup = run_session_runner(args.request_factory_engine, warmup_argv, timeout_s=180.0)
+    warmup = run_session_runner(
+        args.request_factory_engine,
+        warmup_argv,
+        timeout_s=WARMUP_TIMEOUT_S,
+        label="warmup sub-run",
+        watch=WarmupWatch(
+            WARMUP_TIMEOUT_S, WARMUP_SESSION_CEILING_TOK_S, label="warmup sub-run"
+        ).feed,
+    )
     if warmup.returncode != 0:
         raise HarnessError(
             f"{mode}: warmup sub-run failed (this is where a prefix-cache-preflight "
@@ -443,6 +729,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         args.request_factory_engine,
         measured_argv,
         timeout_s=args.timeout_s,
+        label="measured sub-run",
     )
     wall_s = time.monotonic() - start
     if measured.returncode != 0:
@@ -585,6 +872,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--output-json", type=Path, default=None)
     parser.add_argument(
+        "--vs-output",
+        type=Path,
+        default=None,
+        help="Write the evaluator result protocol record stream here (VibeSys passes it).",
+    )
+    parser.add_argument(
         "--request-factory-engine",
         type=Path,
         required=True,
@@ -613,6 +906,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    report = ProtocolReport(args.vs_output)
     try:
         if args.mode == "smoke":
             result = run_smoke(args, resolve_trace(args, args.mode))
@@ -621,7 +915,12 @@ def main(argv: list[str] | None = None) -> int:
             result = run_replay(args, paths, args.mode)
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        report.fail(str(exc), exc.partial)
         return 1
+    if args.mode == "smoke":
+        report.fail("smoke mode validates plumbing only and measures no throughput", None)
+    else:
+        report.emit(result[HEADLINE_METRIC])
 
     text = json.dumps(result, indent=2)
     print(text)

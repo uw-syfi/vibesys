@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
+from vs_agent.api import validate_env_names
 from vs_runtime.api import AgentRoleId
 from vs_runtime.api.infrastructure import BundledResources
 
@@ -133,6 +134,15 @@ class AgentCfg(_Strict):
             "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
         ),
     )
+    env_passthrough: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Launcher environment variable names an agent session inherits beyond "
+            "VibeSys's allowlist (PATH, HOME, locale, TERM, proxy and CA variables, "
+            "and the selected provider's credential variables)."
+        ),
+    )
+
     roles: dict[AgentRoleId, AgentRoleCfg] = Field(
         default_factory=dict,
         description=(
@@ -140,6 +150,15 @@ class AgentCfg(_Strict):
             "Omitted roles inherit [model] and [thinking]."
         ),
     )
+
+    @field_validator("env_passthrough")
+    @classmethod
+    def _env_passthrough_names(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            return validate_env_names(names)
+        except ValueError as exc:
+            message = f"agent.env_passthrough: {exc}"
+            raise ValueError(message) from exc
 
 
 class RepositoryCfg(_Strict):

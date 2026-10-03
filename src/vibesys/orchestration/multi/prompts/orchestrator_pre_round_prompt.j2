@@ -56,11 +56,11 @@ profile costs one round of unmeasured planning, while profiling a candidate
 that does not run spends an expensive turn on a summary with no measurement
 behind it.
 {% endif %}
-{% if regression_info %}
+{% if regression_entry %}
 The latest progress entry records a regression or terminal-workspace notice;
 read it before deciding whether the current tree is meaningful to profile.
 {% endif %}
-{% if exhaustion_info %}
+{% if exhaustion_entry %}
 The latest progress entry records exhausted-review feedback; read it before
 deciding whether profiling can unblock that concrete failure.
 {% endif %}

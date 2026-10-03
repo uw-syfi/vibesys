@@ -26,10 +26,13 @@ Architecture:
   never branches on a concrete sandbox or backend name outside the wiring code.
   Backends emit semantic event data; formatting, colors, and layout belong to
   frontends.
+- Follow the package layout and placement rule in [architecture.md](docs/contributing/architecture.md).
 - A new cross-module import needs its `tach.toml` edge in the same PR. Never add
   an upward edge or a cycle; prefer removing edges.
 - Open the `.vibesys` layout through `vs-project`'s `Project`; do not rebuild
   paths.
+- Agent prompts are rendered from templates: Python passes data, never
+  concatenates or appends prompt text.
 
 Data and validation:
 
@@ -44,12 +47,15 @@ Data and validation:
 Checks:
 
 - A bug fix needs a regression test that fails at the merge base and passes at
-  the head.
+  the head. Sweep for other places with the same flaw, and make the test cover
+  the input space where practical, not only the reported case.
 - Treat lint suppressions as explicit opt-outs. Add one only after considering
   reasonable lint-compliant alternatives, and explain in the source comment why
   each would make the design more hacky than keeping the current code.
-- Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and the narrowest
-  relevant `uv run pytest` target before handing work back. Size limits and
+- While iterating, run `./scripts/check_format.sh`, `./scripts/check_lint.sh`,
+  and the narrowest relevant `uv run pytest` target. Before opening or updating
+  a PR, run `./scripts/check_ci.sh`: it runs CI's Python checks from
+  `.repoctl/checks.toml` and stops at the first failure. Size limits and
   lint-waiver mechanics are in
   [`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md).
 

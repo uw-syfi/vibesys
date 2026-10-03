@@ -16,6 +16,7 @@ qwen3.5-9b-mi210/
 ├── config/platforms/mi210.toml  # accelerator facts and capacity budget
 ├── reference/                # minimal PyTorch engine + OpenAI-compatible server
 ├── accuracy_checker/         # HF-golden gate (golden.json checked in)
+├── cpu_check/                # 10-20 s tiny-model engine check on CPU: cpu_check/run.sh
 └── benchmark/
     ├── run.py                # --mode {smoke,quick,full,holdout}, wraps session_runner
     ├── test_run.py           # unit tests: mode/trace resolution, digest + disjointness checks
@@ -46,11 +47,17 @@ HF_HUB_OFFLINE=1 uv run python -m reference.server --model Qwen/Qwen3.5-9B --por
 # accuracy gate against a running server (exit 0 = PASS)
 uv run python accuracy_checker/checker.py --base-url http://127.0.0.1:8000
 
-# benchmark (session_runner from request-factory rev 118da613)
+# benchmark (session_runner from request-factory rev 89dce4a6)
 python3 benchmark/run.py --mode quick \
   --request-factory-engine /path/to/session_runner \
   --base-url http://127.0.0.1:8000/v1 --output-json result.json
 ```
+
+VibeSys adds `--vs-output <path>` and reads the evaluator result protocol
+record stream written there: the `output_tokens_per_s` row on success, or an
+`error` record on failure. When the warmup is stopped or killed after a
+progress line, that record's `partial` field holds the achieved warmup output
+rate, the rate that finishes within 180 s, and rounds completed out of 72.
 
 `pyproject.toml` pulls torch from the PyTorch ROCm 6.4 wheel index on Linux.
 See [`reference/README.md`](reference/README.md) and
@@ -133,9 +140,12 @@ order of magnitude.
 ## Prefix-cache preflight
 
 For any `text-generation-session-execution-v2` trace, `session_runner` runs
-an unconditional preflight: it sends one probe prompt twice and requires the
-second response to report `cached_tokens > 0`. No flag disables it for
-session traces. Consequences:
+an unconditional preflight: it sends one probe prompt of 8192 tokens twice in
+a row (streamed, `max_tokens` 1, `temperature` 0) and requires the final usage
+chunk of the second response to report `cached_tokens > 0`. A hit on a chained
+round that extends an earlier prompt plus its output does not satisfy it.
+`cpu_check/run.sh --expect-cache-hits` replays this probe on the tiny model.
+No flag disables it for session traces. Consequences:
 
 - `smoke` never reaches the preflight. It runs `session_runner --dry-run`
   (static trace validation, no server contact) plus direct `GET /health`,
@@ -182,6 +192,19 @@ comparable to numbers recorded after it, in either direction: a candidate
 whose advantage was concentrated in the pre-cached first 12 sessions would
 look relatively worse post-fix, and vice versa. The task ledger notes which
 side of this change a given entry falls on.
+
+**Early stop.** The warmup must finish within 180 s (`WARMUP_TIMEOUT_S`).
+`run.py` reads `session_runner`'s progress line (every 5 s: elapsed time,
+rounds, finished sessions, output tokens) and stops the warmup as soon as the
+output tokens still missing cannot arrive in the time left even if every
+unfinished session received 170 output tokens/s
+(`WARMUP_SESSION_CEILING_TOK_S`). That ceiling is one token per session per
+decode pass, with each pass reading at least half of the 19.3 GB of weights
+at the MI210's 1.64 TB/s peak HBM bandwidth. A run that can still finish is
+never stopped. The stop message has the same numbers as the timeout message
+(rounds, sessions, tokens, achieved and needed output tokens/s). A warmup at
+r13's 10 to 17 output tokens/s stops about 7 s before the 180 s kill, so the
+early stop saves little; finding the rate gap before submitting saves more.
 
 ## Held-out evaluation
 

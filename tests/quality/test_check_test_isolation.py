@@ -138,6 +138,71 @@ def test_sleep_rule_allows_only_a_scheduler_yield() -> None:
     assert counts_for(source) == {"sleep": 4}
 
 
+def test_timeout_verdict_rule_counts_an_expiry_consumed_as_a_value() -> None:
+    source = """
+        import asyncio
+        import queue
+        import socket
+        import threading
+        import time
+
+        import pytest
+
+        def test_a():
+            ev = threading.Event()
+            assert not ev.wait(timeout=0.05)
+            assert ev.wait(timeout=0.05) is False
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                pass
+            assert time.monotonic() - deadline < 2
+            with pytest.raises(queue.Empty):
+                queue.Queue().get(timeout=0.1)
+            sock = socket.socket()
+            try:
+                sock.settimeout(0.1)
+            except TimeoutError:
+                pass
+
+        def _reaped(ev):
+            return ev.wait(timeout=30)
+
+        async def test_b(task):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(task, timeout=0.5)
+    """
+    # Two negated waits, a deadline loop, an elapsed-time assertion, an
+    # expected `queue.Empty`, an armed socket deadline whose expiry is caught,
+    # a returned wait, and an expected `asyncio.wait_for` expiry.
+    assert counts_for(source) == {"timeout_verdict": 8}
+
+
+def test_timeout_verdict_rule_allows_a_deadlock_guard() -> None:
+    source = """
+        import asyncio
+        import queue
+        import socket
+        import threading
+        import time
+
+        def test_a():
+            ev = threading.Event()
+            assert ev.wait(timeout=2), "the fake never signalled"
+            ev.wait(timeout=2)
+            if not ev.wait(timeout=2):
+                raise AssertionError("never signalled")
+            started = time.monotonic()
+            queue.Queue().get(timeout=2)
+            socket.socket().settimeout(2)
+            return started
+
+        async def test_b(task, bus):
+            assert await bus.recv(timeout=None) == 1
+            await asyncio.wait_for(task, timeout=2)
+    """
+    assert counts_for(source) == {}
+
+
 def test_private_import_rule_applies_only_to_library_tests() -> None:
     source = """
         import vs_x
@@ -315,6 +380,40 @@ def test_write_shrinks_and_drops_stale_entries() -> None:
 
         assert run(root, "--write")[0] == EXIT_OK
         assert read_baseline(root) == {("tests/test_a.py", "patch"): 1}
+
+
+def budget_and_guard_source(budgets: int, guards: int) -> str:
+    """Build a module with ``budgets`` negated waits and ``guards`` plain ones."""
+    lines = ["import threading", "", "def test_a():", "    ev = threading.Event()"]
+    lines += [f"    assert not ev.wait(timeout=0.0{index + 1})" for index in range(budgets)]
+    lines += [f"    assert ev.wait(timeout={index + 1})" for index in range(guards)]
+    lines.append("    pass")
+    return "\n".join(lines) + "\n"
+
+
+@CHEAP
+@given(budgets=st.integers(0, 8), guards=st.integers(0, 8))
+def test_timeout_verdict_count_ignores_however_many_guards_there_are(
+    budgets: int, guards: int
+) -> None:
+    source = budget_and_guard_source(budgets, guards)
+    assert counts_for(source).get("timeout_verdict", 0) == budgets
+
+
+def test_timeout_verdict_fails_above_its_baseline_and_auto_passes_below() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_repo(root, {"tests/test_a.py": budget_and_guard_source(2, 3)})
+
+        write_baseline(root, [("tests/test_a.py", "timeout_verdict", 1)])
+        code, output = run(root)
+        assert code == EXIT_VIOLATIONS
+        assert "tests/test_a.py: timeout_verdict x2 > 1 (baseline)" in output
+
+        write_baseline(root, [("tests/test_a.py", "timeout_verdict", 5)])
+        code, output = run(root)
+        assert code == EXIT_OK
+        assert "tests/test_a.py: timeout_verdict: 5 -> 2" in output
 
 
 def flagged_and_exempt_source(flagged: int, exempt: int) -> str:

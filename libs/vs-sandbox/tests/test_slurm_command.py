@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
+import signal
+import subprocess
+import sys
+import threading
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
@@ -10,6 +16,7 @@ from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_pla
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.slurm_command import main
+from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -96,6 +103,26 @@ def _write_plan(
             ),
             id="benchmark-restricts-output-path",
         ),
+        *(
+            pytest.param(
+                (
+                    "benchmark",
+                    ("--output", path),
+                    {
+                        "benchmark_command": ("run-benchmark",),
+                        "benchmark_output_argument": "--output",
+                    },
+                    "benchmark output path is outside the framework namespace",
+                ),
+                id=f"benchmark-rejects-{path}",
+            )
+            for path in (
+                "/tmp/result.json",  # noqa: S108  # lint-waiver: LW-147672 [S108]; rejected path under test.
+                "/etc/vibesys-framework-benchmark-0.json",
+                "/tmp/x/vibesys-framework-benchmark-0.json",  # noqa: S108  # lint-waiver: LW-954368 [S108]; rejected path under test.
+                "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-805374 [S108]; rejected path under test.
+            )
+        ),
     ],
 )
 def test_cli_rejects_invocations_that_differ_from_the_plan(
@@ -152,3 +179,112 @@ def test_cli_advances_valid_gate_invocations_to_operator_config_validation(
 
     assert exit_code == 1
     assert "invalid settings: name, remote_workspace_root, transport" in capsys.readouterr().err
+
+
+def test_cli_accepts_the_framework_benchmark_transport_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The trusted framework benchmark writes its result to this fixed /tmp
+    # transport path (one nonce per run); the Slurm gate must accept it.
+    plan_path = _write_plan(
+        tmp_path,
+        benchmark_command=("run-benchmark",),
+        benchmark_output_argument="--output",
+    )
+
+    exit_code = main(
+        (
+            "--plan",
+            str(plan_path),
+            "benchmark",
+            "--output",
+            "/tmp/vibesys-framework-benchmark-0123456789abcdef0123456789abcdef.json",  # noqa: S108  # lint-waiver: LW-728881 [S108]; the fixed framework transport path under test.
+        )
+    )
+
+    assert exit_code == 1
+    assert "invalid settings: name, remote_workspace_root, transport" in capsys.readouterr().err
+
+
+def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    os.mkfifo(state / SUBMITTED_FILE)
+    config_path = tmp_path / "slurm.toml"
+    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+    # A one-hour poll interval: only a prompt cancellation can reach scancel.
+    config_path.write_text(
+        "[slurm]\n"
+        'name = "fake"\n'
+        'remote_workspace_root = "/remote/runs"\n'
+        "poll_interval_seconds = 3600.0\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+    plan_path = tmp_path / "evaluation-plan.json"
+    write_slurm_evaluation_plan(
+        plan_path,
+        SlurmEvaluationPlan(config_path=config_path, benchmark_command=("run-benchmark",)),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    gate = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731005 [S603]; the test runs the real gate CLI with a fixed argv.
+        # > Calling main() in-process cannot receive a real SIGTERM without
+        # > signalling the test runner itself.
+        [sys.executable, "-m", "vs_sandbox.slurm_command", "--plan", str(plan_path), "benchmark"],
+        cwd=workspace,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert (state / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+
+    gate.send_signal(signal.SIGTERM)
+    _, stderr = gate.communicate()
+
+    assert gate.returncode == 128 + signal.SIGTERM, stderr
+    assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
+
+
+def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    os.mkfifo(state / SUBMITTED_FILE)
+    config_path = tmp_path / "slurm.toml"
+    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+    # A one-hour poll interval: only a prompt cancellation can reach scancel.
+    config_path.write_text(
+        "[slurm]\n"
+        'name = "fake"\n'
+        'remote_workspace_root = "/remote/runs"\n'
+        "poll_interval_seconds = 3600.0\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+    plan_path = tmp_path / "evaluation-plan.json"
+    write_slurm_evaluation_plan(
+        plan_path,
+        SlurmEvaluationPlan(config_path=config_path, benchmark_command=("run-benchmark",)),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    main_thread = threading.main_thread().ident
+    assert main_thread is not None
+
+    def terminate_once_submitted() -> None:
+        assert (state / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+        # main() has its SIGTERM handler installed until its gate finishes.
+        signal.pthread_kill(main_thread, signal.SIGTERM)
+
+    signaller = threading.Thread(target=terminate_once_submitted)
+    signaller.start()
+    exit_code = main(("--plan", str(plan_path), "benchmark"))
+    signaller.join()
+
+    assert exit_code == 128 + signal.SIGTERM
+    assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
+    assert f"Slurm evaluator cancelled: Slurm job {JOB_ID} was cancelled" in capsys.readouterr().err

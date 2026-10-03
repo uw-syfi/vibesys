@@ -13,6 +13,12 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from vibesys.orchestration.issue_queue.models import IssueToolPolicy
+from vibesys.orchestration.issue_queue.prompts import (
+    create_issue_result,
+    invalid_status_result,
+    issue_list_result,
+    issue_result,
+)
 from vs_issue_tracker.api import (
     CreateIssuePolicy,
     IssueStatus,
@@ -20,8 +26,6 @@ from vs_issue_tracker.api import (
     IssueTrackerConfig,
     IssueType,
     create_issue_under_policy,
-    format_issue_full,
-    format_issue_short,
     open_issue_tracker,
 )
 
@@ -56,21 +60,18 @@ def build_server(store_path: Path, policy_path: Path, tracker_config_path: Path)
         try:
             selected = IssueStatus(status) if status else None
         except ValueError:
-            return f"error: invalid status {status!r}"
-        issues = board().list(status=selected)
-        return "\n".join(format_issue_short(issue) for issue in issues) or "(no issues)"
+            return invalid_status_result(status or "")
+        return issue_list_result(board().list(status=selected), searched=False)
 
     @server.tool()
     def get_issue(issue_id: int) -> str:
         """Return the complete issue with its history."""
-        issue = board().get(issue_id)
-        return format_issue_full(issue) if issue is not None else f"(no issue #{issue_id})"
+        return issue_result(issue_id, board().get(issue_id))
 
     @server.tool()
     def search_issues(query: str) -> str:
         """Find issues containing every comma-separated, case-insensitive term."""
-        issues = board().search(query)
-        return "\n".join(format_issue_short(issue) for issue in issues) or "(no matches)"
+        return issue_list_result(board().search(query), searched=True)
 
     @server.tool()
     def create_issue(
@@ -79,14 +80,15 @@ def build_server(store_path: Path, policy_path: Path, tracker_config_path: Path)
         description: str,
     ) -> str:
         """Create an issue when the current turn policy permits it."""
-        _, message = create_issue_under_policy(
-            board(),
-            type_str=type,
-            title=title,
-            description=description,
-            policy=_policy(policy_path),
+        return create_issue_result(
+            create_issue_under_policy(
+                board(),
+                type_str=type,
+                title=title,
+                description=description,
+                policy=_policy(policy_path),
+            )
         )
-        return message
 
     return server
 

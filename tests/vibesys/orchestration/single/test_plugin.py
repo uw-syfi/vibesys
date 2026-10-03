@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.hypothesis import OrchestratorPlan
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.models import (
@@ -615,3 +615,77 @@ def test_unexecuted_input_benchmark_with_feedback_warns(tmp_path: Path) -> None:
 
     assert status is RunStatus.SUCCEEDED
     assert any("provisioning failed" in call.message for call in run.observations.calls)
+
+
+_NOTICE_HEADINGS = {
+    "regression or terminal-workspace notice": "Regression or terminal-workspace notice",
+    "exhausted-review feedback": "Exhausted-review feedback",
+}
+_FAILED_ROUND = _response(verdict=Verdict.FAIL, feedback="boundary unchecked")
+
+
+@pytest.mark.parametrize(
+    ("earlier_rounds", "expected_detail"),
+    [
+        pytest.param((_response(),), None, id="passed"),
+        # The failed hypothesis stays active for two continuation rounds before
+        # the designer plans again.
+        pytest.param(
+            (_FAILED_ROUND, _FAILED_ROUND, _FAILED_ROUND),
+            "did not pass after 1 attempts. Last judge feedback: boundary unchecked",
+            id="exhausted-review",
+        ),
+    ],
+)
+def test_designer_prompt_points_at_notices_the_progress_entry_contains(
+    tmp_path: Path,
+    earlier_rounds: tuple[SingleAgentRoundResponse, ...],
+    expected_detail: str | None,
+) -> None:
+    script = _Script(_plan("H-01"), *earlier_rounds, _plan("H-02"), _response())
+    final_round = len(earlier_rounds) + 1
+
+    status, _ = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=final_round, max_retries_per_round=1),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    entry = (tmp_path / "progress" / f"round-{final_round:04d}.md").read_text()
+    designer_prompts = [message for role, _, message in script.calls if role == DESIGNER.id]
+    assert len(designer_prompts) == 2
+    flat = " ".join(designer_prompts[-1].split())
+    for pointer, heading in _NOTICE_HEADINGS.items():
+        assert (pointer in flat) == (f"## Round {final_round}: {heading}" in entry)
+    if expected_detail is None:
+        assert not any(heading in entry for heading in _NOTICE_HEADINGS.values())
+    else:
+        assert expected_detail in entry
+        assert expected_detail not in flat
+
+
+_PROFILE_POINTER = "fresh profiler result is recorded in the current progress entry"
+
+
+def test_designer_prompt_points_at_profile_evidence_the_progress_entry_contains(
+    tmp_path: Path,
+) -> None:
+    script = _Script(
+        _plan("H-01"),
+        _response(profile_analysis="Decode dominates at 61% of wall time."),
+        _plan("H-02"),
+        _response(),
+    )
+
+    status, _ = _run(tmp_path, script, options=_options(max_rounds=2, max_retries_per_round=1))
+
+    assert status is RunStatus.SUCCEEDED
+    designer_prompts = [message for role, _, message in script.calls if role == DESIGNER.id]
+    first, second = (" ".join(prompt.split()) for prompt in designer_prompts)
+    entry = (tmp_path / "progress" / "round-0002.md").read_text()
+    assert _PROFILE_POINTER not in first
+    assert _PROFILE_POINTER in second
+    assert (
+        "## Round 2: Profiler summary\n- analysis: Decode dominates at 61% of wall time." in entry
+    )

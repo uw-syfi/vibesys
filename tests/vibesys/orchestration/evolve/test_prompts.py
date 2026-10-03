@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration.evolve.models import (
     CandidateJudgeContext,
     CandidateProfilerContext,
@@ -174,7 +174,7 @@ def _render_prompt(case: _Case, role: str) -> str:
                 domain_profiler=_domain_section(case, DomainRole.PROFILER),
                 modality=case.modality,
                 objective=case.objective,
-                pareto_objectives_addendum="",
+                objectives=[],
                 profile_execution="local",
                 profile_focus=("Measure the headline metric and identify the dominant bottleneck."),
                 profiler_mcp_name=definition.mcp_name,

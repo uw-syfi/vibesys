@@ -3,53 +3,60 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.hypothesis import (
+    HypothesisSearch,
+    HypothesisStrategy,
+    OrchestratorPlan,
+    normalize_hypothesis_title,
+)
+from vibesys.hypothesis import transitions as hypothesis_transitions
+from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
+from vibesys.orchestration.dynamic.input_gate import InputGate
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
+    DynamicProfile,
     DynamicState,
     DynamicWorkstream,
-    EvaluationResult,
-    EvidenceReference,
-    ImplementerResult,
+    ImplementPortfolioPlan,
+    PlannedWorkstream,
     PortfolioPlan,
-    ReviewResult,
+    ProfilePlan,
     WorkstreamPhase,
     WorkstreamPlan,
+    planned_id,
 )
+from vibesys.orchestration.dynamic.profiles import Profiles
 from vibesys.orchestration.dynamic.prompts import (
-    render_implementation,
     render_portfolio,
-    render_review,
+    render_portfolio_correction,
 )
-from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
-from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
-from vibesys.orchestration.metrics import (
-    FrameworkBenchmarkOutcome,
-    Measurement,
-    MetricComparison,
+from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
+from vibesys.orchestration.dynamic.workstream import (
+    DynamicAttemptError,
+    Workstreams,
+    prompt_context,
+    workstream_index,
 )
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
+from vibesys.orchestration.structured_turn import structured_turn
+from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
-    BenchmarkEvaluation,
-    BenchmarkObjective,
-    MetricDirection,
     Run,
     RunStatus,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping
 
-    from vs_runtime.api import CandidateWorkspace
+    from vibesys.hypothesis import HypothesisStrategyUpdate
 
 
-_READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
 _RECOVERABLE_PHASES = frozenset(
     {
         WorkstreamPhase.PENDING,
@@ -59,21 +66,14 @@ _RECOVERABLE_PHASES = frozenset(
         WorkstreamPhase.EVALUATED,
     }
 )
-_TERMINAL_OUTCOMES = frozenset(
-    {
-        HypothesisOutcome.NOMINATED,
-        HypothesisOutcome.SUPPORTED,
-        HypothesisOutcome.DISPROVEN,
-        HypothesisOutcome.IMPLEMENTATION_FAILED,
-        HypothesisOutcome.INCONCLUSIVE,
-        HypothesisOutcome.BLOCKED,
-    }
-)
-_MAX_HISTORY_ROWS = 16
-_MAX_HISTORY_METRICS = 8
-_MAX_HISTORY_REVISION_CHARS = 256
-_MAX_HISTORY_METRIC_NAME_CHARS = 128
-_MAX_HISTORY_METRIC_UNIT_CHARS = 64
+
+
+class DynamicPlanningError(RuntimeError):
+    """The planner scheduled no valid workstream after its correction, with none running."""
+
+    def __init__(self, error: Exception | None) -> None:
+        """Name the validation error the correction did not fix."""
+        super().__init__(f"the planner scheduled no valid workstream after correction: {error}")
 
 
 class DynamicPlanError(ValueError):
@@ -95,25 +95,126 @@ class DynamicPlanError(ValueError):
         return cls(f"evaluated hypothesis {hypothesis_id!r} is already terminal")
 
     @classmethod
-    def incomplete_checkpoint(
-        cls,
-        hypothesis_id: str,
-        phase: WorkstreamPhase,
-    ) -> DynamicPlanError:
-        """Reject a post-implementation phase without its retained result."""
+    def in_flight_continuation(cls, hypothesis_id: str) -> DynamicPlanError:
+        """Reject scheduling a hypothesis whose workstream is still running."""
+        return cls(f"hypothesis {hypothesis_id!r} is still in flight")
+
+    @classmethod
+    def unbuildable_parent(cls, position: int, plan: WorkstreamPlan) -> DynamicPlanError:
+        """Reject a parent that is not a listed buildable candidate."""
+        field = f"workstreams[{position}].parent_hypothesis_id"
+        if plan.continue_hypothesis:
+            return cls(f"{field}: a continued hypothesis builds on its own candidate; use null")
         return cls(
-            f"dynamic workstream {hypothesis_id!r} has phase {phase.value!r} "
-            "without a retained implementation"
+            f"{field}: {plan.parent_hypothesis_id!r} is not a buildable candidate; name one "
+            "listed under buildable candidates, or use null for the base revision"
+        )
+
+    @classmethod
+    def unreproducible_parent(
+        cls, position: int, hypothesis_id: str, reason: str, *, field: str = "parent_hypothesis_id"
+    ) -> DynamicPlanError:
+        """Reject a parent or profile target whose evaluated content cannot be reproduced."""
+        use = "built on" if field == "parent_hypothesis_id" else "profiled"
+        return cls(
+            f"workstreams[{position}].{field}: {hypothesis_id!r} cannot be "
+            f"{use} ({reason}); name a listed buildable candidate, or use null for the "
+            "base revision"
+        )
+
+    @classmethod
+    def profiling_unavailable(cls, position: int) -> DynamicPlanError:
+        """Reject a profile workstream in a run that cannot produce profile evidence."""
+        return cls(
+            f"workstreams[{position}].kind: this run cannot produce trusted profile evidence; "
+            "schedule only implement workstreams"
+        )
+
+    @classmethod
+    def unprofilable_target(cls, position: int, plan: ProfilePlan) -> DynamicPlanError:
+        """Reject a profile target that is not a listed buildable candidate."""
+        return cls(
+            f"workstreams[{position}].target_hypothesis_id: {plan.target_hypothesis_id!r} "
+            "is not a buildable candidate; name one listed under buildable candidates, or "
+            "use null for the base revision"
+        )
+
+    @classmethod
+    def reused_profile_id(cls, position: int, profile_id: str) -> DynamicPlanError:
+        """Reject a profile ID that a hypothesis or an earlier profile already uses."""
+        return cls(
+            f"workstreams[{position}].profile_id: {profile_id!r} was already used; choose a new ID"
+        )
+
+    @classmethod
+    def invalid_update(cls, error: ValueError) -> DynamicPlanError:
+        """Reject a strategy update the hypothesis search cannot apply."""
+        return cls(f"hypothesis_updates: {error}")
+
+    @classmethod
+    def in_flight_update(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
+        """Reject parking or abandoning a hypothesis whose workstream is still running."""
+        return cls(
+            f"hypothesis_updates[{position}].hypothesis_id: {hypothesis_id!r} is still "
+            "running; park or abandon it only after its workstream finishes"
+        )
+
+    @classmethod
+    def abandoned_continuation(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
+        """Reject continuing a hypothesis that is (or this plan makes) abandoned."""
+        return cls(
+            f"workstreams[{position}].hypothesis_id: {hypothesis_id!r} is abandoned and "
+            "cannot be continued"
+        )
+
+    @classmethod
+    def unchanged_blocked_task(cls, hypothesis_id: str) -> DynamicPlanError:
+        """Reject re-dispatching a blocked hypothesis with the task that blocked it."""
+        return cls(
+            f"hypothesis {hypothesis_id!r} was blocked; continue it only with a task that "
+            "removes the recorded blocker, or park or abandon it"
         )
 
 
-class DynamicAttemptError(RuntimeError):
-    """One isolated workstream attempt failed after its failure was persisted."""
+@dataclass(frozen=True, slots=True)
+class _ParentOptions:
+    """The parents one planning call may name, and the candidates withheld from it."""
 
-    @classmethod
-    def from_cause(cls, hypothesis_id: str, cause: BaseException) -> DynamicAttemptError:
-        """Describe the isolated slot and retain the original failure as the cause."""
-        return cls(f"{hypothesis_id}: {cause}")
+    offered: tuple[BuildableCandidate, ...]
+    # Hypothesis ID to why its candidate cannot be reproduced.
+    unreproducible: Mapping[str, str]
+
+    def check(self, position: int, plan: WorkstreamPlan) -> None:
+        """Reject ``plan``'s parent unless it is an offered candidate of a new hypothesis."""
+        chosen = plan.parent_hypothesis_id
+        if chosen is None:
+            return
+        if plan.continue_hypothesis:
+            raise DynamicPlanError.unbuildable_parent(position, plan)
+        if chosen in self.unreproducible:
+            raise DynamicPlanError.unreproducible_parent(
+                position, chosen, self.unreproducible[chosen]
+            )
+        if all(item.hypothesis_id != chosen for item in self.offered):
+            raise DynamicPlanError.unbuildable_parent(position, plan)
+
+    def check_target(self, position: int, plan: ProfilePlan) -> None:
+        """Reject ``plan``'s target unless it is an offered candidate or the base revision."""
+        chosen = plan.target_hypothesis_id
+        if chosen is None:
+            return
+        if chosen in self.unreproducible:
+            raise DynamicPlanError.unreproducible_parent(
+                position, chosen, self.unreproducible[chosen], field="target_hypothesis_id"
+            )
+        if all(item.hypothesis_id != chosen for item in self.offered):
+            raise DynamicPlanError.unprofilable_target(position, plan)
+
+    def revision_for(self, chosen: str | None, base: str) -> str:
+        """Return the revision of offered candidate ``chosen``, or ``base`` (checked already)."""
+        if chosen is None:
+            return base
+        return next(item.revision for item in self.offered if item.hypothesis_id == chosen)
 
 
 @dataclass(slots=True)
@@ -122,656 +223,560 @@ class _DynamicRun:
     options: DynamicOptions
     state: DynamicState
     _state_lock: asyncio.Lock
+    # Whether the run provisions a profiler and its evaluation executor
+    # produces profile evidence, asked once when the run opens.
+    _can_profile: bool
+    input_gate: InputGate = field(init=False)
+    rounds: Rounds = field(init=False)
+    workstreams: Workstreams = field(init=False)
+    profiles: Profiles = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.input_gate = InputGate(
+            self.run,
+            self.options,
+            self.state,
+            lock=self._state_lock,
+            commit=self._commit_labeled,
+        )
+        self.rounds = Rounds(
+            self.options,
+            self.state,
+            self.input_gate,
+            lock=self._state_lock,
+            commit=self._commit_labeled,
+        )
+        self.workstreams = Workstreams(
+            self.run,
+            self.options,
+            self.state,
+            self.rounds,
+            lock=self._state_lock,
+            commit=self._commit_labeled,
+        )
+        self.profiles = Profiles(
+            self.run, self.state, lock=self._state_lock, commit=self._commit_labeled
+        )
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
         """Restore the policy aggregate and complete an interrupted adoption."""
         state = await run.state.load(DynamicState) or DynamicState()
-        search = HypothesisSearch(_hypothesis_config(options))
+        search = HypothesisSearch(hypothesis_config(options))
         state.search = search.resume(state.search, options.metric_space)
-        dynamic = cls(run, options, state, asyncio.Lock())
+        can_profile = run.facts.profiler_id != "none" and await run.evaluation.can_profile()
+        dynamic = cls(run, options, state, asyncio.Lock(), can_profile)
         if state.adoption_pending:
             await dynamic._finish_adoption()
         return dynamic
 
     async def execute(self) -> RunStatus:
-        """Run bounded portfolio epochs and adopt the best trusted candidate."""
-        await self._measure_input_baseline()
-        while self.state.next_epoch <= self.options.max_rounds:
-            await self.run.control.checkpoint()
-            epoch = self.state.next_epoch
-            plans = self._recoverable_plans(epoch)
-            if not plans:
-                portfolio = await self._plan(epoch)
-                plans = portfolio.workstreams
-                await self._record_plans(epoch, portfolio)
-            await self._execute_bounded(plans, epoch)
-            async with self._state_lock:
-                self.state.next_epoch = epoch + 1
-                await self._commit(label=f"dynamic: close epoch {epoch}")
-        await self._select_and_adopt()
+        """Keep every slot busy within the workstream budget, then adopt the best.
+
+        A slot that frees is refilled by a planning call for the free slots
+        instead of idling until its slowest sibling finishes, and that call sees
+        the newest results. Work durably scheduled before a stop resumes first.
+        """
+        running: dict[asyncio.Task[None], PlannedWorkstream] = {}
+        try:
+            try:
+                await self._fill_slots(running)
+            except asyncio.CancelledError:
+                for task in running:
+                    task.cancel()
+                await asyncio.gather(*running, return_exceptions=True)
+                raise
+            except Exception:
+                # A stop lands at a refill checkpoint. Finish in-flight
+                # workstreams first so none of their agent work is lost; they
+                # persist their own phases, and resume settles any that failed.
+                await asyncio.gather(*running, return_exceptions=True)
+                raise
+            await self._select_and_adopt()
+        finally:
+            await self.input_gate.stop()
         return RunStatus.SUCCEEDED
 
-    async def _measure_input_baseline(self) -> None:
-        """Benchmark the input tree once, before epoch 1, as the root baseline."""
-        if (
-            not self.run.facts.benchmark_configured
-            or self.state.workstreams
-            or self.state.search.input_baseline is not None
-        ):
-            return
-        revision = self._root_revision()
-        benchmark = await self.run.evaluation.benchmark(
-            self.run.workspaces.root, objectives=self._objectives()
-        )
-        if not benchmark.executed and benchmark.feedback is None:
-            return
-        baseline = HypothesisSearch.input_baseline(revision, _framework_outcome(benchmark))
-        if baseline is None:
-            self.run.observations.warning(
-                "input benchmark produced no headline metric; candidates have no input baseline"
-                + (f": {benchmark.feedback}" if benchmark.feedback else "")
-            )
-            return
-        async with self._state_lock:
-            self.state.search = self.state.search.model_copy(
-                update={"input_baseline": baseline}, deep=True
-            )
-            await self._commit(label="dynamic: measure input baseline")
+    async def _fill_slots(self, running: dict[asyncio.Task[None], PlannedWorkstream]) -> None:
+        """Run workstreams until the budget is spent; ``running`` tracks live tasks."""
+        fatal: list[BaseException] = []
+        await self.run.control.checkpoint()
+        # Start before recovered work: a resume with no budget or no free slot
+        # never plans, and its candidates still need the input to beat.
+        self.input_gate.start()
+        for plan in self._recoverable_plans():
+            running[self._start(plan)] = plan
+        refill = True
+        while True:
+            free = min(self.options.max_in_flight - len(running), self._remaining_budget())
+            if refill and not fatal and free > 0:
+                in_flight = frozenset(planned_id(plan) for plan in running.values())
+                for plan in await self._schedule(free, in_flight):
+                    running[self._start(plan)] = plan
+            refill = False
+            if not running:
+                break
+            done, _ = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                plan = running.pop(task)
+                refill = True
+                if await self._settle(plan, task, fatal):
+                    running[self._start(plan)] = plan
+        if fatal:
+            raise fatal[0]
 
-    def _objectives(self) -> tuple[BenchmarkObjective, ...]:
-        return tuple(
-            BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
-            for item in self.options.metric_space.objectives
-        )
+    async def _schedule(
+        self, capacity: int, in_flight: frozenset[str]
+    ) -> tuple[PlannedWorkstream, ...]:
+        """Plan and durably record new workstreams for ``capacity`` free slots."""
+        await self.run.control.checkpoint()
+        self.input_gate.start()
+        call = self.state.next_planning_call
+        parents = await self._parent_options()
+        portfolio = await self._plan(capacity=capacity, in_flight=in_flight, parents=parents)
+        await self._record_plans(call, portfolio, parents)
+        return tuple(portfolio.workstreams)
 
-    def _capacity(self) -> int:
-        return self.options.max_in_flight if self.run.workspaces.supports_parallel_candidates else 1
+    def _start(self, plan: PlannedWorkstream) -> asyncio.Task[None]:
+        if isinstance(plan, ProfilePlan):
+            return asyncio.create_task(self.profiles.execute(plan))
+        return asyncio.create_task(self.workstreams.execute(plan))
 
-    async def _execute_bounded(
+    def _remaining_budget(self) -> int:
+        """Return how many more workstreams the run may schedule.
+
+        The budget bounds agent work: ``max_rounds * max_in_flight``
+        workstreams, each one round of the shared hypothesis search. A
+        continued hypothesis counts like a new one, because it runs its own
+        implementer turns with a fresh retry budget and records its own round;
+        not counting it would let a planner that keeps continuing run forever,
+        and would exceed the search's round limit. Sequences are unique and
+        increase with every scheduled workstream, so the largest one counts
+        the workstreams scheduled so far. A profile workstream shares the
+        sequence: it occupies a slot and an agent turn like any workstream,
+        except one that ended unsupported. That one ran no capture, only a
+        short profiler turn finding none possible, and it stops further
+        profiles, so refunding it costs at most the profiles already in
+        flight; charging it would let a run that cannot profile spend its
+        implement budget on nothing, as profiles alone once did.
+        """
+        total = self.options.max_rounds * self.options.max_in_flight
+        return total - self.state.scheduled() + self.state.unsupported_profiles()
+
+    async def _settle(
         self,
-        plans: Sequence[WorkstreamPlan],
-        epoch: int,
-    ) -> None:
-        """Execute every durable plan without exceeding current capacity."""
-        capacity = self._capacity()
-        pending = list(plans)
-        fatal_failures: list[BaseException] = []
-        while pending:
-            batch = pending[:capacity]
-            del pending[:capacity]
-            results = await asyncio.gather(
-                *(self._execute_workstream(plan, epoch) for plan in batch),
-                return_exceptions=True,
-            )
-            for plan, result in zip(batch, results, strict=True):
-                if isinstance(result, BaseException):
-                    self.run.observations.note(
-                        f"dynamic workstream {plan.hypothesis_id} failed: {result}"
-                    )
-                    item = self.state.workstreams[self._index(plan.hypothesis_id)]
-                    if not isinstance(result, DynamicAttemptError) or item.attempts == 0:
-                        fatal_failures.append(result)
-                    elif item.attempts < self.options.max_retries_per_round:
-                        pending.append(plan)
-        if fatal_failures:
-            raise fatal_failures[0]
+        plan: PlannedWorkstream,
+        task: asyncio.Task[None],
+        fatal: list[BaseException],
+    ) -> bool:
+        """Handle one finished workstream task; return whether to retry it now.
 
-    def _recoverable_plans(self, epoch: int) -> tuple[WorkstreamPlan, ...]:
-        """Recover work durably scheduled but not completed before interruption."""
-        return tuple(
+        The failed attempt is already charged to the workstream's durable
+        budget, so the retry decision here and on resume is the same. A
+        profile records every way it can end as its outcome, so an error that
+        escapes it is fatal.
+        """
+        result = task.exception()
+        if result is None:
+            return False
+        self.run.observations.note(f"dynamic workstream {planned_id(plan)} failed: {result}")
+        if isinstance(plan, ProfilePlan):
+            fatal.append(result)
+            return False
+        index = workstream_index(self.state, plan.hypothesis_id)
+        item = self.state.workstreams[index]
+        if not isinstance(result, DynamicAttemptError):
+            fatal.append(result)
+            return False
+        # A failure after a retained implementation keeps its checkpoint, so
+        # the retry resumes at the failed stage.
+        if not result.repeated and item.budget.remaining(self.options.max_retries_per_round) > 0:
+            return True
+        await self._give_up(index)
+        return False
+
+    async def _give_up(self, index: int) -> None:
+        """Mark a slot failed with its durable retry budget spent.
+
+        Leaving budget unspent would make resume treat the slot as retryable
+        and reimplement it from its parent.
+        """
+        async with self._state_lock:
+            current = self.state.workstreams[index]
+            self.state.workstreams[index] = current.model_copy(
+                update={
+                    "phase": WorkstreamPhase.FAILED,
+                    "budget": current.budget.exhaust(self.options.max_retries_per_round),
+                },
+                deep=True,
+            )
+            await self._commit(label=f"dynamic: {current.hypothesis_id} retries exhausted")
+        await self.rounds.record(index)
+
+    def _recoverable_plans(self) -> tuple[PlannedWorkstream, ...]:
+        """Recover work durably scheduled but not completed before interruption.
+
+        A workstream whose round is recorded has finished, whatever its phase;
+        a rejected candidate is a final outcome the planner decides about, and
+        only a crashed attempt is retried. A profile without an outcome runs.
+        """
+        recorded = {record.round_number for record in self.state.search.rounds}
+        profiles = tuple(item.plan for item in self.state.profiles if item.outcome is None)
+        return profiles + tuple(
             item.plan
             for item in self.state.workstreams
-            if item.epoch == epoch
+            if item.sequence not in recorded
             and (
                 item.phase in _RECOVERABLE_PHASES
                 or (
                     item.phase is WorkstreamPhase.FAILED
-                    and item.attempts < self.options.max_retries_per_round
+                    and item.budget.remaining(self.options.max_retries_per_round) > 0
                 )
             )
         )
 
-    async def _plan(self, epoch: int) -> PortfolioPlan:
+    async def _plan(
+        self,
+        *,
+        capacity: int,
+        in_flight: frozenset[str],
+        parents: _ParentOptions,
+    ) -> PortfolioPlan:
         session = await self.run.agents.create_session(
             ORCHESTRATOR,
             workspace=self.run.workspaces.root,
         )
         try:
-            prompt = render_portfolio(
-                epoch=epoch,
-                max_epochs=self.options.max_rounds,
-                capacity=self._capacity(),
-                objective_location=self.run.facts.objective_location,
-                root_revision=self._root_revision(),
-                input_baseline=self._input_baseline_text(),
-                history=self._history_projection(),
-            )
+            context: dict[str, object] = {
+                "capacity": capacity,
+                "in_flight": len(in_flight),
+                "remaining": self._remaining_budget(),
+                **prompt_context(self.run),
+                "root_revision": self._base_revision(),
+                "profiling": self._profiling_available(),
+                **self.rounds.planner_context(
+                    await self.workstreams.live_evaluations(), parents.offered
+                ),
+            }
             first_error: DynamicPlanError | ValidationError | None = None
+            # A valid plan that leaves slots free; kept if the planner, asked
+            # once to fill them, still finds no independent work.
+            underfilled: PortfolioPlan | None = None
             for attempt in range(2):
                 message = (
-                    prompt if attempt == 0 else f"{prompt}\n\nCorrection required: {first_error}"
+                    render_portfolio(**context)
+                    if attempt == 0
+                    else render_portfolio_correction(
+                        error=None if first_error is None else str(first_error),
+                        scheduled=0 if underfilled is None else len(underfilled.workstreams),
+                        **context,
+                    )
                 )
-                plan = await session.turn(message, response=PortfolioPlan)
+                plan = await structured_turn(
+                    session,
+                    message,
+                    PortfolioPlan if self._profiling_available() else ImplementPortfolioPlan,
+                )
                 try:
-                    self._validate_plan(plan)
+                    self._validate_plan(
+                        plan, capacity=capacity, in_flight=in_flight, parents=parents
+                    )
                 except (DynamicPlanError, ValidationError) as error:
                     first_error = error
-                else:
-                    return plan
-            raise first_error or DynamicPlanError("portfolio planning failed")
+                    continue
+                if attempt == 0 and len(plan.workstreams) < capacity:
+                    # A free slot idles until a running workstream finishes,
+                    # which can take a whole implementer turn.
+                    underfilled = plan
+                    continue
+                return plan
+            if underfilled is not None:
+                return underfilled
+            # The planner could not correct its plan. Ending the run would
+            # discard every in-flight workstream; keep the valid part instead,
+            # leaving a slot idle when none of its workstreams is valid.
+            self.run.observations.note(
+                f"dynamic plan still invalid after correction: {first_error}"
+            )
+            valid = self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            if not valid.workstreams and not in_flight:
+                # Nothing runs and nothing was scheduled: ending here would
+                # report a finished search that never searched.
+                raise DynamicPlanningError(first_error)
+            return valid
         finally:
             await session.close()
 
-    def _validate_plan(self, portfolio: PortfolioPlan) -> None:
-        if len(portfolio.workstreams) > self._capacity():
+    def _valid_part(
+        self,
+        portfolio: PortfolioPlan,
+        *,
+        capacity: int,
+        in_flight: frozenset[str],
+        parents: _ParentOptions,
+    ) -> PortfolioPlan:
+        """Return ``portfolio`` without the strategy updates and workstreams that fail validation.
+
+        Each part is kept only if the parts kept before it plus itself still
+        validate, so the result is valid as a whole. It may schedule nothing.
+        """
+        updates: list[HypothesisStrategyUpdate] = []
+        for update in portfolio.hypothesis_updates:
+            try:
+                self._validate_updates(
+                    portfolio.model_copy(
+                        update={"workstreams": (), "hypothesis_updates": (*updates, update)}
+                    ),
+                    in_flight=in_flight,
+                )
+            except DynamicPlanError as error:
+                self.run.observations.note(f"dynamic plan: dropped strategy update: {error}")
+                continue
+            updates.append(update)
+        kept = portfolio.model_copy(
+            update={"workstreams": (), "hypothesis_updates": tuple(updates)}
+        )
+        for plan in portfolio.workstreams:
+            candidate = kept.model_copy(update={"workstreams": (*kept.workstreams, plan)})
+            try:
+                self._validate_plan(
+                    candidate, capacity=capacity, in_flight=in_flight, parents=parents
+                )
+            except DynamicPlanError as error:
+                self.run.observations.note(f"dynamic plan: dropped workstream: {error}")
+                continue
+            kept = candidate
+        return kept
+
+    def _validate_plan(
+        self,
+        portfolio: PortfolioPlan,
+        *,
+        capacity: int,
+        in_flight: frozenset[str],
+        parents: _ParentOptions,
+    ) -> None:
+        if len(portfolio.workstreams) > capacity:
             message = (
                 f"portfolio requested {len(portfolio.workstreams)} workstreams, "
-                f"but capacity is {self._capacity()}"
+                f"but capacity is {capacity}"
             )
             raise DynamicPlanError(message)
-        known = {item.hypothesis_id: item for item in self.state.workstreams}
+        abandoned = self._validate_updates(portfolio, in_flight=in_flight)
+        for position, plan in enumerate(portfolio.workstreams):
+            if isinstance(plan, ProfilePlan):
+                self._validate_profile(position, plan, parents)
+            else:
+                parents.check(position, plan)
+                self._validate_implement(position, plan, abandoned=abandoned, in_flight=in_flight)
+
+    def _validate_implement(
+        self,
+        position: int,
+        plan: WorkstreamPlan,
+        *,
+        abandoned: frozenset[str],
+        in_flight: frozenset[str],
+    ) -> None:
+        if any(item.profile_id == plan.hypothesis_id for item in self.state.profiles):
+            raise DynamicPlanError.reused_id(plan.hypothesis_id)
+        prior = next(
+            (item for item in self.state.workstreams if item.hypothesis_id == plan.hypothesis_id),
+            None,
+        )
+        if plan.hypothesis_id in abandoned:
+            raise DynamicPlanError.abandoned_continuation(position, plan.hypothesis_id)
+        if plan.hypothesis_id in in_flight:
+            raise DynamicPlanError.in_flight_continuation(plan.hypothesis_id)
+        if prior is None and plan.continue_hypothesis:
+            raise DynamicPlanError.unknown_continuation(plan.hypothesis_id)
+        if prior is not None and not plan.continue_hypothesis:
+            raise DynamicPlanError.reused_id(plan.hypothesis_id)
+        if prior is not None and prior.phase is WorkstreamPhase.EVALUATED:
+            raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
+        if (
+            prior is not None
+            and prior.implementation is not None
+            and prior.implementation.outcome is HypothesisOutcome.BLOCKED
+            and plan.task.strip() == prior.plan.task.strip()
+        ):
+            raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
+
+    def _validate_profile(self, position: int, plan: ProfilePlan, parents: _ParentOptions) -> None:
+        if not self._profiling_available():
+            raise DynamicPlanError.profiling_unavailable(position)
+        used = {
+            *(item.hypothesis_id for item in self.state.workstreams),
+            *(item.profile_id for item in self.state.profiles),
+        }
+        if plan.profile_id in used:
+            raise DynamicPlanError.reused_profile_id(position, plan.profile_id)
+        parents.check_target(position, plan)
+
+    def _profiling_available(self) -> bool:
+        """Return whether a profile workstream can produce trusted profile evidence now.
+
+        The run must be able to profile, and no profile may have ended
+        unsupported: that outcome shows the run cannot, whatever it declared.
+        """
+        return self._can_profile and self.state.unsupported_profiles() == 0
+
+    def _validate_updates(
+        self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]
+    ) -> frozenset[str]:
+        """Check the plan's strategy updates; return the hypotheses abandoned after them.
+
+        A running workstream's direction is unfinished, so it cannot be parked
+        or abandoned until it records its round.
+        """
+        for position, update in enumerate(portfolio.hypothesis_updates):
+            if update.hypothesis_id in in_flight:
+                raise DynamicPlanError.in_flight_update(position, update.hypothesis_id)
         try:
-            hypothesis_transitions.apply_strategy_updates(
+            updated = hypothesis_transitions.apply_strategy_updates(
                 self.state.search,
                 portfolio.hypothesis_updates,
             )
         except ValueError as error:
-            raise DynamicPlanError(str(error)) from error
-        for plan in portfolio.workstreams:
-            prior = known.get(plan.hypothesis_id)
-            if prior is None and plan.continue_hypothesis:
-                raise DynamicPlanError.unknown_continuation(plan.hypothesis_id)
-            if prior is not None and not plan.continue_hypothesis:
-                raise DynamicPlanError.reused_id(plan.hypothesis_id)
-            if prior is not None and prior.phase is WorkstreamPhase.EVALUATED:
-                raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
+            raise DynamicPlanError.invalid_update(error) from error
+        return frozenset(
+            item.hypothesis_id
+            for item in updated.hypotheses
+            if item.strategy is HypothesisStrategy.ABANDONED
+        )
 
-    async def _record_plans(self, epoch: int, portfolio: PortfolioPlan) -> None:
-        parent = self._root_revision()
+    async def _record_plans(
+        self, call: int, portfolio: PortfolioPlan, parents: _ParentOptions
+    ) -> None:
+        base = self._base_revision()
         async with self._state_lock:
             by_id = {item.hypothesis_id: index for index, item in enumerate(self.state.workstreams)}
-            search = HypothesisSearch(_hypothesis_config(self.options))
             self.state.search = hypothesis_transitions.apply_strategy_updates(
                 self.state.search,
                 portfolio.hypothesis_updates,
             )
-            sequence = max((record.round_number for record in self.state.search.rounds), default=0)
+            # A slot that failed before recording a round still owns its
+            # sequence; reusing it would alias that slot in the winner lookup.
+            sequence = max(
+                (
+                    *(record.round_number for record in self.state.search.rounds),
+                    self.state.scheduled(),
+                ),
+                default=0,
+            )
             for plan in portfolio.workstreams:
                 sequence += 1
+                if isinstance(plan, ProfilePlan):
+                    self.state.profiles.append(
+                        DynamicProfile(
+                            profile_id=plan.profile_id,
+                            sequence=sequence,
+                            planning_call=call,
+                            plan=plan,
+                            revision=parents.revision_for(plan.target_hypothesis_id, base),
+                        )
+                    )
+                    continue
                 index = by_id.get(plan.hypothesis_id)
+                if index is not None:
+                    # Continuing a parked direction makes it available again;
+                    # its row would otherwise read parked while it runs.
+                    self.state.search = hypothesis_transitions.reopen_parked_hypothesis(
+                        self.state.search, plan.hypothesis_id
+                    )
+                parent = parents.revision_for(plan.parent_hypothesis_id, base)
                 if index is None:
-                    started = search.start(
+                    started = hypothesis_transitions.start_hypothesis(
                         self.state.search,
                         _orchestrator_plan(plan, portfolio.reasoning),
-                        round_number=len(self.state.workstreams) + 1,
-                        current_commit=parent,
-                        records=self.state.search.rounds,
+                        started_round=sequence,
+                        # Workstreams branch from `parent`, not from the
+                        # previous round as in a sequential loop, so record
+                        # that lineage directly.
+                        parent_round=next(
+                            (
+                                record.round_number
+                                for record in reversed(self.state.search.rounds)
+                                if record.commit == parent
+                            ),
+                            None,
+                        ),
+                        parent_commit=parent,
                     )
-                    self.state.search = search.finish(started.state)
+                    self.state.search = hypothesis_transitions.finish_hypothesis(started)
                 workstream = DynamicWorkstream(
                     hypothesis_id=plan.hypothesis_id,
-                    member_id=plan.hypothesis_id,
                     sequence=sequence,
-                    epoch=epoch,
+                    planning_call=call,
                     plan=plan,
                     parent_revision=(
                         self.state.workstreams[index].candidate_revision or parent
                         if index is not None
                         else parent
                     ),
+                    # The candidate path is keyed by hypothesis, so a
+                    # continuation resumes its provider session. The summary
+                    # still covers a session the provider could not resume.
+                    prior_attempt=(
+                        json.dumps(
+                            self.rounds.history_row(self.state.workstreams[index]),
+                            separators=(",", ":"),
+                        )
+                        if index is not None
+                        else ""
+                    ),
+                    prior_revision=(
+                        self.state.workstreams[index].candidate_revision
+                        if index is not None
+                        else None
+                    ),
+                    # Still buildable once the continuation finishes.
+                    verified=(
+                        self.state.workstreams[index].verified if index is not None else None
+                    ),
                 )
                 if index is None:
                     self.state.workstreams.append(workstream)
                 else:
                     self.state.workstreams[index] = workstream
-            await self._commit(label=f"dynamic: schedule epoch {epoch}")
+            self.state.next_planning_call = call + 1
+            await self._commit(label=f"dynamic: schedule planning call {call}")
 
-    async def _execute_workstream(self, plan: WorkstreamPlan, epoch: int) -> None:
-        index = self._index(plan.hypothesis_id)
-        item = self.state.workstreams[index]
-        if item.phase is WorkstreamPhase.EVALUATED and (
-            item.evaluation is None or item.evaluation.accepted
-        ):
-            await self._record_hypothesis_round(index)
-            return
-        parent = item.parent_revision
-        resume_implemented = item.phase in {
-            WorkstreamPhase.IMPLEMENTED,
-            WorkstreamPhase.REVIEWED,
-            WorkstreamPhase.EVALUATED,
-        }
-        workspace = await self.run.workspaces.create_candidate(
-            item.candidate_revision if resume_implemented else parent
-        )
-        try:
-            feedback: str | None = None
-            completed = False
-            if resume_implemented:
-                completed, feedback = await self._resume_implemented(
-                    index,
-                    plan,
-                    workspace,
-                    epoch,
-                )
-            for _attempt in range(
-                self.state.workstreams[index].attempts,
-                self.options.max_retries_per_round,
-            ):
-                if completed:
-                    break
-                await self._update(
-                    index,
-                    phase=WorkstreamPhase.IMPLEMENTING,
-                    increment_attempts=True,
-                )
-                implementation = await self._implement(
-                    plan,
-                    workspace,
-                    parent,
-                    feedback=feedback,
-                )
-                revision = await workspace.snapshot(
-                    f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
-                )
-                implementation = _bind_evidence_revision(implementation, revision)
-                await workspace.retain(
-                    revision,
-                    label=f"dynamic-{plan.hypothesis_id}-epoch-{epoch}",
-                )
-                await self._update(
-                    index,
-                    phase=WorkstreamPhase.IMPLEMENTED,
-                    candidate_revision=revision,
-                    implementation=implementation,
-                    clear_downstream=True,
-                )
-                completed, feedback = await self._assess_candidate(
-                    plan,
-                    implementation,
-                    workspace,
-                    epoch,
-                )
-            if not completed:
-                await self._update(index, phase=WorkstreamPhase.FAILED)
-            await self._record_hypothesis_round(index)
-        except asyncio.CancelledError:
-            await self._update(index, phase=WorkstreamPhase.FAILED)
-            raise
-        except Exception as error:
-            await self._update(index, phase=WorkstreamPhase.FAILED)
-            raise DynamicAttemptError.from_cause(plan.hypothesis_id, error) from error
-        finally:
-            await workspace.discard()
+    async def _parent_options(self) -> _ParentOptions:
+        """Return the buildable candidates whose revisions still reproduce their content.
 
-    async def _assess_candidate(
-        self,
-        plan: WorkstreamPlan,
-        implementation: ImplementerResult,
-        workspace: CandidateWorkspace,
-        epoch: int,
-    ) -> tuple[bool, str | None]:
-        """Review and evaluate one implementation, returning correction guidance."""
-        index = self._index(plan.hypothesis_id)
-        revision = workspace.revision
-        if revision is None:
-            message = "dynamic candidate assessment requires a recorded revision"
-            raise RuntimeError(message)
-        review = await self._maybe_review(plan, implementation, workspace, revision, epoch)
-        if review is not None:
-            await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
-        if review is not None and not review.passed:
-            return False, review.feedback
-        evaluation = await self._maybe_evaluate(
-            plan,
-            implementation,
-            review,
-            workspace,
-            revision,
-            epoch,
-        )
-        final_phase = (
-            WorkstreamPhase.EVALUATED
-            if evaluation is not None
-            else WorkstreamPhase.REVIEWED
-            if review is not None
-            else WorkstreamPhase.IMPLEMENTED
-        )
-        await self._update(index, phase=final_phase, evaluation=evaluation)
-        if evaluation is not None and not evaluation.accepted:
-            return False, _evaluation_feedback(evaluation)
-        return True, None
-
-    async def _resume_implemented(
-        self,
-        index: int,
-        plan: WorkstreamPlan,
-        workspace: CandidateWorkspace,
-        epoch: int,
-    ) -> tuple[bool, str | None]:
-        """Finish the first incomplete stage after a retained implementation."""
-        item = self.state.workstreams[index]
-        implementation = item.implementation
-        revision = item.candidate_revision
-        if implementation is None or revision is None:
-            raise DynamicPlanError.incomplete_checkpoint(item.hypothesis_id, item.phase)
-        review = item.review
-        if item.phase is WorkstreamPhase.EVALUATED and item.evaluation is not None:
-            if item.evaluation.accepted:
-                return True, None
-            return False, _evaluation_feedback(item.evaluation)
-        if item.phase is WorkstreamPhase.IMPLEMENTED:
-            review = await self._maybe_review(
-                plan,
-                implementation,
-                workspace,
-                revision,
-                epoch,
-            )
-            if review is not None:
-                await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
-        if review is not None and not review.passed:
-            return False, review.feedback
-        evaluation = await self._maybe_evaluate(
-            plan,
-            implementation,
-            review,
-            workspace,
-            revision,
-            epoch,
-        )
-        final_phase = (
-            WorkstreamPhase.EVALUATED
-            if evaluation is not None
-            else WorkstreamPhase.REVIEWED
-            if review is not None
-            else WorkstreamPhase.IMPLEMENTED
-        )
-        await self._update(index, phase=final_phase, evaluation=evaluation)
-        if evaluation is not None and not evaluation.accepted:
-            return False, _evaluation_feedback(evaluation)
-        return True, None
-
-    async def _implement(
-        self,
-        plan: WorkstreamPlan,
-        workspace: CandidateWorkspace,
-        parent_revision: str,
-        *,
-        feedback: str | None,
-    ) -> ImplementerResult:
-        session = await self.run.agents.create_session(
-            IMPLEMENTER,
-            workspace=workspace,
-            member_id=plan.hypothesis_id,
-        )
-        try:
-            return await session.turn(
-                render_implementation(
-                    hypothesis_id=plan.hypothesis_id,
-                    objective_location=self.run.facts.objective_location,
-                    hypothesis=plan.hypothesis,
-                    task=plan.task,
-                    pass_criteria=plan.pass_criteria,
-                    parent_revision=parent_revision,
-                    evidence=_references_text(plan.evidence),
-                    feedback=feedback,
-                ),
-                response=ImplementerResult,
-            )
-        finally:
-            await session.close()
-
-    async def _maybe_review(
-        self,
-        plan: WorkstreamPlan,
-        implementation: ImplementerResult,
-        workspace: CandidateWorkspace,
-        revision: str,
-        epoch: int,
-    ) -> ReviewResult | None:
-        promotable = implementation.outcome in _READY_OUTCOMES
-        due = promotable or (
-            implementation.outcome in _TERMINAL_OUTCOMES and epoch % self.options.judge_every == 0
-        )
-        if not due:
-            return None
-        session = await self.run.agents.create_session(
-            JUDGE,
-            workspace=workspace,
-            member_id=plan.hypothesis_id,
-        )
-        try:
-            return await session.turn(
-                render_review(
-                    hypothesis_id=plan.hypothesis_id,
-                    objective_location=self.run.facts.objective_location,
-                    hypothesis=plan.hypothesis,
-                    pass_criteria=plan.pass_criteria,
-                    candidate_revision=revision,
-                    summary=implementation.summary,
-                    evidence=_references_text(implementation.evidence),
-                ),
-                response=ReviewResult,
-            )
-        finally:
-            await session.close()
-
-    async def _maybe_evaluate(  # noqa: PLR0913  # lint-waiver: LW-930108 [PLR0913]; each argument is an independently established policy fact; a carrier would expose the same state less clearly.
-        self,
-        plan: WorkstreamPlan,
-        implementation: ImplementerResult,
-        review: ReviewResult | None,
-        workspace: CandidateWorkspace,
-        revision: str,
-        epoch: int,
-    ) -> EvaluationResult | None:
-        candidate_ready = implementation.outcome in _READY_OUTCOMES
-        if not candidate_ready or review is None or not review.passed:
-            return None
-        cadence_due = await self._record_eligible_evaluation_candidate(plan.hypothesis_id)
-        due = plan.request_evaluation or cadence_due or epoch == self.options.max_rounds
-        available = self.run.facts.accuracy_configured or self.run.facts.benchmark_configured
-        has_local_recipe = implementation.validation_recipe_artifact is not None
-        if not due or (not available and not has_local_recipe):
-            return None
-        local = (
-            await self.run.evaluation.validate_local(
-                workspace,
-                recipe_artifact=implementation.validation_recipe_artifact,
-                report_location=(
-                    f"progress/validation/dynamic-{plan.hypothesis_id}-epoch-{epoch}.json"
-                ),
-            )
-            if implementation.validation_recipe_artifact is not None
-            else None
-        )
-        if local is not None and not local.passed:
-            return EvaluationResult(
-                revision=revision,
-                local_validation_passed=False,
-                local_validation_feedback=local.feedback,
-            )
-        async with asyncio.TaskGroup() as evaluations:
-            accuracy_task = (
-                evaluations.create_task(self.run.evaluation.accuracy(workspace))
-                if self.run.facts.accuracy_configured
-                else None
-            )
-            benchmark_task = (
-                evaluations.create_task(
-                    self.run.evaluation.benchmark(workspace, objectives=self._objectives()),
+        A candidate verified by an agent-submitted evaluation is offered only if
+        its retained revision exports to the content digest that evaluation
+        recorded; a framework-evaluated candidate only if its revision exports.
+        One that fails is withheld and a plan naming it is corrected, never
+        silently given the base revision.
+        """
+        offered: list[BuildableCandidate] = []
+        unreproducible: dict[str, str] = {}
+        for candidate in self.rounds.buildable():
+            try:
+                patch = await self.run.workspaces.export_patch(candidate.revision)
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-231001 [BLE001]; any export failure means the revision cannot be materialized, which the plan correction reports; narrowing to one runtime error type would let another end the run.
+                unreproducible[candidate.hypothesis_id] = (
+                    f"its revision cannot be exported: {error}"
                 )
-                if self.run.facts.benchmark_configured
-                else None
-            )
-        accuracy = accuracy_task.result() if accuracy_task is not None else None
-        benchmark = benchmark_task.result() if benchmark_task is not None else None
-        return EvaluationResult(
-            revision=revision,
-            local_validation_passed=local.passed if local is not None else None,
-            local_validation_feedback=local.feedback if local is not None else None,
-            accuracy_passed=accuracy.passed if accuracy is not None else None,
-            accuracy_feedback=accuracy.feedback if accuracy is not None else None,
-            benchmark_passed=benchmark.passed if benchmark is not None else None,
-            benchmark_feedback=benchmark.feedback if benchmark is not None else None,
-            metric_name=benchmark.metric_name if benchmark is not None else None,
-            metric_value=benchmark.metric_value if benchmark is not None else None,
-            metric_direction=benchmark.metric_direction if benchmark is not None else None,
-            metric_unit=benchmark.metric_unit if benchmark is not None else None,
-            metrics=dict(benchmark.row or {}) if benchmark is not None else {},
-        )
-
-    async def _update(  # noqa: PLR0913  # lint-waiver: LW-092703 [PLR0913]; optional fields are explicit transition outputs and avoid an untyped mutation mapping at the durability boundary.
-        self,
-        index: int,
-        *,
-        phase: WorkstreamPhase,
-        increment_attempts: bool = False,
-        candidate_revision: str | None = None,
-        implementation: ImplementerResult | None = None,
-        review: ReviewResult | None = None,
-        evaluation: EvaluationResult | None = None,
-        clear_downstream: bool = False,
-    ) -> None:
-        async with self._state_lock:
-            current = self.state.workstreams[index]
-            changes: dict[str, object] = {"phase": phase}
-            if increment_attempts:
-                changes["attempts"] = current.attempts + 1
-            if candidate_revision is not None:
-                changes["candidate_revision"] = candidate_revision
-            if implementation is not None:
-                changes["implementation"] = implementation
-            if clear_downstream:
-                changes["review"] = None
-                changes["evaluation"] = None
-                changes["evaluation_eligibility_counted"] = False
-                changes["cadence_evaluation_due"] = False
-            if review is not None:
-                changes["review"] = review
-            if evaluation is not None:
-                changes["evaluation"] = evaluation
-            self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
-            await self._commit(label=f"dynamic: {current.hypothesis_id} {phase.value}")
-
-    async def _record_hypothesis_round(self, index: int) -> None:
-        """Commit one workstream result through shared hypothesis transitions."""
-        async with self._state_lock:
-            item = self.state.workstreams[index]
-            implementation = item.implementation
-            if implementation is None or any(
-                record.round_number == item.sequence for record in self.state.search.rounds
-            ):
-                return
-            evaluation = item.evaluation
-            review = item.review
-            accepted = evaluation.accepted if evaluation is not None else None
-            metrics = dict(evaluation.metrics) if evaluation is not None else {}
-            framework_metric = (
-                evaluation is not None
-                and evaluation.metric_name is not None
-                and evaluation.metric_value is not None
-            )
-            baseline_round, baseline_commit, baseline_value = (
-                hypothesis_transitions.causal_baseline(
-                    parent_round=None,
-                    parent_commit=item.parent_revision,
-                    metric=evaluation.metric_name,
-                    rounds=self.state.search.rounds,
-                    input_baseline=self.state.search.input_baseline,
+                continue
+            digest = hashlib.sha256(patch.encode()).hexdigest()
+            if candidate.content_digest is not None and digest != candidate.content_digest:
+                unreproducible[candidate.hypothesis_id] = (
+                    "its revision no longer holds the content that passed accuracy"
                 )
-                if framework_metric
-                else (None, None, None)
+                continue
+            offered.append(candidate)
+        for hypothesis_id, reason in unreproducible.items():
+            self.run.observations.note(
+                f"dynamic: buildable candidate {hypothesis_id} withheld: {reason}"
             )
-            direction = (
-                evaluation.metric_direction.value
-                if framework_metric and evaluation.metric_direction is not None
-                else None
-            )
-            comparison = (
-                self.state.search.metrics.compare(
-                    Measurement(
-                        metric=evaluation.metric_name,
-                        value=evaluation.metric_value,
-                        direction=direction,
-                    ),
-                    Measurement(
-                        metric=evaluation.metric_name,
-                        value=baseline_value,
-                        direction=direction,
-                    )
-                    if baseline_value is not None
-                    else None,
-                )
-                if framework_metric
-                else None
-            )
-            disposition, retained = self._candidate_decision(
-                accepted=accepted,
-                metrics=metrics,
-                headline=(
-                    Measurement(
-                        metric=evaluation.metric_name,
-                        value=evaluation.metric_value,
-                        direction=direction,
-                    )
-                    if framework_metric
-                    else None
-                ),
-            )
-            record = RoundRecord(
-                round_number=item.sequence,
-                commit=item.candidate_revision,
-                perf_metric=evaluation.metric_value if framework_metric else None,
-                perf_unit=evaluation.metric_name if framework_metric else None,
-                passed=review.passed if review is not None else True,
-                reviewed=review is not None,
-                hypothesis_id=item.hypothesis_id,
-                hypothesis_declared_outcome=implementation.outcome.value,
-                judge_verdict=(
-                    "pass" if review and review.passed else "fail" if review else "deferred"
-                ),
-                hypothesis_outcome=implementation.outcome.value,
-                hypothesis_claim=item.plan.hypothesis,
-                hypothesis_task=item.plan.task,
-                hypothesis_parent_commit=item.parent_revision,
-                metrics=metrics,
-                official_evaluation=evaluation is not None,
-                official_evaluation_reason=(
-                    "dynamic_promotion" if evaluation is not None else None
-                ),
-                candidate_disposition=disposition.value,
-                candidate_metrics=metrics,
-                candidate_retained=retained,
-                perf_direction=direction,
-                perf_baseline_round=baseline_round,
-                perf_baseline_commit=baseline_commit,
-                perf_baseline_metric=baseline_value,
-                perf_delta_pct=(
-                    (evaluation.metric_value - baseline_value) / abs(baseline_value) * 100
-                    if framework_metric and baseline_value not in {None, 0}
-                    else None
-                ),
-                perf_comparison=comparison,
-                perf_provenance="framework" if framework_metric else None,
-                attempts=item.attempts,
-            )
-            active_search = self.state.search.model_copy(
-                update={"active_hypothesis_id": item.hypothesis_id},
-                deep=True,
-            )
-            self.state.search = hypothesis_transitions.append_round(
-                active_search,
-                record,
-                keep_active=implementation.outcome is HypothesisOutcome.CONTINUE,
-            )
-            if self.state.search.active_hypothesis_id is not None:
-                self.state.search = hypothesis_transitions.finish_hypothesis(self.state.search)
-            await self._commit(label=f"dynamic: record hypothesis {item.hypothesis_id}")
+        return _ParentOptions(offered=tuple(offered), unreproducible=unreproducible)
 
     async def _select_and_adopt(self) -> None:
-        winner = self._winner()
+        await self.input_gate.measured()
+        winner = self.rounds.winner()
         if winner is None or winner.candidate_revision is None:
             self.run.observations.note("dynamic search produced no trusted candidate")
             return
@@ -793,113 +798,17 @@ class _DynamicRun:
             label="dynamic: winner adopted",
         )
 
-    def _winner(self) -> DynamicWorkstream | None:
-        search = HypothesisSearch(_hypothesis_config(self.options))
-        winner = search.best(
-            self.state.search.rounds,
-            space=self.options.metric_space,
-        )
-        if winner is None:
-            return None
-        return next(
-            (item for item in self.state.workstreams if item.sequence == winner.round_number),
-            None,
-        )
+    def _base_revision(self) -> str:
+        """Return the revision fresh hypotheses build on: the best trusted one so far.
 
-    async def _record_eligible_evaluation_candidate(self, hypothesis_id: str) -> bool:
-        """Atomically count an eligible attempt and return whether cadence is due."""
-        async with self._state_lock:
-            index = self._index(hypothesis_id)
-            item = self.state.workstreams[index]
-            if item.evaluation_eligibility_counted:
-                return item.cadence_evaluation_due
-            self.state.eligible_evaluation_candidates += 1
-            due = self.state.eligible_evaluation_candidates % self.options.official_eval_every == 0
-            self.state.workstreams[index] = item.model_copy(
-                update={
-                    "evaluation_eligibility_counted": True,
-                    "cadence_evaluation_due": due,
-                },
-                deep=True,
-            )
-            await self._commit(label="dynamic: evaluation candidate eligible")
-            return due
-
-    def _candidate_decision(
-        self,
-        *,
-        accepted: bool | None,
-        metrics: dict[str, float],
-        headline: Measurement | None,
-    ) -> tuple[CandidateDisposition, bool | None]:
-        """Apply the shared noise aware frontier policy to one evaluated candidate.
-
-        A candidate that does not beat the measured input tree is discarded.
+        Branching every hypothesis from the original root would keep accepted
+        improvements from compounding; the final winner could then contain at
+        most one hypothesis's change.
         """
-        if accepted is False:
-            return CandidateDisposition.DISCARD, False
-        if accepted is not True:
-            return CandidateDisposition.UNASSESSED, None
-        space = self.options.metric_space
-        comparable = space.complete(metrics) if space.objectives else headline is not None
-        if not comparable:
-            return CandidateDisposition.UNASSESSED, None
-        if self._loses_to_input(metrics, headline):
-            return CandidateDisposition.DISCARD, False
-        search = HypothesisSearch(_hypothesis_config(self.options))
-        conflict = search.pareto_conflict(
-            disposition=CandidateDisposition.PARETO_FRONTIER,
-            metrics=metrics,
-            records=self.state.search.rounds,
-            space=space,
-        )
-        if conflict is not None:
-            return CandidateDisposition.DISCARD, False
-        return CandidateDisposition.PARETO_FRONTIER, True
-
-    def _loses_to_input(self, metrics: dict[str, float], headline: Measurement | None) -> bool:
-        """Whether the measured input tree beats (or, on a frontier, dominates) a candidate."""
-        baseline = self.state.search.input_baseline
-        space = self.options.metric_space
-        if space.objectives:
-            return hypothesis_transitions.input_dominates(baseline, metrics, space)
-        reading = hypothesis_transitions.input_baseline_measurement(
-            baseline, headline.metric if headline is not None else None
-        )
-        return reading is not None and space.compare(headline, reading) in {
-            MetricComparison.WORSE,
-            MetricComparison.WITHIN_NOISE,
-        }
-
-    def _input_baseline_text(self) -> str | None:
-        baseline = self.state.search.input_baseline
-        if baseline is None:
-            return None
-        row = ", ".join(f"{name}={value:.6g}" for name, value in baseline.metrics.items())
-        return f"{row} (commit `{baseline.commit[:12]}`)"
-
-    def _history_projection(self) -> str:
-        rows = [
-            {
-                "hypothesis_id": item.hypothesis_id,
-                "title": item.plan.title,
-                "phase": item.phase.value,
-                "outcome": (
-                    item.implementation.outcome.value if item.implementation is not None else None
-                ),
-                "next_step": (
-                    item.implementation.next_step if item.implementation is not None else ""
-                ),
-                "revision": _bounded_optional(
-                    item.candidate_revision,
-                    _MAX_HISTORY_REVISION_CHARS,
-                ),
-                "evidence": [ref.model_dump(mode="json") for ref in _evidence(item)],
-                "evaluation": _compact_evaluation(item.evaluation),
-            }
-            for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]
-        ]
-        return json.dumps(rows, separators=(",", ":"))
+        winner = self.rounds.winner()
+        if winner is not None and winner.candidate_revision is not None:
+            return winner.candidate_revision
+        return self._root_revision()
 
     def _root_revision(self) -> str:
         revision = self.run.workspaces.root.revision
@@ -908,12 +817,8 @@ class _DynamicRun:
             raise RuntimeError(message)
         return revision
 
-    def _index(self, hypothesis_id: str) -> int:
-        return next(
-            index
-            for index, item in enumerate(self.state.workstreams)
-            if item.hypothesis_id == hypothesis_id
-        )
+    async def _commit_labeled(self, label: str) -> None:
+        await self._commit(label=label)
 
     async def _commit(self, *, workspace: bool = False, label: str) -> None:
         self.state.experiment_revision += 1
@@ -924,103 +829,13 @@ class _DynamicRun:
         )
 
 
-def _framework_outcome(benchmark: BenchmarkEvaluation) -> FrameworkBenchmarkOutcome:
-    return FrameworkBenchmarkOutcome(
-        feedback=benchmark.feedback,
-        metric_name=benchmark.metric_name,
-        metric_value=benchmark.metric_value,
-        metric_direction=(
-            benchmark.metric_direction.value if benchmark.metric_direction is not None else None
-        ),
-        metric_unit=benchmark.metric_unit,
-        row=benchmark.row,
-    )
-
-
-def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
-    evidence = tuple(
-        reference
-        if reference.revision is not None
-        else reference.model_copy(update={"revision": revision})
-        for reference in result.evidence
-    )
-    return result.model_copy(update={"evidence": evidence})
-
-
-def _evidence(workstream: DynamicWorkstream) -> tuple[EvidenceReference, ...]:
-    if workstream.implementation is not None:
-        return workstream.implementation.evidence
-    return workstream.plan.evidence
-
-
-def _references_text(references: Sequence[EvidenceReference]) -> str:
-    if not references:
-        return "[]"
-    return json.dumps(
-        [item.model_dump(mode="json") for item in references],
-        separators=(",", ":"),
-    )
-
-
-def _evaluation_feedback(result: EvaluationResult) -> str:
-    """Render trusted gate failures as compact correction guidance."""
-    feedback = [
-        message
-        for passed, message in (
-            (result.local_validation_passed, result.local_validation_feedback),
-            (result.accuracy_passed, result.accuracy_feedback),
-            (result.benchmark_passed, result.benchmark_feedback),
-        )
-        if passed is False and message
-    ]
-    return "Trusted evaluation failed: " + "; ".join(feedback or ["no feedback provided"])
-
-
-def _compact_evaluation(result: EvaluationResult | None) -> dict[str, object] | None:
-    """Project bounded decision facts without copying command output into prompts."""
-    if result is None:
-        return None
-    metric_names = sorted(result.metrics)[:_MAX_HISTORY_METRICS]
-    return {
-        "accepted": result.accepted,
-        "local_validation_passed": result.local_validation_passed,
-        "accuracy_passed": result.accuracy_passed,
-        "benchmark_passed": result.benchmark_passed,
-        "metric_name": _bounded_optional(result.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS),
-        "metric_value": result.metric_value,
-        "metric_direction": (
-            result.metric_direction.value if result.metric_direction is not None else None
-        ),
-        "metric_unit": _bounded_optional(result.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS),
-        "metrics": {
-            name[:_MAX_HISTORY_METRIC_NAME_CHARS]: result.metrics[name] for name in metric_names
-        },
-    }
-
-
-def _bounded_optional(value: str | None, limit: int) -> str | None:
-    if value is None or len(value) <= limit:
-        return value
-    return value[:limit]
-
-
-def _hypothesis_config(options: DynamicOptions) -> HypothesisConfig:
-    return HypothesisConfig(
-        max_rounds=options.max_rounds * options.max_in_flight,
-        judge_every=options.judge_every,
-        official_eval_every=options.official_eval_every,
-        max_retries_per_round=options.max_retries_per_round,
-    )
-
-
 def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan:
     return OrchestratorPlan(
         hypothesis_id=plan.hypothesis_id,
         hypothesis=plan.hypothesis,
-        title=plan.title,
+        title=normalize_hypothesis_title(plan.title),
         task=plan.task,
         pass_criteria=plan.pass_criteria,
-        request_official_evaluation=plan.request_evaluation,
         reasoning=reasoning,
     )
 
@@ -1028,8 +843,16 @@ def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan
 async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run dynamic portfolio search through the public runtime capability."""
     options = DynamicOptions.model_validate(raw_options)
+    if not run.workspaces.supports_parallel_candidates:
+        # Every workstream needs an isolated candidate workspace; failing here
+        # avoids spending a planner turn on work that cannot start.
+        message = (
+            "dynamic orchestration needs isolated candidate workspaces, but this run "
+            "environment does not support parallel candidates"
+        )
+        raise RuntimeError(message)
     dynamic = await _DynamicRun.open(run, options)
     return await dynamic.execute()
 
 
-__all__ = ["DynamicPlanError", "orchestrate"]
+__all__ = ["DynamicPlanError", "DynamicPlanningError", "orchestrate"]

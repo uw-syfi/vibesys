@@ -11,8 +11,17 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from vibesys.inputs import load_input_bundle
+from vs_evaluator_protocol.api import (
+    Measurement,
+    PartialMeasurement,
+    Progress,
+    parse_records,
+    read_measurement,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -45,9 +54,8 @@ def test_manifest_runs_quick_mode_through_the_adapter() -> None:
     assert manifest.evaluator.name == "vibesys-evaluator-request-factory"
     assert manifest.benchmark.entrypoint == "request-factory-adapter"
     assert manifest.benchmark.args == ("benchmark/run.py", "--mode", "quick")
-    assert manifest.benchmark.result is not None
-    assert manifest.benchmark.result.json_argument == "--output-json"
-    assert manifest.benchmark.result.metric == "output_tokens_per_s"
+    assert manifest.benchmark.result is None
+    assert manifest.benchmark.result_protocol == 2
     assert manifest.accuracy.command == ("uv", "run", "python", "accuracy_checker/checker.py")
     assert (_BUNDLE / "accuracy_checker" / "golden.json").is_file()
 
@@ -403,3 +411,121 @@ def test_gate_tolerates_a_chained_divergence_only_at_a_near_tie(checker: ModuleT
     assert decisive["resume_check"]["non_tie_divergences"] == ["short#3@5 (cached 6)"]
     assert tie_passed
     assert tie["resume_check"]["non_tie_divergences"] == []
+
+
+# r13's warmup: 12 sessions, 72 rounds, 14343 output tokens, a 180 s limit.
+_WARMUP_HEADER = (
+    "session workload | sessions=12 rounds=72 max_prompt_len=9000 max_prefix_len=8000 "
+    "max_input_len=3000 max_output_len=900 total_output_len=14343 max_arrival_time_ms=0.000 "
+    "total_tool_wait_after_ms=0.000"
+)
+
+
+def _progress_line(elapsed: float, rounds: int, tokens: int) -> str:
+    return (
+        f"progress | elapsed_s={elapsed:.1f} rounds_done={rounds}/72 "
+        f"sessions_done=0/12 output_tokens={tokens}"
+    )
+
+
+def _read_stream(path: Path) -> Measurement:
+    return read_measurement(parse_records(path.read_text(encoding="utf-8")))
+
+
+def test_a_stopped_warmup_reports_what_it_measured_as_a_partial_measurement(
+    run: ModuleType, tmp_path: Path
+) -> None:
+    """Regression for r14: 15/72 rounds at 16.4 tokens/s reached agents only as prose.
+
+    A warmup the watch stops (it cannot finish in 180 s) now writes an
+    ``error`` record whose partial measurement the framework's own reader
+    accepts: the achieved rate, the rate that finishes in time, and the
+    rounds completed out of the rounds required.
+    """
+    engine = tmp_path / "fake_session_runner"
+    engine.write_text(
+        f"#!{sys.executable}\n"
+        "import sys, time\n"
+        f"print({_WARMUP_HEADER!r}, file=sys.stderr, flush=True)\n"
+        f"print({_progress_line(178, 15, 2919)!r}, file=sys.stderr, flush=True)\n"
+        "time.sleep(3600)\n",
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
+    watch = run.WarmupWatch(
+        run.WARMUP_TIMEOUT_S, run.WARMUP_SESSION_CEILING_TOK_S, label="warmup sub-run"
+    )
+    stream = tmp_path / "result.jsonl"
+    report = run.ProtocolReport(stream)
+
+    with pytest.raises(run.HarnessError) as stopped:
+        run.run_session_runner(
+            engine,
+            ["--trace", "t.csv"],
+            timeout_s=run.WARMUP_TIMEOUT_S,
+            label="warmup sub-run",
+            watch=watch.feed,
+        )
+    report.fail(str(stopped.value), stopped.value.partial)
+
+    measurement = _read_stream(stream)
+    assert measurement.failure is not None
+    assert "warmup sub-run stopped at 178s" in measurement.failure
+    assert measurement.partial == PartialMeasurement(
+        name="warmup_output_tokens_per_s",
+        value=2919 / 178,
+        direction="max",
+        unit="output tokens/s",
+        target=14343 / 180,
+        progress=Progress(completed=15, required=72, unit="rounds"),
+    )
+
+
+# The `run` fixture only imports the stateless benchmark module, so sharing it
+# across generated examples is safe.
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    elapsed=st.floats(min_value=0.1, max_value=1000.0),
+    rounds=st.integers(min_value=0, max_value=72),
+    tokens=st.integers(min_value=0, max_value=10**6),
+    header=st.booleans(),
+)
+def test_a_killed_sub_run_s_partial_measurement_is_its_last_progress_line(
+    run: ModuleType, elapsed: float, rounds: int, tokens: int, *, header: bool
+) -> None:
+    line = _progress_line(elapsed, rounds, tokens)
+    stderr = "\n".join([_WARMUP_HEADER, line] if header else [line])
+    shown_elapsed = float(f"{elapsed:.1f}")
+
+    partial = PartialMeasurement.model_validate(
+        run.partial_measurement(stderr, 180.0, "warmup sub-run")
+    )
+
+    assert partial.value == pytest.approx(tokens / shown_elapsed)
+    assert partial.progress == Progress(completed=rounds, required=72, unit="rounds")
+    assert partial.target == (pytest.approx(14343 / 180) if header else None)
+
+
+@pytest.mark.parametrize("stderr", ["", _WARMUP_HEADER, "Traceback: boom"])
+def test_a_sub_run_without_a_progress_line_measured_nothing(run: ModuleType, stderr: str) -> None:
+    assert run.partial_measurement(stderr, 180.0, "warmup sub-run") is None
+
+
+def test_a_measured_run_reports_its_headline_as_the_one_declared_metric(
+    run: ModuleType, tmp_path: Path
+) -> None:
+    stream = tmp_path / "result.jsonl"
+
+    run.ProtocolReport(stream).emit(412.5)
+
+    measurement = _read_stream(stream)
+    assert measurement.values == {"output_tokens_per_s": 412.5}
+    assert measurement.metrics is not None
+    assert measurement.metrics["output_tokens_per_s"].direction == "max"
+
+
+def test_without_vs_output_nothing_is_written(run: ModuleType, tmp_path: Path) -> None:
+    report = run.ProtocolReport(None)
+    report.fail("stopped", None)
+
+    assert list(tmp_path.iterdir()) == []

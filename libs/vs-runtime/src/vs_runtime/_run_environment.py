@@ -105,6 +105,7 @@ from vs_sandbox.api.slurm import (
     SlurmExecutionPolicy,
     SlurmProcessBroker,
     load_slurm_policy,
+    trusted_profile_command,
     write_slurm_capture_plan,
     write_slurm_evaluation_plan,
 )
@@ -211,7 +212,14 @@ class DockerEnvironmentFacts:
 
 @dataclass(frozen=True)
 class SlurmEnvironmentFacts:
-    """Presentation facts for a local editor with remote trusted execution."""
+    """Presentation facts for a local editor with remote trusted execution.
+
+    ``service_command`` is the operator-configured argv (remote interpreter
+    already substituted) that trusted jobs use to start the candidate service
+    from the candidate root, or empty when the operator configured none.
+    """
+
+    service_command: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -269,11 +277,18 @@ class RunEnvironmentRequest:
     # pairs. Meaningless without profiler_support_path/name set.
     profiler_support_extra: tuple[tuple[str, str], ...] = ()
     git_history_root: Path | None = None
+    # Host directories the run owns besides ``workspace``, such as the
+    # directory holding its candidate worktrees. Agent tools bound once per
+    # run (the profiler) may stage any of them to a remote executor.
+    run_owned_roots: tuple[Path, ...] = ()
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     seeded_workspace_paths: tuple[str, ...] = ()
     log: Callable[[str], None] | None = None
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     state_namespace: StateNamespace | None = None
+    #: Root of the run's dedicated agent CLI homes; ``None`` when the run has
+    #: no machine-local state (agents then keep the provider's default home).
+    agent_homes_dir: Path | None = None
 
 
 class _AgentPathSandbox(Protocol):
@@ -575,6 +590,11 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
         )
 
 
+def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
+    service = policy.remote_service()
+    return () if service is None else service.command
+
+
 class SlurmEnvironment(_NoopWorkspaceRecovery):
     """Keep editing local while trusted gates and ROCprof run through Slurm."""
 
@@ -599,7 +619,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         config = load_slurm_config(self.config_path)
         policy = load_slurm_policy(self.config_path)
         return _PreparedRunEnvironment(
-            SlurmEnvironmentFacts(), partial(self._open, request, config, policy)
+            SlurmEnvironmentFacts(service_command=_slurm_service_command(policy)),
+            partial(self._open, request, config, policy),
         )
 
     def _open(
@@ -636,6 +657,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             )
             if name is not None and path is not None
         }
+        profiler_tree = request.profiler_support_name
         evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = request.log_dir / "slurm-capture-plan.json"
         raw_accuracy = _command_argv(remote.accuracy_command)
@@ -650,6 +672,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 benchmark_command=benchmark,
                 benchmark_output_argument=request.benchmark_output_argument,
                 support_paths=support_paths,
+                profile_command=(
+                    trusted_profile_command(config, policy, benchmark, profiler_tree=profiler_tree)
+                    if profiler_tree is not None and profiler_tree in support_paths
+                    else None
+                ),
             ),
         )
         write_slurm_capture_plan(
@@ -673,7 +700,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             broker = SlurmProcessBroker(
                 config,
                 Path(tempfile.gettempdir()) / f"vss-{secrets.token_hex(8)}.sock",
-                local_roots=(request.workspace, *(path for path in support_paths.values())),
+                local_roots=(
+                    request.workspace,
+                    *request.run_owned_roots,
+                    *support_paths.values(),
+                ),
             )
             broker.start()
             broker_env = (

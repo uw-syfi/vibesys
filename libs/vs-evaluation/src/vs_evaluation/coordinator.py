@@ -23,7 +23,11 @@ from vs_evaluation.models import (
     StageState,
     StoredEvaluation,
 )
-from vs_evaluation.ports import NULL_EVALUATION_EVENT_SINK, ExecutorSubmissionError
+from vs_evaluation.ports import (
+    NULL_EVALUATION_EVENT_SINK,
+    ExecutorRejectedError,
+    ExecutorSubmissionError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -225,17 +229,42 @@ class EvaluationCoordinator:
             # session cannot strand the durable operation.  Executor submission
             # is idempotent by contract.
             if current.submission_pending or observed is None:
-                try:
-                    await self._executor.submit(current.request, handle_id=current.handle_id)
-                except ExecutorSubmissionError:
-                    # The provider may have accepted before a transport error.
-                    # Preserve the same idempotency key for later reconciliation.
+                current, sent = await self._send_submission(current)
+                if not sent:
                     return current
-                current = await self._mark_submission_sent(current)
                 observed = await self._executor.inspect(current.handle_id)
             if observed is None:
                 return current
             return await self._apply_observation(current, observed)
+
+    async def _send_submission(self, current: StoredEvaluation) -> tuple[StoredEvaluation, bool]:
+        """Submit once; return the latest record and whether the executor took the request."""
+        try:
+            await self._executor.submit(current.request, handle_id=current.handle_id)
+        except ExecutorSubmissionError:
+            # The provider may have accepted before a transport error.
+            # Preserve the same idempotency key for later reconciliation.
+            return current, False
+        except ExecutorRejectedError as rejection:
+            return await self._mark_rejected(current, str(rejection)), False
+        return await self._mark_submission_sent(current), True
+
+    async def _mark_rejected(self, current: StoredEvaluation, reason: str) -> StoredEvaluation:
+        """Fail a handle the executor refused, so no caller waits on it forever."""
+        updated = current.model_copy(
+            update={
+                "state": EvaluationState.FAILED,
+                "failure": f"executor rejected the evaluation: {reason}",
+                "submission_pending": False,
+                "revision": current.revision + 1,
+            }
+        )
+        try:
+            stored = await self._store.compare_and_set(updated, expected_revision=current.revision)
+        except RevisionConflictError:
+            return await self._required_record(current.handle_id)
+        self._publish_record(stored)
+        return stored
 
     async def _mark_submission_sent(self, current: StoredEvaluation) -> StoredEvaluation:
         if not current.submission_pending:
