@@ -212,6 +212,10 @@ class HostCore[P]:
       same slot, any other outcome frees the slot;
     - a faulted driver turn stops the search only once ``turn_attempts``
       turns in a row faulted; an accepted submit resets the count;
+    - never quiescent with idle capacity: while a slot is free within the
+      budget, ``wants_turn`` asks the driver for another turn at once, until
+      ``turn_attempts`` turns in a row faulted or left a slot free; a
+      finished worker brings new results and resets that count;
     - ``EndSearch`` is emitted exactly once, when nothing runs or waits and
       the search is stopped or finished.
 
@@ -230,6 +234,9 @@ class HostCore[P]:
     _now_s: float = 0.0
     _slot_seconds: float = 0.0
     _turn_faults: int = 0
+    # Turns in a row, since the last finished worker, that faulted or left a
+    # slot free within the budget.
+    _idle_turns: int = 0
 
     @property
     def running(self) -> frozenset[str]:
@@ -265,6 +272,16 @@ class HostCore[P]:
         return self._ended
 
     @property
+    def wants_turn(self) -> bool:
+        """Whether a driver turn is due now: a slot is free within the budget.
+
+        Waiting for a worker to finish instead would idle that slot for a
+        whole worker turn. The count of idle turns bounds the asking, so a
+        driver that keeps leaving slots free cannot spin.
+        """
+        return self.free_capacity > 0 and self._idle_turns < self.limits.turn_attempts
+
+    @property
     def turn_faults(self) -> int:
         """Consecutive faulted driver turns since the last accepted submit."""
         return self._turn_faults
@@ -285,6 +302,7 @@ class HostCore[P]:
                 return self._maybe_end()
             case TurnFaulted():
                 self._turn_faults += 1
+                self._idle_turns += 1
                 if self._turn_faults >= self.limits.turn_attempts:
                     self._halt(StopReason.TURN_FAULTS_EXHAUSTED)
                 return self._maybe_end()
@@ -331,6 +349,8 @@ class HostCore[P]:
             else:
                 self._queue.append((item, attempt))
                 queued.append(item.worker_id)
+        if charge:
+            self._idle_turns = self._idle_turns + 1 if self.free_capacity > 0 else 0
         return Accepted(tuple(started), tuple(queued)), tuple(effects)
 
     def _finished(self, event: WorkerFinished) -> tuple[Effect[P], ...]:
@@ -338,6 +358,7 @@ class HostCore[P]:
         if slot is None:
             message = f"worker {event.worker_id!r} finished but holds no slot"
             raise ValueError(message)
+        self._idle_turns = 0
         if event.outcome is WorkerOutcome.RETRYABLE and self._stop is None:
             # The retry keeps its slot; its failed attempt is already charged
             # to the worker's own durable retry budget.

@@ -49,6 +49,7 @@ class _Model:
     budget: int
     turn_attempts: int
     turn_faults: int = 0
+    idle_turns: int = 0
     stop_reason: StopReason | None = None
     running: set[str] = field(default_factory=set)
     queue: list[str] = field(default_factory=list)
@@ -140,6 +141,8 @@ class HostCoreMachine(RuleBasedStateMachine):
         assert isinstance(result, Accepted)
         self.model.charged += count
         self.model.turn_faults = 0
+        free = self._model_free()
+        self.model.idle_turns = self.model.idle_turns + 1 if free > 0 else 0
         self.model.queue.extend(result.queued)
         self._apply(effects, freed=False)
 
@@ -158,6 +161,7 @@ class HostCoreMachine(RuleBasedStateMachine):
     @rule(data=st.data(), outcome=st.sampled_from(WorkerOutcome), dt=st.floats(0, 600))
     def finish_worker(self, data: st.DataObject, outcome: WorkerOutcome, dt: float) -> None:
         worker_id = data.draw(st.sampled_from(sorted(self.model.running)))
+        self.model.idle_turns = 0
         effects = self.core.on_event(WorkerFinished(worker_id, outcome, self._tick(dt)))
         restarted = any(
             isinstance(effect, StartWorker) and effect.attempt is Attempt.RETRY
@@ -187,6 +191,7 @@ class HostCoreMachine(RuleBasedStateMachine):
     @rule(dt=st.floats(0, 600))
     def turn_faulted(self, dt: float) -> None:
         self.model.turn_faults += 1
+        self.model.idle_turns += 1
         exhausted = self.model.turn_faults >= self.model.turn_attempts
         if exhausted:
             self._stop(StopReason.TURN_FAULTS_EXHAUSTED)
@@ -207,6 +212,26 @@ class HostCoreMachine(RuleBasedStateMachine):
     def only_a_spent_bound_or_a_stop_halts(self) -> None:
         assert self.core.stopped is self.model.stop_reason
         assert self.core.turn_faults == self.model.turn_faults
+
+    def _model_free(self) -> int:
+        if self.model.stopped or self.model.finishing:
+            return 0
+        free = self.model.max_in_flight - len(self.model.running) - len(self.model.queue)
+        remaining = self.model.budget - self.model.charged + self.model.refunded
+        return max(0, min(free, remaining))
+
+    @invariant()
+    def never_quiescent_with_a_free_slot_and_budget(self) -> None:
+        """r19: a free slot with budget left and an empty queue asks for a turn at once.
+
+        Only a spent idle-turn bound (turns in a row that faulted or left a
+        slot free since the last finished worker) lets the slot wait.
+        """
+        free = self._model_free()
+        assert self.core.free_capacity == free
+        idle = free > 0 and not self.model.queue
+        bound_spent = self.model.idle_turns >= self.model.turn_attempts
+        assert self.core.wants_turn == (idle and not bound_spent)
 
     @invariant()
     def slots_never_exceed_the_limit(self) -> None:

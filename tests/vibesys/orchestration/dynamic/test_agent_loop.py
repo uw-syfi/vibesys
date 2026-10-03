@@ -24,6 +24,8 @@ from vibesys.orchestration.dynamic.planner_driver import PlannerDriver
 if TYPE_CHECKING:
     from collections.abc import Coroutine
 
+    from vibesys.orchestration.dynamic.control import HostEvent
+
 # How one worker attempt ends.
 _ATTEMPTS = st.sampled_from(["ok", "retry", "exhausted", "fatal", "refunded"])
 
@@ -126,6 +128,33 @@ def _clock() -> float:
     return 0.0
 
 
+@dataclass
+class _QuiescenceCheck:
+    """The planner driver, checked each time it chooses to wait for a worker."""
+
+    inner: PlannerDriver[int]
+    waits: int = 0
+
+    async def checkpoint(self) -> None:
+        await self.inner.checkpoint()
+
+    def observe(self, event: HostEvent) -> None:
+        self.inner.observe(event)
+
+    def next_step(self, core: HostCore[int]) -> DriverStep:
+        step = self.inner.next_step(core)
+        if step is DriverStep.WAIT:
+            # r19: a free slot with budget left idled 19.8 slot-minutes
+            # waiting for a sibling; waiting is only right with no turn due.
+            assert not core.wants_turn
+            assert core.running
+            self.waits += 1
+        return step
+
+    async def turn(self, core: HostCore[int]) -> tuple[WorkItem[int], ...]:
+        return await self.inner.turn(core)
+
+
 @dataclass(frozen=True)
 class _Scenario:
     max_in_flight: int
@@ -171,7 +200,7 @@ def test_every_exit_settles_started_work_and_starts_none_after_a_stop(
         )
     )
     workers.core = core
-    driver = PlannerDriver[int](plan=planner.plan, land_stop=planner.land_stop)
+    driver = _QuiescenceCheck(PlannerDriver[int](plan=planner.plan, land_stop=planner.land_stop))
     loop = AgentLoop(core, driver, workers, clock=_clock)
     items = tuple(WorkItem(f"r{n}", n) for n in range(len(recovered)))
 
@@ -234,21 +263,37 @@ def test_cancelling_the_loop_cancels_every_in_flight_worker_once(
     assert len(workers.started) == min(max_in_flight, workers_before_cancel)
 
 
-@given(max_in_flight=st.integers(1, 3), budget=st.integers(0, 3))
-def test_planner_plans_once_per_refill_and_finishes_only_when_idle(
-    max_in_flight: int, budget: int
+@given(
+    max_in_flight=st.integers(1, 3),
+    budget=st.integers(0, 3),
+    turn_attempts=st.integers(1, 3),
+)
+def test_a_planner_that_leaves_slots_free_is_asked_again_within_the_bound(
+    max_in_flight: int, budget: int, turn_attempts: int
 ) -> None:
-    core: HostCore[int] = HostCore(HostLimits(max_in_flight=max_in_flight, start_budget=budget))
+    """r19: a dropped plan idled a free slot until a sibling finished.
+
+    A turn that leaves a slot free is followed by another turn at once, up to
+    ``turn_attempts`` turns in a row; then the search ends without spinning.
+    """
+    core: HostCore[int] = HostCore(
+        HostLimits(max_in_flight=max_in_flight, start_budget=budget, turn_attempts=turn_attempts)
+    )
+    capacities: list[int] = []
 
     async def no_plans(capacity: int, in_flight: frozenset[str]) -> tuple[WorkItem[int], ...]:
-        del capacity, in_flight
+        del in_flight
+        capacities.append(capacity)
         return ()
 
     async def no_stop() -> None:
         return None
 
     driver = PlannerDriver[int](plan=no_plans, land_stop=no_stop)
-    first = driver.next_step(core)
-    assert first is (DriverStep.TURN if budget > 0 else DriverStep.FINISH)
-    # The refill is consumed: with nothing running, the search finishes.
+    workers = _FakeWorkers({})
+    workers.core = core
+    end = asyncio.run(AgentLoop(core, driver, workers, clock=_clock).run(()))
+
+    assert end is SearchEnd.FINISHED
+    assert capacities == ([min(max_in_flight, budget)] * turn_attempts if budget else [])
     assert driver.next_step(core) is DriverStep.FINISH
