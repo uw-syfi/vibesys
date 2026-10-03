@@ -18,15 +18,44 @@ directory layout, and what context they pass.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from vs_prompts.contract import resolve_free_variables
-from vs_prompts.rendered import RenderedPrompt, rendered
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+# Private: only this module mints a RenderedPrompt. The architecture check
+# tests/architecture/test_prompt_templates.py rejects any other use of it.
+_RENDER_TOKEN = object()
+
+
+class RenderedPrompt(str):
+    """Prompt text produced by a :class:`TemplateRenderer` render. Renderer-only.
+
+    Agent-bound text is a template: Python passes data, the template owns the
+    wording, conditionals, and loops. This type marks text that came out of the
+    renderer, so a consumer can tell a rendered prompt from text assembled in
+    Python. The constructor requires a token private to this module; any other
+    caller gets ``TypeError``.
+
+    Transitional: it subclasses ``str`` so existing ``str`` consumers keep
+    working while call sites migrate. Concatenation (``+``, f-strings,
+    ``.join``) returns a plain ``str``. The architecture check catches the
+    remaining escape hatches.
+    """
+
+    __slots__ = ()
+
+    def __new__(cls, text: str, *, token: object) -> Self:
+        """Wrap ``text``; ``token`` must be this module's private token."""
+        if token is not _RENDER_TOKEN:
+            message = "RenderedPrompt is produced only by vs_prompts.api.TemplateRenderer"
+            raise TypeError(message)
+        return super().__new__(cls, text)
 
 
 class TemplateRenderer:
@@ -58,7 +87,7 @@ class TemplateRenderer:
         :meth:`render_string`) doesn't collide with this method's own
         parameter.
         """
-        return rendered(self._env.get_template(name).render(**kwargs))
+        return RenderedPrompt(self._env.get_template(name).render(**kwargs), token=_RENDER_TOKEN)
 
     def unused_kwargs(self, name: str, /, **kwargs: object) -> frozenset[str]:
         """Return which of ``kwargs`` this template would silently never use.
@@ -86,7 +115,7 @@ class TemplateRenderer:
         undefined) so behavior matches file-based templates rendered from the
         same root.
         """
-        return rendered(self._env.from_string(source).render(**kwargs))
+        return RenderedPrompt(self._env.from_string(source).render(**kwargs), token=_RENDER_TOKEN)
 
     def child(self, subroot: Path) -> TemplateRenderer:
         """A renderer scoped to ``subroot``, falling back to this renderer's root.

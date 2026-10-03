@@ -18,7 +18,7 @@ Every backend directory carries the same three fragments.
 
 ## How they're used
 
-`Prompt(template_dir, backend)` (in `vibesys/orchestration/prompts/renderer.py`) auto-injects every fragment under `backend/<backend>/` as a kwarg keyed by **filename stem** on every `prompt.render(...)` call.
+`BackendPromptRenderer(template_dir, backend)` (in `vibesys/orchestration/prompts/renderer.py`) auto-injects every fragment under `backend/<backend>/` as a kwarg keyed by **filename stem** on every `prompt.render(...)` call.
 
 So a fragment file named `device_dtype.j2` is auto-injected as the kwarg `device_dtype`, and any parent template can reference it as `{{ device_dtype }}`. The parent template doesn't know or care which backend it's rendering against.
 

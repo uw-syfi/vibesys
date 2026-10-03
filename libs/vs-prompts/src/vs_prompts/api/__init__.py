@@ -28,8 +28,7 @@ from vs_prompts.contract import (
     resolve_free_variables,
 )
 from vs_prompts.fragments import FragmentFamily
-from vs_prompts.rendered import RenderedPrompt
-from vs_prompts.renderer import TemplateRenderer
+from vs_prompts.renderer import RenderedPrompt, TemplateRenderer
 
 __all__ = [
     "ContractViolation",

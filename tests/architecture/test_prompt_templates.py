@@ -3,12 +3,13 @@
 Python passes data; templates own the wording, conditionals, and loops. This
 check walks every prompt sink in ``src/`` (the message of an agent ``.turn``
 call and every ``system_prompt=`` argument) back through local variables,
-module constants, and functions defined in or imported from first-party
-modules, and reports text assembled in Python: string literals, ``+``,
-``+=``, ``%``, f-strings, ``.format``, and ``.join``. It also reports those
-operations applied to a value returned by a ``render*`` call, ``.format`` on a
-module-level string constant (template text kept in Python), and any
-``RenderedPrompt(...)`` construction outside the renderer.
+module constants, and functions and methods defined in or imported from
+first-party modules, and reports text assembled or edited in Python: string
+literals, ``+``, ``+=``, ``%``, f-strings, ``.format``, ``.join``,
+``.replace``, ``str()``, and ``dedent``. It also reports those operations
+applied to a value returned by a ``render*`` call, ``.format`` on a
+module-level string constant (template text kept in Python), and any minting
+of a ``RenderedPrompt`` outside ``vs_prompts/renderer.py``.
 
 Every module is enforced except those in ``_NOT_YET_MIGRATED``. That list only
 shrinks: a listed module that no longer has a violation fails the check until
@@ -18,8 +19,8 @@ it is removed from the list.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
-from functools import cache
+from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import pytest
@@ -44,8 +45,13 @@ _NOT_YET_MIGRATED: frozenset[str] = frozenset(
     }
 )
 
-_RENDERED_PROMPT_OWNER = "libs/vs-prompts/src/vs_prompts/rendered.py"
-_STRING_METHODS = frozenset({"format", "join"})
+_RENDERED_PROMPT_OWNER = "libs/vs-prompts/src/vs_prompts/renderer.py"
+_MINTING_NAMES = frozenset({"RenderedPrompt", "_RENDER_TOKEN"})
+_STRING_METHODS = frozenset({"format", "join", "replace", "dedent"})
+_STRING_FUNCTIONS = frozenset({"str", "dedent"})
+_SELF_NAMES = frozenset({"self", "cls"})
+
+_Function = ast.FunctionDef | ast.AsyncFunctionDef
 
 
 @dataclass(frozen=True, order=True)
@@ -58,69 +64,188 @@ class _Violation:
         return f"{self.path}:{self.line}: {self.what}"
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Module:
     path: Path
+    relpath: str
     tree: ast.Module
 
-    @property
-    def relpath(self) -> str:
-        return self.path.relative_to(_REPO_ROOT).as_posix()
+    @cached_property
+    def parents(self) -> dict[ast.AST, ast.AST]:
+        return {child: node for node in ast.walk(self.tree) for child in ast.iter_child_nodes(node)}
 
+    def enclosing(
+        self, node: ast.AST, kind: type[ast.AST] | tuple[type[ast.AST], ...]
+    ) -> ast.AST | None:
+        current = self.parents.get(node)
+        while current is not None and not isinstance(current, kind):
+            current = self.parents.get(current)
+        return current
 
-def _source_roots() -> tuple[Path, ...]:
-    return (_REPO_ROOT / "src", *sorted((_REPO_ROOT / "libs").glob("*/src")))
+    def function_of(self, node: ast.AST) -> _Function | None:
+        found = self.enclosing(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        return found if isinstance(found, _Function) else None
 
-
-@cache
-def _load(path: Path) -> _Module:
-    return _Module(path, ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
-
-
-@cache
-def _module_path(dotted: str) -> Path | None:
-    relative = Path(*dotted.split("."))
-    for root in _source_roots():
-        for candidate in (root / relative.with_suffix(".py"), root / relative / "__init__.py"):
-            if candidate.is_file():
-                return candidate
-    return None
-
-
-def _parents(tree: ast.AST) -> dict[ast.AST, ast.AST]:
-    return {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-
-
-@cache
-def _parent_map(path: Path) -> dict[ast.AST, ast.AST]:
-    return _parents(_load(path).tree)
-
-
-def _enclosing_function(path: Path, node: ast.AST) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    parents = _parent_map(path)
-    current = parents.get(node)
-    while current is not None:
-        if isinstance(current, ast.FunctionDef | ast.AsyncFunctionDef):
-            return current
-        current = parents.get(current)
-    return None
-
-
-def _resolve_function(
-    path: Path, name: str, seen: frozenset[tuple[Path, str]] = frozenset()
-) -> tuple[Path, ast.FunctionDef | ast.AsyncFunctionDef] | None:
-    """Find the first-party function ``name`` refers to at module level of ``path``."""
-    if (path, name) in seen:
+    def imported_module(self, name: str) -> str | None:
+        """The dotted module bound to ``name`` by an import, if any."""
+        for node in self.tree.body:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.asname == name or (alias.asname is None and alias.name == name):
+                        return alias.name
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                for alias in node.names:
+                    if (alias.asname or alias.name) == name:
+                        return f"{node.module}.{alias.name}"
         return None
-    tree = _load(path).tree
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name:
-            return path, node
-        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            for alias in node.names:
-                if (alias.asname or alias.name) == name and (target := _module_path(node.module)):
-                    return _resolve_function(target, alias.name, seen | {(path, name)})
-    return None
+
+
+@dataclass
+class _Scanner:
+    """Finds prompt text built in Python under ``scan_root``.
+
+    ``source_roots`` resolve first-party imports; paths are reported relative
+    to ``report_base``.
+    """
+
+    scan_root: Path
+    source_roots: tuple[Path, ...]
+    report_base: Path
+    violations: set[_Violation] = field(default_factory=set)
+    _modules: dict[Path, _Module] = field(default_factory=dict)
+    _visited: set[tuple[Path, int, int]] = field(default_factory=set)
+
+    def load(self, path: Path) -> _Module:
+        if path not in self._modules:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            relpath = path.relative_to(self.report_base).as_posix()
+            self._modules[path] = _Module(path, relpath, tree)
+        return self._modules[path]
+
+    def module_path(self, dotted: str) -> Path | None:
+        relative = Path(*dotted.split("."))
+        for root in self.source_roots:
+            for candidate in (root / relative.with_suffix(".py"), root / relative / "__init__.py"):
+                if candidate.is_file():
+                    return candidate
+        return None
+
+    def run(self) -> frozenset[_Violation]:
+        for path in sorted(self.scan_root.rglob("*.py")):
+            module = self.load(path)
+            for sink in _prompt_sinks(module.tree):
+                self.trace(module, sink)
+            self.violations |= _rendered_output_edits(module) | _formatted_constants(module)
+        return frozenset(self.violations)
+
+    def report(self, module: _Module, node: ast.AST, what: str) -> None:
+        self.violations.add(_Violation(module.relpath, getattr(node, "lineno", 0), what))
+
+    def trace(self, module: _Module, expr: ast.expr) -> None:
+        key = (module.path, expr.lineno, expr.col_offset)
+        if key in self._visited:
+            return
+        self._visited.add(key)
+        if (built := _built_in_python(expr)) is not None:
+            self.report(module, expr, f"prompt built in Python: {built}")
+            return
+        match expr:
+            case ast.Call(func=ast.Name(id=name)):
+                self.trace_function(module, name)
+            case ast.Call(func=ast.Attribute(value=ast.Name(id=owner), attr=attr)):
+                self.trace_method(module, expr, owner, attr)
+            case ast.Await(value=value):
+                self.trace(module, value)
+            case ast.IfExp(body=body, orelse=orelse):
+                self.trace(module, body)
+                self.trace(module, orelse)
+            case ast.Name(id=name):
+                self.trace_name(module, expr, name)
+            case ast.Attribute(value=ast.Name(id=owner), attr=attr) if owner in _SELF_NAMES:
+                self.trace_self_attribute(module, expr, attr)
+            case _:
+                pass
+
+    def trace_returns(self, module: _Module, function: _Function) -> None:
+        for node in ast.walk(function):
+            if isinstance(node, ast.Return) and node.value is not None:
+                self.trace(module, node.value)
+
+    def resolve_function(
+        self, module: _Module, name: str, depth: int = 0
+    ) -> tuple[_Module, _Function] | None:
+        """The first-party module-level function ``name`` refers to in ``module``."""
+        for node in module.tree.body:
+            if isinstance(node, _Function) and node.name == name:
+                return module, node
+        dotted = module.imported_module(name)
+        if dotted is None or depth > 8:
+            return None
+        parent, _, member = dotted.rpartition(".")
+        target = self.module_path(parent) if parent else None
+        if target is None:
+            return None
+        return self.resolve_function(self.load(target), member, depth + 1)
+
+    def trace_function(self, module: _Module, name: str) -> None:
+        if (resolved := self.resolve_function(module, name)) is not None:
+            self.trace_returns(*resolved)
+
+    def trace_method(self, module: _Module, call: ast.Call, owner: str, attr: str) -> None:
+        if owner in _SELF_NAMES:
+            cls = module.enclosing(call, ast.ClassDef)
+            if isinstance(cls, ast.ClassDef):
+                for node in cls.body:
+                    if isinstance(node, _Function) and node.name == attr:
+                        self.trace_returns(module, node)
+            return
+        dotted = module.imported_module(owner)
+        target = self.module_path(dotted) if dotted else None
+        if target is not None and (resolved := self.resolve_function(self.load(target), attr)):
+            self.trace_returns(*resolved)
+
+    def trace_self_attribute(self, module: _Module, expr: ast.Attribute, attr: str) -> None:
+        cls = module.enclosing(expr, ast.ClassDef)
+        if not isinstance(cls, ast.ClassDef):
+            return
+        for node in ast.walk(cls):
+            targets = node.targets if isinstance(node, ast.Assign) else []
+            for target in targets:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr == attr
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id in _SELF_NAMES
+                    and isinstance(node, ast.Assign)
+                ):
+                    self.trace(module, node.value)
+
+    def trace_name(self, module: _Module, expr: ast.Name, name: str) -> None:
+        function = module.function_of(expr)
+        values, augmented = _assignments(function or module.tree, name)
+        if function is not None and not values:
+            values, augmented = _assignments(module.tree, name)
+        for node in augmented:
+            self.report(module, node, f"prompt variable {name!r} extended with +=")
+        for value in values:
+            self.trace(module, value)
+
+
+def _built_in_python(expr: ast.expr) -> str | None:
+    """Name the string-building operation ``expr`` is, if any."""
+    match expr:
+        case ast.Constant(value=str()):
+            return "string literal"
+        case ast.JoinedStr():
+            return "f-string"
+        case ast.BinOp(op=ast.Add() | ast.Mod()):
+            return "+ or %"
+        case ast.Call(func=ast.Attribute(attr=attr)) if attr in _STRING_METHODS:
+            return f".{attr}"
+        case ast.Call(func=ast.Name(id=name)) if name in _STRING_FUNCTIONS:
+            return f"{name}()"
+        case _:
+            return None
 
 
 def _assignments(scope: ast.AST, name: str) -> tuple[list[ast.expr], list[ast.AugAssign]]:
@@ -144,63 +269,6 @@ def _assignments(scope: ast.AST, name: str) -> tuple[list[ast.expr], list[ast.Au
     return values, augmented
 
 
-class _SinkTracer:
-    """Follows a prompt-sink expression back to where its text is produced."""
-
-    def __init__(self) -> None:
-        self.violations: set[_Violation] = set()
-        self._visited: set[tuple[Path, int, int]] = set()
-
-    def _report(self, path: Path, node: ast.AST, what: str) -> None:
-        self.violations.add(_Violation(_load(path).relpath, getattr(node, "lineno", 0), what))
-
-    def trace(self, path: Path, expr: ast.expr) -> None:
-        key = (path, expr.lineno, expr.col_offset)
-        if key in self._visited:
-            return
-        self._visited.add(key)
-        match expr:
-            case ast.Constant(value=str()):
-                self._report(path, expr, "prompt text is a Python string literal")
-            case ast.JoinedStr():
-                self._report(path, expr, "prompt built with an f-string")
-            case ast.BinOp(op=ast.Add() | ast.Mod()):
-                self._report(path, expr, "prompt built with + or %")
-            case ast.Call(func=ast.Attribute(attr=attr)) if attr in _STRING_METHODS:
-                self._report(path, expr, f"prompt built with .{attr}")
-            case ast.Call(func=ast.Name(id=name)):
-                self._trace_function(path, name)
-            case ast.Await(value=value):
-                self.trace(path, value)
-            case ast.IfExp(body=body, orelse=orelse):
-                self.trace(path, body)
-                self.trace(path, orelse)
-            case ast.Name(id=name):
-                self._trace_name(path, expr, name)
-            case _:
-                pass
-
-    def _trace_function(self, path: Path, name: str) -> None:
-        resolved = _resolve_function(path, name)
-        if resolved is None:
-            return
-        target, function = resolved
-        for node in ast.walk(function):
-            if isinstance(node, ast.Return) and node.value is not None:
-                self.trace(target, node.value)
-
-    def _trace_name(self, path: Path, expr: ast.Name, name: str) -> None:
-        function = _enclosing_function(path, expr)
-        scope: ast.AST = function if function is not None else _load(path).tree
-        values, augmented = _assignments(scope, name)
-        if function is not None and not values:
-            values, augmented = _assignments(_load(path).tree, name)
-        for node in augmented:
-            self._report(path, node, f"prompt variable {name!r} extended with +=")
-        for value in values:
-            self.trace(path, value)
-
-
 def _prompt_sinks(tree: ast.Module) -> list[ast.expr]:
     sinks: list[ast.expr] = []
     for node in ast.walk(tree):
@@ -213,50 +281,49 @@ def _prompt_sinks(tree: ast.Module) -> list[ast.expr]:
     return sinks
 
 
-def _is_render_call(node: ast.expr) -> bool:
-    if isinstance(node, ast.Await):
-        node = node.value
+def _call_name(node: ast.AST | None) -> str:
     if not isinstance(node, ast.Call):
-        return False
+        return ""
     func = node.func
-    name = (
-        func.id
-        if isinstance(func, ast.Name)
-        else func.attr
-        if isinstance(func, ast.Attribute)
-        else ""
-    )
-    return name.startswith("render")
+    if isinstance(func, ast.Name):
+        return func.id
+    return func.attr if isinstance(func, ast.Attribute) else ""
+
+
+def _is_render_call(node: ast.expr) -> bool:
+    return _call_name(node.value if isinstance(node, ast.Await) else node).startswith("render")
+
+
+def _edits_operand(parent: ast.AST | None, grandparent: ast.AST | None) -> bool:
+    """Whether ``parent`` applies a string-building operation to its child."""
+    match parent:
+        case ast.BinOp(op=ast.Add() | ast.Mod()) | ast.FormattedValue() | ast.AugAssign():
+            return True
+        case ast.Attribute(attr=attr):
+            return attr in _STRING_METHODS
+        case ast.Call():
+            return _call_name(parent) in _STRING_METHODS | _STRING_FUNCTIONS
+        case ast.List() | ast.Tuple():
+            return _call_name(grandparent) in _STRING_METHODS
+        case _:
+            return False
 
 
 def _rendered_output_edits(module: _Module) -> set[_Violation]:
-    """``+``, ``+=``, f-string, ``.format`` or ``.join`` applied to a ``render*`` result."""
+    """String-building operations applied to a ``render*`` result."""
     found: set[_Violation] = set()
-    parents = _parent_map(module.path)
     for node in ast.walk(module.tree):
         if not isinstance(node, ast.expr):
             continue
         rendered = _is_render_call(node)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            function = _enclosing_function(module.path, node)
-            values, _ = _assignments(function or module.tree, node.id)
+            values, _ = _assignments(module.function_of(node) or module.tree, node.id)
             rendered = any(_is_render_call(value) for value in values)
         if not rendered:
             continue
-        value = parents[node] if isinstance(parents.get(node), ast.Await) else node
-        parent = parents.get(value)
-        edited = (
-            (isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Add | ast.Mod))
-            or isinstance(parent, ast.FormattedValue | ast.AugAssign)
-            or (isinstance(parent, ast.Attribute) and parent.attr in _STRING_METHODS)
-            or (
-                isinstance(parent, ast.Call)
-                and isinstance(parent.func, ast.Attribute)
-                and parent.func.attr in _STRING_METHODS
-            )
-            or (isinstance(parent, ast.List | ast.Tuple) and _joined(parents.get(parent)))
-        )
-        if edited:
+        value = module.parents[node] if isinstance(module.parents.get(node), ast.Await) else node
+        parent = module.parents.get(value)
+        if _edits_operand(parent, module.parents.get(parent) if parent else None):
             found.add(_Violation(module.relpath, node.lineno, "rendered prompt edited in Python"))
     return found
 
@@ -273,9 +340,7 @@ def _formatted_constants(module: _Module) -> set[_Violation]:
         if isinstance(target, ast.Name)
     }
     return {
-        _Violation(
-            module.relpath, node.lineno, f"string constant {node.func.value.id} formatted in Python"
-        )
+        _Violation(module.relpath, node.lineno, "string constant formatted in Python")
         for node in ast.walk(module.tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -285,50 +350,120 @@ def _formatted_constants(module: _Module) -> set[_Violation]:
     }
 
 
-def _joined(node: ast.AST | None) -> bool:
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in _STRING_METHODS
-    )
+def _repo_scan() -> frozenset[_Violation]:
+    source_roots = (_REPO_ROOT / "src", *sorted((_REPO_ROOT / "libs").glob("*/src")))
+    return _Scanner(_REPO_ROOT / "src", source_roots, _REPO_ROOT).run()
 
 
-@cache
-def _violations() -> frozenset[_Violation]:
-    tracer = _SinkTracer()
-    found: set[_Violation] = set()
-    for path in sorted((_REPO_ROOT / "src").rglob("*.py")):
-        module = _load(path)
-        for sink in _prompt_sinks(module.tree):
-            tracer.trace(path, sink)
-        found |= _rendered_output_edits(module) | _formatted_constants(module)
-    return frozenset(found | tracer.violations)
+_REPO_VIOLATIONS = _repo_scan()
 
 
 def test_prompts_in_migrated_modules_are_rendered_from_templates() -> None:
-    unmigrated = sorted(v for v in _violations() if v.path not in _NOT_YET_MIGRATED)
+    unmigrated = sorted(v for v in _REPO_VIOLATIONS if v.path not in _NOT_YET_MIGRATED)
 
     assert [str(v) for v in unmigrated] == []
 
 
 @pytest.mark.parametrize("path", sorted(_NOT_YET_MIGRATED))
 def test_not_yet_migrated_list_only_names_modules_with_violations(path: str) -> None:
-    assert any(v.path == path for v in _violations()), (
+    assert any(v.path == path for v in _REPO_VIOLATIONS), (
         f"{path} builds no prompt in Python any more; remove it from _NOT_YET_MIGRATED"
     )
 
 
-def test_only_the_renderer_constructs_rendered_prompts() -> None:
-    constructions = [
-        f"{path.relative_to(_REPO_ROOT).as_posix()}:{node.lineno}"
-        for root in _source_roots()
+def _minting_sites(path: Path, *, calls: bool) -> list[int]:
+    """Lines that use the private mint token, or construct the type when ``calls``.
+
+    Tests may call the constructor to prove it rejects a foreign token.
+    """
+    lines: list[int] = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+        match node:
+            case ast.Call(
+                func=ast.Name(id="RenderedPrompt") | ast.Attribute(attr="RenderedPrompt")
+            ) if calls:
+                lines.append(node.lineno)
+            case ast.Name(id="_RENDER_TOKEN") | ast.Attribute(attr="_RENDER_TOKEN"):
+                lines.append(node.lineno)
+            case ast.ImportFrom(module=module) if module and module.startswith("vs_prompts"):
+                if any(alias.name in _MINTING_NAMES - {"RenderedPrompt"} for alias in node.names):
+                    lines.append(node.lineno)
+            case _:
+                pass
+    return lines
+
+
+def test_only_the_renderer_mints_rendered_prompts() -> None:
+    libs = _REPO_ROOT / "libs"
+    sources = (_REPO_ROOT / "src", *sorted(libs.glob("*/src")))
+    tests = (_REPO_ROOT / "tests", *sorted(libs.glob("*/tests")))
+    sites = [
+        f"{path.relative_to(_REPO_ROOT).as_posix()}:{line}"
+        for roots, calls in ((sources, True), (tests, False))
+        for root in roots
         for path in sorted(root.rglob("*.py"))
         if path.relative_to(_REPO_ROOT).as_posix() != _RENDERED_PROMPT_OWNER
-        for node in ast.walk(_load(path).tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name | ast.Attribute)
-        and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr)
-        == "RenderedPrompt"
+        for line in _minting_sites(path, calls=calls)
     ]
 
-    assert constructions == []
+    assert sites == []
+
+
+_REPORTED = {
+    "plus": "def f(session, value):\n    return session.turn('a' + value)",
+    "augmented": (
+        "def f(session, value):\n    message = render_x()\n    message += value\n"
+        "    return session.turn(message)"
+    ),
+    "f-string": "def f(session, value):\n    return session.turn(f'do {value}')",
+    "format": "def f(session, value):\n    return session.turn('do {}'.format(value))",
+    "join": "def f(session, value):\n    return session.turn(' '.join([value, value]))",
+    "percent": "def f(session, value):\n    return session.turn('do %s' % value)",
+    "replace": "def f(session, r):\n    return session.turn(r.render_template('t.j2').replace('a', 'b'))",
+    "str": "def f(session, value):\n    return session.turn(str(value))",
+    "dedent": "def f(session, value):\n    return session.turn(textwrap.dedent(value))",
+    "literal": "def f(session):\n    return session.turn('do the thing')",
+    "system prompt literal": "ROLE = Role(system_prompt='You are a judge.')",
+    "system prompt constant": "_PROMPT = 'You are a judge.'\nROLE = Role(system_prompt=_PROMPT)",
+    "helper function": (
+        "def _helper(value):\n    return f'do {value}'\n\n"
+        "def f(session, value):\n    return session.turn(_helper(value))"
+    ),
+    "method": (
+        "class Agent:\n    def _build(self, value):\n        return 'do ' + value\n\n"
+        "    def run(self, session, value):\n        return session.turn(self._build(value))"
+    ),
+    "rendered edited": "def f(value):\n    text = render_x()\n    return text + value",
+    "constant formatted": "_T = 'do {v}'\n\ndef f(value):\n    return render_x(extra=_T.format(v=value))",
+}
+
+_ACCEPTED = {
+    "render call": "def f(session, r, v):\n    return session.turn(r.render_template('t.j2', v=v))",
+    "rendered variable": (
+        "def f(session, v):\n    message = render_x(v=v)\n    return session.turn(message)"
+    ),
+    "parameter": "def f(session, value):\n    return session.turn(value)",
+    "attribute": "def f(config):\n    return Role(system_prompt=config.system_prompt)",
+    "rendering helper": (
+        "def _helper(r, v):\n    return r.render_template('t.j2', v=v)\n\n"
+        "def f(session, r, v):\n    return session.turn(_helper(r, v))"
+    ),
+    "data formatting into a render": "def f(n):\n    return render_x(round_id=f'{n:04d}')",
+}
+
+
+def _scan_snippet(tmp_path: Path, source: str) -> frozenset[_Violation]:
+    path = tmp_path / "src" / "pkg" / "mod.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(source + "\n", encoding="utf-8")
+    return _Scanner(tmp_path / "src", (tmp_path / "src",), tmp_path).run()
+
+
+@pytest.mark.parametrize("source", _REPORTED.values(), ids=_REPORTED.keys())
+def test_check_reports_prompt_text_built_in_python(tmp_path: Path, source: str) -> None:
+    assert _scan_snippet(tmp_path, source)
+
+
+@pytest.mark.parametrize("source", _ACCEPTED.values(), ids=_ACCEPTED.keys())
+def test_check_accepts_rendered_prompts_and_data(tmp_path: Path, source: str) -> None:
+    assert _scan_snippet(tmp_path, source) == frozenset()

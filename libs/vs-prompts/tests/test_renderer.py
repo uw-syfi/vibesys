@@ -151,7 +151,9 @@ def test_only_the_renderer_constructs_a_rendered_prompt(text: str) -> None:
 
 
 @given(text=_TEXT, suffix=_TEXT)
-def test_string_operations_on_rendered_output_drop_the_type(text: str, suffix: str) -> None:
+def test_transitional_str_subclass_concatenation_drops_the_type(text: str, suffix: str) -> None:
+    # Transitional: holds while RenderedPrompt subclasses str. The flip to a
+    # non-str type replaces this with "concatenation is a type error".
     prompt = TemplateRenderer(Path()).render_string("{{ value }}", value=text)
 
     built = (
