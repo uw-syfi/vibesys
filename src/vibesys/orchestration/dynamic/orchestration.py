@@ -201,6 +201,9 @@ class _DynamicRun:
                 objective_location=self.run.facts.objective_location,
                 root_revision=self._root_revision(),
                 history=self._history_projection(),
+                older_ids=", ".join(
+                    item.hypothesis_id for item in self.state.workstreams[:-_MAX_HISTORY_ROWS]
+                ),
             )
             first_error: DynamicPlanError | ValidationError | None = None
             for attempt in range(2):
