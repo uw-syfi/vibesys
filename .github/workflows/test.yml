@@ -360,8 +360,53 @@ jobs:
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
   # changes do not.
+  # The suite is split by test file across two runners (`--shard=I/N`, see
+  # tests/support/sharding.py) so the job fits the five-minute CI budget. Each
+  # shard uploads its coverage data; `coverage` combines them.
   test:
     needs: changes
+    if: >-
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.tui == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+
+      - name: Run Python tests (shard ${{ matrix.shard }} of 2)
+        run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard_${{ matrix.shard }}
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-data-${{ matrix.shard }}
+          path: coverage-shard-${{ matrix.shard }}.data
+
+  # Combines the shards' coverage data, applies the repo-wide and per-module
+  # floors, and checks patch coverage. Was part of the single `test` job, which
+  # had the full history and the coverage report it needs.
+  coverage:
+    needs: [changes, test]
     if: >-
       needs.changes.outputs.python == 'true' ||
       needs.changes.outputs.tui == 'true'
@@ -388,8 +433,14 @@ jobs:
         with:
           go-version-file: support/repoctl/go.mod
 
-      - name: Run Python tests and coverage checks
-        run: ./support/repoctl/repoctl run-checks --group python_ci_tests
+      - name: Download coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+
+      - name: Combine coverage and apply the floors
+        run: ./support/repoctl/repoctl run-checks --group python_ci_coverage
 
       - name: Upload coverage report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -397,10 +448,6 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
-      # Was its own `needs: test` job, which put a second checkout, uv install,
-      # dependency sync, and artifact download on the critical path after the
-      # longest job in the run just to spend a few seconds in diff-cover. This
-      # job already has the full history and the coverage report it needs.
       - name: Check patch coverage
         if: github.event_name == 'pull_request'
         run: ./support/repoctl/repoctl run-checks --group patch_coverage
@@ -501,6 +548,7 @@ jobs:
       - validate-examples
       - agent-image
       - test
+      - coverage
       - sandbox-linux
       - sandbox-macos
     if: always()
@@ -561,6 +609,7 @@ jobs:
       - validate-examples
       - agent-image
       - test
+      - coverage
       - sandbox-linux
       - sandbox-macos
     if: always()

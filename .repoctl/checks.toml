@@ -165,13 +165,43 @@ directory = "resources/evaluators/microservice"
 timeout_seconds = 1200
 commands = [["bash", "check_workloads.sh"]]
 
+# CI runs the suite as two shards on two runners, then combines their coverage
+# data in one follow-up job. `--shard=I/N` is defined in
+# tests/support/sharding.py; `--cov-report=` leaves the report to the combine
+# step. Each shard writes its own data file (no leading dot, so the artifact
+# upload keeps it).
 [[check_groups]]
-name = "python_ci_tests"
+name = "python_ci_tests_shard_1"
 language = "python"
 directory = "."
 timeout_seconds = 1800
+env = { COVERAGE_FILE = "coverage-shard-1.data" }
 commands = [
-  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report=xml", "--cov-report=json", "--cov-fail-under=75"],
+  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--shard=1/2", "--cov-report="],
+]
+
+[[check_groups]]
+name = "python_ci_tests_shard_2"
+language = "python"
+directory = "."
+timeout_seconds = 1800
+env = { COVERAGE_FILE = "coverage-shard-2.data" }
+commands = [
+  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--shard=2/2", "--cov-report="],
+]
+
+# Combines the shards' coverage data and applies the repo-wide and per-module
+# floors that the unsharded run applied.
+[[check_groups]]
+name = "python_ci_coverage"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [
+  ["uv", "run", "coverage", "combine", "coverage-shard-1.data", "coverage-shard-2.data"],
+  ["uv", "run", "coverage", "report", "--fail-under=75"],
+  ["uv", "run", "coverage", "xml"],
+  ["uv", "run", "coverage", "json"],
   ["uv", "run", "python", "scripts/check_coverage_floor.py", "coverage.json"],
 ]
 
