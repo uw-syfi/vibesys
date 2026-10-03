@@ -110,6 +110,16 @@ class DynamicPlanError(ValueError):
         )
 
     @classmethod
+    def free_slots(cls, scheduled: int, capacity: int) -> DynamicPlanError:
+        """Ask once to fill slots that would otherwise idle until a workstream finishes."""
+        return cls(
+            f"the portfolio schedules {scheduled} of {capacity} free slots, and a free slot "
+            "idles until a running workstream finishes. Fill every free slot with an "
+            "independent workstream; return the same portfolio only if no independent "
+            "work would be useful now"
+        )
+
+    @classmethod
     def incomplete_checkpoint(
         cls,
         hypothesis_id: str,
@@ -493,6 +503,9 @@ class _DynamicRun:
                 ),
             )
             first_error: DynamicPlanError | ValidationError | None = None
+            # A valid plan that leaves slots free; kept if the planner, asked
+            # once to fill them, still finds no independent work.
+            underfilled: PortfolioPlan | None = None
             for attempt in range(2):
                 message = (
                     prompt if attempt == 0 else f"{prompt}\n\nCorrection required: {first_error}"
@@ -502,8 +515,16 @@ class _DynamicRun:
                     self._validate_plan(plan, capacity=capacity, in_flight=in_flight)
                 except (DynamicPlanError, ValidationError) as error:
                     first_error = error
-                else:
-                    return plan
+                    continue
+                if attempt == 0 and len(plan.workstreams) < capacity:
+                    # A free slot idles until a running workstream finishes,
+                    # which can take a whole implementer turn.
+                    underfilled = plan
+                    first_error = DynamicPlanError.free_slots(len(plan.workstreams), capacity)
+                    continue
+                return plan
+            if underfilled is not None:
+                return underfilled
             raise first_error or DynamicPlanError("portfolio planning failed")
         finally:
             await session.close()
