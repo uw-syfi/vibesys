@@ -217,7 +217,7 @@ class _MultiRun:
         self.carry = self.search.initial_carry(self.records)
         self.round_number = len(self.records) + 1
         self.files.write_pareto(
-            self.search.archive_summary(self.records, space=self.state.search.metrics)
+            self.search.archive_view(self.records, space=self.state.search.metrics)
         )
         await self._commit(
             workspace=self.workspace,
@@ -231,7 +231,7 @@ class _MultiRun:
                 await self.run.control.checkpoint()
                 self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
-                    self.search.archive_summary(self.records, space=self.state.search.metrics)
+                    self.search.archive_view(self.records, space=self.state.search.metrics)
                 )
                 selected = await self._select_round()
                 await self._run_attempts(selected)
@@ -661,7 +661,6 @@ class _MultiRun:
             hypothesis=hypothesis,
             record=record,
             records=self.records,
-            carry=self.carry,
             passed=attempt.passed,
             reviewed=self.terminal.reviewed(attempt),
             feedback=attempt.feedback,
@@ -695,7 +694,7 @@ class _MultiRun:
 
     async def _finish(self) -> None:
         self.files.write_pareto(
-            self.search.archive_summary(self.records, space=self.state.search.metrics)
+            self.search.archive_view(self.records, space=self.state.search.metrics)
         )
         winner = self.search.best(self.records, space=self.state.search.metrics)
         if winner is None:

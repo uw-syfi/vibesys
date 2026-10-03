@@ -72,7 +72,7 @@ Preserve valid earlier rows after later diagnostic failure.
 {% if pareto_archive_conflict %}
 The framework detected this disposition conflict:
 
-{{ pareto_archive_conflict }}
+{% include "_notices/archive_conflict.j2" +%}
 
 Fail the unsupported disposition and request a report-only correction without
 another unchanged performance run.

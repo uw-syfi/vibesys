@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.hypothesis import cadence, transitions
+from vibesys.orchestration.hypothesis.notices import (
+    ExhaustionNotice,
+    OfficialCandidateNotRetained,
+)
 from vibesys.orchestration.hypothesis.results import (
     AttemptBudget,
     ClosedRound,
@@ -36,6 +40,11 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.orchestration.hypothesis.config import HypothesisConfig
+    from vibesys.orchestration.hypothesis.notices import (
+        ArchiveConflict,
+        ParetoArchiveView,
+        RegressionNotice,
+    )
     from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.metrics import MetricSpace
@@ -65,7 +74,7 @@ class HypothesisSearch:
 
     def initial_carry(self, records: Sequence[RoundRecord]) -> CarryOver:
         """Return the resumed carry-over, seeded from any pending workspace notice."""
-        return CarryOver(regression_info=transitions.terminal_workspace_notice(records))
+        return CarryOver(regression=transitions.terminal_workspace_notice(records))
 
     def finish(self, state: HypothesisState) -> HypothesisState:
         """Clear the active hypothesis pointer without changing the hypothesis itself."""
@@ -193,7 +202,6 @@ class HypothesisSearch:
         hypothesis: Hypothesis,
         record: RoundRecord,
         records: Sequence[RoundRecord],
-        carry: CarryOver,
         passed: bool,
         reviewed: bool,
         feedback: str | None,
@@ -229,7 +237,6 @@ class HypothesisSearch:
         updated = transitions.append_round(updated, record, keep_active=next_active is not None)
         all_records = [*records, record]
         new_carry, exhaustion_feedback = _carry_over(
-            carry,
             passed=passed,
             reviewed=reviewed,
             record=record,
@@ -261,8 +268,8 @@ class HypothesisSearch:
         metrics: dict[str, float],
         records: Sequence[RoundRecord],
         space: MetricSpace,
-    ) -> str | None:
-        """Explain why a claimed frontier row is dominated by the live archive."""
+    ) -> ArchiveConflict | None:
+        """Return the live archive points that dominate a claimed frontier row."""
         return transitions.pareto_archive_conflict(
             candidate_disposition=disposition,
             candidate_metrics=metrics,
@@ -296,15 +303,11 @@ class HypothesisSearch:
         """Count provisional candidates recorded since the last official evaluation."""
         return transitions.provisional_candidates_since_official(records)
 
-    def archive_summary(self, records: Sequence[RoundRecord], *, space: MetricSpace) -> str:
-        """Render the Pareto archive's current summary for the progress board."""
-        return transitions.pareto_archive_summary(records, space)
-
-    def format_metric_row(self, record: RoundRecord, *, space: MetricSpace) -> str:
-        """Render one round record's candidate metrics against *space*'s objectives."""
-        return transitions._format_metric_row(  # noqa: SLF001  # same package  # LW-040043 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
-            transitions.record_candidate_metrics(record), space.objectives
-        )
+    def archive_view(
+        self, records: Sequence[RoundRecord], *, space: MetricSpace
+    ) -> ParetoArchiveView:
+        """Select the Pareto archive's trusted parents and pending claims."""
+        return transitions.pareto_archive_view(records, space)
 
     @staticmethod
     def delta_reason(hypothesis: Hypothesis) -> PerfDeltaReason | None:
@@ -350,7 +353,6 @@ def _next_active(  # noqa: PLR0913  # LW-040044 [PLR0913]; the parameters are in
 
 
 def _carry_over(  # noqa: PLR0913  # LW-040045 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
-    prior: CarryOver,
     *,
     passed: bool,
     reviewed: bool,
@@ -361,30 +363,30 @@ def _carry_over(  # noqa: PLR0913  # LW-040045 [PLR0913]; the parameters are ind
     terminal_needs_parent_choice: bool,
     keeps_active: bool,
 ) -> tuple[CarryOver, str | None]:
-    carry = CarryOver(regression_info=prior.regression_info, exhaustion_info=prior.exhaustion_info)
-    exhaustion_feedback: str | None = None
     if not passed and reviewed:
-        exhaustion_feedback = feedback or ""
-        carry.exhaustion_info = (
-            f"Round {record.round_number} did not pass after "
-            f"{max_retries_per_round} attempts. Last judge feedback: {feedback or '(empty)'}"
+        exhaustion = ExhaustionNotice(
+            round_number=record.round_number,
+            attempts=max_retries_per_round,
+            feedback=feedback,
         )
-        carry.regression_info = None
-    elif passed:
-        carry.exhaustion_info = None
+        return CarryOver(regression=None, exhaustion=exhaustion), feedback or ""
+    if passed:
+        regression: RegressionNotice | None = None
         if terminal_needs_parent_choice:
-            carry.regression_info = transitions.terminal_workspace_notice(all_records)
+            regression = transitions.terminal_workspace_notice(all_records)
         elif record.official_evaluation and record.candidate_retained is False:
-            carry.regression_info = (
-                f"Round {record.round_number}'s official candidate was not retained: "
-                f"{record.perf_metric}{(' ' + record.perf_unit) if record.perf_unit else ''}. "
-                "Use its recorded parent and objective directions when choosing the next checkpoint."
+            regression = OfficialCandidateNotRetained(
+                round_number=record.round_number,
+                perf_metric=record.perf_metric,
+                perf_unit=record.perf_unit,
             )
-        else:
-            carry.regression_info = None
-    else:
-        carry.exhaustion_info = None
-        carry.regression_info = (
-            None if keeps_active else transitions.terminal_workspace_notice(all_records)
-        )
-    return carry, exhaustion_feedback
+        return CarryOver(regression=regression, exhaustion=None), None
+    return (
+        CarryOver(
+            regression=(
+                None if keeps_active else transitions.terminal_workspace_notice(all_records)
+            ),
+            exhaustion=None,
+        ),
+        None,
+    )

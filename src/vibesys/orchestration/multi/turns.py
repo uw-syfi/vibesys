@@ -29,9 +29,11 @@ from vibesys.orchestration.multi.contracts import (
     ProfilerContext,
 )
 from vibesys.orchestration.multi.prompts import (
+    render_archive_conflict,
     render_continuation_prompt,
     render_implementer_prompt,
     render_judge_prompt,
+    render_pareto_guard,
     render_plan_prompt,
     render_pre_round_prompt,
     render_profiler_prompt,
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.hypothesis import (
+        ArchiveConflict,
         AttemptState,
         CarryOver,
         HypothesisSearch,
@@ -180,8 +183,8 @@ class MultiAgentTurns:
         facts = self.run.facts
         context = PreRoundContext(
             objective_location=facts.objective_location,
-            regression_info=carry.regression_info,
-            exhaustion_info=carry.exhaustion_info,
+            regression_info=carry.regression,
+            exhaustion_info=carry.exhaustion,
             progress_location=self.files.progress_location,
             profiler_kind=facts.profiler_id,
             profile_execution=facts.profile_execution.value,
@@ -206,8 +209,8 @@ class MultiAgentTurns:
         return PlanContext(
             objective_location=facts.objective_location,
             profiler_summary=request.profiler_summary,
-            regression_info=request.carry.regression_info,
-            exhaustion_info=request.carry.exhaustion_info,
+            regression_info=request.carry.regression,
+            exhaustion_info=request.carry.exhaustion,
             progress_location=self.files.progress_location,
             roadmap_location=self.files.roadmap_location,
             pareto_archive_location=self.files.pareto_location,
@@ -227,7 +230,7 @@ class MultiAgentTurns:
             active_component=(
                 request.guidance.active_component if request.guidance is not None else None
             ),
-            ledger_text=(request.guidance.ledger_text if request.guidance is not None else None),
+            ledger=(request.guidance.ledger if request.guidance is not None else None),
             ranked_bottlenecks=(
                 [
                     {
@@ -475,7 +478,7 @@ class MultiAgentTurns:
         self,
         request: AttemptRequest,
         state: AttemptState,
-        conflict: str | None,
+        conflict: ArchiveConflict | None,
     ) -> JudgeResponse:
         """Audit one implementation using a fresh read-only conversation."""
         implementation = state.implementation
@@ -525,11 +528,11 @@ class MultiAgentTurns:
             response = await structured_turn(session, render_judge_prompt(context), JudgeResponse)
         finally:
             await session.close()
-        if response.verdict is Verdict.PASS and conflict:
+        if response.verdict is Verdict.PASS and conflict is not None:
             response = response.model_copy(
                 update={
-                    "analysis": f"{response.analysis}\n\nFramework Pareto guard: {conflict}",
-                    "feedback": conflict,
+                    "analysis": render_pareto_guard(response.analysis, conflict),
+                    "feedback": render_archive_conflict(conflict),
                     "verdict": Verdict.FAIL,
                 }
             )

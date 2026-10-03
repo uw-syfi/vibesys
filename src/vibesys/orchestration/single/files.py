@@ -9,10 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.single.prompts import render_pareto_frontier
+
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import OrchestratorPlan
+    from vibesys.orchestration.hypothesis import OrchestratorPlan, ParetoArchiveView
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
     from vibesys.orchestration.structured_turn import TurnFailed
 
@@ -91,10 +93,10 @@ class SingleFiles:
         _write_model(path, plan)
         return _location(path, self.workspace)
 
-    def write_pareto(self, summary: str) -> None:
+    def write_pareto(self, archive: ParetoArchiveView) -> None:
         """Replace the derived Pareto archive."""
         self.pareto_path.parent.mkdir(parents=True, exist_ok=True)
-        self.pareto_path.write_text(f"# Pareto frontier\n\n{summary.rstrip()}\n")
+        self.pareto_path.write_text(render_pareto_frontier(archive))
 
     def note_plan(self, round_number: int, plan: OrchestratorPlan) -> None:
         """Append the selected hypothesis and task to the progress memory."""
