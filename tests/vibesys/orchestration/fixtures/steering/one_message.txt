@@ -1,0 +1,7 @@
+Do the work.
+
+## Operator steering (live)
+
+The operator sent the following instruction(s) for this invocation. Treat them as high-priority guidance for the work you do now:
+
+- focus on latency
