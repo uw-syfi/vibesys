@@ -21,7 +21,7 @@ from vibesys.orchestration.domains.registry import (
 )
 from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.prompts import render_template
+from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path

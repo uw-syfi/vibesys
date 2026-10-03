@@ -61,7 +61,7 @@ forbid_circular_dependencies = true
 # orchestration host > prompts + lower libs), enforced only where a module
 # already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`
 # stay unlayered; their order is still pinned by the explicit edges above).
-# `vibesys.orchestration.prompts` (templates + renderer) sits with policy,
+# `vibesys.prompts` (templates + renderer) sits with policy,
 # other mechanics libraries: the host and lower layers render prompts, they
 # don't hand policy to the template layer, so `prompts` is a leaf every layer
 # above it may reach downward into.
@@ -226,12 +226,12 @@ depends_on = ["vs_loop_state", "vibesys.hypothesis", "vs_runtime", "vibesys.run.
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.hypothesis.readmodel", "vibesys.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic"
@@ -241,7 +241,7 @@ depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.ag
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.orchestration.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
@@ -285,12 +285,12 @@ depends_on = ["vs_prompts"]
 # The one correction turn every built-in plugin sends after an invalid structured reply.
 path = "vibesys.orchestration.structured_turn"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.profiler_agent"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.skill_selection"
@@ -330,7 +330,7 @@ depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", 
 [[modules]]
 path = "vibesys.run.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.resources"
@@ -355,7 +355,7 @@ depends_on = ["vibesys", "vibesys.orchestration.skill_selection", "vs_runtime"]
 [[modules]]
 path = "vibesys.orchestration.domains"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vibesys.orchestration.prompts"]
+depends_on = ["vibesys", "vibesys.prompts"]
 
 [[modules]]
 # Product-owned authored-input parsing, validation, rendering, and synthesis.
@@ -370,7 +370,7 @@ layer = "roles_search"
 depends_on = [ "vibesys.metrics", "vibesys.orchestration.profilers"]
 
 [[modules]]
-path = "vibesys.orchestration.prompts"
+path = "vibesys.prompts"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_prompts"]
 
@@ -726,3 +726,7 @@ from = ["vibesys.hypothesis.readmodel"]
 [[interfaces]]
 expose = ["splice_steering"]
 from = ["vibesys.steering"]
+
+[[interfaces]]
+expose = ["BackendPromptRenderer", "ComputeBackendFragment", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
+from = ["vibesys.prompts"]

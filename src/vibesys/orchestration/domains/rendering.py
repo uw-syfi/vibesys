@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_string, render_template
+from vibesys.prompts import PROMPTS_DIR, render_string, render_template
 
 if TYPE_CHECKING:
     from pathlib import Path

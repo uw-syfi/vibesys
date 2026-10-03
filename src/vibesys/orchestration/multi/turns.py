@@ -44,13 +44,13 @@ from vibesys.orchestration.profilers import (
     UnsupportedProfilerError,
     profiler_definition,
 )
-from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.structured_turn import (
     TurnFailed,
     attempt_structured_turn,
     structured_turn,
 )
+from vibesys.prompts import render_plan_correction
 from vs_runtime.api import (
     ResolvedSkillResources,
     Run,

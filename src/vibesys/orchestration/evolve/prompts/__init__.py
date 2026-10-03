@@ -7,7 +7,7 @@ from vibesys.orchestration.evolve.models import (
     CandidateProfilerContext,
     MutatorContext,
 )
-from vibesys.orchestration.prompts import PROMPTS_DIR
+from vibesys.prompts import PROMPTS_DIR
 from vs_prompts.api import TemplateRenderer
 
 _PROMPT_DIR = Path(__file__).resolve().parent

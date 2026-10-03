@@ -8,7 +8,7 @@ Two concepts:
   directory.
 - **Fragment** — a small reusable snippet meant to be composed *into*
   a template, not rendered standalone. Lives at
-  ``vibesys/orchestration/prompts/backend/<backend>/<name>.j2``. The
+  ``vibesys/prompts/backend/<backend>/<name>.j2``. The
   ``backend/`` directory marks "fragment directory, not a place to find
   full templates".
 
@@ -26,7 +26,7 @@ filename stem on every ``render(...)`` call. Templates can therefore
 reference ``{{ device_dtype }}`` regardless of which backend the run
 targets.
 
-See ``vibesys/orchestration/prompts/backend/README.md`` for the
+See ``vibesys/prompts/backend/README.md`` for the
 fragment-filename convention contributors should follow.
 
 Rendering itself (Jinja environment construction, strict-undefined
@@ -56,8 +56,8 @@ def _build_env(template_dir: Path | str | None = None) -> TemplateRenderer:
     """Return a ``TemplateRenderer`` for the given template directory.
 
     Per-loop prompt directories fall back, in order, to
-    ``vibesys/orchestration/prompts/shared/`` (fragments shared across strategies)
-    and then to the ``vibesys/orchestration/prompts/`` root itself, so fragment lookups via
+    ``vibesys/prompts/shared/`` (fragments shared across strategies)
+    and then to the ``vibesys/prompts/`` root itself, so fragment lookups via
     :class:`ComputeBackendFragment` resolve from package-owned prompt assets.
     A strategy's own folder is always searched first; strategies never
     resolve templates from a sibling strategy's folder.
@@ -106,7 +106,7 @@ def render_string(source: str, **kwargs: object) -> RenderedPrompt:
 class ComputeBackendFragment(ABC):
     """Provides backend-specific Jinja fragments.
 
-    Fragments live under ``vibesys/orchestration/prompts/backend/<backend>/``.
+    Fragments live under ``vibesys/prompts/backend/<backend>/``.
 
     Subclasses must set ``backend = ComputeBackend.<X>``. The default
     rendering reads ``<backend>/<name>.j2`` from the shared templates
@@ -225,7 +225,7 @@ class BackendPromptRenderer:
     template_dir:
         Per-loop directory the renderer searches first.
         For example, a plugin-local prompt directory falls back to the shared
-        ``vibesys/orchestration/prompts/`` root, where backend fragments
+        ``vibesys/prompts/`` root, where backend fragments
         live.
     backend:
         Hardware backend the run targets. Selects the

@@ -11,10 +11,10 @@ from vibesys.hypothesis import (
     SkillResourceSelection,
     normalize_hypothesis_title,
 )
-from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
 from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.prompts import render_plan_correction
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:

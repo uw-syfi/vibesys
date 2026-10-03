@@ -25,8 +25,8 @@ from vibesys.hypothesis import (
 )
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi import prompts as multi_prompts
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 from vibesys.orchestration.single import prompts as single_prompts
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,

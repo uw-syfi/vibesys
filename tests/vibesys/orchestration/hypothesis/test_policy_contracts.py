@@ -23,8 +23,8 @@ from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (

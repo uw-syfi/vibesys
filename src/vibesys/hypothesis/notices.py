@@ -4,7 +4,7 @@ The search policy is pure and never renders text. It selects the facts an
 agent needs (the Pareto archive, a regression or terminal-workspace notice,
 an exhausted-review notice) and returns them as frozen models. Consumers pass
 these models to their templates, and the shared partials under
-``vibesys/orchestration/prompts/shared/_notices/`` own the wording.
+``vibesys/prompts/shared/_notices/`` own the wording.
 
 Fields hold raw facts (agent-supplied strings unmodified, ``None`` where a
 fact is missing, numbers with their recorded ``int`` or ``float`` type); the

@@ -35,7 +35,7 @@ src/vibesys/orchestration/domains/my_domain/
   __init__.py       # exports DEFINITION
   hooks.py          # optional domain-specific EnvironmentHooks implementation
 
-src/vibesys/orchestration/prompts/domains/my_domain/
+src/vibesys/prompts/domains/my_domain/
     README.md        # optional human documentation
     implementer.md   # injected as {{ domain_implementer }}
     judge.md         # injected as {{ domain_judge }}
@@ -100,8 +100,8 @@ Example (inside `judge.md`):
 1. Copy `src/vibesys/orchestration/domains/generic/` to a new in-repo
    `src/vibesys/orchestration/domains/<module_name>/` package, using underscores for the
    Python module name when the CLI domain name contains hyphens.
-2. Copy `src/vibesys/orchestration/prompts/domains/generic/` to
-   `src/vibesys/orchestration/prompts/domains/<module_name>/` and edit its `README.md` with
+2. Copy `src/vibesys/prompts/domains/generic/` to
+   `src/vibesys/prompts/domains/<module_name>/` and edit its `README.md` with
    the title and "use for…" line.
 3. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
    (what to check) under the central prompt directory. Leave a file out to

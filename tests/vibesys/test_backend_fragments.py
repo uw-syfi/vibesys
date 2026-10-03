@@ -12,8 +12,8 @@ from __future__ import annotations
 import pytest
 
 from vibesys.constants import ComputeBackend
-from vibesys.orchestration.prompts import get_backend_fragment
-from vibesys.orchestration.prompts.renderer import _FRAGMENT_IMPLS, _build_env
+from vibesys.prompts import get_backend_fragment
+from vibesys.prompts.renderer import _FRAGMENT_IMPLS, _build_env
 
 
 @pytest.mark.parametrize("backend", list(ComputeBackend), ids=lambda b: b.value)

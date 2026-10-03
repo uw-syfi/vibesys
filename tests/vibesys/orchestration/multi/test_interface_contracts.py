@@ -27,8 +27,8 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.orchestration.prompts import render_template
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path

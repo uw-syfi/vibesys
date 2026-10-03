@@ -1,7 +1,7 @@
 """Prompt rendering API and package-owned prompt assets."""
 
-from vibesys.orchestration.prompts.plan_correction import render_plan_correction
-from vibesys.orchestration.prompts.renderer import (
+from vibesys.prompts.plan_correction import render_plan_correction
+from vibesys.prompts.renderer import (
     PROMPTS_DIR,
     BackendPromptRenderer,
     ComputeBackendFragment,
