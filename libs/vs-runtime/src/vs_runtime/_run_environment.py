@@ -266,6 +266,8 @@ class RunEnvironmentRequest:
     accuracy_command: str | None = None
     benchmark_command: str | None = None
     benchmark_output_argument: str | None = None
+    profile_command: str | None = None
+    profile_timeout_seconds: int | None = None
     evaluator_requirements: TrustedEvaluatorRequirements = field(
         default_factory=TrustedEvaluatorRequirements
     )
@@ -630,6 +632,16 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         policy: SlurmExecutionPolicy,
         presentation: RunEnvironmentPresentation,
     ) -> RunEnvironmentSession:
+        profiler_tree = request.profiler_support_name
+        if profiler_tree is not None and request.profiler_support_path is not None:
+            # Validate the trusted load before opening resources owned by the delegate.
+            trusted_profile_command(
+                config,
+                policy,
+                _command_argv(request.profile_command),
+                profiler_tree=profiler_tree,
+                workload_timeout_seconds=request.profile_timeout_seconds,
+            )
         delegate = (
             LocalEnvironment().prepare(request).open(RunEnvironmentPresentation(prompt_notes=""))
         )
@@ -657,11 +669,12 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             )
             if name is not None and path is not None
         }
-        profiler_tree = request.profiler_support_name
         evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = request.log_dir / "slurm-capture-plan.json"
         raw_accuracy = _command_argv(remote.accuracy_command)
         raw_benchmark = _command_argv(remote.benchmark_command)
+        raw_profile = _command_argv(remote.profile_command)
+        profile = policy.remote_argv(raw_profile) if raw_profile is not None else None
         accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
         benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
         write_slurm_evaluation_plan(
@@ -673,7 +686,13 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 benchmark_output_argument=request.benchmark_output_argument,
                 support_paths=support_paths,
                 profile_command=(
-                    trusted_profile_command(config, policy, benchmark, profiler_tree=profiler_tree)
+                    trusted_profile_command(
+                        config,
+                        policy,
+                        profile,
+                        profiler_tree=profiler_tree,
+                        workload_timeout_seconds=request.profile_timeout_seconds,
+                    )
                     if profiler_tree is not None and profiler_tree in support_paths
                     else None
                 ),
@@ -682,7 +701,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         write_slurm_capture_plan(
             capture_plan_path,
             SlurmCapturePlan(
-                benchmark_command=benchmark,
+                profile_command=profile,
+                profile_timeout_seconds=request.profile_timeout_seconds,
                 support_paths=support_paths,
             ),
         )
@@ -1655,6 +1675,7 @@ def _prepare_evaluation_plan(
         TrustedEvaluationPlan(
             accuracy_command=request.accuracy_command,
             benchmark_command=request.benchmark_command,
+            profile_command=request.profile_command,
         ),
         requirements,
         paths,
