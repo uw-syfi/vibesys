@@ -22,6 +22,7 @@ from vibesys.orchestration.profile_focus.state import (
     ProfileGuidedComponent,
     ProfileImprovementSample,
 )
+from vibesys.orchestration.prompts import render_template
 
 if TYPE_CHECKING:
     from vibesys.orchestration.profile_focus.config import ProfileFocusConfig
@@ -179,18 +180,19 @@ def _select_component(state: ProfileFocusState, *, override: str | None) -> Prof
 
 
 def _format_ledger(state: ProfileFocusState) -> str:
-    if not state.components:
-        return ""
-    lines = ["component | status | rounds_spent | latest_share | stalled_rounds"]
-    for component in state.components:
-        share = (
-            f"{component.latest_share * 100:.2f}%" if component.latest_share is not None else "-"
-        )
-        lines.append(
-            f"{component.name} | {component.status.value} | {component.rounds_spent} | "
-            f"{share} | {component.stalled_rounds}"
-        )
-    return "\n".join(lines)
+    return render_template(
+        "shared/_focus_ledger.j2",
+        components=[
+            {
+                "name": component.name,
+                "status": component.status.value,
+                "rounds_spent": component.rounds_spent,
+                "latest_share": component.latest_share,
+                "stalled_rounds": component.stalled_rounds,
+            }
+            for component in state.components
+        ],
+    )
 
 
 def _ranked_bottlenecks(state: ProfileFocusState) -> list[ProfileBottleneck]:

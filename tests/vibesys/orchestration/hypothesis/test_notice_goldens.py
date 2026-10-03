@@ -9,8 +9,9 @@ their exact bytes (including newlines) are pinned per branch. Regenerate with
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -26,6 +27,11 @@ from vibesys.orchestration.hypothesis.transitions import (
 )
 from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_loop_state.api import PerfProvenance
 
 _GOLDEN_DIR = Path(__file__).parent / "notice_goldens"
 
@@ -47,7 +53,7 @@ def _row(  # noqa: PLR0913  # LW-040137 [PLR0913]; the keyword-only fields are i
     metrics: dict[str, float] | None = None,
     perf: tuple[float, str | None] | None = None,
     official: bool = False,
-    provenance: str | None = None,
+    provenance: PerfProvenance | None = None,
     passed: bool = True,
     reviewed: bool = True,
     outcome: str | None = None,
@@ -109,12 +115,23 @@ def _pending(number: int, tput: float, lat: float) -> RoundRecord:
     )
 
 
-def _terminal(outcome: HypothesisOutcome, **fields: object) -> RoundRecord:
+def _terminal(
+    outcome: HypothesisOutcome, *, number: int = 5, parent_round: int | None = None
+) -> RoundRecord:
+    return _row(number, outcome=outcome.value, hypothesis_id="h5", parent_round=parent_round)
+
+
+def _terminal_retained(
+    outcome: HypothesisOutcome, *, reviewed: bool, metrics: dict[str, float]
+) -> RoundRecord:
     return _row(
-        fields.pop("number", 5),  # type: ignore[arg-type]
+        5,
         outcome=outcome.value,
-        hypothesis_id=fields.pop("hypothesis_id", "h5"),  # type: ignore[arg-type]
-        **fields,  # type: ignore[arg-type]
+        hypothesis_id="h5",
+        metrics=metrics,
+        retained=True,
+        passed=reviewed,
+        reviewed=reviewed,
     )
 
 
@@ -195,17 +212,13 @@ def _notices() -> dict[str, Callable[[], str | None]]:
         ),
         "notice_retained_reviewed": lambda: terminal_workspace_notice(
             [
-                _terminal(
-                    HypothesisOutcome.DISPROVEN,
-                    metrics={"throughput": 5.0},
-                    retained=True,
-                    passed=True,
-                    reviewed=True,
+                _terminal_retained(
+                    HypothesisOutcome.DISPROVEN, reviewed=True, metrics={"throughput": 5.0}
                 )
             ]
         ),
         "notice_retained_awaiting_review": lambda: terminal_workspace_notice(
-            [_terminal(HypothesisOutcome.INCONCLUSIVE, retained=True, passed=False, reviewed=False)]
+            [_terminal_retained(HypothesisOutcome.INCONCLUSIVE, reviewed=False, metrics={})]
         ),
         "notice_retained_missing_commit": lambda: terminal_workspace_notice(
             [
@@ -251,17 +264,19 @@ def _notices() -> dict[str, Callable[[], str | None]]:
     }
 
 
-def _close(
-    record: RoundRecord,
-    *,
-    passed: bool,
-    reviewed: bool,
-    feedback: str | None = None,
-    terminal_needs_parent_choice: bool = False,
-    keeps_active: bool = False,
-    prior: CarryOver | None = None,
-    earlier: list[RoundRecord] | None = None,
-) -> CarryOver:
+@dataclass(frozen=True)
+class _Closing:
+    """How one round closes: the review outcome plus the loop's policy flags."""
+
+    passed: bool
+    reviewed: bool
+    feedback: str | None = None
+    terminal_needs_parent_choice: bool = False
+    keeps_active: bool = False
+    prior: CarryOver | None = None
+
+
+def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
     search = HypothesisSearch(HypothesisConfig(max_rounds=10, max_retries_per_round=3))
     plan = OrchestratorPlan(
         hypothesis_id="h5",
@@ -275,21 +290,21 @@ def _close(
         plan,
         round_number=record.round_number,
         current_commit=None,
-        records=earlier or [],
+        records=[],
     )
     closed = search.close_round(
         started.state,
         hypothesis=started.hypothesis,
         record=record,
-        records=earlier or [],
-        carry=prior or CarryOver(),
-        passed=passed,
-        reviewed=reviewed,
-        feedback=feedback,
-        keeps_active=keeps_active,
+        records=[],
+        carry=closing.prior or CarryOver(),
+        passed=closing.passed,
+        reviewed=closing.reviewed,
+        feedback=closing.feedback,
+        keeps_active=closing.keeps_active,
         requests_continuation=False,
         next_step=None,
-        terminal_needs_parent_choice=terminal_needs_parent_choice,
+        terminal_needs_parent_choice=closing.terminal_needs_parent_choice,
     )
     return closed.carry
 
@@ -303,10 +318,10 @@ def _carries() -> dict[str, Callable[[], str]]:
     stale = CarryOver(regression_info="old regression", exhaustion_info="old exhaustion")
     return {
         "carry_exhaustion_with_feedback": lambda: _carry_text(
-            _close(plain, passed=False, reviewed=True, feedback="needs tests")
+            _close(plain, _Closing(passed=False, reviewed=True, feedback="needs tests"))
         ),
         "carry_exhaustion_empty_feedback": lambda: _carry_text(
-            _close(plain, passed=False, reviewed=True, feedback=None, prior=stale)
+            _close(plain, _Closing(passed=False, reviewed=True, feedback=None, prior=stale))
         ),
         "carry_not_retained_with_unit": lambda: _carry_text(
             _close(
@@ -318,9 +333,7 @@ def _carries() -> dict[str, Callable[[], str]]:
                     retained=False,
                     hypothesis_id="h5",
                 ),
-                passed=True,
-                reviewed=True,
-                prior=stale,
+                _Closing(passed=True, reviewed=True, prior=stale),
             )
         ),
         "carry_not_retained_without_unit": lambda: _carry_text(
@@ -333,28 +346,26 @@ def _carries() -> dict[str, Callable[[], str]]:
                     retained=False,
                     hypothesis_id="h5",
                 ),
-                passed=True,
-                reviewed=True,
+                _Closing(passed=True, reviewed=True),
             )
         ),
         "carry_passed_terminal_parent_choice": lambda: _carry_text(
             _close(
                 _terminal(HypothesisOutcome.DISPROVEN),
-                passed=True,
-                reviewed=True,
-                terminal_needs_parent_choice=True,
+                _Closing(passed=True, reviewed=True, terminal_needs_parent_choice=True),
             )
         ),
         "carry_passed_clears_both": lambda: _carry_text(
-            _close(plain, passed=True, reviewed=True, prior=stale)
+            _close(plain, _Closing(passed=True, reviewed=True, prior=stale))
         ),
         "carry_unreviewed_terminal_notice": lambda: _carry_text(
             _close(
-                _terminal(HypothesisOutcome.INCONCLUSIVE), passed=False, reviewed=False, prior=stale
+                _terminal(HypothesisOutcome.INCONCLUSIVE),
+                _Closing(passed=False, reviewed=False, prior=stale),
             )
         ),
         "carry_unreviewed_keeps_active": lambda: _carry_text(
-            _close(plain, passed=False, reviewed=False, keeps_active=True, prior=stale)
+            _close(plain, _Closing(passed=False, reviewed=False, keeps_active=True, prior=stale))
         ),
     }
 

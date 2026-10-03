@@ -1,0 +1,32 @@
+{% filter trim %}
+{% if not axes %}
+No objective axes are configured. Use objectives.toml to enable multi-objective checkpoint retention; official scalar tracking remains active.
+{% else %}
+Configured axes: {% for axis in axes %}{{ axis.name }}:{{ axis.direction }}{{ ", " if not loop.last else "" }}{% endfor +%}
+Dominance is variance-aware: a point removes another only when it is no worse within {{ noise }} on every axis and better by more than {{ noise }} on at least one.
+{% endif %}
+{% if latest is none %}
+Latest completed round: none.
+{% else %}
+Latest completed round: round {{ latest.round_number }}, commit {{ (latest.commit or "(missing)")[:12] }}, official metrics: {{ latest.metrics }}; retained: {{ latest.retained }}.
+{% endif %}
+{% if axes %}
+{% if frontier_recorded %}
+Trusted frontier parents:
+{% for point in frontier %}
+- round {{ point.round_number }}, commit {{ point.commit[:12] }}, {{ "official" if point.official else "reviewed provisional" }}: {{ point.metrics }}; operating point: {{ point.operating_point or "canonical workload row" }}; artifact: {{ point.artifact or "(missing)" }}
+{% endfor %}
+{% else %}
+Trusted frontier parents: none recorded yet.
+{% endif %}
+{% if pending %}
+Measured frontier claims not yet usable as trusted parents (retain the commit, but do not treat it as a parent). A row lands here because its hard invariants have not passed independent review, or because its numbers are the implementer's own report rather than a framework measurement:
+{% if omitted %}
+- {{ omitted.count }} older untrusted {{ "claim" if omitted.count == 1 else "claims" }} omitted from this context ({{ "round %d" | format(omitted.first_round) if omitted.first_round == omitted.last_round else "rounds %d-%d" | format(omitted.first_round, omitted.last_round) }}); do not treat any omitted claim as a trusted parent.
+{% endif %}
+{% for claim in pending %}
+- round {{ claim.round_number }}, commit {{ claim.commit[:12] }}: {{ claim.metrics }}; operating point: {{ claim.operating_point or "(unspecified)" }}; artifact: {{ claim.artifact or "(missing)" }}; reason: {{ claim.reason or "(unspecified)" }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfilter %}

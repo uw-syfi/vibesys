@@ -1,0 +1,6 @@
+{% if components %}
+component | status | rounds_spent | latest_share | stalled_rounds
+{% for component in components %}
+{{ component.name }} | {{ component.status }} | {{ component.rounds_spent }} | {{ "%.2f%%" | format(component.latest_share * 100) if component.latest_share is not none else "-" }} | {{ component.stalled_rounds }}{{ "\n" if not loop.last else "" }}
+{%- endfor %}
+{% endif %}

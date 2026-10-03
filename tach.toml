@@ -255,15 +255,16 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-# Pure, deterministic hypothesis policy: never agents/prompts/I/O.
+# Pure, deterministic hypothesis policy: never agents or I/O. It renders only
+# the shared notice templates (`prompts/shared/`) that its functions return.
 path = "vibesys.orchestration.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics"]
+depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics", "vibesys.orchestration.prompts"]
 
 [[modules]]
 path = "vibesys.orchestration.profile_focus"
 layer = "roles_search"
-depends_on = []
+depends_on = ["vibesys.orchestration.prompts"]
 
 [[modules]]
 path = "vibesys.orchestration.metrics"

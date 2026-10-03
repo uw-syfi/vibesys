@@ -30,6 +30,7 @@ from vibesys.orchestration.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
 )
+from vibesys.orchestration.prompts import render_template
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
@@ -365,9 +366,11 @@ def _carry_over(  # noqa: PLR0913  # LW-040045 [PLR0913]; the parameters are ind
     exhaustion_feedback: str | None = None
     if not passed and reviewed:
         exhaustion_feedback = feedback or ""
-        carry.exhaustion_info = (
-            f"Round {record.round_number} did not pass after "
-            f"{max_retries_per_round} attempts. Last judge feedback: {feedback or '(empty)'}"
+        carry.exhaustion_info = render_template(
+            "shared/_carry_exhaustion.j2",
+            round_number=record.round_number,
+            max_retries=max_retries_per_round,
+            feedback=feedback,
         )
         carry.regression_info = None
     elif passed:
@@ -375,10 +378,11 @@ def _carry_over(  # noqa: PLR0913  # LW-040045 [PLR0913]; the parameters are ind
         if terminal_needs_parent_choice:
             carry.regression_info = transitions.terminal_workspace_notice(all_records)
         elif record.official_evaluation and record.candidate_retained is False:
-            carry.regression_info = (
-                f"Round {record.round_number}'s official candidate was not retained: "
-                f"{record.perf_metric}{(' ' + record.perf_unit) if record.perf_unit else ''}. "
-                "Use its recorded parent and objective directions when choosing the next checkpoint."
+            carry.regression_info = render_template(
+                "shared/_carry_unretained.j2",
+                round_number=record.round_number,
+                perf_metric=record.perf_metric,
+                perf_unit=record.perf_unit,
             )
         else:
             carry.regression_info = None
