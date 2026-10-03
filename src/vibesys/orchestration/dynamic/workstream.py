@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic import steers
@@ -115,6 +116,14 @@ class DynamicAttemptError(RuntimeError):
         return cls(f"{hypothesis_id}: {cause}", repeated=repeated)
 
 
+class InterruptResult(StrEnum):
+    """What an interrupt request did to a workstream's implementer turn."""
+
+    INTERRUPTED = "interrupted"  # The turn ends now; the next one starts with the notes.
+    NO_LIVE_TURN = "no_live_turn"  # No implementer turn runs; notes wait for the next one.
+    REFUNDS_SPENT = "refunds_spent"  # The refund bound is reached; notes wait likewise.
+
+
 @dataclass(slots=True)
 class Workstreams:
     """Runs workstream attempts against one run's durable state.
@@ -138,6 +147,26 @@ class Workstreams:
     _live_turns: dict[str, tuple[CandidateWorkspace, int]] = field(default_factory=dict)
     # Hypotheses whose running attempt the host withdrew (parked or cancelled).
     _withdrawn: set[str] = field(default_factory=set)
+    # The interrupt signal of each running implementer turn.
+    _interrupts: dict[str, asyncio.Event] = field(default_factory=dict)
+
+    def interrupt(self, hypothesis_id: str) -> InterruptResult:
+        """End the running implementer turn early so its pending notes reach the next turn.
+
+        The turn's worktree is kept as a work-in-progress revision, the turn is
+        refunded through ``refund_interrupted`` (at most
+        ``max_retries_per_round`` times per workstream), and the next turn
+        resumes the same provider conversation. Evaluations the turn submitted
+        keep running.
+        """
+        signal = self._interrupts.get(hypothesis_id)
+        if signal is None or signal.is_set():
+            return InterruptResult.NO_LIVE_TURN
+        current = self.state.workstreams[workstream_index(self.state, hypothesis_id)]
+        if current.budget.refund_interrupted(self.options.max_retries_per_round) is None:
+            return InterruptResult.REFUNDS_SPENT
+        signal.set()
+        return InterruptResult.INTERRUPTED
 
     def withdraw(self, hypothesis_id: str) -> None:
         """Mark the running attempt withdrawn; it keeps its work as it exits."""
@@ -490,6 +519,48 @@ class Workstreams:
         reset: _RecreatedWorktree | None,
         notes: Sequence[SteerNote],
     ) -> ImplementerResult:
+        """Run implementer turns until one returns; an interrupted turn is followed by another."""
+        index = workstream_index(self.state, plan.hypothesis_id)
+        interrupted: str | None = None
+        while True:
+            signal = asyncio.Event()
+            self._interrupts[plan.hypothesis_id] = signal
+            try:
+                result = await self._implementer_turn(
+                    plan,
+                    workspace,
+                    feedback=feedback,
+                    reset=reset,
+                    notes=notes,
+                    interrupted_revision=interrupted,
+                    signal=signal,
+                )
+            finally:
+                del self._interrupts[plan.hypothesis_id]
+            if result is not None:
+                return result
+            interrupted = await workspace.snapshot(
+                f"dynamic: {plan.hypothesis_id} interrupted turn"
+            )
+            await workspace.retain(
+                interrupted,
+                label=f"dynamic-{plan.hypothesis_id}-interrupted-"
+                f"{self.state.workstreams[index].budget.refunded}",
+            )
+            notes = await self._start_implementer_turn(index, refund_interrupted=True)
+
+    async def _implementer_turn(  # noqa: PLR0913  # lint-waiver: LW-261005 [PLR0913]; each argument is one input of the rendered turn or its interrupt signal; bundling them in a one-use container would only move the same fields.
+        self,
+        plan: WorkstreamPlan,
+        workspace: CandidateWorkspace,
+        *,
+        feedback: str | None,
+        reset: _RecreatedWorktree | None,
+        notes: Sequence[SteerNote],
+        interrupted_revision: str | None,
+        signal: asyncio.Event,
+    ) -> ImplementerResult | None:
+        """Run one implementer turn; return ``None`` when ``signal`` ended it first."""
         session = await self.run.agents.create_session(
             IMPLEMENTER,
             workspace=workspace,
@@ -497,8 +568,8 @@ class Workstreams:
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         item = self.state.workstreams[workstream_index(self.state, plan.hypothesis_id)]
-        try:
-            return await structured_turn(
+        turn = asyncio.create_task(
+            structured_turn(
                 session,
                 render_implementation(
                     hypothesis_id=plan.hypothesis_id,
@@ -513,12 +584,24 @@ class Workstreams:
                     worktree_revision=reset.revision if reset is not None else None,
                     prior_revision=reset.remembered if reset is not None else None,
                     notes=notes,
-                    interrupted_revision=None,
+                    interrupted_revision=interrupted_revision,
                 ),
                 ImplementerResult,
             )
+        )
+        interrupt = asyncio.create_task(signal.wait())
+        try:
+            await asyncio.wait({turn, interrupt}, return_when=asyncio.FIRST_COMPLETED)
         finally:
+            # One exit for every path: the turn ends before its session closes.
+            interrupt.cancel()
+            if not turn.done():
+                turn.cancel()
+            await asyncio.gather(turn, interrupt, return_exceptions=True)
             await session.close()
+        if turn.cancelled():
+            return None
+        return turn.result()
 
     async def _maybe_review(
         self,
@@ -632,7 +715,9 @@ class Workstreams:
             partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
         )
 
-    async def _start_implementer_turn(self, index: int) -> tuple[SteerNote, ...]:
+    async def _start_implementer_turn(
+        self, index: int, *, refund_interrupted: bool = False
+    ) -> tuple[SteerNote, ...]:
         """Charge and record an implementer turn start; deliver its steers in that commit.
 
         Returns the orchestrator notes the turn renders. A crash after this
@@ -642,7 +727,15 @@ class Workstreams:
         """
         async with self.lock:
             current = self.state.workstreams[index]
-            budget = current.budget.charge()
+            budget = current.budget
+            if refund_interrupted:
+                # The interrupted turn's charge returns; the next turn takes it.
+                refunded = budget.refund_interrupted(self.options.max_retries_per_round)
+                if refunded is None:
+                    message = f"{current.hypothesis_id}: interrupted past its refund bound"
+                    raise RuntimeError(message)
+                budget = refunded
+            budget = budget.charge()
             self.state.workstreams[index] = current.model_copy(
                 update={"phase": WorkstreamPhase.IMPLEMENTING, "budget": budget}, deep=True
             )

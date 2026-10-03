@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
@@ -169,6 +170,8 @@ class FakeTrustedEvaluationExecutor:
 
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+# A responder may return an awaitable: the turn awaits it, so a test can hold a
+# turn open the way a long provider turn is, and end it early.
 TurnResponder: TypeAlias = Callable[
     [AgentRole, tuple[str, ...], str, type[BaseModel] | None], object
 ]
@@ -419,7 +422,7 @@ class FakeAgentSession:
         label = f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
-            result = self._respond(message, response)
+            result = await self._respond(message, response)
         except StructuredResponseError:
             # Production keeps the conversation after an invalid structured
             # reply, so the correction turn sees this message in its history.
@@ -432,10 +435,12 @@ class FakeAgentSession:
             await self._workspace.snapshot(label)
         return result
 
-    def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
+    async def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
         """Answer one turn, reporting invalid structured output as production does."""
         try:
             value = self._responder(self._role, tuple(self._history), message, response)
+            if inspect.isawaitable(value):
+                value = await value
         except AgentOutputSchemaError as error:
             if response is None:
                 raise
