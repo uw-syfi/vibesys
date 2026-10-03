@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 
 from vibesys.orchestration.issue_queue.models import IssueToolPolicy
 from vibesys.orchestration.issue_queue.prompts import (
+    create_issue_result,
     invalid_status_result,
     issue_list_result,
     issue_result,
@@ -79,14 +80,15 @@ def build_server(store_path: Path, policy_path: Path, tracker_config_path: Path)
         description: str,
     ) -> str:
         """Create an issue when the current turn policy permits it."""
-        _, message = create_issue_under_policy(
-            board(),
-            type_str=type,
-            title=title,
-            description=description,
-            policy=_policy(policy_path),
+        return create_issue_result(
+            create_issue_under_policy(
+                board(),
+                type_str=type,
+                title=title,
+                description=description,
+                policy=_policy(policy_path),
+            )
         )
-        return message
 
     return server
 

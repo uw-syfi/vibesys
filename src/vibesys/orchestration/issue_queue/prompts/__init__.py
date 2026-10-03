@@ -6,13 +6,20 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from vs_issue_tracker.api import (
+    CapReached,
+    InvalidIssueType,
+    Issue,
+    IssueType,
+    TypeNotAllowed,
+)
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from vibesys.orchestration.issue_queue.models import IssueQueueOptions, IssueQueueState
-    from vs_issue_tracker.api import Issue, IssueStatus
+    from vs_issue_tracker.api import CreateRejection, IssueStatus
     from vs_runtime.api import RunFacts
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
@@ -114,9 +121,22 @@ def invalid_status_result(status: str) -> RenderedPrompt:
     return _RENDERER.render_template("tools/invalid_status.j2", status=status)
 
 
+def create_issue_result(outcome: Issue | CreateRejection) -> RenderedPrompt:
+    """Render the issue-board tool result for a created issue or its rejection."""
+    return _RENDERER.render_template(
+        "tools/create_issue.j2",
+        issue=outcome if isinstance(outcome, Issue) else None,
+        invalid_type=outcome if isinstance(outcome, InvalidIssueType) else None,
+        not_allowed=outcome if isinstance(outcome, TypeNotAllowed) else None,
+        cap=outcome if isinstance(outcome, CapReached) else None,
+        issue_types=list(IssueType),
+    )
+
+
 __all__ = [
     "ProgressStep",
     "bootstrap_description",
+    "create_issue_result",
     "implementer_message",
     "implementer_system_prompt",
     "invalid_status_result",
