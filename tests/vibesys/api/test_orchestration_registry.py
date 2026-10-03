@@ -52,6 +52,7 @@ from vs_runtime.api import (
     OrchestrationPlugin,
     OrchestrationResumeDecision,
     Run,
+    StructuredResponseError,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
 
@@ -209,7 +210,9 @@ def test_builtin_catalog_selects_only_plugins() -> None:
         assert registration.projector is not None
 
 
-def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Path) -> None:
+def test_builtin_single_agent_reaches_its_first_structured_turn_with_the_stub_backend(
+    tmp_path: Path,
+) -> None:
     request = _custom_request(tmp_path).model_copy(
         update={
             "orchestration": OrchestrationDescriptor(
@@ -227,9 +230,11 @@ def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Pa
     )
     session = create_session(request, sink=_discard_event)
 
-    result = asyncio.run(session.await_result())
-
-    assert result.loop == "single-agent"
+    # The stub backend writes no structured output, and the plugin must not
+    # fabricate a plan in its place: the run reaches the designer turn and
+    # ends with the typed error.
+    with pytest.raises(StructuredResponseError, match="OrchestratorPlan"):
+        asyncio.run(session.await_result())
 
 
 def test_builtin_plugin_metadata_declares_product_policy() -> None:
