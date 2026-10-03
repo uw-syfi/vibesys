@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,6 +23,7 @@ from vs_evaluation.api import (
     EvaluationAgentService,
     EvaluationFailed,
     EvaluationLifecycleEvent,
+    EvaluationRequest,
     EvaluationState,
     EvidenceKind,
     SubmitCall,
@@ -334,4 +335,59 @@ async def test_concurrent_submissions_of_unchanged_content_share_one_evaluation(
     assert len(handles) == 1
     assert all(isinstance(reply, SubmittedReply) for reply in replies)
     assert len(executor.submissions) == 1
+    await backend.close()
+
+
+@dataclass
+class _BlockingSubmitExecutor(_OwnedFakeExecutor):
+    """An executor whose submit stays in progress until the test releases it."""
+
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+    entered: list[str] = field(default_factory=list)
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        """Record the arrival, then wait for the release like a slow remote stage."""
+        self.entered.append(handle_id)
+        await self.release.wait()
+        await super().submit(request, handle_id=handle_id)
+
+
+async def _let_ready_tasks_run() -> None:
+    # Every await in the code under test completes without real I/O, so a fixed
+    # number of event-loop turns lets all runnable work reach its next real wait.
+    for _ in range(100):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_slow_submission_does_not_delay_a_submission_of_different_content(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    executor = _BlockingSubmitExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "throughput", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:throughput",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    call = SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+
+    # Each snapshot is a new revision with its own patch, so the content differs.
+    submissions = [asyncio.create_task(service.dispatch(call)) for _ in range(2)]
+    await _let_ready_tasks_run()
+
+    assert len(set(executor.entered)) == 2
+    executor.release.set()
+    replies = await asyncio.gather(*submissions)
+    assert len({reply.handle_id for reply in replies if isinstance(reply, SubmittedReply)}) == 2
     await backend.close()

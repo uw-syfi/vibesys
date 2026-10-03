@@ -371,7 +371,7 @@ class SemanticEvaluationBackend:
         self._store = _NamespaceEvaluationStore(namespace)
         # Serializes "pick a key, then claim it" so two submissions of identical
         # content cannot both pick the same fresh key with different snapshots.
-        self._submit_lock = asyncio.Lock()
+        self._claim_lock = asyncio.Lock()
         self._coordinator = EvaluationCoordinator(
             self._executor,
             self._store,
@@ -404,15 +404,14 @@ class SemanticEvaluationBackend:
         workspace = self._require_workspace(scope_id)
         snapshot = await workspace.snapshot("agent-evaluation")
         fingerprints = await self._fingerprints(snapshot)
-        async with self._submit_lock:
+        # Only choosing and claiming the key is serialized. Staging and submitting to
+        # the executor can take tens of seconds, so they run outside the lock.
+        async with self._claim_lock:
             key, existing = await self._claimable_key(fingerprints, kinds)
-            if existing is not None:
-                # The same content was already submitted from another snapshot. Any
-                # snapshot with these fingerprints is the same work, so join it.
-                handle = await self._coordinator.submit(existing.request)
-                return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
-            handle = await self._coordinator.submit(
-                EvaluationRequest(
+            request = (
+                existing.request
+                if existing is not None
+                else EvaluationRequest(
                     key=key,
                     stages=tuple(
                         EvaluationStep(
@@ -427,7 +426,14 @@ class SemanticEvaluationBackend:
                     ),
                 )
             )
-            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            if existing is None:
+                # Claiming makes the key visible to the next submission's pick. The
+                # coordinator's own claim below returns this same record.
+                await self._store.claim(request, handle_id=stable_handle_id(key))
+        # An existing record means the same content was already submitted from another
+        # snapshot; any snapshot with these fingerprints is the same work, so join it.
+        handle = await self._coordinator.submit(request)
+        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
 
     async def _claimable_key(
         self, fingerprints: EvidenceFingerprints, kinds: tuple[EvidenceKind, ...]
