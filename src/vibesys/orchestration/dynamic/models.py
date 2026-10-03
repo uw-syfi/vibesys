@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self, override
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
@@ -12,6 +13,9 @@ from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.orchestration.hypothesis.state import HypothesisState
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import MetricDirection
+
+if TYPE_CHECKING:
+    from pydantic.config import ExtraValues
 
 
 class DynamicOptions(AgentOrchestrationOptions):
@@ -246,10 +250,46 @@ class DynamicState(BaseModel):
     winner_revision: str | None = None
     adoption_pending: bool = False
 
-    @model_validator(mode="before")
     @classmethod
-    def _migrate(cls, data: object) -> object:
-        return _migrate_state(data)
+    @override
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        extra: ExtraValues | None = None,
+        context: object | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        """Load persisted JSON, first upgrading state written by an older version.
+
+        The migration rewrites the parsed mapping and validates the re-encoded
+        JSON, so the load keeps JSON-mode validation. A ``mode="before"`` model
+        validator would instead hand the mapping to a Python-mode validation,
+        which under the state store's ``strict=True`` rejects JSON arrays for
+        tuple fields.
+        """
+        try:
+            parsed = json.loads(json_data)
+        except ValueError:
+            # Malformed JSON: pydantic reports it in its own words.
+            return super().model_validate_json(
+                json_data,
+                strict=strict,
+                extra=extra,
+                context=context,
+                by_alias=by_alias,
+                by_name=by_name,
+            )
+        return super().model_validate_json(
+            json.dumps(_migrate_state(parsed)),
+            strict=strict,
+            extra=extra,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
 
     @model_validator(mode="after")
     def _valid_history(self) -> DynamicState:

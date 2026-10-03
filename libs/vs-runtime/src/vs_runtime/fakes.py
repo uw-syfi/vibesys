@@ -1188,7 +1188,7 @@ class FakeState:
         return tuple(
             FakeStateCommit(
                 type(commit.value).model_validate_json(
-                    commit.value.model_dump_json(round_trip=True)
+                    commit.value.model_dump_json(round_trip=True), strict=True
                 ),
                 commit.workspace,
                 commit.label,
@@ -1205,7 +1205,7 @@ class FakeState:
         self._require_model(model)
         if self._value is None:
             return None
-        return model.model_validate_json(self._value.model_dump_json(round_trip=True))
+        return model.model_validate_json(self._value.model_dump_json(round_trip=True), strict=True)
 
     async def commit(
         self,
@@ -1222,13 +1222,13 @@ class FakeState:
         model = self._model
         if model is None:
             raise StateModelError(None, type(value))
-        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
+        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True), strict=True)
         if self._commit_results:
             failure = self._commit_results.pop(0)
             if failure is not None:
                 raise failure
         self._value = snapshot
-        recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True))
+        recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True), strict=True)
         self._commits.append(FakeStateCommit(recorded, workspace, label))
 
     def _require_model(self, model: type[BaseModel]) -> None:
