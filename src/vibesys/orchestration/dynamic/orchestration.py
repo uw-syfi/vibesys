@@ -531,8 +531,9 @@ class _DynamicRun:
                         if index is not None
                         else parent
                     ),
-                    # A continuation runs in a new worktree, so its provider
-                    # session cannot resume; carry the prior attempt instead.
+                    # The candidate path is keyed by hypothesis, so a
+                    # continuation resumes its provider session. The summary
+                    # still covers a session the provider could not resume.
                     prior_attempt=(
                         json.dumps(
                             _history_row(self.state.workstreams[index]),
@@ -540,6 +541,11 @@ class _DynamicRun:
                         )
                         if index is not None
                         else ""
+                    ),
+                    prior_revision=(
+                        self.state.workstreams[index].candidate_revision
+                        if index is not None
+                        else None
                     ),
                 )
                 if index is None:
@@ -566,8 +572,11 @@ class _DynamicRun:
             WorkstreamPhase.REVIEWED,
             WorkstreamPhase.EVALUATED,
         }
+        # Keyed by hypothesis: every attempt and continuation of this
+        # hypothesis works at one path, so its agent sessions resume.
         workspace = await self.run.workspaces.create_candidate(
-            item.candidate_revision if resume_implemented else parent
+            item.candidate_revision if resume_implemented else parent,
+            member_id=plan.hypothesis_id,
         )
         try:
             feedback: str | None = None
@@ -771,6 +780,9 @@ class _DynamicRun:
                     prior_attempt=self.state.workstreams[
                         self._index(plan.hypothesis_id)
                     ].prior_attempt,
+                    prior_revision=self.state.workstreams[
+                        self._index(plan.hypothesis_id)
+                    ].prior_revision,
                 ),
                 ImplementerResult,
             )

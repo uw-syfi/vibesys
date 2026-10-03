@@ -162,6 +162,12 @@ class ProjectRunResources:
             self._request.run_id, workspace_id
         )
         log_dir = self.state.local("runtime").external_directory(f"workspaces/{workspace_id}/logs")
+        if workspace.exists():
+            # A stable (member-keyed) workspace ID reuses one path across
+            # processes. The runtime holds at most one live candidate per ID,
+            # so a directory already here was left by a process that stopped
+            # before discarding it.
+            self.git.remove_worktree(workspace)
         teardown_stack = ExitStack()
         try:
             teardown_stack.callback(self.git.remove_worktree, workspace)

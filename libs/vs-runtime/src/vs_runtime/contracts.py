@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import re
 import unicodedata
@@ -323,8 +324,23 @@ class Workspaces(Protocol):
         """Return whether independent candidate workspaces can run concurrently."""
         ...
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
-        """Create an isolated candidate from a retained revision or the root head."""
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        """Create an isolated candidate from a retained revision or the root head.
+
+        Without ``member_id`` every candidate gets a fresh path. With it, the
+        path is a fixed function of the member ID, so a member that works in a
+        sequence of candidates (one at a time, each from a new revision) keeps
+        one path, and an agent session created with the same ``member_id``
+        continues its provider conversation, whose provider keys history by
+        working directory. At most one live candidate exists per member ID;
+        creating a second while the first is live raises
+        :class:`RuntimeContractError`.
+        """
         ...
 
     async def adopt(self, revision: str) -> None:
@@ -752,6 +768,18 @@ def validate_member_id(member_id: str | None) -> None:
     if invalid:
         message = f"invalid agent member ID {member_id!r}"
         raise ValueError(message)
+
+
+def member_workspace_id(member_id: str) -> str:
+    """Return the stable candidate workspace ID for one logical member.
+
+    The ID is a safe path component: a readable prefix of the member ID plus a
+    digest of the whole ID, so distinct members never share a path.
+    """
+    validate_member_id(member_id)
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", member_id).strip("-.")[:48]
+    digest = hashlib.sha256(member_id.encode()).hexdigest()[:12]
+    return f"m-{readable}-{digest}" if readable else f"m-{digest}"
 
 
 def validate_command(argv: tuple[str, ...], timeout_seconds: int | None) -> None:

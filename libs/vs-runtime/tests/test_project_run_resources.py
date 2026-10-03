@@ -212,6 +212,29 @@ def test_candidate_resources_own_linked_worktree_git_and_logger(tmp_path: Path) 
     resources.close()
 
 
+def test_candidate_replaces_a_worktree_left_at_its_path_by_a_stopped_process(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    with open_project_run_resources(
+        _request(root), effects=_effects([]), resolve_resume=_unexpected_resume
+    ) as resources:
+        revision = resources.git.current_sha()
+        assert revision is not None
+        # A process that stops without discarding leaves the worktree behind.
+        stale = resources.open_candidate("m-h1", revision)
+        (stale.project_root / "scratch.txt").write_text("stale", encoding="utf-8")
+        stale.logger.close()
+
+        candidate = resources.open_candidate("m-h1", revision)
+
+        assert candidate.project_root == stale.project_root
+        assert candidate.git.current_sha() == revision
+        assert not (candidate.project_root / "scratch.txt").exists()
+        candidate.close()
+
+
 def test_candidate_construction_failure_removes_partial_worktree(tmp_path: Path) -> None:
     root = tmp_path / "project"
     _write_project(root)

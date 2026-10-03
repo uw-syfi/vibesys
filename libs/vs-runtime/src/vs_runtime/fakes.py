@@ -43,6 +43,7 @@ from vs_runtime.contracts import (
     Workspace,
     WorkspaceAccess,
     WorkspaceRestoreError,
+    member_workspace_id,
     validate_command,
     validate_member_id,
     validate_objectives,
@@ -296,6 +297,8 @@ class _FakeSessionConfig:
     member_id: str | None
     writable_paths: tuple[str, ...]
     writable_directory_paths: tuple[str, ...]
+    #: The resumed conversation's history, shared with earlier sessions.
+    history: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -307,6 +310,7 @@ class _FakeCandidateConfig:
     revision: str
     trusted_input_baseline: str | None
     known_revisions: set[str]
+    revision_prefix: str
 
 
 def _echo_responder(
@@ -329,7 +333,7 @@ class FakeAgentSession:
         responder: TurnResponder,
         config: _FakeSessionConfig,
     ) -> None:
-        """Bind one fresh session to immutable creation configuration."""
+        """Bind a session to its configuration and, if resumed, its conversation."""
         self._role = role
         self._workspace = workspace
         self._member_id = config.member_id
@@ -337,7 +341,7 @@ class FakeAgentSession:
         self._writable_directory_paths = config.writable_directory_paths
         self._binding = binding
         self._responder = responder
-        self._history: list[str] = []
+        self._history: list[str] = [] if config.history is None else config.history
         self._turn_number = 0
         self._turn_lock = asyncio.Lock()
         self._closed = False
@@ -496,6 +500,11 @@ class FakeAgentSessions:
         # what the public fake created and whether runtime ownership closed it.
         self._sessions: list[FakeAgentSession] = []
         self._active_sessions: list[FakeAgentSession] = []
+        # Provider conversations by (role, member): the working directory the
+        # conversation ran in and its shared history. Providers key resumable
+        # history by working directory, so a member session continues only
+        # from the same path.
+        self._conversations: dict[tuple[str, str], tuple[Path, list[str]]] = {}
         self._creation_results: list[BaseException | None] = []
         self._closing = False
         self._closed = False
@@ -550,11 +559,26 @@ class FakeAgentSessions:
                 member_id,
                 validated_paths,
                 tuple(path for path in validated_paths if workspace.is_directory(path)),
+                self._member_history(role, member_id, workspace.path),
             ),
         )
         self._sessions.append(session)
         self._active_sessions.append(session)
         return session
+
+    def _member_history(
+        self, role: AgentRole, member_id: str | None, path: Path
+    ) -> list[str] | None:
+        """Return the conversation a member session resumes, or start one."""
+        if member_id is None:
+            return None
+        key = (role.id, member_id)
+        previous = self._conversations.get(key)
+        if previous is not None and previous[0] == path:
+            return previous[1]
+        history: list[str] = []
+        self._conversations[key] = (path, history)
+        return history
 
     async def close(self) -> None:
         """Close all sessions in reverse creation order, once."""
@@ -622,7 +646,12 @@ class FakeWorkspaces:
         """Return candidates in creation order, including discarded ones."""
         return tuple(self._candidates)
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
         """Create one isolated workspace from a known root revision."""
         if self._closing or self._closed:
             raise SessionClosedError
@@ -632,7 +661,16 @@ class FakeWorkspaces:
         revision = from_revision or self._root.revision
         if revision is None or not self._root.knows_revision(revision):
             raise WorkspaceRestoreError(from_revision or "")
-        workspace_id = f"candidate-{len(self._candidates) + 1}"
+        if member_id is None:
+            workspace_id = f"candidate-{len(self._candidates) + 1}"
+        else:
+            workspace_id = member_workspace_id(member_id)
+            if any(
+                candidate.id == workspace_id and not candidate.discarded
+                for candidate in self._candidates
+            ):
+                message = f"member {member_id!r} already has a live candidate workspace"
+                raise RuntimeContractError(message)
         candidate = FakeCandidateWorkspace(
             owner=self,
             invalidate_sessions=(
@@ -644,6 +682,7 @@ class FakeWorkspaces:
                 revision=revision,
                 trusted_input_baseline=self._root.trusted_input_baseline,
                 known_revisions=self._root.known_revisions,
+                revision_prefix=f"candidate-{len(self._candidates) + 1}",
             ),
         )
         self._candidates.append(candidate)
@@ -903,6 +942,8 @@ class FakeWorkspace:
             value for value in (revision, self._trusted_input_baseline) if value
         }
         self._snapshot_count = 0
+        # Revision names stay unique when a member-keyed candidate reuses an ID.
+        self._revision_prefix = workspace_id or "fake"
         self._retained: dict[str, str] = {}
         self._pending_changes: list[list[str]] = []
         self._directories: set[str] = set()
@@ -938,8 +979,7 @@ class FakeWorkspace:
         """Record a deterministic new revision for the current fake tree."""
         del label
         self._snapshot_count += 1
-        prefix = self._id or "fake"
-        revision = f"{prefix}-revision-{self._snapshot_count}"
+        revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"
         self._revision = revision
         self._tree_revision = revision
         self._known_revisions.add(revision)
@@ -1033,6 +1073,7 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self._owner = owner
         self._invalidate_sessions = invalidate_sessions
         self._discarded = False
+        self._revision_prefix = config.revision_prefix
 
     @property
     def discarded(self) -> bool:

@@ -155,10 +155,13 @@ class DynamicWorkstream(BaseModel):
     # Interrupted implementation attempts that resume did not count against
     # the retry budget; bounded so a repeatedly crashing attempt ends.
     refunded_attempts: Annotated[int, Field(ge=0)] = 0
-    # Compact record of this hypothesis's previous epoch, shown to a continued
-    # implementer. Provider sessions are keyed by working directory, and each
-    # epoch uses a new worktree, so the prior session cannot be resumed.
+    # Compact record of this hypothesis's previous attempt, shown to a
+    # continued implementer. Its session normally resumes (the candidate path
+    # is keyed by hypothesis); the record covers a session that did not.
     prior_attempt: str = ""
+    # The candidate revision the previous attempt ended at, so a continued
+    # implementer is told what its reset worktree changed.
+    prior_revision: str | None = None
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:

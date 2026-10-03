@@ -94,8 +94,13 @@ class _TrackedWorkspaces:
     def supports_parallel_candidates(self) -> bool:
         return self._inner.supports_parallel_candidates
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
-        inner = await self._inner.create_candidate(from_revision)
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        inner = await self._inner.create_candidate(from_revision, member_id=member_id)
         index = len(self.candidates)
         candidate = _TrackedCandidate(inner, release=self.release, error=self._errors[index])
         self.candidates.append(candidate)

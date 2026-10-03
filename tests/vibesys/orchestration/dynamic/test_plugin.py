@@ -103,15 +103,18 @@ class _Script:
     def __init__(self, replies: dict[str, list[object]]) -> None:
         self._replies = {role: deque(values) for role, values in replies.items()}
         self.calls: list[tuple[str, str | None, str]] = []
+        # Earlier messages of the conversation each call continued.
+        self.histories: list[tuple[str, tuple[str, ...]]] = []
 
     def respond(
         self,
         role: AgentRole,
-        _history: tuple[str, ...],
+        history: tuple[str, ...],
         message: str,
         _response: type[BaseModel] | None,
     ) -> object:
         self.calls.append((role.id, None, message))
+        self.histories.append((role.id, history))
         reply = self._replies[role.id].popleft()
         if isinstance(reply, BaseException):
             raise reply
@@ -282,56 +285,6 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
     assert "Build the fast path in `engine/` instead." in script.calls[4][2]
 
 
-def test_continued_hypothesis_starts_from_its_prior_attempt(tmp_path: Path) -> None:
-    """A continuation in a new epoch tells the fresh implementer what it already did.
-
-    Each epoch runs in a new worktree, so the provider session cannot resume;
-    without the prior attempt the implementer rebuilds its context from scratch.
-    """
-    first = {
-        "summary": "Added a prefix cache; prefill time halved locally.",
-        "outcome": "continue",
-        "next_step": "Batch decode across sessions.",
-        "evidence": [{"location": "evidence/prefix.json", "purpose": "cache hit rate"}],
-    }
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [
-                _portfolio("cache"),
-                _portfolio("cache", continue_hypothesis=True),
-            ],
-            IMPLEMENTER.id: [first, _implementation("cache")],
-            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
-        }
-    )
-
-    async def scenario() -> None:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=script.respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-            supports_parallel_candidates=True,
-        )
-        await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_rounds=2))
-
-    asyncio.run(scenario())
-    first_prompt, continued_prompt = [
-        message for role, _, message in script.calls if role == IMPLEMENTER.id
-    ]
-    assert "earlier attempt" not in first_prompt
-    assert "earlier attempt" in continued_prompt
-    assert first["summary"] in continued_prompt
-    assert first["next_step"] in continued_prompt
-    assert "evidence/prefix.json" in continued_prompt
-
-
 def test_profiler_role_is_read_only_resumable_and_evaluation_enabled() -> None:
     assert PROFILER in PLUGIN.agents
     assert PROFILER.workspace_access.value == "read_only"
@@ -498,6 +451,63 @@ def test_nonparallel_runtime_fails_before_any_agent_turn(tmp_path: Path) -> None
     run = asyncio.run(scenario())
     assert not run.agents.sessions
     assert script.calls == []
+
+
+def test_continued_hypothesis_resumes_its_session_in_a_reset_worktree(tmp_path: Path) -> None:
+    """A continuation in a new epoch continues the implementer's conversation.
+
+    The candidate path is keyed by hypothesis, so the provider session resumes;
+    the prompt says the worktree was reset to the new parent and still carries
+    the prior attempt for a session the provider could not resume.
+    """
+    first = {
+        "summary": "Added a prefix cache; prefill time halved locally.",
+        "outcome": "continue",
+        "next_step": "Batch decode across sessions.",
+        "evidence": [{"location": "evidence/prefix.json", "purpose": "cache hit rate"}],
+    }
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("cache"),
+                _portfolio("cache", continue_hypothesis=True),
+            ],
+            IMPLEMENTER.id: [first, _implementation("cache")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+            supports_parallel_candidates=True,
+        )
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_rounds=2))
+
+    asyncio.run(scenario())
+    first_prompt, continued_prompt = [
+        message for role, _, message in script.calls if role == IMPLEMENTER.id
+    ]
+    implementer_histories = [
+        history for role, history in script.histories if role == IMPLEMENTER.id
+    ]
+    assert implementer_histories == [(), (first_prompt,)]
+    assert "reset to the parent revision" in continued_prompt
+    assert "The parent is the revision your earlier attempt ended at" in continued_prompt
+    assert "earlier attempt" not in first_prompt
+    assert "earlier attempt" in continued_prompt
+    assert first["summary"] in continued_prompt
+    assert first["next_step"] in continued_prompt
+    assert "evidence/prefix.json" in continued_prompt
 
 
 def test_later_epoch_continues_same_hypothesis_and_session_identity(tmp_path: Path) -> None:
