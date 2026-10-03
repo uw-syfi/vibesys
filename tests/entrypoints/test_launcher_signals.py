@@ -17,10 +17,13 @@ import select
 import signal
 import subprocess
 import sys
+import threading
 from contextlib import suppress
 from pathlib import Path
 
 import pytest
+
+from entrypoints.launcher import call_child
 
 _SOURCE = Path(__file__).resolve().parents[2] / "src"
 _ENGINE_STATUS = 7
@@ -129,3 +132,58 @@ def test_the_launcher_waits_for_its_engine_to_finish_tearing_down(
             # At the merge base the engine outlives a SIGTERMed launcher.
             with suppress(ProcessLookupError):
                 os.kill(engine_pid, signal.SIGKILL)
+
+
+# In-process: the child signals this process (its launcher) itself, so the
+# test needs no timing. These run `call_child` on pytest's main thread, where
+# its handlers apply, and prove pytest is neither interrupted nor terminated.
+_SIGNAL_PARENT = """
+import os, signal, sys
+number = signal.Signals[sys.argv[1]]
+forwarded = sys.argv[2] == "forwarded"
+signal.pthread_sigmask(signal.SIG_BLOCK, {number})
+os.kill(os.getppid(), number)
+if forwarded:
+    signal.sigwait({number})
+sys.exit(7)
+"""
+
+
+@pytest.mark.parametrize(
+    ("number", "forwarded"),
+    [(signal.SIGINT, False), (signal.SIGTERM, True), (signal.SIGHUP, True)],
+    ids=["sigint-waits", "sigterm-forwarded", "sighup-forwarded"],
+)
+def test_call_child_waits_through_sigint_and_forwards_termination(
+    number: signal.Signals, *, forwarded: bool
+) -> None:
+    status = call_child(
+        [
+            sys.executable,
+            "-c",
+            _SIGNAL_PARENT,
+            number.name,
+            "forwarded" if forwarded else "waited",
+        ]
+    )
+
+    assert status == _ENGINE_STATUS
+
+
+def test_call_child_reports_a_signal_death_as_a_shell_does() -> None:
+    status = call_child(
+        [sys.executable, "-c", "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"]
+    )
+
+    assert status == 128 + signal.SIGKILL
+
+
+def test_call_child_from_a_worker_thread_only_waits() -> None:
+    statuses: list[int] = []
+    worker = threading.Thread(
+        target=lambda: statuses.append(call_child([sys.executable, "-c", "raise SystemExit(3)"]))
+    )
+    worker.start()
+    worker.join()
+
+    assert statuses == [3]

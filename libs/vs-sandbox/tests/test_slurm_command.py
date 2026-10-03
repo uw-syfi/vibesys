@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
@@ -244,3 +245,46 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
 
     assert gate.returncode == 128 + signal.SIGTERM, stderr
     assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
+
+
+def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    os.mkfifo(state / SUBMITTED_FILE)
+    config_path = tmp_path / "slurm.toml"
+    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+    # A one-hour poll interval: only a prompt cancellation can reach scancel.
+    config_path.write_text(
+        "[slurm]\n"
+        'name = "fake"\n'
+        'remote_workspace_root = "/remote/runs"\n'
+        "poll_interval_seconds = 3600.0\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+    plan_path = tmp_path / "evaluation-plan.json"
+    write_slurm_evaluation_plan(
+        plan_path,
+        SlurmEvaluationPlan(config_path=config_path, benchmark_command=("run-benchmark",)),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    main_thread = threading.main_thread().ident
+    assert main_thread is not None
+
+    def terminate_once_submitted() -> None:
+        assert (state / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+        # main() has its SIGTERM handler installed until its gate finishes.
+        signal.pthread_kill(main_thread, signal.SIGTERM)
+
+    signaller = threading.Thread(target=terminate_once_submitted)
+    signaller.start()
+    exit_code = main(("--plan", str(plan_path), "benchmark"))
+    signaller.join()
+
+    assert exit_code == 128 + signal.SIGTERM
+    assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
+    assert f"Slurm evaluator cancelled: Slurm job {JOB_ID} was cancelled" in capsys.readouterr().err

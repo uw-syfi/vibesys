@@ -22,12 +22,15 @@ from vs_slurm.fake_connector import (
     JOB_ID,
     executing_cluster,
     handle,
+    main,
     recorded_commands,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
+
+    import pytest
 
 
 def _runner(state: Path, remote_root: str = "/remote/runs") -> SlurmJobRunner:
@@ -126,3 +129,23 @@ def test_the_ssh_stand_in_answers_like_the_connector(tmp_path: Path) -> None:
     runner.cancel(job)
     assert runner.poll(job) is SlurmJobStatus.CANCELLED
     assert recorded_commands(state).count(f"scancel {JOB_ID}") == 1
+
+
+def test_the_ssh_and_rsync_stand_ins_answer_in_process(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+
+    assert main([str(state), "rsync", "-a", "--", "local/", "fake:/remote/runs/x/"]) == 0
+    assert main([str(state), "ssh", "--", "fake", f"squeue -h -j {JOB_ID} -o %T"]) == 0
+    assert capsys.readouterr().out == "PENDING\n"
+    assert main([str(state), "ssh", "--", "fake", f"scancel {JOB_ID}"]) == 0
+    assert main([str(state), "ssh", "--", "fake", f"squeue -h -j {JOB_ID} -o %T"]) == 0
+
+    assert capsys.readouterr().out == ""
+    assert recorded_commands(state) == [
+        f"squeue -h -j {JOB_ID} -o %T",
+        f"scancel {JOB_ID}",
+        f"squeue -h -j {JOB_ID} -o %T",
+    ]

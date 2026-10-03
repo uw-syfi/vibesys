@@ -44,6 +44,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
@@ -224,19 +228,20 @@ def recorded_commands(state: Path) -> list[str]:
     return [str(item["command"]) for item in requests if item["operation"] == "exec"]
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Answer the one request on stdin, or one SSH-transport program call."""
-    state = Path(sys.argv[1])
-    program = sys.argv[2:3]
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    state = Path(arguments[0])
+    program = arguments[1:2]
     if program == ["ssh"]:
         # ssh [options] -- HOST COMMAND
-        response = handle(state, {"operation": "exec", "command": sys.argv[-1]})
+        response = handle(state, {"operation": "exec", "command": arguments[-1]})
         sys.stdout.write(str(response["stdout"]))
         sys.stderr.write(str(response["stderr"]))
         return int(str(response["returncode"]))
     if program == ["rsync"]:
         with (state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
-            log.write(json.dumps({"operation": "rsync", "argv": sys.argv[3:]}) + "\n")
+            log.write(json.dumps({"operation": "rsync", "argv": arguments[2:]}) + "\n")
         return 0
     sys.stdout.write(json.dumps(handle(state, json.loads(sys.stdin.read()))))
     return 0
