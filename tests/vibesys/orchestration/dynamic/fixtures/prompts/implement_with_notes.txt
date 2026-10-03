@@ -1,0 +1,39 @@
+Own hypothesis `cache` in this isolated candidate workspace.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
+with the returned handle. An evaluation can take many minutes; `await_evaluation`
+returns periodically with `outcome: running` and the progress recorded so far. Keep
+calling `await_evaluation` with the same handle until it returns a final result, and do
+not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
+candidate; useful work on files outside it is allowed.
+
+Claim: Mechanism cache limits the objective.
+Task: Implement and verify cache.
+Pass criteria: The change is correct and measurably improves the objective.
+Parent revision: `r-base`
+
+Evidence references:
+[]
+
+Notes from the orchestrator (it watches all workstreams; these are guidance, your task
+and pass criteria are unchanged):
+- 15:58 into the run: After your benchmark read 41.0 tok/s of 79.7 required: profile decode first.
+- 125:03 into the run: Workstream beta found the KV cache is fp32; do not duplicate that fix.
+
+Inspect referenced artifacts only as needed. Keep evidence in files and return compact
+references with their applicable revision. Use any provisioned profiling or evaluation
+tools when they can resolve the hypothesis, and continue useful work while asynchronous
+operations run. Do not duplicate a trusted result for an unchanged revision.
+
+Implement and run the cheapest checks that cover the changed behavior. Use `continue`
+only for a concrete next step in the same mechanism. Use `nominated` only when the
+candidate is ready for independent review and framework gates. Return only schema-valid
+JSON.

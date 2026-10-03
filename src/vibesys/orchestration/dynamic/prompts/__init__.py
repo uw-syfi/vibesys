@@ -16,6 +16,8 @@ from vs_prompts.api import RenderedPrompt, TemplateRenderer
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.orchestration.dynamic.models import SteerNote
+
 _RENDERER = TemplateRenderer(Path(__file__).parent)
 
 
@@ -64,9 +66,18 @@ def render_portfolio_correction(
     )
 
 
-def render_implementation(**context: object) -> RenderedPrompt:
-    """Render one isolated hypothesis implementation request."""
-    return _RENDERER.render_template("implement.j2", **context)
+def render_implementation(
+    *, notes: Sequence[SteerNote], interrupted_revision: str | None, **context: object
+) -> RenderedPrompt:
+    """Render one isolated hypothesis implementation request.
+
+    ``notes`` are the orchestrator's steers delivered to this turn.
+    ``interrupted_revision`` is the work-in-progress revision kept when the
+    previous turn was ended early to deliver them, or ``None``.
+    """
+    return _RENDERER.render_template(
+        "implement.j2", notes=notes, interrupted_revision=interrupted_revision, **context
+    )
 
 
 def render_profile_request(**context: object) -> RenderedPrompt:
@@ -74,9 +85,11 @@ def render_profile_request(**context: object) -> RenderedPrompt:
     return _RENDERER.render_template("profile_request.j2", **context)
 
 
-def render_review(*, evaluations: Sequence[EvaluationLine], **context: object) -> RenderedPrompt:
-    """Render one independent candidate review request."""
-    return _RENDERER.render_template("review.j2", evaluations=evaluations, **context)
+def render_review(
+    *, evaluations: Sequence[EvaluationLine], notes: Sequence[SteerNote], **context: object
+) -> RenderedPrompt:
+    """Render one independent candidate review request with the steers delivered to it."""
+    return _RENDERER.render_template("review.j2", evaluations=evaluations, notes=notes, **context)
 
 
 def render_steer_dropped(*, note_sha256: str, sent_at_s: float) -> RenderedPrompt:

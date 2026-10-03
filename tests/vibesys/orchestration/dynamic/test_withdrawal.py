@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 from typing import TYPE_CHECKING
 
 import pytest
@@ -48,8 +47,7 @@ async def _withdraw_after(
 ) -> tuple[_DynamicRun, Accepted | object]:
     run = baseline_run(tmp_path, _script())
     dynamic = await _DynamicRun.open(run, dynamic_options(max_in_flight=1))
-    ticks = itertools.count()
-    loop = dynamic.search_loop(lambda: float(next(ticks)))
+    loop = dynamic.search_loop()
     task = asyncio.create_task(loop.run(dynamic.recoverable()))
     try:
         for _ in range(_MAX_YIELDS):

@@ -13,6 +13,7 @@ from vibesys.hypothesis import (
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.metrics import Measurement
+from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.models import (
     DynamicWorkstream,
     InputNotMeasurable,
@@ -74,30 +75,24 @@ class BuildableCandidate:
     partial_measurement: PartialMeasurement | None
 
 
+@dataclass(slots=True)
 class Rounds:
     """Records each finished workstream as a round and selects the winner.
 
     Every candidate decision is made against the input reading of ``gate``;
     the winner is re-filtered at selection because a round recorded before
     the input was measured was not gated. The planner's view of the history
-    (bounded rows and the input reading) is projected here too.
+    (bounded rows and the input reading) is projected here too. ``clock``
+    returns run-elapsed seconds; it times the journal entry of a steer dropped
+    when its workstream settles.
     """
 
-    def __init__(
-        self,
-        options: DynamicOptions,
-        state: DynamicState,
-        gate: InputGate,
-        *,
-        lock: asyncio.Lock,
-        commit: Callable[[str], Awaitable[None]],
-    ) -> None:
-        """Bind the round book to one run's state, input gate and commit path."""
-        self.options = options
-        self.state = state
-        self._gate = gate
-        self._lock = lock
-        self._commit = commit
+    options: DynamicOptions
+    state: DynamicState
+    gate: InputGate
+    lock: asyncio.Lock
+    commit: Callable[[str], Awaitable[None]]
+    clock: Callable[[], float]
 
     def planner_context(
         self,
@@ -211,11 +206,17 @@ class Rounds:
         return tuple(sorted(candidates, key=_measured_rank))
 
     async def record(self, index: int) -> None:
-        """Commit one workstream result through shared hypothesis transitions."""
+        """Commit one workstream result through shared hypothesis transitions.
+
+        Recording the round settles the workstream: every path that ends one
+        (finished, failed, or given up) passes here. Steers still pending for
+        it are dropped and journaled in the same commit, since no worker turn
+        of the workstream follows.
+        """
         if self.state.workstreams[index].evaluation is not None:
             # The candidate decision compares against the input measurement.
-            await self._gate.measured()
-        async with self._lock:
+            await self.gate.measured()
+        async with self.lock:
             item = self.state.workstreams[index]
             implementation = item.implementation
             # A slot given up before any implementer turn returned still ends
@@ -345,7 +346,8 @@ class Rounds:
             )
             if self.state.search.active_hypothesis_id is not None:
                 self.state.search = hypothesis_transitions.finish_hypothesis(self.state.search)
-            await self._commit(f"dynamic: record hypothesis {item.hypothesis_id}")
+            steers.drop_pending(self.state, item.hypothesis_id, at_s=self.clock())
+            await self.commit(f"dynamic: record hypothesis {item.hypothesis_id}")
 
     def winner(self) -> DynamicWorkstream | None:
         """Return the workstream of the best recorded round that beats the input, if any."""
@@ -356,7 +358,7 @@ class Rounds:
             [
                 record
                 for record in self.state.search.rounds
-                if self._gate.admits(
+                if self.gate.admits(
                     dict(record.metrics),
                     hypothesis_transitions.headline_measurement(record),
                 )
@@ -386,7 +388,7 @@ class Rounds:
         comparable = space.complete(metrics) if space.objectives else headline is not None
         if not comparable:
             return CandidateDisposition.UNASSESSED, None
-        if not self._gate.admits(metrics, headline):
+        if not self.gate.admits(metrics, headline):
             return CandidateDisposition.DISCARD, False
         search = HypothesisSearch(hypothesis_config(self.options))
         conflict = search.pareto_conflict(

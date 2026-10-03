@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.input_gate import benchmark_objectives
 from vibesys.orchestration.dynamic.models import (
@@ -37,10 +38,11 @@ if TYPE_CHECKING:
         DynamicState,
         DynamicWorkstream,
         EvidenceReference,
+        SteerNote,
         WorkstreamPlan,
     )
     from vibesys.orchestration.dynamic.rounds import Rounds
-    from vs_runtime.api import AgentEvaluation, CandidateWorkspace, Run
+    from vs_runtime.api import AgentEvaluation, AgentRole, CandidateWorkspace, Run
 
 _READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
 # Phases with a retained implementation; an attempt resumes after it.
@@ -307,7 +309,6 @@ class Workstreams:
     ) -> None:
         item = self.state.workstreams[index]
         call = item.planning_call
-        parent = item.parent_revision
         resume_implemented = item.phase in _IMPLEMENTED_PHASES
         # A session of this hypothesis may already exist and resume here; it
         # remembers edits that the recreated worktree no longer has.
@@ -323,20 +324,16 @@ class Workstreams:
         ):
             if completed:
                 break
-            await self._update(
-                index,
-                phase=WorkstreamPhase.IMPLEMENTING,
-                charge=True,
-            )
+            notes = await self._start_implementer_turn(index)
             submitted_before = len(await self.run.evaluation.agent_evaluations(workspace))
             self._live_turns[plan.hypothesis_id] = (workspace, submitted_before)
             try:
                 implementation = await self._implement(
                     plan,
                     workspace,
-                    parent,
                     feedback=feedback,
                     reset=reset,
+                    notes=notes,
                 )
             finally:
                 del self._live_turns[plan.hypothesis_id]
@@ -488,10 +485,10 @@ class Workstreams:
         self,
         plan: WorkstreamPlan,
         workspace: CandidateWorkspace,
-        parent_revision: str,
         *,
         feedback: str | None,
         reset: _RecreatedWorktree | None,
+        notes: Sequence[SteerNote],
     ) -> ImplementerResult:
         session = await self.run.agents.create_session(
             IMPLEMENTER,
@@ -499,6 +496,7 @@ class Workstreams:
             member_id=plan.hypothesis_id,
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
+        item = self.state.workstreams[workstream_index(self.state, plan.hypothesis_id)]
         try:
             return await structured_turn(
                 session,
@@ -508,14 +506,14 @@ class Workstreams:
                     hypothesis=plan.hypothesis,
                     task=plan.task,
                     pass_criteria=plan.pass_criteria,
-                    parent_revision=parent_revision,
+                    parent_revision=item.parent_revision,
                     evidence=_references_text(plan.evidence),
                     feedback=feedback,
-                    prior_attempt=self.state.workstreams[
-                        workstream_index(self.state, plan.hypothesis_id)
-                    ].prior_attempt,
+                    prior_attempt=item.prior_attempt,
                     worktree_revision=reset.revision if reset is not None else None,
                     prior_revision=reset.remembered if reset is not None else None,
+                    notes=notes,
+                    interrupted_revision=None,
                 ),
                 ImplementerResult,
             )
@@ -552,6 +550,7 @@ class Workstreams:
         if not due:
             return None
         submitted = await self.run.evaluation.agent_evaluations(workspace)
+        notes = await self._deliver_to_judge(workstream_index(self.state, plan.hypothesis_id))
         session = await self.run.agents.create_session(
             JUDGE,
             workspace=workspace,
@@ -570,6 +569,7 @@ class Workstreams:
                     summary=implementation.summary,
                     evidence=_references_text(implementation.evidence),
                     evaluations=_evaluation_lines(submitted[-_REVIEWED_EVALUATIONS:]),
+                    notes=notes,
                 ),
                 ReviewResult,
             )
@@ -632,12 +632,52 @@ class Workstreams:
             partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
         )
 
+    async def _start_implementer_turn(self, index: int) -> tuple[SteerNote, ...]:
+        """Charge and record an implementer turn start; deliver its steers in that commit.
+
+        Returns the orchestrator notes the turn renders. A crash after this
+        commit redoes the turn under the same invocation id (resume refunds the
+        interrupted attempt), so the notes render again; see
+        :func:`steers.mark_delivered`.
+        """
+        async with self.lock:
+            current = self.state.workstreams[index]
+            budget = current.budget.charge()
+            self.state.workstreams[index] = current.model_copy(
+                update={"phase": WorkstreamPhase.IMPLEMENTING, "budget": budget}, deep=True
+            )
+            notes = steers.mark_delivered(
+                self.state,
+                current.hypothesis_id,
+                _invocation_id(current.hypothesis_id, IMPLEMENTER, budget.spent),
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} implementing")
+        return notes
+
+    async def _deliver_to_judge(self, index: int) -> tuple[SteerNote, ...]:
+        """Deliver pending steers to the judge turn about to start, committed before it.
+
+        Commits only when a note was newly delivered, so a run without steers
+        (planner mode) keeps its commit sequence. A judge turn redone after a
+        crash has the same invocation id and renders the same notes.
+        """
+        async with self.lock:
+            current = self.state.workstreams[index]
+            fresh = steers.pending(self.state, current.hypothesis_id)
+            notes = steers.mark_delivered(
+                self.state,
+                current.hypothesis_id,
+                _invocation_id(current.hypothesis_id, JUDGE, current.budget.spent),
+            )
+            if fresh:
+                await self.commit(f"dynamic: {current.hypothesis_id} review notes delivered")
+        return notes
+
     async def _update(  # noqa: PLR0913  # lint-waiver: LW-092703 [PLR0913]; optional fields are explicit transition outputs and avoid an untyped mutation mapping at the durability boundary.
         self,
         index: int,
         *,
         phase: WorkstreamPhase,
-        charge: bool = False,
         candidate_revision: str | None = None,
         implementation: ImplementerResult | None = None,
         review: ReviewResult | None = None,
@@ -647,8 +687,6 @@ class Workstreams:
         async with self.lock:
             current = self.state.workstreams[index]
             changes: dict[str, object] = {"phase": phase}
-            if charge:
-                changes["budget"] = current.budget.charge()
             if candidate_revision is not None:
                 changes["candidate_revision"] = candidate_revision
             if implementation is not None:
@@ -687,6 +725,17 @@ def workstream_index(state: DynamicState, hypothesis_id: str) -> int:
     return next(
         index for index, item in enumerate(state.workstreams) if item.hypothesis_id == hypothesis_id
     )
+
+
+def _invocation_id(hypothesis_id: str, role: AgentRole, attempt: int) -> str:
+    """Return the host's stable id of one worker turn, known before the turn starts.
+
+    The runtime's agent session exposes no per-turn id, so the host derives
+    one from durable state: the workstream, the role, and the attempt number
+    (the budget's ``spent`` once the attempt is charged). An interrupted turn
+    is refunded on resume, so its redo gets the same id.
+    """
+    return f"{hypothesis_id}/{role.id}/attempt-{attempt}"
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:

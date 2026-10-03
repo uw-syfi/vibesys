@@ -249,8 +249,11 @@ class _DynamicRun:
     rounds: Rounds = field(init=False)
     workstreams: Workstreams = field(init=False)
     profiles: Profiles = field(init=False)
+    # Run-elapsed seconds, the only time source of the host core and the round book.
+    _clock: Callable[[], float] = field(init=False)
 
     def __post_init__(self) -> None:
+        self._clock = _elapsed_clock()
         self.input_gate = InputGate(
             self.run,
             self.options,
@@ -264,6 +267,7 @@ class _DynamicRun:
             self.input_gate,
             lock=self._state_lock,
             commit=self._commit_labeled,
+            clock=self._clock,
         )
         self.workstreams = Workstreams(
             self.run,
@@ -297,14 +301,18 @@ class _DynamicRun:
         the newest results. Work durably scheduled before a stop resumes first.
         """
         try:
-            await self.search_loop(_elapsed_clock()).run(self.recoverable())
+            await self.search_loop().run(self.recoverable())
             await self._select_and_adopt()
         finally:
             await self.input_gate.stop()
         return RunStatus.SUCCEEDED
 
-    def search_loop(self, clock: Callable[[], float]) -> AgentLoop[PlannedWorkstream]:
-        """Return the planner-mode search over this run, with the run as its workers."""
+    def search_loop(self) -> AgentLoop[PlannedWorkstream]:
+        """Return the planner-mode search over this run, with the run as its workers.
+
+        The loop shares the run's clock, so the core and the durable records
+        it settles agree on run-elapsed time.
+        """
         core = HostCore[PlannedWorkstream](
             HostLimits(
                 max_in_flight=self.options.max_in_flight,
@@ -315,7 +323,7 @@ class _DynamicRun:
             )
         )
         driver = PlannerDriver[PlannedWorkstream](plan=self._schedule, land_stop=self._checkpoint)
-        return AgentLoop(core, driver, self, clock=clock)
+        return AgentLoop(core, driver, self, clock=self._clock)
 
     def recoverable(self) -> tuple[WorkItem[PlannedWorkstream], ...]:
         """Return the work durably scheduled before a restart, which resumes first."""

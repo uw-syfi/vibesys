@@ -301,7 +301,14 @@ code with the same field path.
   `implement.j2` and `review.j2` render a guarded "Notes from the
   orchestrator" section from the pending steers. The host marks them
   delivered with the turn's invocation id in the same commit that records the
-  turn start.
+  turn start. The runtime's agent session has no per-turn id, so the host
+  derives one before the turn: `<workstream>/<role>/attempt-<n>`, where `n`
+  is the budget's `spent` once the attempt is charged. A crash after that
+  commit redoes the turn under the same id (resume refunds the interrupted
+  attempt), and a turn renders every note delivered to its id, so the redo
+  shows the notes again. Once refunds are exhausted the interrupted turn
+  counts as run, and its notes stay delivered to it. The rules live in
+  `orchestration/dynamic/steers.py`.
 - **Interrupt** (`interrupt=true`, implement workstreams only). An implementer
   turn can last 48 minutes, so the next turn may come too late. The host
   cancels the active provider turn through the runtime's session cancel, then
@@ -323,7 +330,10 @@ code with the same field path.
 - A steer never changes the task, pass criteria or acceptance. To change the
   task, the orchestrator cancels and starts a new workstream. A steer to a
   workstream that settles before delivery is dropped, and the drop is
-  recorded as an event.
+  recorded as an event: recording the workstream's round (finished, failed,
+  or given up) marks its pending notes `dropped="workstream_settled"` and
+  journals each drop, in the same commit. A steer to a settled workstream is
+  refused `workstream_settled`.
 
 ### 4. Budget unit
 
