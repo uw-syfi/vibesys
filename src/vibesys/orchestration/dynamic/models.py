@@ -196,6 +196,9 @@ class DynamicState(BaseModel):
     workstreams: list[DynamicWorkstream] = Field(default_factory=list)
     # Retired evaluation-cadence counter, kept so older state loads.
     eligible_evaluation_candidates: Annotated[int, Field(ge=0)] = 0
+    # The input (root) revision's trusted benchmark, measured once per run.
+    # Candidates must beat it to be adopted or built on.
+    baseline: EvaluationResult | None = None
     winner_revision: str | None = None
     adoption_pending: bool = False
 
