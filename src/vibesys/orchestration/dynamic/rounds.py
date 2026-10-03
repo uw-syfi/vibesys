@@ -6,7 +6,11 @@ import json
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
-from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.orchestration.hypothesis import (
+    HypothesisConfig,
+    HypothesisSearch,
+    normalize_hypothesis_title,
+)
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.metrics import Measurement
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
@@ -32,6 +36,7 @@ _MAX_HISTORY_METRIC_NAME_CHARS = 128
 _MAX_HISTORY_METRIC_UNIT_CHARS = 64
 _MAX_HISTORY_SUMMARY_CHARS = 600
 _MAX_HISTORY_REVIEW_CHARS = 600
+_MAX_HISTORY_NEXT_STEP_CHARS = 600
 
 
 class Rounds:
@@ -286,7 +291,7 @@ def _attempt_row(item: DynamicWorkstream) -> dict[str, object]:
     """Project one workstream's latest attempt as bounded decision facts."""
     return {
         "hypothesis_id": item.hypothesis_id,
-        "title": item.plan.title,
+        "title": normalize_hypothesis_title(item.plan.title),
         "phase": item.phase.value,
         "outcome": item.implementation.outcome.value if item.implementation is not None else None,
         "summary": _bounded_optional(
@@ -299,7 +304,11 @@ def _attempt_row(item: DynamicWorkstream) -> dict[str, object]:
             else None,
             _MAX_HISTORY_SUMMARY_CHARS,
         ),
-        "next_step": item.implementation.next_step if item.implementation is not None else "",
+        "next_step": (
+            _bounded_optional(item.implementation.next_step, _MAX_HISTORY_NEXT_STEP_CHARS)
+            if item.implementation is not None
+            else ""
+        ),
         "review": _compact_review(item.review),
         "revision": _bounded_optional(
             item.candidate_revision,

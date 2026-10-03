@@ -32,7 +32,7 @@ from vs_runtime.api import StructuredResponseError
 
 _SCHEMA_ERRORS = (
     "Output does not match required schema: root: must have required property 'workstreams', "
-    "/reasoning: must NOT have more than 2000 characters (got 2762)"
+    "/workstreams/0/hypothesis_id: must match pattern"
 )
 
 
@@ -370,12 +370,12 @@ def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
 ) -> None:
     """The correction names the offending field, as the production client reports it."""
     loop_input = LoopInput.create(tmp_path)
-    too_long = {**portfolio(workstream("H1")), "reasoning": "x" * 2001}
+    trailing_space = portfolio(workstream("0 "))
     agents = (
         ScriptedAgents()
-        .plan(too_long, portfolio(workstream("H1")))
-        .implement("H1", edit_to(2, "H1"))
-        .judge("H1", PASS)
+        .plan(trailing_space, portfolio(workstream("0")))
+        .implement("0", edit_to(2, "0"))
+        .judge("0", PASS)
     )
 
     run = run_loop(loop_input, agents, options())
@@ -385,4 +385,57 @@ def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
     assert agents.unscripted == []
     planner = agents.prompts(ORCHESTRATOR.id)
     assert len(planner) == 2
-    assert "reasoning: String should have at most 2000 characters" in planner[1]
+    assert "Correction required" in planner[1]
+    assert "workstreams.0.hypothesis_id" in planner[1]
+    assert "'0 ' is not a valid identifier" in planner[1]
+    state = load_state(loop_input, run.run_id)
+    assert [item.hypothesis_id for item in state.workstreams] == ["0"]
+    assert [item.phase for item in state.workstreams] == [WorkstreamPhase.EVALUATED]
+
+
+def test_long_agent_text_is_kept_whole_and_the_planner_history_stays_bounded(
+    tmp_path: Path,
+) -> None:
+    """No agent text field is capped, so nothing is cut at the agent boundary.
+
+    Under Codex a capped field is cut off mid-word and the turn still succeeds.
+    The planner's history view is bounded where it is rendered instead.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    long = "word " * 4000
+    long_workstream = {
+        **workstream("H1", title=long, task=long),
+        "hypothesis": long,
+        "pass_criteria": long,
+    }
+    plan = {**portfolio(long_workstream), "reasoning": long}
+
+    def long_result(agent: Turn) -> dict[str, object]:
+        agent.set_value(2)
+        return {**implemented("H1"), "summary": long, "next_step": long}
+
+    agents = (
+        ScriptedAgents()
+        .plan(plan, portfolio(workstream("H2")))
+        .implement("H1", long_result)
+        .judge("H1", {"passed": True, "analysis": long, "feedback": long})
+        .implement("H2", edit_to(3, "H2"))
+        .judge("H2", PASS)
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    first = load_state(loop_input, run.run_id).workstreams[0]
+    assert first.plan.hypothesis == long
+    assert first.plan.task == long
+    assert first.plan.pass_criteria == long
+    assert first.implementation is not None
+    assert first.implementation.summary == long
+    assert first.implementation.next_step == long
+    assert first.review is not None
+    assert first.review.analysis == long
+    second_planning = agents.prompts(ORCHESTRATOR.id)[1]
+    assert len(second_planning) < 20_000
+    assert long not in second_planning

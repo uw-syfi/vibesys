@@ -111,14 +111,16 @@ STORES = pytest.mark.parametrize(
 )
 
 
-def _workstream(sequence: int, hypothesis_id: str, phase: WorkstreamPhase) -> DynamicWorkstream:
+def _workstream(
+    sequence: int, hypothesis_id: str, phase: WorkstreamPhase, *, text: str = ""
+) -> DynamicWorkstream:
     plan = WorkstreamPlan.model_validate(
         {
             "hypothesis_id": hypothesis_id,
-            "title": "T" * 80,
-            "hypothesis": "Batching amortizes the lock.",
-            "task": "Batch the queue.",
-            "pass_criteria": "Throughput rises.",
+            "title": "T" * 80 + text,
+            "hypothesis": "Batching amortizes the lock." + text,
+            "task": "Batch the queue." + text,
+            "pass_criteria": "Throughput rises." + text,
             "evidence": [{"location": "queue.py:1", "purpose": "hot path", "revision": "abc"}],
         }
     )
@@ -133,11 +135,17 @@ def _workstream(sequence: int, hypothesis_id: str, phase: WorkstreamPhase) -> Dy
         budget=WorkstreamBudget(spent=1, refunded=1),
         candidate_revision="1" * 40 if finished else None,
         implementation=(
-            ImplementerResult(summary="Batched.", outcome=HypothesisOutcome.SUPPORTED)
+            ImplementerResult(
+                summary="Batched." + text,
+                outcome=HypothesisOutcome.SUPPORTED,
+                next_step=text,
+            )
             if finished
             else None
         ),
-        review=ReviewResult(passed=False, analysis="No.", feedback="Retry.") if finished else None,
+        review=ReviewResult(passed=False, analysis="No." + text, feedback="Retry." + text)
+        if finished
+        else None,
         evaluation=(
             EvaluationResult(
                 revision="1" * 40,
@@ -168,6 +176,10 @@ REPRESENTATIVE = (
         winner_revision="1" * 40,
         adoption_pending=True,
     ),
+    # Agent free text has no length cap, so a long value must persist and reload.
+    DynamicState(
+        workstreams=[_workstream(1, "H1", WorkstreamPhase.EVALUATED, text=" long" * 20_000)]
+    ),
 )
 
 
@@ -190,7 +202,7 @@ def test_nothing_loads_before_the_first_commit(store: _Store, tmp_path: Path) ->
 
 
 @STORES
-@pytest.mark.parametrize("value", REPRESENTATIVE, ids=("empty", "every-phase"))
+@pytest.mark.parametrize("value", REPRESENTATIVE, ids=("empty", "every-phase", "long-text"))
 def test_a_committed_state_loads_equal_and_detached(
     store: _Store, tmp_path: Path, value: DynamicState
 ) -> None:

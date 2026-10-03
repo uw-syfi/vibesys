@@ -30,7 +30,11 @@ from vibesys.orchestration.dynamic.workstream import (
     prompt_context,
     workstream_index,
 )
-from vibesys.orchestration.hypothesis import HypothesisSearch, OrchestratorPlan
+from vibesys.orchestration.hypothesis import (
+    HypothesisSearch,
+    OrchestratorPlan,
+    normalize_hypothesis_title,
+)
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
@@ -536,7 +540,7 @@ def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan
     return OrchestratorPlan(
         hypothesis_id=plan.hypothesis_id,
         hypothesis=plan.hypothesis,
-        title=plan.title,
+        title=normalize_hypothesis_title(plan.title),
         task=plan.task,
         pass_criteria=plan.pass_criteria,
         reasoning=reasoning,
