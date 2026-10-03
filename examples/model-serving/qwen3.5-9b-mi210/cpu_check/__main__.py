@@ -47,6 +47,7 @@ from cpu_check.tiny_model import VOCAB_SIZE, write_checkpoint
 MODEL_NAME = "tiny-qwen3.5"
 SERVER_START_SECONDS = 120.0
 REQUEST_SECONDS = 60.0
+STOP_SECONDS = 10.0
 LOG_TAIL_LINES = 40
 _EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception): ")
 
@@ -107,8 +108,8 @@ def _start_server(root: Path, model_dir: Path, port: int, log_path: Path) -> sub
         "--device",
         "cpu",
     ]
-    log = log_path.open("w")
-    return subprocess.Popen(argv, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+    with log_path.open("w") as log:  # the child keeps its own descriptor
+        return subprocess.Popen(argv, cwd=root, stdout=log, stderr=subprocess.STDOUT)
 
 
 def _wait_healthy(proc: subprocess.Popen, base_url: str) -> str | None:
@@ -166,7 +167,11 @@ def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=pr
                 stream_error = f"{type(exc).__name__}: {exc}"
     finally:
         proc.terminate()
-        proc.wait()
+        try:
+            proc.wait(timeout=STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
     for o in outcomes:
         log(f"  [{'ok' if o.ok else 'FAIL'}] {o.describe()}")
