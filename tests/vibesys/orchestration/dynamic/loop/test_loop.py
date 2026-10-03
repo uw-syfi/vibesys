@@ -958,4 +958,4 @@ def test_a_profile_without_a_provisioned_profiler_is_corrected(tmp_path: Path) -
     assert agents.unscripted == []
     first, correction = agents.prompts(ORCHESTRATOR.id)
     assert "profile workstream" not in first
-    assert "workstreams[0].kind: this run provisions no profiler" in correction
+    assert "workstreams[0].kind: this run cannot produce trusted profile evidence" in correction

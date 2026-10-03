@@ -17,6 +17,7 @@ from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,
     DynamicWorkstream,
+    ImplementPortfolioPlan,
     PlannedWorkstream,
     PortfolioPlan,
     ProfilePlan,
@@ -67,6 +68,14 @@ _RECOVERABLE_PHASES = frozenset(
 )
 
 
+class DynamicPlanningError(RuntimeError):
+    """The planner scheduled no valid workstream after its correction, with none running."""
+
+    def __init__(self, error: Exception | None) -> None:
+        """Name the validation error the correction did not fix."""
+        super().__init__(f"the planner scheduled no valid workstream after correction: {error}")
+
+
 class DynamicPlanError(ValueError):
     """A portfolio cannot be applied to the durable hypothesis search."""
 
@@ -115,9 +124,9 @@ class DynamicPlanError(ValueError):
 
     @classmethod
     def profiling_unavailable(cls, position: int) -> DynamicPlanError:
-        """Reject a profile workstream in a run without a provisioned profiler."""
+        """Reject a profile workstream in a run that cannot produce profile evidence."""
         return cls(
-            f"workstreams[{position}].kind: this run provisions no profiler; "
+            f"workstreams[{position}].kind: this run cannot produce trusted profile evidence; "
             "schedule only implement workstreams"
         )
 
@@ -214,6 +223,9 @@ class _DynamicRun:
     options: DynamicOptions
     state: DynamicState
     _state_lock: asyncio.Lock
+    # Whether the run provisions a profiler and its evaluation executor
+    # produces profile evidence, asked once when the run opens.
+    _can_profile: bool
     input_gate: InputGate = field(init=False)
     rounds: Rounds = field(init=False)
     workstreams: Workstreams = field(init=False)
@@ -252,7 +264,8 @@ class _DynamicRun:
         state = await run.state.load(DynamicState) or DynamicState()
         search = HypothesisSearch(hypothesis_config(options))
         state.search = search.resume(state.search, options.metric_space)
-        dynamic = cls(run, options, state, asyncio.Lock())
+        can_profile = run.facts.profiler_id != "none" and await run.evaluation.can_profile()
+        dynamic = cls(run, options, state, asyncio.Lock(), can_profile)
         if state.adoption_pending:
             await dynamic._finish_adoption()
         return dynamic
@@ -343,9 +356,15 @@ class _DynamicRun:
         and would exceed the search's round limit. Sequences are unique and
         increase with every scheduled workstream, so the largest one counts
         the workstreams scheduled so far. A profile workstream shares the
-        sequence: it occupies a slot and an agent turn like any workstream.
+        sequence: it occupies a slot and an agent turn like any workstream,
+        except one that ended unsupported. That one ran no capture, only a
+        short profiler turn finding none possible, and it stops further
+        profiles, so refunding it costs at most the profiles already in
+        flight; charging it would let a run that cannot profile spend its
+        implement budget on nothing, as profiles alone once did.
         """
-        return self.options.max_rounds * self.options.max_in_flight - self.state.scheduled()
+        total = self.options.max_rounds * self.options.max_in_flight
+        return total - self.state.scheduled() + self.state.unsupported_profiles()
 
     async def _settle(
         self,
@@ -456,7 +475,11 @@ class _DynamicRun:
                         **context,
                     )
                 )
-                plan = await structured_turn(session, message, PortfolioPlan)
+                plan = await structured_turn(
+                    session,
+                    message,
+                    PortfolioPlan if self._profiling_available() else ImplementPortfolioPlan,
+                )
                 try:
                     self._validate_plan(
                         plan, capacity=capacity, in_flight=in_flight, parents=parents
@@ -478,7 +501,12 @@ class _DynamicRun:
             self.run.observations.note(
                 f"dynamic plan still invalid after correction: {first_error}"
             )
-            return self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            valid = self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            if not valid.workstreams and not in_flight:
+                # Nothing runs and nothing was scheduled: ending here would
+                # report a finished search that never searched.
+                raise DynamicPlanningError(first_error)
+            return valid
         finally:
             await session.close()
 
@@ -589,8 +617,12 @@ class _DynamicRun:
         parents.check_target(position, plan)
 
     def _profiling_available(self) -> bool:
-        """Return whether the run provisions the profiler agent a profile workstream needs."""
-        return self.run.facts.profiler_id != "none"
+        """Return whether a profile workstream can produce trusted profile evidence now.
+
+        The run must be able to profile, and no profile may have ended
+        unsupported: that outcome shows the run cannot, whatever it declared.
+        """
+        return self._can_profile and self.state.unsupported_profiles() == 0
 
     def _validate_updates(
         self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]
@@ -826,4 +858,4 @@ async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     return await dynamic.execute()
 
 
-__all__ = ["DynamicPlanError", "orchestrate"]
+__all__ = ["DynamicPlanError", "DynamicPlanningError", "orchestrate"]

@@ -16,9 +16,10 @@ Input baseline (the root before any change, trusted benchmark): {{ baseline }}
 A candidate must beat it on the objectives to be adopted or become the base revision.
 {% endif %}
 {% if input_failure %}
+Input not measurable: {{ input_failure.reason }}
 The input itself fails the trusted benchmark, so there is no input baseline: any
 candidate with a passing trusted benchmark can be adopted. Plan the first candidate
-to satisfy what the benchmark requires. The input's failure: {{ input_failure }}
+to satisfy what the benchmark requires. The input's failure: {{ input_failure.reason }}
 {% if input_partial %}
 What the input's failed benchmark measured before it stopped: {{ input_partial }}
 {% endif %}
@@ -36,7 +37,7 @@ one when the new work needs a change it already made, instead of rebuilding it.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
-reduces uncertainty for the others, such as measuring or profiling the base revision.
+reduces uncertainty for the others, such as measuring{% if profiling %} or profiling{% endif %} the base revision.
 {% if profiling %}
 A workstream is either an implement workstream (`kind` "implement", the fields above) or
 a profile workstream: `kind` "profile", a new `profile_id`, `target_hypothesis_id` (a

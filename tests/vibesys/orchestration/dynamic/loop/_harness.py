@@ -106,6 +106,38 @@ pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in
 raise SystemExit(0 if passed else 1)
 """
 
+# The GPU node's profiler, faked like the cluster: the remote interpreter runs
+# every command with this host's Python, except the profiler's trusted capture,
+# which it answers as ``remote_capture.py --print-output`` does: one trace
+# directory under the requested profile store and the capture summary on stdout.
+# With the input's WORKLOAD_FAILS_FILE present, the capture's workload fails its
+# preflight, and the capture exits 1 with the reason last, as production does.
+_REMOTE_PYTHON = """\
+#!/bin/sh
+if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
+  while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
+  mkdir -p "$2/timeline-1"
+  if [ -e "{workload_fails}" ]; then
+    printf 'load log tail: Error: prefix-cache preflight failed\\n'
+    printf 'not profilable: the configured workload did not run (capture timeline-1 '
+    printf 'status=load_failed, load_rc=1, target_rc=-9)\\n'
+    exit 1
+  fi
+  printf 'kernel,share\\nqueue_step,0.75\\n' > "$2/timeline-1/stats.csv"
+  printf 'Timeline: queue_step holds 75%% of device time.\\n'
+  exit 0
+fi
+exec {python} "$@"
+"""
+
+WORKLOAD_FAILS_FILE = "profile-workload-fails"
+
+_SERVICE = (
+    "import pathlib, sys, threading; "
+    "pathlib.Path(sys.argv[1], f'service-ready-{sys.argv[2]}').touch(); "
+    "threading.Event().wait()"
+)
+
 _ACCURACY = """\
 import pathlib
 namespace = {}
@@ -184,6 +216,12 @@ class Turn:
     def trusted_operations(self) -> dict[str, object]:
         """Read the run's trusted operations through the planner's real MCP tool."""
         return self._call("trusted_operations", {})
+
+    def accepted_evidence(self, *kinds: str) -> list[dict[str, object]]:
+        """Return the trusted evidence already recorded for this turn's exact candidate."""
+        evidence = self._call("accepted_evidence", {"evidence_kinds": kinds})["evidence"]
+        assert isinstance(evidence, list)
+        return evidence
 
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
@@ -404,11 +442,16 @@ class LoopInput:
     backend: ComputeBackend = ComputeBackend.CPU
 
     @classmethod
-    def create(cls, base: Path, *, profiled: bool = False) -> LoopInput:
+    def create(
+        cls, base: Path, *, profiled: bool = False, profile_capture: bool = True
+    ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
         A ``profiled`` input is an LLM-serving project on ROCm, so its run
         provisions the rocprof profiler agent, the production profiling target.
+        With ``profile_capture`` it also configures a service for the GPU node's
+        profiler to capture under load, so the run's evaluation executor
+        produces trusted profile evidence; without it, the executor cannot.
         """
         domain = "llm-serving" if profiled else "generic"
         root = base / "project"
@@ -430,6 +473,23 @@ class LoopInput:
         config = base / "slurm.toml"
         # A one-hour poll interval: a job that is not finished at its first
         # poll stalls the test visibly instead of being waited for.
+        remote_python = base / "remote-python"
+        remote_python.write_text(
+            _REMOTE_PYTHON.format(python=sys.executable, workload_fails=base / WORKLOAD_FAILS_FILE),
+            encoding="utf-8",
+        )
+        remote_python.chmod(0o755)
+        # The service only announces readiness through a file of its own, so
+        # concurrent tests never contend for the port the job derives.
+        service_argv = ["python", "-c", _SERVICE, str(base), "VIBESYS_DYNAMIC_PORT"]
+        service = (
+            "[vibesys.service]\n"
+            f"command = {json.dumps(service_argv)}\n"
+            f'readiness_url = "file://{base}/service-ready-VIBESYS_DYNAMIC_PORT"\n'
+            "startup_timeout_seconds = 60\n"
+            if profiled and profile_capture
+            else ""
+        )
         config.write_text(
             "[slurm]\n"
             'name = "fake"\n'
@@ -437,12 +497,16 @@ class LoopInput:
             "poll_interval_seconds = 3600.0\n"
             f'transport = {{ kind = "connector", command = {connector} }}\n'
             "[vibesys]\n"
-            f'remote_python = "{sys.executable}"\n',
+            f'remote_python = "{remote_python}"\n' + service,
             encoding="utf-8",
         )
         if profiled:
             return cls(root, cluster, config, ProfilerKind.ROCPROF, ComputeBackend.ROCM)
         return cls(root, cluster, config)
+
+    def fail_profile_workloads(self) -> None:
+        """Make every trusted capture's workload fail, as a no-prefix-cache engine's does."""
+        (self.root.parent / WORKLOAD_FAILS_FILE).touch()
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""

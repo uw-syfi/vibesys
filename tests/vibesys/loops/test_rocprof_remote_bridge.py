@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import sys
 from dataclasses import dataclass, field
 from threading import Event, Thread
 from typing import TYPE_CHECKING
@@ -8,8 +11,9 @@ from typing import TYPE_CHECKING
 import pytest
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
 
-from vs_sandbox.api.slurm import SlurmCapturePlan, write_slurm_capture_plan
-from vs_slurm.api import SlurmJobResult
+from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
+from vs_slurm.api import SlurmError, SlurmJobResult, load_slurm_config
+from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -224,3 +228,72 @@ def test_remote_capture_releases_ownership_after_failure(tmp_path: Path) -> None
     output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
 
     assert output == f"captured at {tmp_path / 'profiles'}/capture-1"
+
+
+def test_a_brokered_capture_from_a_candidate_workspace_reaches_the_scheduler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: every brokered capture failed before sbatch.
+
+    The runner wrote its job script under the system temporary directory, and
+    the broker refuses to transfer a file outside the run-owned roots, so a
+    capture from a candidate worktree never reached the scheduler.
+    """
+    cluster = tmp_path / "cluster"
+    cluster.mkdir()
+    os.mkfifo(cluster / SUBMITTED_FILE)
+    program = f'["{sys.executable}", "-m", "vs_slurm.fake_connector", "{cluster}"]'
+    program_tail = program.removesuffix("]")
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        f"""[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/runs"
+poll_interval_seconds = 0.01
+
+[slurm.transport]
+kind = "ssh"
+host = "cluster"
+ssh_command = {program_tail}, "ssh"]
+rsync_command = {program_tail}, "rsync"]
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    worktrees = tmp_path / "worktrees"
+    workspace = worktrees / "candidate" / "workspace"
+    workspace.mkdir(parents=True)
+    broker = SlurmProcessBroker(
+        load_slurm_config(config_path), tmp_path / "broker.sock", local_roots=(worktrees,)
+    )
+    broker.start()
+    monkeypatch.setenv("VIBESYS_SLURM_BROKER_SOCKET", str(broker.socket_path))
+    monkeypatch.setenv("VIBESYS_SLURM_BROKER_TOKEN", broker.token)
+    bridge = RemoteCaptureBridge(config_path, workspace, profile_root=tmp_path / "profiles")
+    cancel = Event()
+    failures: list[BaseException] = []
+
+    def capture() -> None:
+        try:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=cancel)
+        except (SlurmError, PermissionError) as error:
+            failures.append(error)
+        # Unblock the reader when the capture ended before any job was submitted.
+        with contextlib.suppress(OSError):
+            descriptor = os.open(cluster / SUBMITTED_FILE, os.O_WRONLY | os.O_NONBLOCK)
+            os.write(descriptor, b"none")
+            os.close(descriptor)
+
+    worker = Thread(target=capture)
+    try:
+        worker.start()
+        submitted = (cluster / SUBMITTED_FILE).read_text(encoding="utf-8")
+        cancel.set()
+        worker.join()
+    finally:
+        broker.close()
+
+    assert submitted == JOB_ID, [str(item) for item in failures]
+    assert f"scancel {JOB_ID}" in recorded_commands(cluster)

@@ -37,11 +37,13 @@ from vs_runtime.api.infrastructure import (
     decode_trusted_benchmark_partial,
 )
 from vs_sandbox.api.slurm import (
+    PROFILE_OUTPUT_ROOT,
     SharedSlurmAdmission,
     SlurmCommandResult,
     SlurmEvaluationExecutor,
     SlurmEvaluationPlan,
     SlurmStagePayload,
+    SlurmTargetLifecycle,
 )
 
 if TYPE_CHECKING:
@@ -192,9 +194,23 @@ class SlurmSemanticEvaluationExecutor:
             service=self._policy.remote_service(),
             support_trees=self._plan.support_paths,
             handle_root=self._handle_root,
+            supported_evidence_kinds=self._supported_evidence_kinds(),
             admission=self._admission,
             runner=self._runner,
         )
+
+    def _supported_evidence_kinds(self) -> tuple[str, ...]:
+        """Return the kinds this plan has a command for.
+
+        A stage without a command would run nothing and exit 0, which the
+        evidence mapping would record as a pass for a workload that never ran.
+        """
+        commands = (
+            (EvidenceKind.ACCURACY, self._plan.accuracy_command),
+            (EvidenceKind.BENCHMARK, self._plan.benchmark_command),
+            (EvidenceKind.PROFILE, self._plan.profile_command),
+        )
+        return tuple(kind.value for kind, command in commands if command is not None)
 
     def _provider_request(self, request: EvaluationRequest) -> EvaluationRequest:
         return request.model_copy(
@@ -229,8 +245,21 @@ class SlurmSemanticEvaluationExecutor:
                     command, contract, ".vibesys-framework-benchmark.json"
                 )
             timeout = self._trusted_plan.benchmark_timeout_seconds
+        elif stage.kind is EvidenceKind.PROFILE and self._plan.profile_command is not None:
+            # The capture starts, loads, and stops the service itself, inside
+            # the job's timeout, and its traces come back into the run-owned
+            # candidate worktree.
+            return SlurmStagePayload(
+                command=shlex.join(self._plan.profile_command),
+                tree_artifact_refs=(PROFILE_OUTPUT_ROOT,),
+                target_lifecycle=SlurmTargetLifecycle.COMMAND_MANAGED,
+            )
         else:
-            message = f"Slurm semantic executor supports accuracy and benchmark only, not {stage.kind.value}"
+            command = None
+            timeout = None
+        if command is None:
+            supported = ", ".join(self._supported_evidence_kinds())
+            message = f"Slurm semantic executor supports {supported} only, not {stage.kind.value}"
             raise ExecutorRejectedError(message)
         return SlurmStagePayload(command=command, timeout_seconds=timeout)
 
@@ -316,6 +345,10 @@ class SlurmSemanticEvaluationExecutor:
             except (TypeError, ValueError) as error:
                 passed = False
                 summary = str(error)
+        if stage.kind is EvidenceKind.PROFILE and passed:
+            # The capture's printed summary is the profile's evidence; its end
+            # holds the attribution tables.
+            summary = (raw.stdout or raw.output)[-_MAX_SUMMARY_CHARS:] or None
         if not passed and summary is None:
             # The provider's stage failure already holds the stage output plus the
             # server log tail; keep its end, where the cause usually is.

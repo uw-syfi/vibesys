@@ -431,6 +431,16 @@ class SemanticEvaluationBackend:
         """Snapshot a candidate and submit exact semantic evidence work."""
         workspace = self._require_workspace(scope_id)
         snapshot = await workspace.snapshot("agent-evaluation")
+        return await self.submit_revision_evidence(snapshot, kinds)
+
+    async def submit_revision_evidence(
+        self, snapshot: str, kinds: tuple[EvidenceKind, ...]
+    ) -> SubmittedSemanticEvaluation:
+        """Submit exact semantic evidence work for one recorded revision.
+
+        Work for the same content and kinds is joined, so an agent that later
+        submits the same candidate reads this evaluation instead of a new one.
+        """
         fingerprints = await self._fingerprints(snapshot)
         # Only choosing and claiming the key is serialized. Staging and submitting to
         # the executor can take tens of seconds, so they run outside the lock.
@@ -802,6 +812,7 @@ def _candidate_profile(revision: str, operation: ProfilerOperation) -> Candidate
             status=CandidateProfileStatus.UNSUPPORTED,
             operation_id=operation.operation_id,
             diagnosis=report.unsupported_reason,
+            evidence_ids=report.evidence_ids,
         )
     return CandidateProfile(
         revision=revision,
@@ -814,6 +825,25 @@ def _candidate_profile(revision: str, operation: ProfilerOperation) -> Candidate
         ),
         evidence_ids=report.evidence_ids,
     )
+
+
+_TERMINAL_EVALUATION_STATES = frozenset(
+    {
+        EvaluationState.SUCCEEDED,
+        EvaluationState.FAILED,
+        EvaluationState.CANCELED,
+        EvaluationState.SUPERSEDED,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _CapturedProfile:
+    """The recorded outcome of one host-run trusted profile capture."""
+
+    evidence_id: str
+    outcome: EvidenceOutcome
+    summary_tail: str | None
 
 
 class EvidenceReusingEvaluation:
@@ -840,6 +870,17 @@ class EvidenceReusingEvaluation:
         self._scope_handles = scope_handles
         self._profiler = profiler
 
+    async def can_profile(self) -> bool:
+        """Return whether a profiler is provisioned and the executor produces profile evidence.
+
+        The executor's availability snapshot is the one source of its supported
+        evidence kinds; the agent service rejects a submission from the same set.
+        """
+        if self._profiler is None:
+            return False
+        snapshot = await self._backend.availability(ResourceRequirements())
+        return EvidenceKind.PROFILE.value in snapshot.supported_evidence_kinds
+
     async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
         """Run one profiler operation on ``revision`` and return its typed outcome.
 
@@ -848,6 +889,20 @@ class EvidenceReusingEvaluation:
         """
         if self._profiler is None:
             return await self._delegate.profile(revision, request, member_id=member_id)
+        captured = await self._trusted_capture(revision)
+        if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
+            # The trusted capture's workload did not run (for example the
+            # engine fails the workload's own preflight), so no profiler turn
+            # can answer the question from it. Report that without a turn.
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                diagnosis=(
+                    "the trusted profile capture failed, so no profiler turn ran: "
+                    f"{captured.summary_tail or 'no output'}"
+                ),
+                evidence_ids=(captured.evidence_id,),
+            )
         try:
             dispatched = await self._profiler.dispatch(
                 principal_id=member_id,
@@ -872,6 +927,31 @@ class EvidenceReusingEvaluation:
             )
             if not reply.timed_out:
                 return _candidate_profile(revision, reply.operation)
+
+    async def _trusted_capture(self, revision: str) -> _CapturedProfile | None:
+        """Run the trusted profile capture of ``revision`` before any profiler turn.
+
+        The host waits for the capture, which costs no agent tokens; the
+        profiler's own submission of the same content then joins the completed
+        evaluation instead of polling a running one. Returns ``None`` when the
+        executor cannot capture or the capture recorded no evidence.
+        """
+        if not await self.can_profile():
+            return None
+        submitted = await self._backend.submit_revision_evidence(revision, (EvidenceKind.PROFILE,))
+        while True:
+            snapshot = await self._backend.operation_snapshot(submitted.handle_id)
+            if snapshot.state in _TERMINAL_EVALUATION_STATES:
+                break
+            await self._backend.await_result(submitted.handle_id, MAX_AGENT_AWAIT_S)
+        if not snapshot.stage_outcomes or not snapshot.evidence_ids:
+            return None
+        (outcome,) = snapshot.stage_outcomes
+        return _CapturedProfile(
+            evidence_id=snapshot.evidence_ids[0],
+            outcome=outcome.outcome,
+            summary_tail=outcome.summary_tail,
+        )
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""

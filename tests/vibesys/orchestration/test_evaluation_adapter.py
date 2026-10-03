@@ -29,6 +29,7 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     BenchmarkObjective,
     LocalValidationEvaluation,
     MetricDirection,
@@ -284,6 +285,7 @@ def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:
         assert not result.passed
         assert result.feedback is not None
         assert result.feedback.startswith("Framework benchmark failed.")
+        assert result.failure_kind is BenchmarkFailureKind.INFRASTRUCTURE
     finally:
         integration.close()
 

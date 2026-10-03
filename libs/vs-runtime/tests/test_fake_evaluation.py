@@ -127,7 +127,7 @@ def test_scripted_profiles_describe_the_requested_revision_in_call_order(
             failure="turn failed" if failed else None,
         )
 
-    evaluation = FakeEvaluation()
+    evaluation = FakeEvaluation(profiling_supported=True)
     evaluation.script_profile(*(outcome(kind) for kind in script))
 
     async def drain() -> list[str]:
@@ -149,3 +149,26 @@ def test_scripted_profiles_describe_the_requested_revision_in_call_order(
         *(f"rev{index}" for index in range(len(script))),
         "rev",
     ]
+
+
+@given(script=st.lists(st.sampled_from(["observed", "unsupported", "failed"]), max_size=3))
+def test_a_fake_that_cannot_profile_reports_every_profile_unsupported(script: list[str]) -> None:
+    """Like a production executor without profile evidence, scripts cannot make it capable."""
+    evaluation = FakeEvaluation()
+    evaluation.script_profile(
+        *(
+            CandidateProfile(
+                revision="scripted",
+                status=CandidateProfileStatus(kind),
+                diagnosis=None if kind == "failed" else "diagnosis",
+                failure="turn failed" if kind == "failed" else None,
+            )
+            for kind in script
+        )
+    )
+
+    assert asyncio.run(evaluation.can_profile()) is False
+    profile = asyncio.run(evaluation.profile("rev", "q", member_id="p"))
+    assert profile.status is CandidateProfileStatus.UNSUPPORTED
+    assert profile.revision == "rev"
+    assert asyncio.run(FakeEvaluation(profiling_supported=True).can_profile()) is True

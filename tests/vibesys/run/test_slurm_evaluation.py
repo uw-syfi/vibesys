@@ -30,7 +30,7 @@ from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
 from vs_project.api import StateNamespace
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
-from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -357,6 +357,118 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK])
+async def test_a_kind_without_a_command_is_rejected_not_passed(
+    tmp_path: Path, kind: EvidenceKind
+) -> None:
+    """A stage with no command ran ``true`` and was recorded as passed evidence."""
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(config)
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
+    )
+
+    availability = await executor.availability(ResourceRequirements())
+    handle = await coordinator.submit(_request(snapshot, (kind,)))
+    result = await handle.await_result(5)
+
+    assert kind.value not in availability.supported_evidence_kinds
+    assert isinstance(result, EvaluationFailed)
+    assert result.message is not None
+    assert f"not {kind.value}" in result.message
+    assert runner.submissions == 0
+    await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path: Path) -> None:
+    """Regression: no executor produced profile evidence, so every profile was unsupported."""
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(
+        config,
+        stages=(
+            SlurmBatchStageResult(
+                name="profile",
+                exit_code=0,
+                stdout="top kernels: gemm 61%, attention 22%\n",
+                stderr="",
+                elapsed_seconds=3.0,
+                skipped=False,
+            ),
+        ),
+    )
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            benchmark_command=("python", "benchmark.py"),
+            profile_command=("python", "rocprof_profiler/remote_capture.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+
+    availability = await executor.availability(ResourceRequirements())
+    await executor.submit(_request(snapshot, (EvidenceKind.PROFILE,)), handle_id="profile")
+    observed = await _terminal(executor, "profile")
+
+    assert EvidenceKind.PROFILE.value in availability.supported_evidence_kinds
+    assert observed.state is EvaluationState.SUCCEEDED
+    assert runner.request is not None
+    assert runner.request.service is None
+    (stage,) = runner.request.stages
+    assert stage.command[-1] == "python rocprof_profiler/remote_capture.py"
+    assert [item.remote_path for item in stage.tree_artifacts] == [PROFILE_OUTPUT_ROOT]
+    evidence = TrustedEvidence.model_validate(observed.stage_results[0].result)
+    assert evidence.kind is EvidenceKind.PROFILE
+    assert evidence.outcome is EvidenceOutcome.PASSED
+    assert evidence.semantic_summary == "top kernels: gemm 61%, attention 22%\n"
+    await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    executor = SlurmSemanticEvaluationExecutor(
+        _config(),
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=_Runner(_config()),
+    )
+
+    availability = await executor.availability(ResourceRequirements())
+
+    assert availability.supported_evidence_kinds == ("accuracy", "benchmark")
+    await executor.close()
+
+
+@pytest.mark.asyncio
 async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_path: Path) -> None:
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
@@ -503,7 +615,11 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         workspaces,
         _namespace(tmp_path),
@@ -537,7 +653,11 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         workspaces,
         _namespace(tmp_path),
@@ -568,7 +688,11 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         run.workspaces,
         _namespace(tmp_path),

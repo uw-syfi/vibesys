@@ -145,7 +145,9 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
                 for _ in range(benchmark_results)
             ),
         )
-        run.state.script_commit(*commit_results)
+        # The input submission reserves its durable retry budget before the
+        # existing candidate lifecycle commits scripted below.
+        run.state.script_commit(None, *commit_results)
         with pytest.raises(RuntimeError, match="stop"):
             await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
         interrupted = await run.state.load(DynamicState)
@@ -587,6 +589,7 @@ def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path
             supports_parallel_candidates=True,
         )
         options = dynamic_options(max_in_flight=1)
+        run.evaluation.profiling_supported = True
         run.evaluation.script_profile(
             _ProfilerStoppedError("stop"),
             CandidateProfile(

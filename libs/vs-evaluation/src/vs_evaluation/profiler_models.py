@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
 
-from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
+from vs_evaluation.agent_evidence import EvidenceKind, EvidenceOutcome, TrustedEvidence
 
 # How long one agent await call may block before it returns progress instead.
 # An agent CLI abandons an MCP tool call after its own tool-call timeout (Codex
@@ -131,10 +131,11 @@ class ProfilerAgentResult(BaseModel):
             raise ValueError(  # noqa: TRY003  # lint-waiver: LW-930055 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
                 "unsupported outcome requires unsupported_reason and observed forbids it"
             )
-        if self.outcome is ProfilerResultOutcome.UNSUPPORTED and (
-            self.attribution or self.evidence_ids
-        ):
-            raise ValueError("unsupported outcome forbids attribution and evidence")  # noqa: TRY003  # lint-waiver: LW-930056 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+        # An unsupported report may cite the trusted evidence it examined (for
+        # example the failed capture that made the question unanswerable); the
+        # host resolves those ids like any other. It may not attribute cost.
+        if self.outcome is ProfilerResultOutcome.UNSUPPORTED and self.attribution:
+            raise ValueError("unsupported outcome forbids attribution")  # noqa: TRY003  # lint-waiver: LW-930056 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
 
 
 class ProfilerOperationResult(BaseModel):
@@ -155,6 +156,13 @@ class ProfilerOperationResult(BaseModel):
             raise ValueError(  # noqa: TRY003  # lint-waiver: LW-930058 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
                 "trusted profile evidence references included non-profile evidence"
             )
+        if self.report.outcome is ProfilerResultOutcome.OBSERVED and any(
+            item.outcome is EvidenceOutcome.FAILED for item in self.trusted_evidence
+        ):
+            # A failed capture describes no completed workload, so it cannot
+            # support an observation; the report must say unsupported instead.
+            message = "an observed profile cited failed profile evidence"
+            raise ValueError(message)
         return self
 
 

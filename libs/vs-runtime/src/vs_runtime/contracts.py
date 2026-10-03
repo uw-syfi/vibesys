@@ -633,6 +633,13 @@ class AccuracyEvaluation(BaseModel):
         return self.feedback is None
 
 
+class BenchmarkFailureKind(StrEnum):
+    """Whether a benchmark failure describes its workload or execution infrastructure."""
+
+    WORKLOAD = "workload"
+    INFRASTRUCTURE = "infrastructure"
+
+
 class BenchmarkEvaluation(BaseModel):
     """Semantic outcome and measurements from the trusted benchmark."""
 
@@ -640,6 +647,8 @@ class BenchmarkEvaluation(BaseModel):
 
     executed: bool
     feedback: str | None = None
+    # Absent for older or reused evidence that did not retain failure provenance.
+    failure_kind: BenchmarkFailureKind | None = None
     metric_name: str | None = None
     metric_value: FiniteFloat | None = None
     metric_direction: MetricDirection | None = None
@@ -866,6 +875,15 @@ class Evaluation(Protocol):
         A candidate workspace keeps its identity across the attempts of one
         member, so the history spans them. Empty when the run offers agents no
         evaluation tool.
+        """
+        ...
+
+    async def can_profile(self) -> bool:
+        """Return whether :meth:`profile` can produce trusted profile evidence in this run.
+
+        True only when the run provisions a profiler agent and its evaluation
+        executor produces profile evidence. Policy offers profiling only when
+        this holds; otherwise every profile ends unsupported or failed.
         """
         ...
 

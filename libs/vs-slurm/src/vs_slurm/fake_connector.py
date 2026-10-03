@@ -126,6 +126,9 @@ def _submit(state: Path, tokens: list[str]) -> str:
         completed = subprocess.run(  # noqa: S603
             ("/bin/bash", str(script)),
             cwd=directory,
+            # A job script reads its id as Slurm sets it (a service job derives
+            # its port from it).
+            env={**os.environ, "SLURM_JOB_ID": job_id},
             stdout=log,
             stderr=subprocess.STDOUT,
             check=False,

@@ -27,7 +27,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, PortfolioPlan
+from vibesys.orchestration.dynamic import PLUGIN, ImplementPortfolioPlan
 from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -245,7 +245,8 @@ def test_unparseable_replies_are_corrected(tmp_path: Path) -> None:
     script = Script(
         {
             ORCHESTRATOR.id: [
-                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
+                # A run that cannot profile is offered implement workstreams only.
+                StructuredResponseError(ORCHESTRATOR.id, ImplementPortfolioPlan),
                 portfolio("recover"),
             ],
             IMPLEMENTER.id: [

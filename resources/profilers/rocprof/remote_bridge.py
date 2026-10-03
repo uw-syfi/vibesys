@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import shutil
 import tempfile
 import uuid
@@ -14,12 +13,12 @@ from threading import Lock
 from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 from vs_sandbox.api.slurm import (
+    configured_capture_lifecycle,
     load_slurm_policy,
     read_slurm_capture_plan,
     run_brokered_process,
 )
 from vs_slurm.api import (
-    PORT_PLACEHOLDER,
     SlurmFileArtifact,
     SlurmJobRequest,
     SlurmJobRunner,
@@ -34,13 +33,6 @@ if TYPE_CHECKING:
     from vs_slurm.api import SlurmJobResult
 
 _CAPTURE_ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
-_PORT_FILE = ".vibesys-profile-port"
-_MIN_GRACE_SECONDS = 30.0
-_MAX_GRACE_SECONDS = 120.0
-_GRACE_FRACTION = 0.1
-_MIN_JOB_MARGIN_SECONDS = 10.0
-_MAX_JOB_MARGIN_SECONDS = 120.0
-_JOB_MARGIN_FRACTION = 0.1
 
 
 class RemoteCaptureError(ValueError):
@@ -101,6 +93,8 @@ class RemoteCaptureBridge:
         if runner is not None:
             self._runner = runner
         elif broker_socket is not None and broker_token is not None:
+            # The broker transfers only files under the run's own roots, and the
+            # candidate workspace is one; the system temporary directory is not.
             self._runner = SlurmJobRunner(
                 self._config,
                 process=lambda argv, *, stdin, timeout: run_brokered_process(
@@ -110,6 +104,7 @@ class RemoteCaptureBridge:
                     stdin=stdin,
                     timeout=timeout,
                 ),
+                scratch_root=self._workspace,
             )
         else:
             self._runner = SlurmJobRunner(self._config)
@@ -122,60 +117,11 @@ class RemoteCaptureBridge:
         Agents invoke a semantic configured-capture tool and do not need to
         reconstruct operator commands, scheduler limits, or port management.
         """
-        service = self._policy.remote_service()
-        if service is None or self._plan is None or self._plan.benchmark_command is None:
+        if self._plan is None:
             return None
-        job_timeout_s = float(self._config.job_timeout_seconds)
-        completion_margin_s = min(
-            _MAX_JOB_MARGIN_SECONDS,
-            max(_MIN_JOB_MARGIN_SECONDS, job_timeout_s * _JOB_MARGIN_FRACTION),
+        return configured_capture_lifecycle(
+            self._config, self._policy, self._plan.benchmark_command
         )
-        timeout_s = max(1.0, job_timeout_s - completion_margin_s)
-        grace_s = min(
-            _MAX_GRACE_SECONDS,
-            max(_MIN_GRACE_SECONDS, timeout_s * _GRACE_FRACTION),
-        )
-        ready_timeout_s = min(
-            float(service.startup_timeout_seconds),
-            max(1.0, timeout_s - grace_s),
-        )
-        read_port = f"read -r PORT < {shlex.quote(_PORT_FILE)}"
-        setup_command = (
-            f"{shlex.quote(self._policy.remote_python)} -c "
-            + shlex.quote(
-                "import socket; "
-                "s=socket.socket(); "
-                "s.bind(('127.0.0.1', 0)); "
-                "print(s.getsockname()[1]); "
-                "s.close()"
-            )
-            + f" > {shlex.quote(_PORT_FILE)}"
-        )
-        readiness_probe = _shell_join_dynamic(
-            (
-                self._policy.remote_python,
-                "-c",
-                (
-                    "import sys, urllib.request; "
-                    "urllib.request.urlopen(sys.argv[1], timeout=2).close()"
-                ),
-                service.readiness_url,
-            )
-        )
-        benchmark_command = (*self._plan.benchmark_command, *self._policy.benchmark_arguments)
-        return {
-            "command": f"{read_port}\n{_shell_join_dynamic(service.command)}",
-            "cwd": None,
-            "env": {},
-            "ready_command": f"{read_port}\n{readiness_probe}",
-            "ready_timeout_s": ready_timeout_s,
-            "ready_interval_s": 1.0,
-            "load_command": f"{read_port}\n{_shell_join_dynamic(benchmark_command)}",
-            "setup_command": setup_command,
-            "stop_signal": "SIGINT",
-            "grace_s": grace_s,
-            "timeout_s": timeout_s,
-        }
 
     def capture(
         self,
@@ -318,16 +264,3 @@ def remote_capabilities(config_path: Path) -> str:
         "Remote ROCm tool and GPU capabilities are validated by the first capture request. "
         "Persistent warm targets are unavailable across job-scoped captures."
     )
-
-
-def _shell_join_dynamic(arguments: tuple[str, ...]) -> str:
-    """Quote argv while substituting the environment-owned dynamic port."""
-    return " ".join(_substitute_dynamic_port(argument) for argument in arguments)
-
-
-def _substitute_dynamic_port(value: str) -> str:
-    """Quote opaque text while retaining one shell port expansion."""
-    if PORT_PLACEHOLDER not in value:
-        return shlex.quote(value)
-    before, after = value.split(PORT_PLACEHOLDER, maxsplit=1)
-    return f'{shlex.quote(before)}"${{PORT}}"{shlex.quote(after)}'
