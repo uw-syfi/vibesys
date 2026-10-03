@@ -914,3 +914,48 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     }
     winner = next(item for item in state.workstreams if item.hypothesis_id == "fast")
     assert state.winner_revision == winner.candidate_revision
+
+
+def test_recorded_hypothesis_lineage_matches_the_branched_revision(tmp_path: Path) -> None:
+    """Each hypothesis records the revision its workstream branched from, not a sibling."""
+    planned = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planned
+        if role.id == ORCHESTRATOR.id:
+            planned += 1
+            return _portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
+        return {"summary": "No viable change.", "outcome": "disproven"}
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, judge_every=100))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    hypotheses = {item.hypothesis_id: item for item in state.search.hypotheses}
+    rounds = {record.hypothesis_id: record.round_number for record in state.search.rounds}
+    assert len(hypotheses) == len(state.workstreams) == 4
+    for workstream in state.workstreams:
+        hypothesis = hypotheses[workstream.hypothesis_id]
+        assert hypothesis.parent_commit == workstream.parent_revision
+        assert hypothesis.parent_round is None
+        assert rounds[workstream.hypothesis_id] == workstream.sequence
