@@ -796,12 +796,7 @@ class _DynamicRun:
         feedback = item.feedback
         completed = False
         if resume_implemented:
-            completed, feedback = await self._resume_implemented(
-                index,
-                plan,
-                workspace,
-                epoch,
-            )
+            completed, feedback = await self._assess(index, plan, workspace)
             await self._remember_feedback(index, feedback)
         for _attempt in range(
             self.state.workstreams[index].attempts,
@@ -837,12 +832,7 @@ class _DynamicRun:
                 implementation=implementation,
                 clear_downstream=True,
             )
-            completed, feedback = await self._assess_candidate(
-                plan,
-                implementation,
-                workspace,
-                epoch,
-            )
+            completed, feedback = await self._assess(index, plan, workspace)
             await self._remember_feedback(index, feedback)
         if not completed:
             await self._update(index, phase=WorkstreamPhase.FAILED)
@@ -883,70 +873,32 @@ class _DynamicRun:
             self.state.workstreams[index] = current.model_copy(update=update, deep=True)
             await self._commit(label=label)
 
-    async def _assess_candidate(
-        self,
-        plan: WorkstreamPlan,
-        implementation: ImplementerResult,
-        workspace: CandidateWorkspace,
-        epoch: int,
-    ) -> tuple[bool, str | None]:
-        """Review and evaluate one implementation, returning correction guidance."""
-        index = self._index(plan.hypothesis_id)
-        revision = workspace.revision
-        if revision is None:
-            message = "dynamic candidate assessment requires a recorded revision"
-            raise RuntimeError(message)
-        review = await self._maybe_review(plan, implementation, workspace, revision, epoch)
-        if review is not None:
-            await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
-        if review is not None and not review.passed:
-            return False, review.feedback
-        evaluation = await self._maybe_evaluate(
-            plan,
-            implementation,
-            review,
-            workspace,
-            revision,
-            epoch,
-        )
-        final_phase = (
-            WorkstreamPhase.EVALUATED
-            if evaluation is not None
-            else WorkstreamPhase.REVIEWED
-            if review is not None
-            else WorkstreamPhase.IMPLEMENTED
-        )
-        await self._update(index, phase=final_phase, evaluation=evaluation)
-        if evaluation is not None and not evaluation.accepted:
-            return False, _evaluation_feedback(evaluation)
-        return True, None
-
-    async def _resume_implemented(
+    async def _assess(
         self,
         index: int,
         plan: WorkstreamPlan,
         workspace: CandidateWorkspace,
-        epoch: int,
     ) -> tuple[bool, str | None]:
-        """Finish the first incomplete stage after a retained implementation."""
+        """Run every assessment stage after the workstream's durable phase.
+
+        A fresh implementation (``implemented``) is reviewed and then
+        evaluated; a resumed one continues at its first incomplete stage, and an
+        evaluated one only reports its verdict. Returns whether the candidate is
+        complete and, if not, the correction guidance for the next attempt.
+        """
         item = self.state.workstreams[index]
         implementation = item.implementation
         revision = item.candidate_revision
         if implementation is None or revision is None:
             raise DynamicPlanError.incomplete_checkpoint(item.hypothesis_id, item.phase)
-        review = item.review
         if item.phase is WorkstreamPhase.EVALUATED and item.evaluation is not None:
             if item.evaluation.accepted:
                 return True, None
             return False, _evaluation_feedback(item.evaluation)
+        epoch = item.epoch
+        review = item.review
         if item.phase is WorkstreamPhase.IMPLEMENTED:
-            review = await self._maybe_review(
-                plan,
-                implementation,
-                workspace,
-                revision,
-                epoch,
-            )
+            review = await self._maybe_review(plan, implementation, workspace, revision, epoch)
             if review is not None:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
