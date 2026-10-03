@@ -191,7 +191,7 @@ depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.cont
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"
@@ -351,7 +351,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime"
 [[modules]]
 path = "vibesys.run.profilers"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vs_agent", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vs_agent", "vs_project", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.skill_sources"
@@ -691,7 +691,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["native_profiler_preflight", "resolve_run_profiler"]
+expose = ["native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]

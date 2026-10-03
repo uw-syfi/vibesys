@@ -23,6 +23,7 @@ from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.plugin_catalog import project_run
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.profilers import validate_run_request
 from vs_agent.api import (
     ToolServerDescriptor,
     agent_catalog,
@@ -139,6 +140,7 @@ class _LocalRunSession:
         registry: OrchestrationRegistry | None,
         effects: SessionEffects = _PRODUCTION_EFFECTS,
     ) -> None:
+        validate_run_request(request)
         self._request = request
         self._effects = effects
         self._sink = sink

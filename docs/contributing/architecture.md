@@ -130,6 +130,7 @@ graph TD
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
     vibesys.api._session --> vibesys.run.host
+    vibesys.api._session --> vibesys.run.profilers
     vibesys.api._store --> vibesys.api.contracts
     vibesys.api._store --> vibesys.plugin_builtins
     vibesys.api._store --> vibesys.plugin_catalog
@@ -394,6 +395,7 @@ graph TD
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
     vibesys.api._session --> vibesys.run.host
+    vibesys.api._session --> vibesys.run.profilers
     vibesys.api._session --> vs_agent
     vibesys.api._session --> vs_project
     vibesys.api._session --> vs_runtime
@@ -593,6 +595,7 @@ graph TD
     vibesys.run.profilers --> vibesys.orchestration.profilers
     vibesys.run.profilers --> vibesys.run.contracts
     vibesys.run.profilers --> vs_agent
+    vibesys.run.profilers --> vs_project
     vibesys.run.profilers --> vs_runtime
     vibesys.run.resources --> vibesys
     vibesys.run.resources --> vibesys.errors

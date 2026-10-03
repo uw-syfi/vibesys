@@ -33,7 +33,7 @@ from vibesys.api.request import (
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
-from vs_project.api import Project
+from vs_project.api import Project, ProjectLayoutError
 
 if TYPE_CHECKING:
     import argparse
@@ -64,6 +64,12 @@ def _normalize_runs_dir(args: argparse.Namespace) -> None:
             f"--runs-dir is not a directory: {runs_dir}",
             code="invalid_runs_dir",
             stage="argument_parsing",
+        )
+    try:
+        Project.validate_collection_root(runs_dir)
+    except ProjectLayoutError as exc:
+        _configuration_error(
+            f"--runs-dir: {exc}", code="invalid_runs_dir", stage="argument_parsing"
         )
     args.runs_dir = runs_dir
 
