@@ -800,6 +800,7 @@ def test_a_stopped_warmup_on_slurm_reaches_the_implementer_and_planner_as_its_ra
     assert isinstance(awaited, dict)
     benchmark = awaited["stages"][-1]["result"]
     assert benchmark["outcome"] == "failed"
+    assert benchmark["semantic_summary"].startswith("warmup sub-run stopped")
     assert "7.1 output tokens/s achieved" in benchmark["semantic_summary"]
     assert benchmark["partial_measurement"] == measured
     operations = seen["operations"]["evaluations"]

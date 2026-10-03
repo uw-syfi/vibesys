@@ -327,6 +327,9 @@ class SlurmSemanticEvaluationExecutor:
                 raw.output, contract, frozenset(), exited_cleanly=passed
             )
             partial = decoded.partial
+            # The evaluator's own stop reason leads, as on the local executor;
+            # the raw output tail would end with its command line instead.
+            summary = decoded.reason
             if decoded.violation is not None and passed:
                 summary = decoded.violation
             elif decoded.violation is not None:
