@@ -204,8 +204,10 @@ def test_planner_may_abandon_a_hypothesis_whose_slot_gave_up(tmp_path: Path) -> 
     [
         # An update naming an unknown hypothesis is dropped; the workstream runs.
         (_plan(_workstream("a"), abandon=("ghost",)), ["a"]),
+        # r19, r20: a repeated ID keeps its first entry; the repeat is dropped.
+        (_plan(_workstream("a"), _workstream("a")), ["a"]),
     ],
-    ids=["drops-update"],
+    ids=["drops-update", "drops-repeated-id"],
 )
 def test_plan_still_invalid_after_correction_keeps_its_valid_part(
     tmp_path: Path, invalid: dict[str, object], scheduled: list[str]

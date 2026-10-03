@@ -145,6 +145,14 @@ class DynamicPlanError(ValueError):
         )
 
     @classmethod
+    def repeated_id(cls, position: int, identifier: str) -> DynamicPlanError:
+        """Reject a later entry that repeats an ID an earlier entry of the plan uses."""
+        return cls(
+            f"workstreams[{position}]: {identifier!r} repeats an earlier entry's ID; "
+            "merge the entries or give each its own ID"
+        )
+
+    @classmethod
     def reused_profile_id(cls, position: int, profile_id: str) -> DynamicPlanError:
         """Reject a profile ID that a hypothesis or an earlier profile already uses."""
         return cls(
@@ -550,7 +558,14 @@ class _DynamicRun:
             )
             raise DynamicPlanError(message)
         abandoned = self._validate_updates(portfolio, in_flight=in_flight)
+        # A repeated ID is checked here, not in the reply schema, so that a
+        # plan still repeating one after its correction keeps its first entry
+        # and its other workstreams (r19, r20) instead of faulting the turn.
+        seen: set[str] = set()
         for position, plan in enumerate(portfolio.workstreams):
+            if planned_id(plan) in seen:
+                raise DynamicPlanError.repeated_id(position, planned_id(plan))
+            seen.add(planned_id(plan))
             if isinstance(plan, ProfilePlan):
                 self._validate_profile(position, plan, parents)
             else:

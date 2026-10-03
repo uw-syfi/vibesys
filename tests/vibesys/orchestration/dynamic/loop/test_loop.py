@@ -11,6 +11,7 @@ import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._harness import (
@@ -333,19 +334,23 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 2\n"
 
 
+@pytest.mark.parametrize("schema_failures", [1, 2])
 def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
-    tmp_path: Path,
+    tmp_path: Path, schema_failures: int
 ) -> None:
     """Regression: r10's planner exhausted the provider's schema retries and the run ended.
 
     The planner's first structured turn fails the way the provider reports
     giving up on the schema; it is sent a correction carrying the validation
-    errors in the same session, and the run completes.
+    errors in the same session. r20: when the correction fails too, the turn
+    faulted, and a fresh planning turn is asked within the turn-fault bound
+    instead of the error escaping the run. Either way the run completes.
     """
     loop_input = LoopInput.create(tmp_path)
+    failures = [AgentOutputSchemaError(_SCHEMA_ERRORS)] * schema_failures
     agents = (
         ScriptedAgents()
-        .plan(AgentOutputSchemaError(_SCHEMA_ERRORS), portfolio(workstream("H1")))
+        .plan(*failures, portfolio(workstream("H1")))
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
@@ -356,7 +361,7 @@ def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     assert run.succeeded is True
     assert agents.unscripted == []
     planner = agents.prompts(ORCHESTRATOR.id)
-    assert len(planner) == 2
+    assert len(planner) == schema_failures + 1
     assert _SCHEMA_ERRORS in planner[1]
     state = load_state(loop_input, run.run_id)
     assert [item.phase for item in state.workstreams] == [WorkstreamPhase.EVALUATED]
