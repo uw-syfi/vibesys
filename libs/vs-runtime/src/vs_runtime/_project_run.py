@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable, Iterable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -121,6 +122,12 @@ class ProjectRunRequest:
     excluded_files: frozenset[str] = frozenset()
     trusted_input_paths: tuple[str | Path, ...] = ()
     state: ProjectStateDeclaration | None = None
+    candidate_support_dirs: frozenset[str] = frozenset()
+    """Unversioned root directories every candidate worktree receives a copy of.
+
+    Agent tool support (for example a profiler's analysis server) is staged in the
+    project root but excluded from Git, so a linked worktree would not contain it.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +180,15 @@ class ProjectRunResources:
         try:
             teardown_stack.callback(self.git.remove_worktree, workspace)
             self.git.add_worktree(workspace, revision)
+            for name in sorted(self._request.candidate_support_dirs):
+                source = self._request.project_root / name
+                if source.is_dir():
+                    shutil.copytree(
+                        source,
+                        workspace / name,
+                        symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__"),
+                    )
             logger = RunLogger(log_dir, tee_stderr=False, emit=self._effects.log_emit)
             teardown_stack.callback(logger.close)
             git = GitTracker(

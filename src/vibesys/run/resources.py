@@ -402,6 +402,14 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     provisional_project=workspace_files if copied_project else None,
                     excluded_dirs=frozenset(project_excluded_dirs),
                     excluded_files=AGENT_CONFIG_FILES,
+                    candidate_support_dirs=frozenset(
+                        name
+                        for name in (
+                            profiler_support_name,
+                            *(name for _path, name in profiler_support_extra),
+                        )
+                        if name is not None
+                    ),
                     trusted_input_paths=tuple(
                         trusted_project_input_paths(
                             project_root,
