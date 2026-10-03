@@ -1452,3 +1452,56 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
     assert state.workstreams[0].attempts == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
+    tmp_path: Path,
+) -> None:
+    """IDs that scrolled out of the bounded history are still listed as used.
+
+    The planner must not reuse an ID; a rejected portfolio costs a correction
+    turn, and two rejections fail the run.
+    """
+    epochs = 10
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            epoch = message.split("epoch ", 1)[1].split(" ", 1)[0]
+            return _portfolio(f"e{epoch}-a", f"e{epoch}-b", request_evaluation=False)
+        return {"summary": "No viable change.", "outcome": "disproven"}
+
+    calls: list[str] = []
+
+    def recording(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            calls.append(message)
+        return respond(role, history, message, response)
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=recording,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=epochs, judge_every=100))
+
+    asyncio.run(scenario())
+    assert len(calls) == epochs
+    assert "e1-a" in calls[-1]
