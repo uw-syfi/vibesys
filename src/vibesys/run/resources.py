@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import overload
 
 from vibesys.composition import (
-    _vibesys_runtime_host_resource,
+    _vibesys_runtime_host_resources,
     prepare_domain_model_artifacts,
     resolve_agent_driver,
 )
@@ -552,7 +552,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             evaluator_tool_roots=evaluator_tool_roots,
         )
         if not session.view.cli_sandboxed:
-            agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
+            agent_host_resources = (*agent_host_resources, *_vibesys_runtime_host_resources())
         result = _PreparedRun(
             backend=backend,
             agent_specs=agent_specs,
