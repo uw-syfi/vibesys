@@ -32,6 +32,9 @@ gfx942; treat them as hypotheses to re-verify on gfx90a, per
   reports a prefix-cache hit: the same 8192-token prompt sent twice in a row
   (streamed, `max_tokens` 1) must report `cached_tokens > 0` on the second
   response (see "Interface contract"), and their warmup sub-run must finish within 180 s.
+  The harness stops a warmup early once it provably cannot finish in time
+  (see `README.md` "Warmup"); the message gives the achieved and needed
+  output tokens/s.
 
 ## Hardware and model facts
 
@@ -53,6 +56,28 @@ gfx942; treat them as hypotheses to re-verify on gfx90a, per
 - A vLLM boot at `--gpu-memory-utilization 0.85 --max-model-len 4096`
   reported a GPU KV cache of 547,401 tokens; see `config/platforms/mi210.toml`
   for the capacity budget.
+
+### Memory budget before submitting
+
+r13 lost 7 of its 11 failed accuracy runs to HIP out-of-memory errors 54 to
+63 s into the job, at model load or at the first batch. The CPU check cannot
+see these (its model is tiny). Before submitting a change to admission,
+batching, or prefill, add up the peak device memory it allocates and compare
+it with what is left after the weights (about 44 GB of the 64 GB, less
+the HIP runtime's own ~1 to 2 GB):
+
+| term | bytes |
+|:--|:--|
+| GDN state, per admitted session | ~49 MiB (128 sessions: 6.1 GiB) |
+| attention KV, per resident token | 32 KiB (128 sessions at the trace's p95 context of 7,153 tokens: 28 GiB) |
+| logits, per position computed | 248,320 x 4 B = 0.95 MiB in fp32 (one 4,275-token accuracy prompt scored at once: 4 GiB; a 15,733-token benchmark prompt: 15 GiB) |
+| prefill activations | grow with the tokens in one forward pass: bound them by chunking |
+
+Compute logits only where they are needed (the last position for generation;
+512-position chunks for `echo` + `logprobs` scoring, as the reference does).
+Preallocate fixed pools (state slots, KV pages) at startup so an
+over-budget configuration fails at load, before any request, and log the
+pool sizes, the admission cap, and `torch.cuda.mem_get_info()` when it does.
 
 ## Workload
 

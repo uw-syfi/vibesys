@@ -187,6 +187,19 @@ whose advantage was concentrated in the pre-cached first 12 sessions would
 look relatively worse post-fix, and vice versa. The task ledger notes which
 side of this change a given entry falls on.
 
+**Early stop.** The warmup must finish within 180 s (`WARMUP_TIMEOUT_S`).
+`run.py` reads `session_runner`'s progress line (every 5 s: elapsed time,
+rounds, finished sessions, output tokens) and stops the warmup as soon as the
+output tokens still missing cannot arrive in the time left even if every
+unfinished session received 170 output tokens/s
+(`WARMUP_SESSION_CEILING_TOK_S`). That ceiling is one token per session per
+decode pass, with each pass reading at least half of the 19.3 GB of weights
+at the MI210's 1.64 TB/s peak HBM bandwidth. A run that can still finish is
+never stopped. The stop message has the same numbers as the timeout message
+(rounds, sessions, tokens, achieved and needed output tokens/s). A warmup at
+r13's 10 to 17 output tokens/s stops about 7 s before the 180 s kill, so the
+early stop saves little; finding the rate gap before submitting saves more.
+
 ## Held-out evaluation
 
 `quick` (sessions 0-59) and `full` (sessions 0-259) are prefixes of the same

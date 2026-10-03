@@ -70,11 +70,15 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # fetch_corpus.py sits next to this script; make it importable however run.py is loaded.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -92,6 +96,18 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
 # cap (session_runner has no deadline flag).
 WARMUP_SESSIONS = 12
 WARMUP_TIMEOUT_S = 180.0
+# The most output tokens per second one session can receive, used to stop a warmup
+# that cannot finish by WARMUP_TIMEOUT_S (`WarmupWatch`). Each decode forward pass
+# streams every decoder weight from HBM once. At least half of the 19.3 GB bf16
+# checkpoint is decoder weights that every token passes through (the rest bounds the
+# embedding table and the vision tower, which a text decode step need not read), and
+# the MI210's HBM2e peak is 1.64 TB/s (AMD's figure; ../config/platforms/mi210.toml
+# rounds it to 1.6 and measured 1.38), so a pass takes at least 9.65 GB / 1.64 TB/s =
+# 5.9 ms and emits at most one token per session: at most 170 tokens/s per session,
+# 2,040 for the 12 warmup sessions (tuned vLLM sustains ~500 at 128 sessions).
+# Speculative decoding that accepts more than one token per pass on average could
+# exceed it; nothing in this bundle has done so.
+WARMUP_SESSION_CEILING_TOK_S = 170.0
 MODE_SESSIONS: dict[Mode, int] = {
     "smoke": 2,
     "quick": 60,
@@ -178,6 +194,81 @@ _PROGRESS_LINE = re.compile(
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class Progress:
+    """One `progress |` line of session_runner."""
+
+    elapsed_s: float
+    rounds_done: int
+    rounds: int
+    sessions_done: int
+    sessions: int
+    output_tokens: int
+
+    @classmethod
+    def parse(cls, line: str) -> Progress | None:
+        m = _PROGRESS_LINE.search(line)
+        if m is None:
+            return None
+        return cls(
+            elapsed_s=float(m["elapsed"]),
+            rounds_done=int(m["rounds_done"]),
+            rounds=int(m["rounds"]),
+            sessions_done=int(m["sessions_done"]),
+            sessions=int(m["sessions"]),
+            output_tokens=int(m["tokens"]),
+        )
+
+
+class WarmupWatch:
+    """Stops a sub-run as soon as its progress proves it cannot finish by its deadline.
+
+    The bound: from the last progress line, each unfinished session receives at most
+    `ceiling_tok_s` more output tokens per second until `deadline_s`. A finished session
+    receives none. session_runner's own clock starts after the harness starts the
+    process, so `deadline_s - elapsed_s` overstates, never understates, the time left.
+    If even this cannot reach the workload's total output tokens, the run cannot pass
+    and waiting for the kill only costs time.
+    """
+
+    def __init__(self, deadline_s: float, ceiling_tok_s: float, label: str) -> None:
+        self.deadline_s = deadline_s
+        self.ceiling_tok_s = ceiling_tok_s
+        self.label = label
+        self.total_output_tokens: int | None = None
+
+    def feed(self, line: str) -> str | None:
+        """None while the run can still finish in time; otherwise why it cannot."""
+        if (workload := _WORKLOAD_LINE.search(line)) is not None:
+            self.total_output_tokens = int(workload["output_tokens"])
+            return None
+        progress = Progress.parse(line)
+        if progress is None or self.total_output_tokens is None:
+            return None
+        return self.verdict(progress, self.total_output_tokens)
+
+    def verdict(self, p: Progress, total: int) -> str | None:
+        left_s = max(0.0, self.deadline_s - p.elapsed_s)
+        unfinished = p.sessions - p.sessions_done
+        reachable = p.output_tokens + unfinished * self.ceiling_tok_s * left_s
+        if reachable >= total:
+            return None
+        achieved = p.output_tokens / p.elapsed_s if p.elapsed_s > 0 else 0.0
+        return (
+            f"{self.label} stopped at {p.elapsed_s:.0f}s: it cannot finish within the "
+            f"{self.deadline_s:.0f}s limit. {p.rounds_done}/{p.rounds} rounds, "
+            f"{p.sessions_done}/{p.sessions} sessions, {p.output_tokens} output tokens, "
+            f"{achieved:.1f} output tokens/s achieved; finishing {total} output tokens needs "
+            f"{total / self.deadline_s:.1f} output tokens/s on average (startup included). "
+            f"The remaining {total - p.output_tokens} tokens in the remaining {left_s:.0f}s "
+            f"need {(total - p.output_tokens) / max(left_s, 1e-9):.0f} output tokens/s, above "
+            f"the {unfinished * self.ceiling_tok_s:.0f} that {unfinished} unfinished sessions "
+            f"can receive at {self.ceiling_tok_s:.0f} tokens/s each (one token per session "
+            "per decode pass at the MI210's peak HBM bandwidth; see "
+            "WARMUP_SESSION_CEILING_TOK_S in benchmark/run.py)."
+        )
+
+
 def describe_timeout(
     command: list[str], timeout_s: float, partial_stderr: str | bytes | None, label: str
 ) -> str:
@@ -237,13 +328,16 @@ def run_session_runner(
     *,
     timeout_s: float,
     label: str = "session_runner",
+    watch: Callable[[str], str | None] | None = None,
 ) -> SessionRunnerResult:
     """Invoke `session_runner` with `argv` and parse its `--summary-path` output.
 
     Translates a missing binary, a timeout, and a nonzero exit into
     `HarnessError` at the call site (the caller decides which are fatal, since
     a preflight failure and a genuine request failure warrant different
-    messages); this function only reports what happened.
+    messages); this function only reports what happened. `watch` sees each
+    stderr line as it is printed; a non-None return kills the run and becomes
+    the `HarnessError` message.
     """
     summary_path: Path | None = None
     if "--summary-path" in argv:
@@ -251,26 +345,55 @@ def run_session_runner(
 
     command = [str(engine), *argv]
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
+        proc = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace"
         )
     except FileNotFoundError as exc:
         raise HarnessError(f"session_runner not found at {engine}") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise HarnessError(describe_timeout(command, timeout_s, exc.stderr, label)) from exc
+
+    stdout: list[str] = []
+    stderr: list[str] = []
+    stopped: list[str] = []
+
+    def read_stderr() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr.append(line)
+            if watch is not None and not stopped and (why := watch(line)) is not None:
+                stopped.append(why)
+                proc.kill()
+
+    def read_stdout() -> None:
+        assert proc.stdout is not None
+        stdout.extend(proc.stdout)
+
+    readers = [threading.Thread(target=f, daemon=True) for f in (read_stderr, read_stdout)]
+    for reader in readers:
+        reader.start()
+    try:
+        proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for reader in readers:
+            reader.join()
+        if not stopped:
+            raise HarnessError(
+                describe_timeout(command, timeout_s, "".join(stderr), label)
+            ) from None
+    for reader in readers:
+        reader.join()
+    if stopped:
+        raise HarnessError(f"{stopped[0]}\ncommand: {' '.join(command)}")
 
     summary: dict[str, Any] | None = None
     if summary_path is not None and summary_path.exists():
         summary = json.loads(summary_path.read_text())
 
     return SessionRunnerResult(
-        returncode=completed.returncode,
-        stdout_tail=completed.stdout[-4000:],
-        stderr_tail=completed.stderr[-4000:],
+        returncode=proc.returncode,
+        stdout_tail="".join(stdout)[-4000:],
+        stderr_tail="".join(stderr)[-4000:],
         summary=summary,
     )
 
@@ -487,6 +610,9 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         warmup_argv,
         timeout_s=WARMUP_TIMEOUT_S,
         label="warmup sub-run",
+        watch=WarmupWatch(
+            WARMUP_TIMEOUT_S, WARMUP_SESSION_CEILING_TOK_S, label="warmup sub-run"
+        ).feed,
     )
     if warmup.returncode != 0:
         raise HarnessError(
