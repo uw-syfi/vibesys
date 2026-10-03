@@ -253,7 +253,7 @@ def test_priority_queue_inputs_use_shared_editable_rust_starter() -> None:
             assert not (input_dir / relative).exists()
 
 
-def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994689 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted priority-queue evaluator")
 
@@ -263,7 +263,7 @@ def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201
     _copy_input_bundle(starter, build_dir)
     cargo_target = tmp_path / "cargo-target"
     subprocess.run(
-        ["make"],  # noqa: S607  # tracked: #288
+        ["make"],  # noqa: S607  # lint-waiver: LW-994690 [S607]; Executable name is a project tool resolved from PATH in tests.
         cwd=build_dir,
         check=True,
         env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
@@ -276,7 +276,7 @@ def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201
     assert not (build_dir / "target").exists()
 
 
-def test_priority_queue_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_priority_queue_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994691 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted priority-queue evaluator")
 
@@ -288,8 +288,8 @@ def test_priority_queue_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001,
     assert "sched_setaffinity" in text
     assert "configure_benchmark_thread(lane)" in text
     assert "configure_benchmark_thread(worker_index)" in text
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-994692 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+        [  # noqa: S607  # lint-waiver: LW-994693 [S607]; Executable name is a project tool resolved from PATH in tests.
             "cargo",
             "test",
             "--locked",

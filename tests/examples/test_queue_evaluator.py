@@ -200,7 +200,7 @@ def test_repository_make_honors_cargo_target_dir(tmp_path: Path) -> None:
     shutil.copytree(repository, build_dir)
     cargo_target = tmp_path / "cargo-target"
     subprocess.run(
-        ["make"],  # noqa: S607  # tracked: #288
+        ["make"],  # noqa: S607  # lint-waiver: LW-994694 [S607]; Executable name is a project tool resolved from PATH in tests.
         cwd=build_dir,
         check=True,
         env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
@@ -223,8 +223,8 @@ def test_queue_benchmark_pins_linux_workers(tmp_path: Path) -> None:
     assert "sched_setaffinity" in text
     assert "configure_benchmark_thread(lane)" in text
     assert "configure_benchmark_thread(worker_index)" in text
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-994695 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+        [  # noqa: S607  # lint-waiver: LW-994696 [S607]; Executable name is a project tool resolved from PATH in tests.
             "cargo",
             "test",
             "--locked",

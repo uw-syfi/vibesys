@@ -5,10 +5,15 @@ import os
 import shutil
 import subprocess
 import tomllib
-from collections.abc import Iterator  # noqa: TC003  # tracked: #288
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+from vibesys.inputs import load_input_bundle
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ORDERED_MAP_INPUTS = {
     "ordered-map-swmr": "swmr",
@@ -32,7 +37,7 @@ def _tbb_is_available() -> bool:
         return False
     return (
         subprocess.run(
-            ["pkg-config", "--exists", "tbb"],  # noqa: S607  # tracked: #288
+            ["pkg-config", "--exists", "tbb"],  # noqa: S607  # lint-waiver: LW-994579 [S607]; Executable name is a project tool resolved from PATH in tests.
             check=False,
             capture_output=True,
         ).returncode
@@ -54,8 +59,6 @@ def _materialize_ordered_map_input(
     input_name: str,
     workspace: Path,
 ) -> Path:
-    from vibesys.inputs import load_input_bundle  # noqa: PLC0415  # tracked: #288
-
     input_dir = project_root / "examples" / "data-structures" / input_name
     starter = project_root / "examples" / "starters" / "ordered-map-rs"
     bundle = load_input_bundle(input_dir)
@@ -70,7 +73,7 @@ def _materialize_ordered_map_input(
 
 
 @pytest.fixture(scope="session")
-def compiled_ordered_map_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # tracked: #288
+def compiled_ordered_map_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # lint-waiver: LW-994581 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
     """Build the shared Rust starter once for materialized-input tests."""
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted ordered-map evaluator")
@@ -79,7 +82,7 @@ def compiled_ordered_map_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  #
     starter = project_root / "examples" / "starters" / "ordered-map-rs"
     build_dir = tmp_path_factory.mktemp("ordered-map-rs-build") / "starter"
     _copy_input_bundle(starter, build_dir)
-    subprocess.run(["make"], cwd=build_dir, check=True)  # noqa: S607  # tracked: #288
+    subprocess.run(["make"], cwd=build_dir, check=True)  # noqa: S607  # lint-waiver: LW-994582 [S607]; Executable name is a project tool resolved from PATH in tests.
 
     candidate = build_dir / "ordered-map-candidate.so"
     assert candidate.is_file()
@@ -87,7 +90,7 @@ def compiled_ordered_map_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  #
 
 
 @pytest.fixture(scope="session")
-def ordered_map_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # tracked: #288
+def ordered_map_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # lint-waiver: LW-994583 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
     """Build the trusted evaluator runner once and reuse it across subprocesses."""
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted ordered-map evaluator")
@@ -95,8 +98,8 @@ def ordered_map_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN0
     project_root = Path(__file__).parents[2]
     source = project_root / "examples" / "evaluators" / "ordered-map" / "native_runner"
     target_dir = tmp_path_factory.mktemp("ordered-map-native-runner") / "target"
-    subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    subprocess.run(  # noqa: S603  # lint-waiver: LW-994584 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+        [  # noqa: S607  # lint-waiver: LW-994585 [S607]; Executable name is a project tool resolved from PATH in tests.
             "cargo",
             "build",
             "--quiet",
@@ -121,7 +124,7 @@ def ordered_map_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN0
         environment.undo()
 
 
-def test_ordered_map_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # tracked: #288
+def test_ordered_map_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # lint-waiver: LW-994586 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
     root = Path(__file__).parents[2] / "examples" / "data-structures"
 
     for input_name, scenario in ORDERED_MAP_INPUTS.items():
@@ -174,9 +177,7 @@ def test_ordered_map_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  
     assert (evaluator / "go.sum").is_file()
 
 
-def test_ordered_map_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # tracked: #288
-    from vibesys.inputs import load_input_bundle  # noqa: PLC0415  # tracked: #288
-
+def test_ordered_map_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # lint-waiver: LW-994587 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
     project_root = Path(__file__).parents[2]
     root = project_root / "examples" / "data-structures"
     starter = project_root / "examples" / "starters" / "ordered-map-rs"
@@ -205,7 +206,7 @@ def test_ordered_map_inputs_use_shared_editable_rust_starter():  # noqa: ANN201 
             assert not (input_dir / relative).exists()
 
 
-def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994589 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted ordered-map evaluator")
 
@@ -215,7 +216,7 @@ def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201
     _copy_input_bundle(starter, build_dir)
     cargo_target = tmp_path / "cargo-target"
     subprocess.run(
-        ["make"],  # noqa: S607  # tracked: #288
+        ["make"],  # noqa: S607  # lint-waiver: LW-994590 [S607]; Executable name is a project tool resolved from PATH in tests.
         cwd=build_dir,
         check=True,
         env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
@@ -228,7 +229,7 @@ def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201
     assert not (build_dir / "target").exists()
 
 
-def test_ordered_map_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_ordered_map_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994591 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted ordered-map evaluator")
 
@@ -237,8 +238,8 @@ def test_ordered_map_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, AN
     assert "fn pin_current_thread(worker_index: usize)" in text
     assert "sched_setaffinity" in text
     assert "configure_benchmark_thread(lane as usize)" in text
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-994592 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+        [  # noqa: S607  # lint-waiver: LW-994593 [S607]; Executable name is a project tool resolved from PATH in tests.
             "cargo",
             "test",
             "--locked",
@@ -260,11 +261,11 @@ def test_ordered_map_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, AN
 
 @pytest.mark.parametrize(("input_name", "scenario"), ORDERED_MAP_INPUTS.items())
 @pytest.mark.usefixtures("ordered_map_native_runner")
-def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-    input_name,  # noqa: ANN001  # tracked: #288
-    scenario,  # noqa: ANN001  # tracked: #288
-    compiled_ordered_map_candidate,  # noqa: ANN001  # tracked: #288
+def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # lint-waiver: LW-994594 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
+    tmp_path,  # noqa: ANN001  # lint-waiver: LW-994595 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
+    input_name,  # noqa: ANN001  # lint-waiver: LW-994596 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
+    scenario,  # noqa: ANN001  # lint-waiver: LW-994597 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
+    compiled_ordered_map_candidate,  # noqa: ANN001  # lint-waiver: LW-994598 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
 ):
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted ordered-map evaluator")
@@ -289,7 +290,7 @@ def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # tracked: 
         "--trials",
         "1",
     ]
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
+    completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-994599 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
         accuracy,
         cwd=workspace,
         check=True,
@@ -300,7 +301,7 @@ def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # tracked: 
 
 
 @pytest.mark.usefixtures("ordered_map_native_runner")
-def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # noqa: ANN001, ANN201  # lint-waiver: LW-994600 [ANN001, ANN201]; Pytest fixture argument and unused test return are left unannotated.
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted ordered-map evaluator")
 
@@ -312,7 +313,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         workspace,
     )
     assert (workspace / "_evaluator" / "ordered-map" / "DESIGN.md").is_file()
-    subprocess.run(["make"], cwd=workspace, check=True)  # noqa: S607  # tracked: #288
+    subprocess.run(["make"], cwd=workspace, check=True)  # noqa: S607  # lint-waiver: LW-994601 [S607]; Executable name is a project tool resolved from PATH in tests.
     manifest = tomllib.loads((input_dir / "vibesys.input.toml").read_text())
 
     accuracy = [
@@ -324,7 +325,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         "--trials",
         "1",
     ]
-    subprocess.run(accuracy, cwd=workspace, check=True)  # noqa: S603  # tracked: #288
+    subprocess.run(accuracy, cwd=workspace, check=True)  # noqa: S603  # lint-waiver: LW-994602 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
 
     output = workspace / "results.json"
     benchmark = [
@@ -338,7 +339,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         "--output-json",
         str(output),
     ]
-    subprocess.run(benchmark, cwd=workspace, check=True)  # noqa: S603  # tracked: #288
+    subprocess.run(benchmark, cwd=workspace, check=True)  # noqa: S603  # lint-waiver: LW-994603 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
     results = json.loads(output.read_text())
     assert [result["scenario"] for result in results] == ["swmr"]
     assert all(result["repetitions"] == 3 for result in results)
@@ -346,15 +347,15 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
 
 
 @pytest.mark.usefixtures("ordered_map_native_runner")
-def test_ordered_map_evaluator_go_tests():  # noqa: ANN201  # tracked: #288
+def test_ordered_map_evaluator_go_tests():  # noqa: ANN201  # lint-waiver: LW-994604 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted ordered-map evaluator")
 
     evaluator = Path(__file__).parents[2] / "examples" / "evaluators" / "ordered-map"
-    subprocess.run(["go", "test", "./..."], cwd=evaluator, check=True)  # noqa: S607  # tracked: #288
+    subprocess.run(["go", "test", "./..."], cwd=evaluator, check=True)  # noqa: S607  # lint-waiver: LW-994605 [S607]; Executable name is a project tool resolved from PATH in tests.
 
 
-def test_ordered_map_tbb_baseline_uses_concurrent_map():  # noqa: ANN201  # tracked: #288
+def test_ordered_map_tbb_baseline_uses_concurrent_map():  # noqa: ANN201  # lint-waiver: LW-994606 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
     project_root = Path(__file__).parents[2]
     adapter = (
         project_root / "examples" / "baselines" / "ordered-map-tbb" / "tbb_ordered_map.cpp"
@@ -369,7 +370,7 @@ def test_ordered_map_tbb_baseline_uses_concurrent_map():  # noqa: ANN201  # trac
 
 
 @pytest.fixture(scope="session")
-def built_ordered_map_tbb(tmp_path_factory) -> Path:  # noqa: ANN001  # tracked: #288
+def built_ordered_map_tbb(tmp_path_factory) -> Path:  # noqa: ANN001  # lint-waiver: LW-994607 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
     """Build the oneTBB ordered-map baseline once against the evaluator ABI header."""
     if shutil.which("c++") is None:
         pytest.skip("A C++ compiler is required by the TBB ordered-map baseline")
@@ -385,8 +386,8 @@ def built_ordered_map_tbb(tmp_path_factory) -> Path:  # noqa: ANN001  # tracked:
         baseline,
         ignore=shutil.ignore_patterns("ordered-map-candidate.so"),
     )
-    subprocess.run(  # noqa: S603  # tracked: #288
-        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # tracked: #288
+    subprocess.run(  # noqa: S603  # lint-waiver: LW-994608 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # lint-waiver: LW-994609 [S607]; Executable name is a project tool resolved from PATH in tests.
         cwd=baseline,
         check=True,
     )
@@ -396,16 +397,16 @@ def built_ordered_map_tbb(tmp_path_factory) -> Path:  # noqa: ANN001  # tracked:
 
 @pytest.mark.parametrize("scenario", list(ORDERED_MAP_INPUTS.values()))
 @pytest.mark.usefixtures("ordered_map_native_runner")
-def test_ordered_map_tbb_baseline_builds_and_passes_accuracy(  # noqa: ANN201  # tracked: #288
-    scenario,  # noqa: ANN001  # tracked: #288
-    built_ordered_map_tbb,  # noqa: ANN001  # tracked: #288
+def test_ordered_map_tbb_baseline_builds_and_passes_accuracy(  # noqa: ANN201  # lint-waiver: LW-994610 [ANN201]; Test return type is unused and left unannotated for the pytest runner.
+    scenario,  # noqa: ANN001  # lint-waiver: LW-994611 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
+    built_ordered_map_tbb,  # noqa: ANN001  # lint-waiver: LW-994612 [ANN001]; Pytest fixture argument is untyped because the fixture plugin supplies it.
 ):
     if shutil.which("go") is None:
         pytest.skip("Go is required by the TBB ordered-map baseline")
 
     evaluator = Path(__file__).parents[2] / "examples" / "evaluators" / "ordered-map"
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-994613 [S603]; Subprocess argv is a fixed trusted build or evaluator command.
+        [  # noqa: S607  # lint-waiver: LW-994614 [S607]; Executable name is a project tool resolved from PATH in tests.
             "go",
             "-C",
             str(evaluator),
