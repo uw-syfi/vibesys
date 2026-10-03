@@ -51,6 +51,7 @@ source_roots = [
     "libs/vs-sandbox/src",
     "libs/vs-agent/src",
     "libs/vs-slurm/src",
+    "libs/vs-faults/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -544,6 +545,13 @@ path = "vs_slurm"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
+# Test-support fault injection: wraps vs_agent's client protocol. Nothing in
+# production depends on it.
+[[modules]]
+path = "vs_faults"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent"]
+
 # Each library exposes only its `api` subpackage and its submodules. External
 # modules must import through that surface, never from the package root or
 # internal modules. Tests are outside tach scope.
@@ -590,6 +598,10 @@ from = ["vs_runtime"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_slurm"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_faults"]
 
 [[interfaces]]
 expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
