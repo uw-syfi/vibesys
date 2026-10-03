@@ -1591,19 +1591,23 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
     workspace = tmp_path / "ws"
     workspace.mkdir()
     key = AgentSessionKey(SessionScope.MEMBER, "planner:p")
-    turn = {
-        "kind": "planner",
-        "workspace": workspace,
-        "system_prompt": "s",
-        "round_label": "r",
-        "reuse_session": True,
-        "session_key": key,
-    }
     with AgentClient(driver, provider="claude", event_sink=NULL_AGENT_EVENT_SINK) as client:
-        with pytest.raises(AgentOutputSchemaError):
-            client.invoke_text(user_prompt="plan", **turn)
 
-        assert client.invoke_text(user_prompt="correct it", **turn) == "corrected"
+        def turn(prompt: str) -> str:
+            return client.invoke_text(
+                kind="planner",
+                workspace=workspace,
+                system_prompt="s",
+                user_prompt=prompt,
+                round_label="r",
+                reuse_session=True,
+                session_key=key,
+            )
+
+        with pytest.raises(AgentOutputSchemaError):
+            turn("plan")
+
+        assert turn("correct it") == "corrected"
 
     assert "s-1" in fake.requests[-1].argv
 
