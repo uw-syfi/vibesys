@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from entrypoints.cli.errors import _configuration_error
 from vibesys.api.request import REPOSITORY_SLUG, experiment_origin_matches
 from vs_github.api import GitHubCLI, GitHubCLIError
-from vs_project.api import Project, ProjectStateError
+from vs_project.api import Project, ProjectStateError, run_git
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 
@@ -210,15 +209,8 @@ def _checkout_remote_run_branch(project_root: Path, selected: _RemoteRunBranch) 
 
 
 def _resume_git(project_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    """Run a non-shell Git command during remote resume resolution."""
-    git = shutil.which("git") or "git"
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-010225 [S603]; only fixed Git operations reach this non-shell resume helper.
-        [git, *arguments],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Run a Git command during remote resume resolution."""
+    return run_git(arguments, cwd=project_root, text=True)
 
 
 def _require_resume_git(

@@ -10,13 +10,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from vs_project.api import run_git
 from vs_runtime._input_project import materialize_input_project
 
 if TYPE_CHECKING:
@@ -491,10 +491,8 @@ class ProjectMaterializer:
     @staticmethod
     def _source_gitignored_paths(src: Path) -> frozenset[tuple[str, ...]]:
         """Return untracked paths ignored by Git below ``src``."""
-        git = shutil.which("git") or "git"
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010238 [S603]; this fixed Git query inspects ignored workspace paths without a shell.
+        result = run_git(
             [
-                git,
                 "-C",
                 str(src),
                 "ls-files",
@@ -504,8 +502,7 @@ class ProjectMaterializer:
                 "--directory",
                 "-z",
             ],
-            capture_output=True,
-            check=False,
+            cwd=src,
         )
         if result.returncode != 0:
             detail = result.stderr.decode(errors="replace").strip()
@@ -517,12 +514,8 @@ class ProjectMaterializer:
 
     @staticmethod
     def _is_git_worktree(path: Path) -> bool:
-        git = shutil.which("git") or "git"
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-548123 [S603]; this checks the supplied project path using a fixed non-shell Git command.
-            [git, "-C", str(path), "rev-parse", "--is-inside-work-tree"],
-            check=False,
-            capture_output=True,
-            text=True,
+        result = run_git(
+            ["-C", str(path), "rev-parse", "--is-inside-work-tree"], cwd=path, text=True
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
 
@@ -535,14 +528,7 @@ class ProjectMaterializer:
 
 
 def _run_git(args: Sequence[str], cwd: Path) -> str:
-    git = shutil.which("git") or "git"
-    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010237 [S603]; project Git arguments are built by internal repository operations and use no shell.
-        [git, *args],
-        cwd=cwd,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git(args, cwd=cwd, text=True)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         message = f"git {' '.join(args)} failed: {detail}"
