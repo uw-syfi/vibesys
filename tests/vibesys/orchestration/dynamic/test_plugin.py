@@ -251,13 +251,14 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
             supports_parallel_candidates=True,
         )
         run.evaluation.script_benchmark(
+            _INPUT_BASELINE,
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
                 metric_value=12.0,
                 metric_direction=MetricDirection.MAXIMIZE,
                 row={"throughput": 12.0},
-            )
+            ),
         )
         assert await PLUGIN.orchestrate(run, _options(max_rounds=2, judge_every=1)) is (
             RunStatus.SUCCEEDED
