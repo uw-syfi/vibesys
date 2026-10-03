@@ -1,0 +1,2 @@
+exhaustion_info=None
+regression_info='Hypothesis `h5` ended as `inconclusive` in round 5, but its workspace edits are still present. Before building a new hypothesis, decide explicitly whether to roll those edits back or retain a reusable correctness/measurement prerequisite. Do not silently build on a falsified performance mechanism. The recorded pre-hypothesis parent is round 4; use `revert_to_round=4` if that parent should be restored. If retaining any part, justify it and re-establish the end-to-end parent behavior.'

@@ -1,0 +1,5 @@
+component | status | rounds_spent | latest_share | stalled_rounds
+attn | open | 2 | 12.35% | 0
+mlp | active | 1 | 50.00% | 1
+kv_cache | exhausted | 4 | 0.00% | 2
+norm | open | 0 | 100.00% | 0
