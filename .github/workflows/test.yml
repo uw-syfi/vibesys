@@ -360,9 +360,9 @@ jobs:
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
   # changes do not.
-  # The suite is split by test file across two runners (`--shard=I/N`, see
-  # tests/support/sharding.py) so the job fits the five-minute CI budget. Each
-  # shard uploads its coverage data; `coverage` combines them.
+  # The suite is split by test file across three runners (`VIBESYS_TEST_SHARD`,
+  # see tests/support/sharding.py) so the job fits the five-minute CI budget.
+  # Each shard uploads its coverage data; `coverage` combines them.
   test:
     needs: changes
     if: >-
@@ -372,7 +372,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -393,14 +393,18 @@ jobs:
         with:
           go-version-file: support/repoctl/go.mod
 
-      - name: Run Python tests (shard ${{ matrix.shard }} of 2)
-        run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard_${{ matrix.shard }}
+      - name: Run Python tests (shard ${{ matrix.shard }} of 3)
+        env:
+          VIBESYS_TEST_SHARD: ${{ matrix.shard }}/3
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
+        run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard
 
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-data-${{ matrix.shard }}
-          path: coverage-shard-${{ matrix.shard }}.data
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
 
   # Combines the shards' coverage data, applies the repo-wide and per-module
   # floors, and checks patch coverage. Was part of the single `test` job, which
@@ -437,6 +441,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-data-*
+          path: coverage-data
           merge-multiple: true
 
       - name: Combine coverage and apply the floors

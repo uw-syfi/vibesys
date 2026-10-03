@@ -165,29 +165,18 @@ directory = "resources/evaluators/microservice"
 timeout_seconds = 1200
 commands = [["bash", "check_workloads.sh"]]
 
-# CI runs the suite as two shards on two runners, then combines their coverage
-# data in one follow-up job. `--shard=I/N` is defined in
-# tests/support/sharding.py; `--cov-report=` leaves the report to the combine
-# step. Each shard writes its own data file (no leading dot, so the artifact
-# upload keeps it).
+# CI runs the suite as shards on separate runners, then combines their
+# coverage data in one follow-up job. The workflow sets VIBESYS_TEST_SHARD=I/N
+# (see tests/support/sharding.py) and COVERAGE_FILE=.coverage.shard-I per
+# runner; `--cov-report=` leaves the report to the combine step. `--no-sync`
+# skips `uv run`'s environment re-check: the job already ran `uv sync --dev`.
 [[check_groups]]
-name = "python_ci_tests_shard_1"
+name = "python_ci_tests_shard"
 language = "python"
 directory = "."
 timeout_seconds = 1800
-env = { COVERAGE_FILE = "coverage-shard-1.data" }
 commands = [
-  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--shard=1/2", "--cov-report="],
-]
-
-[[check_groups]]
-name = "python_ci_tests_shard_2"
-language = "python"
-directory = "."
-timeout_seconds = 1800
-env = { COVERAGE_FILE = "coverage-shard-2.data" }
-commands = [
-  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--shard=2/2", "--cov-report="],
+  ["uv", "run", "--no-sync", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report="],
 ]
 
 # Combines the shards' coverage data and applies the repo-wide and per-module
@@ -198,11 +187,11 @@ language = "python"
 directory = "."
 timeout_seconds = 600
 commands = [
-  ["uv", "run", "coverage", "combine", "coverage-shard-1.data", "coverage-shard-2.data"],
-  ["uv", "run", "coverage", "report", "--fail-under=75"],
-  ["uv", "run", "coverage", "xml"],
-  ["uv", "run", "coverage", "json"],
-  ["uv", "run", "python", "scripts/check_coverage_floor.py", "coverage.json"],
+  ["uv", "run", "--no-sync", "coverage", "combine", "coverage-data"],
+  ["uv", "run", "--no-sync", "coverage", "report", "--fail-under=75"],
+  ["uv", "run", "--no-sync", "coverage", "xml"],
+  ["uv", "run", "--no-sync", "coverage", "json"],
+  ["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"],
 ]
 
 [[check_groups]]

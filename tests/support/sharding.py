@@ -1,6 +1,7 @@
 """Split the suite across CI runners by test file, balanced by recorded durations.
 
-``--shard=I/N`` keeps only the test files assigned to shard ``I`` (1-based) of
+``--shard=I/N`` (or ``VIBESYS_TEST_SHARD=I/N``, which lets one CI check group
+serve every shard) keeps only the test files assigned to shard ``I`` (1-based) of
 ``N``. Files are assigned longest-first to the currently lightest shard, using
 the per-file seconds in ``shard_durations.json``. A file missing from that
 record is weighted at the mean of the recorded files, so a new test file lands
@@ -17,6 +18,7 @@ unbalances the shards; it never drops or duplicates a test.
 from __future__ import annotations
 
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -66,7 +68,12 @@ def _file_of(nodeid: str) -> str:
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the sharding options."""
     group = parser.getgroup("shard", "split the suite across CI runners")
-    group.addoption("--shard", default=None, metavar="I/N", help="run only shard I of N")
+    group.addoption(
+        "--shard",
+        default=os.environ.get("VIBESYS_TEST_SHARD"),
+        metavar="I/N",
+        help="run only shard I of N (default: $VIBESYS_TEST_SHARD)",
+    )
     group.addoption(
         "--shard-durations",
         default=str(DEFAULT_DURATIONS),
