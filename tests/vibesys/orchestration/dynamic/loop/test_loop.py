@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from hypothesis import example, given, settings
@@ -268,17 +269,23 @@ def test_a_crashed_run_resumes_from_older_state_and_finishes(tmp_path: Path) -> 
 
 
 # Hypothesis ids and titles are agent output that becomes workspace names,
-# Git refs, state namespaces, and prompt text. Each example is a whole run, so
-# the example count stays small; the explicit examples are past failures.
-_IDS = st.text(st.characters(exclude_categories=("Cs", "Cc")), min_size=1, max_size=128).filter(
-    str.strip
-)
+# Git refs, state namespaces, and prompt text. The plan accepts an id only in
+# its one canonical spelling (tests/vibesys/orchestration/dynamic/test_plan_ids.py
+# covers the rejected ones), so this generates canonical ids. Each example is a
+# whole run, so the example count stays small; the explicit examples are past
+# failures.
+_IDS = st.text(
+    st.characters(categories=("L", "M", "N", "P", "S"), include_characters=" "),
+    min_size=1,
+    max_size=128,
+).filter(lambda value: value == value.strip() and unicodedata.is_normalized("NFC", value))
 _TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_size=80)
 
 
 @settings(max_examples=3)
 @given(identifier=_IDS, title=_TITLES)
 @example(identifier="H1", title="Prefix cache")
+@example(identifier="0", title="0 ")
 @example(identifier="KV.Cache_v2 / ../Ünïcode", title="T" * 80)
 def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
     identifier: str, title: str

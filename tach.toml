@@ -258,7 +258,7 @@ depends_on = []
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.orchestration.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics"]
+depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.profile_focus"

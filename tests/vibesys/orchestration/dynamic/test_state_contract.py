@@ -156,7 +156,7 @@ def _workstream(sequence: int, hypothesis_id: str, phase: WorkstreamPhase) -> Dy
     )
 
 
-_IDS = ("H1", "KV.Cache_v2 / ../Ünïcode", "x" * 128, "a\u200bb", "h1", "Ω")
+_IDS = ("H1", "KV.Cache_v2 / ../Ünïcode", "x" * 128, "a b", "h1", "Ω")
 REPRESENTATIVE = (
     DynamicState(),
     DynamicState(
