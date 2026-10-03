@@ -90,6 +90,11 @@ def render_exhaustion_notice(notice: ExhaustionNotice) -> str:
     return _RENDERER.render_template("_notices/exhaustion.j2", exhaustion_info=notice)
 
 
+def render_turn_failed_feedback(reason: str) -> str:
+    """Render the framework feedback for an attempt whose agent returned no valid response."""
+    return _RENDERER.render_template("_notices/turn_failed.j2", reason=reason)
+
+
 def render_system_prompt(role: str) -> str:
     """Render the fixed system prompt of one agent role from ``<role>_system.j2``."""
     return _RENDERER.render_template(f"{role}_system.j2")
@@ -109,4 +114,5 @@ __all__ = [
     "render_profiler_prompt",
     "render_regression_notice",
     "render_system_prompt",
+    "render_turn_failed_feedback",
 ]
