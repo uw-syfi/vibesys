@@ -1,5 +1,6 @@
 """Product run-resource composition through its internal module API."""
 
+import shutil
 import sys
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
@@ -38,6 +39,7 @@ from vibesys.run.resources import (
     _PreparedRun,
     open_run_resources,
 )
+from vs_agent.api import cli_skill_dirs
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
@@ -85,6 +87,7 @@ class _CreateContextOptions(TypedDict, total=False):
     integration: LocalRunIntegration | None
     agent_roles: tuple[AgentRole, ...]
     backend_factory: _RecordingBackendFactory
+    skills_dirs: list[str] | None
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -195,6 +198,7 @@ def _create_context(
         run_environment=RunEnvironmentSpec("local"),
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
+        skills_dirs=options.get("skills_dirs"),
     )
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
@@ -284,6 +288,27 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
     assert manifest.branch == f"vibesys-runs/{run_id}"
     assert _git(project, "branch", "--show-current") == manifest.branch
     assert _git(project, "status", "--porcelain") == ""
+
+
+def test_driver_skill_copies_are_not_candidate_changes(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    skills = tmp_path / "skills"
+    (skills / "serving-notes").mkdir(parents=True)
+    (skills / "serving-notes" / "SKILL.md").write_text(
+        "---\nname: serving-notes\ndescription: Notes.\n---\nRead me.\n"
+    )
+    with _create_context(project, evaluator=evaluator, skills_dirs=[str(skills)]) as ctx:
+        workspace = ctx.environment_resources.request.workspace
+        # What an agent driver does before each turn: copy every skill into
+        # the workspace root and into each CLI's skill-discovery directory.
+        for target in (".", *cli_skill_dirs()):
+            shutil.copytree(skills / "serving-notes", workspace / target / "serving-notes")
+        (workspace / "fast_queue.py").write_text("FAST = True\n")
+
+        changed = _git(workspace, "status", "--porcelain", "--untracked-files=all")
+
+    assert changed.splitlines() == ["?? fast_queue.py"]
 
 
 def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_only(

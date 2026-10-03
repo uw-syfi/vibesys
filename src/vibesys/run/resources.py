@@ -58,6 +58,7 @@ from vibesys.run.project_policy import (
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     create_project_materializer,
+    materialized_skill_dirs,
 )
 from vs_agent.api import (
     AgentBackend,
@@ -371,6 +372,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         if profiler_support_name is not None:
             project_excluded_dirs.add(profiler_support_name)
         project_excluded_dirs.update(name for _path, name in profiler_support_extra)
+        project_excluded_dirs.update(materialized_skill_dirs(skill_source_paths))
 
         def resolve_recorded_run(
             recorded: OrchestrationRunManifest,
