@@ -24,6 +24,7 @@ from vs_agent.api import (
     AgentBackend,
     AgentCapabilities,
     AgentClient,
+    AgentOutputSchemaError,
     AgentSessionKey,
     AgentSessionState,
     AgentSpec,
@@ -43,6 +44,7 @@ from vs_runtime.api import (
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
+    StructuredResponseError,
     Workspace,
     WorkspaceAccess,
 )
@@ -1066,6 +1068,44 @@ def test_session_enforces_declared_workspace_access(
         await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@given(detail=st.text(min_size=1).filter(str.strip))
+def test_a_provider_schema_failure_is_a_structured_response_error_in_the_same_session(
+    detail: str,
+) -> None:
+    """Regression: r10's planner exhausted the provider's schema retries and the run ended.
+
+    The failure reaches plugin code as the same error as an unparseable reply,
+    carrying the validation errors, and the next turn continues the session.
+    """
+    role = AgentRole(id="worker", system_prompt="Work.")
+    failure = AgentOutputSchemaError(detail)
+    client = _client().fail("worker", failure, times=1).enqueue("worker", {"value": 2})
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(client),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        session = await runtime.agents.create_session(
+            role, workspace=runtime.workspaces.root, member_id="m"
+        )
+        with pytest.raises(StructuredResponseError) as raised:
+            await session.turn("work", response=_Reply)
+        assert raised.value.detail == detail
+        assert detail in str(raised.value)
+        assert raised.value.__cause__ is failure
+        assert await session.turn("correct it", response=_Reply) == _Reply(value=2)
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+    first, second = client.calls_for("worker")
+    assert first.session_key == second.session_key
 
 
 def test_timeout_is_normalized_and_capability_failure_cleans_up() -> None:

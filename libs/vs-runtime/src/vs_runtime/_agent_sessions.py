@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, TypeVar, overload
 
 from pydantic import BaseModel
 
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, SessionScope
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
@@ -29,6 +29,7 @@ from vs_runtime.contracts import (
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
+    StructuredResponseError,
     UnknownAgentRoleError,
     Workspace,
     WorkspaceAccess,
@@ -175,6 +176,12 @@ class RuntimeAgentSession:
                 )
             except DriverAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
+            except AgentOutputSchemaError as error:
+                if response is None:
+                    raise
+                raise StructuredResponseError(
+                    self._role.id, response, detail=error.detail
+                ) from error
         finally:
             await self._enforce_workspace_access(revision)
 

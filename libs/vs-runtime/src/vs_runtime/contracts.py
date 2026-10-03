@@ -67,12 +67,22 @@ class SessionClosedError(RuntimeContractError):
 
 
 class StructuredResponseError(RuntimeContractError):
-    """An agent turn could not be parsed as its requested response type."""
+    """An agent turn did not produce a valid response of its requested type.
 
-    def __init__(self, role_id: str, response_type: type[BaseModel]) -> None:
-        """Name the role and response contract whose validation failed."""
+    Raised both when the reply cannot be parsed and when the provider gave up
+    producing output that matches the response schema. Either way the session
+    keeps its conversation, so a caller can send a correction as the next
+    turn. ``detail`` holds the validation errors when the provider reported
+    them, and the message includes them.
+    """
+
+    def __init__(self, role_id: str, response_type: type[BaseModel], detail: str = "") -> None:
+        """Name the role and response contract whose validation failed, and why if known."""
+        self.detail = detail
+        reason = f": {detail}" if detail else ""
         super().__init__(
-            f"agent role {role_id!r} did not return a valid {response_type.__name__} response"
+            f"agent role {role_id!r} did not return a valid {response_type.__name__} "
+            f"response{reason}"
         )
 
 
