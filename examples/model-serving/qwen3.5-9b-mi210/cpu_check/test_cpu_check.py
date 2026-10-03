@@ -90,6 +90,29 @@ def test_a_correct_prefix_cache_passes_with_hits(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "no cache hits" not in result.stdout
+    assert "[ok] preflight replay" in result.stdout
+
+
+def test_a_cache_that_only_snapshots_after_the_output_fails_the_preflight_replay(
+    tmp_path: Path,
+) -> None:
+    # Chained rounds extend a finished request, so this cache hits them; the benchmark's
+    # preflight repeats a prompt that produced one token, so the same cache misses it.
+    result = _run_check(
+        _candidate_root(tmp_path, FAKE_SERVER), "--expect-cache-hits", bug="output_only"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "cache-hit rounds 0/6" not in result.stdout
+    assert "[FAIL] preflight replay: second response reported cached_tokens=0" in result.stdout
+    assert "8192-token prompt twice" in result.stdout
+
+
+def test_the_preflight_replay_runs_only_when_cache_hits_are_expected(tmp_path: Path) -> None:
+    result = _run_check(_candidate_root(tmp_path, FAKE_SERVER), bug="output_only")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "preflight replay" not in result.stdout
 
 
 def test_cached_state_keeping_its_creators_capacity_fails_on_the_chained_round(

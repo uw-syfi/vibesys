@@ -134,9 +134,12 @@ order of magnitude.
 ## Prefix-cache preflight
 
 For any `text-generation-session-execution-v2` trace, `session_runner` runs
-an unconditional preflight: it sends one probe prompt twice and requires the
-second response to report `cached_tokens > 0`. No flag disables it for
-session traces. Consequences:
+an unconditional preflight: it sends one probe prompt of 8192 tokens twice in
+a row (streamed, `max_tokens` 1, `temperature` 0) and requires the final usage
+chunk of the second response to report `cached_tokens > 0`. A hit on a chained
+round that extends an earlier prompt plus its output does not satisfy it.
+`cpu_check/run.sh --expect-cache-hits` replays this probe on the tiny model.
+No flag disables it for session traces. Consequences:
 
 - `smoke` never reaches the preflight. It runs `session_runner --dry-run`
   (static trace validation, no server contact) plus direct `GET /health`,

@@ -29,8 +29,9 @@ gfx942; treat them as hypotheses to re-verify on gfx90a, per
 - `reference/`, `accuracy_checker/`, and `benchmark/` are read-only trusted
   inputs.
 - The `quick` and `full` benchmarks fail at their preflight unless the server
-  reports a prefix-cache hit (`cached_tokens > 0`; see "Interface
-  contract"), and their warmup sub-run must finish within 180 s.
+  reports a prefix-cache hit: the same 8192-token prompt sent twice in a row
+  (streamed, `max_tokens` 1) must report `cached_tokens > 0` on the second
+  response (see "Interface contract"), and their warmup sub-run must finish within 180 s.
 
 ## Hardware and model facts
 
@@ -77,7 +78,9 @@ handled.
     `--enable-prompt-tokens-details`). Report `0` honestly if the engine has
     no prefix caching; never fabricate a nonzero value. `quick`/`full` modes
     fail at `session_runner`'s prefix-cache preflight until the engine reports
-    real cache hits (see `README.md` "Prefix-cache preflight").
+    a real cache hit on an exact repeat of one 8192-token prompt, streamed,
+    with `max_tokens` 1: `cached_tokens > 0` on the second response (see
+    `README.md` "Prefix-cache preflight").
   - The accuracy checker additionally needs the vLLM extensions
     `return_token_ids` and `echo` + `logprobs` + `return_tokens_as_token_ids`
     (see `accuracy_checker/README.md`).
@@ -109,7 +112,7 @@ on the editor host first, which has no GPU. From the candidate root:
 
 ```bash
 cpu_check/run.sh                      # any engine
-cpu_check/run.sh --expect-cache-hits  # once the engine caches prefixes
+cpu_check/run.sh --expect-cache-hits  # once the engine caches prefixes; also replays the preflight
 ```
 
 It writes a randomly initialized tiny checkpoint of this architecture (8
@@ -121,7 +124,10 @@ round with the in-process reference engine. It catches crashes on chained
 rounds (for example "sequence length exceeds state capacity" from a cached
 state that keeps the capacity of the request that created it, or from a
 sequence length advanced twice per decode step), wrong outputs after a cache
-hit, bad `cached_tokens`, and streaming mismatches. Each failure names its
+hit, bad `cached_tokens`, and streaming mismatches. With `--expect-cache-hits`
+it also replays the preflight probe (an exact repeat of one 8192-token prompt,
+streamed, `max_tokens` 1) and fails if the second response reports
+`cached_tokens == 0`. Each failure names its
 session and round, then the first server exception and the server log tail.
 The first run installs CPU torch into the user cache (about 40 s), outside the
 candidate directory; later runs reuse it.

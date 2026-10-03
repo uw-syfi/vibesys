@@ -3,8 +3,13 @@
 Copied into a temporary candidate root as `engine/server.py`. `FAKE_CACHE_BUG`
 selects a known defect, or none:
 
-- `none`: a correct cache. A hit copies the cached state into a new state sized
-  for this request, then prefills only the uncached suffix.
+- `none`: a correct cache. It snapshots the state one token short of the end of
+  the prompt (so an exact repeat of a prompt can resume) and at the end of the
+  output. A hit copies the cached state into a new state sized for this request,
+  then prefills only the uncached suffix.
+- `output_only`: snapshots only the state at the end of prompt plus output. A
+  chained round that extends a finished request hits it; an exact repeat of a
+  one-token request does not, because a hit must leave a token to prefill.
 - `stale_capacity`: a hit resumes the cached state as-is, so the state keeps the
   capacity of the request that created it and a longer chained round
   overflows it.
@@ -28,7 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 BUG = os.environ.get("FAKE_CACHE_BUG", "none")
-if BUG not in ("none", "stale_capacity", "double_length"):
+if BUG not in ("none", "output_only", "stale_capacity", "double_length"):
     raise SystemExit(f"unknown FAKE_CACHE_BUG {BUG!r}")
 
 
@@ -72,7 +77,12 @@ class CachingEngine(Engine):
         self._check_len(len(prompt_ids) + params.max_tokens)
         state, hit = self._resume(prompt_ids, len(prompt_ids) + params.max_tokens)
         self.last_cached_tokens = hit
-        hidden = self.model(torch.tensor([prompt_ids[hit:]], device=self.device), state)
+        suffix = prompt_ids[hit:]
+        if BUG != "output_only" and len(suffix) > 1:
+            self.model(torch.tensor([suffix[:-1]], device=self.device), state)
+            self.cache[tuple(prompt_ids[:-1])] = _clone(state)
+            suffix = suffix[-1:]
+        hidden = self.model(torch.tensor([suffix], device=self.device), state)
         absorbed = list(prompt_ids)
         for i in range(params.max_tokens):
             token = int(self.model.logits(hidden[0, -1]).argmax())

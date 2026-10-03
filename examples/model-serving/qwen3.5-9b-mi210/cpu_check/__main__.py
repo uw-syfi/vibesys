@@ -14,7 +14,9 @@ Each round must succeed, report `cached_tokens` within `[0, prompt tokens]`,
 and produce the in-process reference engine's greedy tokens, except for a
 departure at a near-tie. One streamed request must match its non-streamed
 tokens and usage. `--expect-cache-hits` also fails a run in which no round
-reports `cached_tokens > 0`, which the benchmark's prefix-cache preflight needs.
+reports `cached_tokens > 0`, and replays the benchmark's prefix-cache preflight
+(`preflight.py`): one 8192-token prompt sent twice in a row, streamed, with
+`max_tokens` 1, whose second response must report `cached_tokens > 0`.
 
 Exit 0: pass. Exit 1: a round failed; each failure names its session and
 round, followed by the server log tail. Exit 2: the server did not start.
@@ -41,7 +43,7 @@ import torch
 from accuracy_checker.targets import Completion, HttpTarget
 from reference.engine import Engine, SamplingParams
 
-from cpu_check import sessions
+from cpu_check import preflight, sessions
 from cpu_check.tiny_model import VOCAB_SIZE, write_checkpoint
 
 MODEL_NAME = "tiny-qwen3.5"
@@ -156,6 +158,10 @@ def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=pr
             log(f"FAIL: {why}\n--- server log tail ---\n{_tail(log_path)}")
             return 2
         outcomes = sessions.run(_FreshConnection(base_url), rounds)
+        preflight_error = None
+        if expect_cache_hits:
+            with httpx.Client(timeout=REQUEST_SECONDS) as client:
+                preflight_error = preflight.replay(client, base_url, MODEL_NAME, VOCAB_SIZE)
         last = outcomes[-1]
         stream_error = "skipped: its non-streamed request failed"
         if last.error is None:
@@ -183,11 +189,19 @@ def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=pr
     log(f"cache-hit rounds {hits}/{len(outcomes)}")
     if not hits:
         log(
-            f"  [{'FAIL' if expect_cache_hits else 'note'}] no cache hits; the benchmark's "
-            "prefix-cache preflight needs cached_tokens > 0"
+            f"  [{'FAIL' if expect_cache_hits else 'note'}] no cache hits in the chained "
+            "rounds (cached_tokens > 0 is needed)"
+        )
+    if expect_cache_hits:
+        log(
+            f"  [{'ok' if preflight_error is None else 'FAIL'}] preflight replay: "
+            f"{preflight_error or 'the second response reported cached_tokens > 0'}"
         )
     passed = (
-        all(o.ok for o in outcomes) and stream_error is None and (hits > 0 or not expect_cache_hits)
+        all(o.ok for o in outcomes)
+        and stream_error is None
+        and (hits > 0 or not expect_cache_hits)
+        and preflight_error is None
     )
     log(f"{'PASS' if passed else 'FAIL'} in {time.monotonic() - t0:.1f} s")
     if not passed:
@@ -207,7 +221,7 @@ def main() -> None:
     p.add_argument(
         "--expect-cache-hits",
         action="store_true",
-        help="fail unless some chained round reports cached_tokens > 0",
+        help="fail unless a chained round reports cached_tokens > 0 and the preflight replay hits",
     )
     args = p.parse_args()
     torch.set_num_threads(min(8, torch.get_num_threads()))
