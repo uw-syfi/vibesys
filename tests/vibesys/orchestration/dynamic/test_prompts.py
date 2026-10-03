@@ -34,6 +34,7 @@ from vs_runtime.api import (
     MetricDirection,
     RunFacts,
     RunStatus,
+    SkillFact,
     StructuredResponseError,
 )
 from vs_runtime.api.testing import FakeRun
@@ -156,6 +157,7 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(input_sta
         remaining=4,
         objective="Raise throughput.",
         environment_notes="",
+        skills=(),
         root_revision="rev0",
         baseline='{"throughput":1.0}' if input_state == "passing" else "",
         input_failure="preflight failed" if input_state == "failing" else "",
@@ -239,6 +241,61 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
     assert "reject a candidate that violates any rule or constraint the objective states" in (
         " ".join(prompts[JUDGE.id].split())
     )
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        (),
+        (
+            SkillFact(name="queue-tuning", description="Tune request queues under load."),
+            SkillFact(name="cache-notes", description="Design notes for result caches."),
+        ),
+    ],
+)
+def test_every_role_prompt_names_the_offered_skills(
+    tmp_path: Path, skills: tuple[SkillFact, ...]
+) -> None:
+    """Agents see each offered skill by name and description, and none when none is offered.
+
+    A generic pointer to "installed skills" did not lead agents to load them.
+    """
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("engine")],
+            IMPLEMENTER.id: [implementation("engine")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Improve.",
+                benchmark_configured=True,
+                skills=skills,
+            ),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+            supports_parallel_candidates=True,
+        )
+        await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+
+    asyncio.run(scenario())
+    prompts = {role: message for role, _, message in script.calls}
+    assert set(prompts) == {ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id}
+    for prompt in prompts.values():
+        assert ("Skills installed for this run" in prompt) == bool(skills)
+        for skill in skills:
+            assert f"- {skill.name}: {skill.description}" in prompt
 
 
 def test_portfolio_history_omits_large_evaluation_feedback(tmp_path: Path) -> None:

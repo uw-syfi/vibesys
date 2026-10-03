@@ -182,6 +182,7 @@ from vs_runtime._skills import (
     build_skill_catalog,
     discover_skill_dirs,
     load_skill_frontmatter,
+    offered_skill_facts,
     resolve_skill_resources,
 )
 from vs_runtime._state import CommittedStateObserver, create_state
@@ -550,6 +551,7 @@ __all__ = [
     "make_run_environment_spec",
     "materialize_input_project",
     "materialize_objective_document",
+    "offered_skill_facts",
     "open_agent_execution_environment",
     "open_managed_conversation",
     "open_project_run_resources",

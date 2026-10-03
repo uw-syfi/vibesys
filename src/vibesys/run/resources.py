@@ -95,6 +95,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_run_environment,
     make_run_environment_spec,
+    offered_skill_facts,
     open_project_run_resources,
     open_run_environment_resources,
     prepare_trusted_evaluator,
@@ -575,6 +576,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 environment_resources,
                 ref_name=ref_name,
                 profiler_kind=resolved_profiler_kind,
+                skill_source_paths=skill_source_paths,
             ),
             skill_source_paths=tuple(skill_source_paths),
             evaluation_plan=trusted_evaluation_plan(bundle, session),
@@ -617,6 +619,7 @@ def _run_facts(
     *,
     ref_name: str,
     profiler_kind: ProfilerKind,
+    skill_source_paths: list[Path],
 ) -> RunFacts:
     """Resolve the immutable policy facts exposed by the runtime host."""
     bundle = request.input_bundle
@@ -639,6 +642,7 @@ def _run_facts(
             WorkspaceSourceFact(name=source.name, dest=source.dest)
             for source in bundle.workspace_sources
         ),
+        skills=offered_skill_facts(skill_source_paths),
     )
 
 

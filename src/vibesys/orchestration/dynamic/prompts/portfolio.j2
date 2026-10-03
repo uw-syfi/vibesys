@@ -8,6 +8,8 @@ Assign work only where it can succeed: never assign edits to read-only inputs, a
 never plan work that needs target hardware outside trusted evaluation.
 
 Current base revision (best trusted candidate, or the root): `{{ root_revision }}`
+Your workspace holds the run's input, not candidate work: a workstream's files exist
+only at the `revision` in its history row (read them with git show REVISION:PATH).
 {% if baseline %}
 Input baseline (the root before any change, trusted benchmark): {{ baseline }}
 A candidate must beat it on the objectives to be adopted or built on.
@@ -24,6 +26,8 @@ reduces uncertainty for the others, such as measuring or profiling the base revi
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
+A workstream's `evidence` may cite skill reference files that bear on its task;
+implementers read their evidence files.
 Do not split one implementation into parallel fragments and do not assign duplicate
 hypothesis IDs. New IDs must not occur in the history. A continued workstream must
 reuse its existing ID and set `continue_hypothesis`.

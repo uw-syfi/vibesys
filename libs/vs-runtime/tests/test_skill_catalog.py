@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_runtime.api import SkillCatalogError, SkillResourceRequest
+from vs_runtime.api import SkillCatalogError, SkillFact, SkillResourceRequest
 from vs_runtime.api.infrastructure import (
     BlockingOperations,
     SkillMetadataError,
     build_skill_catalog,
     discover_skill_dirs,
+    offered_skill_facts,
     resolve_skill_resources,
 )
 from vs_runtime.api.infrastructure_skills import create_installed_skills
@@ -43,6 +44,32 @@ def test_catalog_requires_frontmatter_name_to_match_directory(tmp_path: Path) ->
 
     with pytest.raises(SkillMetadataError, match="must match directory name"):
         build_skill_catalog((tmp_path,))
+
+
+def test_catalog_requires_a_description(tmp_path: Path) -> None:
+    skill = tmp_path / "bare"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: bare\n---\n")
+
+    with pytest.raises(SkillMetadataError, match="`description` must be a non-empty string"):
+        offered_skill_facts((tmp_path,))
+
+
+def test_offered_facts_name_every_skill_with_its_description_on_one_line(
+    tmp_path: Path,
+) -> None:
+    _write_skill(tmp_path, "profiling")
+    folded = tmp_path / "folded"
+    folded.mkdir()
+    (folded / "SKILL.md").write_text(
+        "---\nname: folded\ndescription: |\n  First line.\n  Second line.\n---\n"
+    )
+
+    assert offered_skill_facts((tmp_path,)) == (
+        SkillFact(name="folded", description="First line. Second line."),
+        SkillFact(name="profiling", description="Test."),
+    )
+    assert offered_skill_facts(()) == ()
 
 
 def test_resource_resolution_preserves_partial_success_and_blocks_escapes(

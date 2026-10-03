@@ -551,17 +551,20 @@ class Workstreams:
             await self.commit(f"dynamic: {current.hypothesis_id} {phase.value}")
 
 
-def prompt_context(run: Run) -> dict[str, str]:
+def prompt_context(run: Run) -> dict[str, object]:
     """Return the run facts every role prompt states inline.
 
     The objective is inlined rather than cited by path: the effective
     objective lives in run state that agent sandboxes hide. The environment
     notes carry facts such as read-only inputs and where trusted evaluation
-    runs, without which agents plan edits that fail.
+    runs, without which agents plan edits that fail. The offered skills are
+    named with their descriptions because a generic pointer to "installed
+    skills" did not lead agents to load them.
     """
     return {
         "objective": run.facts.objective,
         "environment_notes": run.facts.environment_notes,
+        "skills": run.facts.skills,
     }
 
 

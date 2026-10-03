@@ -545,6 +545,20 @@ class WorkspaceSourceFact(BaseModel):
     dest: str = Field(min_length=1)
 
 
+class SkillFact(BaseModel):
+    """One installed skill the run offers its agents.
+
+    ``name`` is the agent-visible skill name, so ``<name>/SKILL.md`` is the
+    skill's router in every agent workspace. ``description`` is the skill's
+    frontmatter description on one line.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
 class RunFacts(BaseModel):
     """Immutable prompt-visible facts resolved before orchestration starts."""
 
@@ -562,6 +576,8 @@ class RunFacts(BaseModel):
     benchmark_configured: bool = False
     profiler_id: str = Field(default="none", min_length=1)
     workspace_sources: tuple[WorkspaceSourceFact, ...] = ()
+    # The same installed catalog that ``Run.skills`` resolves against.
+    skills: tuple[SkillFact, ...] = ()
 
 
 class MetricDirection(StrEnum):
