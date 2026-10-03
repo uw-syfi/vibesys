@@ -216,6 +216,12 @@ class Turn:
         """Read the run's trusted operations through the planner's real MCP tool."""
         return self._call("trusted_operations", {})
 
+    def accepted_evidence(self, *kinds: str) -> list[dict[str, object]]:
+        """Return the trusted evidence already recorded for this turn's exact candidate."""
+        evidence = self._call("accepted_evidence", {"evidence_kinds": kinds})["evidence"]
+        assert isinstance(evidence, list)
+        return evidence
+
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
         return str(self._call("submit_evaluation", {"evidence_kinds": kinds})["handle_id"])

@@ -33,11 +33,14 @@ if TYPE_CHECKING:
 
 
 def _trusted_profile(agent: Turn) -> dict[str, object]:
-    """Profile through the framework's evaluation tool and cite its evidence."""
-    reply = agent.evaluate("profile")
-    result = reply["result"]
-    assert isinstance(result, dict), reply
-    assert result["outcome"] == "completed", reply
+    """Profile through the framework's evaluation tool and cite its evidence.
+
+    The host captured this revision before the turn, so its evidence is already
+    recorded when the turn starts, and the turn's own submission joins it.
+    """
+    (recorded,) = agent.accepted_evidence("profile")
+    result = agent.await_once(agent.submit("profile"), 5.0)
+    assert result["outcome"] == "completed", result
     stages = result["stages"]
     assert isinstance(stages, list)
     (stage,) = stages
@@ -45,6 +48,7 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     assert evidence["kind"] == "profile", evidence
     assert evidence["outcome"] == "passed", evidence
     assert "queue_step holds 75%" in evidence["semantic_summary"]
+    assert evidence["evidence_id"] == recorded["evidence_id"]
     evidence_ids = [evidence["evidence_id"]]
     return {
         "outcome": "observed",
@@ -79,7 +83,7 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     state = load_state(loop_input, run.run_id)
     (profile,) = state.profiles
     assert profile.outcome is not None
-    assert profile.outcome.status.value == "observed"
+    assert profile.outcome.status.value == "observed", profile.outcome.failure
     assert profile.outcome.evidence_ids
     row = planner_history(agents.prompts(ORCHESTRATOR.id)[2])["prof-A"]
     assert row["status"] == "observed"
