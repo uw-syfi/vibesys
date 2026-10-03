@@ -2190,3 +2190,36 @@ def test_input_benchmark_that_did_not_run_is_measured_again(tmp_path: Path) -> N
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.metrics == {"throughput": 10.0}
+
+
+def test_judge_checks_the_objective_numerics_policy_not_only_accuracy(tmp_path: Path) -> None:
+    """Trusted accuracy can pass a change that the objective's numerics policy forbids."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("cast")],
+            IMPLEMENTER.id: [_implementation("cast")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1))
+        return run
+
+    run = asyncio.run(scenario())
+    judge = next(session for session in run.agents.sessions if session.role.id == JUDGE.id)
+    prompt = " ".join(judge.history[0].split())
+    assert "Passing the accuracy gate is not enough" in prompt
+    assert "numerics or precision policy the objective states" in prompt
