@@ -173,7 +173,7 @@ class FaultPlan(BaseModel):
                 fault: AgentFault | ToolFault | ClusterFault = cluster_fault
                 target: str | None = rng.choice(_CLUSTER_FAULTS[cluster_fault]).value
             else:
-                fault = rng.choice(_FAULTS[boundary])  # ty: ignore[invalid-assignment]
+                fault = rng.choice(_FAULTS[boundary])
                 target = rng.choice(targets[boundary]) if targets[boundary] else None
             rules.append(
                 FaultRule(

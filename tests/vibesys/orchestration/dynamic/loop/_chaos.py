@@ -175,7 +175,7 @@ class ChaosAgents:
                 _edit(candidate, rng.randint(-1, 9), None)
 
     def _call(
-        self, dispatch: FaultyToolDispatch, kind: str, name: str, arguments: dict[str, object]
+        self, dispatch: FaultyToolDispatch, kind: str, name: str, arguments: Mapping[str, object]
     ) -> list[str]:
         """Make one tool call as an agent CLI does; return the ids its reply names."""
         try:
