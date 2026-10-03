@@ -221,13 +221,19 @@ class Rounds:
             # A slot given up before any implementer turn returned still ends
             # its hypothesis: without a round the hypothesis stays incomplete,
             # and the planner, told the slot failed, could not abandon it.
-            given_up = implementation is None and item.phase is WorkstreamPhase.FAILED
+            # A cancelled one ends it the same way.
+            cancelled = item.phase is WorkstreamPhase.CANCELLED
+            given_up = implementation is None and (
+                item.phase is WorkstreamPhase.FAILED or cancelled
+            )
             if (implementation is None and not given_up) or any(
                 record.round_number == item.sequence for record in self.state.search.rounds
             ):
                 return
             outcome = (
-                implementation.outcome
+                HypothesisOutcome.INCONCLUSIVE
+                if cancelled
+                else implementation.outcome
                 if implementation is not None
                 else HypothesisOutcome.IMPLEMENTATION_FAILED
             )

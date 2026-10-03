@@ -1,9 +1,10 @@
 """Async shell of the dynamic loop: executes ``HostCore`` effects and feeds results back.
 
 The shell is the only scheduling code that awaits. It starts worker tasks,
-runs the driver's turns, and turns task completions into events. Every exit
-(the search ending, an exception, a cancellation) leaves through one
-``_WorkerTasks`` scope, which releases in-flight workers exactly once.
+stops withdrawn ones, runs the driver's turns, and turns task completions into
+events. Every exit (the search ending, an exception, a cancellation) leaves
+through one ``_WorkerTasks`` scope, which releases in-flight workers exactly
+once and settles every withdrawn worker exactly once.
 """
 
 from __future__ import annotations
@@ -21,11 +22,14 @@ from vibesys.orchestration.dynamic.control import (
     RecordGiveUp,
     Recover,
     SearchEnd,
+    SettleWithdrawn,
     StartWorker,
     StopReason,
     StopRequested,
+    StopWorker,
     Submit,
     TurnFaulted,
+    Withdraw,
     WorkerFinished,
     WorkerOutcome,
     WorkItem,
@@ -35,7 +39,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from types import TracebackType
 
-    from vibesys.orchestration.dynamic.control import Effect, HostAction, HostEvent
+    from vibesys.orchestration.dynamic.control import (
+        Effect,
+        HostAction,
+        HostEvent,
+        Refused,
+        Withdrawal,
+    )
 
 
 class DriverStep(StrEnum):
@@ -81,6 +91,17 @@ class Workers[P](Protocol):
         """Durably mark ``plan`` failed with its retry budget spent."""
         ...
 
+    def withdraw(self, plan: P, withdrawal: Withdrawal) -> None:
+        """Learn, before its task is cancelled, that ``plan``'s attempt is withdrawn.
+
+        The attempt keeps its work (a work-in-progress revision) as it exits.
+        """
+        ...
+
+    async def settle(self, plan: P, withdrawal: Withdrawal) -> None:
+        """Durably park or cancel ``plan`` and release its cluster jobs; called once."""
+        ...
+
 
 class DriverActionRefusedError(RuntimeError):
     """The core refused a driver's action, which the driver should have prevented."""
@@ -88,12 +109,45 @@ class DriverActionRefusedError(RuntimeError):
 
 @dataclass(slots=True)
 class _WorkerTasks[P]:
-    """The one owner of worker tasks; releasing them is its exit, on every path."""
+    """The one owner of worker tasks; releasing them is its exit, on every path.
 
+    A withdrawn worker is settled exactly once: by the core's
+    ``SettleWithdrawn`` once its task ended, or, if the loop leaves first,
+    by this scope's exit.
+    """
+
+    workers: Workers[P]
     tasks: dict[asyncio.Task[None], WorkItem[P]] = field(default_factory=dict)
+    # Stopped workers whose settle has not run yet.
+    withdrawing: dict[str, tuple[WorkItem[P], Withdrawal]] = field(default_factory=dict)
 
     async def __aenter__(self) -> _WorkerTasks[P]:
         return self
+
+    def stop(self, worker_id: str, withdrawal: Withdrawal) -> None:
+        """Cancel the running task of ``worker_id``, telling its worker first."""
+        found = [(task, item) for task, item in self.tasks.items() if item.worker_id == worker_id]
+        if len(found) != 1:
+            message = f"the core stopped {worker_id!r}, which has no running task"
+            raise RuntimeError(message)
+        task, item = found[0]
+        self.withdrawing[worker_id] = (item, withdrawal)
+        self.workers.withdraw(item.plan, withdrawal)
+        task.cancel()
+
+    def withdrawn(self, worker_id: str) -> bool:
+        """Whether ``worker_id`` was stopped and is not settled yet."""
+        return worker_id in self.withdrawing
+
+    async def settle(self, item: WorkItem[P], withdrawal: Withdrawal) -> None:
+        """Settle one withdrawn worker; a queued one was never stopped.
+
+        It stays pending until its settle returns, so a settle a cancellation
+        interrupts runs again at the scope's exit; settling is idempotent.
+        """
+        self.withdrawing.setdefault(item.worker_id, (item, withdrawal))
+        await self.workers.settle(item.plan, withdrawal)
+        del self.withdrawing[item.worker_id]
 
     async def __aexit__(
         self,
@@ -111,6 +165,18 @@ class _WorkerTasks[P]:
                 task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
         self.tasks.clear()
+        # A worker stopped before the loop left settles here: its task has
+        # ended, and its jobs are released and its phase recorded exactly once.
+        pending = tuple(self.withdrawing.values())
+        self.withdrawing.clear()
+        results = await asyncio.gather(
+            *(self.workers.settle(item.plan, withdrawal) for item, withdrawal in pending),
+            return_exceptions=True,
+        )
+        errors = [result for result in results if isinstance(result, Exception)]
+        if errors and exc_type is None:
+            message = "settling withdrawn workers failed"
+            raise ExceptionGroup(message, errors)
 
 
 @dataclass(slots=True)
@@ -128,20 +194,39 @@ class AgentLoop[P]:
     clock: Callable[[], float]
     _errors: list[BaseException] = field(default_factory=list)
     _end: SearchEnd | None = None
+    _tasks: _WorkerTasks[P] | None = None
 
     async def run(self, recovered: tuple[WorkItem[P], ...]) -> SearchEnd:
         """Recover ``recovered`` work, then schedule until the core ends the search."""
-        async with _WorkerTasks[P]() as tasks:
-            if await self._checkpoint(tasks):
-                await self._act(Recover(recovered, self.clock()), tasks)
-            while not self.core.ended:
-                await self._step(tasks)
+        async with _WorkerTasks[P](self.workers) as tasks:
+            self._tasks = tasks
+            try:
+                if await self._checkpoint(tasks):
+                    await self._act(Recover(recovered, self.clock()), tasks)
+                while not self.core.ended:
+                    await self._step(tasks)
+            finally:
+                self._tasks = None
         if self._errors:
             raise self._errors[0]
         if self._end is None:
             message = "the search loop left without an end"
             raise RuntimeError(message)
         return self._end
+
+    async def withdraw(self, worker_id: str, withdrawal: Withdrawal) -> Accepted | Refused:
+        """Park or cancel one running or queued worker; a driver calls this during a turn.
+
+        A refusal (the worker is not in flight, is already withdrawing, or the
+        run stopped) changes nothing and is returned for the driver to report.
+        """
+        tasks = self._tasks
+        if tasks is None:
+            message = "a worker can be withdrawn only while the search runs"
+            raise RuntimeError(message)
+        result, effects = self.core.on_action(Withdraw(worker_id, withdrawal, self.clock()))
+        await self._execute(effects, tasks)
+        return result
 
     async def _step(self, tasks: _WorkerTasks[P]) -> None:
         match self.driver.next_step(self.core):
@@ -175,11 +260,22 @@ class AgentLoop[P]:
         done, _ = await asyncio.wait(tasks.tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             item = tasks.tasks.pop(task)
+            if task.cancelled():
+                # Only a withdrawal cancels a task while the loop runs; the
+                # core settles a withdrawn worker whatever its outcome.
+                await self._feed(
+                    WorkerFinished(item.worker_id, WorkerOutcome.COMPLETED, self.clock()), tasks
+                )
+                continue
             error = task.exception()
             outcome = await self.workers.classify(item.plan, error)
             if outcome is WorkerOutcome.FATAL and error is not None:
                 self._errors.append(error)
-            if outcome is WorkerOutcome.RETRYABLE and self.core.stopped is None:
+            if (
+                outcome is WorkerOutcome.RETRYABLE
+                and self.core.stopped is None
+                and not tasks.withdrawn(item.worker_id)
+            ):
                 # A retry starts agent work: land a pending stop first, so the
                 # core settles the worker instead of restarting it.
                 await self._checkpoint(tasks)
@@ -213,5 +309,9 @@ class AgentLoop[P]:
                     tasks.tasks[asyncio.create_task(self.workers.run_worker(item.plan))] = item
                 case RecordGiveUp(item=item):
                     await self.workers.give_up(item.plan)
+                case StopWorker(worker_id=worker_id, withdrawal=withdrawal):
+                    tasks.stop(worker_id, withdrawal)
+                case SettleWithdrawn(item=item, withdrawal=withdrawal):
+                    await tasks.settle(item, withdrawal)
                 case EndSearch(end=end):
                     self._end = end

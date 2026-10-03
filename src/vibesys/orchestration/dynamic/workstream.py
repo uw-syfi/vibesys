@@ -134,6 +134,37 @@ class Workstreams:
     # Each running implementer turn's workspace and how many evaluations that
     # workspace had submitted before the turn began.
     _live_turns: dict[str, tuple[CandidateWorkspace, int]] = field(default_factory=dict)
+    # Hypotheses whose running attempt the host withdrew (parked or cancelled).
+    _withdrawn: set[str] = field(default_factory=set)
+
+    def withdraw(self, hypothesis_id: str) -> None:
+        """Mark the running attempt withdrawn; it keeps its work as it exits."""
+        self._withdrawn.add(hypothesis_id)
+
+    async def settle_withdrawn(self, hypothesis_id: str, *, terminal: bool) -> None:
+        """Durably park (resumable) or cancel (terminal, round recorded) a workstream.
+
+        A workstream whose round was recorded before the withdrawal landed
+        keeps that result. Parking refunds an interrupted implementer turn
+        (bounded by ``refund_interrupted``): the orchestrator, not the
+        attempt, ended it.
+        """
+        self._withdrawn.discard(hypothesis_id)
+        index = workstream_index(self.state, hypothesis_id)
+        async with self.lock:
+            current = self.state.workstreams[index]
+            if any(record.round_number == current.sequence for record in self.state.search.rounds):
+                return
+            phase = WorkstreamPhase.CANCELLED if terminal else WorkstreamPhase.PARKED
+            changes: dict[str, object] = {"phase": phase}
+            if not terminal and current.phase is WorkstreamPhase.IMPLEMENTING:
+                refunded = current.budget.refund_interrupted(self.options.max_retries_per_round)
+                if refunded is not None:
+                    changes["budget"] = refunded
+            self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
+            await self.commit(f"dynamic: {hypothesis_id} {phase.value}")
+        if terminal:
+            await self.rounds.record(index)
 
     async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
         """Return the evaluations each running implementer turn has submitted so far.
@@ -179,7 +210,31 @@ class Workstreams:
             ) from error
         finally:
             if workspace is not None:
+                if plan.hypothesis_id in self._withdrawn:
+                    await self._keep_work_in_progress(index, workspace)
                 await self._discard(plan.hypothesis_id, workspace)
+
+    async def _keep_work_in_progress(self, index: int, workspace: CandidateWorkspace) -> None:
+        """Snapshot and retain a withdrawn attempt's worktree before it is discarded.
+
+        Without a retained implementation the snapshot becomes the candidate
+        revision, so a resumed (parked) workstream continues from it; with one,
+        the implementation stays the resume point and the snapshot is only
+        retained.
+        """
+        current = self.state.workstreams[index]
+        revision = await workspace.snapshot(f"dynamic: {current.hypothesis_id} work in progress")
+        await workspace.retain(
+            revision, label=f"dynamic-{current.hypothesis_id}-wip-{current.budget.spent}"
+        )
+        if current.implementation is not None:
+            return
+        async with self.lock:
+            current = self.state.workstreams[index]
+            self.state.workstreams[index] = current.model_copy(
+                update={"candidate_revision": revision}, deep=True
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} work in progress kept")
 
     async def _record_failure(
         self, index: int, error: str, *, spent_at_start: int | None, before_turn: bool

@@ -21,6 +21,7 @@ from vibesys.orchestration.dynamic.control import (
     Effect,
     EndSearch,
     FinishSearch,
+    HostAction,
     HostCore,
     HostLimits,
     RecordGiveUp,
@@ -28,11 +29,15 @@ from vibesys.orchestration.dynamic.control import (
     Refusal,
     Refused,
     SearchEnd,
+    SettleWithdrawn,
     StartWorker,
     StopReason,
     StopRequested,
+    StopWorker,
     Submit,
     TurnFaulted,
+    Withdraw,
+    Withdrawal,
     WorkerFinished,
     WorkerOutcome,
     WorkItem,
@@ -57,6 +62,10 @@ class _Model:
     settled: dict[str, int] = field(default_factory=dict)
     given_up: list[str] = field(default_factory=list)
     ends: list[EndSearch] = field(default_factory=list)
+    # Withdrawn running workers whose task has not ended yet.
+    withdrawing: dict[str, Withdrawal] = field(default_factory=dict)
+    stopped_workers: list[str] = field(default_factory=list)
+    withdrawn_settles: list[tuple[str, Withdrawal]] = field(default_factory=list)
     charged: int = 0
     refunded: int = 0
     stopped: bool = False
@@ -117,13 +126,20 @@ class HostCoreMachine(RuleBasedStateMachine):
                     self.model.running.add(item.worker_id)
                     self.model.started.append(item.worker_id)
                 case RecordGiveUp(item=item):
+                    assert item.worker_id not in self.model.withdrawing
                     self.model.given_up.append(item.worker_id)
+                case StopWorker(worker_id=worker_id, withdrawal=withdrawal):
+                    assert self.model.withdrawing.get(worker_id) is withdrawal
+                    self.model.stopped_workers.append(worker_id)
+                case SettleWithdrawn(item=item, withdrawal=withdrawal):
+                    assert item.worker_id not in self.model.running
+                    self.model.withdrawn_settles.append((item.worker_id, withdrawal))
                 case EndSearch():
                     expected = SearchEnd.STOPPED if self.model.stopped else SearchEnd.FINISHED
                     assert effect.end is expected
                     self.model.ends.append(effect)
 
-    def _check_refusal(self, action: Recover[int] | Submit[int] | FinishSearch) -> None:
+    def _check_refusal(self, action: HostAction[int]) -> None:
         before = (self.core.running, self.core.queued, self.core.remaining_budget)
         result, effects = self.core.on_action(action)
         assert isinstance(result, Refused)
@@ -167,7 +183,16 @@ class HostCoreMachine(RuleBasedStateMachine):
             isinstance(effect, StartWorker) and effect.attempt is Attempt.RETRY
             for effect in effects
         )
-        assert restarted == (outcome is WorkerOutcome.RETRYABLE and not self.model.stopped)
+        withdrawal = self.model.withdrawing.pop(worker_id, None)
+        assert restarted == (
+            outcome is WorkerOutcome.RETRYABLE and not self.model.stopped and withdrawal is None
+        )
+        settles = [effect for effect in effects if isinstance(effect, SettleWithdrawn)]
+        if withdrawal is None:
+            assert settles == []
+        else:
+            assert [(e.item.worker_id, e.withdrawal) for e in settles] == [(worker_id, withdrawal)]
+            assert not any(isinstance(effect, RecordGiveUp) for effect in effects)
         if not restarted:
             self.model.running.discard(worker_id)
             self.model.settled[worker_id] = self.model.settled.get(worker_id, 0) + 1
@@ -176,6 +201,47 @@ class HostCoreMachine(RuleBasedStateMachine):
             if outcome is WorkerOutcome.FATAL:
                 self._stop(StopReason.WORKER_FAILED)
         self._apply(effects, freed=True)
+
+    @rule(
+        data=st.data(),
+        withdrawal=st.sampled_from(Withdrawal),
+        dt=st.floats(0, 600),
+        known=st.booleans(),
+    )
+    def withdraw(
+        self, data: st.DataObject, withdrawal: Withdrawal, dt: float, *, known: bool
+    ) -> None:
+        """Park or cancel a running, queued, withdrawing, settled or unknown worker."""
+        candidates = sorted(self.model.running | set(self.model.queue))
+        worker_id = (
+            data.draw(st.sampled_from(candidates))
+            if known and candidates
+            else data.draw(st.sampled_from([*self.model.started, "ghost"]))
+        )
+        action = Withdraw(worker_id, withdrawal, self._tick(dt))
+        if self.model.stopped:
+            self._check_refusal(action)
+            return
+        before = (self.core.running, self.core.queued, self.core.remaining_budget)
+        result, effects = self.core.on_action(action)
+        if worker_id in self.model.withdrawing:
+            assert result == Refused(Refusal.WITHDRAWING, worker_id)
+        elif worker_id not in self.model.running and worker_id not in self.model.queue:
+            assert result == Refused(Refusal.NOT_IN_FLIGHT, worker_id)
+        else:
+            assert isinstance(result, Accepted)
+            if worker_id in self.model.running:
+                # The slot stays held until the task has ended.
+                self.model.withdrawing[worker_id] = withdrawal
+                assert effects == (StopWorker(worker_id, withdrawal),)
+            else:
+                self.model.queue.remove(worker_id)
+                self.model.settled[worker_id] = self.model.settled.get(worker_id, 0) + 1
+                self.model.started.append(worker_id)
+            self._apply(effects, freed=False)
+            return
+        assert effects == ()
+        assert (self.core.running, self.core.queued, self.core.remaining_budget) == before
 
     def _stop(self, reason: StopReason) -> None:
         if self.model.stop_reason is None:
@@ -257,6 +323,16 @@ class HostCoreMachine(RuleBasedStateMachine):
         assert len(self.model.started) == len(set(self.model.started))
 
     @invariant()
+    def a_withdrawn_worker_is_stopped_once_and_settled_once(self) -> None:
+        assert len(self.model.stopped_workers) == len(set(self.model.stopped_workers))
+        settled = [worker_id for worker_id, _ in self.model.withdrawn_settles]
+        assert len(settled) == len(set(settled))
+        assert set(self.model.withdrawing) <= set(self.model.stopped_workers)
+        assert not set(self.model.withdrawing) & set(settled)
+        # Every stopped worker settles once its task ends, and only then.
+        assert set(self.model.stopped_workers) - set(self.model.withdrawing) <= set(settled)
+
+    @invariant()
     def search_ends_once_when_drained(self) -> None:
         drained = not self.model.running and not self.model.queue
         should_end = drained and (self.model.stopped or self.model.finishing)
@@ -273,6 +349,8 @@ class HostCoreMachine(RuleBasedStateMachine):
             self.finish_worker_now(sorted(self.model.running)[0])
         assert set(self.model.settled) == set(self.model.started)
         assert all(count == 1 for count in self.model.settled.values())
+        settled = {worker_id for worker_id, _ in self.model.withdrawn_settles}
+        assert set(self.model.stopped_workers) <= settled
         assert len(self.model.ends) == 1
         assert self.core.ended
 
@@ -280,6 +358,10 @@ class HostCoreMachine(RuleBasedStateMachine):
         effects = self.core.on_event(
             WorkerFinished(worker_id, WorkerOutcome.COMPLETED, self.model.now)
         )
+        withdrawal = self.model.withdrawing.pop(worker_id, None)
+        if withdrawal is not None:
+            settles = [e for e in effects if isinstance(e, SettleWithdrawn)]
+            assert [(e.item.worker_id, e.withdrawal) for e in settles] == [(worker_id, withdrawal)]
         self.model.running.discard(worker_id)
         self.model.settled[worker_id] = self.model.settled.get(worker_id, 0) + 1
         self._apply(effects, freed=True)

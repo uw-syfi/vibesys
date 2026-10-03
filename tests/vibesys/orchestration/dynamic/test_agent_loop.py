@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -12,10 +14,13 @@ from hypothesis import strategies as st
 
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop, DriverStep
 from vibesys.orchestration.dynamic.control import (
+    Accepted,
     HostCore,
     HostLimits,
+    Refused,
     SearchEnd,
     StopReason,
+    Withdrawal,
     WorkerOutcome,
     WorkItem,
 )
@@ -54,23 +59,37 @@ class _FakeWorkers:
     # Set once ``expected`` attempts have started.
     expected: int = 0
     all_started: asyncio.Event = field(default_factory=asyncio.Event)
+    # Yield points per attempt, so withdrawals land mid-attempt.
+    steps: int = 1
+    # Cluster jobs each plan's attempts submitted that nothing released yet.
+    live_jobs: dict[int, int] = field(default_factory=dict)
+    withdrawn: dict[int, Withdrawal] = field(default_factory=dict)
+    kept_work: list[int] = field(default_factory=list)
+    settled: list[tuple[int, Withdrawal]] = field(default_factory=list)
+    started_after_withdrawal: list[int] = field(default_factory=list)
 
     async def _attempt(self, plan: int) -> None:
         try:
             script = self.attempts.setdefault(plan, [])
             kind = script.pop(0) if script else "ok"
+            self.live_jobs[plan] = self.live_jobs.get(plan, 0) + 1
             if kind == "hang":
                 await self.hang.wait()
-            await asyncio.sleep(0)
+            for _ in range(self.steps):
+                await asyncio.sleep(0)
             if kind not in {"ok", "refunded"}:
                 raise _AttemptFailedError(kind)
         finally:
+            if plan in self.withdrawn:
+                self.kept_work.append(plan)
             self.exited.append(plan)
 
     def run_worker(self, plan: int) -> Coroutine[object, object, None]:
         assert self.core is not None
         if self.core.stopped is not None:
             self.started_after_stop.append(plan)
+        if plan in self.withdrawn:
+            self.started_after_withdrawal.append(plan)
         self.started.append(plan)
         if len(self.started) >= self.expected:
             self.all_started.set()
@@ -89,6 +108,15 @@ class _FakeWorkers:
 
     async def give_up(self, plan: int) -> None:
         self.given_up.append(plan)
+
+    def withdraw(self, plan: int, withdrawal: Withdrawal) -> None:
+        self.withdrawn[plan] = withdrawal
+
+    async def settle(self, plan: int, withdrawal: Withdrawal) -> None:
+        await asyncio.sleep(0)
+        self.settled.append((plan, withdrawal))
+        # Release: the cluster cancels every job this plan's attempts left.
+        self.live_jobs[plan] = 0
 
 
 @dataclass
@@ -297,3 +325,128 @@ def test_a_planner_that_leaves_slots_free_is_asked_again_within_the_bound(
     assert end is SearchEnd.FINISHED
     assert capacities == ([min(max_in_flight, budget)] * turn_attempts if budget else [])
     assert driver.next_step(core) is DriverStep.FINISH
+
+
+@dataclass
+class _WithdrawingDriver:
+    """The planner driver, plus turns that park or cancel an in-flight worker."""
+
+    inner: PlannerDriver[int]
+    script: list[tuple[int, Withdrawal]]
+    loop: AgentLoop[int] | None = None
+    results: dict[str, list[Accepted | Refused]] = field(default_factory=dict)
+    turns: int = 0
+    cancel_after: int | None = None
+    cancel_point: asyncio.Event = field(default_factory=asyncio.Event)
+    _withdrawing: bool = False
+
+    async def checkpoint(self) -> None:
+        await self.inner.checkpoint()
+
+    def observe(self, event: HostEvent) -> None:
+        self.inner.observe(event)
+
+    def next_step(self, core: HostCore[int]) -> DriverStep:
+        in_flight = core.running or core.queued
+        self._withdrawing = bool(self.script and in_flight and core.stopped is None)
+        if self._withdrawing:
+            return DriverStep.TURN
+        return self.inner.next_step(core)
+
+    async def turn(self, core: HostCore[int]) -> tuple[WorkItem[int], ...]:
+        self.turns += 1
+        if self.turns == self.cancel_after:
+            self.cancel_point.set()
+        if not self._withdrawing:
+            return await self.inner.turn(core)
+        assert self.loop is not None
+        pick, withdrawal = self.script.pop(0)
+        targets = sorted({*core.running, *core.queued})
+        worker_id = targets[pick % len(targets)]
+        result = await self.loop.withdraw(worker_id, withdrawal)
+        self.results.setdefault(worker_id, []).append(result)
+        if pick % 2:
+            # A second request for the same worker is refused and changes nothing.
+            again = await self.loop.withdraw(worker_id, withdrawal)
+            assert isinstance(again, Refused)
+        return ()
+
+
+_WITHDRAWALS = st.lists(st.tuples(st.integers(0, 7), st.sampled_from(Withdrawal)), max_size=6)
+
+
+@given(
+    scenario=_SCENARIOS,
+    withdrawals=_WITHDRAWALS,
+    steps=st.integers(1, 4),
+    cancel_after=st.none() | st.integers(1, 6),
+)
+def test_a_withdrawal_at_any_point_releases_jobs_once_and_settles_once(
+    scenario: _Scenario,
+    withdrawals: list[tuple[int, Withdrawal]],
+    steps: int,
+    cancel_after: int | None,
+) -> None:
+    """Park or cancel at any point of a worker's life, then any exit of the loop.
+
+    Every accepted withdrawal stops the worker (which keeps its work), never
+    restarts it, frees its slot, and settles it exactly once, which releases
+    its cluster jobs exactly once; a loop cancelled before the core settles
+    it settles it on the way out.
+    """
+    attempts = {n: list(script) for n, script in enumerate(scenario.recovered)}
+    attempts |= {100 + n: list(script) for n, script in enumerate(scenario.planned)}
+    workers = _FakeWorkers(attempts, steps=steps)
+    planner = _ScriptedPlanner(
+        list(scenario.batches), scenario.stop_at_checkpoint, scenario.crash_turns
+    )
+    core: HostCore[int] = HostCore(
+        HostLimits(
+            max_in_flight=scenario.max_in_flight,
+            start_budget=scenario.budget,
+            turn_attempts=scenario.turn_attempts,
+        )
+    )
+    workers.core = core
+    driver = _WithdrawingDriver(
+        PlannerDriver[int](plan=planner.plan, land_stop=planner.land_stop),
+        list(withdrawals),
+        cancel_after=cancel_after,
+    )
+    loop = AgentLoop(core, driver, workers, clock=_clock)
+    driver.loop = loop
+    items = tuple(WorkItem(f"r{n}", n) for n in range(len(scenario.recovered)))
+
+    async def run() -> None:
+        task = asyncio.create_task(loop.run(items))
+        cancel = asyncio.create_task(driver.cancel_point.wait())
+        await asyncio.wait({task, cancel}, return_when=asyncio.FIRST_COMPLETED)
+        if not task.done():
+            task.cancel()
+        cancel.cancel()
+        with contextlib.suppress(_InjectedError, _AttemptFailedError, asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+
+    accepted = {
+        int(worker_id[1:])
+        for worker_id, results in driver.results.items()
+        if any(isinstance(result, Accepted) for result in results)
+    }
+    for results in driver.results.values():
+        assert sum(isinstance(result, Accepted) for result in results) <= 1
+    # Every accepted withdrawal settles exactly once, and only those do.
+    assert sorted(plan for plan, _ in workers.settled) == sorted(accepted)
+    for plan, withdrawal in workers.settled:
+        assert workers.live_jobs.get(plan, 0) == 0, "jobs not released"
+        assert workers.withdrawn.get(plan, withdrawal) is withdrawal
+    # A stopped attempt keeps its work; a withdrawn worker never starts again.
+    assert set(workers.kept_work) <= set(workers.withdrawn) <= accepted
+    assert workers.started_after_withdrawal == []
+    # Every attempt that ran exited once; one withdrawn before its first step never ran.
+    unfinished = Counter(workers.started) - Counter(workers.exited)
+    assert not Counter(workers.exited) - Counter(workers.started)
+    assert set(unfinished) <= set(workers.withdrawn)
+    assert all(count == 1 for count in unfinished.values())
+    assert workers.started_after_stop == []

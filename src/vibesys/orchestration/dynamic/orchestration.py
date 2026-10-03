@@ -20,7 +20,13 @@ from vibesys.hypothesis import (
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
-from vibesys.orchestration.dynamic.control import HostCore, HostLimits, WorkerOutcome, WorkItem
+from vibesys.orchestration.dynamic.control import (
+    HostCore,
+    HostLimits,
+    Withdrawal,
+    WorkerOutcome,
+    WorkItem,
+)
 from vibesys.orchestration.dynamic.input_gate import InputGate
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
@@ -380,6 +386,20 @@ class _DynamicRun:
             message = f"profile {plan.profile_id!r} has no retry budget to give up"
             raise TypeError(message)
         await self._give_up(workstream_index(self.state, plan.hypothesis_id))
+
+    def withdraw(self, plan: PlannedWorkstream, withdrawal: Withdrawal) -> None:
+        """Mark ``plan``'s running attempt withdrawn (the ``Workers`` port)."""
+        del withdrawal  # Both keep the attempt's work; they differ at settle.
+        if not isinstance(plan, ProfilePlan):
+            self.workstreams.withdraw(plan.hypothesis_id)
+
+    async def settle(self, plan: PlannedWorkstream, withdrawal: Withdrawal) -> None:
+        """Durably park or cancel ``plan`` (the ``Workers`` port); called once."""
+        terminal = withdrawal is Withdrawal.CANCEL
+        if isinstance(plan, ProfilePlan):
+            await self.profiles.settle_withdrawn(plan, terminal=terminal)
+        else:
+            await self.workstreams.settle_withdrawn(plan.hypothesis_id, terminal=terminal)
 
     def _profile_unsupported(self, plan: ProfilePlan) -> bool:
         """Return whether ``plan`` ended unsupported, which refunds its start."""
