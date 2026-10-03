@@ -96,6 +96,26 @@ def _write_plan(
             ),
             id="benchmark-restricts-output-path",
         ),
+        *(
+            pytest.param(
+                (
+                    "benchmark",
+                    ("--output", path),
+                    {
+                        "benchmark_command": ("run-benchmark",),
+                        "benchmark_output_argument": "--output",
+                    },
+                    "benchmark output path is outside the framework namespace",
+                ),
+                id=f"benchmark-rejects-{path}",
+            )
+            for path in (
+                "/tmp/result.json",  # noqa: S108  # lint-waiver: LW-147672 [S108]; rejected path under test.
+                "/etc/vibesys-framework-benchmark-0.json",
+                "/tmp/x/vibesys-framework-benchmark-0.json",  # noqa: S108  # lint-waiver: LW-954368 [S108]; rejected path under test.
+                "/tmp/vibesys-framework-benchmark-../x.json",  # noqa: S108  # lint-waiver: LW-805374 [S108]; rejected path under test.
+            )
+        ),
     ],
 )
 def test_cli_rejects_invocations_that_differ_from_the_plan(
@@ -149,6 +169,32 @@ def test_cli_advances_valid_gate_invocations_to_operator_config_validation(
     )
 
     exit_code = main(("--plan", str(plan_path), kind, *arguments))
+
+    assert exit_code == 1
+    assert "invalid settings: name, remote_workspace_root, transport" in capsys.readouterr().err
+
+
+def test_cli_accepts_the_framework_benchmark_transport_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The trusted framework benchmark writes its result to this fixed /tmp
+    # transport path (one nonce per run); the Slurm gate must accept it.
+    plan_path = _write_plan(
+        tmp_path,
+        benchmark_command=("run-benchmark",),
+        benchmark_output_argument="--output",
+    )
+
+    exit_code = main(
+        (
+            "--plan",
+            str(plan_path),
+            "benchmark",
+            "--output",
+            "/tmp/vibesys-framework-benchmark-0123456789abcdef0123456789abcdef.json",  # noqa: S108  # lint-waiver: LW-728881 [S108]; the fixed framework transport path under test.
+        )
+    )
 
     assert exit_code == 1
     assert "invalid settings: name, remote_workspace_root, transport" in capsys.readouterr().err

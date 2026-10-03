@@ -50,6 +50,9 @@ if TYPE_CHECKING:
 _CLEANUP_FAILURE = "cleanup failed"
 
 
+_MAX_SUMMARY_CHARS = 16_384  # TrustedEvidence.semantic_summary limit
+
+
 class _DurableSemanticSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -226,13 +229,18 @@ class SlurmSemanticEvaluationExecutor:
         self, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
+        failed_summaries: list[str] = []
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
-            evidence = self._evidence(stage, raw)
+            evidence = self._evidence(stage, raw, raw_step.failure)
+            if evidence.outcome is EvidenceOutcome.FAILED:
+                failed_summaries.append(
+                    evidence.semantic_summary or f"{stage.kind.value} check failed"
+                )
             results.append(
                 EvaluationStepResult(
                     name=step.name,
@@ -242,11 +250,18 @@ class SlurmSemanticEvaluationExecutor:
                 )
             )
         has_semantic_result = any(item.result is not None for item in results)
-        state = (
-            EvaluationState.SUCCEEDED
-            if observed.state is EvaluationState.FAILED and has_semantic_result
-            else observed.state
-        )
+        skipped = any(item.state is StageState.SKIPPED for item in results)
+        failure = observed.failure
+        if observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
+            state = EvaluationState.SUCCEEDED
+        elif skipped and has_semantic_result:
+            # A successful evaluation must complete every planned stage. A failed
+            # stage that skipped the rest makes the evaluation failed, and its
+            # diagnostics are the failure the submitting agent reads.
+            state = EvaluationState.FAILED
+            failure = "\n".join(failed_summaries) or observed.failure or "a stage failed"
+        else:
+            state = observed.state
         return ExecutorObservation(
             state=state,
             current_stage=(
@@ -261,10 +276,12 @@ class SlurmSemanticEvaluationExecutor:
                 else observed.current_stage
             ),
             stage_results=tuple(results),
-            failure=None if state is EvaluationState.SUCCEEDED else observed.failure,
+            failure=None if state is EvaluationState.SUCCEEDED else failure,
         )
 
-    def _evidence(self, stage: SemanticEvaluationStage, raw: SlurmCommandResult) -> TrustedEvidence:
+    def _evidence(
+        self, stage: SemanticEvaluationStage, raw: SlurmCommandResult, failure: str | None
+    ) -> TrustedEvidence:
         passed = raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
@@ -290,7 +307,10 @@ class SlurmSemanticEvaluationExecutor:
                     passed = False
                     summary = str(error)
         if not passed and summary is None:
-            summary = raw.output[-4000:] or f"{stage.kind.value} command failed"
+            # The provider's stage failure already holds the stage output plus the
+            # server log tail; keep its end, where the cause usually is.
+            detail = failure or raw.output
+            summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
         identity = {
             "kind": stage.kind.value,

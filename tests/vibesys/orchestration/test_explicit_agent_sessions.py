@@ -14,6 +14,11 @@ from pydantic import BaseModel, ConfigDict
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 import vibesys
+import vs_agent
+import vs_evaluation
+import vs_project
+import vs_runtime
+import vs_sandbox
 from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
 from vibesys.composition import AGENT_TOOL_BINDINGS
 from vibesys.config import Config
@@ -245,6 +250,39 @@ def test_product_composition_declares_its_runtime_to_confined_agents(tmp_path: P
     package_root = Path(vibesys.__file__).resolve().parents[1]
     matching = [resource for resource in observed if resource.path == package_root]
     assert matching == [HostResource(package_root, HostResourceAccess.READ_ONLY, "VibeSys runtime")]
+
+
+def test_confined_agents_can_import_every_first_party_package(tmp_path: Path) -> None:
+    # Regression: an editable install keeps each library under libs/<name>/src,
+    # outside the product source root. Granting only that root left stdio MCP
+    # servers such as ``python -m vs_evaluation.agent_mcp`` unimportable in the
+    # sandbox, so agents saw the evaluation tool as disconnected.
+    client = FakeAgentClient(session_reuse=True)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    observed: list[HostResource] = []
+
+    def create_client(**kwargs: object) -> FakeAgentClient:
+        observed.extend(cast("tuple[HostResource, ...]", kwargs["host_resources"]))
+        return client
+
+    async def body(ctx: Run) -> None:
+        session = await ctx.agents.create_session(role, workspace=ctx.workspaces.root)
+        await session.close()
+
+    _run_with_clients(
+        tmp_path,
+        [client],
+        body,
+        declaration=(role,),
+        configuration=_RunConfiguration(client_factory=create_client),
+    )
+
+    readable = {
+        resource.path for resource in observed if resource.access is HostResourceAccess.READ_ONLY
+    }
+    for module in (vibesys, vs_agent, vs_evaluation, vs_project, vs_runtime, vs_sandbox):
+        assert module.__file__ is not None
+        assert Path(module.__file__).resolve().parents[1] in readable, module.__name__
 
 
 def test_slurm_ssh_access_grants_no_private_keys_to_the_profiler_role(

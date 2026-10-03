@@ -193,6 +193,7 @@ src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-p
 extend-exclude = [
     "resources/skills",
     "examples/microservices/repositories/deathstarbench",
+    "examples/microservices/repositories/masa",
     "examples/microservices/repositories/train-ticket",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",

@@ -455,6 +455,56 @@ remote_python = "/remote/venv/bin/python"
     session.close()
 
 
+def test_slurm_prompt_notes_state_the_service_command_and_read_only_inputs(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "slurm.toml"
+    config_path.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "ssh"
+host = "test-cluster"
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+
+[vibesys.service]
+command = ["python", "-m", "engine.server", "--model", "m p", "--port", "VIBESYS_DYNAMIC_PORT"]
+readiness_url = "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1/models"
+startup_timeout_seconds = 600
+""",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / "reference").mkdir(parents=True)
+    (workspace / "benchmark").mkdir()
+    environment = build_run_environment(
+        RunEnvironmentSpec("slurm", {"config_path": str(config_path)})
+    )
+
+    session = _open(
+        environment,
+        _request(
+            tmp_path,
+            FakeBackend(),
+            project_path_policy=ProjectPathPolicy(read_only_paths=("reference", "benchmark")),
+        ),
+    )
+    notes = session.view.prompt_notes
+    session.close()
+
+    assert (
+        "`/remote/venv/bin/python -m engine.server --model 'm p' --port VIBESYS_DYNAMIC_PORT`"
+        in notes
+    )
+    assert "read-only" in notes
+    assert "`reference`" in notes
+    assert "`benchmark`" in notes
+
+
 def test_run_environment_record_rejects_an_unknown_environment() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
         run_environment_record(RunEnvironmentSpec("kubernetes"))

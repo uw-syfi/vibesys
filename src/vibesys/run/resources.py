@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import overload
 
 from vibesys.composition import (
-    _vibesys_runtime_host_resource,
+    _vibesys_runtime_host_resources,
     prepare_domain_model_artifacts,
     resolve_agent_driver,
 )
@@ -58,6 +58,7 @@ from vibesys.run.project_policy import (
 from vibesys.run.workspace_policy import (
     build_workspace_materialization_plan,
     create_project_materializer,
+    materialized_skill_dirs,
 )
 from vs_agent.api import (
     AgentBackend,
@@ -371,6 +372,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         if profiler_support_name is not None:
             project_excluded_dirs.add(profiler_support_name)
         project_excluded_dirs.update(name for _path, name in profiler_support_extra)
+        project_excluded_dirs.update(materialized_skill_dirs(skill_source_paths))
 
         def resolve_recorded_run(
             recorded: OrchestrationRunManifest,
@@ -433,7 +435,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
         prepared_evaluator = prepare_trusted_evaluator(
             evaluator_package_root,
-            project_state.model_cache_directory("evaluator-tools"),
+            # Tools are installed under their specification digest, so every
+            # project on this machine can reuse one build.
+            project_state.machine_cache_directory("evaluator-tools"),
         )
         evaluator_requirements = prepared_evaluator.requirements
         evaluator_tool_roots = prepared_evaluator.tool_roots
@@ -552,7 +556,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             evaluator_tool_roots=evaluator_tool_roots,
         )
         if not session.view.cli_sandboxed:
-            agent_host_resources = (*agent_host_resources, _vibesys_runtime_host_resource())
+            agent_host_resources = (*agent_host_resources, *_vibesys_runtime_host_resources())
         result = _PreparedRun(
             backend=backend,
             agent_specs=agent_specs,

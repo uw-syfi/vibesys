@@ -893,6 +893,22 @@ class ProjectState:
         )
         return _contained_state_dir(cache_root, name, kind="model cache")
 
+    def machine_cache_directory(self, name: str) -> Path:
+        """Return a named cache shared by every project in this state home.
+
+        Only content-addressed, immutable entries belong here (for example a
+        tool installed under its specification digest), so projects can share
+        them without coordination. Per-project caches use
+        :meth:`model_cache_directory`.
+        """
+        self._validate_storage_roots()
+        cache_root = _contained_without_symlinks(
+            self._state_home,
+            self._state_home / "cache",
+            kind="machine cache root",
+        )
+        return _contained_state_dir(cache_root, name, kind="machine cache")
+
     def candidate_worktree_directory(self, run_id: str, candidate_id: str) -> Path:
         """Return the exact Git worktree directory for one run candidate."""
         candidate_root = _contained_state_dir(

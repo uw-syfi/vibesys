@@ -88,15 +88,9 @@ def _implementation(identifier: str) -> dict[str, object]:
     }
 
 
-# The trusted benchmark of the unchanged input, measured once before the first
-# epoch. Every scripted candidate in these tests beats it.
-_INPUT_BASELINE = BenchmarkEvaluation(
-    executed=True,
-    metric_name="throughput",
-    metric_value=1.0,
-    metric_direction=MetricDirection.MAXIMIZE,
-    row={"throughput": 1.0, "latency": 100.0},
-)
+def _requested_slots(message: str) -> int:
+    """Return how many workstreams a planning request asks for."""
+    return int(message.split("Schedule at most ", 1)[1].split(" ", 1)[0])
 
 
 class _Script:
@@ -1148,6 +1142,467 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     assert state.winner_revision == winner.candidate_revision
 
 
+def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) -> None:
+    """A slot that failed before recording a round keeps its sequence to itself.
+
+    Otherwise a later workstream reuses the number, and the winner lookup by
+    round number resolves to the failed slot's unreviewed revision.
+    """
+
+    planned: list[str] = []
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            # The first call fills both slots; each freed slot is refilled.
+            ids = (
+                (("base", "broken"), ("winner",))[len(planned)]
+                if len(planned) < 2
+                else (f"spare{len(planned)}",)
+            )
+            planned.append(ids[0])
+            return _portfolio(*ids)
+        hypothesis_id = message.split("`")[1]
+        if role.id == IMPLEMENTER.id:
+            if hypothesis_id.startswith("spare"):
+                return {"summary": "No viable change.", "outcome": "disproven"}
+            return _implementation(hypothesis_id)
+        if hypothesis_id == "broken":
+            raise _JudgeTransportError
+        return {"passed": True, "analysis": "Candidate is correct."}
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            _INPUT_BASELINE,
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 20.0)
+            ),
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    sequences = [item.sequence for item in state.workstreams]
+    assert len(sequences) == len(set(sequences))
+    winner = next(item for item in state.workstreams if item.hypothesis_id == "winner")
+    assert state.winner_revision == winner.candidate_revision
+
+
+_FATES = st.sampled_from(("raise", "reject", "pass"))
+
+
+@settings(max_examples=30, deadline=None)
+@given(epochs=st.lists(st.tuples(_FATES, _FATES), min_size=1, max_size=3))
+def test_winner_is_always_the_workstream_of_the_winning_round(
+    epochs: list[tuple[str, str]],
+) -> None:
+    """For any mix of failed, rejected, and evaluated slots, adoption is consistent.
+
+    Sequences stay unique, and the adopted revision is the candidate of the
+    workstream that recorded the best trusted round.
+    """
+    fates = {
+        f"e{epoch}-{slot}": fate
+        for epoch, pair in enumerate(epochs, start=1)
+        for slot, fate in zip("ab", pair, strict=True)
+    }
+    unplanned = deque(fates)
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio(*(unplanned.popleft() for _ in range(_requested_slots(message))))
+        hypothesis_id = next(name for name in fates if f"`{name}`" in message)
+        if role.id == IMPLEMENTER.id:
+            return _implementation(hypothesis_id)
+        if fates[hypothesis_id] == "raise":
+            raise _JudgeTransportError
+        passed = fates[hypothesis_id] == "pass"
+        return {"passed": passed, "analysis": "Reviewed.", "feedback": "" if passed else "No."}
+
+    async def scenario(root: Path) -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=root,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            _INPUT_BASELINE,
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0 * (index + 1) for index in range(len(fates)))
+            ),
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=len(epochs)))
+        return run
+
+    with tempfile.TemporaryDirectory() as directory:
+        run = asyncio.run(scenario(Path(directory)))
+        state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    sequences = [item.sequence for item in state.workstreams]
+    assert len(sequences) == len(set(sequences))
+    trusted = [
+        record
+        for record in state.search.rounds
+        if record.official_evaluation and record.perf_metric is not None
+    ]
+    if not trusted:
+        assert state.winner_revision is None
+        return
+    best = max(trusted, key=lambda record: record.perf_metric or 0.0)
+    winner = next(item for item in state.workstreams if item.hypothesis_id == best.hypothesis_id)
+    assert state.winner_revision == winner.candidate_revision == best.commit
+
+
+def test_recorded_hypothesis_lineage_matches_the_branched_revision(tmp_path: Path) -> None:
+    """Each hypothesis records the revision its workstream branched from, not a sibling."""
+    planned = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planned
+        if role.id == ORCHESTRATOR.id:
+            planned += 1
+            return _portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
+        return {"summary": "No viable change.", "outcome": "disproven"}
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, judge_every=100))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    hypotheses = {item.hypothesis_id: item for item in state.search.hypotheses}
+    rounds = {record.hypothesis_id: record.round_number for record in state.search.rounds}
+    assert len(hypotheses) == len(state.workstreams) == 4
+    for workstream in state.workstreams:
+        hypothesis = hypotheses[workstream.hypothesis_id]
+        assert hypothesis.parent_commit == workstream.parent_revision
+        assert hypothesis.parent_round is None
+        assert rounds[workstream.hypothesis_id] == workstream.sequence
+
+
+def test_projected_round_budget_covers_every_recorded_round(tmp_path: Path) -> None:
+    """The run's advertised round budget matches the rounds a full run records.
+
+    Each epoch records one round per workstream, so a budget of epochs alone
+    would show progress past 100%.
+    """
+    planned = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planned
+        if role.id == ORCHESTRATOR.id:
+            planned += 1
+            return _portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
+        return {"summary": "No viable change.", "outcome": "disproven"}
+
+    options = _options(max_rounds=2, max_in_flight=2, judge_every=100)
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, options)
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert REGISTRATION.project_max_rounds is not None
+    budget = REGISTRATION.project_max_rounds(options)
+    assert max(record.round_number for record in state.search.rounds) == budget
+
+
+def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
+    tmp_path: Path,
+) -> None:
+    """IDs that scrolled out of the bounded history are still listed as used.
+
+    The planner must not reuse an ID; a rejected portfolio costs a correction
+    turn, and two rejections fail the run.
+    """
+    epochs = 10
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            call = len(calls)
+            return _portfolio(
+                *(f"c{call}-{slot}" for slot in range(_requested_slots(message))),
+                request_evaluation=False,
+            )
+        return {"summary": "No viable change.", "outcome": "disproven"}
+
+    calls: list[str] = []
+
+    def recording(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            calls.append(message)
+        return respond(role, history, message, response)
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=recording,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=epochs, judge_every=100))
+
+    asyncio.run(scenario())
+    assert len(calls) >= epochs
+    assert "c1-0" in calls[-1]
+
+
+def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> None:
+    """The planner sees what was tried and why the review rejected it."""
+    summary = "Raised the decode batch size to 32."
+    feedback = "The change disables graph capture on the decode path."
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("rejected"), _portfolio("next")],
+            IMPLEMENTER.id: [
+                {**_implementation("rejected"), "summary": summary},
+                {"summary": "No viable change.", "outcome": "disproven"},
+            ],
+            JUDGE.id: [{"passed": False, "analysis": "Incorrect.", "feedback": feedback}],
+        }
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+
+    asyncio.run(scenario())
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert len(planner_messages) == 2
+    assert summary in planner_messages[1]
+    assert feedback in planner_messages[1]
+
+
+def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> None:
+    """A later epoch's fresh hypothesis starts from the best evaluated candidate.
+
+    Branching every hypothesis from the original root would make the final
+    winner contain at most one hypothesis's change.
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("base"), _portfolio("stacked")],
+            IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Candidate is correct."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            _INPUT_BASELINE,
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 20.0)
+            ),
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    base, stacked = state.workstreams
+    assert base.candidate_revision is not None
+    assert stacked.parent_revision == base.candidate_revision
+    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert f"`{base.candidate_revision}`" in planner_messages[1]
+    assert state.winner_revision == stacked.candidate_revision
+
+
+def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: Path) -> None:
+    """One malformed structured reply costs a follow-up turn, not the run or an attempt."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
+                _portfolio("recover"),
+            ],
+            IMPLEMENTER.id: [
+                StructuredResponseError(IMPLEMENTER.id, BaseModel),
+                _implementation("recover"),
+            ],
+            JUDGE.id: [
+                StructuredResponseError(JUDGE.id, BaseModel),
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_benchmark(
+            _INPUT_BASELINE,
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=10.0,
+                metric_direction=MetricDirection.MAXIMIZE,
+                row={"throughput": 10.0},
+            ),
+        )
+        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1))
+        assert status is RunStatus.SUCCEEDED
+        return run
+
+    run = asyncio.run(scenario())
+    for role in (ORCHESTRATOR, IMPLEMENTER, JUDGE):
+        sessions = [session for session in run.agents.sessions if session.role.id == role.id]
+        assert len(sessions) == 1
+        messages = [message for role_id, _, message in script.calls if role_id == role.id]
+        assert len(messages) == 2
+        assert messages[1].startswith("Correction required")
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
 class _FlakyBenchmarkEvaluation:
     """Evaluation fake whose first candidate benchmark fails in transport.
 
@@ -1382,40 +1837,28 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
     assert state.winner_revision == state.workstreams[0].candidate_revision
 
 
-def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) -> None:
-    """A slot that failed before recording a round keeps its sequence to itself.
-
-    Otherwise a later workstream reuses the number, and the winner lookup by
-    round number resolves to the failed slot's unreviewed revision.
-    """
-
-    planned: list[str] = []
+def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Path) -> None:
+    """Refunds of interrupted attempts are bounded, so a crash loop terminates."""
+    orchestrating: asyncio.Future[RunStatus] | None = None
+    implementer_calls = 0
 
     def respond(
         role: AgentRole,
         _history: tuple[str, ...],
-        message: str,
+        _message: str,
         _response: type[BaseModel] | None,
     ) -> object:
+        nonlocal implementer_calls
         if role.id == ORCHESTRATOR.id:
-            # The first call fills both slots; each freed slot is refilled.
-            ids = (
-                (("base", "broken"), ("winner",))[len(planned)]
-                if len(planned) < 2
-                else (f"spare{len(planned)}",)
-            )
-            planned.append(ids[0])
-            return _portfolio(*ids)
-        hypothesis_id = message.split("`")[1]
-        if role.id == IMPLEMENTER.id:
-            if hypothesis_id.startswith("spare"):
-                return {"summary": "No viable change.", "outcome": "disproven"}
-            return _implementation(hypothesis_id)
-        if hypothesis_id == "broken":
-            raise _JudgeTransportError
-        return {"passed": True, "analysis": "Candidate is correct."}
+            return _portfolio("crashing")
+        implementer_calls += 1
+        # Every implementation attempt is interrupted, like a process crash.
+        assert orchestrating is not None
+        orchestrating.cancel()
+        return _implementation("crashing")
 
-    async def scenario() -> FakeRun:
+    async def scenario() -> tuple[FakeRun, RunStatus]:
+        nonlocal orchestrating
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
@@ -1429,125 +1872,23 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        run.evaluation.script_benchmark(
-            _INPUT_BASELINE,
-            *(
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=value,
-                    metric_direction=MetricDirection.MAXIMIZE,
-                    row={"throughput": value},
-                )
-                for value in (10.0, 20.0)
-            ),
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=2))
-        return run
+        options = _options(max_in_flight=1, max_retries_per_round=1)
+        for _interruption in range(2):
+            orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+            with pytest.raises(asyncio.CancelledError):
+                await orchestrating
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+        return run, await orchestrating
 
-    run = asyncio.run(scenario())
+    run, status = asyncio.run(scenario())
+    assert status is RunStatus.SUCCEEDED
+    # The first interruption is refunded and redone; the second counts.
+    assert implementer_calls == 2
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    sequences = [item.sequence for item in state.workstreams]
-    assert len(sequences) == len(set(sequences))
-    winner = next(item for item in state.workstreams if item.hypothesis_id == "winner")
-    assert state.winner_revision == winner.candidate_revision
-
-
-def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> None:
-    """The planner sees what was tried and why the review rejected it."""
-    summary = "Raised the decode batch size to 32."
-    feedback = "The change disables graph capture on the decode path."
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [_portfolio("rejected"), _portfolio("next")],
-            IMPLEMENTER.id: [
-                {**_implementation("rejected"), "summary": summary},
-                {"summary": "No viable change.", "outcome": "disproven"},
-            ],
-            JUDGE.id: [{"passed": False, "analysis": "Incorrect.", "feedback": feedback}],
-        }
-    )
-
-    async def scenario() -> None:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=script.respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
-
-    asyncio.run(scenario())
-    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
-    assert len(planner_messages) == 2
-    assert summary in planner_messages[1]
-    assert feedback in planner_messages[1]
-
-
-def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> None:
-    """A later epoch's fresh hypothesis starts from the best evaluated candidate.
-
-    Branching every hypothesis from the original root would make the final
-    winner contain at most one hypothesis's change.
-    """
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [_portfolio("base"), _portfolio("stacked")],
-            IMPLEMENTER.id: [_implementation("base"), _implementation("stacked")],
-            JUDGE.id: [
-                {"passed": True, "analysis": "Candidate is correct."},
-                {"passed": True, "analysis": "Candidate is correct."},
-            ],
-        }
-    )
-
-    async def scenario() -> FakeRun:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=script.respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        run.evaluation.script_benchmark(
-            _INPUT_BASELINE,
-            *(
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=value,
-                    metric_direction=MetricDirection.MAXIMIZE,
-                    row={"throughput": value},
-                )
-                for value in (10.0, 20.0)
-            ),
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
-        return run
-
-    run = asyncio.run(scenario())
-    state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    base, stacked = state.workstreams
-    assert base.candidate_revision is not None
-    assert stacked.parent_revision == base.candidate_revision
-    planner_messages = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
-    assert f"`{base.candidate_revision}`" in planner_messages[1]
-    assert state.winner_revision == stacked.candidate_revision
+    assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].attempts == 1
+    assert state.winner_revision is None
 
 
 class _StopRequestedError(RuntimeError):
@@ -1658,297 +1999,13 @@ def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
     assert finished.workspaces.root.restore_calls[-1][0] == state.winner_revision
 
 
-def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: Path) -> None:
-    """One malformed structured reply costs a follow-up turn, not the run or an attempt."""
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [
-                StructuredResponseError(ORCHESTRATOR.id, PortfolioPlan),
-                _portfolio("recover"),
-            ],
-            IMPLEMENTER.id: [
-                StructuredResponseError(IMPLEMENTER.id, BaseModel),
-                _implementation("recover"),
-            ],
-            JUDGE.id: [
-                StructuredResponseError(JUDGE.id, BaseModel),
-                {"passed": True, "analysis": "Candidate is correct."},
-            ],
-        }
-    )
-
-    async def scenario() -> FakeRun:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=script.respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        run.evaluation.script_benchmark(
-            _INPUT_BASELINE,
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=10.0,
-                metric_direction=MetricDirection.MAXIMIZE,
-                row={"throughput": 10.0},
-            ),
-        )
-        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1))
-        assert status is RunStatus.SUCCEEDED
-        return run
-
-    run = asyncio.run(scenario())
-    for role in (ORCHESTRATOR, IMPLEMENTER, JUDGE):
-        sessions = [session for session in run.agents.sessions if session.role.id == role.id]
-        assert len(sessions) == 1
-        messages = [message for role_id, _, message in script.calls if role_id == role.id]
-        assert len(messages) == 2
-        assert messages[1].startswith("Correction required")
-    state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    assert state.workstreams[0].attempts == 1
-    assert state.workstreams[0].phase.value == "evaluated"
-    assert state.winner_revision == state.workstreams[0].candidate_revision
-
-
-def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
-    tmp_path: Path,
-) -> None:
-    """IDs that scrolled out of the bounded history are still listed as used.
-
-    The planner must not reuse an ID; a rejected portfolio costs a correction
-    turn, and two rejections fail the run.
-    """
-    epochs = 10
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        if role.id == ORCHESTRATOR.id:
-            call = len(calls)
-            return _portfolio(
-                *(f"c{call}-{slot}" for slot in range(_requested_slots(message))),
-                request_evaluation=False,
-            )
-        return {"summary": "No viable change.", "outcome": "disproven"}
-
-    calls: list[str] = []
-
-    def recording(
-        role: AgentRole,
-        history: tuple[str, ...],
-        message: str,
-        response: type[BaseModel] | None,
-    ) -> object:
-        if role.id == ORCHESTRATOR.id:
-            calls.append(message)
-        return respond(role, history, message, response)
-
-    async def scenario() -> None:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            responder=recording,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=epochs, judge_every=100))
-
-    asyncio.run(scenario())
-    assert len(calls) >= epochs
-    assert "c1-0" in calls[-1]
-
-
-def test_recorded_hypothesis_lineage_matches_the_branched_revision(tmp_path: Path) -> None:
-    """Each hypothesis records the revision its workstream branched from, not a sibling."""
-    planned = 0
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        _message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        nonlocal planned
-        if role.id == ORCHESTRATOR.id:
-            planned += 1
-            return _portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
-        return {"summary": "No viable change.", "outcome": "disproven"}
-
-    async def scenario() -> FakeRun:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=2, judge_every=100))
-        return run
-
-    run = asyncio.run(scenario())
-    state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    hypotheses = {item.hypothesis_id: item for item in state.search.hypotheses}
-    rounds = {record.hypothesis_id: record.round_number for record in state.search.rounds}
-    assert len(hypotheses) == len(state.workstreams) == 4
-    for workstream in state.workstreams:
-        hypothesis = hypotheses[workstream.hypothesis_id]
-        assert hypothesis.parent_commit == workstream.parent_revision
-        assert hypothesis.parent_round is None
-        assert rounds[workstream.hypothesis_id] == workstream.sequence
-
-
-_FATES = st.sampled_from(("raise", "reject", "pass"))
-
-
-@settings(max_examples=30, deadline=None)
-@given(epochs=st.lists(st.tuples(_FATES, _FATES), min_size=1, max_size=3))
-def test_winner_is_always_the_workstream_of_the_winning_round(
-    epochs: list[tuple[str, str]],
-) -> None:
-    """For any mix of failed, rejected, and evaluated slots, adoption is consistent.
-
-    Sequences stay unique, and the adopted revision is the candidate of the
-    workstream that recorded the best trusted round.
-    """
-    fates = {
-        f"e{epoch}-{slot}": fate
-        for epoch, pair in enumerate(epochs, start=1)
-        for slot, fate in zip("ab", pair, strict=True)
-    }
-    unplanned = deque(fates)
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        if role.id == ORCHESTRATOR.id:
-            return _portfolio(*(unplanned.popleft() for _ in range(_requested_slots(message))))
-        hypothesis_id = next(name for name in fates if f"`{name}`" in message)
-        if role.id == IMPLEMENTER.id:
-            return _implementation(hypothesis_id)
-        if fates[hypothesis_id] == "raise":
-            raise _JudgeTransportError
-        passed = fates[hypothesis_id] == "pass"
-        return {"passed": passed, "analysis": "Reviewed.", "feedback": "" if passed else "No."}
-
-    async def scenario(root: Path) -> FakeRun:
-        run = FakeRun(
-            PLUGIN,
-            project_root=root,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        run.evaluation.script_benchmark(
-            _INPUT_BASELINE,
-            *(
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=value,
-                    metric_direction=MetricDirection.MAXIMIZE,
-                    row={"throughput": value},
-                )
-                for value in (10.0 * (index + 1) for index in range(len(fates)))
-            ),
-        )
-        await PLUGIN.orchestrate(run, _options(max_rounds=len(epochs)))
-        return run
-
-    with tempfile.TemporaryDirectory() as directory:
-        run = asyncio.run(scenario(Path(directory)))
-        state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    sequences = [item.sequence for item in state.workstreams]
-    assert len(sequences) == len(set(sequences))
-    trusted = [
-        record
-        for record in state.search.rounds
-        if record.official_evaluation and record.perf_metric is not None
-    ]
-    if not trusted:
-        assert state.winner_revision is None
-        return
-    best = max(trusted, key=lambda record: record.perf_metric or 0.0)
-    winner = next(item for item in state.workstreams if item.hypothesis_id == best.hypothesis_id)
-    assert state.winner_revision == winner.candidate_revision == best.commit
-
-
-def test_projected_round_budget_covers_every_recorded_round(tmp_path: Path) -> None:
-    """The run's advertised round budget matches the rounds a full run records.
-
-    Each epoch records one round per workstream, so a budget of epochs alone
-    would show progress past 100%.
-    """
-    planned = 0
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        _message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        nonlocal planned
-        if role.id == ORCHESTRATOR.id:
-            planned += 1
-            return _portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
-        return {"summary": "No viable change.", "outcome": "disproven"}
-
-    options = _options(max_rounds=2, max_in_flight=2, judge_every=100)
-
-    async def scenario() -> FakeRun:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        await PLUGIN.orchestrate(run, options)
-        return run
-
-    run = asyncio.run(scenario())
-    state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    assert REGISTRATION.project_max_rounds is not None
-    budget = REGISTRATION.project_max_rounds(options)
-    assert max(record.round_number for record in state.search.rounds) == budget
+_INPUT_BASELINE = BenchmarkEvaluation(
+    executed=True,
+    metric_name="throughput",
+    metric_value=1.0,
+    metric_direction=MetricDirection.MAXIMIZE,
+    row={"throughput": 1.0, "latency": 100.0},
+)
 
 
 def _throughput(value: float) -> BenchmarkEvaluation:
@@ -2102,60 +2159,6 @@ def test_failed_input_measurement_is_retried_before_the_next_epoch(tmp_path: Pat
     assert state.winner_revision is None
 
 
-def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Path) -> None:
-    """Refunds of interrupted attempts are bounded, so a crash loop terminates."""
-    orchestrating: asyncio.Future[RunStatus] | None = None
-    implementer_calls = 0
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        _message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        nonlocal implementer_calls
-        if role.id == ORCHESTRATOR.id:
-            return _portfolio("crashing")
-        implementer_calls += 1
-        # Every implementation attempt is interrupted, like a process crash.
-        assert orchestrating is not None
-        orchestrating.cancel()
-        return _implementation("crashing")
-
-    async def scenario() -> tuple[FakeRun, RunStatus]:
-        nonlocal orchestrating
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        options = _options(max_in_flight=1, max_retries_per_round=1)
-        for _interruption in range(2):
-            orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-            with pytest.raises(asyncio.CancelledError):
-                await orchestrating
-        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-        return run, await orchestrating
-
-    run, status = asyncio.run(scenario())
-    assert status is RunStatus.SUCCEEDED
-    # The first interruption is refunded and redone; the second counts.
-    assert implementer_calls == 2
-    state = asyncio.run(run.state.load(DynamicState))
-    assert state is not None
-    assert state.workstreams[0].phase.value == "failed"
-    assert state.workstreams[0].attempts == 1
-    assert state.winner_revision is None
-
-
 def _two_epoch_script() -> _Script:
     return _Script(
         {
@@ -2169,10 +2172,10 @@ def _two_epoch_script() -> _Script:
     )
 
 
-def test_input_that_fails_the_benchmark_is_measured_once_and_gates_nothing(
+def test_input_that_fails_the_benchmark_twice_is_recorded_and_gates_nothing(
     tmp_path: Path,
 ) -> None:
-    """A benchmark that ran and rejected the input is a property of the input.
+    """A benchmark that ran and rejected the input twice is a property of the input.
 
     Re-measuring it every epoch costs a cluster job and delays each epoch;
     candidates then need only a passing trusted benchmark, and the planner is
@@ -2181,20 +2184,24 @@ def test_input_that_fails_the_benchmark_is_measured_once_and_gates_nothing(
     rejection = "prefix-cache preflight failed: server reported no prefix-cache hit"
     script = _two_epoch_script()
 
-    async def scenario() -> tuple[FakeRun, DynamicState | None]:
-        run = _baseline_run(tmp_path, script)
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=True, feedback=rejection),
-            _throughput(12.0),
-            _throughput(15.0),
+    async def scenario() -> tuple[_InputVersusCandidate, DynamicState | None]:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[
+                BenchmarkEvaluation(executed=True, feedback=rejection),
+                BenchmarkEvaluation(executed=True, feedback=rejection),
+            ],
+            candidates=[_throughput(12.0), _throughput(15.0)],
         )
+        run = _with_evaluation(fake, evaluation)
         assert await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1)) is (
             RunStatus.SUCCEEDED
         )
-        return run, await run.state.load(DynamicState)
+        return evaluation, await fake.state.load(DynamicState)
 
-    run, state = asyncio.run(scenario())
-    assert len(run.evaluation.benchmark_calls) == 3
+    evaluation, state = asyncio.run(scenario())
+    assert evaluation.input_calls == 2
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is False
@@ -2262,11 +2269,7 @@ def test_judge_checks_the_objective_numerics_policy_not_only_accuracy(tmp_path: 
     assert "numerics or precision policy the objective states" in prompt
 
 
-def _requested_slots(message: str) -> int:
-    """Return how many workstreams a planning request asks for."""
-    return int(message.split("Schedule at most ", 1)[1].split(" ", 1)[0])
-
-
+# Bounded cooperative yields that let sibling workstreams advance; no wall clock.
 _HOLD_YIELDS = 200
 
 
@@ -2450,3 +2453,182 @@ def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) 
     asyncio.run(scenario())
     assert evaluation.released_after_refill == [True]
     assert headers[1].startswith("Schedule at most 1 new workstreams for free slots. 1 other")
+
+
+class _InputVersusCandidate:
+    """Evaluation fake that answers the input and the candidates from separate scripts.
+
+    The input measurement runs beside candidate work, so one shared script
+    would make the reading each side gets depend on scheduling order.
+    """
+
+    def __init__(
+        self,
+        delegate: FakeEvaluation,
+        *,
+        inputs: list[BenchmarkEvaluation | BaseException],
+        candidates: list[BenchmarkEvaluation],
+    ) -> None:
+        self.delegate = delegate
+        self.inputs = deque(inputs)
+        self.candidates = deque(candidates)
+        self.input_calls = 0
+
+    async def accuracy(
+        self,
+        workspace: Workspace,
+        *,
+        reuse: AccuracyReceipt | None = None,
+    ) -> AccuracyEvaluation:
+        return await self.delegate.accuracy(workspace, reuse=reuse)
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        del objectives
+        if workspace.id is not None:
+            return self.candidates.popleft()
+        self.input_calls += 1
+        result = self.inputs.popleft()
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+    ) -> LocalValidationEvaluation:
+        return await self.delegate.validate_local(
+            workspace,
+            recipe_artifact=recipe_artifact,
+            report_location=report_location,
+        )
+
+
+def _with_evaluation(fake: FakeRun, evaluation: _InputVersusCandidate) -> Run:
+    return Run(
+        run_id=fake.run_id,
+        facts=fake.facts,
+        agents=fake.agents,
+        workspaces=fake.workspaces,
+        evaluation=evaluation,
+        state=fake.state,
+        control=fake.control,
+        commands=fake.commands,
+        skills=fake.skills,
+        observations=fake.observations,
+    )
+
+
+def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path) -> None:
+    """A resumed run that only recovers work measures the input before adopting.
+
+    The stop lands while the last budgeted workstream runs and before the input
+    has a reading, so the resume never plans; the recovered candidate (12) must
+    still be compared with the input (20) and not adopted.
+    """
+    orchestrating: asyncio.Future[RunStatus] | None = None
+    implementer_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_calls
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("slower")
+        if role.id == IMPLEMENTER.id:
+            implementer_calls += 1
+            if implementer_calls == 1:
+                assert orchestrating is not None
+                orchestrating.cancel()
+            return _implementation("slower")
+        return {"passed": True, "analysis": "Candidate is correct."}
+
+    async def scenario() -> tuple[FakeRun, _InputVersusCandidate, DynamicState | None]:
+        nonlocal orchestrating
+        fake = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[_EvaluationTransportError(), _throughput(20.0)],
+            candidates=[_throughput(12.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        options = _options(max_rounds=1, max_in_flight=1)
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+        with pytest.raises(asyncio.CancelledError):
+            await orchestrating
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return fake, evaluation, await fake.state.load(DynamicState)
+
+    fake, evaluation, state = asyncio.run(scenario())
+
+    assert len([s for s in fake.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
+    assert evaluation.input_calls >= 1
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.metrics == {"throughput": 20.0}
+    assert [record.candidate_disposition for record in state.search.rounds] == ["discard"]
+    assert state.winner_revision is None
+
+
+def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """One executed failure of the input may be contention with agent work.
+
+    Recording it at once would disable the input gate for the run; a second
+    measurement that passes gates the candidate (12) against the input (20).
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("slower")],
+            IMPLEMENTER.id: [_implementation("slower")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> tuple[_InputVersusCandidate, DynamicState | None]:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[
+                BenchmarkEvaluation(executed=True, feedback="server start timed out"),
+                _throughput(20.0),
+            ],
+            candidates=[_throughput(12.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        assert await PLUGIN.orchestrate(run, _options(max_rounds=1, max_in_flight=1)) is (
+            RunStatus.SUCCEEDED
+        )
+        return evaluation, await fake.state.load(DynamicState)
+
+    evaluation, state = asyncio.run(scenario())
+
+    assert evaluation.input_calls == 2
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.benchmark_passed is True
+    assert state.baseline.metrics == {"throughput": 20.0}
+    assert state.winner_revision is None

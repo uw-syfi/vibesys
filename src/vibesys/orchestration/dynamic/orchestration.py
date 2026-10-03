@@ -136,6 +136,9 @@ class _DynamicRun:
     # The input measurement runs beside the first workstreams; only
     # candidate decisions and adoption wait for it.
     _input_measurement: asyncio.Task[None] | None = None
+    # Executed input-benchmark failures seen by this process. The first is
+    # measured again before it is recorded as a property of the input.
+    _input_failures: int = 0
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
@@ -180,6 +183,9 @@ class _DynamicRun:
         failures: dict[str, int] = {}
         fatal: list[BaseException] = []
         await self.run.control.checkpoint()
+        # Start before recovered work: a resume with no budget or no free slot
+        # never plans, and its candidates still need the input to beat.
+        self._start_input_measurement()
         for plan in self._recoverable_plans():
             running[self._start(plan)] = plan
         refill = True
@@ -229,13 +235,19 @@ class _DynamicRun:
 
         Candidates take far longer to reach a decision than the input takes to
         measure, so the first planning call need not wait for it. A failed
-        measurement starts again at the next planning call.
+        measurement starts again at the next planning call or candidate decision.
         """
         if self._input_measurement is None or self._input_measurement.done():
             self._input_measurement = asyncio.create_task(self._measure_baseline())
 
     async def _input_measured(self) -> None:
-        """Wait for a running input measurement before judging against it."""
+        """Wait for an input reading before judging a candidate against it.
+
+        A measurement that ended without a reading starts again, so a decision
+        made after a failed measurement still gets one more chance to be gated.
+        """
+        if self.state.baseline is None:
+            self._start_input_measurement()
         if self._input_measurement is not None:
             await asyncio.shield(self._input_measurement)
 
@@ -279,6 +291,17 @@ class _DynamicRun:
                 f"dynamic input baseline benchmark did not run: {benchmark.feedback}"
             )
             return
+        if not benchmark.passed:
+            self._input_failures += 1
+            if self._input_failures == 1:
+                # It ran beside agent work, so an OOM or a server start timeout
+                # may be contention, not the input; measure again before
+                # recording a verdict that disables the input gate.
+                self.run.observations.note(
+                    f"dynamic input baseline benchmark failed; measuring again: "
+                    f"{benchmark.feedback}"
+                )
+                return
         async with self._state_lock:
             self.state.baseline = EvaluationResult(
                 revision=revision,
@@ -292,9 +315,9 @@ class _DynamicRun:
             )
             await self._commit(label="dynamic: measure input baseline")
         if not benchmark.passed:
-            # The benchmark ran and rejected the input (for example, it lacks a
-            # capability the benchmark requires). That is a property of the
-            # input, so it is recorded once and never re-measured.
+            # The benchmark ran and rejected the input twice (for example, it
+            # lacks a capability the benchmark requires). That is a property
+            # of the input, so it is recorded and never re-measured.
             self.run.observations.note(
                 "dynamic input does not satisfy the benchmark; candidates need only a "
                 "passing trusted benchmark"
@@ -337,19 +360,6 @@ class _DynamicRun:
             BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
             for item in self.options.metric_space.objectives
         )
-
-    def _prompt_context(self) -> dict[str, str]:
-        """Return the run facts every role prompt states inline.
-
-        The objective is inlined rather than cited by path: the effective
-        objective lives in run state that agent sandboxes hide. The environment
-        notes carry facts such as read-only inputs and where trusted evaluation
-        runs, without which agents plan edits that fail.
-        """
-        return {
-            "objective": self.run.facts.objective,
-            "environment_notes": self.run.facts.environment_notes,
-        }
 
     def _capacity(self) -> int:
         return self.options.max_in_flight
@@ -1177,6 +1187,19 @@ class _DynamicRun:
             message = "dynamic orchestration requires a recorded root revision"
             raise RuntimeError(message)
         return revision
+
+    def _prompt_context(self) -> dict[str, str]:
+        """Return the run facts every role prompt states inline.
+
+        The objective is inlined rather than cited by path: the effective
+        objective lives in run state that agent sandboxes hide. The environment
+        notes carry facts such as read-only inputs and where trusted evaluation
+        runs, without which agents plan edits that fail.
+        """
+        return {
+            "objective": self.run.facts.objective,
+            "environment_notes": self.run.facts.environment_notes,
+        }
 
     def _index(self, hypothesis_id: str) -> int:
         return next(

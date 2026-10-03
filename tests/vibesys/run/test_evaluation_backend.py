@@ -15,9 +15,11 @@ from vibesys.run.evaluation_backend import (
 )
 from vs_evaluation.api import (
     AwaitCall,
+    AwaitReply,
     ContentDigest,
     EvaluationAgentRole,
     EvaluationAgentService,
+    EvaluationFailed,
     EvaluationLifecycleEvent,
     EvaluationState,
     EvidenceKind,
@@ -181,3 +183,41 @@ async def test_reuse_rejects_non_candidate_identity_mismatches(
     assert len(run.evaluation.accuracy_calls) == 2
     await backend.close()
     await mismatched.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_accuracy_reaches_the_agent_and_skips_the_benchmark(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    run.evaluation.script_accuracy(
+        AccuracyEvaluation(executed=True, feedback="server failed to start: model not found")
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "throughput", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:throughput",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    submitted = await service.dispatch(
+        SubmitCall(
+            token=grant.token,
+            evidence_kinds=(EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK),
+        )
+    )
+    assert isinstance(submitted, SubmittedReply)
+
+    reply = await service.dispatch(
+        AwaitCall(token=grant.token, handle_id=submitted.handle_id, timeout_s=3)
+    )
+
+    assert isinstance(reply, AwaitReply)
+    assert isinstance(reply.result, EvaluationFailed)
+    assert "server failed to start: model not found" in reply.result.message
+    assert await backend.status(submitted.handle_id) is EvaluationState.FAILED
+    assert run.evaluation.benchmark_calls == []
+    await backend.close()

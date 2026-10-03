@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +20,11 @@ if TYPE_CHECKING:
 
 _BENCHMARK_OUTPUT_PREFIX = ".vibesys-benchmark-"
 _BENCHMARK_OUTPUT_SUFFIX = ".json"
+# The trusted framework benchmark writes to this fixed transport path with a
+# hex nonce (vs_runtime._trusted_evaluation); accept exactly that shape.
+_FRAMEWORK_BENCHMARK_OUTPUT = re.compile(
+    r"/tmp/vibesys-framework-benchmark-[0-9a-f]+\.json"  # noqa: S108  # lint-waiver: LW-352320 [S108]; the fixed framework benchmark transport path, not a temp file.
+)
 _BENCHMARK_OUTPUT_ARGUMENT_COUNT = 2
 
 
@@ -99,9 +105,10 @@ def _benchmark_command(
     if len(arguments) != _BENCHMARK_OUTPUT_ARGUMENT_COUNT or arguments[0] != output_argument:
         raise SlurmCommandError.invalid_benchmark_arguments()
     local_output = arguments[1]
-    if not local_output.startswith(_BENCHMARK_OUTPUT_PREFIX) or not local_output.endswith(
+    workspace_output = local_output.startswith(_BENCHMARK_OUTPUT_PREFIX) and local_output.endswith(
         _BENCHMARK_OUTPUT_SUFFIX
-    ):
+    )
+    if not workspace_output and _FRAMEWORK_BENCHMARK_OUTPUT.fullmatch(local_output) is None:
         raise SlurmCommandError.invalid_benchmark_output()
     remote_output = ".vibesys-framework-benchmark.json"
     return (
