@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         PreRoundDecision,
     )
     from vibesys.orchestration.profilers import ProfilerSummary
+    from vibesys.orchestration.structured_turn import TurnFailed
 
 
 def _location(path: Path, workspace: Path, *, directory: bool = False) -> str:
@@ -205,6 +206,19 @@ class MultiFiles:
             f"- outcome: {response.hypothesis_outcome.value}\n"
             f"- disposition: {response.candidate_disposition.value}\n"
             f"- summary: {response.summary}\n",
+        )
+
+    def note_implementation_failed(
+        self,
+        round_number: int,
+        retry: int,
+        failure: TurnFailed,
+    ) -> None:
+        """Append an implementer attempt that returned no valid response."""
+        self._append(
+            round_number,
+            f"Implementer attempt {retry}",
+            f"- outcome: no valid response\n- reason: {failure.reason}\n",
         )
 
     def note_judge(self, round_number: int, retry: int, response: JudgeResponse) -> None:

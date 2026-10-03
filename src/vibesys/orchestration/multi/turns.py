@@ -44,14 +44,16 @@ from vibesys.orchestration.profilers import (
 )
 from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.orchestration.structured_turn import (
+    TurnFailed,
+    attempt_structured_turn,
+    structured_turn,
+)
 from vs_runtime.api import (
-    AgentTurnTimeoutError,
     ResolvedSkillResources,
     Run,
     SkillCatalogError,
     SkillResourceRequest,
-    StructuredResponseError,
 )
 
 if TYPE_CHECKING:
@@ -95,63 +97,6 @@ class AttemptRequest:
     active_hypothesis: Hypothesis
     workspace: Workspace
     guidance: FocusView | None
-
-
-def _fallback_pre_round() -> PreRoundDecision:
-    return PreRoundDecision(
-        need_profile=False,
-        profile_focus="",
-        reasoning="fallback: default to skip",
-    )
-
-
-def _fallback_plan() -> OrchestratorPlan:
-    return OrchestratorPlan.model_validate(
-        {
-            "task": "Re-check minimal server boots and /health returns 200.",
-            "pass_criteria": "/health returns 200.",
-            "reasoning": "fallback: orchestrator produced no structured response",
-        }
-    )
-
-
-def _fallback_profiler() -> ProfilerSummary:
-    return ProfilerSummary(
-        analysis="Profiler produced no structured response.",
-        bottlenecks="n/a",
-        suggestions="Re-run profiling on the next round.",
-    )
-
-
-def _fallback_implementer() -> ImplementerResponse:
-    return ImplementerResponse(
-        summary="Implementer produced no structured response.",
-        expected_behavior="unknown",
-        hypothesis_outcome="inconclusive",
-        evidence="The implementer output could not be parsed.",
-        next_step="Recover retained evidence and return a schema-valid response before review.",
-    )
-
-
-def _timeout_implementer(timeout_seconds: float) -> ImplementerResponse:
-    return ImplementerResponse(
-        summary="Implementer invocation timed out.",
-        expected_behavior="unknown",
-        hypothesis_outcome="inconclusive",
-        evidence=(
-            f"The framework stopped the implementer after {timeout_seconds:g} seconds "
-            "without a structured response."
-        ),
-        next_step="Inspect retained evidence and return a schema-valid response on retry.",
-    )
-
-
-def _fallback_judge() -> JudgeResponse:
-    return JudgeResponse(
-        analysis="Judge produced no structured response.",
-        feedback="No structured response received.",
-        verdict=Verdict.FAIL,
-    )
 
 
 async def _resolve_skills(
@@ -248,12 +193,9 @@ class MultiAgentTurns:
             writable_paths=(self.files.roadmap_location,),
         )
         try:
-            try:
-                decision = await structured_turn(
-                    session, render_pre_round_prompt(context), PreRoundDecision
-                )
-            except StructuredResponseError:
-                decision = _fallback_pre_round()
+            decision = await structured_turn(
+                session, render_pre_round_prompt(context), PreRoundDecision
+            )
         finally:
             await session.close()
         self.files.note_pre_round(round_number, decision)
@@ -319,10 +261,7 @@ class MultiAgentTurns:
             writable_paths=(self.files.roadmap_location,),
         )
         try:
-            try:
-                plan = await structured_turn(session, render_plan_prompt(context), OrchestratorPlan)
-            except StructuredResponseError:
-                plan = _fallback_plan()
+            plan = await structured_turn(session, render_plan_prompt(context), OrchestratorPlan)
             for attempt in range(2):
                 plan.hypothesis_id = (
                     plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
@@ -344,10 +283,7 @@ class MultiAgentTurns:
                     self.run.observations.warning(
                         f"[orchestrator] plan rejected ({error}); reprompting once"
                     )
-                    try:
-                        plan = await structured_turn(session, feedback, OrchestratorPlan)
-                    except StructuredResponseError:
-                        plan = _fallback_plan()
+                    plan = await structured_turn(session, feedback, OrchestratorPlan)
                     continue
                 portable, _ = await _resolve_skills(self.run, plan.recommended_skills)
                 plan.recommended_skills = portable
@@ -394,12 +330,9 @@ class MultiAgentTurns:
             writable_paths=(artifact,),
         )
         try:
-            try:
-                summary = await structured_turn(
-                    session, render_profiler_prompt(kind.value, context), ProfilerSummary
-                )
-            except StructuredResponseError:
-                summary = _fallback_profiler()
+            summary = await structured_turn(
+                session, render_profiler_prompt(kind.value, context), ProfilerSummary
+            )
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920440 [BLE001]; profiling is advisory; a failed specialist must not abort the policy round.
             self.run.observations.warning(f"[profiler] failed: {error}")
             return None
@@ -491,8 +424,12 @@ class MultiAgentTurns:
         self,
         request: AttemptRequest,
         state: AttemptState,
-    ) -> tuple[ImplementerResponse, bool]:
-        """Run one attempt in the hypothesis's context-preserving conversation."""
+    ) -> ImplementerResponse | TurnFailed:
+        """Run one attempt in the hypothesis's context-preserving conversation.
+
+        A reply that stays invalid after its correction, or a timed-out turn,
+        returns :class:`TurnFailed`; the caller records it as a failed attempt.
+        """
         if self._closed:
             message = "multi-agent turns are closed"
             raise RuntimeError(message)
@@ -519,16 +456,10 @@ class MultiAgentTurns:
             if isinstance(context, ImplementerContinuationContext)
             else render_implementer_prompt(context)
         )
-        try:
-            response = await structured_turn(session, prompt, ImplementerResponse)
-        except StructuredResponseError:
-            response = _fallback_implementer()
-        except AgentTurnTimeoutError as error:
-            response = _timeout_implementer(error.timeout_seconds)
-        synthesized = response.summary in {
-            "Implementer produced no structured response.",
-            "Implementer invocation timed out.",
-        }
+        response = await attempt_structured_turn(session, prompt, ImplementerResponse)
+        if isinstance(response, TurnFailed):
+            self.files.note_implementation_failed(request.round_number, state.retry, response)
+            return response
         updates, _ = await _resolve_skills(self.run, response.skill_context_updates)
         if updates:
             plan.recommended_skills, _ = await _resolve_skills(
@@ -538,7 +469,7 @@ class MultiAgentTurns:
             self.files.write_plan(request.round_number, plan)
         self.files.write_implementer(request.round_number, state.retry, response)
         self.files.note_implementation(request.round_number, state.retry, response)
-        return response, synthesized
+        return response
 
     async def review(
         self,
@@ -591,12 +522,7 @@ class MultiAgentTurns:
         )
         session = await self.run.agents.create_session(JUDGE, workspace=request.workspace)
         try:
-            try:
-                response = await structured_turn(
-                    session, render_judge_prompt(context), JudgeResponse
-                )
-            except StructuredResponseError:
-                response = _fallback_judge()
+            response = await structured_turn(session, render_judge_prompt(context), JudgeResponse)
         finally:
             await session.close()
         if response.verdict is Verdict.PASS and conflict:

@@ -391,6 +391,20 @@
   {
     "agent_kind": null,
     "data": {
+      "detail": null,
+      "kind": "framework_warning",
+      "source": "loop",
+      "source_label": null,
+      "summary": "[single-agent] attempt 1 returned no valid response (agent turn timed out after <DURATION>); retrying"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "framework_warning"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
@@ -434,7 +448,7 @@
       "provider": "fake",
       "stage": "implementer",
       "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
-      "user_prompt": "<text len=6707 sha256=3a1c16ad57040e67>"
+      "user_prompt": "<text len=6735 sha256=9f9cf450d9451800>"
     },
     "round_label": "implementer-session-turn-2",
     "status": "active",
@@ -458,7 +472,7 @@
     "data": {
       "kind": "invocation_started",
       "system_prompt": "You implement one optimization plan end-to-end, check correctness, and self-review the result. Work only in the assigned workspace and return only the requested structured response.",
-      "user_prompt": "<text len=6707 sha256=3a1c16ad57040e67>"
+      "user_prompt": "<text len=6735 sha256=9f9cf450d9451800>"
     },
     "round_label": "implementer-session-turn-2",
     "status": "active",

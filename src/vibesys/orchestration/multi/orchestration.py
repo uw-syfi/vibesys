@@ -39,6 +39,7 @@ from vibesys.orchestration.profile_focus import (
     ProfileFocusState,
 )
 from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import TurnFailed
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkObjective,
@@ -391,14 +392,16 @@ class _MultiRun:
             attempt.official_reason = None
             attempt.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
             await self._mark_paid(selected, retry)
-            response, synthesized = await self.turns.implement(selected.request, attempt)
-            attempt.implementation = response
-            if synthesized:
+            response = await self.turns.implement(selected.request, attempt)
+            if isinstance(response, TurnFailed):
+                attempt.implementation = None
                 attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
                 self.run.observations.warning(
-                    f"[implementer] attempt {retry} returned no parseable response; retrying"
+                    f"[implementer] attempt {retry} returned no valid response "
+                    f"({response.reason}); retrying"
                 )
                 continue
+            attempt.implementation = response
             decision = await self._review(selected)
             if decision is AttemptDecision.FINISH:
                 break

@@ -8,6 +8,8 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (
@@ -205,6 +207,34 @@ def test_malformed_implementer_response_after_correction_retries_before_judge(
     state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     assert state.search.rounds[0].attempts == 2
+
+
+def test_judge_reply_invalid_after_correction_ends_the_run_without_a_verdict(
+    tmp_path: Path,
+) -> None:
+    script = _Script(
+        _pre_round(),
+        _plan(),
+        _implementation(),
+        StructuredResponseError(JUDGE.id, JudgeResponse, detail="verdict: Field required"),
+        StructuredResponseError(JUDGE.id, JudgeResponse, detail="verdict: Field required"),
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            await PLUGIN.orchestrate(run, _options())
+        finally:
+            await run.close()
+
+    with pytest.raises(StructuredResponseError, match="verdict: Field required"):
+        asyncio.run(scenario())
+    assert [call[0] for call in script.calls][-2:] == [JUDGE.id, JUDGE.id]
 
 
 def test_explicit_plugin_pass_trajectory_matches_golden(tmp_path: Path) -> None:

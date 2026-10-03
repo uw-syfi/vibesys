@@ -376,6 +376,20 @@
   {
     "agent_kind": null,
     "data": {
+      "detail": null,
+      "kind": "framework_warning",
+      "source": "loop",
+      "source_label": null,
+      "summary": "[single-agent] attempt 1 returned no valid response (agent turn timed out after <DURATION>); retrying"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "framework_warning"
+  },
+  {
+    "agent_kind": null,
+    "data": {
       "baseline": null,
       "commit": null,
       "excluded_paths": [],
@@ -407,14 +421,14 @@
     "agent_kind": null,
     "data": {
       "attempts": 1,
-      "judge_verdict": "fail",
+      "judge_verdict": "skipped",
       "kind": "round_finished",
       "perf_metric": null,
       "perf_unit": null,
       "profile_skipped": true
     },
     "round_label": "round-1",
-    "status": "failed",
+    "status": "completed",
     "text": "",
     "type": "round_finished"
   },

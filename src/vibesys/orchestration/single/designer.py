@@ -15,7 +15,7 @@ from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest, StructuredResponseError
+from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis import HypothesisSearch, HypothesisState
@@ -37,16 +37,6 @@ class DesignerPlanRequest:
         if self.round_number < 1:
             message = "designer round_number must be positive"
             raise ValueError(message)
-
-
-def _fallback_plan() -> OrchestratorPlan:
-    return OrchestratorPlan.model_validate(
-        {
-            "task": "Re-check minimal server boots and /health returns 200.",
-            "pass_criteria": "/health returns 200.",
-            "reasoning": "fallback: orchestrator produced no structured response",
-        }
-    )
 
 
 def _validate_plan(
@@ -116,12 +106,7 @@ async def request_plan(
         writable_paths=(request.context.roadmap_location,),
     )
     try:
-        try:
-            plan = await structured_turn(
-                session, render_plan_prompt(request.context), OrchestratorPlan
-            )
-        except StructuredResponseError:
-            plan = _fallback_plan()
+        plan = await structured_turn(session, render_plan_prompt(request.context), OrchestratorPlan)
         for attempt in range(2):
             plan.hypothesis_id = (
                 plan.hypothesis_id.strip() or f"hypothesis-{request.round_number:04d}"
@@ -135,12 +120,9 @@ async def request_plan(
                 run.observations.warning(
                     f"[orchestrator] plan rejected ({error}); reprompting once"
                 )
-                try:
-                    plan = await structured_turn(
-                        session, _correction_message(plan, error), OrchestratorPlan
-                    )
-                except StructuredResponseError:
-                    plan = _fallback_plan()
+                plan = await structured_turn(
+                    session, _correction_message(plan, error), OrchestratorPlan
+                )
                 continue
             await _resolve_recommendations(run, plan)
             return plan

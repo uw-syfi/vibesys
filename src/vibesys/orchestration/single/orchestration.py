@@ -16,6 +16,8 @@ from vibesys.orchestration.hypothesis import (
     HypothesisConfig,
     HypothesisSearch,
     JudgeReviewed,
+    JudgeSkipped,
+    JudgeSkipReason,
     NewHypothesis,
     PerformanceProjection,
     RecordInput,
@@ -48,6 +50,7 @@ from vibesys.orchestration.single.models import (
     SingleOptions,
     SingleState,
 )
+from vibesys.orchestration.structured_turn import TurnFailed
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
@@ -328,6 +331,19 @@ class _SingleRun:
                 )
             )
             self.files.write_plan(self.round_number, selected.plan)
+            if isinstance(response, TurnFailed):
+                selected.attempt.single_agent_response = None
+                selected.attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
+                self.files.note_turn_failed(self.round_number, retry, response)
+                feedback = f"framework: the previous attempt returned no valid response ({response.reason})"
+                selected.attempt.feedback = feedback
+                selected.hypothesis.feedback = feedback
+                await self._checkpoint_hypothesis(selected)
+                self.run.observations.warning(
+                    f"[single-agent] attempt {retry} returned no valid response "
+                    f"({response.reason}); retrying"
+                )
+                continue
             selected.attempt.single_agent_response = response
             selected.attempt.judge = JudgeReviewed(response.verdict.value)
             self.files.note_response(self.round_number, retry, response)

@@ -5,9 +5,8 @@
 - pass criteria: throughput improves without regressing accuracy
 
 ## Round 1: Single-agent attempt 1
-- verdict: fail
-- summary: Single-agent invocation timed out.
-- feedback: Inspect retained evidence and return a schema-valid response on retry.
+- verdict: no valid response
+- reason: agent turn timed out after <DURATION>
 
 ## Round 1: Single-agent attempt 2
 - verdict: pass

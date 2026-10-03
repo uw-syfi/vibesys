@@ -232,21 +232,39 @@ def test_an_unparseable_plan_is_corrected_in_the_same_conversation() -> None:
     assert run.agents.sessions[0].closed
 
 
-def test_unparseable_plan_uses_policy_fallback() -> None:
+def _run_failing(script: _Script, *, round_number: int) -> tuple[StructuredResponseError, FakeRun]:
+    async def scenario() -> tuple[StructuredResponseError, FakeRun]:
+        run = FakeRun(PLUGIN, project_root=Path("/candidate"), responder=script.respond)
+        request = DesignerPlanRequest(
+            round_number=round_number,
+            state=HypothesisState(),
+            context=_context(),
+            workspace=run.workspaces.root,
+        )
+        try:
+            with pytest.raises(StructuredResponseError) as raised:
+                await request_plan(run, _search(), request)
+            return raised.value, run
+        finally:
+            await run.close()
+
+    return asyncio.run(scenario())
+
+
+def test_unparseable_plan_ends_the_run_without_fabricating_one() -> None:
     script = _Script(
         StructuredResponseError("orchestrator", OrchestratorPlan),
         StructuredResponseError("orchestrator", OrchestratorPlan),
     )
 
-    plan, run = _run(script, round_number=3)
+    error, run = _run_failing(script, round_number=3)
 
-    assert plan.hypothesis_id == "hypothesis-0003"
-    assert "fallback" in plan.reasoning
+    assert "OrchestratorPlan" in str(error)
     assert len(script.calls) == 2
     assert run.agents.sessions[0].closed
 
 
-def test_unparseable_correction_uses_policy_fallback() -> None:
+def test_unparseable_correction_ends_the_run_without_fabricating_a_plan() -> None:
     script = _Script(
         _plan(
             "H-01",
@@ -260,9 +278,7 @@ def test_unparseable_correction_uses_policy_fallback() -> None:
         StructuredResponseError("orchestrator", OrchestratorPlan),
     )
 
-    plan, run = _run(script, round_number=2)
+    _error, run = _run_failing(script, round_number=2)
 
-    assert plan.hypothesis_id == "hypothesis-0002"
-    assert "fallback" in plan.reasoning
     assert [len(history) for history, _message, _type in script.calls] == [0, 1, 1]
     assert run.agents.sessions[0].closed

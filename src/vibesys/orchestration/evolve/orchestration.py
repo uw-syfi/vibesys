@@ -32,14 +32,17 @@ from vibesys.orchestration.evolve.population import (
 from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
 from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
 from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.orchestration.structured_turn import (
+    TurnFailed,
+    attempt_structured_turn,
+    structured_turn,
+)
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
     MetricDirection,
     Run,
     RunStatus,
-    StructuredResponseError,
     Workspace,
 )
 
@@ -111,32 +114,6 @@ async def _open_sessions(run: Run, workspace: Workspace) -> _Sessions:
         else None
     )
     return _Sessions(mutator=mutator, judge=judge, profiler=profiler)
-
-
-def _fallback_mutator() -> MutatorResponse:
-    return MutatorResponse(
-        summary="Mutator produced no structured response.",
-        hypothesis="unknown",
-        expected_behavior="unknown",
-    )
-
-
-def _fallback_judge() -> JudgeResponse:
-    return JudgeResponse(
-        analysis="Judge produced no structured response.",
-        feedback="No structured response received.",
-        verdict=Verdict.FAIL,
-    )
-
-
-def _fallback_profiler() -> ProfilerSummary:
-    return ProfilerSummary(
-        analysis="Profiler produced no structured response.",
-        bottlenecks="n/a",
-        suggestions="n/a",
-        perf_metric=None,
-        perf_unit=None,
-    )
 
 
 class _EvolveRun:
@@ -415,7 +392,11 @@ class _EvolveRun:
             cold_start=task.cold_start,
             repair_seed=task.repair_seed,
         )
+        if isinstance(mutation, TurnFailed):
+            return self._failed_turn("mutator", mutation, task)
         verdict = await self._judge(sessions.judge)
+        if isinstance(verdict, TurnFailed):
+            return self._failed_turn("judge", verdict, task, summary=mutation.summary)
         feedback = verdict.feedback if verdict.verdict is Verdict.FAIL else None
         benchmark = None
         if feedback is None:
@@ -454,6 +435,21 @@ class _EvolveRun:
             code=code,
         )
 
+    @staticmethod
+    def _failed_turn(
+        role: str, failure: TurnFailed, task: _CandidateTask, *, summary: str = ""
+    ) -> CandidateOutcome:
+        """Record a candidate whose agent turn returned no valid response as failed."""
+        return CandidateOutcome(
+            passed=False,
+            parent_id=task.parent.id if task.parent is not None else None,
+            inspiration_ids=tuple(item.id for item in task.inspirations),
+            summary=summary,
+            feedback=f"framework: the {role} returned no valid response ({failure.reason})",
+            policy_parent_id=task.policy_parent_id,
+            target_island=task.target_island,
+        )
+
     async def _mutate(
         self,
         session: AgentSession,
@@ -462,7 +458,7 @@ class _EvolveRun:
         inspirations: tuple[Individual, ...],
         cold_start: bool,
         repair_seed: bool,
-    ) -> MutatorResponse:
+    ) -> MutatorResponse | TurnFailed:
         context = MutatorContext(
             accuracy_command=self.run.facts.accuracy_command,
             benchmark_command=self.run.facts.benchmark_command,
@@ -482,12 +478,9 @@ class _EvolveRun:
             repair_seed=repair_seed,
             runtime_notes=self.run.facts.environment_notes,
         )
-        try:
-            return await structured_turn(session, render_mutator(context), MutatorResponse)
-        except StructuredResponseError:
-            return _fallback_mutator()
+        return await attempt_structured_turn(session, render_mutator(context), MutatorResponse)
 
-    async def _judge(self, session: AgentSession) -> JudgeResponse:
+    async def _judge(self, session: AgentSession) -> JudgeResponse | TurnFailed:
         context = CandidateJudgeContext(
             accuracy_command=self.run.facts.accuracy_command,
             benchmark_command=self.run.facts.benchmark_command,
@@ -500,10 +493,7 @@ class _EvolveRun:
             pass_criteria=_CANDIDATE_REQUIREMENTS,
             runtime_notes=self.run.facts.environment_notes,
         )
-        try:
-            return await structured_turn(session, render_judge(context), JudgeResponse)
-        except StructuredResponseError:
-            return _fallback_judge()
+        return await attempt_structured_turn(session, render_judge(context), JudgeResponse)
 
     async def _profile(self, session: AgentSession | None) -> ProfilerSummary | None:
         kind = ProfilerKind(self.run.facts.profiler_id)
@@ -530,8 +520,6 @@ class _EvolveRun:
             return await structured_turn(
                 session, render_profiler(kind.value, context), ProfilerSummary
             )
-        except StructuredResponseError:
-            return _fallback_profiler()
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-920437 [BLE001]; profiling is advisory and provider failures are not normalized to one stable runtime exception yet; restricting this catch would make an optional profile abort accepted candidates.
             self.run.observations.warning(f"profiler failed: {error}")
             return None

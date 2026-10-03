@@ -18,7 +18,7 @@ Reuse a matching framework validation PASS when its declared inputs are unchange
 
 New retry feedback:
 
-Inspect retained evidence and return a schema-valid response on retry.
+framework: the previous attempt returned no valid response (agent turn timed out after <DURATION>)
 
 Address affected source/evidence and invariants without repeating unrelated
 expensive work.

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.hypothesis import OrchestratorPlan
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
+    from vibesys.orchestration.structured_turn import TurnFailed
 
 
 def _location(path: Path, workspace: Path, *, directory: bool = False) -> str:
@@ -124,6 +125,14 @@ class SingleFiles:
             f"- verdict: {response.verdict.value}\n"
             f"- summary: {response.summary}\n"
             f"- feedback: {response.feedback or '(none)'}\n",
+        )
+
+    def note_turn_failed(self, round_number: int, retry: int, failure: TurnFailed) -> None:
+        """Append one attempt whose agent returned no valid response."""
+        self._append(
+            round_number,
+            f"Single-agent attempt {retry}",
+            f"- verdict: no valid response\n- reason: {failure.reason}\n",
         )
 
     def note_evaluation(self, round_number: int, retry: int, detail: str) -> None:

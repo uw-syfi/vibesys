@@ -149,8 +149,9 @@ same schema. The conversation is kept, by the driver and by `AgentClient`,
 which does not evict the session for this error, so a correction sent as the
 next turn continues the work. vs-runtime raises it to plugins as
 `StructuredResponseError` with the same `.detail`, the error an unparseable
-reply raises, so every plugin's existing handling of invalid output (a
-correction turn or a fallback) applies unchanged. Codex never fails this way:
+reply raises, so every plugin handles it the same way: one correction turn,
+then a recorded failed attempt or the end of the run. No plugin fabricates a
+response in its place. Codex never fails this way:
 it constrains decoding to the schema.
 
 ### Retired after a turn, or replaced during one

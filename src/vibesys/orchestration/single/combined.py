@@ -13,14 +13,8 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
 )
 from vibesys.orchestration.single.prompts import render_single_agent_prompt
-from vibesys.orchestration.structured_turn import structured_turn
-from vs_runtime.api import (
-    AgentTurnTimeoutError,
-    Run,
-    SkillCatalogError,
-    SkillResourceRequest,
-    StructuredResponseError,
-)
+from vibesys.orchestration.structured_turn import TurnFailed, attempt_structured_turn
+from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
@@ -50,35 +44,6 @@ class CombinedTurnRequest:
         if not self.plan.hypothesis_id.strip():
             message = "combined plan requires a hypothesis_id"
             raise ValueError(message)
-
-
-def _fallback_response() -> SingleAgentRoundResponse:
-    return SingleAgentRoundResponse(
-        summary="Single-agent produced no structured response.",
-        expected_behavior="unknown",
-        self_review="No structured response received.",
-        feedback="No structured response received.",
-        verdict=Verdict.FAIL,
-        bottlenecks="",
-        suggestions="",
-        profile_analysis="",
-    )
-
-
-def _timeout_response(timeout_seconds: float) -> SingleAgentRoundResponse:
-    return SingleAgentRoundResponse(
-        summary="Single-agent invocation timed out.",
-        expected_behavior="unknown",
-        self_review=(
-            f"The framework stopped the agent after {timeout_seconds:g} seconds "
-            "without a structured response."
-        ),
-        feedback="Inspect retained evidence and return a schema-valid response on retry.",
-        verdict=Verdict.FAIL,
-        bottlenecks="",
-        suggestions="",
-        profile_analysis="",
-    )
 
 
 async def _resolve_skills(
@@ -123,8 +88,11 @@ class SingleAgentWorker:
         self._sessions: dict[str, AgentSession] = {}
         self._closed = False
 
-    async def turn(self, request: CombinedTurnRequest) -> SingleAgentRoundResponse:
+    async def turn(self, request: CombinedTurnRequest) -> SingleAgentRoundResponse | TurnFailed:
         """Return one response, preserving conversation across retries.
+
+        A reply that stays invalid after its correction, or a timed-out turn,
+        returns :class:`TurnFailed`; the caller records it as a failed attempt.
 
         Mutates the supplied plan's resolved skill recommendations. The caller
         owns subsequent artifact persistence and state transitions.
@@ -145,14 +113,11 @@ class SingleAgentWorker:
         elif session.workspace != request.workspace:
             message = f"hypothesis {plan.hypothesis_id!r} changed workspace"
             raise ValueError(message)
-        try:
-            response = await structured_turn(
-                session, render_single_agent_prompt(request.context), SingleAgentRoundResponse
-            )
-        except StructuredResponseError:
-            response = _fallback_response()
-        except AgentTurnTimeoutError as error:
-            response = _timeout_response(error.timeout_seconds)
+        response = await attempt_structured_turn(
+            session, render_single_agent_prompt(request.context), SingleAgentRoundResponse
+        )
+        if isinstance(response, TurnFailed):
+            return response
         response.skill_context_updates = await _resolve_skills(
             self._run, response.skill_context_updates
         )

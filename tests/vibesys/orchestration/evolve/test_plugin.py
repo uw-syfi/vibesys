@@ -23,6 +23,7 @@ from vs_runtime.api import (
     RunFacts,
     RunStatus,
     RuntimeContractError,
+    StructuredResponseError,
 )
 from vs_runtime.api.testing import FakeRun
 
@@ -249,6 +250,42 @@ def test_judge_failure_skips_trusted_evaluation(tmp_path: Path) -> None:
         await run.close()
 
     asyncio.run(scenario())
+
+
+def test_mutator_reply_invalid_after_correction_records_a_failed_candidate(
+    tmp_path: Path,
+) -> None:
+    roles: list[str] = []
+
+    def invalid_mutator(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        roles.append(role.id)
+        if role.id == "implementer":
+            assert response is not None
+            raise StructuredResponseError(role.id, response, detail="hypothesis: Field required")
+        return _passing_responder(role, history, message, response)
+
+    async def scenario() -> None:
+        run = FakeRun(PLUGIN, project_root=tmp_path, responder=invalid_mutator)
+        status = await PLUGIN.orchestrate(run, _options())
+
+        assert status is RunStatus.FAILED
+        assert run.evaluation.accuracy_calls == []
+        state = await run.state.load(EvolveState)
+        assert state is not None
+        [individual] = state.population.individuals
+        assert individual.passed is False
+        assert individual.feedback is not None
+        assert individual.feedback.startswith("framework: the mutator returned no valid response")
+        assert "hypothesis: Field required" in individual.feedback
+        await run.close()
+
+    asyncio.run(scenario())
+    assert roles == ["implementer", "implementer"]
 
 
 def test_trusted_accuracy_rejects_candidate_after_judge_passes(tmp_path: Path) -> None:
