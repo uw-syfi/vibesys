@@ -198,6 +198,78 @@ def test_options_and_portfolios_are_strict() -> None:
         DynamicState.model_validate({"profiler": []})
 
 
+def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
+    tmp_path: Path,
+) -> None:
+    """A blocked attempt costs no judge turn, and its unchanged task is refused.
+
+    Re-dispatching the task that blocked an implementer repeats the failure;
+    the planner must change the task to remove the blocker (or drop it).
+    """
+    blocked = {
+        "summary": "Blocked: `reference/model.py` is read-only.",
+        "outcome": "blocked",
+        "evidence": [],
+    }
+    changed = _portfolio("kernel", continue_hypothesis=True)
+    changed["workstreams"][0]["task"] = "Build the fast path in `engine/` instead."
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("kernel"),
+                _portfolio("kernel", continue_hypothesis=True),
+                changed,
+            ],
+            IMPLEMENTER.id: [blocked, _implementation("kernel")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+            supports_parallel_candidates=True,
+        )
+        run.evaluation.script_benchmark(
+            _INPUT_BASELINE,
+            BenchmarkEvaluation(
+                executed=True,
+                metric_name="throughput",
+                metric_value=12.0,
+                metric_direction=MetricDirection.MAXIMIZE,
+                row={"throughput": 12.0},
+            ),
+        )
+        assert await PLUGIN.orchestrate(run, _options(max_rounds=2, judge_every=1)) is (
+            RunStatus.SUCCEEDED
+        )
+        return run
+
+    asyncio.run(scenario())
+    roles = [role for role, _, _ in script.calls]
+    assert roles == [
+        ORCHESTRATOR.id,
+        IMPLEMENTER.id,
+        ORCHESTRATOR.id,
+        ORCHESTRATOR.id,
+        IMPLEMENTER.id,
+        JUDGE.id,
+    ]
+    correction = script.calls[3][2]
+    assert "Correction required" in correction
+    assert "was blocked" in correction
+    assert "Build the fast path in `engine/` instead." in script.calls[4][2]
+
+
 def test_profiler_role_is_read_only_resumable_and_evaluation_enabled() -> None:
     assert PROFILER in PLUGIN.agents
     assert PROFILER.workspace_access.value == "read_only"
