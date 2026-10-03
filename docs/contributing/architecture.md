@@ -168,6 +168,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.hypothesis.readmodel
     vibesys.orchestration.dynamic --> vibesys.metrics
     vibesys.orchestration.dynamic --> vibesys.orchestration.agent_options
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.resume
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
@@ -428,6 +429,7 @@ graph TD
     vibesys.api.testing --> vibesys.plugin_catalog
     vibesys.api.testing --> vibesys.run.contracts
     vibesys.api.testing --> vs_agent
+    vibesys.api.testing --> vs_runtime
     vibesys.api.testing --> vs_sandbox
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
@@ -450,6 +452,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.hypothesis.readmodel
     vibesys.orchestration.dynamic --> vibesys.metrics
     vibesys.orchestration.dynamic --> vibesys.orchestration.agent_options
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.resume
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
@@ -626,7 +629,6 @@ graph TD
     vs_async_ops.testing --> vs_async_ops.models
     vs_evaluation.agent_evidence --> vs_evaluator_protocol
     vs_evaluation.agent_mcp --> vs_agent
-    vs_evaluation.agent_mcp --> vs_evaluation.agent_evidence
     vs_evaluation.agent_mcp --> vs_evaluation.agent_models
     vs_evaluation.agent_mcp --> vs_evaluation.profiler_models
     vs_evaluation.agent_models --> vs_evaluation.agent_evidence

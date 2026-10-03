@@ -13,6 +13,7 @@ constructed response objects, and this module never runs an external agent.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, TypeVar
@@ -176,6 +177,7 @@ class FakeAgentClient:
 
         self._closed = False
         self.cancel_count = 0
+        self._cancelled = threading.Event()
 
     # -- AgentClientProtocol: attribution ---------------------------------
 
@@ -220,8 +222,18 @@ class FakeAgentClient:
         self._closed = True
 
     def cancel(self) -> None:
-        """Record a cancellation request; the in-memory fake has no process."""
+        """Record a cancellation request and release turns waiting for one."""
         self.cancel_count += 1
+        self._cancelled.set()
+
+    def wait_cancelled(self, timeout: float) -> bool:
+        """Block until :meth:`cancel` is called; return whether it was.
+
+        A scripted response calls this to model a long provider turn that
+        only a cancellation ends, as the production client's process kill
+        does. *timeout* is a deadlock guard, not a verdict.
+        """
+        return self._cancelled.wait(timeout)
 
     # -- configuration (each returns self for chaining) --------------------
 

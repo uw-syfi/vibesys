@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import pytest
 from hypothesis import given, settings
@@ -113,6 +113,49 @@ def test_generated_replies_satisfy_the_declared_schema(seed: int, *, bold: bool)
     assert isinstance(reply, _Reply)
     with pytest.raises(ValidationError):
         _Reply.model_validate(generator.invalid(_Reply))
+
+
+_SEEN_ID = "0123456789abcdef" * 4
+
+
+class _Report(BaseModel):
+    """A report whose cross-field rule the schema does not state."""
+
+    model_config = ConfigDict(extra="forbid")
+    outcome: Literal["observed", "unsupported"]
+    evidence_ids: tuple[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], ...] = Field(
+        default=(), max_length=4
+    )
+    reason: str | None = None
+
+    def model_post_init(self, __context: object) -> None:
+        if (self.outcome == "observed") == (not self.evidence_ids):
+            message = "observed cites evidence; unsupported cites none"
+            raise ValueError(message)
+        if (self.outcome == "unsupported") != (self.reason is not None):
+            message = "unsupported needs its reason"
+            raise ValueError(message)
+
+
+@given(seed=st.integers(0, 2**32))
+def test_a_careful_reply_cites_only_identifiers_it_has_seen(seed: int) -> None:
+    """A generated observed report could not cite evidence, so every one was rejected."""
+    generator = ReplyGenerator(FaultPlan(seed=seed).rng("t"), ("H1", _SEEN_ID))
+
+    reply = generator.valid(_Report)
+
+    if reply is not None:
+        assert set(reply.evidence_ids) <= {_SEEN_ID}
+
+
+def test_careful_replies_reach_every_outcome_a_cross_field_rule_allows() -> None:
+    outcomes = {
+        reply.outcome
+        for seed in range(64)
+        if (reply := ReplyGenerator(FaultPlan(seed=seed).rng("t"), (_SEEN_ID,)).valid(_Report))
+    }
+
+    assert outcomes == {"observed", "unsupported"}
 
 
 def test_generated_replies_are_reproducible_from_the_seed() -> None:

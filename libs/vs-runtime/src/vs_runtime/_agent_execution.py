@@ -460,6 +460,9 @@ class RuntimeAgentExecution:
         try:
             return await asyncio.shield(turn)
         except asyncio.CancelledError as cancelled:
+            # Stop the provider turn instead of waiting out its own timeout:
+            # the worker thread ends only when the turn does.
+            self._client.cancel()
             await _wait_until_done(turn)
             if error := turn.exception():
                 cancelled.add_note(f"canceled agent turn also failed: {error}")

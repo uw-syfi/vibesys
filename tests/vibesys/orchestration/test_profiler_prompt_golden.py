@@ -20,7 +20,9 @@ _SNAPSHOT = Path(__file__).with_name("fixtures") / "profiler_prompts" / "turn.tx
 
 def _first_prompt() -> str:
     role = AgentRole(id="profiler", system_prompt="Investigate performance.")
-    result = ProfilerAgentResult(outcome=ProfilerResultOutcome.OBSERVED, narrative="Observed.")
+    result = ProfilerAgentResult(
+        outcome=ProfilerResultOutcome.OBSERVED, narrative="Observed.", evidence_ids=("a" * 64,)
+    )
     agents = FakeAgentSessions(
         (role,),
         responder=lambda *_: result.model_dump(),

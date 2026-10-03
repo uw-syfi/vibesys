@@ -52,6 +52,7 @@ async def test_runtime_profiler_reuses_conversation_on_requested_snapshots() -> 
     response = ProfilerAgentResult(
         outcome=ProfilerResultOutcome.OBSERVED,
         narrative="The kernel launch path dominates.",
+        evidence_ids=("a" * 64,),
     )
 
     def respond(

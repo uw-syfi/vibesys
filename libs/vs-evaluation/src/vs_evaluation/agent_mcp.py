@@ -6,16 +6,16 @@ import json
 import os
 import socket
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vs_agent.api import ToolServerDescriptor, ToolSpec, expose_as_tools, serve_stdio
-from vs_evaluation.agent_evidence import EvidenceKind
 from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
     AgentEvaluationReply,
     AvailabilityCall,
+    AwaitArgs,
     AwaitCall,
     AwaitProfilerCall,
     CancelCall,
@@ -24,6 +24,8 @@ from vs_evaluation.agent_models import (
     EvaluationAgentRole,
     EvaluationGrant,
     EvidenceCall,
+    EvidenceKindsArgs,
+    HandleArgs,
     ProfilerOperationsCall,
     ProfilerStatusCall,
     RunOperationsCall,
@@ -33,9 +35,16 @@ from vs_evaluation.agent_models import (
     SubmitCall,
 )
 from vs_evaluation.profiler_models import (
-    MAX_PROFILER_REQUEST_CHARS,
-    ProfilerWorkKey,
+    AWAIT_CAP_TEXT,
+    AgentToolArgs,
+    AwaitProfilerArgs,
+    DispatchProfilerArgs,
+    NoArgs,
+    ProfilerHandleArgs,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _REPLY = TypeAdapter(SocketReply)
 _TOOL_REPLY = TypeAdapter(AgentEvaluationReply)
@@ -81,82 +90,14 @@ class EvaluationServiceClientError(RuntimeError):
         """Build the fixed incomplete-frame violation."""
         return cls("evaluation service closed without a complete reply")
 
-
-class _Kinds(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    evidence_kinds: tuple[EvidenceKind, ...] = Field(
-        default=(),
-        description="Requested semantic evidence kinds. Empty means every kind granted to this role.",
-    )
-
-
-class _Handle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    handle_id: str = Field(description="Opaque handle returned by submit_evaluation.")
-
-
-_AWAIT_CAP_TEXT = (
-    f"Each call waits at most {MAX_AGENT_AWAIT_S:.0f} s; a larger timeout_s waits "
-    f"{MAX_AGENT_AWAIT_S:.0f} s."
-)
-
-
-def _capped_await_s(timeout_s: float) -> float:
-    """Clamp an agent's requested wait to the per-call cap the host enforces."""
-    return min(timeout_s, MAX_AGENT_AWAIT_S)
-
-
-class _Await(_Handle):
-    timeout_s: FiniteFloat = Field(
-        gt=0,
-        description=(
-            "Maximum seconds to block. Returning before completion leaves the evaluation "
-            "running. " + _AWAIT_CAP_TEXT
-        ),
-    )
-
-
-class _DispatchProfiler(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    work: ProfilerWorkKey = Field(
-        description=(
-            "Semantic purpose and exact focus of this work. Reuse occurs only for an exact match."
+    @classmethod
+    def invalid(cls, error: ValidationError) -> EvaluationServiceClientError:
+        """Build the error for arguments the wire call model rejects."""
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc']) or 'arguments'}: {item['msg']}"
+            for item in error.errors(include_url=False, include_input=False)
         )
-    )
-    request: str = Field(
-        min_length=1,
-        max_length=MAX_PROFILER_REQUEST_CHARS,
-        description="Natural-language profiling or measurement request.",
-    )
-    session_id: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Omit to start a conversation; provide an earlier session ID to resume it.",
-    )
-    idempotency_key: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=128,
-        description="Optional retry key. Reusing it returns the original operation.",
-    )
-
-
-class _ProfilerOperations(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class _ProfilerHandle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    operation_id: str = Field(description="Opaque operation ID returned by dispatch_profiler.")
-
-
-class _AwaitProfiler(_ProfilerHandle):
-    timeout_s: FiniteFloat = Field(
-        gt=0,
-        description=(
-            "Maximum seconds to wait. Timeout leaves the profiler turn running. " + _AWAIT_CAP_TEXT
-        ),
-    )
+        return cls(f"invalid arguments: {problems}")
 
 
 class _SocketClient:
@@ -202,6 +143,50 @@ def _read_line(client: socket.socket) -> bytes:
     return line
 
 
+def _socket_wait_s(args: AwaitArgs | AwaitProfilerArgs) -> float:
+    """Socket deadline for an await: the service's cap on the wait, plus slack."""
+    return min(args.timeout_s, MAX_AGENT_AWAIT_S) + 5.0
+
+
+class _Offer:
+    """Build tools whose input schema is the agent-supplied part of a wire call."""
+
+    def __init__(self, client: _SocketClient, token: str) -> None:
+        self._client = client
+        self._token = token
+
+    def tool[A: AgentToolArgs](
+        self,
+        name: str,
+        description: str,
+        args: type[A],
+        call: type[A],
+        socket_wait_s: Callable[[A], float] | None = None,
+    ) -> ToolSpec[A]:
+        """Offer *call*'s agent-supplied fields, *args*, as the tool *name*.
+
+        *call* subclasses *args* and adds only the host-held ``action`` and
+        ``token``, so the schema the agent is offered and the model the
+        service validates are one definition. A value the wire model still
+        rejects is a typed tool error.
+        """
+        if not issubclass(call, args):
+            message = f"{call.__name__} does not extend the tool arguments {args.__name__}"
+            raise TypeError(message)
+        client, token = self._client, self._token
+
+        def handler(values: A) -> str:
+            try:
+                request = call.model_validate({**values.model_dump(), "token": token})
+            except ValidationError as error:
+                raise EvaluationServiceClientError.invalid(error) from error
+            if socket_wait_s is None:
+                return client.call(request)
+            return client.call(request, timeout_s=socket_wait_s(values))
+
+        return ToolSpec(name=name, description=description, input_schema=args, handler=handler)
+
+
 def build_evaluation_tools(
     *,
     socket_path: Path,
@@ -211,21 +196,19 @@ def build_evaluation_tools(
     run_observer: bool = False,
 ) -> tuple[ToolSpec[Any], ...]:
     """Build only the tools granted to *role*; the host rechecks every call."""
-    client = _SocketClient(socket_path)
+    offer = _Offer(_SocketClient(socket_path), token)
     tools: list[ToolSpec[Any]] = []
     if run_observer:
         tools.append(
-            ToolSpec(
-                name="trusted_operations",
-                description=(
-                    "List recent host-owned evaluation and profiler operations across the run, "
-                    "including hypothesis principal, candidate identity, lifecycle, original "
-                    "profiler request, whether every stage recorded trusted evidence, and "
-                    "each recorded stage's outcome (passed, failed, or observed) with its "
-                    "metrics. Recorded evidence is not a pass: read the stage outcomes."
-                ),
-                input_schema=_ProfilerOperations,
-                handler=lambda _args: client.call(RunOperationsCall(token=token)),
+            offer.tool(
+                "trusted_operations",
+                "List recent host-owned evaluation and profiler operations across the run, "
+                "including hypothesis principal, candidate identity, lifecycle, original "
+                "profiler request, whether every stage recorded trusted evidence, and "
+                "each recorded stage's outcome (passed, failed, or observed) with its "
+                "metrics. Recorded evidence is not a pass: read the stage outcomes.",
+                NoArgs,
+                RunOperationsCall,
             )
         )
     if role in {
@@ -236,24 +219,20 @@ def build_evaluation_tools(
         EvaluationAgentRole.RUN_OBSERVER,
     }:
         tools.append(
-            ToolSpec(
-                name="evaluation_availability",
-                description=(
-                    "Return normalized capacity and queue estimates for semantic evidence, "
-                    "including observable kinds this role may not submit."
-                    if role
-                    in {
-                        EvaluationAgentRole.ORCHESTRATOR,
-                        EvaluationAgentRole.PORTFOLIO_DISPATCH,
-                        EvaluationAgentRole.RUN_OBSERVER,
-                    }
-                    or (role is EvaluationAgentRole.IMPLEMENTER and profiler_available)
-                    else "Return normalized capacity and queue estimates for semantic evidence."
-                ),
-                input_schema=_Kinds,
-                handler=lambda args: client.call(
-                    AvailabilityCall(token=token, evidence_kinds=args.evidence_kinds)
-                ),
+            offer.tool(
+                "evaluation_availability",
+                "Return normalized capacity and queue estimates for semantic evidence, "
+                "including observable kinds this role may not submit."
+                if role
+                in {
+                    EvaluationAgentRole.ORCHESTRATOR,
+                    EvaluationAgentRole.PORTFOLIO_DISPATCH,
+                    EvaluationAgentRole.RUN_OBSERVER,
+                }
+                or (role is EvaluationAgentRole.IMPLEMENTER and profiler_available)
+                else "Return normalized capacity and queue estimates for semantic evidence.",
+                EvidenceKindsArgs,
+                AvailabilityCall,
             )
         )
     if role in {
@@ -263,118 +242,81 @@ def build_evaluation_tools(
     }:
         tools.extend(
             (
-                ToolSpec(
-                    name="submit_evaluation",
-                    description=(
-                        "Submit role-authorized semantic evidence collection without blocking; "
-                        "returns an opaque handle."
-                    ),
-                    input_schema=_Kinds,
-                    handler=lambda args: client.call(
-                        SubmitCall(token=token, evidence_kinds=args.evidence_kinds)
-                    ),
+                offer.tool(
+                    "submit_evaluation",
+                    "Submit role-authorized semantic evidence collection without blocking; "
+                    "returns an opaque handle, or kind run_stopping when the run is "
+                    "stopping and nothing was submitted.",
+                    EvidenceKindsArgs,
+                    SubmitCall,
                 ),
-                ToolSpec(
-                    name="evaluation_status",
-                    description="Return the current durable state of an evaluation owned by this agent.",
-                    input_schema=_Handle,
-                    handler=lambda args: client.call(
-                        StatusCall(token=token, handle_id=args.handle_id)
-                    ),
+                offer.tool(
+                    "evaluation_status",
+                    "Return the current durable state of an evaluation owned by this agent.",
+                    HandleArgs,
+                    StatusCall,
                 ),
-                ToolSpec(
-                    name="await_evaluation",
-                    description=(
-                        "Wait at most timeout_s for the evaluation to finish. "
-                        + _AWAIT_CAP_TEXT
-                        + " Before it finishes, the call returns a running result with the "
-                        "progress recorded so far (state, current stage, finished stages) and "
-                        "next_await_s; the evaluation keeps running. Remote evaluations can "
-                        "take many minutes: call again with the same handle to keep waiting."
-                    ),
-                    input_schema=_Await,
-                    handler=lambda args: client.call(
-                        AwaitCall(
-                            token=token,
-                            handle_id=args.handle_id,
-                            timeout_s=_capped_await_s(args.timeout_s),
-                        ),
-                        timeout_s=_capped_await_s(args.timeout_s) + 5.0,
-                    ),
+                offer.tool(
+                    "await_evaluation",
+                    "Wait at most timeout_s for the evaluation to finish. "
+                    + AWAIT_CAP_TEXT
+                    + " Before it finishes, the call returns a running result with the "
+                    "progress recorded so far (state, current stage, finished stages) and "
+                    "next_await_s; the evaluation keeps running. Remote evaluations can "
+                    "take many minutes: call again with the same handle to keep waiting.",
+                    AwaitArgs,
+                    AwaitCall,
+                    _socket_wait_s,
                 ),
-                ToolSpec(
-                    name="cancel_evaluation",
-                    description="Request cancellation of an evaluation owned by this agent.",
-                    input_schema=_Handle,
-                    handler=lambda args: client.call(
-                        CancelCall(token=token, handle_id=args.handle_id)
-                    ),
+                offer.tool(
+                    "cancel_evaluation",
+                    "Request cancellation of an evaluation owned by this agent.",
+                    HandleArgs,
+                    CancelCall,
                 ),
             )
         )
     if role is EvaluationAgentRole.IMPLEMENTER and profiler_available:
         tools.extend(
             (
-                ToolSpec(
-                    name="profiler_operations",
-                    description=(
-                        "List this logical implementer's recent durable profiler turns, "
-                        "including operation and session IDs, original request, exact candidate "
-                        "snapshot, and state. Use profiler_status for a turn's full result."
-                    ),
-                    input_schema=_ProfilerOperations,
-                    handler=lambda _args: client.call(ProfilerOperationsCall(token=token)),
+                offer.tool(
+                    "profiler_operations",
+                    "List this logical implementer's recent durable profiler turns, "
+                    "including operation and session IDs, original request, exact candidate "
+                    "snapshot, and state. Use profiler_status for a turn's full result.",
+                    NoArgs,
+                    ProfilerOperationsCall,
                 ),
-                ToolSpec(
-                    name="dispatch_profiler",
-                    description=(
-                        "Ask a provisioned profiler agent to investigate in natural language. "
-                        "Returns session and operation IDs without waiting. A failed operation "
-                        "is terminal; do not repeat an identical request until its candidate, "
-                        "provision, or diagnosed failure condition changes."
-                    ),
-                    input_schema=_DispatchProfiler,
-                    handler=lambda args: client.call(
-                        DispatchProfilerCall(
-                            token=token,
-                            work=args.work,
-                            request=args.request,
-                            session_id=args.session_id,
-                            idempotency_key=args.idempotency_key,
-                        )
-                    ),
+                offer.tool(
+                    "dispatch_profiler",
+                    "Ask a provisioned profiler agent to investigate in natural language. "
+                    "Returns session and operation IDs without waiting, or kind "
+                    "run_stopping when the run is stopping and nothing was dispatched. "
+                    "A failed operation "
+                    "is terminal; do not repeat an identical request until its candidate, "
+                    "provision, or diagnosed failure condition changes.",
+                    DispatchProfilerArgs,
+                    DispatchProfilerCall,
                 ),
-                ToolSpec(
-                    name="profiler_status",
-                    description="Observe one asynchronous profiler-agent turn.",
-                    input_schema=_ProfilerHandle,
-                    handler=lambda args: client.call(
-                        ProfilerStatusCall(token=token, operation_id=args.operation_id)
-                    ),
+                offer.tool(
+                    "profiler_status",
+                    "Observe one asynchronous profiler-agent turn.",
+                    ProfilerHandleArgs,
+                    ProfilerStatusCall,
                 ),
-                ToolSpec(
-                    name="await_profiler",
-                    description=(
-                        "Wait at most timeout_s for a profiler-agent turn; timeout does not cancel "
-                        "it. " + _AWAIT_CAP_TEXT
-                    ),
-                    input_schema=_AwaitProfiler,
-                    handler=lambda args: client.call(
-                        AwaitProfilerCall(
-                            token=token,
-                            operation_id=args.operation_id,
-                            timeout_s=_capped_await_s(args.timeout_s),
-                        ),
-                        timeout_s=_capped_await_s(args.timeout_s) + 5.0,
-                    ),
+                offer.tool(
+                    "await_profiler",
+                    "Wait at most timeout_s for a profiler-agent turn; timeout does not cancel "
+                    "it. " + AWAIT_CAP_TEXT,
+                    AwaitProfilerArgs,
+                    AwaitProfilerCall,
+                    _socket_wait_s,
                 ),
-                ToolSpec(
-                    name="cancel_profiler",
-                    description="Cancel an obsolete profiler-agent turn.",
-                    input_schema=_ProfilerHandle,
-                    handler=lambda args: client.call(
-                        CancelProfilerCall(token=token, operation_id=args.operation_id)
-                    ),
+                offer.tool(
+                    "cancel_profiler",
+                    "Cancel an obsolete profiler-agent turn.",
+                    ProfilerHandleArgs,
+                    CancelProfilerCall,
                 ),
             )
         )
@@ -385,13 +327,11 @@ def build_evaluation_tools(
         EvaluationAgentRole.ORCHESTRATOR,
     }:
         tools.append(
-            ToolSpec(
-                name="accepted_evidence",
-                description="Read only results accepted by the host trust boundary for this candidate.",
-                input_schema=_Kinds,
-                handler=lambda args: client.call(
-                    EvidenceCall(token=token, evidence_kinds=args.evidence_kinds)
-                ),
+            offer.tool(
+                "accepted_evidence",
+                "Read only results accepted by the host trust boundary for this candidate.",
+                EvidenceKindsArgs,
+                EvidenceCall,
             )
         )
     return tuple(tools)

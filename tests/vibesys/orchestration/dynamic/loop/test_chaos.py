@@ -23,16 +23,18 @@ if TYPE_CHECKING:
 _PR_SEEDS = "0-3,2018,2022"
 
 
-def _seeds() -> list[int]:
+def _seeds() -> list[object]:
     spec = os.environ.get("CHAOS_SEEDS", _PR_SEEDS)
-    seeds: list[int] = []
+    seeds: list[object] = []
     for part in spec.split(","):
         low, _, high = part.partition("-")
-        seeds.extend(range(int(low), int(high or low) + 1))
+        seeds.extend(
+            pytest.param(seed, id=f"seed_{seed}") for seed in range(int(low), int(high or low) + 1)
+        )
     return seeds
 
 
-@pytest.mark.parametrize("seed", _seeds(), ids=lambda seed: f"seed_{seed}")
+@pytest.mark.parametrize("seed", _seeds())
 def test_the_loop_keeps_its_invariants_under_generated_agents_and_faults(
     tmp_path: Path, seed: int
 ) -> None:
@@ -41,15 +43,8 @@ def test_the_loop_keeps_its_invariants_under_generated_agents_and_faults(
     assert chaos.violations == [], chaos.report()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "routed bug: after a stop request the evaluation service still accepts an agent's "
-        "submit_evaluation from a turn that is still running (EVALUATION_AFTER_STOP)"
-    ),
-)
 def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path) -> None:
-    """Seed 4025 stops the run while a profile runs; before the fix it hung there."""
+    """Seed 4025 stops the run while a profile runs and a turn then submits an evaluation."""
     chaos = run_chaos(tmp_path, 4025)
 
     assert chaos.violations == [], chaos.report()

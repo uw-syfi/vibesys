@@ -207,7 +207,7 @@ depends_on = ["vibesys.api.contracts", "vibesys.plugin_builtins", "vibesys.plugi
 
 [[modules]]
 path = "vibesys.api.testing"
-depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_sandbox"]
+depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration"
@@ -235,9 +235,14 @@ layer = "loops"
 depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
+path = "vibesys.orchestration.dynamic.control"
+layer = "loops"
+depends_on = []
+
+[[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -473,7 +478,7 @@ depends_on = ["vs_evaluator_protocol"]
 [[modules]]
 path = "vs_evaluation.agent_mcp"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
+depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
 
 [[modules]]
 path = "vs_evaluation.agent_models"
@@ -555,6 +560,11 @@ depends_on = ["vs_agent"]
 # Each library exposes only its `api` subpackage and its submodules. External
 # modules must import through that surface, never from the package root or
 # internal modules. Tests are outside tach scope.
+[[interfaces]]
+# The host core's public names, re-exported by its package; not its submodules.
+expose = ["[A-Z][A-Za-z]*"]
+from = ["vibesys.orchestration.dynamic.control"]
+
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_async_ops"]

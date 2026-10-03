@@ -42,7 +42,7 @@ from vibesys.api import (
     RunRequest,
     RunStopped,
 )
-from vibesys.api.testing import create_session
+from vibesys.api.testing import FakeStopTimer, create_session
 from vibesys.events import CoreEventType
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
@@ -226,7 +226,11 @@ class Turn:
 
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
-        return str(self._call("submit_evaluation", {"evidence_kinds": kinds})["handle_id"])
+        return str(self.submit_reply(*kinds)["handle_id"])
+
+    def submit_reply(self, *kinds: str) -> dict[str, object]:
+        """Submit an evaluation without waiting; return the tool's whole reply."""
+        return self._call("submit_evaluation", {"evidence_kinds": kinds})
 
     def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         servers = self.invocation.tool_servers or []
@@ -267,6 +271,7 @@ class ScriptedAgents:
     unscripted: list[str] = field(default_factory=list)
     turns: list[tuple[str, str | None, str]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _client: FakeAgentClient | None = None
 
     def plan(self, *replies: Reply) -> ScriptedAgents:
         """Queue planner replies."""
@@ -306,7 +311,13 @@ class ScriptedAgents:
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id):
             client.set_response(role, self._answer)
+        self._client = client
         return client
+
+    def wait_cancelled(self, timeout: float) -> bool:
+        """Block a scripted turn until the run cancels its agents' turns."""
+        assert self._client is not None
+        return self._client.wait_cancelled(timeout)
 
     def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
         member = _member(invocation)
@@ -568,13 +579,17 @@ class AgentsSource(Protocol):
         ...
 
 
-def run_loop(
+# lint-waiver: LW-122303 [PLR0913]; scenarios pass only the hooks they use, by
+# > keyword. A scenario-options object would add a type every scenario builds
+# > for one or two hooks, and positional loop_input/agents/options stay explicit.
+def run_loop(  # noqa: PLR0913
     loop_input: LoopInput,
     agents: AgentsSource,
     configured: DynamicOptions,
     *,
     resume_run_id: str | None = None,
     on_session: Callable[[object], None] | None = None,
+    stop_timer: FakeStopTimer | None = None,
 ) -> LoopRun:
     """Run the dynamic plugin to its end through the product session."""
     bundle = load_input_bundle(loop_input.root)
@@ -610,6 +625,7 @@ def run_loop(
             registry=built_in_orchestrations(),
             agent_client_factory=lambda **_kwargs: client,
             backend_factory=create_compute_backend,
+            stop_timer=stop_timer or FakeStopTimer(),
         )
         if on_session is not None:
             on_session(session)

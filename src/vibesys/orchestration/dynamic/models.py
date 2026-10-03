@@ -213,18 +213,6 @@ class PortfolioPlan(BaseModel):
             union_format=union_format,
         )
 
-    @model_validator(mode="after")
-    def _distinct_hypotheses(self) -> PortfolioPlan:
-        identifiers = [planned_id(item) for item in self.workstreams]
-        repeated = sorted({item for item in identifiers if identifiers.count(item) > 1})
-        if repeated:
-            message = (
-                "portfolio workstreams must use distinct hypothesis and profile IDs; "
-                f"repeated: {repeated}"
-            )
-            raise ValueError(message)
-        return self
-
 
 class ImplementPortfolioPlan(PortfolioPlan):
     """The planner's reply in a run that cannot profile: its schema offers no profile kind.

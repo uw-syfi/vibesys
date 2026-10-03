@@ -11,6 +11,7 @@ import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.loop._harness import (
@@ -247,7 +248,13 @@ def test_a_crashed_run_resumes_from_older_state_and_finishes(tmp_path: Path) -> 
     loop_input = LoopInput.create(tmp_path)
     first = (
         ScriptedAgents()
-        .plan(portfolio(workstream("H1")), PlannerCrashError("planner died"))
+        # A planner fault is retried; the run ends once the bound
+        # (max_retries_per_round=2 planning attempts) is spent.
+        .plan(
+            portfolio(workstream("H1")),
+            PlannerCrashError("planner died"),
+            PlannerCrashError("planner died"),
+        )
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
@@ -334,19 +341,23 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 2\n"
 
 
+@pytest.mark.parametrize("schema_failures", [1, 2])
 def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
-    tmp_path: Path,
+    tmp_path: Path, schema_failures: int
 ) -> None:
     """Regression: r10's planner exhausted the provider's schema retries and the run ended.
 
     The planner's first structured turn fails the way the provider reports
     giving up on the schema; it is sent a correction carrying the validation
-    errors in the same session, and the run completes.
+    errors in the same session. r20: when the correction fails too, the turn
+    faulted, and a fresh planning turn is asked within the turn-fault bound
+    instead of the error escaping the run. Either way the run completes.
     """
     loop_input = LoopInput.create(tmp_path)
+    failures = [AgentOutputSchemaError(_SCHEMA_ERRORS)] * schema_failures
     agents = (
         ScriptedAgents()
-        .plan(AgentOutputSchemaError(_SCHEMA_ERRORS), portfolio(workstream("H1")))
+        .plan(*failures, portfolio(workstream("H1")))
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
@@ -357,7 +368,7 @@ def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     assert run.succeeded is True
     assert agents.unscripted == []
     planner = agents.prompts(ORCHESTRATOR.id)
-    assert len(planner) == 2
+    assert len(planner) == schema_failures + 1
     assert _SCHEMA_ERRORS in planner[1]
     state = load_state(loop_input, run.run_id)
     assert [item.phase for item in state.workstreams] == [WorkstreamPhase.EVALUATED]
@@ -366,11 +377,14 @@ def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
 def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_reason(
     tmp_path: Path,
 ) -> None:
-    """The correction is bounded; then the run fails naming the schema, not a CLI exit."""
+    """Correction and turn retries are bounded; then the run fails naming the schema.
+
+    Each planning turn gets one correction, and a turn still invalid after it
+    is a turn fault, retried like an implementer attempt up to
+    max_retries_per_round (2) turns.
+    """
     loop_input = LoopInput.create(tmp_path)
-    agents = ScriptedAgents().plan(
-        AgentOutputSchemaError(_SCHEMA_ERRORS), AgentOutputSchemaError(_SCHEMA_ERRORS)
-    )
+    agents = ScriptedAgents().plan(*[AgentOutputSchemaError(_SCHEMA_ERRORS)] * 4)
 
     run = run_loop(loop_input, agents, options())
 
@@ -378,7 +392,7 @@ def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_
     assert run.error.detail == _SCHEMA_ERRORS
     assert "PortfolioPlan" in str(run.error)
     assert agents.unscripted == []
-    assert len(agents.prompts(ORCHESTRATOR.id)) == 2
+    assert len(agents.prompts(ORCHESTRATOR.id)) == 4
 
 
 def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
@@ -839,11 +853,13 @@ def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
     assert item.evaluation.metric_value == 4.0
 
 
-def _observed_profile(_agent: Turn) -> dict[str, object]:
+def _observed_profile(agent: Turn) -> dict[str, object]:
+    # An observation cites the trusted capture the host recorded before the turn.
+    (recorded,) = agent.accepted_evidence("profile")
     return {
         "outcome": "observed",
         "narrative": "Decode dominates: 75% of the time is in the per-token loop.",
-        "evidence_ids": [],
+        "evidence_ids": [recorded["evidence_id"]],
         "attribution": [{"name": "decode", "cost": 3.0, "share": 0.75}],
     }
 
