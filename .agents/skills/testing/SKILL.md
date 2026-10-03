@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Write, change, review, or fix tests in any language in this repository. Use when adding or editing any test, fixing a bug (regression test), tempted to patch or mock, adding or changing a Fake, writing property-based or golden-fixture tests, or diagnosing a flaky test.
+description: Write, change, review, or fix tests in any language in this repository. Use when adding or editing any test, fixing a bug (regression test), tempted to patch or mock, adding or changing a Fake, writing property-based, golden-fixture, or fault-injection tests, testing code that calls agents, clusters, or subprocesses, or diagnosing a flaky test.
 ---
 
 # Testing
@@ -33,9 +33,12 @@ a per-language reference; read the one for the language you are editing:
    code is missing a seam: add an injectable port (constructor argument or
    parameter) and pass a Fake.
 3. **Integrate modules with Fakes.** A Fake is an in-memory, faithful
-   implementation of the same API, not a stub with canned answers. Whoever
-   changes the real behavior owns the Fake and its contract test in the same
-   PR. See [references/fakes-and-contracts.md](references/fakes-and-contracts.md).
+   implementation of the same API, not a stub with canned answers. A Fake is
+   never more capable or more forgiving than production: it reports the same
+   supported capabilities (derived from the same definition), validates and
+   loads state as strictly, and enforces the same limits. Whoever changes the
+   real behavior owns the Fake and its contract test in the same PR. See
+   [references/fakes-and-contracts.md](references/fakes-and-contracts.md).
 4. **Test properties, not instances.** Default to property-based tests and
    fuzzing for parsers, serializers, validators, pure logic, and state
    machines. Use single examples only for a named scenario or a regression.
@@ -51,7 +54,25 @@ a per-language reference; read the one for the language you are editing:
    property test that generalizes the pattern, so the whole class of bug is
    covered and not just the reported instance. Example: for an uppercase
    hypothesis id that broke workspace names, test every agent-supplied id with
-   a property test, not only the uppercase one.
+   a property test, not only the uppercase one. The class is the mechanism
+   named under the `software-design` skill's Mechanism checkpoint; a test that
+   replays the one reply or exit path that triggered the bug does not cover
+   it.
+7. **Test the unhappy paths at boundaries.** Canned replies that match what
+   the code expects test only the happy path. Where code meets an agent, a
+   cluster, an MCP client, or a subprocess, drive it with generated behavior:
+   agent output generated from the declared schema, including options the run
+   does not offer, repeated mistakes, malformed output, and replies slower
+   than the caller's deadline; and scheduled faults on the far side. For a
+   scope that owns a resource, test as a property that an exit at any point
+   (each step, exception, cancellation, signal, stop) releases the resource
+   and ends in a typed status. Assert invariants, not one expected trace. See
+   [references/fault-injection.md](references/fault-injection.md).
+8. **Test process and signal code in process.** Logic that runs in a child
+   process or a signal handler is invisible to coverage and slow to test
+   through subprocesses. Put it behind a function the test calls directly
+   with injected effects; keep at most one subprocess test per entry point
+   to prove the wiring.
 
 ## Before handing back
 
