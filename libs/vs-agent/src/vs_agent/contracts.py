@@ -47,6 +47,8 @@ class AgentEventKind(StrEnum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     USAGE = "usage"
+    SKILL = "skill"
+    """The agent loaded a skill; ``text`` is its name."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +172,19 @@ class AgentTurnRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentSkillUse:
+    """Skills a turn was offered and loaded, as the provider reported them.
+
+    ``None`` means the provider cannot say, never zero: a driver without a
+    skill signal leaves both fields unset. ``invoked`` has one entry per load,
+    in order, so its length is the turn's skill-use count.
+    """
+
+    offered: tuple[str, ...] | None = None
+    invoked: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTurnResult:
     """Provider-independent result of one raw agent turn."""
 
@@ -177,6 +192,7 @@ class AgentTurnResult:
     usage: AgentUsage = field(default_factory=AgentUsage)
     provider_session_id: str | None = None
     disposition: SessionDisposition = SessionDisposition.REUSABLE
+    skills: AgentSkillUse = field(default_factory=AgentSkillUse)
 
 
 class AgentSession(Protocol):

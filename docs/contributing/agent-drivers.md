@@ -327,7 +327,22 @@ same thing across CLIs, and `cache_read_input_tokens` reports the cached part
 separately. Records written by Claude runs before this change excluded the
 cached tokens from `input_tokens`, so a Claude series that spans the change is
 not comparable without adding `cache_read_input_tokens` back into the older
-rows.
+rows. Since agentshim 0.7, `cache_read_input_tokens` counts cache reads only;
+on Claude it used to include cache writes, which `cache_creation_input_tokens`
+reports.
+
+Each row also records skill use for the turn: `skill_uses` (number of skill
+loads), `skills_invoked` (their names, one per load, in order) and
+`skills_offered` (how many skills the provider listed for the session). A
+`null` means the provider cannot report it, never zero: agentshim declares
+this per provider (`ProviderProfile.skill_invocation`, `skill_discovery`).
+Claude Code reports both; Codex reports loads (inferred from a shell read of a
+`SKILL.md`) but not the offered list; Gemini and opencode report neither.
+Which provider frames count as a load is agentshim's knowledge: the driver
+maps `agentshim.SkillInvoked` to an `AgentEventKind.SKILL` event and the
+turn's `agentshim.SkillSummary` to `AgentTurnResult.skills`, and matches no
+tool names or paths. The offered list also appears in the run log as a
+`[skills offered]` diagnostic line, and each load as `[skill] <name>`.
 
 ## Mock driver
 

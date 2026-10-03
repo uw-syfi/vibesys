@@ -21,6 +21,7 @@ from vs_agent.contracts import (
     AgentObserver,
     AgentSession,
     AgentSessionSpec,
+    AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
@@ -144,6 +145,8 @@ class _LoggerObserver:
             )
         elif event.kind is AgentEventKind.USAGE and event.usage is not None:
             self._logger.update_usage(_usage_dict(event.usage))
+        elif event.kind is AgentEventKind.SKILL:
+            self._logger.on_diagnostic(f"[skill] {event.text or 'unknown'}")
 
     def close(self) -> None:
         """Close any assistant-text segment left open at turn completion."""
@@ -158,6 +161,16 @@ def _usage_dict(usage: AgentUsage) -> dict[str, int | float | None]:
         "output_tokens": usage.output_tokens,
         "total_cost_usd": usage.total_cost_usd,
         "duration_ms": usage.duration_ms,
+    }
+
+
+def _skill_dict(skills: AgentSkillUse) -> dict[str, int | list[str] | None]:
+    """Usage-record fields for skill use; ``None`` where the provider cannot say."""
+    invoked = skills.invoked
+    return {
+        "skill_uses": None if invoked is None else len(invoked),
+        "skills_invoked": None if invoked is None else list(invoked),
+        "skills_offered": None if skills.offered is None else len(skills.offered),
     }
 
 
@@ -471,7 +484,7 @@ class AgentClient:
                 round_label=round_label,
                 model=model,
                 reasoning_effort=reasoning_effort,
-                usage=result.usage if result is not None else AgentUsage(),
+                result=result,
             )
         if result is None:
             message = "successful invocation did not produce a result"
@@ -485,10 +498,12 @@ class AgentClient:
         round_label: str,
         model: str | None,
         reasoning_effort: str | None,
-        usage: AgentUsage,
+        result: AgentTurnResult | None,
     ) -> None:
         if self._log_dir is None:
             return
+        usage = result.usage if result is not None else AgentUsage()
+        skills = result.skills if result is not None else AgentSkillUse()
         record = {
             "timestamp": datetime.now(UTC).isoformat(),
             "kind": kind,
@@ -497,6 +512,7 @@ class AgentClient:
             "model": model,
             "reasoning_effort": reasoning_effort,
             **_usage_dict(usage),
+            **_skill_dict(skills),
         }
         target = self._log_dir / "usage.jsonl"
         try:

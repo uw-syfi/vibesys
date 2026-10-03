@@ -40,6 +40,8 @@ from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
 from vs_agent import docker_executor
 from vs_agent.api import (
+    NULL_AGENT_EVENT_SINK,
+    AgentClient,
     AgentEvent,
     AgentEventKind,
     AgentTurnTimeoutError,
@@ -48,6 +50,7 @@ from vs_agent.api import (
 from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
+    AgentSkillUse,
     AgentTurnRequest,
     SessionDisposition,
 )
@@ -60,6 +63,13 @@ if TYPE_CHECKING:
     from vs_agent.contracts import AgentSession
 
 SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
+SKILL_LOAD_PROVIDERS = tuple(
+    provider
+    for provider in SCRIPTED_PROVIDERS
+    if agentshim.get_provider(provider).profile.skill_invocation is not agentshim.SkillSignal.NONE
+)
+"""Providers whose stream reveals a skill load, per agentshim's own profile."""
+SKILL_BLIND_PROVIDERS = tuple(p for p in SCRIPTED_PROVIDERS if p not in SKILL_LOAD_PROVIDERS)
 """Every provider VibeSys ships, each scripted in its own stream format.
 
 The driver treats them all the same way, so these cases are parametrized
@@ -1577,3 +1587,130 @@ def test_the_launch_drops_the_inherited_pwd(
     env = fake.requests[-1].env
     assert "PWD" not in env
     assert env["GPU"] == "1"
+
+
+# ---------------------------------------------------------------------------
+# Skills
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", SKILL_LOAD_PROVIDERS)
+def test_a_skill_load_reaches_the_result_and_the_stream(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(provider, text="ok", skills_invoked=["serving-systems", "serving-systems"]),
+    )
+    observer = _Observer()
+
+    result = session.run_turn(AgentTurnRequest(message="go"), observer)
+
+    assert result.skills.invoked == ("serving-systems", "serving-systems")
+    kinds = observer.kinds()
+    first = kinds.index(AgentEventKind.SKILL)
+    # The load sits where it happened: right after the tool call that made it.
+    assert kinds[first - 1] is AgentEventKind.TOOL_CALL
+    assert [event.text for event in observer.of_kind(AgentEventKind.SKILL)] == [
+        "serving-systems",
+        "serving-systems",
+    ]
+
+
+@pytest.mark.parametrize("provider", SKILL_LOAD_PROVIDERS)
+def test_a_turn_without_a_skill_load_reports_zero(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        provider,
+        scripted_turn(provider, text="ok", tool_calls=[("shell", {"command": "ls"}, "")]),
+    )
+
+    result = session.run_turn(AgentTurnRequest(message="go"))
+
+    assert result.skills.invoked == ()
+
+
+@pytest.mark.parametrize("provider", SKILL_BLIND_PROVIDERS)
+def test_a_provider_without_a_skill_signal_reports_unknown(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+    observer = _Observer()
+
+    result = session.run_turn(AgentTurnRequest(message="go"), observer)
+
+    assert result.skills == AgentSkillUse(offered=None, invoked=None)
+    assert observer.of_kind(AgentEventKind.SKILL) == []
+
+
+def test_the_offered_skills_reach_the_result_and_the_diagnostic_channel(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    del sandbox_builds
+    session, _fake = _session(
+        tmp_path,
+        "claude",
+        scripted_turn("claude", text="ok", skills_offered=["serving-systems", "torch-profiler"]),
+    )
+    observer = _Observer()
+
+    result = session.run_turn(AgentTurnRequest(message="go"), observer)
+
+    assert result.skills.offered == ("serving-systems", "torch-profiler")
+    diagnostics = [
+        event.text
+        for event in observer.of_kind(AgentEventKind.THINKING)
+        if event.payload.get("channel") == "diagnostic"
+    ]
+    assert "[skills offered] serving-systems, torch-profiler" in diagnostics
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+@pytest.mark.parametrize("role", ["planner", "implementer", "judge", "profiler"])
+def test_a_session_finds_the_run_skills_where_its_provider_looks(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+    role: str,
+) -> None:
+    """Skills reach every directory agentshim says the provider reads, before launch."""
+    del sandbox_builds
+    source = tmp_path / "skills" / "serving-systems"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: serving-systems\ndescription: d\n---\nbody\n")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    skill_dirs = agentshim.get_provider(provider).profile.skill_dirs
+    found: list[list[str]] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        cwd = Path(request.cwd or "")
+        found.append(
+            [d for d in skill_dirs if (cwd / d / "serving-systems" / "SKILL.md").is_file()]
+        )
+        return scripted_turn(provider, text="ok")
+
+    driver, _fake = _driver(provider, run)
+    client = AgentClient(
+        driver, provider=provider, skills=[tmp_path / "skills"], event_sink=NULL_AGENT_EVENT_SINK
+    )
+    with client:
+        client.invoke_text(
+            kind=role, workspace=workspace, system_prompt="s", user_prompt="u", round_label="r"
+        )
+
+    assert skill_dirs
+    assert found == [list(skill_dirs)]

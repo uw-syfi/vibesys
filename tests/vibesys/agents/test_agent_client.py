@@ -34,6 +34,7 @@ from vs_agent.contracts import (
     AgentObserver,
     AgentSession,
     AgentSessionSpec,
+    AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
     MCPServerSpec,
@@ -660,6 +661,62 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
         "total_cost_usd": 0.02,
         "duration_ms": 30,
     }
+    assert {key: record[key] for key in expected} == expected
+
+
+def test_a_skill_load_is_rendered_on_the_diagnostic_channel(tmp_path: Path) -> None:
+    session = _FakeSession(
+        results=[AgentTurnResult("Done")],
+        events=[AgentEvent(AgentEventKind.SKILL, text="serving-systems")],
+    )
+    seen = []
+    client = AgentClient(_FakeDriver([session]), event_sink=CoreAgentEventSink(seen.append))
+    client.invoke_text(
+        kind="implementer",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        round_label="round-1",
+    )
+
+    assert ("diagnostic", "[skill] serving-systems") in [
+        (event.data.channel, event.data.content)
+        for event in seen
+        if isinstance(event.data, AgentOutputChunkData)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("skills", "expected"),
+    [
+        (
+            AgentSkillUse(offered=("a", "b"), invoked=("a", "a")),
+            {"skill_uses": 2, "skills_invoked": ["a", "a"], "skills_offered": 2},
+        ),
+        (
+            AgentSkillUse(offered=None, invoked=()),
+            {"skill_uses": 0, "skills_invoked": [], "skills_offered": None},
+        ),
+        # A provider that cannot say is recorded as unknown, never as zero.
+        (AgentSkillUse(), {"skill_uses": None, "skills_invoked": None, "skills_offered": None}),
+    ],
+)
+def test_the_usage_record_carries_the_turns_skill_use(
+    tmp_path: Path, skills: AgentSkillUse, expected: dict[str, object]
+) -> None:
+    session = _FakeSession(results=[AgentTurnResult("done", skills=skills)])
+    client = AgentClient(_FakeDriver([session]), log_dir=tmp_path, event_sink=NULL_AGENT_EVENT_SINK)
+
+    client.invoke_text(
+        kind="implementer",
+        workspace=tmp_path,
+        system_prompt="system",
+        user_prompt="user",
+        round_label="impl #1",
+    )
+
+    record = json.loads((tmp_path / "usage.jsonl").read_text())
+    assert record["kind"] == "implementer"
     assert {key: record[key] for key in expected} == expected
 
 

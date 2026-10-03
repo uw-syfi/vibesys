@@ -33,6 +33,7 @@ from vs_agent.contracts import (
     AgentObserver,
     AgentSession,
     AgentSessionSpec,
+    AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
     AgentTurnTimeoutError,
@@ -254,7 +255,7 @@ def _usage_from(
     return AgentUsage(
         input_tokens=tokens.input_tokens,
         cache_creation_input_tokens=tokens.cache_write_input_tokens,
-        cache_read_input_tokens=tokens.cached_input_tokens,
+        cache_read_input_tokens=tokens.cache_read_input_tokens,
         output_tokens=tokens.output_tokens,
         total_cost_usd=cost_usd if cost_usd is not None else usage.total_cost_usd,
         duration_ms=duration_ms,
@@ -315,7 +316,24 @@ def _translate(  # one arm per event type
             kind=AgentEventKind.USAGE,
             usage=_usage_from(event.usage, cost_usd=event.cost_usd),
         )
-    return _translate_plumbing(event)
+    return _translate_skill(event) or _translate_plumbing(event)
+
+
+def _translate_skill(event: agentshim.AgentEvent) -> AgentEvent | None:
+    """Translate a skill load, and log the offered list where a run log shows it.
+
+    Which provider frames mean a skill was offered or loaded is agentshim's
+    knowledge; this only maps its typed events.
+    """
+    if isinstance(event, agentshim.SkillInvoked):
+        return AgentEvent(
+            kind=AgentEventKind.SKILL,
+            text=event.name,
+            payload={"skill": event.name, "source_path": event.source_path},
+        )
+    if isinstance(event, agentshim.SkillsDiscovered):
+        return _diagnostic(f"[skills offered] {', '.join(event.names) or '(none)'}")
+    return None
 
 
 def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
@@ -330,6 +348,7 @@ def _translate_plumbing(event: agentshim.AgentEvent) -> AgentEvent | None:
         return _diagnostic(event.text)
     if isinstance(event, agentshim.ProviderError):
         return _diagnostic(f"[error] {event.message}")
+
     # RunStarted and RunFinished describe the subprocess, not the agent.
     return None
 
@@ -419,6 +438,7 @@ class AgentShimSession:
             disposition=(
                 SessionDisposition.RESET_REQUIRED if restarted else SessionDisposition.REUSABLE
             ),
+            skills=_skill_use(result.skills),
         )
 
     def cancel(self) -> None:
@@ -486,7 +506,11 @@ class AgentShimSession:
             if profile.schema_dialect is not None
             else agentshim.SchemaDialect.STRICT
         )
-        schema = response_cls.model_json_schema()
+        # The dialect check runs on the schema the CLI will receive: the
+        # normalizer is what makes pydantic's optional fields nullable and
+        # closes objects, so checking the raw schema rejects models the
+        # provider accepts.
+        schema = agentshim.normalize(response_cls.model_json_schema(), dialect)
         problems = agentshim.dialect_problems(schema, dialect)
         if problems:
             self._log(
@@ -498,7 +522,7 @@ class AgentShimSession:
         host_dir = self._spec.workspace / _SCHEMA_DIR
         return (
             agentshim.OutputSchema(
-                schema=agentshim.normalize(schema, dialect),
+                schema=schema,
                 host_dir=host_dir,
                 cli_dir=_agent_path(self._sandbox, host_dir),
             ),
@@ -586,6 +610,15 @@ class AgentShimSession:
         self._session.forget()
         self._turn_count = 0
         return True
+
+
+def _skill_use(summary: agentshim.SkillSummary) -> AgentSkillUse:
+    """Carry the library's skill summary over, keeping unknown distinct from zero."""
+    invocations = summary.invocations
+    return AgentSkillUse(
+        offered=summary.discovered,
+        invoked=None if invocations is None else tuple(event.name for event in invocations),
+    )
 
 
 def _result_text(result: agentshim.TurnResult) -> str:
