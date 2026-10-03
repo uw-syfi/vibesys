@@ -420,14 +420,14 @@ class Workstreams:
             return
         await workspace.retain(
             verified.revision,
-            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-verified-call-{call}",
+            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-accuracy-verified-call-{call}",
         )
         async with self.lock:
             current = self.state.workstreams[index]
             self.state.workstreams[index] = current.model_copy(
                 update={"verified": verified}, deep=True
             )
-            await self.commit(f"dynamic: {current.hypothesis_id} verified candidate")
+            await self.commit(f"dynamic: {current.hypothesis_id} accuracy-verified candidate")
 
     def _headline_metric(self) -> str | None:
         objectives = self.options.metric_space.objectives

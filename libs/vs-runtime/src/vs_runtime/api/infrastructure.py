@@ -197,6 +197,7 @@ from vs_runtime._trusted_evaluation import (
     ScalarBenchmarkContract,
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
+    TrustedBenchmarkDecoding,
     TrustedBenchmarkResult,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
@@ -204,7 +205,7 @@ from vs_runtime._trusted_evaluation import (
     build_trusted_benchmark_command,
     create_trusted_evaluation_executor,
     decode_trusted_benchmark_output,
-    decode_trusted_benchmark_partial,
+    decode_trusted_benchmark_run,
 )
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -520,6 +521,7 @@ __all__ = [
     "StopTimer",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
+    "TrustedBenchmarkDecoding",
     "TrustedBenchmarkResult",
     "TrustedEvaluationCommandPaths",
     "TrustedEvaluationExecutor",
@@ -550,7 +552,7 @@ __all__ = [
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",
     "decode_trusted_benchmark_output",
-    "decode_trusted_benchmark_partial",
+    "decode_trusted_benchmark_run",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",

@@ -26,6 +26,7 @@ from .config import (
     SlurmConnectorTransport,
     SlurmService,
     SlurmSshTransport,
+    shell_join_with_port,
 )
 from .staging import _ContentStageError, _stage_tree, _TreeStageRequest
 
@@ -1272,7 +1273,7 @@ def _batch_script(stages: Sequence[SlurmBatchStage], *, stop_on_failure: bool) -
         stderr_path = result_root / "stderr.txt"
         exit_path = result_root / "exit-code.txt"
         elapsed_path = result_root / "elapsed-seconds.txt"
-        command = _shell_join_dynamic(stage.command)
+        command = shell_join_with_port(stage.command)
         if stage.timeout_seconds is not None:
             command = f"timeout --signal=TERM --kill-after=5s {stage.timeout_seconds}s {command}"
         lines.extend(
@@ -1370,7 +1371,7 @@ def _job_script(request: _JobScriptRequest) -> str:
     elif phase_timing_root is not None:
         timing_path = workspace / phase_timing_root / "service-startup-seconds.txt"
         lines.append(f"printf '%s\\n' 0 > {shlex.quote(timing_path.as_posix())}")
-    lines.extend([_shell_join_dynamic(command), "job_status=$?"])
+    lines.extend([shell_join_with_port(command), "job_status=$?"])
     if service is not None and phase_timing_root is not None:
         tail_path = workspace / phase_timing_root / _SERVICE_LOG_TAIL
         lines.append(
@@ -1395,7 +1396,7 @@ def _service_script(
     phase_timing_root: PurePosixPath | None = None,
     workspace: PurePosixPath | None = None,
 ) -> list[str]:
-    command = _shell_join_dynamic(service.command)
+    command = shell_join_with_port(service.command)
     readiness_url = shlex.quote(service.readiness_url)
     lines = [
         "export PORT=$((20000 + SLURM_JOB_ID % 10000))",
@@ -1421,19 +1422,6 @@ def _service_script(
         )
     lines.append('if [ "$ready" -ne 1 ]; then tail -40 .vs-slurm-service.log; job_status=70; else')
     return lines
-
-
-def _shell_join_dynamic(arguments: Sequence[str]) -> str:
-    parts: list[str] = []
-    for argument in arguments:
-        if argument == PORT_PLACEHOLDER:
-            parts.append('"${PORT}"')
-        elif PORT_PLACEHOLDER in argument:
-            before, after = argument.split(PORT_PLACEHOLDER, maxsplit=1)
-            parts.append(f'"{before}${{PORT}}{after}"')
-        else:
-            parts.append(shlex.quote(argument))
-    return " ".join(parts)
 
 
 def _distinct_tail(path: Path) -> str:

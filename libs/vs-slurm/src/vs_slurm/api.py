@@ -15,6 +15,7 @@ from .config import (
     SlurmSshTransport,
     SlurmTransport,
     load_slurm_config,
+    shell_join_with_port,
 )
 from .identity import runtime_content_identity
 from .runner import (
@@ -63,5 +64,6 @@ __all__ = [
     "SlurmTreeArtifact",
     "load_slurm_config",
     "runtime_content_identity",
+    "shell_join_with_port",
     "tree_content_identity",
 ]

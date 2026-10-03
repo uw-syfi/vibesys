@@ -34,6 +34,7 @@ from vs_evaluation.agent_models import (
     EvidencePreflightDecision,
     EvidencePreflightResolution,
     EvidenceReply,
+    FailureKind,
     RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
@@ -138,6 +139,11 @@ from vs_evaluation.profiler_service import (
     ProfilerIdempotencyConflictError,
     ProfilerTurnProvision,
 )
+from vs_evaluation.repeated_failure import (
+    FailureSignature,
+    classify_failure,
+    detect_repeated_failure,
+)
 
 __all__ = [
     "MAX_AGENT_AWAIT_S",
@@ -209,6 +215,8 @@ __all__ = [
     "ExecutorObservation",
     "ExecutorRejectedError",
     "ExecutorSubmissionError",
+    "FailureKind",
+    "FailureSignature",
     "FilesystemEvaluationStore",
     "InFlightProfilerOperation",
     "PartialMeasurement",
@@ -256,7 +264,9 @@ __all__ = [
     "SubmittedReply",
     "SubmittedSemanticEvaluation",
     "TrustedEvidence",
+    "classify_failure",
     "decide_evidence_preflight",
+    "detect_repeated_failure",
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
