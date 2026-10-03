@@ -24,6 +24,7 @@ from vs_evaluation.api import (
     EvaluationStep,
     EvaluationStepResult,
     ExecutorObservation,
+    ExecutorRejectedError,
     ExecutorSubmissionError,
     ResourceRequirements,
     ReuseStatus,
@@ -206,6 +207,11 @@ class SlurmEvaluationExecutor:
             return
         try:
             stages = self._parse_stages(request)
+        except ValueError as exc:
+            # Malformed stages are refused before any provider contact, so a
+            # retry cannot succeed; report a rejection, not an ambiguous error.
+            raise ExecutorRejectedError(str(exc)) from exc
+        try:
             durable = self._read_evaluation(handle_id)
             self._validate_durable_request(handle_id, request, durable)
             self._publish(

@@ -11,6 +11,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     ExecutorObservation,
+    ExecutorRejectedError,
     StageState,
 )
 from vs_sandbox.api.slurm import (
@@ -265,6 +266,43 @@ async def test_executor_fuses_stages_and_preserves_execution_metadata(tmp_path: 
     result = SlurmCommandResult.model_validate(observed.stage_results[0].result)
     assert result.execution_metadata is not None
     assert result.execution_metadata.content_cache_hits == 2
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_malformed_stages_without_submitting(tmp_path: Path) -> None:
+    config = _config()
+    runner = _FakeRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    mixed = EvaluationRequest(
+        key="mixed",
+        stages=tuple(
+            EvaluationStep(
+                name=name,
+                payload=SlurmStagePayload(
+                    command=f"run-{name}", target_lifecycle=lifecycle
+                ).model_dump(mode="json"),
+            )
+            for name, lifecycle in (
+                ("accuracy", SlurmTargetLifecycle.COMMAND_MANAGED),
+                ("benchmark", SlurmTargetLifecycle.SHARED_SERVICE),
+            )
+        ),
+    )
+
+    with pytest.raises(ExecutorRejectedError, match="one target lifecycle"):
+        await executor.submit(mixed, handle_id="eval-mixed")
+
+    assert await executor.inspect("eval-mixed") is None
+    assert runner.submissions == 0
+    await executor.close()
 
 
 @pytest.mark.asyncio
