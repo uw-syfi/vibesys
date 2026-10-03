@@ -116,7 +116,7 @@ class _SemanticBackend:
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
             state=record.state,
-            accepted_result=False,
+            evidence_recorded=False,
         )
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
@@ -417,7 +417,7 @@ async def test_run_observer_reads_all_evaluations_without_widening_other_roles(
     assert operation.scope_id == "candidate-attention"
     assert operation.evidence_kinds == (EvidenceKind.BENCHMARK,)
     assert operation.state is EvaluationState.QUEUED
-    assert not operation.accepted_result
+    assert not operation.evidence_recorded
     assert len(operation.candidate_content_digest) == 64
     with pytest.raises(EvaluationAgentAccessError, match="run-wide trusted operations"):
         await service.dispatch(RunOperationsCall(token=ordinary_orchestrator.token))

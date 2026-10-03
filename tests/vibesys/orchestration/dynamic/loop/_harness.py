@@ -153,6 +153,10 @@ class Turn:
             if result["outcome"] != "timed_out":
                 return reply
 
+    def trusted_operations(self) -> dict[str, object]:
+        """Read the run's trusted operations through the planner's real MCP tool."""
+        return self._call("trusted_operations", {})
+
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
         return str(self._call("submit_evaluation", {"evidence_kinds": kinds})["handle_id"])
@@ -255,6 +259,14 @@ class ScriptedAgents:
         if kind == JUDGE.id:
             return self.judges[member]
         return deque()
+
+
+def planner_history(prompt: str) -> dict[str, dict[str, object]]:
+    """Return the history rows of one planning prompt, keyed by hypothesis id."""
+    _, rest = prompt.split("## Compact hypothesis history\n", 1)
+    rows = json.loads(rest.split("\n", 1)[0])
+    assert isinstance(rows, list)
+    return {str(row["hypothesis_id"]): row for row in rows}
 
 
 def _member(invocation: FakeInvocation) -> str | None:

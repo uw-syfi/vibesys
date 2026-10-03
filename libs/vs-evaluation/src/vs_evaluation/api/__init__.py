@@ -11,6 +11,7 @@ from vs_evaluation.agent_evidence import (
 )
 from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
+    MAX_STAGE_SUMMARY_TAIL_CHARS,
     AgentEvaluationCall,
     AgentEvaluationReply,
     AvailabilityCall,
@@ -24,6 +25,7 @@ from vs_evaluation.agent_models import (
     EvaluationGrant,
     EvaluationOperationObservation,
     EvaluationOperationSnapshot,
+    EvaluationStageOutcome,
     EvidenceCall,
     EvidencePreflightCheck,
     EvidencePreflightDecision,
@@ -136,6 +138,7 @@ __all__ = [
     "MAX_LIVE_PROFILER_OPERATIONS",
     "MAX_PROFILER_NARRATIVE_CHARS",
     "MAX_PROFILER_REQUEST_CHARS",
+    "MAX_STAGE_SUMMARY_TAIL_CHARS",
     "PROFILER_TERMINAL_RETENTION",
     "AgentEvaluationCall",
     "AgentEvaluationReply",
@@ -177,6 +180,7 @@ __all__ = [
     "EvaluationOperationObservation",
     "EvaluationOperationSnapshot",
     "EvaluationRequest",
+    "EvaluationStageOutcome",
     "EvaluationState",
     "EvaluationStatus",
     "EvaluationStep",

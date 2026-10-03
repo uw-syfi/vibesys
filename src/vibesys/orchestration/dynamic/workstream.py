@@ -130,6 +130,21 @@ class Workstreams:
     # Agent turns started per hypothesis in this process; an attempt that
     # started none failed in setup, before any agent could act.
     _agent_turns: dict[str, int] = field(default_factory=dict)
+    # Each running implementer turn's workspace and how many evaluations that
+    # workspace had submitted before the turn began.
+    _live_turns: dict[str, tuple[CandidateWorkspace, int]] = field(default_factory=dict)
+
+    async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
+        """Return the evaluations each running implementer turn has submitted so far.
+
+        A turn can run for most of an hour; its durable state changes only when
+        it ends, so these are the only current facts about its candidate.
+        """
+        live = dict(self._live_turns)
+        return {
+            hypothesis_id: (await self.run.evaluation.agent_evaluations(workspace))[before:]
+            for hypothesis_id, (workspace, before) in live.items()
+        }
 
     async def execute(self, plan: WorkstreamPlan) -> None:
         """Run one attempt of a workstream; every failure is a retryable attempt failure.
@@ -258,13 +273,17 @@ class Workstreams:
                 charge=True,
             )
             submitted_before = len(await self.run.evaluation.agent_evaluations(workspace))
-            implementation = await self._implement(
-                plan,
-                workspace,
-                parent,
-                feedback=feedback,
-                reset=reset,
-            )
+            self._live_turns[plan.hypothesis_id] = (workspace, submitted_before)
+            try:
+                implementation = await self._implement(
+                    plan,
+                    workspace,
+                    parent,
+                    feedback=feedback,
+                    reset=reset,
+                )
+            finally:
+                del self._live_turns[plan.hypothesis_id]
             reset = None
             revision = await workspace.snapshot(
                 f"dynamic: {plan.hypothesis_id} implementation planning call {call}"

@@ -215,7 +215,7 @@ async def test_dispatch_is_nonblocking_and_timeout_is_observational(tmp_path: Pa
     assert completed.operation.result.trusted_evidence == (evidence,)
     assert queries == [("implementer", "candidate", "snapshot:candidate", (evidence.evidence_id,))]
     run_projection = await service.project_run()
-    assert run_projection[0].accepted_result
+    assert run_projection[0].evidence_recorded
     projection = await service.project_candidate("snapshot:candidate")
     assert projection.completed[0].result.trusted_evidence == (evidence,)
     assert (await service.project_candidate("snapshot:other")).completed == ()
@@ -240,7 +240,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
     assert active.scope_id == "candidate-prefill"
     assert active.request == "Measure whether prefill attention saturates memory bandwidth."
     assert active.candidate_snapshot_id == "snapshot:candidate-prefill"
-    assert not active.accepted_result
+    assert not active.evidence_recorded
 
     await provision.wait_started(dispatched.operation_id)
     provision.complete(dispatched.operation_id)
@@ -252,7 +252,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
     )
     completed = (await service.project_run())[0]
     assert completed.state is ProfilerOperationState.COMPLETED
-    assert not completed.accepted_result
+    assert not completed.evidence_recorded
     assert completed.outcome is ProfilerResultOutcome.OBSERVED
 
     unsupported = await service.dispatch(
@@ -271,7 +271,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
         10,
     )
     unsupported_observation = (await service.project_run())[-1]
-    assert not unsupported_observation.accepted_result
+    assert not unsupported_observation.evidence_recorded
     assert unsupported_observation.outcome is ProfilerResultOutcome.UNSUPPORTED
 
 

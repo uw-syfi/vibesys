@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from vs_evaluation.api import (
+    MAX_STAGE_SUMMARY_TAIL_CHARS,
     AvailabilitySnapshot,
     AvailabilityState,
     ContentDigest,
@@ -22,6 +23,7 @@ from vs_evaluation.api import (
     EvaluationLifecycleEvent,
     EvaluationOperationSnapshot,
     EvaluationRequest,
+    EvaluationStageOutcome,
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
@@ -44,6 +46,9 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
     AgentEvaluation,
+    AgentEvaluationMetric,
+    AgentEvaluationStage,
+    AgentEvaluationStageOutcome,
     AgentEvaluationStatus,
     BenchmarkEvaluation,
     BenchmarkObjective,
@@ -527,17 +532,26 @@ class SemanticEvaluationBackend:
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return lifecycle state and trust-boundary accepted result identity."""
         record = await self._coordinator.snapshot(handle_id)
-        evidence = tuple(
-            TrustedEvidence.model_validate(result.result)
-            for result in record.stage_results
-            if result.state is StageState.SUCCEEDED and result.result is not None
-        )
+        evidence = _stage_evidence(record)
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
             state=record.state,
-            accepted_result=(
+            evidence_recorded=(
                 record.state is EvaluationState.SUCCEEDED
                 and len(evidence) == len(record.request.stages)
+            ),
+            stage_outcomes=tuple(
+                EvaluationStageOutcome(
+                    kind=item.kind,
+                    outcome=item.outcome,
+                    metrics=item.metrics,
+                    summary_tail=(
+                        item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
+                        if item.semantic_summary
+                        else None
+                    ),
+                )
+                for item in evidence
             ),
             evidence_ids=tuple(item.evidence_id for item in evidence),
             failure=_agent_evaluation(record).failure,
@@ -601,25 +615,25 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
     """Reduce one durable record to the outcome its submitting agent saw."""
     stage = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
     kinds = tuple(step.name for step in record.request.stages)
+    evidence = _stage_evidence(record)
+    stages = tuple(_agent_stage(item) for item in evidence)
     if record.state is EvaluationState.SUCCEEDED:
-        rejected = [
-            evidence
-            for result in record.stage_results
-            if result.state is StageState.SUCCEEDED and result.result is not None
-            for evidence in (TrustedEvidence.model_validate(result.result),)
-            if evidence.outcome is EvidenceOutcome.FAILED
-        ]
+        rejected = [item for item in evidence if item.outcome is EvidenceOutcome.FAILED]
         if not rejected:
             return AgentEvaluation(
-                revision=stage.snapshot, kinds=kinds, status=AgentEvaluationStatus.PASSED
+                revision=stage.snapshot,
+                kinds=kinds,
+                status=AgentEvaluationStatus.PASSED,
+                stages=stages,
             )
         failure = "\n".join(
-            evidence.semantic_summary or f"{evidence.kind.value} failed" for evidence in rejected
+            item.semantic_summary or f"{item.kind.value} failed" for item in rejected
         )
         return AgentEvaluation(
             revision=stage.snapshot,
             kinds=kinds,
             status=AgentEvaluationStatus.FAILED,
+            stages=stages,
             failure=failure,
             signature=failure_signature(failure),
         )
@@ -632,6 +646,7 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
             revision=stage.snapshot,
             kinds=kinds,
             status=AgentEvaluationStatus.FAILED,
+            stages=stages,
             failure=failure,
             signature=failure_signature(failure),
         )
@@ -640,7 +655,34 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         if record.state in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
         else AgentEvaluationStatus.PENDING
     )
-    return AgentEvaluation(revision=stage.snapshot, kinds=kinds, status=status)
+    return AgentEvaluation(revision=stage.snapshot, kinds=kinds, status=status, stages=stages)
+
+
+def _stage_evidence(record: StoredEvaluation) -> tuple[TrustedEvidence, ...]:
+    """Return the trusted evidence of each stage that finished with a result, in stage order."""
+    return tuple(
+        TrustedEvidence.model_validate(result.result)
+        for result in record.stage_results
+        if result.state is StageState.SUCCEEDED and result.result is not None
+    )
+
+
+def _agent_stage(evidence: TrustedEvidence) -> AgentEvaluationStage:
+    return AgentEvaluationStage(
+        kind=evidence.kind.value,
+        outcome=AgentEvaluationStageOutcome(evidence.outcome.value),
+        metrics=tuple(
+            AgentEvaluationMetric(
+                name=metric.name,
+                value=metric.value,
+                unit=metric.unit,
+                direction=(
+                    MetricDirection(metric.direction) if metric.direction is not None else None
+                ),
+            )
+            for metric in evidence.metrics
+        ),
+    )
 
 
 class EvidenceReusingEvaluation:

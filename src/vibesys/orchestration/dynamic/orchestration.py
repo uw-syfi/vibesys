@@ -32,6 +32,7 @@ from vibesys.orchestration.dynamic.workstream import (
 )
 from vibesys.orchestration.hypothesis import (
     HypothesisSearch,
+    HypothesisStrategy,
     OrchestratorPlan,
     normalize_hypothesis_title,
 )
@@ -80,6 +81,27 @@ class DynamicPlanError(ValueError):
     def in_flight_continuation(cls, hypothesis_id: str) -> DynamicPlanError:
         """Reject scheduling a hypothesis whose workstream is still running."""
         return cls(f"hypothesis {hypothesis_id!r} is still in flight")
+
+    @classmethod
+    def invalid_update(cls, error: ValueError) -> DynamicPlanError:
+        """Reject a strategy update the hypothesis search cannot apply."""
+        return cls(f"hypothesis_updates: {error}")
+
+    @classmethod
+    def in_flight_update(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
+        """Reject parking or abandoning a hypothesis whose workstream is still running."""
+        return cls(
+            f"hypothesis_updates[{position}].hypothesis_id: {hypothesis_id!r} is still "
+            "running; park or abandon it only after its workstream finishes"
+        )
+
+    @classmethod
+    def abandoned_continuation(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
+        """Reject continuing a hypothesis that is (or this plan makes) abandoned."""
+        return cls(
+            f"workstreams[{position}].hypothesis_id: {hypothesis_id!r} is abandoned and "
+            "cannot be continued"
+        )
 
     @classmethod
     def unchanged_blocked_task(cls, hypothesis_id: str) -> DynamicPlanError:
@@ -296,7 +318,7 @@ class _DynamicRun:
                 "remaining": self._remaining_budget(),
                 **prompt_context(self.run),
                 "root_revision": self._base_revision(),
-                **self.rounds.planner_context(),
+                **self.rounds.planner_context(await self.workstreams.live_evaluations()),
             }
             first_error: DynamicPlanError | ValidationError | None = None
             # A valid plan that leaves slots free; kept if the planner, asked
@@ -351,8 +373,13 @@ class _DynamicRun:
         updates: list[HypothesisStrategyUpdate] = []
         for update in portfolio.hypothesis_updates:
             try:
-                hypothesis_transitions.apply_strategy_updates(self.state.search, (*updates, update))
-            except ValueError as error:
+                self._validate_updates(
+                    portfolio.model_copy(
+                        update={"workstreams": (), "hypothesis_updates": (*updates, update)}
+                    ),
+                    in_flight=in_flight,
+                )
+            except DynamicPlanError as error:
                 self.run.observations.note(f"dynamic plan: dropped strategy update: {error}")
                 continue
             updates.append(update)
@@ -383,15 +410,11 @@ class _DynamicRun:
             )
             raise DynamicPlanError(message)
         known = {item.hypothesis_id: item for item in self.state.workstreams}
-        try:
-            hypothesis_transitions.apply_strategy_updates(
-                self.state.search,
-                portfolio.hypothesis_updates,
-            )
-        except ValueError as error:
-            raise DynamicPlanError(str(error)) from error
-        for plan in portfolio.workstreams:
+        abandoned = self._validate_updates(portfolio, in_flight=in_flight)
+        for position, plan in enumerate(portfolio.workstreams):
             prior = known.get(plan.hypothesis_id)
+            if plan.hypothesis_id in abandoned:
+                raise DynamicPlanError.abandoned_continuation(position, plan.hypothesis_id)
             if plan.hypothesis_id in in_flight:
                 raise DynamicPlanError.in_flight_continuation(plan.hypothesis_id)
             if prior is None and plan.continue_hypothesis:
@@ -407,6 +430,30 @@ class _DynamicRun:
                 and plan.task.strip() == prior.plan.task.strip()
             ):
                 raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
+
+    def _validate_updates(
+        self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]
+    ) -> frozenset[str]:
+        """Check the plan's strategy updates; return the hypotheses abandoned after them.
+
+        A running workstream's direction is unfinished, so it cannot be parked
+        or abandoned until it records its round.
+        """
+        for position, update in enumerate(portfolio.hypothesis_updates):
+            if update.hypothesis_id in in_flight:
+                raise DynamicPlanError.in_flight_update(position, update.hypothesis_id)
+        try:
+            updated = hypothesis_transitions.apply_strategy_updates(
+                self.state.search,
+                portfolio.hypothesis_updates,
+            )
+        except ValueError as error:
+            raise DynamicPlanError.invalid_update(error) from error
+        return frozenset(
+            item.hypothesis_id
+            for item in updated.hypotheses
+            if item.strategy is HypothesisStrategy.ABANDONED
+        )
 
     async def _record_plans(self, call: int, portfolio: PortfolioPlan) -> None:
         parent = self._base_revision()
@@ -438,6 +485,12 @@ class _DynamicRun:
             for plan in portfolio.workstreams:
                 sequence += 1
                 index = by_id.get(plan.hypothesis_id)
+                if index is not None:
+                    # Continuing a parked direction makes it available again;
+                    # its row would otherwise read parked while it runs.
+                    self.state.search = hypothesis_transitions.reopen_parked_hypothesis(
+                        self.state.search, plan.hypothesis_id
+                    )
                 if index is None:
                     started = hypothesis_transitions.start_hypothesis(
                         self.state.search,

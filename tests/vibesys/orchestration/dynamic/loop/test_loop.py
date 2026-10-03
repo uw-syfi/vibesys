@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import unicodedata
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     implemented,
     load_state,
     options,
+    planner_history,
     portfolio,
     run_loop,
     workstream,
@@ -439,3 +441,108 @@ def test_long_agent_text_is_kept_whole_and_the_planner_history_stays_bounded(
     second_planning = agents.prompts(ORCHESTRATOR.id)[1]
     assert len(second_planning) < 20_000
     assert long not in second_planning
+
+
+# Accuracy reads ``VALUE`` and passes; the benchmark process exits with a
+# failure after measuring, as a benchmark killed at its time limit does.
+_SLOW_CANDIDATE = """\
+import sys
+VALUE = 2
+if "--vs-output" in sys.argv:
+    raise SystemExit("warmup timed out at 2 requests/s; 80 needed")
+"""
+# A deadlock guard for turns that wait on each other; each wait ends within
+# seconds, and a longer bound never turns a failure into a pass.
+_HANDOFF_S = 120.0
+
+
+def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
+    tmp_path: Path,
+) -> None:
+    """Regression for r13: the planner planned on stale and misreported facts.
+
+    A running implementer turn showed the outcome of the attempt before it, an
+    evaluation whose benchmark failed read as an accepted result, and a park
+    left no trace in the history.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    second_turn = threading.Event()
+    planned = threading.Event()
+    seen: dict[str, object] = {}
+
+    def fail_twice(agent: Turn) -> dict[str, object]:
+        for value in (-1, -2):
+            agent.set_value(value)
+            agent.evaluate("accuracy")
+        return implemented("A", outcome="blocked")
+
+    def slow_candidate(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text(_SLOW_CANDIDATE, encoding="utf-8")
+        agent.evaluate("accuracy", "benchmark")
+        second_turn.set()
+        assert planned.wait(_HANDOFF_S)
+        return implemented("A", outcome="blocked")
+
+    def finish_while_a_runs(_agent: Turn) -> dict[str, object]:
+        assert second_turn.wait(_HANDOFF_S)
+        return implemented("B", outcome="blocked")
+
+    def park_running(agent: Turn) -> dict[str, object]:
+        seen["operations"] = agent.trusted_operations()
+        park = {"hypothesis_id": "A", "disposition": "parked", "reason": "Too slow."}
+        return portfolio(workstream("C"), updates=[park])
+
+    def park_finished(_agent: Turn) -> dict[str, object]:
+        planned.set()
+        park = {"hypothesis_id": "B", "disposition": "parked", "reason": "Blocked."}
+        return portfolio(workstream("C"), updates=[park])
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("A"), workstream("B")), park_running, park_finished)
+        .plan(portfolio(workstream("D")))
+        .implement("A", fail_twice, slow_candidate)
+        .implement("B", finish_while_a_runs)
+        .implement("C", implemented("C", outcome="blocked"))
+        .implement("D", implemented("D", outcome="blocked"))
+    )
+
+    run = run_loop(
+        loop_input,
+        agents,
+        options(max_in_flight=2, max_rounds=2, max_repeated_failures=2),
+    )
+
+    assert run.error is None
+    assert agents.unscripted == []
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 4
+    running = planner_history(planner[1])["A"]
+    assert running["phase"] == "implementing"
+    # The attempt before the running turn is labeled as such, not as current.
+    assert "outcome" not in running
+    previous = running["previous_attempt"]
+    assert isinstance(previous, dict)
+    assert previous["outcome"] == "blocked"
+    (live,) = running["running_evaluations"]
+    assert isinstance(live, dict)
+    assert live["status"] == "failed"
+    assert [(stage["kind"], stage["outcome"]) for stage in live["stages"]] == [
+        ("accuracy", "passed"),
+        ("benchmark", "failed"),
+    ]
+    assert "warmup timed out at 2 requests/s" in str(live["failure_tail"])
+    # The run-wide operations tool says the same: recorded is not passed.
+    operations = seen["operations"]
+    assert isinstance(operations, dict)
+    measured = operations["evaluations"][-1]
+    assert measured["evidence_recorded"] is True
+    assert [item["outcome"] for item in measured["stage_outcomes"]] == ["passed", "failed"]
+    # Parking a running workstream is corrected with the field named.
+    assert "hypothesis_updates[0].hypothesis_id: 'A' is still running" in planner[2]
+    # The applied park shows in the next planning call's history.
+    parked = planner_history(planner[3])["B"]
+    assert parked["strategy"] == "parked"
+    assert parked["strategy_reason"] == "Blocked."
+    state = load_state(loop_input, run.run_id)
+    assert [item.hypothesis_id for item in state.workstreams] == ["A", "B", "C", "D"]

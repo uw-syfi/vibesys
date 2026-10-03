@@ -471,7 +471,8 @@ class EvaluationAgentService:
                     candidate_content_digest=access.fingerprints.candidate.value,
                     evidence_kinds=access.kinds,
                     state=snapshot.state,
-                    accepted_result=snapshot.accepted_result,
+                    evidence_recorded=snapshot.evidence_recorded,
+                    stage_outcomes=snapshot.stage_outcomes,
                     evidence_ids=snapshot.evidence_ids,
                 )
             )

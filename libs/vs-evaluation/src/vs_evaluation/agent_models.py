@@ -7,7 +7,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
 
-from vs_evaluation.agent_evidence import EvidenceFingerprints, EvidenceKind, TrustedEvidence
+from vs_evaluation.agent_evidence import (
+    EvidenceFingerprints,
+    EvidenceKind,
+    EvidenceMetric,
+    EvidenceOutcome,
+    TrustedEvidence,
+)
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     EvaluationAwaitResult,
@@ -190,13 +196,36 @@ class RunOperationsCall(BaseModel):
     token: str
 
 
+MAX_STAGE_SUMMARY_TAIL_CHARS = 600
+
+
+class EvaluationStageOutcome(BaseModel):
+    """The trusted conclusion of one stage that recorded evidence.
+
+    ``outcome`` is the stage's verdict: a benchmark that ran but missed its
+    requirement is ``failed`` even though its evidence was recorded.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: EvidenceKind
+    outcome: EvidenceOutcome
+    metrics: tuple[EvidenceMetric, ...] = ()
+    # The end of the stage's own summary, where a failure states its cause.
+    summary_tail: str | None = Field(default=None, max_length=MAX_STAGE_SUMMARY_TAIL_CHARS)
+
+
 class EvaluationOperationSnapshot(BaseModel):
-    """Backend-owned lifecycle and accepted-result state for one evaluation."""
+    """Backend-owned lifecycle and per-stage outcomes of one evaluation.
+
+    ``evidence_recorded`` says only that every requested stage recorded
+    trusted evidence; whether each stage passed is in ``stage_outcomes``.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     handle_id: str = Field(min_length=1)
     state: EvaluationState
-    accepted_result: bool
+    evidence_recorded: bool
+    stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     # Complete failure text when the evaluation failed: the run failed, or its
     # accepted evidence reports a failed outcome.
@@ -213,7 +242,9 @@ class EvaluationOperationObservation(BaseModel):
     candidate_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     evidence_kinds: tuple[EvidenceKind, ...]
     state: EvaluationState
-    accepted_result: bool
+    # Every requested stage recorded trusted evidence; not that each passed.
+    evidence_recorded: bool
+    stage_outcomes: tuple[EvaluationStageOutcome, ...] = ()
     evidence_ids: tuple[str, ...] = ()
 
 
@@ -341,6 +372,7 @@ SocketReply = Annotated[SocketSuccess | SocketFailure, Field(discriminator="ok")
 
 __all__ = [
     "MAX_AGENT_AWAIT_S",
+    "MAX_STAGE_SUMMARY_TAIL_CHARS",
     "AgentEvaluationCall",
     "AgentEvaluationReply",
     "AvailabilityCall",
@@ -354,6 +386,7 @@ __all__ = [
     "EvaluationGrant",
     "EvaluationOperationObservation",
     "EvaluationOperationSnapshot",
+    "EvaluationStageOutcome",
     "EvidenceCall",
     "EvidencePreflightCheck",
     "EvidencePreflightDecision",

@@ -26,6 +26,7 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvidenceKind,
+    EvidenceOutcome,
     SubmitCall,
     SubmittedReply,
 )
@@ -33,6 +34,7 @@ from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
     AccuracyEvaluation,
+    AgentEvaluationStageOutcome,
     AgentEvaluationStatus,
     AgentToolBindingContext,
     BenchmarkEvaluation,
@@ -118,7 +120,7 @@ async def test_agent_results_are_reused_by_the_framework_gate_without_execution(
     handle_id = await _submit_and_finish(service, grant.token)
     snapshot = await backend.operation_snapshot(handle_id)
     assert snapshot.state is EvaluationState.SUCCEEDED
-    assert snapshot.accepted_result
+    assert snapshot.evidence_recorded
     assert len(snapshot.evidence_ids) == 2
     assert lifecycle[0].handle_id == handle_id
     assert lifecycle[-1].state is EvaluationState.SUCCEEDED
@@ -272,6 +274,62 @@ async def test_policy_reads_the_outcomes_agents_submitted_from_a_workspace(
     assert outcomes[0].kinds == ("accuracy", "benchmark")
     assert outcomes[0].revision != outcomes[1].revision
     assert await evaluation.agent_evaluations(other) == ()
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_recorded_evidence_reports_each_stage_outcome_not_a_pass(
+    tmp_path: Path,
+) -> None:
+    # Regression: an evaluation whose benchmark ran and failed was reported as
+    # an accepted result, and a planner read it as passing both gates.
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="cache")
+    run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
+    run.evaluation.script_benchmark(
+        BenchmarkEvaluation(
+            executed=True,
+            feedback="warmup timed out at 16.3 requests/s; 79.7 needed",
+            metric_name="throughput",
+            metric_value=16.3,
+            metric_direction=MetricDirection.MAXIMIZE,
+            metric_unit="requests/s",
+            row={"throughput": 16.3},
+        )
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "cache", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:cache",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+    )
+
+    handle_id = await _submit_and_finish(service, grant.token)
+
+    snapshot = await backend.operation_snapshot(handle_id)
+    assert snapshot.evidence_recorded
+    assert [(item.kind, item.outcome) for item in snapshot.stage_outcomes] == [
+        (EvidenceKind.ACCURACY, EvidenceOutcome.PASSED),
+        (EvidenceKind.BENCHMARK, EvidenceOutcome.FAILED),
+    ]
+    benchmark = snapshot.stage_outcomes[1]
+    assert [(item.name, item.value, item.unit) for item in benchmark.metrics] == [
+        ("throughput", 16.3, "requests/s")
+    ]
+    assert benchmark.summary_tail == "warmup timed out at 16.3 requests/s; 79.7 needed"
+    (outcome,) = await evaluation.agent_evaluations(candidate)
+    assert outcome.status is AgentEvaluationStatus.FAILED
+    assert [(item.kind, item.outcome) for item in outcome.stages] == [
+        ("accuracy", AgentEvaluationStageOutcome.PASSED),
+        ("benchmark", AgentEvaluationStageOutcome.FAILED),
+    ]
+    assert [(item.name, item.value) for item in outcome.stages[1].metrics] == [("throughput", 16.3)]
     await backend.close()
 
 
