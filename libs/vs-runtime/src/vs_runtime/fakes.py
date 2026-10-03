@@ -1261,9 +1261,57 @@ class FakeLocalValidationCall:
     report_location: str
 
 
+FakeEvaluationKind: TypeAlias = Literal["accuracy", "benchmark"]
+
+
+class FakeEvaluationGate:
+    """Holds one trusted evaluation call until the test releases it.
+
+    The gated call sets :attr:`entered` when it starts and then waits for
+    :meth:`release`, so a test can order events across concurrent work without
+    yielding a counted number of times or reading a clock.
+    """
+
+    def __init__(self) -> None:
+        """Create an unreleased gate."""
+        self.entered = asyncio.Event()
+        self._release = asyncio.Event()
+        self.cancelled_while_live = False
+        self.finished = False
+
+    @property
+    def released(self) -> bool:
+        """Return whether the test has released the held call."""
+        return self._release.is_set()
+
+    def release(self) -> None:
+        """Let the held call continue to its scripted outcome."""
+        self._release.set()
+
+    async def hold(self, workspace: Workspace) -> None:
+        """Wait for release, noting a cancellation that arrives while ``workspace`` is live."""
+        self.entered.set()
+        try:
+            await self._release.wait()
+        except asyncio.CancelledError:
+            discarded = isinstance(workspace, FakeCandidateWorkspace) and workspace.discarded
+            self.cancelled_while_live = not discarded
+            raise
+        finally:
+            self.finished = True
+
+
 @dataclass(slots=True)
 class FakeEvaluation:
-    """Scriptable in-memory implementation of trusted evaluation effects."""
+    """Scriptable in-memory implementation of trusted evaluation effects.
+
+    Scripted results are consumed in call order; a scripted exception is raised
+    by the call that consumes it. Benchmarks of the root workspace (the run's
+    input, whose ``id`` is ``None``) consume :attr:`root_benchmark_results`
+    first, so a test can script the input and candidates independently of how
+    their calls interleave. A gate holds the n-th call of one kind (counted
+    from zero across all workspaces) until the test releases it.
+    """
 
     default_accuracy: AccuracyEvaluation = field(
         default_factory=lambda: AccuracyEvaluation(executed=False)
@@ -1274,25 +1322,46 @@ class FakeEvaluation:
     default_local_validation: LocalValidationEvaluation = field(
         default_factory=lambda: LocalValidationEvaluation(passed=True)
     )
-    accuracy_results: list[AccuracyEvaluation] = field(default_factory=list)
-    benchmark_results: list[BenchmarkEvaluation] = field(default_factory=list)
+    accuracy_results: list[AccuracyEvaluation | BaseException] = field(default_factory=list)
+    benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
+    root_benchmark_results: list[BenchmarkEvaluation | BaseException] = field(default_factory=list)
     local_validation_results: list[LocalValidationEvaluation] = field(default_factory=list)
     accuracy_calls: list[FakeAccuracyCall] = field(default_factory=list)
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
+    _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
 
-    def script_accuracy(self, *results: AccuracyEvaluation) -> None:
-        """Queue accuracy results in call order."""
+    def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
+        """Queue accuracy results or failures in call order."""
         self.accuracy_results.extend(results)
 
-    def script_benchmark(self, *results: BenchmarkEvaluation) -> None:
-        """Queue benchmark results in call order."""
+    def script_benchmark(self, *results: BenchmarkEvaluation | BaseException) -> None:
+        """Queue benchmark results or failures in call order."""
         self.benchmark_results.extend(results)
+
+    def script_root_benchmark(self, *results: BenchmarkEvaluation | BaseException) -> None:
+        """Queue results or failures for benchmarks of the root workspace only."""
+        self.root_benchmark_results.extend(results)
 
     def script_local_validation(self, *results: LocalValidationEvaluation) -> None:
         """Queue local-validation results in call order."""
         self.local_validation_results.extend(results)
+
+    def gate(self, kind: FakeEvaluationKind, call: int) -> FakeEvaluationGate:
+        """Hold the ``call``-th evaluation of ``kind`` (from zero) until released."""
+        key = (kind, call)
+        if key in self._gates:
+            message = f"{kind} call {call} is already gated"
+            raise ValueError(message)
+        gate = FakeEvaluationGate()
+        self._gates[key] = gate
+        return gate
+
+    async def _pass_gate(self, kind: FakeEvaluationKind, call: int, workspace: Workspace) -> None:
+        gate = self._gates.get((kind, call))
+        if gate is not None:
+            await gate.hold(workspace)
 
     async def accuracy(
         self,
@@ -1302,6 +1371,7 @@ class FakeEvaluation:
     ) -> AccuracyEvaluation:
         """Record the request and return the next scripted result."""
         self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
+        await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace)
         if reuse is not None:
             if reuse.run_id != self.run_id:
                 message = "accuracy receipt belongs to another run"
@@ -1314,6 +1384,8 @@ class FakeEvaluation:
                 raise RuntimeContractError(message)
             return AccuracyEvaluation(executed=False, receipt=reuse)
         result = self.accuracy_results.pop(0) if self.accuracy_results else self.default_accuracy
+        if isinstance(result, BaseException):
+            raise result
         if not result.passed:
             return result
         revision = workspace.revision
@@ -1336,9 +1408,16 @@ class FakeEvaluation:
         """Record the request and return the next scripted result."""
         validate_objectives(objectives)
         self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives))
-        if self.benchmark_results:
-            return self.benchmark_results.pop(0)
-        return self.default_benchmark
+        await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace)
+        if workspace.id is None and self.root_benchmark_results:
+            result = self.root_benchmark_results.pop(0)
+        elif self.benchmark_results:
+            result = self.benchmark_results.pop(0)
+        else:
+            result = self.default_benchmark
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
     async def validate_local(
         self,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from collections import deque
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,10 +23,8 @@ from vibesys.orchestration.dynamic import (
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vs_runtime.api import (
     AccuracyEvaluation,
-    AccuracyReceipt,
     AgentCapability,
     BenchmarkEvaluation,
-    BenchmarkObjective,
     LocalValidationEvaluation,
     MetricDirection,
     Run,
@@ -35,7 +32,7 @@ from vs_runtime.api import (
     RunStatus,
     StructuredResponseError,
 )
-from vs_runtime.api.testing import FakeEvaluation, FakeRun
+from vs_runtime.api.testing import FakeEvaluationGate, FakeRun
 
 if TYPE_CHECKING:
     from vs_runtime.api import AgentRole, CandidateWorkspace, Workspace, Workspaces
@@ -124,74 +121,6 @@ class _EvaluationTransportError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("accuracy transport failed")
-
-
-class _CoordinatedEvaluation:
-    """Evaluation fake that exposes sibling cancellation without wall-clock waits."""
-
-    def __init__(self, *, fail_accuracy: bool) -> None:
-        self.delegate = FakeEvaluation()
-        self.fail_accuracy = fail_accuracy
-        self.accuracy_started = asyncio.Event()
-        self.benchmark_started = asyncio.Event()
-        self.accuracy_task: asyncio.Task[object] | None = None
-        self.benchmark_task: asyncio.Task[object] | None = None
-        self.canceled_while_live: list[str] = []
-        self.input_measured = False
-
-    async def accuracy(
-        self,
-        workspace: Workspace,
-        *,
-        reuse: AccuracyReceipt | None = None,
-    ) -> AccuracyEvaluation:
-        del reuse
-        self.accuracy_task = asyncio.current_task()
-        self.accuracy_started.set()
-        if self.fail_accuracy:
-            await self.benchmark_started.wait()
-            raise _EvaluationTransportError
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            if not getattr(workspace, "discarded", False):
-                self.canceled_while_live.append("accuracy")
-            raise
-        return AccuracyEvaluation(executed=True)
-
-    async def benchmark(
-        self,
-        workspace: Workspace,
-        *,
-        objectives: tuple[BenchmarkObjective, ...] = (),
-    ) -> BenchmarkEvaluation:
-        del objectives
-        if not self.input_measured:
-            # The input baseline is measured alone, before any candidate exists.
-            self.input_measured = True
-            return _INPUT_BASELINE
-        self.benchmark_task = asyncio.current_task()
-        self.benchmark_started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            if not getattr(workspace, "discarded", False):
-                self.canceled_while_live.append("benchmark")
-            raise
-        return BenchmarkEvaluation(executed=True)
-
-    async def validate_local(
-        self,
-        workspace: Workspace,
-        *,
-        recipe_artifact: str,
-        report_location: str,
-    ) -> LocalValidationEvaluation:
-        return await self.delegate.validate_local(
-            workspace,
-            recipe_artifact=recipe_artifact,
-            report_location=report_location,
-        )
 
 
 def test_options_and_portfolios_are_strict() -> None:
@@ -771,8 +700,8 @@ def test_parallel_evaluations_are_drained_before_candidate_discard(
         }
     )
 
-    async def scenario() -> tuple[_CoordinatedEvaluation, FakeRun]:
-        fake = FakeRun(
+    async def scenario() -> tuple[FakeEvaluationGate, FakeEvaluationGate, FakeRun]:
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(
@@ -790,37 +719,35 @@ def test_parallel_evaluations_are_drained_before_candidate_discard(
             },
             supports_parallel_candidates=True,
         )
-        evaluation = _CoordinatedEvaluation(fail_accuracy=not cancel_orchestrate)
-        run = Run(
-            run_id=fake.run_id,
-            facts=fake.facts,
-            agents=fake.agents,
-            workspaces=fake.workspaces,
-            evaluation=evaluation,
-            state=fake.state,
-            control=fake.control,
-            commands=fake.commands,
-            skills=fake.skills,
-            observations=fake.observations,
-        )
+        # The input baseline is measured alone, before any candidate exists.
+        run.evaluation.script_root_benchmark(_INPUT_BASELINE)
+        run.evaluation.script_accuracy(_EvaluationTransportError())
+        accuracy = run.evaluation.gate("accuracy", 0)
+        benchmark = run.evaluation.gate("benchmark", 1)
         orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, _options(max_in_flight=1)))
-        await evaluation.accuracy_started.wait()
-        await evaluation.benchmark_started.wait()
+        await accuracy.entered.wait()
+        await benchmark.entered.wait()
         if cancel_orchestrate:
             orchestrating.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await orchestrating
         else:
+            accuracy.release()
             await orchestrating
-        return evaluation, fake
+        return accuracy, benchmark, run
 
-    evaluation, run = asyncio.run(scenario())
+    accuracy, benchmark, run = asyncio.run(scenario())
 
+    canceled_while_live = {
+        kind
+        for kind, gate in (("accuracy", accuracy), ("benchmark", benchmark))
+        if gate.cancelled_while_live
+    }
     expected = {"accuracy", "benchmark"} if cancel_orchestrate else {"benchmark"}
-    assert set(evaluation.canceled_while_live) == expected
-    assert evaluation.accuracy_task is not None
-    assert evaluation.benchmark_task is not None
-    assert evaluation.benchmark_task.done()
+    assert canceled_while_live == expected
+    assert accuracy.entered.is_set()
+    assert benchmark.entered.is_set()
+    assert benchmark.finished
     assert all(candidate.discarded for candidate in run.workspaces.candidates)
 
 
@@ -1610,49 +1537,6 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
     assert state.winner_revision == state.workstreams[0].candidate_revision
 
 
-class _FlakyBenchmarkEvaluation:
-    """Evaluation fake whose first candidate benchmark fails in transport.
-
-    Call 1 measures the input baseline; call 2 is the candidate's first.
-    """
-
-    def __init__(self, delegate: FakeEvaluation) -> None:
-        self.delegate = delegate
-        self.benchmark_calls = 0
-
-    async def accuracy(
-        self,
-        workspace: Workspace,
-        *,
-        reuse: AccuracyReceipt | None = None,
-    ) -> AccuracyEvaluation:
-        return await self.delegate.accuracy(workspace, reuse=reuse)
-
-    async def benchmark(
-        self,
-        workspace: Workspace,
-        *,
-        objectives: tuple[BenchmarkObjective, ...] = (),
-    ) -> BenchmarkEvaluation:
-        self.benchmark_calls += 1
-        if self.benchmark_calls == 2:
-            raise _EvaluationTransportError
-        return await self.delegate.benchmark(workspace, objectives=objectives)
-
-    async def validate_local(
-        self,
-        workspace: Workspace,
-        *,
-        recipe_artifact: str,
-        report_location: str,
-    ) -> LocalValidationEvaluation:
-        return await self.delegate.validate_local(
-            workspace,
-            recipe_artifact=recipe_artifact,
-            report_location=report_location,
-        )
-
-
 def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> None:
     """A stage failure after a retained implementation resumes at that stage."""
     script = _Script(
@@ -1663,8 +1547,8 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
         }
     )
 
-    async def scenario() -> tuple[FakeRun, _FlakyBenchmarkEvaluation]:
-        fake = FakeRun(
+    async def scenario() -> FakeRun:
+        run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
             facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
@@ -1677,8 +1561,10 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        fake.evaluation.script_benchmark(
+        # Call 1 measures the input baseline; the candidate's first fails in transport.
+        run.evaluation.script_benchmark(
             _INPUT_BASELINE,
+            _EvaluationTransportError(),
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -1687,25 +1573,12 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
                 row={"throughput": 10.0},
             ),
         )
-        evaluation = _FlakyBenchmarkEvaluation(fake.evaluation)
-        run = Run(
-            run_id=fake.run_id,
-            facts=fake.facts,
-            agents=fake.agents,
-            workspaces=fake.workspaces,
-            evaluation=evaluation,
-            state=fake.state,
-            control=fake.control,
-            commands=fake.commands,
-            skills=fake.skills,
-            observations=fake.observations,
-        )
         status = await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_retries_per_round=2))
         assert status is RunStatus.SUCCEEDED
-        return fake, evaluation
+        return run
 
-    run, evaluation = asyncio.run(scenario())
-    assert evaluation.benchmark_calls == 1 + 2
+    run = asyncio.run(scenario())
+    assert len(run.evaluation.benchmark_calls) == 1 + 2
     assert len([s for s in run.agents.sessions if s.role.id == IMPLEMENTER.id]) == 1
     assert len([s for s in run.agents.sessions if s.role.id == JUDGE.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
@@ -2025,6 +1898,11 @@ def _throughput(value: float) -> BenchmarkEvaluation:
     )
 
 
+def _input_calls(run: FakeRun) -> int:
+    """Return how many benchmarks measured the input (the root workspace)."""
+    return sum(call.workspace.id is None for call in run.evaluation.benchmark_calls)
+
+
 def _baseline_run(tmp_path: Path, script: _Script) -> FakeRun:
     return FakeRun(
         PLUGIN,
@@ -2083,46 +1961,6 @@ class _InputBenchmarkFailsOnceError(RuntimeError):
     """Synthetic evaluator transport failure on the first input measurement."""
 
 
-class _InputBenchmarkFailsOnce:
-    """Evaluation fake whose first benchmark call raises, then delegates."""
-
-    def __init__(self, delegate: FakeEvaluation) -> None:
-        self.delegate = delegate
-        self.failed = False
-
-    async def accuracy(
-        self,
-        workspace: Workspace,
-        *,
-        reuse: AccuracyReceipt | None = None,
-    ) -> AccuracyEvaluation:
-        return await self.delegate.accuracy(workspace, reuse=reuse)
-
-    async def benchmark(
-        self,
-        workspace: Workspace,
-        *,
-        objectives: tuple[BenchmarkObjective, ...] = (),
-    ) -> BenchmarkEvaluation:
-        if not self.failed:
-            self.failed = True
-            raise _InputBenchmarkFailsOnceError
-        return await self.delegate.benchmark(workspace, objectives=objectives)
-
-    async def validate_local(
-        self,
-        workspace: Workspace,
-        *,
-        recipe_artifact: str,
-        report_location: str,
-    ) -> LocalValidationEvaluation:
-        return await self.delegate.validate_local(
-            workspace,
-            recipe_artifact=recipe_artifact,
-            report_location=report_location,
-        )
-
-
 def test_failed_input_measurement_is_retried_before_the_next_epoch(tmp_path: Path) -> None:
     script = _Script(
         {
@@ -2137,21 +1975,15 @@ def test_failed_input_measurement_is_retried_before_the_next_epoch(tmp_path: Pat
 
     async def scenario() -> tuple[FakeRun, DynamicState | None]:
         fake = _baseline_run(tmp_path, script)
-        # Epoch 1 candidate 12 is recorded ungated; the input then measures 20.
-        fake.evaluation.script_benchmark(_throughput(12.0), _throughput(20.0), _throughput(15.0))
-        run = Run(
-            run_id=fake.run_id,
-            facts=fake.facts,
-            agents=fake.agents,
-            workspaces=fake.workspaces,
-            evaluation=_InputBenchmarkFailsOnce(fake.evaluation),
-            state=fake.state,
-            control=fake.control,
-            commands=fake.commands,
-            skills=fake.skills,
-            observations=fake.observations,
+        # The first input measurement fails in transport; epoch 1 candidate 12
+        # is recorded ungated; the input then measures 20.
+        fake.evaluation.script_benchmark(
+            _InputBenchmarkFailsOnceError(),
+            _throughput(12.0),
+            _throughput(20.0),
+            _throughput(15.0),
         )
-        status = await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+        status = await PLUGIN.orchestrate(fake, _options(max_rounds=2, max_in_flight=1))
         assert status is RunStatus.SUCCEEDED
         return fake, await fake.state.load(DynamicState)
 
@@ -2191,24 +2023,21 @@ def test_input_that_fails_the_benchmark_twice_is_recorded_and_gates_nothing(
     rejection = "prefix-cache preflight failed: server reported no prefix-cache hit"
     script = _two_epoch_script()
 
-    async def scenario() -> tuple[_InputVersusCandidate, DynamicState | None]:
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
         fake = _baseline_run(tmp_path, script)
-        evaluation = _InputVersusCandidate(
-            fake.evaluation,
-            inputs=[
-                BenchmarkEvaluation(executed=True, feedback=rejection),
-                BenchmarkEvaluation(executed=True, feedback=rejection),
-            ],
-            candidates=[_throughput(12.0), _throughput(15.0)],
+        fake.evaluation.script_root_benchmark(
+            BenchmarkEvaluation(executed=True, feedback=rejection),
+            BenchmarkEvaluation(executed=True, feedback=rejection),
         )
-        run = _with_evaluation(fake, evaluation)
+        fake.evaluation.script_benchmark(_throughput(12.0), _throughput(15.0))
+        run = fake
         assert await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1)) is (
             RunStatus.SUCCEEDED
         )
-        return evaluation, await fake.state.load(DynamicState)
+        return fake, await fake.state.load(DynamicState)
 
-    evaluation, state = asyncio.run(scenario())
-    assert evaluation.input_calls == 2
+    fake, state = asyncio.run(scenario())
+    assert _input_calls(fake) == 2
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is False
@@ -2243,36 +2072,6 @@ def test_input_benchmark_that_did_not_run_is_measured_again(tmp_path: Path) -> N
     assert state.baseline.metrics == {"throughput": 10.0}
 
 
-# Bounded cooperative yields that let sibling workstreams advance; no wall clock.
-_HOLD_YIELDS = 200
-
-
-@dataclass(slots=True)
-class _HeldInputEvaluation(FakeEvaluation):
-    """Fake evaluation that holds the input benchmark until an implementer runs.
-
-    The hold yields a bounded number of times, so a policy that waits for the
-    input before planning still finishes and the test observes it.
-    """
-
-    implementing: bool = False
-    released_by_implementer: list[bool] = field(default_factory=list)
-
-    async def benchmark(
-        self,
-        workspace: Workspace,
-        *,
-        objectives: tuple[BenchmarkObjective, ...] = (),
-    ) -> BenchmarkEvaluation:
-        if workspace.id is None:
-            for _ in range(_HOLD_YIELDS):
-                if self.implementing:
-                    break
-                await asyncio.sleep(0)
-            self.released_by_implementer.append(self.implementing)
-        return await FakeEvaluation.benchmark(self, workspace, objectives=objectives)
-
-
 def test_input_measurement_runs_beside_the_first_workstream_and_still_gates_it(
     tmp_path: Path,
 ) -> None:
@@ -2282,8 +2081,6 @@ def test_input_measurement_runs_beside_the_first_workstream_and_still_gates_it(
     It only gates which candidates may be kept, so the first workstream starts
     while it runs, and a slower candidate is still discarded against it.
     """
-    evaluation = _HeldInputEvaluation()
-    evaluation.script_benchmark(_INPUT_BASELINE, _throughput(0.5))
     script = _Script(
         {
             ORCHESTRATOR.id: [_portfolio("slower")],
@@ -2299,73 +2096,39 @@ def test_input_measurement_runs_beside_the_first_workstream_and_still_gates_it(
         response: type[BaseModel] | None,
     ) -> object:
         if role.id == IMPLEMENTER.id:
-            evaluation.implementing = True
+            held_input.release()
         return script.respond(role, history, message, response)
 
+    run = FakeRun(
+        PLUGIN,
+        project_root=tmp_path,
+        facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+        responder=respond,
+        supported_extra_tools={"evaluation", "profiler"},
+        supports_parallel_candidates=True,
+        supported_agent_capabilities={
+            AgentCapability.MCP_SERVERS,
+            AgentCapability.SESSION_REUSE,
+            AgentCapability.PROVIDER_SESSION_RESUME,
+        },
+    )
+    run.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(0.5))
+    # The input benchmark is held until an implementer turn releases it, so a
+    # policy that waits for the input before planning never finishes.
+    held_input = run.evaluation.gate("benchmark", 0)
+
     async def scenario() -> DynamicState | None:
-        fake = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        run = Run(
-            run_id=fake.run_id,
-            facts=fake.facts,
-            agents=fake.agents,
-            workspaces=fake.workspaces,
-            evaluation=evaluation,
-            state=fake.state,
-            control=fake.control,
-            commands=fake.commands,
-            skills=fake.skills,
-            observations=fake.observations,
-        )
         options = _options(max_rounds=1, max_in_flight=1, official_eval_every=1)
         assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
-        return await fake.state.load(DynamicState)
+        return await run.state.load(DynamicState)
 
     state = asyncio.run(scenario())
-    assert evaluation.released_by_implementer == [True]
+    assert held_input.released
+    assert held_input.finished
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.metric_value == 1.0
     assert state.winner_revision is None
-
-
-@dataclass(slots=True)
-class _HeldEvaluation(FakeEvaluation):
-    """Fake evaluation that holds the first candidate benchmark until a refill.
-
-    The hold yields to the event loop a bounded number of times, so a runtime
-    that never refills still finishes, and the test observes that instead of
-    hanging.
-    """
-
-    refilled: bool = False
-    released_after_refill: list[bool] = field(default_factory=list)
-
-    async def benchmark(
-        self,
-        workspace: Workspace,
-        *,
-        objectives: tuple[BenchmarkObjective, ...] = (),
-    ) -> BenchmarkEvaluation:
-        if self.benchmark_calls and not self.released_after_refill:
-            self.released_after_refill.append(False)
-            for _ in range(_HOLD_YIELDS):
-                if self.refilled:
-                    break
-                await asyncio.sleep(0)
-            self.released_after_refill[0] = self.refilled
-        return await FakeEvaluation.benchmark(self, workspace, objectives=objectives)
 
 
 def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) -> None:
@@ -2375,8 +2138,6 @@ def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) 
     the next planning call must fill that one free slot while the held
     workstream is still in flight.
     """
-    evaluation = _HeldEvaluation(default_benchmark=_throughput(2.0))
-    evaluation.script_benchmark(_INPUT_BASELINE)
     headers: list[str] = []
 
     def respond(
@@ -2388,116 +2149,40 @@ def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) 
         if role.id == ORCHESTRATOR.id:
             headers.append(message.split("\n", 1)[0])
             if len(headers) > 1:
-                evaluation.refilled = True
+                held_candidate.release()
             slots = _requested_slots(message)
             return _portfolio(*(f"h{len(headers)}-{slot}" for slot in range(slots)))
         if role.id == IMPLEMENTER.id:
             return _implementation(next(n for n in message.split("`") if n.startswith("h")))
         return {"passed": True, "analysis": "Reviewed.", "feedback": ""}
 
+    run = FakeRun(
+        PLUGIN,
+        project_root=tmp_path,
+        facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+        responder=respond,
+        supported_extra_tools={"evaluation", "profiler"},
+        supports_parallel_candidates=True,
+        supported_agent_capabilities={
+            AgentCapability.MCP_SERVERS,
+            AgentCapability.SESSION_REUSE,
+            AgentCapability.PROVIDER_SESSION_RESUME,
+        },
+    )
+    run.evaluation.default_benchmark = _throughput(2.0)
+    run.evaluation.script_benchmark(_INPUT_BASELINE)
+    # The first candidate benchmark is held until the next planning call, so a
+    # runtime that never refills a freed slot never finishes.
+    held_candidate = run.evaluation.gate("benchmark", 1)
+
     async def scenario() -> None:
-        fake = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        run = Run(
-            run_id=fake.run_id,
-            facts=fake.facts,
-            agents=fake.agents,
-            workspaces=fake.workspaces,
-            evaluation=evaluation,
-            state=fake.state,
-            control=fake.control,
-            commands=fake.commands,
-            skills=fake.skills,
-            observations=fake.observations,
-        )
         options = _options(max_rounds=2, official_eval_every=1)
         assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
 
     asyncio.run(scenario())
-    assert evaluation.released_after_refill == [True]
+    assert held_candidate.released
+    assert held_candidate.finished
     assert headers[1].startswith("Schedule at most 1 new workstreams for free slots. 1 other")
-
-
-class _InputVersusCandidate:
-    """Evaluation fake that answers the input and the candidates from separate scripts.
-
-    The input measurement runs beside candidate work, so one shared script
-    would make the reading each side gets depend on scheduling order.
-    """
-
-    def __init__(
-        self,
-        delegate: FakeEvaluation,
-        *,
-        inputs: list[BenchmarkEvaluation | BaseException],
-        candidates: list[BenchmarkEvaluation],
-    ) -> None:
-        self.delegate = delegate
-        self.inputs = deque(inputs)
-        self.candidates = deque(candidates)
-        self.input_calls = 0
-
-    async def accuracy(
-        self,
-        workspace: Workspace,
-        *,
-        reuse: AccuracyReceipt | None = None,
-    ) -> AccuracyEvaluation:
-        return await self.delegate.accuracy(workspace, reuse=reuse)
-
-    async def benchmark(
-        self,
-        workspace: Workspace,
-        *,
-        objectives: tuple[BenchmarkObjective, ...] = (),
-    ) -> BenchmarkEvaluation:
-        del objectives
-        if workspace.id is not None:
-            return self.candidates.popleft()
-        self.input_calls += 1
-        result = self.inputs.popleft()
-        if isinstance(result, BaseException):
-            raise result
-        return result
-
-    async def validate_local(
-        self,
-        workspace: Workspace,
-        *,
-        recipe_artifact: str,
-        report_location: str,
-    ) -> LocalValidationEvaluation:
-        return await self.delegate.validate_local(
-            workspace,
-            recipe_artifact=recipe_artifact,
-            report_location=report_location,
-        )
-
-
-def _with_evaluation(fake: FakeRun, evaluation: _InputVersusCandidate) -> Run:
-    return Run(
-        run_id=fake.run_id,
-        facts=fake.facts,
-        agents=fake.agents,
-        workspaces=fake.workspaces,
-        evaluation=evaluation,
-        state=fake.state,
-        control=fake.control,
-        commands=fake.commands,
-        skills=fake.skills,
-        observations=fake.observations,
-    )
 
 
 def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path) -> None:
@@ -2527,7 +2212,7 @@ def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path)
             return _implementation("slower")
         return {"passed": True, "analysis": "Candidate is correct."}
 
-    async def scenario() -> tuple[FakeRun, _InputVersusCandidate, DynamicState | None]:
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
         nonlocal orchestrating
         fake = FakeRun(
             PLUGIN,
@@ -2542,23 +2227,20 @@ def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path)
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        evaluation = _InputVersusCandidate(
-            fake.evaluation,
-            inputs=[_EvaluationTransportError(), _throughput(20.0)],
-            candidates=[_throughput(12.0)],
-        )
-        run = _with_evaluation(fake, evaluation)
+        fake.evaluation.script_root_benchmark(_EvaluationTransportError(), _throughput(20.0))
+        fake.evaluation.script_benchmark(_throughput(12.0))
+        run = fake
         options = _options(max_rounds=1, max_in_flight=1)
         orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
         with pytest.raises(asyncio.CancelledError):
             await orchestrating
         assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
-        return fake, evaluation, await fake.state.load(DynamicState)
+        return fake, await fake.state.load(DynamicState)
 
-    fake, evaluation, state = asyncio.run(scenario())
+    fake, state = asyncio.run(scenario())
 
     assert len([s for s in fake.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
-    assert evaluation.input_calls >= 1
+    assert _input_calls(fake) >= 1
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.metrics == {"throughput": 20.0}
@@ -2582,25 +2264,21 @@ def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorde
         }
     )
 
-    async def scenario() -> tuple[_InputVersusCandidate, DynamicState | None]:
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
         fake = _baseline_run(tmp_path, script)
-        evaluation = _InputVersusCandidate(
-            fake.evaluation,
-            inputs=[
-                BenchmarkEvaluation(executed=True, feedback="server start timed out"),
-                _throughput(20.0),
-            ],
-            candidates=[_throughput(12.0)],
+        fake.evaluation.script_root_benchmark(
+            BenchmarkEvaluation(executed=True, feedback="server start timed out"), _throughput(20.0)
         )
-        run = _with_evaluation(fake, evaluation)
+        fake.evaluation.script_benchmark(_throughput(12.0))
+        run = fake
         assert await PLUGIN.orchestrate(run, _options(max_rounds=1, max_in_flight=1)) is (
             RunStatus.SUCCEEDED
         )
-        return evaluation, await fake.state.load(DynamicState)
+        return fake, await fake.state.load(DynamicState)
 
-    evaluation, state = asyncio.run(scenario())
+    fake, state = asyncio.run(scenario())
 
-    assert evaluation.input_calls == 2
+    assert _input_calls(fake) == 2
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is True
@@ -2778,12 +2456,9 @@ def test_planner_history_shows_that_an_accepted_candidate_was_discarded(tmp_path
 
     async def scenario() -> None:
         fake = _baseline_run(tmp_path, script)
-        evaluation = _InputVersusCandidate(
-            fake.evaluation,
-            inputs=[_throughput(20.0)],
-            candidates=[_throughput(12.0), _throughput(25.0)],
-        )
-        run = _with_evaluation(fake, evaluation)
+        fake.evaluation.script_root_benchmark(_throughput(20.0))
+        fake.evaluation.script_benchmark(_throughput(12.0), _throughput(25.0))
+        run = fake
         await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
 
     asyncio.run(scenario())
