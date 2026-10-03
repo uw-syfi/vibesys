@@ -146,7 +146,15 @@ def _benchmark_command(
     remote_output = ".vibesys-framework-benchmark.json"
     return (
         (*plan.benchmark_command, *extra_arguments, output_argument, remote_output),
-        (SlurmFileArtifact(remote_path=remote_output, local_path=Path(local_output)),),
+        # A failed benchmark may have written why (an evaluator protocol
+        # `error` record), so its result file is copied back either way.
+        (
+            SlurmFileArtifact(
+                remote_path=remote_output,
+                local_path=Path(local_output),
+                collect_on_failure=True,
+            ),
+        ),
     )
 
 
