@@ -13,6 +13,8 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+from vs_evaluator_protocol.api import PartialMeasurement
+
 
 class EvidenceKind(StrEnum):
     """Semantic facts available through the evaluation agent service."""
@@ -90,6 +92,9 @@ class TrustedEvidence(BaseModel):
     outcome: EvidenceOutcome
     semantic_summary: str | None = Field(default=None, max_length=16_384)
     metrics: tuple[EvidenceMetric, ...] = ()
+    # What a failed stage measured before it stopped, as its evaluator
+    # reported it through the evaluator result protocol; never inferred.
+    partial_measurement: PartialMeasurement | None = None
     artifacts: tuple[ArtifactDigest, ...] = ()
     accepted_round: int = Field(ge=0)
 
@@ -101,5 +106,6 @@ __all__ = [
     "EvidenceKind",
     "EvidenceMetric",
     "EvidenceOutcome",
+    "PartialMeasurement",
     "TrustedEvidence",
 ]

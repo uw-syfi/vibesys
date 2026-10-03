@@ -10,13 +10,16 @@ import shlex
 import threading
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vs_evaluator_protocol.api import (
+    ErrorRecord,
     Hello,
+    PartialMeasurement,
     ProtocolError,
     check_objectives,
     parse_records,
@@ -43,14 +46,23 @@ def build_trusted_benchmark_command(
     contract: TrustedBenchmarkContract,
     output_path: str,
 ) -> str:
-    """Frame one benchmark command for the authoritative result decoder."""
+    """Frame one benchmark command for the authoritative result decoder.
+
+    The result file is printed whether or not the command succeeded, so a
+    failed evaluator's `error` record reaches the decoder too; the framed
+    command still exits with the benchmark's own status. A missing file frames
+    nothing, which the decoder rejects for a passing run.
+    """
+    path = shlex.quote(output_path)
     return (
-        f"rm -f -- {shlex.quote(output_path)}"
-        f" && {command}"
-        f" {shlex.quote(contract.output_argument)} {shlex.quote(output_path)}"
-        f" && printf '\\n{_BENCHMARK_MARKER}\\n'"
-        f" && cat {shlex.quote(output_path)}"
-        f" && printf '\\n{_BENCHMARK_END_MARKER}\\n'"
+        f"rm -f -- {path}"
+        f" && {{ {command}"
+        f" {shlex.quote(contract.output_argument)} {path};"
+        " status=$?;"
+        f" printf '\\n{_BENCHMARK_MARKER}\\n';"
+        f" cat {path} 2>/dev/null;"
+        f" printf '\\n{_BENCHMARK_END_MARKER}\\n';"
+        ' (exit "$status"); }'
     )
 
 
@@ -141,6 +153,8 @@ class TrustedBenchmarkResult(BaseModel):
     stderr: str = ""
     row: Mapping[str, FiniteFloat] | None = None
     metrics: Mapping[str, TrustedMetricDeclaration] = Field(default_factory=dict)
+    # What a failed run measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
     provisioned_volumes: tuple[str, ...] = ()
 
 
@@ -342,24 +356,22 @@ class RuntimeTrustedEvaluation:
                 label="benchmark",
                 cancel=cancel,
             )
-            output = execution_failure or result.output.strip()
-            passed = execution_failure is None and result.exit_code == 0
-            row: Mapping[str, float] | None = None
-            metrics: Mapping[str, TrustedMetricDeclaration] = {}
-            if passed:
-                try:
-                    framed = output
-                    if result.truncated:
-                        # The sandbox keeps only the head of long output, which
-                        # drops the framed result appended after the evaluator's
-                        # own logs. Read the result file on its own instead.
-                        framed = self._sandbox.execute(_framed_result_command(output_path)).output
-                    row, metrics = decode_trusted_benchmark_output(
-                        framed, contract, required_metrics
-                    )
-                except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
-                    output = f"{output}\n{error}".strip()
-                    passed = False
+            decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
+            if execution_failure is None:
+                framed = decoded.output
+                if result.truncated:
+                    # The sandbox keeps only the head of long output, which
+                    # drops the framed result appended after the evaluator's
+                    # own logs. Read the result file on its own instead.
+                    framed = self._sandbox.execute(_framed_result_command(output_path)).output
+                decoded = _decode_framed(
+                    framed,
+                    decoded.output,
+                    contract,
+                    required_metrics,
+                    exited_cleanly=result.exit_code == 0,
+                )
+            output, passed, row = decoded.output, decoded.passed, decoded.row
             if changed := self._git.trusted_input_changes():
                 mutation = "Evaluator-owned files changed during benchmark execution: " + ", ".join(
                     changed
@@ -376,7 +388,8 @@ class RuntimeTrustedEvaluation:
                 stdout=result.stdout,
                 stderr=result.stderr,
                 row=row,
-                metrics=metrics,
+                metrics=decoded.metrics,
+                partial_measurement=decoded.partial,
                 provisioned_volumes=volumes,
             )
         finally:
@@ -403,6 +416,43 @@ class RuntimeTrustedEvaluation:
         if declared is None:
             return None
         return declared + self._plan.framework_setup_timeout_seconds
+
+
+@dataclass(frozen=True, slots=True)
+class _Decoded:
+    """One benchmark run's verdict after its framed result was decoded."""
+
+    output: str
+    passed: bool
+    row: Mapping[str, float] | None = None
+    metrics: Mapping[str, TrustedMetricDeclaration] = field(default_factory=dict)
+    partial: PartialMeasurement | None = None
+
+
+def _decode_framed(
+    framed: str,
+    output: str,
+    contract: TrustedBenchmarkContract,
+    required_metrics: frozenset[str],
+    *,
+    exited_cleanly: bool,
+) -> _Decoded:
+    """Decode a finished run's result: its row when it exited 0, else its partial measurement.
+
+    A result that violates its contract fails the run, and the violation is
+    appended to the output the failure reports.
+    """
+    if exited_cleanly:
+        try:
+            row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
+        except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
+            return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
+        return _Decoded(output=output, passed=True, row=row, metrics=metrics)
+    try:
+        measured = decode_trusted_benchmark_partial(framed, contract)
+    except ValueError as error:
+        return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
+    return _Decoded(output=output, passed=False, partial=measured)
 
 
 class _BenchmarkResultError(ValueError):
@@ -476,6 +526,37 @@ def decode_trusted_benchmark_output(
         for name, spec in (measurement.metrics or {}).items()
     }
     return measurement.values, declarations
+
+
+def decode_trusted_benchmark_partial(
+    output: str,
+    contract: TrustedBenchmarkContract,
+) -> PartialMeasurement | None:
+    """Return what a failed benchmark measured, as its `error` record reported it.
+
+    Only the evaluator result protocol carries a partial measurement. A run
+    that framed no result, wrote nothing, or stopped before its `error` record
+    reports none: nothing is inferred from its logs.
+
+    Raises:
+        ValueError: when the run wrote an `error` record but its stream violates
+            the protocol, with the reason code and the offending key.
+    """
+    if not isinstance(contract, ProtocolBenchmarkContract):
+        return None
+    _, marker, framed = output.rpartition(_BENCHMARK_MARKER)
+    encoded, end_marker, _ = framed.partition(_BENCHMARK_END_MARKER)
+    if not marker or not end_marker:
+        return None
+    hello: Hello | None = None
+    try:
+        records = parse_records(encoded)
+        hello = next((record for record in records if isinstance(record, Hello)), None)
+        if not any(isinstance(record, ErrorRecord) for record in records):
+            return None
+        return read_measurement(records).partial
+    except ProtocolError as error:
+        raise _BenchmarkResultError.protocol(error, hello) from error
 
 
 def _parse_scalar(encoded: str, metric: str) -> float:

@@ -12,6 +12,7 @@ from vs_evaluation.agent_evidence import (
     EvidenceKind,
     EvidenceMetric,
     EvidenceOutcome,
+    PartialMeasurement,
     TrustedEvidence,
 )
 from vs_evaluation.models import (
@@ -210,6 +211,8 @@ class EvaluationStageOutcome(BaseModel):
     kind: EvidenceKind
     outcome: EvidenceOutcome
     metrics: tuple[EvidenceMetric, ...] = ()
+    # What a failed stage measured before it stopped, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
     # The end of the stage's own summary, where a failure states its cause.
     summary_tail: str | None = Field(default=None, max_length=MAX_STAGE_SUMMARY_TAIL_CHARS)
 
