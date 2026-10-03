@@ -57,6 +57,24 @@ jobs:
           ./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
 
+  # The two stdlib-only documentation checks, run on every pull request and
+  # merge-queue entry. They used to run only in `python-checks` (skipped for a
+  # docs-only change, since `python` is false) and in the separate Website
+  # workflow, which is neither required nor triggered by the merge queue, so a
+  # docs-only PR with a broken link could merge (#1237). Required PR CI now
+  # depends on this job.
+  doc-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check Markdown links
+        run: python3 scripts/check_doc_links.py
+
+      - name: Check doc code citations
+        run: python3 -m scripts.check_doc_citations
+
   # One environment setup for the Python quality group. repoctl prints each
   # command before running it and names the failing command in its error.
   python-checks:
@@ -474,6 +492,7 @@ jobs:
     name: Required PR CI
     needs:
       - changes
+      - doc-checks
       - python-checks
       - typecheck
       - tui
