@@ -1,0 +1,7 @@
+Configured axes: throughput:max, latency:min
+Dominance is variance-aware: a point removes another only when it is no worse within 2% on every axis and better by more than 2% on at least one.
+Latest completed round: round 3, commit 030303030303, official metrics: (none); retained: True.
+Trusted frontier parents:
+- round 1, commit 010101010101, official: throughput=1000 (max), latency=90 (min); operating point: c=64; artifact: r1.json
+Measured frontier claims not yet usable as trusted parents (retain the commit, but do not treat it as a parent). A row lands here because its hard invariants have not passed independent review, or because its numbers are the implementer's own report rather than a framework measurement:
+- round 3, commit 030303030303: throughput=6000 (max), latency=3600 (min); operating point: c=3; artifact: p3.json; reason: tradeoff

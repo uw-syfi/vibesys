@@ -1,0 +1,6 @@
+Configured axes: throughput:max, latency:min
+Dominance is variance-aware: a point removes another only when it is no worse within 2% on every axis and better by more than 2% on at least one.
+Latest completed round: round 3, commit 030303030303, official metrics: throughput=900 (max), latency=95 (min); retained: True.
+Trusted frontier parents:
+- round 1, commit 010101010101, official: throughput=1000 (max), latency=90 (min); operating point: c=64; artifact: r1.json
+- round 2, commit 020202020202, official: throughput=2000 (max), latency=100 (min); operating point: c=128; artifact: r2.json
