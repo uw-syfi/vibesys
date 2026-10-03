@@ -52,7 +52,6 @@ from vs_evaluation.agent_models import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
 )
-from vs_evaluation.failure_signature import failure_signature, repeated_failures
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
@@ -63,6 +62,7 @@ from vs_evaluation.models import (
     ResourceRequirements,
 )
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
+from vs_evaluation.repeated_failure import detect_repeated_failure
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
@@ -79,7 +79,6 @@ _CALL_ADAPTER = TypeAdapter(AgentEvaluationCall)
 _REPLY_ADAPTER = TypeAdapter(AgentEvaluationReply)
 _MAX_FRAME_BYTES = 1_048_576
 # The second identical failure in a row is the first repeat.
-_FIRST_REPEAT = 2
 
 
 class EvaluationBackend(Protocol):
@@ -561,37 +560,15 @@ class EvaluationAgentService:
         )
 
     async def _repeated_failure(self, access: HandleAccess) -> RepeatedFailure | None:
-        """Describe a failure that repeats the previous ones from the same workspace.
-
-        Failures count in the scope's submission order up to this handle; a
-        passed evaluation ends the run of failures, and an unfinished or
-        canceled one is skipped.
-        """
+        """Describe a failure that repeats its stage's previous ones from the same workspace."""
         handles = await self.scope_handles(access.scope_id)
         if access.handle_id not in handles:
             return None
-        signatures: list[str | None] = []
-        for handle_id in handles[: handles.index(access.handle_id) + 1]:
-            snapshot = await self._backend.operation_snapshot(handle_id)
-            if snapshot.failure is not None:
-                signatures.append(failure_signature(snapshot.failure))
-            elif snapshot.state is EvaluationState.SUCCEEDED:
-                signatures.clear()
-        count = repeated_failures(signatures)
-        signature = signatures[-1] if signatures else None
-        if count < _FIRST_REPEAT or signature is None:
-            return None
-        return RepeatedFailure(
-            signature=signature,
-            count=count,
-            instruction=(
-                f"This is failure {count} in a row with the same error ({signature}). "
-                "Your edits have not reached its cause. Before you edit or submit again, "
-                "read the code at the cited file and line and the code that produces its "
-                "failing values, and state the cause. Repeating an identical failure ends "
-                "your attempt."
-            ),
-        )
+        snapshots = [
+            await self._backend.operation_snapshot(handle_id)
+            for handle_id in handles[: handles.index(access.handle_id) + 1]
+        ]
+        return detect_repeated_failure(snapshots)
 
     def _require_profiler_agents(self) -> ProfilerAgentService:
         if self._profiler_agents is None:

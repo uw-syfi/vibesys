@@ -27,6 +27,8 @@ from vs_evaluation.api import (
     EvaluationState,
     EvidenceKind,
     EvidenceOutcome,
+    FailureKind,
+    PartialMeasurement,
     SubmitCall,
     SubmittedReply,
 )
@@ -398,6 +400,71 @@ async def test_the_await_reply_says_when_a_failure_repeats_the_previous_ones(
         None,
         "ValueError at model.py:442",
     ]
+    await backend.close()
+
+
+def _warmup_stop(rate: float) -> BenchmarkEvaluation:
+    return BenchmarkEvaluation(
+        executed=True,
+        feedback=f"warmup sub-run stopped: {rate} output tokens/s achieved",
+        partial_measurement=PartialMeasurement(
+            name="warmup_output_tokens_per_s",
+            value=rate,
+            direction="max",
+            unit="output tokens/s",
+            target=79.7,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_await_reply_says_when_a_benchmark_stops_at_the_same_rate_again(
+    tmp_path: Path,
+) -> None:
+    """Regression for r19: repeated warmup stops behind a passing accuracy stage never repeated.
+
+    Each passed accuracy stage ended the run of failures, and a stop without a
+    traceback had no signature at all.
+    """
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="cache")
+    run.evaluation.script_accuracy(*(AccuracyEvaluation(executed=True) for _ in range(3)))
+    run.evaluation.script_benchmark(_warmup_stop(7.1), _warmup_stop(7.9), _warmup_stop(16.3))
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "cache", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:cache",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    replies: list[AwaitReply] = []
+    for label in ("first", "same range", "faster"):
+        await candidate.snapshot(label)
+        submitted = await service.dispatch(
+            SubmitCall(
+                token=grant.token,
+                evidence_kinds=(EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK),
+            )
+        )
+        assert isinstance(submitted, SubmittedReply)
+        reply = await service.dispatch(
+            AwaitCall(token=grant.token, handle_id=submitted.handle_id, timeout_s=3)
+        )
+        assert isinstance(reply, AwaitReply)
+        replies.append(reply)
+
+    first, same_range, faster = (reply.repeated_failure for reply in replies)
+    assert first is None
+    assert same_range is not None
+    assert (same_range.kind, same_range.stage, same_range.signature, same_range.count) == (
+        FailureKind.MEASUREMENT,
+        EvidenceKind.BENCHMARK,
+        "warmup_output_tokens_per_s in [4, 8) output tokens/s",
+        2,
+    )
+    assert faster is None
     await backend.close()
 
 

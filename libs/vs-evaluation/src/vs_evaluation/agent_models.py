@@ -338,11 +338,30 @@ class StatusReply(BaseModel):
     status: EvaluationState
 
 
+class FailureKind(StrEnum):
+    """What identifies a repeated evaluation failure."""
+
+    # A Python traceback: its exception type and innermost source line.
+    TRACEBACK = "traceback"
+    # A stage that stopped early: its metric and the power-of-two range of its value.
+    MEASUREMENT = "measurement"
+
+
 class RepeatedFailure(BaseModel):
-    """A failure identical to the ones before it from the same workspace."""
+    """A failure of one stage identical to that stage's previous ones from the same workspace."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    signature: str = Field(min_length=1, description="Exception type and innermost source line.")
+    kind: FailureKind
+    stage: EvidenceKind | None = Field(
+        description="The failing stage, or null when the run failed before any stage's verdict."
+    )
+    signature: str = Field(
+        min_length=1,
+        description=(
+            "The kind's key fields: exception type and innermost source line, or the "
+            "measured metric and its value range."
+        ),
+    )
     count: int = Field(ge=2, description="Consecutive failures with this signature, this included.")
     instruction: str = Field(min_length=1)
 
@@ -483,6 +502,7 @@ __all__ = [
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
+    "FailureKind",
     "HandleAccess",
     "HandleArgs",
     "RepeatedFailure",
