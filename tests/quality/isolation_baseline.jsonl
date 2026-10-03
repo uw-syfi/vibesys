@@ -12,9 +12,8 @@
 {"path": "libs/vs-sandbox/tests/test_device_nodes.py", "rule": "patch", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_device_nodes.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "private_import", "count": 2}
-{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "mock", "count": 147}
-{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "patch", "count": 2}
-{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "private_import", "count": 3}
+{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "mock", "count": 146}
+{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_execution.py", "rule": "private_import", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_host_resource_importer.py", "rule": "private_import", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_landlock_sandbox.py", "rule": "patch", "count": 38}
