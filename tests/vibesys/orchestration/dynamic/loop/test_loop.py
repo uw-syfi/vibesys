@@ -298,7 +298,14 @@ _IDS = st.text(
 _TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_size=80)
 
 
-@settings(max_examples=3)
+# Each example runs a whole loop (hundreds of subprocesses), so a pull request
+# draws one generated example beside the pinned ``@example`` cases below. The
+# scheduled workflow (``.github/workflows/nightly.yml``) sets
+# ``VIBESYS_FULL_PROPERTIES=1`` and draws many more.
+_LOOP_EXAMPLES = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 1
+
+
+@settings(max_examples=_LOOP_EXAMPLES)
 @given(identifier=_IDS, title=_TITLES)
 @example(identifier="H1", title="Prefix cache")
 @example(identifier="0", title="0 ")
