@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -408,23 +408,22 @@ def _formatted_constants(module: _Module) -> set[_Violation]:
     }
 
 
-def _repo_scan() -> frozenset[_Violation]:
+@cache
+def _repo_violations() -> frozenset[_Violation]:
+    """Scan the repository once per process, on first use rather than at import."""
     source_roots = (_REPO_ROOT / "src", *sorted((_REPO_ROOT / "libs").glob("*/src")))
     return _Scanner(_REPO_ROOT / "src", source_roots, _REPO_ROOT).run()
 
 
-_REPO_VIOLATIONS = _repo_scan()
-
-
 def test_prompts_in_migrated_modules_are_rendered_from_templates() -> None:
-    unmigrated = sorted(v for v in _REPO_VIOLATIONS if v.path not in _NOT_YET_MIGRATED)
+    unmigrated = sorted(v for v in _repo_violations() if v.path not in _NOT_YET_MIGRATED)
 
     assert [str(v) for v in unmigrated] == []
 
 
 @pytest.mark.parametrize("path", sorted(_NOT_YET_MIGRATED))
 def test_not_yet_migrated_list_only_names_modules_with_violations(path: str) -> None:
-    assert any(v.path == path for v in _REPO_VIOLATIONS), (
+    assert any(v.path == path for v in _repo_violations()), (
         f"{path} builds no prompt in Python any more; remove it from _NOT_YET_MIGRATED"
     )
 
