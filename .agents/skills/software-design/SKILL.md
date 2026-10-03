@@ -31,6 +31,11 @@ section.
    callers? See rule 5.
 6. **Twice.** Sketch a second, materially different interface. Keep the one
    that hides more.
+7. **Mechanism.** When a bug fix finds the same flaw in several places, change
+   the mechanism that allows it instead of patching each place: a constrained
+   type where agent output becomes a name or path, one source of truth that
+   consumers project from, a failure type set where the failure happens. If
+   that is too large for the PR, name it as a follow-up.
 
 ## Rules
 

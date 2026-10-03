@@ -28,6 +28,8 @@ Answer the software-design checkpoint (.agents/skills/software-design/):
 - Direction: which way data and dependencies flow, and any new coupling or
   `tach.toml` edges (name each one and why it is needed).
 - Drift: known violations you left untouched, extended, or filed as an issue.
+  For a bug fix with the same flaw in several places, the mechanism change
+  that would remove it, or the follow-up that tracks it.
 Write "n/a: <reason>" for a question that does not apply.
 -->
 
