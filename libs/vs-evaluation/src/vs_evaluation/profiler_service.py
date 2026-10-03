@@ -170,8 +170,9 @@ class _StoredOperationIndex(BaseModel):
 
 
 class _NamespaceOperationStore:
-    def __init__(self, namespace: StateNamespace) -> None:
+    def __init__(self, namespace: StateNamespace, terminal_retention: int) -> None:
         self._namespace = namespace
+        self._terminal_retention = terminal_retention
         self._lock = asyncio.Lock()
 
     async def create(self, record: OperationHandle) -> None:
@@ -241,7 +242,7 @@ class _NamespaceOperationStore:
         terminal_ids = tuple(
             record.request.operation_id for record in records if record.state.terminal
         )
-        retired = set(terminal_ids[:-PROFILER_TERMINAL_RETENTION])
+        retired = set(terminal_ids[: -self._terminal_retention])
         if not retired:
             return
         retained = tuple(
@@ -339,8 +340,15 @@ class ProfilerAgentService:
         namespace: StateNamespace,
         hooks: ProfilerAgentServiceHooks,
         policy: OperationPolicy | None = None,
+        terminal_retention: int = PROFILER_TERMINAL_RETENTION,
     ) -> None:
-        """Bind one environment provision and project-owned state."""
+        """Bind one environment provision and project-owned state.
+
+        ``terminal_retention`` is how many finished operations stay queryable.
+        """
+        if terminal_retention < 1:
+            message = f"terminal_retention must be at least 1, got {terminal_retention}"
+            raise ValueError(message)
         self._provision = provision
         self._events = hooks.events
         self._candidate_snapshot = hooks.candidate_snapshot
@@ -348,7 +356,7 @@ class ProfilerAgentService:
         self._dispatch_locks: dict[tuple[str, str | None, str], _DispatchLockEntry] = {}
         self._started = False
         self._event_context: dict[str, tuple[str | None, str]] = {}
-        store = _NamespaceOperationStore(namespace)
+        store = _NamespaceOperationStore(namespace, terminal_retention)
         self._store = store
         self._coordinator = OperationCoordinator(
             _ProfilerRunner(provision, hooks.resolve_evidence)
