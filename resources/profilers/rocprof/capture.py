@@ -38,7 +38,6 @@ import contextlib
 import csv
 import dataclasses
 import importlib
-import io
 import math
 import os
 import re
@@ -47,12 +46,12 @@ import subprocess
 import sys
 import textwrap
 import time
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import threading
+    import types
     from collections.abc import Callable, Iterable
 
 _HERE = Path(__file__).resolve().parent
@@ -95,6 +94,7 @@ _STATUS_SEVERITY: dict[capture_runtime.CaptureStatus, int] = {
     capture_runtime.CaptureStatus.NOT_READY: 1,
     capture_runtime.CaptureStatus.LOAD_FAILED: 2,
     capture_runtime.CaptureStatus.TARGET_FAILED: 3,
+    capture_runtime.CaptureStatus.SETUP_FAILED: 3,
     capture_runtime.CaptureStatus.TIMED_OUT: 4,
     capture_runtime.CaptureStatus.KILLED_AFTER_GRACE: 5,
     capture_runtime.CaptureStatus.CANCELLED: 6,
@@ -126,21 +126,8 @@ _STATUS_SEVERITY: dict[capture_runtime.CaptureStatus, int] = {
 
 
 def run_cli(fn: Callable[[types.SimpleNamespace], None], **kwargs: object) -> str:
-    """Run a ``cmd_*`` with an argparse-like namespace and capture its stdout.
-
-    Several ``cmd_*`` functions reject bad input via ``sys.exit(message)``
-    rather than raising; that becomes an ``error: ...`` string here instead
-    of killing the process.
-    """
-    ns = types.SimpleNamespace(**kwargs)
-    buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(buf):
-            fn(ns)
-    except SystemExit as exc:
-        return f"error: {exc}"
-    out = buf.getvalue()
-    return out or "(no output)"
+    """Run the shared textual-analysis boundary."""
+    return capture_runtime.run_analysis(fn, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -375,12 +362,13 @@ def target_arg_unavailable_message() -> str:
     rocprofv3 ``profile_*`` capture tool always launches its own target.
     """
     _available, detail = _probe_rocprofv3_attach()
-    return (
+    diagnostic = (
         f"error: target= is not supported by this capture tool ({detail}). Every rocprofv3 "
         "capture must launch its own target for the capture's lifetime (omit target=, pass "
         "command= instead). For repeated windows on an already-running process, use the torch "
         "plugin's start_target + profile_ops(target=<id>) instead."
     )
+    raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
 
 
 def import_torch_sibling(module_name: str) -> types.ModuleType | None:
@@ -769,22 +757,9 @@ def _suggest_counter_drilldown(out_dir: Path) -> str | None:
 
 
 def _format_timeline_result(result: capture_runtime.CaptureResult) -> str:
+    capture_runtime.require_profile(result.status.value, capture_runtime.format_result(result))
     lines = [capture_runtime.format_result(result)]
-    if result.status is not capture_runtime.CaptureStatus.OK:
-        # A non-OK status means the *overall* lifecycle didn't exit cleanly
-        # (the target needed escalation, the load command failed, etc.), but
-        # rocprofv3 only needs its own stop_signal delivered to flush a
-        # trace: a serving-engine capture can have rocprofv3 finish "output
-        # generation"/"tool finalization" within seconds of stop_signal,
-        # while some other thread in the same process group (observed with
-        # a real multi-threaded serving engine's API-server process under a
-        # graceful SIGINT; see the profiling-serving-engines skill
-        # references for the engine-specific detail) keeps the process
-        # alive until this lifecycle gives up and escalates -- the trace on
-        # disk is real and complete regardless. Attempt the analysis
-        # unconditionally rather than withholding it: every analyzer
-        # function already degrades cleanly ("no kernel data found") when
-        # nothing was actually written.
+    if result.status is capture_runtime.CaptureStatus.KILLED_AFTER_GRACE:
         lines.append(
             "\nCapture did not complete cleanly (see the log tail above); analyzing whatever "
             "rocprofv3 output exists anyway, since rocprofv3 can flush a complete trace before "
@@ -1045,7 +1020,7 @@ def _format_counters_result(  # noqa: PLR0913  # LW-910056; this function's para
     )
     if overall_status is not capture_runtime.CaptureStatus.OK:
         lines.append(f"\nAt least one pass did not complete cleanly; see each pass under {out_dir}")
-        return "\n".join(lines)
+        raise capture_runtime.CaptureFailedError(overall_status.value, "\n".join(lines))
     dirs = counters.dedupe_preserve_order(str(d) for d in set_dirs.values())
     lines.append("")
     lines.append(
@@ -1117,10 +1092,11 @@ def profile_kernel_deep(
     rocprof_bin = compute.find_rocprof_compute_bin()
     python = compute.find_deps_python(rocprof_bin) if rocprof_bin else None
     if not rocprof_bin or not python:
-        return (
+        diagnostic = (
             "error: rocprof-compute is not usable on this host (no binary, or no interpreter "
             "satisfies its dependency gate); see profiling_capabilities for the fix."
         )
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
 
     capture_id, out_dir = capture_runtime.new_capture("kernel_deep")
     workload_dir = out_dir / "workloads" / capture_id
@@ -1156,6 +1132,7 @@ def profile_kernel_deep(
 def _format_kernel_deep_result(
     result: capture_runtime.CaptureResult, *, kernel: str, dispatch: int | None, workload_dir: Path
 ) -> str:
+    capture_runtime.require_profile(result.status.value, capture_runtime.format_result(result))
     lines = [capture_runtime.format_result(result)]
     if result.status is not capture_runtime.CaptureStatus.OK:
         lines.append("\nCapture did not complete cleanly; see the log tail above.")
@@ -1231,19 +1208,22 @@ def profile_instructions(  # noqa: PLR0913  # LW-910058; this function's paramet
         raise ValueError("kernel is required (a --kernel-include-regex value)")  # noqa: TRY003  # LW-910059; this is a boundary error that deliberately embeds the offending value for the operator to act on
     decoder_dir = _find_att_decoder_dir()
     if decoder_dir is None:
-        return (
+        diagnostic = (
             "error: no rocprof-trace-decoder library found (set $VIBESYS_ROCPROF_ATT_LIBRARY_PATH "
             "or $ROCPROF_ATT_LIBRARY_PATH, or install it under $ROCM_PATH/lib); see "
             "profiling_capabilities."
         )
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     rocprofv3_bin = compute.find_rocprofv3_bin()
     if rocprofv3_bin is None:
-        return "error: rocprofv3 not found; see profiling_capabilities."
+        diagnostic = "error: rocprofv3 not found; see profiling_capabilities."
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     version = _rocprofv3_version(rocprofv3_bin)
     if version is None or version < _ATT_MIN_ROCPROFV3_VERSION:
         found = ".".join(map(str, version)) if version else "unknown"
         needed = ".".join(map(str, _ATT_MIN_ROCPROFV3_VERSION))
-        return f"error: rocprofv3 {found} does not support --att (needs >= {needed}); see profiling_capabilities."
+        diagnostic = f"error: rocprofv3 {found} does not support --att (needs >= {needed}); see profiling_capabilities."
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
 
     capture_id, out_dir = capture_runtime.new_capture("instructions")
     prefix = [
@@ -1281,6 +1261,7 @@ def profile_instructions(  # noqa: PLR0913  # LW-910058; this function's paramet
 
 
 def _format_instructions_result(result: capture_runtime.CaptureResult) -> str:
+    capture_runtime.require_profile(result.status.value, capture_runtime.format_result(result))
     lines = [capture_runtime.format_result(result)]
     if result.status is not capture_runtime.CaptureStatus.OK:
         lines.append("\nCapture did not complete cleanly; see the log tail above.")
@@ -1353,14 +1334,16 @@ def profile_ops(  # noqa: PLR0913  # LW-910060; this function's parameters mirro
     """
     ops_module = import_torch_sibling("capture_ops")
     if ops_module is None:
-        return (
+        diagnostic = (
             "error: the torch profiler plugin's capture_ops module is not staged alongside "
             "rocprof (expected a 'torch' or 'torch_profiler' sibling directory with "
             "capture_ops.py); profile_ops is unavailable."
         )
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     profile_ops_fn = getattr(ops_module, "profile_ops", None)
     if profile_ops_fn is None:
-        return "error: torch capture_ops module has no profile_ops() function."
+        diagnostic = "error: torch capture_ops module has no profile_ops() function."
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     try:
         return profile_ops_fn(
             command=command,
@@ -1381,7 +1364,8 @@ def profile_ops(  # noqa: PLR0913  # LW-910060; this function's parameters mirro
             cancel_event=cancel_event,
         )
     except TypeError as exc:
-        return f"error: torch capture_ops.profile_ops() signature mismatch: {exc}"
+        diagnostic = f"error: torch capture_ops.profile_ops() signature mismatch: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1416,14 +1400,16 @@ def start_target(  # noqa: PLR0913  # LW-910061; this function's parameters mirr
     """
     ops_module = import_torch_sibling("capture_ops")
     if ops_module is None:
-        return (
+        diagnostic = (
             "error: the torch profiler plugin's capture_ops module is not staged alongside "
             "rocprof (expected a 'torch' or 'torch_profiler' sibling directory with "
             "capture_ops.py); start_target is unavailable."
         )
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     start_target_fn = getattr(ops_module, "start_target", None)
     if start_target_fn is None:
-        return "error: torch capture_ops module has no start_target() function."
+        diagnostic = "error: torch capture_ops module has no start_target() function."
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     try:
         return start_target_fn(
             command,
@@ -1437,7 +1423,8 @@ def start_target(  # noqa: PLR0913  # LW-910061; this function's parameters mirr
             timeout_s=timeout_s,
         )
     except RuntimeError as exc:
-        return f"error: {exc}"
+        diagnostic = f"error: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1480,7 +1467,8 @@ def stop_target(target: str) -> str:
     try:
         capture_runtime.stop_target(target)
     except KeyError as exc:
-        return f"error: {exc}"
+        diagnostic = f"error: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     return f"stopped target {target}"
 
 
@@ -1498,7 +1486,8 @@ def _counters_triage_from_manifest(manifest: dict[str, Any]) -> str:
     set_dirs = manifest.get("set_dirs")
     arch = manifest.get("arch")
     if not isinstance(set_dirs, dict) or not set_dirs or not arch:
-        return "error: counters manifest is missing set_dirs/arch"
+        diagnostic = "error: counters manifest is missing set_dirs/arch"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return run_cli(
         counters.cmd_triage,
         dirs=list(set_dirs.values()),
@@ -1511,7 +1500,8 @@ def _counters_triage_from_manifest(manifest: dict[str, Any]) -> str:
 def _kernel_deep_analyze_from_manifest(manifest: dict[str, Any]) -> str:
     workload_dir = manifest.get("meta", {}).get("workload_dir")
     if not workload_dir:
-        return "error: kernel_deep manifest is missing meta.workload_dir"
+        diagnostic = "error: kernel_deep manifest is missing meta.workload_dir"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return run_cli(
         compute.cmd_analyze,
         workload_dir=workload_dir,
@@ -1526,7 +1516,8 @@ def _ops_summary(capture_dir: Path, manifest: dict[str, Any]) -> str:
     """Summarize an ``ops`` capture via the torch analyzer, using its ``capture_ops``-recorded primary trace."""
     analyze_torch_profile = import_torch_sibling("analyze_torch_profile")
     if analyze_torch_profile is None:
-        return "error: the torch analyzer module is not staged alongside rocprof."
+        diagnostic = "error: the torch analyzer module is not staged alongside rocprof."
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     # capture_ops.profile_ops records the trace it picked as "primary_trace"
     # (relative to the capture dir) directly on the manifest; fall back to a
     # glob in case an older/foreign ops capture didn't.
@@ -1539,7 +1530,8 @@ def _ops_summary(capture_dir: Path, manifest: dict[str, Any]) -> str:
         )
         report = str(candidates[0]) if candidates else None
     if not report:
-        return "error: could not locate a torch trace/report file under this ops capture"
+        diagnostic = "error: could not locate a torch trace/report file under this ops capture"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return run_cli(analyze_torch_profile.cmd_summary, report=report, top=15)
 
 
@@ -1558,7 +1550,8 @@ def _summary_kernel_deep(_capture_dir: Path, manifest: dict[str, Any]) -> str:
 def _summary_instructions(capture_dir: Path, _manifest: dict[str, Any]) -> str:
     dispatch_dir = _find_att_dispatch_dir(capture_dir)
     if dispatch_dir is None:
-        return "error: no decoded ATT dispatch directory found under this capture"
+        diagnostic = "error: no decoded ATT dispatch directory found under this capture"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return run_cli(att.cmd_hotspots, dispatch_dir=str(dispatch_dir), top=15)
 
 
@@ -1582,12 +1575,14 @@ def summary(capture: str) -> str:
         capture_dir = capture_runtime.resolve(capture)
         manifest = capture_runtime.load_manifest(capture_dir)
     except (FileNotFoundError, ValueError) as exc:
-        return f"error: {exc}"
+        diagnostic = f"error: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     handler = _SUMMARY_DISPATCH.get(manifest.get("kind"))
     if handler is None:
-        return (
+        diagnostic = (
             f"error: unknown or unsupported capture kind {manifest.get('kind')!r} for {capture_dir}"
         )
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return handler(capture_dir, manifest)
 
 
@@ -1660,9 +1655,11 @@ def _compare_counters(manifest_a: dict[str, Any], manifest_b: dict[str, Any]) ->
     set_dirs_a, set_dirs_b = manifest_a.get("set_dirs"), manifest_b.get("set_dirs")
     arch_a, arch_b = manifest_a.get("arch"), manifest_b.get("arch")
     if not set_dirs_a or not set_dirs_b or not arch_a or not arch_b:
-        return "error: counters manifest(s) missing set_dirs/arch"
+        diagnostic = "error: counters manifest(s) missing set_dirs/arch"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     if arch_a != arch_b:
-        return f"error: cannot compare counters captures from different architectures ({arch_a!r} vs {arch_b!r})"
+        diagnostic = f"error: cannot compare counters captures from different architectures ({arch_a!r} vs {arch_b!r})"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     metrics_a = counters.kernel_metrics_by_name(list(set_dirs_a.values()), arch=arch_a)
     metrics_b = counters.kernel_metrics_by_name(list(set_dirs_b.values()), arch=arch_b)
 
@@ -1695,15 +1692,18 @@ def compare(a: str, b: str) -> str:
         manifest_a = capture_runtime.load_manifest(dir_a)
         manifest_b = capture_runtime.load_manifest(dir_b)
     except (FileNotFoundError, ValueError) as exc:
-        return f"error: {exc}"
+        diagnostic = f"error: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     kind_a, kind_b = manifest_a.get("kind"), manifest_b.get("kind")
     if kind_a != kind_b:
-        return f"error: cannot compare captures of different kinds ({kind_a!r} vs {kind_b!r})"
+        diagnostic = f"error: cannot compare captures of different kinds ({kind_a!r} vs {kind_b!r})"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     if kind_a == "timeline":
         return _compare_timeline(dir_a, dir_b)
     if kind_a == "counters":
         return _compare_counters(manifest_a, manifest_b)
-    return (
+    diagnostic = (
         f"error: compare is not implemented for {kind_a!r} captures; call summary({a!r}) and "
         f"summary({b!r}) and compare manually."
     )
+    raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)

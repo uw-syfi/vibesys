@@ -145,15 +145,17 @@ class RemoteCaptureBridge:
     ) -> str:
         """Submit one bounded profile operation and copy its capture into the MCP store."""
         if options.get("target") is not None:
-            return (
+            diagnostic = (
                 "error: persistent profiler targets are local to one MCP process; "
                 "pass command and load_command to one profile_* call for remote Slurm"
             )
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         if not self._capture_lock.acquire(blocking=False):
-            return (
+            diagnostic = (
                 "error: a remote Slurm ROCprof capture is already in progress; "
                 "wait for it to finish before starting another"
             )
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         try:
             return self._capture_owned(kind, lifecycle, options, cancel_event=cancel_event)
         finally:
@@ -227,7 +229,10 @@ class RemoteCaptureBridge:
             )
             if result.exit_code != 0:
                 detail = result.output.strip()
-                return f"error: remote ROCprof capture job failed ({result.exit_code})\n{detail}"
+                diagnostic = (
+                    f"error: remote ROCprof capture job failed ({result.exit_code})\n{detail}"
+                )
+                raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
             envelope = _load_result(result_file)
             capture_ids = envelope["capture_ids"]
             for capture_id in capture_ids:

@@ -20,19 +20,23 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import contextlib
-import errno
-import io
+import importlib
 import shutil
 import sqlite3
 import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TextIO
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "capture_runtime.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+capture_runtime = importlib.import_module("capture_runtime")
+
 _MIN_KERNEL_NAME_COMPONENTS = 2
 _MIN_IDLE_GAP_KERNELS = 2
 _MIN_GRAPH_REPLAY_TRACES = 2
@@ -70,10 +74,25 @@ def _print(
 
 def _open_db(path: str) -> tuple[sqlite3.Connection, dict[int, str]]:
     """Open the SQLite file and build the string map."""
-    conn = sqlite3.connect(path)
-    strings: dict[int, str] = {}
-    with contextlib.suppress(sqlite3.OperationalError):
-        strings = dict(conn.execute("SELECT id, value FROM StringIds").fetchall())
+    if path != ":memory:" and not Path(path).is_file():
+        diagnostic = f"report does not exist: {path}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(
+            path if path == ":memory:" else Path(path).resolve().as_uri() + "?mode=ro",
+            uri=path != ":memory:",
+        )
+        strings = (
+            dict(conn.execute("SELECT id, value FROM StringIds").fetchall())
+            if _table_exists(conn, "StringIds")
+            else {}
+        )
+    except sqlite3.DatabaseError as exc:
+        if conn is not None:
+            conn.close()
+        diagnostic = f"invalid SQLite report {path}: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     return conn, strings
 
 
@@ -135,20 +154,31 @@ def _kernel_name_col(conn: sqlite3.Connection) -> str | None:
 def _ensure_sqlite(path: str) -> str:
     """If path is .nsys-rep, export to .sqlite and return the sqlite path."""
     p = Path(path)
+    if not p.is_file():
+        diagnostic = f"report does not exist: {path}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     if p.suffix == ".nsys-rep":
         nsys = shutil.which("nsys")
         if nsys is None:
-            raise FileNotFoundError(errno.ENOENT, "nsys executable was not found on PATH", "nsys")
+            diagnostic = "nsys executable was not found on PATH"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         sqlite_path = p.with_suffix(".sqlite")
         if sqlite_path.exists():
             sqlite_path.unlink()
         # lint-waiver: LW-008041 [S603]; The resolved NSYS executable receives the fixed export subcommand and path arguments without a shell.
-        subprocess.run(  # noqa: S603
-            [nsys, "export", "--type=sqlite", f"--output={sqlite_path}", str(p)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            subprocess.run(  # noqa: S603
+                [nsys, "export", "--type=sqlite", f"--output={sqlite_path}", str(p)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            diagnostic = f"nsys export failed for {path}: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
+        if not sqlite_path.is_file():
+            diagnostic = f"nsys export produced no database for {path}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         return str(sqlite_path)
     return path
 
@@ -654,92 +684,6 @@ def cmd_step_timeline(args: argparse.Namespace) -> None:
     _display_step_timeline(rows, boundaries, threshold, strings, args.step)
 
 
-# ---------------------------------------------------------------------------
-# Backward-compatible function API (used by tests)
-# ---------------------------------------------------------------------------
-
-
-def _build_string_map(conn: sqlite3.Connection) -> dict[int, str]:
-    """Build id → string map from StringIds table (if present)."""
-    try:
-        return dict(conn.execute("SELECT id, value FROM StringIds").fetchall())
-    except sqlite3.OperationalError:
-        return {}
-
-
-def _capture_stdout(fn: Callable[..., object], *a: object, **kw: object) -> str:
-    """Run fn() and capture its stdout as a string."""
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        fn(*a, **kw)
-    return buf.getvalue()
-
-
-def analyze_kernels(conn: sqlite3.Connection, strings: dict[int, str], top_n: int = 15) -> str:
-    """Legacy API — returns analysis as a string."""
-
-    class _A:
-        report = ":memory:"
-        top = top_n
-
-    # Monkey-patch _open_db for this call
-    saved = globals().get("_open_db")
-    globals()["_open_db"] = lambda _: (conn, strings)
-    try:
-        return _capture_stdout(cmd_kernels, _A())
-    finally:
-        globals()["_open_db"] = saved
-
-
-def analyze_cpu_overhead(conn: sqlite3.Connection, strings: dict[int, str]) -> str:
-    """Format the CPU launch-overhead analysis."""
-
-    class _A:
-        report = ":memory:"
-
-    saved = globals().get("_open_db")
-    globals()["_open_db"] = lambda _: (conn, strings)
-    try:
-        return _capture_stdout(cmd_cpu_overhead, _A())
-    finally:
-        globals()["_open_db"] = saved
-
-
-def analyze_gpu_idle_gaps(
-    conn: sqlite3.Connection, strings: dict[int, str], top_n: int = 10
-) -> str:
-    """Format the GPU idle-gap analysis."""
-
-    class _A:
-        report = ":memory:"
-        top = top_n
-
-    saved = globals().get("_open_db")
-    globals()["_open_db"] = lambda _: (conn, strings)
-    try:
-        return _capture_stdout(cmd_idle_gaps, _A())
-    finally:
-        globals()["_open_db"] = saved
-
-
-def analyze_memory_ops(conn: sqlite3.Connection) -> str:
-    """Format memory operation analysis."""
-
-    class _A:
-        report = ":memory:"
-
-    saved = globals().get("_open_db")
-    globals()["_open_db"] = lambda _: (conn, {})
-    try:
-        return _capture_stdout(cmd_memory, _A())
-    finally:
-        globals()["_open_db"] = saved
-
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-
-
 def cmd_query(args: argparse.Namespace) -> None:
     """Run arbitrary SQL against the nsys SQLite export."""
     conn, _ = _open_db(_ensure_sqlite(args.report))
@@ -753,8 +697,8 @@ def cmd_query(args: argparse.Namespace) -> None:
         else:
             _print("(No results.)")
     except sqlite3.OperationalError as e:
-        _print(f"SQL error: {e}", file=sys.stderr)
-        sys.exit(1)
+        diagnostic = f"SQL error: {e}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from e
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +784,7 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    {
+    command = {
         "export": cmd_export,
         "tables": cmd_tables,
         "kernels": cmd_kernels,
@@ -851,7 +795,12 @@ def main() -> None:
         "step-timeline": cmd_step_timeline,
         "query": cmd_query,
         "summary": cmd_summary,
-    }[args.command](args)
+    }[args.command]
+    try:
+        sys.stdout.write(capture_runtime.run_analysis(command, **vars(args)))
+    except capture_runtime.CaptureFailedError as exc:
+        sys.stderr.write(str(exc) + "\n")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

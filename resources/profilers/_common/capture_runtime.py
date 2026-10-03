@@ -39,20 +39,24 @@ with a small path shim, e.g.::
 from __future__ import annotations
 
 import contextlib
+import csv
 import dataclasses
+import io
 import json
 import os
 import secrets
 import signal
 import socket
+import sqlite3
 import stat
 import subprocess
 import threading
 import time
+import types
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -65,6 +69,7 @@ __all__ = [
     "CaptureResult",
     "CaptureStatus",
     "CaptureSummary",
+    "CommandRunner",
     "Lifecycle",
     "TargetInfo",
     "acquire_capture_slot",
@@ -82,6 +87,7 @@ __all__ = [
     "release_capture_slot",
     "require_profile",
     "resolve",
+    "run_analysis",
     "run_capture",
     "signal_target",
     "start_target",
@@ -220,6 +226,12 @@ class ActiveCapture:
 WORKLOAD_RAN_STATUSES = frozenset({CaptureStatus.OK.value, CaptureStatus.KILLED_AFTER_GRACE.value})
 
 
+class CommandRunner(Protocol):
+    """Run a bounded argv command with subprocess-compatible options."""
+
+    def __call__(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+
+
 class CaptureFailedError(RuntimeError):
     """A capture ended without a profile of the requested workload.
 
@@ -234,11 +246,27 @@ class CaptureFailedError(RuntimeError):
         self.status = status
         self.report = report
 
+    @classmethod
+    def analysis_failed(cls, diagnostic: object) -> CaptureFailedError:
+        """Translate invalid report inputs and failed analyzer commands."""
+        return cls("analysis_failed", str(diagnostic))
+
 
 def require_profile(status: str, report: str) -> None:
     """Raise :class:`CaptureFailedError` unless *status* is a capture whose workload ran."""
     if status not in WORKLOAD_RAN_STATUSES:
         raise CaptureFailedError(status, report)
+
+
+def run_analysis(fn: Callable[..., object], **kwargs: object) -> str:
+    """Capture analyzer output, translating rejected external inputs into typed failures."""
+    output = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output):
+            fn(types.SimpleNamespace(**kwargs))
+    except (SystemExit, OSError, ValueError, TypeError, sqlite3.DatabaseError, csv.Error) as exc:
+        raise CaptureFailedError.analysis_failed(exc) from exc
+    return output.getvalue() or "(no output)"
 
 
 def workload_failure(profiles_path: Path, capture_ids: list[str]) -> str | None:

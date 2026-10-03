@@ -231,9 +231,13 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
     worker.start()
     runner.entered.wait()
 
-    overlap = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
-    runner.release.set()
-    worker.join()
+    try:
+        with pytest.raises(RuntimeError) as failed:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        overlap = getattr(failed.value, "report", None)
+    finally:
+        runner.release.set()
+        worker.join()
 
     assert overlap == (
         "error: a remote Slurm ROCprof capture is already in progress; "
@@ -322,3 +326,19 @@ remote_python = "/remote/venv/bin/python"
 
     assert submitted == JOB_ID, [str(item) for item in failures]
     assert f"scancel {JOB_ID}" in recorded_commands(cluster)
+
+
+@pytest.mark.parametrize("status", list(capture_runtime.CaptureStatus))
+def test_remote_capture_manifest_cannot_turn_failure_into_a_profile(
+    tmp_path: Path, status: capture_runtime.CaptureStatus
+) -> None:
+    bridge = _bridge(tmp_path, _FakeJobRunner(status))
+    if status in (
+        capture_runtime.CaptureStatus.OK,
+        capture_runtime.CaptureStatus.KILLED_AFTER_GRACE,
+    ):
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+    else:
+        with pytest.raises(RuntimeError, match=f"status={status.value}") as failed:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        assert type(failed.value).__name__ == "CaptureFailedError"

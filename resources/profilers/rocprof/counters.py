@@ -70,7 +70,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib
 import json
+import math
 import re
 import shlex
 import sys
@@ -78,6 +80,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "capture_runtime.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+capture_runtime = importlib.import_module("capture_runtime")
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -500,26 +510,39 @@ class CounterRow:
 
 
 def _to_int(value: object) -> int:
+    if value in (None, ""):
+        return 0
     try:
         return int(float(value))  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0
+    except (TypeError, ValueError, OverflowError) as exc:
+        diagnostic = f"invalid integer counter field: {value!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
 
 def _to_float(value: object) -> float:
     try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0.0
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError) as exc:
+        diagnostic = f"invalid counter value: {value!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
+    if not math.isfinite(parsed):
+        diagnostic = f"invalid counter value: {value!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    return parsed
 
 
 def _to_optional_float(value: object) -> float | None:
     if value in (None, ""):
         return None
     try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError) as exc:
+        diagnostic = f"invalid counter timestamp: {value!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
+    if not math.isfinite(parsed):
+        diagnostic = f"invalid counter timestamp: {value!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    return parsed
 
 
 def _row_from_mapping(row: dict[str, Any]) -> CounterRow | None:
@@ -527,7 +550,8 @@ def _row_from_mapping(row: dict[str, Any]) -> CounterRow | None:
     counter_name = row.get("Counter_Name") or row.get("counter_name")
     counter_value = row.get("Counter_Value", row.get("counter_value"))
     if not name or not counter_name or counter_value in (None, ""):
-        return None
+        diagnostic = f"incomplete counter row: {row!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return CounterRow(
         kernel_name=str(name),
         dispatch_id=str(row.get("Dispatch_Id", row.get("dispatch_id", ""))),
@@ -585,8 +609,9 @@ def _load_counter_rows(files: list[Path]) -> list[CounterRow]:
                 rows.extend(_iter_json_rows(path))
             else:
                 rows.extend(_iter_csv_rows(path))
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # LW-910064; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+        except (OSError, ValueError, csv.Error, capture_runtime.CaptureFailedError) as exc:
+            diagnostic = f"could not parse {path}: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     return rows
 
 
@@ -681,8 +706,8 @@ def _load_agent_info(dirs: list[str]) -> AgentInfo | None:
             with path.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
         except (OSError, csv.Error) as exc:
-            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # LW-910066; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
-            continue
+            diagnostic = f"could not parse {path}: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
         for row in rows:
             if row.get("Agent_Type") != "GPU":
                 continue

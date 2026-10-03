@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, cast
 
+import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 from resources.profilers.ncu.server import build_server
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 async def _call(name: str, **arguments: object) -> dict[str, object]:
@@ -30,9 +30,8 @@ def test_ncu_server_registers_discovery_and_report_tools() -> None:
 
 def test_ncu_server_reports_missing_executable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NCU_PATH", "/missing/ncu")
-    result = asyncio.run(_call("capabilities"))
-    assert result["status"] == "unavailable"
-    assert "NCU_PATH" in str(result["diagnostic"])
+    with pytest.raises(ToolError, match="NCU_PATH"):
+        asyncio.run(_call("capabilities"))
 
 
 def test_ncu_server_reads_existing_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -53,9 +52,8 @@ def test_ncu_server_reads_existing_report(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 def test_ncu_server_rejects_missing_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("NCU_PATH", "/missing/ncu")
-    result = asyncio.run(_call("read_report", path=str(tmp_path / "missing.ncu-rep")))
-    assert result["status"] == "error"
-    assert "missing.ncu-rep" in str(result["diagnostic"])
+    with pytest.raises(ToolError, match=r"missing\.ncu-rep"):
+        asyncio.run(_call("read_report", path=str(tmp_path / "missing.ncu-rep")))
 
 
 def test_ncu_server_filters_large_raw_report(

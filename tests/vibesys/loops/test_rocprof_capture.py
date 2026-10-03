@@ -779,22 +779,10 @@ def test_profile_timeline_killed_after_grace_still_analyzes_a_real_flushed_trace
 def test_format_timeline_result_always_runs_the_analyzer_regardless_of_status(
     status: cr.CaptureStatus,
 ) -> None:
-    """Generalizes the fixed bug over every ``CaptureStatus``, not just ``killed_after_grace``.
-
-    ``_format_timeline_result`` must attempt ``host_idle``/``summary``
-    analysis unconditionally: a non-OK status describes the *lifecycle's*
-    outcome (did the target/load process exit cleanly), which is
-    independent of whether rocprofv3 itself already flushed a usable trace
-    before that. Withholding analysis for any status class silently hides
-    real, already-on-disk data for whichever status happens to be hit.
-
-    Uses a plain ``tempfile.TemporaryDirectory`` rather than the ``tmp_path``
-    fixture: it's function-scoped, which Hypothesis warns against reusing
-    unreset across generated examples within one ``@given`` run.
-    """
+    """Analyze completed workloads, including forced cleanup, and reject failed captures."""
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = Path(tmp) / "capture"
-        out_dir.mkdir()
+        shutil.copytree(_ROCPROF_FIXTURES / "kernel_trace", out_dir)
         result = cr.CaptureResult(
             capture_id="timeline-test",
             kind="timeline",
@@ -809,11 +797,19 @@ def test_format_timeline_result_always_runs_the_analyzer_regardless_of_status(
             load_log_tail=None,
             manifest_path=out_dir / "manifest.json",
         )
-
-        out = capture._format_timeline_result(result)
-
-    assert "ROCPROFV3 TRACE SUMMARY" in out
-    assert "Top Kernels" in out  # section header always printed, data or not
+        # test-isolation: the formatter combines lifecycle status with already-flushed trace data.
+        if status.value in cr.WORKLOAD_RAN_STATUSES:
+            out = capture._format_timeline_result(result)
+            assert "ROCPROFV3 TRACE SUMMARY" in out
+            assert "Top Kernels" in out
+            assert "flash_attn_decode_kernel" in out
+            if status is cr.CaptureStatus.KILLED_AFTER_GRACE:
+                assert "Capture did not complete cleanly" in out
+        else:
+            with pytest.raises(RuntimeError) as failed:
+                capture._format_timeline_result(result)
+            assert type(failed.value).__name__ == "CaptureFailedError"
+            assert getattr(failed.value, "status", None) == status.value
 
 
 def test_profile_timeline_target_failed_has_no_kernel_data(
@@ -823,10 +819,11 @@ def test_profile_timeline_target_failed_has_no_kernel_data(
     _install_fake_rocprofv3(bin_dir)
     lifecycle = cr.Lifecycle(command="exit 7", timeout_s=10.0)
 
-    out = capture.profile_timeline(lifecycle)
-
-    assert "target_failed" in out
-    assert "flash_attn_decode_kernel" not in out
+    with pytest.raises(RuntimeError) as failed:
+        capture.profile_timeline(lifecycle)
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    assert getattr(failed.value, "status", None) == "target_failed"
+    assert "flash_attn_decode_kernel" not in str(failed.value)
 
 
 def test_profile_timeline_with_load_command_ready_poll_and_graceful_stop(
@@ -1046,9 +1043,11 @@ def test_profile_kernel_deep_no_rocprof_compute_binary_returns_error_string(
     del profiles_dir
     lifecycle = cr.Lifecycle(command="true", timeout_s=10.0)
 
-    out = capture.profile_kernel_deep(lifecycle, kernel="Cijk_Ailk")
+    with pytest.raises(RuntimeError) as failed:
+        capture.profile_kernel_deep(lifecycle, kernel="Cijk_Ailk")
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
-    assert out.startswith("error:")
     assert "profiling_capabilities" in out
 
 
@@ -1090,7 +1089,10 @@ def test_profile_instructions_no_decoder_returns_error_string(profiles_dir: Path
     del profiles_dir
     lifecycle = cr.Lifecycle(command="true", timeout_s=10.0)
 
-    out = capture.profile_instructions(lifecycle, kernel="flash_attn.*")
+    with pytest.raises(RuntimeError) as failed:
+        capture.profile_instructions(lifecycle, kernel="flash_attn.*")
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
     assert "rocprof-trace-decoder" in out
     assert "profiling_capabilities" in out
@@ -1103,9 +1105,11 @@ def test_profile_instructions_no_rocprofv3_returns_error_string(
     _install_fake_att_decoder(tmp_path, monkeypatch)
     lifecycle = cr.Lifecycle(command="true", timeout_s=10.0)
 
-    out = capture.profile_instructions(lifecycle, kernel="flash_attn.*")
+    with pytest.raises(RuntimeError) as failed:
+        capture.profile_instructions(lifecycle, kernel="flash_attn.*")
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
-    assert out.startswith("error:")
     assert "rocprofv3" in out
 
 
@@ -1117,9 +1121,11 @@ def test_profile_instructions_rocprofv3_too_old_returns_error_string(
     _install_fake_rocprofv3(bin_dir, version="6.4.1")
     lifecycle = cr.Lifecycle(command="true", timeout_s=10.0)
 
-    out = capture.profile_instructions(lifecycle, kernel="flash_attn.*")
+    with pytest.raises(RuntimeError) as failed:
+        capture.profile_instructions(lifecycle, kernel="flash_attn.*")
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
-    assert out.startswith("error:")
     assert "rocprofv3" in out
     assert "6.4.1" in out
 
@@ -1213,9 +1219,11 @@ def test_profile_ops_stub_signature_mismatch_becomes_error_string(
         "def profile_ops(only_this_kwarg=None):\n    raise TypeError('boom')\n"
     )
 
-    out = staged_capture.profile_ops(command="true")
+    with pytest.raises(RuntimeError) as failed:
+        staged_capture.profile_ops(command="true")
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
-    assert out.startswith("error:")
     assert "signature mismatch" in out
 
 
@@ -1223,7 +1231,10 @@ def test_profile_ops_not_staged_returns_error_string(
     profiles_dir: Path, staged_capture: ModuleType
 ) -> None:
     del profiles_dir
-    out = staged_capture.profile_ops(command="true")
+    with pytest.raises(RuntimeError) as failed:
+        staged_capture.profile_ops(command="true")
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
     assert "not staged alongside rocprof" in out
 
@@ -1355,16 +1366,16 @@ def test_summary_missing_manifest_is_a_clean_error(profiles_dir: Path) -> None:
     # No manifest.json written -- capture_runtime.resolve() succeeds (the
     # directory exists) but load_manifest() must raise inside the try.
 
-    out = capture.summary(capture_id)
-
-    assert out.startswith("error:")
+    with pytest.raises(RuntimeError) as failed:
+        capture.summary(capture_id)
+    assert type(failed.value).__name__ == "CaptureFailedError"
 
 
 def test_summary_unknown_capture_id_returns_error_string_not_raise(profiles_dir: Path) -> None:
     del profiles_dir
-    out = capture.summary("totally-bogus-capture-id-xyz")
-
-    assert out.startswith("error:")
+    with pytest.raises(RuntimeError) as failed:
+        capture.summary("totally-bogus-capture-id-xyz")
+    assert type(failed.value).__name__ == "CaptureFailedError"
 
 
 def test_summary_unknown_kind_in_manifest(profiles_dir: Path) -> None:
@@ -1372,9 +1383,11 @@ def test_summary_unknown_kind_in_manifest(profiles_dir: Path) -> None:
     capture_id, capture_dir = cr.new_capture("weird")
     cr.write_manifest(capture_dir, {"kind": "totally_unknown_kind", "capture_id": capture_id})
 
-    out = capture.summary(capture_id)
+    with pytest.raises(RuntimeError) as failed:
+        capture.summary(capture_id)
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
-    assert out.startswith("error:")
     assert "totally_unknown_kind" in out
 
 
@@ -1385,9 +1398,9 @@ def test_summary_unknown_kind_in_manifest(profiles_dir: Path) -> None:
 
 def test_compare_unknown_capture_id_returns_error_string_not_raise(profiles_dir: Path) -> None:
     del profiles_dir
-    out = capture.compare("no-such-a", "no-such-b")
-
-    assert out.startswith("error:")
+    with pytest.raises(RuntimeError) as failed:
+        capture.compare("no-such-a", "no-such-b")
+    assert type(failed.value).__name__ == "CaptureFailedError"
 
 
 def test_compare_different_kinds_is_an_error(profiles_dir: Path) -> None:
@@ -1397,9 +1410,9 @@ def test_compare_different_kinds_is_an_error(profiles_dir: Path) -> None:
     id_b, dir_b = cr.new_capture("counters")
     cr.write_manifest(dir_b, {"kind": "counters"})
 
-    out = capture.compare(id_a, id_b)
-
-    assert out.startswith("error:")
+    with pytest.raises(RuntimeError) as failed:
+        capture.compare(id_a, id_b)
+    assert type(failed.value).__name__ == "CaptureFailedError"
 
 
 def test_compare_timeline_reports_deltas_and_new_kernels(profiles_dir: Path) -> None:
