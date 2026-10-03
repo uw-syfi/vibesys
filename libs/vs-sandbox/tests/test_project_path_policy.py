@@ -277,6 +277,34 @@ class TestBubblewrapProjectPaths:
         assert result.returncode == 0, result.stderr
         assert result.stdout.split() == ["engine.py", "base"]
 
+    @pytest.mark.skipif(shutil.which("git") is None, reason="requires git")
+    def test_linked_worktree_binds_only_its_out_of_tree_git_metadata(self, tmp_path: Path) -> None:
+        repository = tmp_path / "project"
+        workspace = tmp_path / "run" / "worktrees" / "workspace"
+        identity = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
+
+        def git(*args: str, cwd: Path) -> None:
+            run_test_command(["git", *identity, *args], cwd=cwd, check=True, capture_output=True)
+
+        repository.mkdir()
+        git("init", "-q", cwd=repository)
+        (repository / "engine.py").write_text("print(1)\n")
+        git("add", "engine.py", cwd=repository)
+        git("commit", "-q", "-m", "base", cwd=repository)
+        git("worktree", "add", "-q", str(workspace), cwd=repository)
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        (plain / ".git").write_text("not a pointer\n")
+
+        # test-isolation: the bubblewrap test above proves git works through the
+        # sandbox, but needs user namespaces that CI runners lack; this checks the
+        # path selection it relies on without them.
+        linked_git_metadata = host_sandbox._linked_git_metadata  # noqa: SLF001  # lint-waiver: LW-502504 [SLF001]; the bubblewrap test cannot run on CI, so the path selection is checked directly.
+
+        assert linked_git_metadata(workspace) == ((repository / ".git").resolve(),)
+        assert linked_git_metadata(repository) == ()
+        assert linked_git_metadata(plain) == ()
+
     def test_builder_passes_validated_policy_to_linux_backend(
         self,
         tmp_path: Path,
