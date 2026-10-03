@@ -58,7 +58,14 @@ class _BlockingEvaluationSandbox(FakeSandbox):
         self.started = threading.Event()
         self.release = threading.Event()
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        del cancel  # the test releases the held command itself
         if not self.started.is_set():
             self.started.set()
             self.release.wait()

@@ -16,7 +16,7 @@ from vs_runtime.contracts import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
     from vs_runtime._agent_execution import AgentExecutionScope
@@ -256,6 +256,7 @@ class RuntimeWorkspaces:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: RuntimeAgentSessions | None = None
+        self._evaluations: set[asyncio.Task[object]] = set()
         self.root = RuntimeWorkspace(self, resources.root)
 
     def _attach_sessions(self, sessions: RuntimeAgentSessions) -> None:
@@ -358,6 +359,31 @@ class RuntimeWorkspaces:
         async with lock:
             yield
 
+    async def _evaluate[Result](
+        self,
+        workspace: RuntimeWorkspace,
+        evaluation: Callable[[WorkspaceResource], Awaitable[Result]],
+    ) -> Result:
+        """Run one trusted evaluation that run teardown cancels.
+
+        The evaluation holds the workspace's mutation lock, so teardown, which
+        takes the same lock, would otherwise wait for it to finish on its own:
+        on Slurm, for a job that may still be queued. :meth:`begin_close`
+        cancels it instead; the cancellation stops its command and job.
+        """
+        async with self._mutation(workspace):
+            if self._closed:
+                message = "workspace collection is closed"
+                raise RuntimeContractError(message)
+            task: asyncio.Task[Result] = asyncio.ensure_future(
+                evaluation(self.resource_for(workspace))
+            )
+            self._evaluations.add(task)
+            try:
+                return await task
+            finally:
+                self._evaluations.discard(task)
+
     async def _discard(self, candidate: RuntimeCandidateWorkspace) -> None:
         async with self._lifecycle_lock:
             resource = self.resource_for(candidate)
@@ -381,10 +407,12 @@ class RuntimeWorkspaces:
                 raise BaseExceptionGroup(message, errors)
 
     def begin_close(self) -> None:
-        """Reject new candidates, sessions, and turns before teardown."""
+        """Reject new work and cancel in-flight trusted evaluations before teardown."""
         if self._closed:
             return
         self._closed = True
+        for evaluation in tuple(self._evaluations):
+            evaluation.cancel()
         self._owned_sessions().begin_close()
 
     async def close(self) -> None:

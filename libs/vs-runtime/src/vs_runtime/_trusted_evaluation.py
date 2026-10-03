@@ -7,6 +7,7 @@ import contextlib
 import json
 import math
 import shlex
+import threading
 import uuid
 from collections.abc import Mapping
 from functools import partial
@@ -207,12 +208,20 @@ class RuntimeTrustedEvaluation:
 
     async def _run_sync[Result](
         self,
-        operation: Callable[[], Result],
+        operation: Callable[[threading.Event], Result],
     ) -> Result:
-        task = asyncio.create_task(asyncio.to_thread(operation))
+        """Run *operation* in a worker; cancelling the caller stops its command.
+
+        On cancellation the operation's cancel event stops the sandbox command
+        (and, on Slurm, cancels its job); the worker is drained before the
+        cancellation propagates, so no command outlives this call.
+        """
+        cancel = threading.Event()
+        task = asyncio.create_task(asyncio.to_thread(operation, cancel))
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError as cancelled:
+            cancel.set()
             await _drain(task)
             if error := task.exception():
                 cancelled.add_note(f"trusted evaluation also failed: {error}")
@@ -227,7 +236,9 @@ class RuntimeTrustedEvaluation:
             return (), f"Model-weight request could not be satisfied: {error}"
         return volumes, None
 
-    def _accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+    def _accuracy(
+        self, command_override: str | None, cancel: threading.Event
+    ) -> TrustedAccuracyResult:
         command = self._plan.accuracy_command
         volumes, failure = self._provision()
         if failure is not None:
@@ -257,6 +268,7 @@ class RuntimeTrustedEvaluation:
             command_override or command,
             timeout=self._timeout(self._plan.accuracy_timeout_seconds),
             label="accuracy",
+            cancel=cancel,
         )
         output = execution_failure or result.output.strip()
         passed = execution_failure is None and result.exit_code == 0
@@ -281,6 +293,7 @@ class RuntimeTrustedEvaluation:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        cancel: threading.Event,
     ) -> TrustedBenchmarkResult:
         contract = self._plan.benchmark_contract
         command = self._plan.benchmark_command
@@ -327,6 +340,7 @@ class RuntimeTrustedEvaluation:
                 execution,
                 timeout=self._timeout(self._plan.benchmark_timeout_seconds),
                 label="benchmark",
+                cancel=cancel,
             )
             output = execution_failure or result.output.strip()
             passed = execution_failure is None and result.exit_code == 0
@@ -375,9 +389,10 @@ class RuntimeTrustedEvaluation:
         *,
         timeout: int | None,
         label: str,
+        cancel: threading.Event,
     ) -> tuple[SandboxExecutionResult, str | None]:
         try:
-            result = self._sandbox.execute(command, timeout=timeout)
+            result = self._sandbox.execute(command, timeout=timeout, cancel=cancel)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-837217 [BLE001]; trusted command failures are typed policy-visible outcomes rather than run-fatal exceptions.
             return SandboxExecutionResult(output="", exit_code=None), (
                 f"{label} command could not be executed: {error}"

@@ -15,6 +15,7 @@ from vs_sandbox.api.symlink_mounts import (
 )
 
 if TYPE_CHECKING:
+    import threading
     from pathlib import Path
 
 
@@ -28,8 +29,15 @@ class _RecordingSandbox:
     def id(self) -> str:
         return "recording-sandbox"
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
         assert timeout is None
+        assert cancel is None
         self.commands.append(command)
         return self.result
 

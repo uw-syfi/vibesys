@@ -229,8 +229,9 @@ class RuntimeWorkspaceEvaluation:
             candidate_revision,
             spec.deployment_release_env_var if release else None,
         )
-        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
-            result = await self._workspaces.resource_for(managed).trusted_accuracy(command_override)
+        result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
+            managed, lambda resource: resource.trusted_accuracy(command_override)
+        )
         if result.executed:
             await managed.snapshot("framework-accuracy-evaluation")
         return RuntimeAccuracyRun(
@@ -259,11 +260,10 @@ class RuntimeWorkspaceEvaluation:
             candidate_revision,
             spec.deployment_release_env_var,
         )
-        async with self._workspaces._mutation(managed):  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
-            result = await self._workspaces.resource_for(managed).trusted_benchmark(
-                command_override,
-                required_metrics,
-            )
+        result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
+            managed,
+            lambda resource: resource.trusted_benchmark(command_override, required_metrics),
+        )
         if result.executed:
             await managed.snapshot("framework-benchmark-evaluation")
         return RuntimeBenchmarkRun(result=result, contract=spec.benchmark_contract)

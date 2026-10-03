@@ -1108,6 +1108,11 @@ def _run_process(
         text=True,
         timeout=timeout,
         encoding="utf-8",
+        # Each call is bounded by its timeout. In its own process group, a
+        # signal aimed at the caller's group (Ctrl-C, a sandbox stopping its
+        # command) cannot kill an in-flight sbatch or squeue, which would lose
+        # the job id or the chance to cancel the job.
+        process_group=0,
     )
 
 

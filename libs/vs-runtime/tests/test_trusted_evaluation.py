@@ -151,7 +151,14 @@ def test_scalar_benchmark_decodes_finite_result_and_always_cleans(tmp_path: Path
 class _TruncatingSandbox(FakeSandbox):
     """Return head-truncated benchmark output, then the framed result file on request."""
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        del cancel  # every command here finishes at once
         super().execute(command, timeout=timeout)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
@@ -302,7 +309,14 @@ class _FailingSandbox:
     def id(self) -> str:
         return "failing"
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        del cancel  # every command here finishes at once
         del timeout
         self.calls.append(command)
         message = "sandbox unavailable"
@@ -370,7 +384,14 @@ class _BlockingSandbox:
     def id(self) -> str:
         return "blocking"
 
-    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        del cancel  # every command here finishes at once
         del timeout
         self.calls.append(command)
         self.started.set()
