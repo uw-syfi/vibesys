@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -18,6 +19,7 @@ from cpu_check import sessions
 
 BUNDLE = Path(__file__).resolve().parents[1]
 FAKE_SERVER = Path(__file__).parent / "testdata" / "caching_server.py"
+FAKE_SCHEDULER = Path(__file__).parent / "testdata" / "scheduler_server.py"
 
 
 class HashReference:
@@ -31,9 +33,17 @@ class HashReference:
 
 
 @settings(max_examples=50, deadline=None)
-@given(seed=st.integers(min_value=0, max_value=2**32 - 1))
-def test_each_round_extends_the_last_and_outgrows_its_state(seed: int) -> None:
-    rounds = sessions.plan(HashReference(), vocab_size=512, seed=seed)
+@given(
+    seed=st.integers(min_value=0, max_value=2**32 - 1),
+    concurrency=st.one_of(st.just(0), st.integers(min_value=1, max_value=12)),
+)
+def test_each_round_extends_the_last_and_outgrows_its_state(seed: int, concurrency: int) -> None:
+    names = sessions.concurrent_sessions(concurrency) if concurrency else sessions.SESSIONS
+    rounds = sessions.plan(HashReference(), vocab_size=512, seed=seed, names=names)
+    assert {r.session for r in rounds} == set(names)
+    if concurrency:
+        long_first = next(r for r in rounds if r.session == sessions.LONG_SESSION)
+        assert len(long_first.prompt) == sessions.SHARED_PREFIX + sessions.LONG_FIRST_INPUT
     by_session: dict[str, list[sessions.Round]] = {}
     for r in rounds:
         by_session.setdefault(r.session, []).append(r)
@@ -66,11 +76,13 @@ def _candidate_root(tmp_path: Path, server: Path | None) -> Path:
     return root
 
 
-def _run_check(root: Path, *args: str, bug: str = "none") -> subprocess.CompletedProcess[str]:
+def _run_check(
+    root: Path, *args: str, bug: str = "none", scheduler_bug: str = ""
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "cpu_check", "--root", str(root), *args],
         cwd=BUNDLE,
-        env={**os.environ, "FAKE_CACHE_BUG": bug},
+        env={**os.environ, "FAKE_CACHE_BUG": bug, "FAKE_SCHEDULER_BUG": scheduler_bug},
         capture_output=True,
         text=True,
         check=False,
@@ -144,3 +156,39 @@ def test_a_server_that_cannot_start_names_why(tmp_path: Path) -> None:
     assert result.returncode == 2, result.stdout + result.stderr
     assert "server exited" in result.stdout
     assert "unknown FAKE_CACHE_BUG" in result.stdout
+
+
+def test_reference_server_passes_concurrent_mode(tmp_path: Path) -> None:
+    result = _run_check(_candidate_root(tmp_path, None), "--concurrency", "8")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "concurrent: 9 sessions (one with a 4491-token first prompt)" in result.stdout
+    assert "[ok] teacher-forced scoring of 1372 tokens" in result.stdout
+
+
+# r13: every failed accuracy run of the continuous-batching candidate followed a passing
+# sequential check. Each fake below passes it too and fails in concurrent mode.
+@pytest.mark.parametrize(
+    ("scheduler_bug", "failure", "server_exception"),
+    [
+        ("score_remainder", "[FAIL] teacher-forced scoring of 1372 tokens", "RuntimeError: "),
+        (
+            "inference_mode",
+            "[FAIL] session long round 1 (prompt 4491 tokens",
+            "Inplace update to inference tensor outside InferenceMode",
+        ),
+        ("slot_leak", "request failed", "admission: no free decode slot"),
+    ],
+)
+def test_a_batched_path_bug_fails_only_the_concurrent_mode(
+    tmp_path: Path, scheduler_bug: str, failure: str, server_exception: str
+) -> None:
+    root = _candidate_root(tmp_path, FAKE_SCHEDULER)
+
+    sequential = _run_check(root, scheduler_bug=scheduler_bug)
+    concurrent = _run_check(root, "--concurrency", "8", scheduler_bug=scheduler_bug)
+
+    assert sequential.returncode == 0, sequential.stdout + sequential.stderr
+    assert concurrent.returncode == 1, concurrent.stdout + concurrent.stderr
+    assert failure in concurrent.stdout
+    assert server_exception in concurrent.stdout

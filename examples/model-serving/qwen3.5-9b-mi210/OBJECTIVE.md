@@ -113,6 +113,7 @@ on the editor host first, which has no GPU. From the candidate root:
 ```bash
 cpu_check/run.sh                      # any engine
 cpu_check/run.sh --expect-cache-hits  # once the engine caches prefixes; also replays the preflight
+cpu_check/run.sh --concurrency N      # once the engine batches requests; N above its admission cap
 ```
 
 It writes a randomly initialized tiny checkpoint of this architecture (8
@@ -132,9 +133,21 @@ session and round, then the first server exception and the server log tail.
 The first run installs CPU torch into the user cache (about 40 s), outside the
 candidate directory; later runs reuse it.
 
+`--concurrency N` sends N chained sessions, one session with a 4491-token
+first prompt, and a 1372-token `echo` + `logprobs` scoring request (the
+accuracy checker's path, which splits it into 512-position chunks plus a
+347-position remainder) all at once. It catches what the sequential replay
+cannot reach: shape bugs in chunked prefill or chunked scoring, writes to
+`torch.inference_mode` tensors from a scheduler thread outside it, and
+admission or slot-accounting crashes. In r13, every failed accuracy run of a
+continuous-batching candidate followed a passing sequential check.
+
 Keep `engine.server` accepting `--device cpu`, as the reference does, so the
 check can run: give GPU-only kernels (fla, Triton, HIP graphs) the reference's
-torch path when the device is CPU. Passing this check is necessary, not
+torch path when the device is CPU, and keep everything else on the GPU's code
+path. The scheduler, admission, batching, chunked prefill, and caching must be
+the same code on both devices; a server that falls back to the reference
+worker on CPU passes the check without testing the engine. Passing this check is necessary, not
 sufficient: the accuracy checker on the 9B model stays the gate.
 
 Numerics: weights and activations stay bf16. Weights, KV cache, and GDN

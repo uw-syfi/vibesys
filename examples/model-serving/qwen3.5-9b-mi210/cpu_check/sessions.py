@@ -16,12 +16,15 @@ reference makes the next prompt an exact extension of what the candidate saw.
 from __future__ import annotations
 
 import random
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from accuracy_checker.resume import common_prefix
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from accuracy_checker.targets import Completion
 
 # A first divergence where the reference top-1 beats top-2 by less than this (nats) is a
@@ -33,6 +36,16 @@ SHARED_PREFIX = 48  # tokens both sessions start with
 # boundary; every round asks for more output than the one before.
 ROUNDS = ((40, 6), (70, 10), (30, 14))
 SESSIONS = ("A", "B")
+# Concurrent mode adds one session whose first prompt spans two 2048-token prefill chunks
+# plus a remainder (and eight 512-token chunks plus a remainder), the longest-prompt shape
+# that chunked-prefill engines split; the benchmark's prompts reach 15,733 tokens.
+LONG_SESSION = "long"
+LONG_FIRST_INPUT = 2 * 2048 + 347
+
+
+def concurrent_sessions(count: int) -> tuple[str, ...]:
+    """Names of `count` chained sessions plus the long-prompt session, for concurrent mode."""
+    return (*(f"c{i:03d}" for i in range(count)), LONG_SESSION)
 
 
 @dataclass(frozen=True)
@@ -58,19 +71,26 @@ class Target(Protocol):
     def complete(self, prompt: list[int], n: int) -> Completion: ...
 
 
-def plan(reference: Reference, vocab_size: int, seed: int = 0) -> list[Round]:
-    """Interleaved rounds A1, B1, A2, B2, ... with their reference answers."""
+def plan(
+    reference: Reference, vocab_size: int, seed: int = 0, names: Sequence[str] = SESSIONS
+) -> list[Round]:
+    """Interleaved rounds A1, B1, A2, B2, ... with their reference answers.
+
+    Every session in `names` shares the first `SHARED_PREFIX` tokens; `LONG_SESSION`'s
+    first round adds `LONG_FIRST_INPUT` fresh tokens instead of the usual count.
+    """
     rng = random.Random(seed)
 
     def fresh(n: int) -> list[int]:
         return [rng.randrange(1, vocab_size) for _ in range(n)]
 
     shared = fresh(SHARED_PREFIX)
-    context = {s: list(shared) for s in SESSIONS}
+    context = {s: list(shared) for s in names}
     rounds = []
     for k, (n_fresh, n_out) in enumerate(ROUNDS, 1):
-        for s in SESSIONS:
-            prompt = context[s] + fresh(n_fresh)
+        for s in names:
+            first_long = k == 1 and s == LONG_SESSION
+            prompt = context[s] + fresh(LONG_FIRST_INPUT if first_long else n_fresh)
             expected = reference.greedy(prompt, n_out)
             rounds.append(Round(s, k, prompt, expected, reference.margins(prompt, expected)))
             context[s] = prompt + expected
@@ -136,3 +156,17 @@ def run(target: Target, rounds: list[Round]) -> list[Outcome]:
             Outcome(r, matched=matched, cached_tokens=c.cached_tokens, token_ids=tuple(c.token_ids))
         )
     return outcomes
+
+
+def run_concurrent(target: Target, rounds: list[Round]) -> list[Outcome]:
+    """Every session at once, each sending its rounds in order, as the benchmark replays them.
+
+    `target` must be safe to call from several threads. Outcomes keep the order of `rounds`.
+    """
+    by_session: dict[str, list[Round]] = {}
+    for r in rounds:
+        by_session.setdefault(r.session, []).append(r)
+    with ThreadPoolExecutor(max_workers=len(by_session)) as pool:
+        results = list(pool.map(lambda rs: run(target, rs), by_session.values()))
+    outcome_of = {(o.round.session, o.round.round): o for outs in results for o in outs}
+    return [outcome_of[(r.session, r.round)] for r in rounds]

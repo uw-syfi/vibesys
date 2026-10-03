@@ -18,6 +18,13 @@ reports `cached_tokens > 0`, and replays the benchmark's prefix-cache preflight
 (`preflight.py`): one 8192-token prompt sent twice in a row, streamed, with
 `max_tokens` 1, whose second response must report `cached_tokens > 0`.
 
+`--concurrency N` drives the candidate's batching scheduler instead of one
+request at a time: N chained sessions, one session whose first prompt is
+4443 tokens long, and one 1372-token teacher-forced scoring request (the
+accuracy checker's `echo` + `logprobs` path) are all in flight together, each
+session sending its rounds in order as the benchmark does. Set N above the
+engine's admission cap so admission, queueing, and batched decode all run.
+
 Exit 0: pass. Exit 1: a round failed; each failure names its session and
 round, followed by the server log tail. Exit 2: the server did not start.
 
@@ -36,14 +43,15 @@ import sys
 import tempfile
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpx
 import torch
-from accuracy_checker.targets import Completion, HttpTarget
+from accuracy_checker.targets import Completion, ForcedStep, HttpTarget
 from reference.engine import Engine, SamplingParams
 
-from cpu_check import preflight, sessions
+from cpu_check import preflight, scoring, sessions
 from cpu_check.tiny_model import VOCAB_SIZE, write_checkpoint
 
 MODEL_NAME = "tiny-qwen3.5"
@@ -68,6 +76,9 @@ class ReferenceAnswers:
         scored = self.engine.score(prompt + cont, top_k=2)[len(prompt) - 1 :]
         return [s.top[0][1] - s.top[1][1] for s in scored]
 
+    def top2(self, tokens: list[int]) -> list[tuple[int, float]]:
+        return [(s.top[0][0], s.top[0][1] - s.top[1][1]) for s in self.engine.score(tokens, 2)]
+
 
 class _FreshConnection:
     """One connection per request: a server that drops its connection after a failed
@@ -80,6 +91,13 @@ class _FreshConnection:
         target = HttpTarget(self.base_url, MODEL_NAME, REQUEST_SECONDS)
         try:
             return target.complete(prompt, n)
+        finally:
+            target.client.close()
+
+    def teacher_forced(self, prompt: list[int], cont: list[int]) -> list[ForcedStep]:
+        target = HttpTarget(self.base_url, MODEL_NAME, REQUEST_SECONDS)
+        try:
+            return target.teacher_forced(prompt, cont)
         finally:
             target.client.close()
 
@@ -140,11 +158,21 @@ def _first_exception(log_path: Path) -> str | None:
         return next((line.strip() for line in f if _EXCEPTION_LINE.match(line)), None)
 
 
-def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=print) -> int:
+def check(
+    root: Path,
+    work_dir: Path,
+    *,
+    expect_cache_hits: bool = False,
+    concurrency: int = 0,
+    log=print,
+) -> int:
     t0 = time.monotonic()
     model_dir = work_dir / "tiny-model"
     write_checkpoint(model_dir)
-    rounds = sessions.plan(ReferenceAnswers(model_dir), VOCAB_SIZE)
+    reference = ReferenceAnswers(model_dir)
+    names = sessions.concurrent_sessions(concurrency) if concurrency else sessions.SESSIONS
+    rounds = sessions.plan(reference, VOCAB_SIZE, names=names)
+    scored = scoring.plan(reference, VOCAB_SIZE) if concurrency else None
     log(f"reference answers for {len(rounds)} rounds in {time.monotonic() - t0:.1f} s")
 
     port = _free_port()
@@ -157,7 +185,20 @@ def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=pr
         if why is not None:
             log(f"FAIL: {why}\n--- server log tail ---\n{_tail(log_path)}")
             return 2
-        outcomes = sessions.run(_FreshConnection(base_url), rounds)
+        connection = _FreshConnection(base_url)
+        score_error = None
+        if scored is None:
+            outcomes = sessions.run(connection, rounds)
+        else:
+            long_prompt = sessions.SHARED_PREFIX + sessions.LONG_FIRST_INPUT
+            log(
+                f"concurrent: {len(names)} sessions (one with a {long_prompt}-token first "
+                f"prompt) and a {len(scored.tokens)}-token scoring request at once"
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                score_future = pool.submit(scoring.check, connection, scored)
+                outcomes = sessions.run_concurrent(connection, rounds)
+                score_error = score_future.result()
         preflight_error = None
         if expect_cache_hits:
             with httpx.Client(timeout=REQUEST_SECONDS) as client:
@@ -181,6 +222,11 @@ def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=pr
 
     for o in outcomes:
         log(f"  [{'ok' if o.ok else 'FAIL'}] {o.describe()}")
+    if scored is not None:
+        log(
+            f"  [{'ok' if score_error is None else 'FAIL'}] teacher-forced scoring of "
+            f"{len(scored.tokens)} tokens: {score_error or 'top-1 matches the reference'}"
+        )
     log(
         f"  [{'ok' if stream_error is None else 'FAIL'}] stream of {last.round.label}: "
         f"{stream_error or 'tokens and usage match the non-streamed response'}"
@@ -202,6 +248,7 @@ def check(root: Path, work_dir: Path, *, expect_cache_hits: bool = False, log=pr
         and stream_error is None
         and (hits > 0 or not expect_cache_hits)
         and preflight_error is None
+        and score_error is None
     )
     log(f"{'PASS' if passed else 'FAIL'} in {time.monotonic() - t0:.1f} s")
     if not passed:
@@ -223,14 +270,31 @@ def main() -> None:
         action="store_true",
         help="fail unless a chained round reports cached_tokens > 0 and the preflight replay hits",
     )
+    p.add_argument(
+        "--concurrency",
+        type=_nonnegative,
+        default=0,
+        metavar="N",
+        help="drive the batching scheduler: N sessions, a long-prompt session, and a scoring "
+        "request at once; set N above the engine's admission cap (default 0: one at a time)",
+    )
     args = p.parse_args()
     torch.set_num_threads(min(8, torch.get_num_threads()))
+    options = {"expect_cache_hits": args.expect_cache_hits, "concurrency": args.concurrency}
     if args.work_dir is not None:
         args.work_dir.mkdir(parents=True, exist_ok=True)
-        work_dir = args.work_dir.resolve()
-        sys.exit(check(args.root.resolve(), work_dir, expect_cache_hits=args.expect_cache_hits))
-    with tempfile.TemporaryDirectory(prefix="cpu-check-") as tmp:
-        sys.exit(check(args.root.resolve(), Path(tmp), expect_cache_hits=args.expect_cache_hits))
+        sys.exit(check(args.root.resolve(), args.work_dir.resolve(), **options))
+    # The in-process reference engine maps the tiny checkpoint until it is collected; on an
+    # NFS /tmp, deleting a mapped file leaves a `.nfs*` placeholder that blocks the rmdir.
+    with tempfile.TemporaryDirectory(prefix="cpu-check-", ignore_cleanup_errors=True) as tmp:
+        sys.exit(check(args.root.resolve(), Path(tmp), **options))
+
+
+def _nonnegative(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {value}")
+    return value
 
 
 if __name__ == "__main__":
