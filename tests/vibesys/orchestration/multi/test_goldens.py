@@ -15,8 +15,8 @@ from tests.vibesys.golden.helpers import (
 )
 
 from vibesys.inputs import ProfileGuidedInput
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import (
     PLUGIN,
     PROFILE_GUIDED_PLUGIN,

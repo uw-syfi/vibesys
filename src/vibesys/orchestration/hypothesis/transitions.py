@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+from vibesys.metrics import Measurement, MetricComparison, MetricSpace
 from vibesys.orchestration.hypothesis.notices import (
     ArchiveAxis,
     ArchiveConflict,
@@ -37,7 +38,6 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.orchestration.metrics import Measurement, MetricComparison, MetricSpace
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,

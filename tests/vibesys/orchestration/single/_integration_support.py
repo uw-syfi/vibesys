@@ -17,7 +17,7 @@ from vibesys.api import (
 )
 from vibesys.api.testing import create_session
 from vibesys.inputs import ProfileGuidedInput, load_input_bundle
-from vibesys.orchestration.metrics import MetricSpace
+from vibesys.metrics import MetricSpace
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.orchestration.single import (
     PLUGIN,

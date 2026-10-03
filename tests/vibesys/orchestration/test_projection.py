@@ -8,10 +8,10 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.api import PluginProjection
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.hypothesis import OrchestratorPlan
 from vibesys.orchestration.hypothesis.readmodel import AgentRunProjection
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )

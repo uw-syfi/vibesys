@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.hypothesis import (
     AttemptDecision,
     AttemptState,
@@ -22,7 +23,6 @@ from vibesys.orchestration.hypothesis import (
     build_round_record,
 )
 from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
-from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles
 from vibesys.orchestration.multi.models import (

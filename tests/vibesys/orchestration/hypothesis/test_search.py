@@ -20,6 +20,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.hypothesis import (
     CarryOver,
     ClosedRound,
@@ -40,7 +41,6 @@ from vibesys.orchestration.hypothesis.attempts import (
     JudgeSkipReason,
 )
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 

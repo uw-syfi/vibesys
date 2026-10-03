@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest
 
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.hypothesis import (
     HypothesisConfig,
     HypothesisResolution,
@@ -24,7 +25,6 @@ from vibesys.orchestration.hypothesis import (
 from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.hypothesis.transitions import append_round, start_hypothesis
-from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vs_loop_state.api import PerfDeltaReason, RoundRecord
 
 _NOISY_OPS = MetricSpace(

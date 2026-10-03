@@ -39,6 +39,7 @@ from vs_loop_state.api import RoundHistory
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.metrics import MetricSpace
     from vibesys.orchestration.hypothesis.config import HypothesisConfig
     from vibesys.orchestration.hypothesis.notices import (
         ArchiveConflict,
@@ -47,7 +48,6 @@ if TYPE_CHECKING:
     )
     from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
-    from vibesys.orchestration.metrics import MetricSpace
     from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
 
 __all__ = ["HypothesisSearch"]

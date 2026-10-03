@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.golden.helpers import assert_exact_text
 
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve import PLUGIN
 from vibesys.orchestration.evolve.models import EvolveOptions
-from vibesys.orchestration.metrics import MetricSpace, Objective
 from vs_runtime.api import RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRun
 

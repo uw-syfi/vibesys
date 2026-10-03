@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
+from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.domains.base import DomainRole
 from vibesys.orchestration.domains.registry import resolve_domain
 from vibesys.orchestration.domains.rendering import render_domain_section
@@ -23,7 +24,6 @@ from vibesys.orchestration.hypothesis import (
     RecordInput,
     build_round_record,
 )
-from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.profile_focus import (
     FocusView,
     ProfileFocus,

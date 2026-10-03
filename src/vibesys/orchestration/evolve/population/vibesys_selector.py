@@ -18,8 +18,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+from vibesys.metrics import Measurement, MetricSpace, Objective
 from vibesys.orchestration.evolve.population.models import Individual, Proposal
-from vibesys.orchestration.metrics import Measurement, MetricSpace, Objective
 
 if TYPE_CHECKING:
     import random

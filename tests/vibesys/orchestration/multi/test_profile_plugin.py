@@ -11,8 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.inputs import ProfileGuidedInput
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,

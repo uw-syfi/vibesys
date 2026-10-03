@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
-from vibesys.orchestration.metrics import FrameworkBenchmarkOutcome
+from vibesys.metrics import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.state import HypothesisState
