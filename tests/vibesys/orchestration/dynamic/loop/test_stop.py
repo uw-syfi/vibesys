@@ -12,15 +12,17 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     ScriptedAgents,
     Turn,
     implemented,
+    load_state,
     options,
     portfolio,
+    profile_workstream,
     run_loop,
     workstream,
 )
 
 from vibesys.api import RunStopped
 from vibesys.api.testing import FakeStopTimer
-from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
+from vibesys.orchestration.dynamic.agents import ORCHESTRATOR, PROFILER
 from vibesys.run.host import STOP_GRACE_S
 
 if TYPE_CHECKING:
@@ -161,3 +163,59 @@ def test_a_turn_that_ends_after_a_stop_starts_no_planner_turn_or_evaluation(
     (input_job,) = jobs
     assert f"scancel {input_job}" in commands
     assert agents.unscripted == []
+
+
+_UNSUPPORTED: dict[str, object] = {
+    "outcome": "unsupported",
+    "narrative": "No profiler reaches this candidate.",
+    "unsupported_reason": "the profiler cannot attach to this process",
+}
+
+
+def test_a_profile_a_stop_interrupts_has_no_outcome_and_runs_again_on_resume(
+    tmp_path: Path,
+) -> None:
+    """Chaos seed 4025: the interrupted profile was committed failed and never rerun."""
+    loop_input = LoopInput.create(tmp_path, profiled=True)
+    sessions: list[Any] = []
+
+    def stop_during_the_profile(_agent: Turn) -> dict[str, object]:
+        (session,) = sessions
+        session.stop()
+        # A reply the profiler must correct: its correction turn is the next
+        # turn boundary, where the stop lands.
+        return {"outcome": "observed"}
+
+    first = (
+        ScriptedAgents()
+        .plan(portfolio(profile_workstream("prof-1", None)))
+        .profile(stop_during_the_profile)
+    )
+    stopped = run_loop(
+        loop_input,
+        first,
+        options(max_rounds=2),
+        on_session=sessions.append,
+        stop_timer=FakeStopTimer(),
+    )
+
+    assert isinstance(stopped.error, RunStopped), stopped.error
+    (interrupted,) = load_state(loop_input, stopped.run_id).profiles
+    assert interrupted.outcome is None
+
+    second = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("H1")), portfolio(workstream("H2")))
+        .profile(_UNSUPPORTED)
+        .implement("H1", implemented("H1"))
+        .implement("H2", implemented("H2"))
+        .judge("H1", PASS)
+        .judge("H2", PASS)
+    )
+    resumed = run_loop(loop_input, second, options(max_rounds=2), resume_run_id=stopped.run_id)
+
+    assert resumed.error is None, resumed.error
+    (rerun,) = load_state(loop_input, resumed.run_id).profiles
+    assert rerun.outcome is not None
+    assert rerun.outcome.status.value == "unsupported"
+    assert len(second.prompts(PROFILER.id)) == 1

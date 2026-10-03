@@ -73,6 +73,7 @@ from vs_runtime.api import (
     Workspace,
     Workspaces,
 )
+from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -855,7 +856,9 @@ class EvidenceReusingEvaluation:
         """Run one profiler operation on ``revision`` and return its typed outcome.
 
         The operation goes through the same profiler service as an agent's
-        ``dispatch_profiler``, so it is a durable, run-observable record.
+        ``dispatch_profiler``, so it is a durable, run-observable record. An
+        operation the host interrupted raises :class:`RunStopped` instead of
+        returning an outcome.
         """
         if self._profiler is None:
             return await self._delegate.profile(revision, request, member_id=member_id)
@@ -882,6 +885,10 @@ class EvidenceReusingEvaluation:
                 dispatched.operation_id, member_id, None, MAX_AGENT_AWAIT_S
             )
             if not reply.timed_out:
+                if reply.operation.state is ProfilerOperationState.INTERRUPTED:
+                    # A stop or the host closing ended the operation, not the
+                    # profile: it has no outcome, so a resume runs it again.
+                    raise RunStopped
                 return _candidate_profile(revision, reply.operation)
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:

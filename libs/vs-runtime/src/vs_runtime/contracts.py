@@ -893,7 +893,10 @@ class Evaluation(Protocol):
         The profile is a host-owned profiler operation recorded under
         ``member_id``, so it is listed with the run's trusted operations.
         Every way the profile can end, including a run without a provisioned
-        profiler, is a typed outcome; this raises only on cancellation.
+        profiler, is a typed outcome. It raises only when the run, not the
+        profile, ends the operation: on cancellation, and with ``RunStopped``
+        when a stop or the host closing interrupts it. Such a profile has no
+        outcome and runs again on resume.
         """
         ...
 
