@@ -1,0 +1,2 @@
+exhaustion_info=None
+regression_info="Round 6's official candidate was not retained: 8.5. Use its recorded parent and objective directions when choosing the next checkpoint."
