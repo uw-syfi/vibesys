@@ -43,12 +43,13 @@ class _FakeRunner(SlurmJobRunner):
         config: SlurmConfig,
         *,
         fail_before_stage: bool = False,
-        benchmark_exit_code: int = 0,
+        benchmark_exit_code: int | None = 0,
         benchmark_stdout: str = '{"throughput": 10}',
         service_log_tail: str = "",
     ) -> None:
         super().__init__(config)
         self.service_log_tail = service_log_tail
+        self.job_exit_code = 0
         self.benchmark_exit_code = benchmark_exit_code
         self.benchmark_stdout = benchmark_stdout
         self.submissions = 0
@@ -103,7 +104,7 @@ class _FakeRunner(SlurmJobRunner):
             )
         return SlurmBatchResult(
             job_id="1234",
-            job_exit_code=0,
+            job_exit_code=self.job_exit_code,
             job_output="",
             service_log_tail=self.service_log_tail,
             stages=(
@@ -324,6 +325,72 @@ async def test_executor_maps_pre_stage_failure_and_skips_remainder(tmp_path: Pat
     assert observed.state is EvaluationState.FAILED
     assert observed.stage_results[0].failure == "service startup failed"
     assert observed.stage_results[1].state is StageState.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_executor_never_invents_a_successful_exit_code(tmp_path: Path) -> None:
+    config = _config()
+    runner = _FakeRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    try:
+        for exit_code in (None, *range(256)):
+            runner.benchmark_exit_code = exit_code
+            handle_id = f"eval-exit-code-{exit_code}"
+            await executor.submit(_request(), handle_id=handle_id)
+            observed = await _terminal(executor, handle_id)
+            if exit_code is None:
+                assert observed.state is EvaluationState.FAILED
+                assert observed.failure == (
+                    "SlurmOutcomeUnknownError: Slurm stage 'benchmark' has an unknown outcome: "
+                    "missing exit code"
+                )
+                assert not observed.stage_results
+            else:
+                expected = StageState.SUCCEEDED if exit_code == 0 else StageState.FAILED
+                assert observed.stage_results[1].state is expected
+                result = SlurmCommandResult.model_validate(observed.stage_results[1].result)
+                assert result.exit_code == exit_code
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_executor_preserves_steps_but_rejects_failed_batch(tmp_path: Path) -> None:
+    config = _config()
+    runner = _FakeRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    try:
+        for exit_code in range(256):
+            runner.job_exit_code = exit_code
+            handle_id = f"eval-batch-exit-{exit_code}"
+            await executor.submit(_request(), handle_id=handle_id)
+            observed = await _terminal(executor, handle_id)
+            assert all(stage.state is StageState.SUCCEEDED for stage in observed.stage_results)
+            assert len(observed.stage_results) == 2
+            expected = EvaluationState.SUCCEEDED if exit_code == 0 else EvaluationState.FAILED
+            assert observed.state is expected
+            if exit_code:
+                assert observed.failure == (
+                    f"_SlurmExecutionError: Slurm batch '1234' exited with code {exit_code}"
+                )
+    finally:
+        await executor.close()
 
 
 @pytest.mark.asyncio

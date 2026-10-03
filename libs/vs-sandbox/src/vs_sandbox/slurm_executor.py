@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import subprocess
 import time
-import uuid
 from contextlib import asynccontextmanager
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -30,6 +28,7 @@ from vs_evaluation.api import (
     ReuseStatus,
     StageState,
 )
+from vs_project.api import atomic_write_bytes
 from vs_slurm.api import (
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -86,6 +85,15 @@ class SlurmCommandResult(BaseModel):
     stderr: str = ""
     executed: bool = True
     execution_metadata: SlurmExecutionMetadata | None = None
+
+
+class SlurmOutcomeUnknownError(RuntimeError):
+    """Collected stage evidence cannot establish the command's outcome."""
+
+    @classmethod
+    def missing_exit_code(cls, stage: str) -> SlurmOutcomeUnknownError:
+        """Name the stage whose terminal evidence lacks an exit code."""
+        return cls(f"Slurm stage {stage!r} has an unknown outcome: missing exit code")
 
 
 class SharedSlurmAdmission:
@@ -442,9 +450,11 @@ class SlurmEvaluationExecutor:
                     results.append(EvaluationStepResult(name=step.name, state=StageState.SKIPPED))
                 continue
             output = item.stdout + item.stderr
+            if item.exit_code is None:
+                raise SlurmOutcomeUnknownError.missing_exit_code(step.name)
             raw = SlurmCommandResult(
                 output=output,
-                exit_code=item.exit_code or 0,
+                exit_code=item.exit_code,
                 stdout=item.stdout,
                 stderr=item.stderr,
                 execution_metadata=metadata if index == 0 else None,
@@ -464,12 +474,16 @@ class SlurmEvaluationExecutor:
                 )
             )
         failed = next((item for item in results if item.state is StageState.FAILED), None)
+        failure = failed.failure if failed is not None else None
+        if failure is None and batch.job_exit_code != 0:
+            error = _SlurmExecutionError.batch_failed(batch.job_id, batch.job_exit_code)
+            failure = f"{type(error).__name__}: {error}"
         self._publish(
             handle_id,
             ExecutorObservation(
-                state=EvaluationState.FAILED if failed is not None else EvaluationState.SUCCEEDED,
+                state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
                 stage_results=tuple(results),
-                failure=failed.failure if failed is not None else None,
+                failure=failure,
             ),
         )
 
@@ -569,7 +583,6 @@ class SlurmEvaluationExecutor:
         wait_deadline_epoch_s: float | None = None,
     ) -> None:
         path = self._handle_root / f"{handle_id}.json"
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         document = (
             _DurableSlurmEvaluation(
                 handle=handle,
@@ -578,24 +591,7 @@ class SlurmEvaluationExecutor:
             ).model_dump_json()
             + "\n"
         )
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            output = os.fdopen(descriptor, "w", encoding="utf-8")
-            descriptor = -1
-            with output:
-                output.write(document)
-                output.flush()
-                os.fsync(output.fileno())
-            temporary.replace(path)
-            directory = os.open(self._handle_root, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
-            temporary.unlink(missing_ok=True)
+        atomic_write_bytes(path, document.encode("utf-8"))
 
     def _read_evaluation(self, handle_id: str) -> _DurableSlurmEvaluation | None:
         path = self._handle_root / f"{handle_id}.json"
@@ -648,6 +644,10 @@ def _stage_failure(
 
 
 class _SlurmExecutionError(RuntimeError):
+    @classmethod
+    def batch_failed(cls, job_id: str, exit_code: int) -> _SlurmExecutionError:
+        return cls(f"Slurm batch {job_id!r} exited with code {exit_code}")
+
     @classmethod
     def request_conflict(cls, handle_id: str) -> _SlurmExecutionError:
         return cls(f"Slurm evaluation handle {handle_id!r} has a different request")
