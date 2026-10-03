@@ -1,0 +1,6 @@
+{# Context: `round_number`, `retry` (int), `reason` (str). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Single-agent attempt " ~ retry) %}
+- verdict: no valid response
+- reason: {{ reason }}
+{% endcall %}

@@ -226,12 +226,12 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime",
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic"
@@ -274,6 +274,12 @@ depends_on = ["vs_loop_state"]
 path = "vibesys.orchestration.profilers"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.run.contracts"]
+
+[[modules]]
+# Per-round progress entries; a written entry is the only proof a prompt may point at.
+path = "vibesys.orchestration.progress"
+layer = "orchestration_host"
+depends_on = ["vs_prompts"]
 
 [[modules]]
 # The one correction turn every built-in plugin sends after an invalid structured reply.

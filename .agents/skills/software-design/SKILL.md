@@ -90,6 +90,11 @@ section.
     Python passes data; the template owns the wording, conditionals, and loops.
     Never build prompt text with `+`, f-strings, `.format`, or `.join`, and
     never append to rendered output. `tests/architecture/test_prompt_templates.py`
+    enforces this. Text agents read later (progress files, tool results) is
+    agent-bound too: take it as a `RenderedPrompt` parameter, which makes the
+    call a checked sink. A prompt that points the agent at written text takes
+    the proof of the write as data (a `ProgressEntry` from `ProgressLog.append`)
+    and guards the pointer on it; `tests/architecture/test_progress_pointers.py`
     enforces this.
 12. **Lint suppressions are explicit opt-outs.** First consider reasonable
     lint-compliant fixes. Suppress only when those fixes would make the design

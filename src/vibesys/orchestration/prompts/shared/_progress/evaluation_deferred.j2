@@ -1,0 +1,6 @@
+{# Context: `round_number`, `retry` (int). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Official evaluation attempt " ~ retry) %}
+- decision: deferred
+- reason: cadence not due
+{% endcall %}

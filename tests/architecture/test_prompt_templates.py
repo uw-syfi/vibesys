@@ -2,7 +2,9 @@
 
 Python passes data; templates own the wording, conditionals, and loops. This
 check walks every prompt sink in ``src/`` (the message of an agent ``.turn``
-call and every ``system_prompt=`` argument) back through local variables,
+call, every ``system_prompt=`` argument, and every argument bound to a
+parameter annotated ``RenderedPrompt``, such as a progress-log section or an
+agent-facing tool result) back through local variables,
 module constants, and functions and methods defined in or imported from
 first-party modules, and reports text assembled or edited in Python: string
 literals, ``+``, ``+=``, ``%``, f-strings, ``.format``, ``.join``,
@@ -22,8 +24,12 @@ import ast
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -115,9 +121,11 @@ class _Scanner:
         return None
 
     def run(self) -> frozenset[_Violation]:
-        for path in sorted(self.scan_root.rglob("*.py")):
+        paths = sorted(self.scan_root.rglob("*.py"))
+        typed = _typed_sinks(self.load(path).tree for path in paths)
+        for path in paths:
             module = self.load(path)
-            for sink in _prompt_sinks(module.tree):
+            for sink in _prompt_sinks(module.tree, typed):
                 self.trace(module, sink)
             self.violations |= _rendered_output_edits(module) | _formatted_constants(module)
         return frozenset(self.violations)
@@ -253,7 +261,44 @@ def _assignments(scope: ast.AST, name: str) -> tuple[list[ast.expr], list[ast.Au
     return values, augmented
 
 
-def _prompt_sinks(tree: ast.Module) -> list[ast.expr]:
+# A function name mapped to its ``RenderedPrompt`` parameters: (positional index, name).
+_TypedSinks = dict[str, tuple[tuple[int, str], ...]]
+
+
+def _typed_sinks(trees: Iterable[ast.Module]) -> _TypedSinks:
+    """Functions whose parameters are annotated ``RenderedPrompt``: agent-visible text sinks."""
+    sinks: _TypedSinks = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if not isinstance(node, _Function):
+                continue
+            positional = [*node.args.posonlyargs, *node.args.args]
+            offset = 1 if positional and positional[0].arg in _SELF_NAMES else 0
+            params = [
+                (index - offset, arg.arg)
+                for index, arg in enumerate(positional)
+                if _names_rendered_prompt(arg.annotation)
+            ] + [
+                (-1, arg.arg)
+                for arg in node.args.kwonlyargs
+                if _names_rendered_prompt(arg.annotation)
+            ]
+            if params:
+                sinks[node.name] = tuple(params)
+    return sinks
+
+
+def _names_rendered_prompt(annotation: ast.expr | None) -> bool:
+    match annotation:
+        case ast.Name(id="RenderedPrompt") | ast.Attribute(attr="RenderedPrompt"):
+            return True
+        case ast.Constant(value=str() as text):
+            return text == "RenderedPrompt"
+        case _:
+            return False
+
+
+def _prompt_sinks(tree: ast.Module, typed: _TypedSinks | None = None) -> list[ast.expr]:
     sinks: list[ast.expr] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -262,6 +307,10 @@ def _prompt_sinks(tree: ast.Module) -> list[ast.expr]:
             sinks.extend(node.args[:1])
             sinks.extend(k.value for k in node.keywords if k.arg == "message")
         sinks.extend(k.value for k in node.keywords if k.arg == "system_prompt")
+        for index, name in (typed or {}).get(_call_name(node), ()):
+            if 0 <= index < len(node.args):
+                sinks.append(node.args[index])
+            sinks.extend(k.value for k in node.keywords if k.arg == name)
     return sinks
 
 
@@ -419,6 +468,14 @@ _REPORTED = {
     ),
     "rendered edited": "def f(value):\n    text = render_x()\n    return text + value",
     "constant formatted": "_T = 'do {v}'\n\ndef f(value):\n    return render_x(extra=_T.format(v=value))",
+    "typed sink": (
+        "class Log:\n    def append(self, n: int, section: RenderedPrompt) -> None: ...\n\n"
+        "def f(log, n):\n    log.append(n, f'## Round {n}')"
+    ),
+    "typed sink keyword": (
+        "def write(*, text: RenderedPrompt) -> None: ...\n\n"
+        "def f(value):\n    write(text='do ' + value)"
+    ),
 }
 
 _ACCEPTED = {
@@ -433,6 +490,10 @@ _ACCEPTED = {
         "def f(session, r, v):\n    return session.turn(_helper(r, v))"
     ),
     "data formatting into a render": "def f(n):\n    return render_x(round_id=f'{n:04d}')",
+    "typed sink rendered": (
+        "class Log:\n    def append(self, n: int, section: RenderedPrompt) -> None: ...\n\n"
+        "def f(log, r, n):\n    log.append(f'{n}', r.render_template('s.j2', n=n))"
+    ),
 }
 
 

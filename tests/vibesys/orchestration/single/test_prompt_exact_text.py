@@ -84,9 +84,9 @@ def test_plan_correction_message_text_is_stable(*, named_updates: bool) -> None:
                     state=HypothesisState(hypotheses=[previous]),
                     context=PlanContext(
                         objective_location="OBJECTIVE.md",
-                        profiler_summary=None,
-                        regression_info=None,
-                        exhaustion_info=None,
+                        profiler_entry=None,
+                        regression_entry=None,
+                        exhaustion_entry=None,
                         progress_location="progress/ledger.md",
                         roadmap_location="progress/roadmap.md",
                         pareto_archive_location="progress/pareto.md",

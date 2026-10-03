@@ -9,13 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis import (
-    ExhaustionNotice,
-    RegressionNotice,
     SkillResourceSelection,
 )
 from vibesys.orchestration.hypothesis.state import HypothesisState
 from vibesys.orchestration.profile_focus import FocusLedger
-from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
@@ -29,9 +27,9 @@ class PlanContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    profiler_summary: ProfilerSummary | None
-    regression_info: RegressionNotice | None
-    exhaustion_info: ExhaustionNotice | None
+    profiler_entry: ProgressEntry | None
+    regression_entry: ProgressEntry | None
+    exhaustion_entry: ProgressEntry | None
     progress_location: str
     roadmap_location: str
     pareto_archive_location: str

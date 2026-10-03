@@ -256,16 +256,16 @@ class _MultiRun:
         if isinstance(decision, NewHypothesis):
             context = decision.context
             # The pre-round and plan prompts point at this entry for the notice text.
-            self.files.note_carry(number, context.carry)
+            carried = self.files.note_carry(number, context.carry)
             guidance = await self._prepare_profile_guidance()
             profile_decision = await self.turns.pre_round(
                 number,
-                context.carry,
+                carried,
                 has_history=not (number == 1 and not self.records),
             )
-            summary = None
+            profile = None
             if profile_decision.need_profile:
-                summary = await self.turns.profile(
+                profile = await self.turns.profile(
                     number,
                     profile_decision.profile_focus or "general steady-state benchmark hotspots",
                 )
@@ -273,8 +273,8 @@ class _MultiRun:
                 PlanRequest(
                     round_number=context.round_number,
                     state=self.state.search,
-                    carry=context.carry,
-                    profiler_summary=summary,
+                    carried=carried,
+                    profile=profile,
                     plateau_warning=context.plateau_warning,
                     provisional_candidates=context.provisional_candidates,
                     workspace=self.workspace,
@@ -482,11 +482,7 @@ class _MultiRun:
         )
         if reason is None:
             state.passed = True
-            self.files.note_evaluation(
-                self.round_number,
-                state.retry,
-                "- decision: deferred\n- reason: cadence not due\n",
-            )
+            self.files.note_evaluation_deferred(self.round_number, state.retry)
             return AttemptDecision.FINISH
         await self._approve_perf(selected)
         state.official_reason = reason
@@ -509,15 +505,7 @@ class _MultiRun:
             recipe_artifact=artifact,
             report_location=report_location,
         )
-        location = result.report_location or "(no report written)"
-        detail = f"- decision: {'passed' if result.passed else 'failed'}\n- report: {location}\n"
-        if result.feedback:
-            detail += f"- feedback: {result.feedback}\n"
-        self.files.note_evaluation(
-            self.round_number,
-            selected.attempt.retry,
-            detail,
-        )
+        self.files.note_local_validation(self.round_number, selected.attempt.retry, result)
         return result.feedback if not result.passed else None
 
     async def _checkpoint_hypothesis(self, selected: _SelectedRound) -> None:
@@ -597,11 +585,7 @@ class _MultiRun:
             await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
             return False
         attempt.passed = True
-        self.files.note_evaluation(
-            self.round_number,
-            attempt.retry,
-            f"- decision: passed\n- reason: {attempt.official_reason}\n",
-        )
+        self.files.note_evaluation_passed(self.round_number, attempt.retry, attempt.official_reason)
         return True
 
     async def _evaluation_failed(self, selected: _SelectedRound, feedback: str) -> None:
@@ -613,11 +597,7 @@ class _MultiRun:
         hypothesis.gate_candidate_commit = self.workspace.revision
         hypothesis.gate_accuracy_passed = self.state.accuracy_receipt is not None
         hypothesis.feedback = feedback
-        self.files.note_evaluation(
-            self.round_number,
-            attempt.retry,
-            f"- decision: failed\n- feedback: {feedback}\n",
-        )
+        self.files.note_evaluation_failed(self.round_number, attempt.retry, feedback)
         await self._checkpoint_hypothesis(selected)
 
     async def _close_round(self, selected: _SelectedRound) -> None:

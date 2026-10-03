@@ -70,6 +70,7 @@ if TYPE_CHECKING:
         RollbackTarget,
     )
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
 
 
 @dataclass(slots=True)
@@ -210,8 +211,9 @@ class _SingleRun:
             message = "hypothesis search finished before the configured round cursor"
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
-            # The plan prompt points at this entry for the notice text.
-            self.files.note_carry(self.round_number, decision.context.carry)
+            # The plan prompt points at these entries; it mentions only what they hold.
+            carried = self.files.note_carry(self.round_number, decision.context.carry)
+            profile = self._note_profile()
             guidance = await self._prepare_profile_guidance()
             plan = await request_plan(
                 self.run,
@@ -219,7 +221,7 @@ class _SingleRun:
                 DesignerPlanRequest(
                     round_number=self.round_number,
                     state=self.state.search,
-                    context=self._plan_context(decision.context, guidance),
+                    context=self._plan_context(decision.context, guidance, carried, profile),
                     workspace=self.workspace,
                 ),
             )
@@ -363,11 +365,7 @@ class _SingleRun:
             )
             if official_reason is None:
                 selected.attempt.passed = True
-                self.files.note_evaluation(
-                    self.round_number,
-                    retry,
-                    "- decision: deferred\n- reason: cadence not due\n",
-                )
+                self.files.note_evaluation_deferred(self.round_number, retry)
                 return
             selected.attempt.official_reason = official_reason
             if await self._official_evaluation(selected):
@@ -415,10 +413,8 @@ class _SingleRun:
             await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
             return False
         selected.attempt.passed = True
-        self.files.note_evaluation(
-            self.round_number,
-            selected.attempt.retry,
-            f"- decision: passed\n- reason: {selected.official_reason}\n",
+        self.files.note_evaluation_passed(
+            self.round_number, selected.attempt.retry, selected.official_reason
         )
         return True
 
@@ -430,11 +426,7 @@ class _SingleRun:
         hypothesis.gate_candidate_commit = self.workspace.revision
         hypothesis.gate_accuracy_passed = self.state.accuracy_receipt is not None
         hypothesis.feedback = feedback
-        self.files.note_evaluation(
-            self.round_number,
-            selected.attempt.retry,
-            f"- decision: failed\n- feedback: {feedback}\n",
-        )
+        self.files.note_evaluation_failed(self.round_number, selected.attempt.retry, feedback)
         await self._checkpoint_hypothesis(selected)
 
     async def _close_round(self, selected: _SelectedRound) -> None:
@@ -562,30 +554,34 @@ class _SingleRun:
             "workspace_sources": tuple(item.model_dump() for item in facts.workspace_sources),
         }
 
+    def _note_profile(self) -> ProgressEntry | None:
+        """Record the last attempt's profile evidence in this round's progress entry."""
+        last = self.state.last_response
+        if last is None:
+            return None
+        summary = ProfilerSummary(
+            analysis=last.profile_analysis,
+            bottlenecks=last.bottlenecks,
+            suggestions=last.suggestions,
+            perf_metric=last.perf_metric,
+            perf_unit=last.perf_unit,
+        )
+        return self.files.note_profile(self.round_number, summary)
+
     def _plan_context(
         self,
         context: PlanningContext,
         guidance: FocusView | None,
+        carried: CarriedEntries,
+        profile: ProgressEntry | None,
     ) -> PlanContext:
         facts = self.run.facts
         domain = resolve_domain(DomainName(facts.domain_id))
-        last = self.state.last_response
-        summary = (
-            ProfilerSummary(
-                analysis=last.profile_analysis,
-                bottlenecks=last.bottlenecks,
-                suggestions=last.suggestions,
-                perf_metric=last.perf_metric,
-                perf_unit=last.perf_unit,
-            )
-            if last is not None
-            else None
-        )
         return PlanContext(
             objective_location=facts.objective_location,
-            profiler_summary=summary,
-            regression_info=context.carry.regression,
-            exhaustion_info=context.carry.exhaustion,
+            profiler_entry=profile,
+            regression_entry=carried.regression,
+            exhaustion_entry=carried.exhaustion,
             progress_location=self.files.progress_location,
             roadmap_location=self.files.roadmap_location,
             pareto_archive_location=self.files.pareto_location,

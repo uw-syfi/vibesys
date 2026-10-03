@@ -6,25 +6,31 @@ import inspect
 from pathlib import Path
 
 import vibesys.orchestration.single.prompts as single_prompts
-from vibesys.orchestration.hypothesis import ExhaustionNotice, OfficialCandidateNotRetained
+from vibesys.orchestration.hypothesis import ExhaustionNotice
 from vibesys.orchestration.profile_focus import (
     FocusLedger,
     FocusLedgerRow,
     ProfileGuidanceStatus,
 )
+from vibesys.orchestration.progress import ProgressLog
 from vibesys.orchestration.prompts import PROMPTS_DIR
 from vibesys.orchestration.single.models import PlanContext, SingleAgentRoundContext
 from vs_prompts.api import resolve_free_variables
 
 
-def _plan_context() -> PlanContext:
+def _plan_context(workspace: Path) -> PlanContext:
+    log = ProgressLog(workspace, workspace / "progress")
+    notice = single_prompts.render_progress(
+        "exhaustion",
+        round_number=4,
+        exhaustion_info=ExhaustionNotice(round_number=3, attempts=2, feedback="Add a test."),
+    )
+    entry = log.append(4, notice)
     return PlanContext(
         objective_location="OBJECTIVE.md",
-        profiler_summary=None,
-        regression_info=OfficialCandidateNotRetained(
-            round_number=3, perf_metric=9.5, perf_unit="tok/s"
-        ),
-        exhaustion_info=ExhaustionNotice(round_number=3, attempts=2, feedback="Add a test."),
+        profiler_entry=None,
+        regression_entry=entry,
+        exhaustion_entry=entry,
         progress_location="progress/ledger.md",
         roadmap_location="progress/roadmap.md",
         pareto_archive_location="progress/pareto.md",
@@ -86,8 +92,8 @@ def test_colocated_templates_use_every_field_of_their_typed_contexts() -> None:
         assert variables == set(model.model_fields)
 
 
-def test_plan_prompt_renders_policy_context_and_profile_guidance() -> None:
-    rendered = single_prompts.render_plan_prompt(_plan_context())
+def test_plan_prompt_renders_policy_context_and_profile_guidance(tmp_path: Path) -> None:
+    rendered = single_prompts.render_plan_prompt(_plan_context(tmp_path))
 
     assert "progress/roadmap.md" in rendered
     assert "The throughput curve has flattened." in rendered
