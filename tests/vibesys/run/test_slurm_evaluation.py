@@ -118,9 +118,11 @@ class _Runner(SlurmJobRunner):
         block_wait: bool = False,
         fail_cancel: bool = False,
         stages: tuple[SlurmBatchStageResult, ...] | None = None,
+        service_log_tail: str = "",
     ) -> None:
         super().__init__(config)
         self._stages = stages
+        self._service_log_tail = service_log_tail
         self.submissions = 0
         self.request: SlurmBatchRequest | None = None
         self.handle = SlurmBatchHandle.model_validate(
@@ -176,6 +178,7 @@ class _Runner(SlurmJobRunner):
             job_output="",
             phase_timings_seconds={},
             content_cache_hits=0,
+            service_log_tail=self._service_log_tail,
             stages=self._stages
             or (
                 SlurmBatchStageResult(
@@ -355,6 +358,60 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
     accuracy = TrustedEvidence.model_validate(observed.stage_results[0].result)
     assert accuracy.outcome is EvidenceOutcome.FAILED
     assert observed.stage_results[1].state is StageState.SKIPPED
+    await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(
+        config,
+        stages=(
+            SlurmBatchStageResult(
+                name="accuracy",
+                exit_code=0,
+                stdout="ok",
+                stderr="",
+                elapsed_seconds=1.0,
+                skipped=False,
+            ),
+            SlurmBatchStageResult(
+                name="benchmark",
+                exit_code=124,
+                stdout="",
+                stderr="",
+                elapsed_seconds=600.0,
+                skipped=False,
+            ),
+        ),
+        service_log_tail="decode: 4000 steps, 120 ms/step at 22 sequences",
+    )
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+
+    await executor.submit(_request(snapshot), handle_id="fused")
+    observed = await _terminal(executor, "fused")
+
+    benchmark = TrustedEvidence.model_validate(observed.stage_results[1].result)
+    assert benchmark.semantic_summary is not None
+    assert "hit its time limit" in benchmark.semantic_summary
+    assert "decode: 4000 steps, 120 ms/step" in benchmark.semantic_summary
     await executor.close()
 
 

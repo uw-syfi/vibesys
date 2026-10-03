@@ -50,6 +50,9 @@ if TYPE_CHECKING:
 _CLEANUP_FAILURE = "cleanup failed"
 
 
+_MAX_SUMMARY_CHARS = 16_384  # TrustedEvidence.semantic_summary limit
+
+
 class _DurableSemanticSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -233,7 +236,7 @@ class SlurmSemanticEvaluationExecutor:
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
-            evidence = self._evidence(stage, raw)
+            evidence = self._evidence(stage, raw, raw_step.failure)
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_summaries.append(
                     evidence.semantic_summary or f"{stage.kind.value} check failed"
@@ -276,7 +279,9 @@ class SlurmSemanticEvaluationExecutor:
             failure=None if state is EvaluationState.SUCCEEDED else failure,
         )
 
-    def _evidence(self, stage: SemanticEvaluationStage, raw: SlurmCommandResult) -> TrustedEvidence:
+    def _evidence(
+        self, stage: SemanticEvaluationStage, raw: SlurmCommandResult, failure: str | None
+    ) -> TrustedEvidence:
         passed = raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
@@ -302,7 +307,10 @@ class SlurmSemanticEvaluationExecutor:
                     passed = False
                     summary = str(error)
         if not passed and summary is None:
-            summary = raw.output[-4000:] or f"{stage.kind.value} command failed"
+            # The provider's stage failure already holds the stage output plus the
+            # server log tail; keep its end, where the cause usually is.
+            detail = failure or raw.output
+            summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
         identity = {
             "kind": stage.kind.value,

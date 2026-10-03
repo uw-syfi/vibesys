@@ -43,6 +43,8 @@ _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
 _SERVICE_LOG_TAIL_LINES = 400
 _SERVICE_LOG_REPORTED_LINES = 40
+_SERVICE_LOG_LINE_CHARS = 400
+_SERVICE_LOG_TAIL_CHARS = 8_000
 _CONTENT_CACHE_ROOT = ".vibesys-content-cache"
 _STAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
@@ -1372,9 +1374,18 @@ def _distinct_tail(path: Path) -> str:
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     seen: set[str] = set()
     kept: list[str] = []
-    for line in reversed(lines):
+    size = 0
+    for raw_line in reversed(lines):
+        line = (
+            raw_line
+            if len(raw_line) <= _SERVICE_LOG_LINE_CHARS
+            else raw_line[:_SERVICE_LOG_LINE_CHARS] + " [line truncated]"
+        )
         if line in seen:
             continue
+        size += len(line) + 1
+        if size > _SERVICE_LOG_TAIL_CHARS:
+            break
         seen.add(line)
         kept.append(line)
         if len(kept) == _SERVICE_LOG_REPORTED_LINES:
