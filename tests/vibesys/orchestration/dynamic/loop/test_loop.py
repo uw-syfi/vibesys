@@ -356,3 +356,26 @@ def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_
     assert "PortfolioPlan" in str(run.error)
     assert agents.unscripted == []
     assert len(agents.prompts(ORCHESTRATOR.id)) == 2
+
+
+def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
+    tmp_path: Path,
+) -> None:
+    """The correction names the offending field, as the production client reports it."""
+    loop_input = LoopInput.create(tmp_path)
+    too_long = {**portfolio(workstream("H1")), "reasoning": "x" * 2001}
+    agents = (
+        ScriptedAgents()
+        .plan(too_long, portfolio(workstream("H1")))
+        .implement("H1", edit_to(2, "H1"))
+        .judge("H1", PASS)
+    )
+
+    run = run_loop(loop_input, agents, options())
+
+    assert run.error is None
+    assert run.succeeded is True
+    assert agents.unscripted == []
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 2
+    assert "reasoning: String should have at most 2000 characters" in planner[1]

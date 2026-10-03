@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, override
 import pytest
 from pydantic import BaseModel
 
-from vs_agent.api import StdioServerDescriptor
+from vs_agent.api import AgentOutputSchemaError, StdioServerDescriptor
 from vs_agent.contracts import AgentCapabilities
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
@@ -462,16 +462,26 @@ def test_fail_can_raise_a_base_exception() -> None:
     assert _invoke_text(client, kind="chat") == "Fake agent inspected the trajectory."
 
 
-def test_enqueue_parse_failure_returns_the_fallback_positionally() -> None:
+def test_enqueue_parse_failure_raises_like_the_real_client_positionally() -> None:
     client = FakeAgentClient()
-    # First judge turn succeeds; the second returns unparseable output so the
-    # loop falls back. Both turns are still recorded.
+    # First judge turn succeeds; the second returns unparseable output, which
+    # the real client reports as AgentOutputSchemaError. Both turns are recorded.
     client.enqueue("judge", _Response(verdict="pass"))
     client.enqueue_parse_failure("judge")
 
     assert _invoke(client) == _Response(verdict="pass")
-    assert _invoke(client) == _Response(verdict="fallback")
+    with pytest.raises(AgentOutputSchemaError, match="no JSON object"):
+        _invoke(client)
     assert len(client.calls_for("judge")) == 2
+
+
+def test_a_scripted_reply_that_does_not_validate_names_its_fields() -> None:
+    client = FakeAgentClient().enqueue("judge", {"verdict": 3})
+
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        _invoke(client)
+
+    assert raised.value.detail.startswith("verdict: ")
 
 
 def test_evict_session_clears_a_seeded_conversation() -> None:

@@ -151,8 +151,11 @@ next turn continues the work. vs-runtime raises it to plugins as
 `StructuredResponseError` with the same `.detail`, the error an unparseable
 reply raises, so every plugin handles it the same way: one correction turn,
 then a recorded failed attempt or the end of the run. No plugin fabricates a
-response in its place. Codex never fails this way:
-it constrains decoding to the schema.
+response in its place. Codex never fails this way: it constrains decoding to
+the schema. `AgentClient.invoke` raises the same error, with field-named
+errors (`reasoning: String should have at most 2000 characters`), for a reply
+that does not validate as the response model; `FakeAgentClient` and the
+vs-runtime `FakeRun` session do the same, so tests see production behavior.
 
 ### Retired after a turn, or replaced during one
 

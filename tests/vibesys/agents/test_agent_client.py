@@ -24,6 +24,7 @@ from vs_agent.api import (
     AgentClient,
     AgentEvent,
     AgentEventKind,
+    AgentOutputSchemaError,
     AgentSessionKey,
     AgentUsage,
     SessionScope,
@@ -744,28 +745,25 @@ def test_runtime_accessors_default_to_none_or_codex_when_unconfigured() -> None:
     assert client.model_for_kind("implementer") is None
 
 
-def test_invoke_uses_fallback_only_for_unparseable_output(tmp_path: Path) -> None:
-    session = _FakeSession(results=[AgentTurnResult("not json")])
+def test_invoke_reports_an_invalid_reply_as_a_schema_error_naming_its_fields(
+    tmp_path: Path,
+) -> None:
+    """The caller's correction needs the field-named errors, not a synthesized response."""
+    session = _FakeSession(results=[AgentTurnResult('{"answer": 3}')])
     client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
-    fallback_calls = 0
 
-    def fallback() -> _Response:
-        nonlocal fallback_calls
-        fallback_calls += 1
-        return _Response(answer="fallback")
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        client.invoke(
+            kind="judge",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            response_cls=_Response,
+            fallback_factory=lambda: _Response(answer="fallback"),
+            round_label="judge #1",
+        )
 
-    response = client.invoke(
-        kind="judge",
-        workspace=tmp_path,
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=_Response,
-        fallback_factory=fallback,
-        round_label="judge #1",
-    )
-
-    assert response == _Response(answer="fallback")
-    assert fallback_calls == 1
+    assert raised.value.detail.startswith("answer: ")
 
 
 def test_invoke_translates_generic_tool_server_for_the_driver(tmp_path: Path) -> None:

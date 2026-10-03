@@ -32,7 +32,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.events import CommandResultPayload, JsonResultPayload
 from vs_agent.provider_policy import DEFAULT_CLI_PROVIDER
-from vs_agent.runner import parse_typed_response_text
+from vs_agent.runner import parse_typed_response
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
@@ -295,7 +295,14 @@ class AgentClient:
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> T:
-        """Run one turn and parse its structured response."""
+        """Run one turn and parse its structured response.
+
+        Raises ``AgentOutputSchemaError`` naming the offending fields when the
+        reply does not validate as ``response_cls``; ``fallback_factory`` is
+        not called for it, so the caller can send a correction to the same
+        conversation.
+        """
+        del fallback_factory  # part of AgentClientProtocol; see the docstring
         result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,
@@ -311,8 +318,9 @@ class AgentClient:
             session_key=session_key,
         )
         label = agent_label(kind)
-        parsed = parse_typed_response_text(result.text, response_cls)
-        if parsed is None:
+        try:
+            parsed = parse_typed_response(result.text, response_cls)
+        except AgentOutputSchemaError:
             _emit_and_log(
                 self._sink,
                 f"\n=== {label} ROUND OUTPUT (missing response) ===",
@@ -330,7 +338,8 @@ class AgentClient:
                     self._run_log_file,
                 )
                 _publish_final_text(logger, result.text)
-            return fallback_factory()
+            # The session stays live, so the caller's correction continues it.
+            raise
         _emit_and_log(self._sink, f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
         _emit_and_log(self._sink, parsed.model_dump_json(indent=2), self._run_log_file)
         return parsed

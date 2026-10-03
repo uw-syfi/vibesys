@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Literal, Self, TypeVar
 
 from pydantic import BaseModel
 
-from vs_agent.contracts import AgentCapabilities
+from vs_agent.contracts import AgentCapabilities, AgentOutputSchemaError
+from vs_agent.runner import validate_typed_response
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 if TYPE_CHECKING:
@@ -42,10 +43,13 @@ type TextSource = str | Callable[[FakeInvocation], str]
 class _ParseFailure:
     """Queue marker for a turn that returns unparseable output.
 
-    When one is dequeued, the loop falls back to ``fallback_factory()`` (a
-    synthesized response) instead of a parsed model.
+    When one is dequeued, ``invoke`` raises ``AgentOutputSchemaError``, as
+    the real client does for a reply that does not validate.
     """
 
+
+#: The detail of a scripted parse failure, as the real client reports a reply with no JSON.
+_UNPARSEABLE = "the reply contained no JSON object"
 
 #: Singleton enqueued by :meth:`FakeAgentClient.enqueue_parse_failure`.
 _PARSE_FAILURE = _ParseFailure()
@@ -259,8 +263,9 @@ class FakeAgentClient:
         """Queue ``count`` parse failures for ``invoke(kind=...)``, in call order.
 
         Models the real client emitting output the loop cannot parse into
-        ``response_cls``: for that turn the loop falls back to
-        ``fallback_factory()`` (a synthesized response). Queued positionally
+        ``response_cls``: that turn raises ``AgentOutputSchemaError``, as the
+        real client does, and keeps the session. A scripted dict that does
+        not validate raises the same error, naming its fields. Queued positionally
         alongside :meth:`enqueue`, so ``enqueue(kind, ok).enqueue_parse_failure(kind)``
         makes the first turn succeed and the second parse-fail. The call is
         still recorded. Only affects :meth:`invoke`, not :meth:`invoke_text`.
@@ -494,7 +499,7 @@ class FakeAgentClient:
     ) -> T:
         source = _pop(self._queues, kind)
         if isinstance(source, _ParseFailure):
-            return fallback_factory()
+            raise AgentOutputSchemaError(_UNPARSEABLE)
         if source is None:
             source = self._constants.get(kind)
         if source is None:
@@ -504,7 +509,7 @@ class FakeAgentClient:
             # A model instance is returned as-is; the caller enqueued it (rather
             # than a dict) and owns it matching ``response_cls``.
             return value  # ty: ignore[invalid-return-type]
-        return response_cls.model_validate(value)
+        return validate_typed_response(value, response_cls)
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:
         source = _pop(self._text_queues, kind)

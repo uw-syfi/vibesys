@@ -57,6 +57,7 @@ from vs_agent.provider_policy import (
     cli_mcp_config_files,
     cli_skill_dirs,
 )
+from vs_agent.runner import describe_validation_error
 from vs_agent.selection import AgentSelection
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import (
@@ -138,6 +139,7 @@ __all__ = [
     "cli_mcp_config_files",
     "cli_skill_dirs",
     "declare_provider_state_resources",
+    "describe_validation_error",
     "expose_as_tools",
     "register_tool",
     "serve_stdio",

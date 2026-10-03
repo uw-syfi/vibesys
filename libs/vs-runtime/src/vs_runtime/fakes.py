@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import NULL_SKILL_SELECTION
+from vs_agent.api import NULL_SKILL_SELECTION, describe_validation_error
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
@@ -41,6 +41,7 @@ from vs_runtime.contracts import (
     SkillResolution,
     SkillResourceRequest,
     StateModelError,
+    StructuredResponseError,
     UnknownAgentRoleError,
     Workspace,
     WorkspaceAccess,
@@ -418,7 +419,13 @@ class FakeAgentSession:
                     raise TypeError(error)
                 result: str | ResponseT = value
             else:
-                result = response.model_validate(value)
+                try:
+                    result = response.model_validate(value)
+                except ValidationError as error:
+                    # The production session reports an invalid reply this way.
+                    raise StructuredResponseError(
+                        self._role.id, response, detail=describe_validation_error(error)
+                    ) from error
         finally:
             remaining_changes = await self._enforce_workspace_access(revision)
         self._history.append(message)
