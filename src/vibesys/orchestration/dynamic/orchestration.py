@@ -55,6 +55,10 @@ _RECOVERABLE_PHASES = frozenset(
         WorkstreamPhase.EVALUATED,
     }
 )
+# Phases with a retained implementation; an attempt resumes after it.
+_IMPLEMENTED_PHASES = frozenset(
+    {WorkstreamPhase.IMPLEMENTED, WorkstreamPhase.REVIEWED, WorkstreamPhase.EVALUATED}
+)
 _TERMINAL_OUTCOMES = frozenset(
     {
         HypothesisOutcome.NOMINATED,
@@ -180,7 +184,9 @@ class _DynamicRun:
 
     async def _fill_slots(self, running: dict[asyncio.Task[None], WorkstreamPlan]) -> None:
         """Run workstreams until the budget is spent; ``running`` tracks live tasks."""
-        failures: dict[str, int] = {}
+        # Keyed by sequence: a continuation of a hypothesis is a new
+        # workstream with its own retry budget.
+        failures: dict[int, int] = {}
         fatal: list[BaseException] = []
         await self.run.control.checkpoint()
         # Start before recovered work: a resume with no budget or no free slot
@@ -368,7 +374,7 @@ class _DynamicRun:
         self,
         plan: WorkstreamPlan,
         task: asyncio.Task[None],
-        failures: dict[str, int],
+        failures: dict[int, int],
         fatal: list[BaseException],
     ) -> bool:
         """Handle one finished workstream task; return whether to retry it now."""
@@ -378,15 +384,15 @@ class _DynamicRun:
         self.run.observations.note(f"dynamic workstream {plan.hypothesis_id} failed: {result}")
         index = self._index(plan.hypothesis_id)
         item = self.state.workstreams[index]
-        if not isinstance(result, DynamicAttemptError) or item.attempts == 0:
+        if not isinstance(result, DynamicAttemptError):
             fatal.append(result)
             return False
-        failures[plan.hypothesis_id] = failures.get(plan.hypothesis_id, 0) + 1
+        failures[item.sequence] = failures.get(item.sequence, 0) + 1
         retries = self.options.max_retries_per_round
         # A failure after a retained implementation keeps its checkpoint, so
         # the retry resumes at the failed stage.
         retained = item.phase is not WorkstreamPhase.FAILED
-        if failures[plan.hypothesis_id] < retries and (retained or item.attempts < retries):
+        if failures[item.sequence] < retries and (retained or item.attempts < retries):
             return True
         await self._give_up(index)
         return False
@@ -594,79 +600,18 @@ class _DynamicRun:
             await self._commit(label=f"dynamic: schedule planning call {epoch}")
 
     async def _execute_workstream(self, plan: WorkstreamPlan) -> None:
+        """Run one attempt of a workstream; every failure is a retryable attempt failure.
+
+        Workspace creation and the pre-attempt transitions are inside the
+        attempt boundary, so a transient worktree error spends a retry of this
+        slot instead of ending the run.
+        """
         index = self._index(plan.hypothesis_id)
-        item = self.state.workstreams[index]
-        epoch = item.epoch
-        if item.phase is WorkstreamPhase.EVALUATED and (
-            item.evaluation is None or item.evaluation.accepted
-        ):
-            await self._record_hypothesis_round(index)
-            return
-        if item.phase is WorkstreamPhase.IMPLEMENTING:
-            await self._refund_interrupted_attempt(index)
-        parent = item.parent_revision
-        resume_implemented = item.phase in {
-            WorkstreamPhase.IMPLEMENTED,
-            WorkstreamPhase.REVIEWED,
-            WorkstreamPhase.EVALUATED,
-        }
-        # Keyed by hypothesis: every attempt and continuation of this
-        # hypothesis works at one path, so its agent sessions resume.
-        workspace = await self.run.workspaces.create_candidate(
-            item.candidate_revision if resume_implemented else parent,
-            member_id=plan.hypothesis_id,
-        )
+        workspace: CandidateWorkspace | None = None
         try:
-            feedback: str | None = None
-            completed = False
-            if resume_implemented:
-                completed, feedback = await self._resume_implemented(
-                    index,
-                    plan,
-                    workspace,
-                    epoch,
-                )
-            for _attempt in range(
-                self.state.workstreams[index].attempts,
-                self.options.max_retries_per_round,
-            ):
-                if completed:
-                    break
-                await self._update(
-                    index,
-                    phase=WorkstreamPhase.IMPLEMENTING,
-                    increment_attempts=True,
-                )
-                implementation = await self._implement(
-                    plan,
-                    workspace,
-                    parent,
-                    feedback=feedback,
-                )
-                revision = await workspace.snapshot(
-                    f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
-                )
-                implementation = _bind_evidence_revision(implementation, revision)
-                await workspace.retain(
-                    revision,
-                    label=f"dynamic-{plan.hypothesis_id}-epoch-{epoch}",
-                )
-                await self._update(
-                    index,
-                    phase=WorkstreamPhase.IMPLEMENTED,
-                    candidate_revision=revision,
-                    implementation=implementation,
-                    clear_downstream=True,
-                )
-                completed, feedback = await self._assess_candidate(
-                    plan,
-                    implementation,
-                    workspace,
-                    epoch,
-                )
-            if not completed:
-                await self._update(index, phase=WorkstreamPhase.FAILED)
-            await self._record_hypothesis_round(index)
+            workspace = await self._open_attempt(index)
+            if workspace is not None:
+                await self._run_attempt(index, plan, workspace)
         except asyncio.CancelledError:
             # Keep the durable phase: resume continues from the last checkpoint
             # and redoes an interrupted implementation.
@@ -676,7 +621,105 @@ class _DynamicRun:
                 await self._update(index, phase=WorkstreamPhase.FAILED)
             raise DynamicAttemptError.from_cause(plan.hypothesis_id, error) from error
         finally:
+            if workspace is not None:
+                await self._discard(plan.hypothesis_id, workspace)
+
+    async def _open_attempt(self, index: int) -> CandidateWorkspace | None:
+        """Settle durable bookkeeping and open the attempt's workspace, if work remains."""
+        item = self.state.workstreams[index]
+        if item.phase is WorkstreamPhase.EVALUATED and (
+            item.evaluation is None or item.evaluation.accepted
+        ):
+            await self._record_hypothesis_round(index)
+            return None
+        if item.phase is WorkstreamPhase.IMPLEMENTING:
+            await self._refund_interrupted_attempt(index)
+        resume_implemented = item.phase in _IMPLEMENTED_PHASES
+        # Keyed by hypothesis: every attempt and continuation of this
+        # hypothesis works at one path, so its agent sessions resume.
+        return await self.run.workspaces.create_candidate(
+            item.candidate_revision if resume_implemented else item.parent_revision,
+            member_id=item.hypothesis_id,
+        )
+
+    async def _discard(self, hypothesis_id: str, workspace: CandidateWorkspace) -> None:
+        """Release an attempt's workspace without replacing the attempt's result.
+
+        The result is already durable when cleanup runs: raising here would
+        mask the attempt's own error or make a recorded workstream retry. A
+        leaked worktree resurfaces as a creation error inside the next attempt
+        boundary of the same hypothesis.
+        """
+        try:
             await workspace.discard()
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-031017 [BLE001]; cleanup after a durable result must not replace that result.
+            # > Narrowing to one type would let another cleanup failure (an
+            # > ExceptionGroup from the runtime's teardown) end the run or retry
+            # > a recorded workstream; the error is reported, not dropped.
+            self.run.observations.note(
+                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {error}"
+            )
+
+    async def _run_attempt(
+        self,
+        index: int,
+        plan: WorkstreamPlan,
+        workspace: CandidateWorkspace,
+    ) -> None:
+        item = self.state.workstreams[index]
+        epoch = item.epoch
+        parent = item.parent_revision
+        resume_implemented = item.phase in _IMPLEMENTED_PHASES
+        feedback: str | None = None
+        completed = False
+        if resume_implemented:
+            completed, feedback = await self._resume_implemented(
+                index,
+                plan,
+                workspace,
+                epoch,
+            )
+        for _attempt in range(
+            self.state.workstreams[index].attempts,
+            self.options.max_retries_per_round,
+        ):
+            if completed:
+                break
+            await self._update(
+                index,
+                phase=WorkstreamPhase.IMPLEMENTING,
+                increment_attempts=True,
+            )
+            implementation = await self._implement(
+                plan,
+                workspace,
+                parent,
+                feedback=feedback,
+            )
+            revision = await workspace.snapshot(
+                f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
+            )
+            implementation = _bind_evidence_revision(implementation, revision)
+            await workspace.retain(
+                revision,
+                label=f"dynamic-{plan.hypothesis_id}-epoch-{epoch}",
+            )
+            await self._update(
+                index,
+                phase=WorkstreamPhase.IMPLEMENTED,
+                candidate_revision=revision,
+                implementation=implementation,
+                clear_downstream=True,
+            )
+            completed, feedback = await self._assess_candidate(
+                plan,
+                implementation,
+                workspace,
+                epoch,
+            )
+        if not completed:
+            await self._update(index, phase=WorkstreamPhase.FAILED)
+        await self._record_hypothesis_round(index)
 
     async def _refund_interrupted_attempt(self, index: int) -> None:
         """Uncount an implementation attempt that a stop or crash interrupted.
