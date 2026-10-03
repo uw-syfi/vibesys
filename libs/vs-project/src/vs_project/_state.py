@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import re
 import stat
 import unicodedata
@@ -894,12 +895,14 @@ class ProjectState:
         return _contained_state_dir(cache_root, name, kind="model cache")
 
     def machine_cache_directory(self, name: str) -> Path:
-        """Return a named cache shared by every project in this state home.
+        """Return a named cache shared by every project on this architecture.
 
         Only content-addressed, immutable entries belong here (for example a
         tool installed under its specification digest), so projects can share
-        them without coordination. Per-project caches use
-        :meth:`model_cache_directory`.
+        them without coordination. Entries may be native binaries, and a state
+        home can sit on a filesystem shared by hosts of different
+        architectures, so each architecture gets its own cache. Per-project
+        caches use :meth:`model_cache_directory`.
         """
         self._validate_storage_roots()
         cache_root = _contained_without_symlinks(
@@ -907,7 +910,10 @@ class ProjectState:
             self._state_home / "cache",
             kind="machine cache root",
         )
-        return _contained_state_dir(cache_root, name, kind="machine cache")
+        architecture_root = _contained_state_dir(
+            cache_root, _host_architecture(), kind="machine cache architecture"
+        )
+        return _contained_state_dir(architecture_root, name, kind="machine cache")
 
     def candidate_worktree_directory(self, run_id: str, candidate_id: str) -> Path:
         """Return the exact Git worktree directory for one run candidate."""
@@ -1328,6 +1334,12 @@ def _validate_run_id(run_id: str, *, source: Path | None = None) -> str:
     if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
         raise ProjectStateError.invalid_run_id(run_id, source)
     return run_id
+
+
+def _host_architecture() -> str:
+    """Return this host's CPU architecture as a state namespace."""
+    architecture = re.sub(r"[^a-z0-9._-]", "-", platform.machine().lower())
+    return architecture if re.fullmatch(_IDENTIFIER_PATTERN, architecture) else "unknown"
 
 
 def _validate_namespace(namespace: str) -> str:

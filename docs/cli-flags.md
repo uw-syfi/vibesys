@@ -167,9 +167,16 @@ remains in the project, while machine-local state defaults to `~/.vibesys`:
     ├── agent/active.json
     ├── round-transaction.json             # during round commit/recovery
     └── logs/
+~/.vibesys/cache/<architecture>/
+└── evaluator-tools/<tool>/<spec-digest>/  # evaluator tools, shared by all projects
 ```
 
 Set `VIBESYS_STATE_HOME` to an absolute directory to override `~/.vibesys`.
+`~/.vibesys/cache/` holds immutable, content-addressed entries that every project
+on the host reuses, such as evaluator tools built from a pinned source revision.
+Entries are keyed by CPU architecture, so a state home on a filesystem shared by
+hosts of different architectures stays correct. Deleting the directory is safe:
+VibeSys rebuilds entries on the next run that needs them.
 VibeSys moves an existing `.vibesys/state/local/` tree on first open, preserving
 the existing bytes and paths; temporary worktrees remain in the project.
 

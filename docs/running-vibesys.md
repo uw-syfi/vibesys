@@ -26,6 +26,8 @@ project/
 ~/.vibesys/projects/<project-key>/
 ├── current-run
 └── runs/<run-id>/                  # logs and machine-local state
+~/.vibesys/cache/<architecture>/
+└── evaluator-tools/<tool>/<spec-digest>/  # evaluator tools, shared by all projects
 ```
 
 VibeSys commits candidate evolution and portable `.vibesys/state/runs/`
