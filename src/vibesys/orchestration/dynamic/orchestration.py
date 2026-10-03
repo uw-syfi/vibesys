@@ -296,6 +296,15 @@ class _DynamicRun:
         instead of idling until its slowest sibling finishes, and that call sees
         the newest results. Work durably scheduled before a stop resumes first.
         """
+        try:
+            await self.search_loop(_elapsed_clock()).run(self.recoverable())
+            await self._select_and_adopt()
+        finally:
+            await self.input_gate.stop()
+        return RunStatus.SUCCEEDED
+
+    def search_loop(self, clock: Callable[[], float]) -> AgentLoop[PlannedWorkstream]:
+        """Return the planner-mode search over this run, with the run as its workers."""
         core = HostCore[PlannedWorkstream](
             HostLimits(
                 max_in_flight=self.options.max_in_flight,
@@ -306,13 +315,11 @@ class _DynamicRun:
             )
         )
         driver = PlannerDriver[PlannedWorkstream](plan=self._schedule, land_stop=self._checkpoint)
-        loop = AgentLoop(core, driver, self, clock=_elapsed_clock())
-        try:
-            await loop.run(tuple(_item(plan) for plan in self._recoverable_plans()))
-            await self._select_and_adopt()
-        finally:
-            await self.input_gate.stop()
-        return RunStatus.SUCCEEDED
+        return AgentLoop(core, driver, self, clock=clock)
+
+    def recoverable(self) -> tuple[WorkItem[PlannedWorkstream], ...]:
+        """Return the work durably scheduled before a restart, which resumes first."""
+        return tuple(_item(plan) for plan in self._recoverable_plans())
 
     async def _checkpoint(self) -> None:
         """Land a pending stop; start measuring the input before any work starts."""
