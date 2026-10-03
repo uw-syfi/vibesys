@@ -18,7 +18,7 @@ from entrypoints import launcher as cli
 
 
 class _LaunchCall(TypedDict, total=False):
-    """What the launcher handed to ``subprocess.call``, as captured by a fake."""
+    """What the launcher handed to ``call_child``, as captured by a fake."""
 
     cmd: list[str]
     cwd: Path | None
@@ -67,9 +67,7 @@ def test_launcher_routes_noninteractive_commands_to_headless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands: list[list[str]] = []
-    monkeypatch.setattr(
-        cli.subprocess, "call", lambda command, **_kwargs: commands.append(command) or 0
-    )
+    monkeypatch.setattr(cli, "call_child", lambda command, **_kwargs: commands.append(command) or 0)
     for args in (
         ["--headless", "--input", "x"],
         ["validate", "bundle"],
@@ -95,7 +93,7 @@ def test_launcher_routes_non_tty_commands_to_headless(monkeypatch: pytest.Monkey
     monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
     captured: _LaunchCall = {}
     monkeypatch.setattr(
-        cli.subprocess, "call", lambda command, **_kwargs: captured.update(cmd=command) or 0
+        cli, "call_child", lambda command, **_kwargs: captured.update(cmd=command) or 0
     )
     assert cli.main(["--input", "x"]) == 0
     assert captured["cmd"] == [sys.executable, "-m", "entrypoints.headless", "--input", "x"]
@@ -108,7 +106,7 @@ def test_headless_flag_runs_engine_subprocess(monkeypatch: pytest.MonkeyPatch) -
         captured["cmd"] = cmd
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", _call)
+    monkeypatch.setattr(cli, "call_child", _call)
 
     rc = cli.main(["--headless", "--input", "bundle", "--local"])
 
@@ -131,7 +129,7 @@ def test_tui_defaults_runs_backend_entrypoint(monkeypatch: pytest.MonkeyPatch) -
         captured["cmd"] = cmd
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", _call)
+    monkeypatch.setattr(cli, "call_child", _call)
 
     assert cli.main(["tui-defaults"]) == 0
     assert captured["cmd"] == [sys.executable, "-m", "entrypoints.server", "tui-defaults"]
@@ -152,7 +150,7 @@ def test_interactive_execs_launcher_with_python_env(
         captured["env"] = env
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", _call)
+    monkeypatch.setattr(cli, "call_child", _call)
 
     with patch("shutil.which", side_effect=AssertionError("must not search system runtimes")):
         rc = cli.main(["--input", "bundle", "--local"])
@@ -194,7 +192,7 @@ def test_boot_trace_request_reaches_the_launcher(
         captured["env"] = env
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", _call)
+    monkeypatch.setattr(cli, "call_child", _call)
 
     assert cli.main(["--input", "bundle", "--local"]) == 0
     env = captured["env"]
@@ -231,7 +229,7 @@ def test_no_bundle_no_checkout_falls_back_to_headless(
         captured["cmd"] = cmd
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", _call)
+    monkeypatch.setattr(cli, "call_child", _call)
 
     rc = cli.main(["--input", "bundle"])
 
@@ -281,7 +279,7 @@ def test_source_checkout_builds_and_runs_launcher_from_callers_directory(
         captured["env"] = env
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", _call)
+    monkeypatch.setattr(cli, "call_child", _call)
 
     rc = cli.main(["--input", "bundle", "--local"])
 
@@ -315,7 +313,7 @@ def test_source_checkout_skips_build_when_fresh(
         raise AssertionError(message)
 
     monkeypatch.setattr(cli, "_ensure_source_tui_built", _boom)
-    monkeypatch.setattr(cli.subprocess, "call", lambda *_a, **_k: 0)
+    monkeypatch.setattr(cli, "call_child", lambda *_a, **_k: 0)
 
     assert cli.main([]) == 0
 
@@ -384,8 +382,8 @@ def test_source_checkout_uses_bun_from_path_and_node_version_from_process(
     )
     captured: _LaunchCall = {}
     monkeypatch.setattr(
-        cli.subprocess,
-        "call",
+        cli,
+        "call_child",
         lambda command, **kwargs: captured.update(cmd=command, env=kwargs.get("env")) or 0,
     )
 
@@ -423,8 +421,8 @@ def test_source_checkout_uses_bun_home_fallback(
 
     captured: _LaunchCall = {}
     monkeypatch.setattr(
-        cli.subprocess,
-        "call",
+        cli,
+        "call_child",
         lambda command, **kwargs: captured.update(cmd=command, env=kwargs.get("env")) or 0,
     )
 
@@ -498,8 +496,8 @@ def _configure_source_checkout(
     monkeypatch.setattr(cli, "_node_major", lambda _node: 20)
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        cli.subprocess,
-        "call",
+        cli,
+        "call_child",
         lambda command, **_kwargs: calls.append(command) or 0,
     )
     return calls
@@ -959,7 +957,7 @@ def test_run_source_tui_prints_stale_and_rebuilt_messages(
     monkeypatch.setattr(cli, "_needs_rebuild", lambda _root: True)
     monkeypatch.setattr(cli, "_stale_reason", lambda _root: "src/server/api/protocol.py")
     monkeypatch.setattr(cli, "_ensure_source_tui_built", lambda _root: True)
-    monkeypatch.setattr(cli.subprocess, "call", lambda *_a, **_k: 0)
+    monkeypatch.setattr(cli, "call_child", lambda *_a, **_k: 0)
     monkeypatch.setattr(cli, "bundled_tui", lambda: None)
     monkeypatch.setattr(cli, "source_checkout_root", lambda: tmp_path)
 
@@ -986,7 +984,7 @@ def test_run_source_tui_skips_message_when_fresh(
         raise AssertionError(message)
 
     monkeypatch.setattr(cli, "_stale_reason", _boom)
-    monkeypatch.setattr(cli.subprocess, "call", lambda *_a, **_k: 0)
+    monkeypatch.setattr(cli, "call_child", lambda *_a, **_k: 0)
     monkeypatch.setattr(cli, "bundled_tui", lambda: None)
     monkeypatch.setattr(cli, "source_checkout_root", lambda: tmp_path)
 
