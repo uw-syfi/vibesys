@@ -566,6 +566,7 @@ class Workstreams:
             metric_direction=benchmark.metric_direction if benchmark is not None else None,
             metric_unit=benchmark.metric_unit if benchmark is not None else None,
             metrics=dict(benchmark.row or {}) if benchmark is not None else {},
+            partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
         )
 
     async def _update(  # noqa: PLR0913  # lint-waiver: LW-092703 [PLR0913]; optional fields are explicit transition outputs and avoid an untyped mutation mapping at the durability boundary.
@@ -693,6 +694,8 @@ def _verified_candidate(
             metric_name=metric.name if metric is not None else None,
             metric_value=metric.value if metric is not None else None,
             metric_unit=metric.unit if metric is not None else None,
+            metric_direction=metric.direction if metric is not None else None,
+            partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
         )
     return None
 

@@ -1,5 +1,6 @@
 """Public contracts for the reusable VibeSys runtime."""
 
+from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime._local_validation import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
@@ -104,7 +105,9 @@ __all__ = [
     "OrchestrationDescriptor",
     "OrchestrationPlugin",
     "OrchestrationResumeDecision",
+    "PartialMeasurement",
     "ProfileExecution",
+    "Progress",
     "ResolvedSkillResources",
     "Run",
     "RunFacts",

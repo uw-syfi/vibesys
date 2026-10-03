@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from vibesys.run.evaluation_backend import SemanticEvaluationStage, render_stage_failure
+from vibesys.run.evaluation_backend import (
+    SemanticEvaluationStage,
+    evidence_identity,
+    render_stage_failure,
+)
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     EvaluationRequest,
@@ -23,6 +25,7 @@ from vs_evaluation.api import (
     EvidenceOutcome,
     ExecutorObservation,
     ExecutorRejectedError,
+    PartialMeasurement,
     ResourceRequirements,
     StageState,
     TrustedEvidence,
@@ -31,6 +34,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
     decode_trusted_benchmark_output,
+    decode_trusted_benchmark_partial,
 )
 from vs_sandbox.api.slurm import (
     SharedSlurmAdmission,
@@ -288,43 +292,37 @@ class SlurmSemanticEvaluationExecutor:
         passed = raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
-        if stage.kind is EvidenceKind.BENCHMARK and passed:
-            contract = self._trusted_plan.benchmark_contract
-            if contract is not None:
-                try:
-                    row, declarations = decode_trusted_benchmark_output(
-                        raw.output, contract, frozenset()
+        partial: PartialMeasurement | None = None
+        contract = self._trusted_plan.benchmark_contract
+        if stage.kind is EvidenceKind.BENCHMARK and not passed and contract is not None:
+            try:
+                partial = decode_trusted_benchmark_partial(raw.output, contract)
+            except ValueError as error:
+                failure = f"{failure or raw.output}\n{error}"
+        if stage.kind is EvidenceKind.BENCHMARK and passed and contract is not None:
+            try:
+                row, declarations = decode_trusted_benchmark_output(
+                    raw.output, contract, frozenset()
+                )
+                metrics = tuple(
+                    EvidenceMetric(
+                        name=name,
+                        value=value,
+                        direction=(declarations[name].direction if name in declarations else None),
+                        unit=declarations[name].unit if name in declarations else None,
                     )
-                    metrics = tuple(
-                        EvidenceMetric(
-                            name=name,
-                            value=value,
-                            direction=(
-                                declarations[name].direction if name in declarations else None
-                            ),
-                            unit=declarations[name].unit if name in declarations else None,
-                        )
-                        for name, value in sorted(row.items())
-                    )
-                except (TypeError, ValueError) as error:
-                    passed = False
-                    summary = str(error)
+                    for name, value in sorted(row.items())
+                )
+            except (TypeError, ValueError) as error:
+                passed = False
+                summary = str(error)
         if not passed and summary is None:
             # The provider's stage failure already holds the stage output plus the
             # server log tail; keep its end, where the cause usually is.
             detail = failure or raw.output
             summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
-        identity = {
-            "kind": stage.kind.value,
-            "fingerprints": stage.fingerprints.model_dump(mode="json"),
-            "outcome": outcome.value,
-            "summary": summary,
-            "metrics": [metric.model_dump(mode="json") for metric in metrics],
-        }
-        evidence_id = hashlib.sha256(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
         return TrustedEvidence(
             evidence_id=evidence_id,
             evaluation_id=evidence_id,
@@ -335,6 +333,7 @@ class SlurmSemanticEvaluationExecutor:
             outcome=outcome,
             semantic_summary=summary,
             metrics=metrics,
+            partial_measurement=partial,
             accepted_round=0,
         )
 

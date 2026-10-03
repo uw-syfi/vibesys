@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import tempfile
 import threading
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
@@ -33,6 +35,9 @@ from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATO
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
 from vs_agent.api import AgentOutputSchemaError
 from vs_runtime.api import StructuredResponseError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _SCHEMA_ERRORS = (
     "Output does not match required schema: root: must have required property 'workstreams', "
@@ -649,6 +654,98 @@ def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: P
     assert first.verified.benchmark_passed is False
     assert second.parent_revision == first.verified.revision
     assert second.parent_revision != first.candidate_revision
+
+
+def _buildable(prompt: str) -> list[dict[str, Any]]:
+    """Return the buildable candidates one planning prompt lists, in its order."""
+    match = re.search(r"Buildable candidates .*?: (\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE)
+    assert match is not None
+    rows = json.loads(match.group(1))
+    assert isinstance(rows, list)
+    return rows
+
+
+def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
+    tmp_path: Path,
+) -> None:
+    """Regression for r14: every candidate missed the warmup bar by a different margin.
+
+    Their progress reached agents only as prose, so the planner saw
+    ``metric_value: null`` for all of them and could not tell the closest one.
+    Two candidates fail the benchmark with 14 and 38 of 72 rounds; the
+    implementer's own evaluation, the run-wide operations, the history rows,
+    and the buildable list all carry the structured measurement, and the
+    better candidate is listed first.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    # The input itself misses the bar too, by more than either candidate.
+    (loop_input.root / "queue.py").write_text("VALUE = 1\nREQUIRED = 72\n", encoding="utf-8")
+    seen: dict[str, dict[str, object]] = {}
+
+    def reach(value: int, identifier: str) -> Callable[[Turn], dict[str, object]]:
+        def turn(agent: Turn) -> dict[str, object]:
+            (agent.workspace / "queue.py").write_text(
+                f"VALUE = {value}\nREQUIRED = 72\n", encoding="utf-8"
+            )
+            seen[identifier] = agent.evaluate("accuracy", "benchmark")
+            return implemented(identifier)
+
+        return turn
+
+    def third_plan(agent: Turn) -> dict[str, object]:
+        seen["operations"] = agent.trusted_operations()
+        return portfolio(workstream("C"))
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("A")), portfolio(workstream("B")), third_plan)
+        .implement("A", reach(14, "A"))
+        .judge("A", PASS)
+        .implement("B", reach(38, "B"))
+        .judge("B", PASS)
+        .implement("C", implemented("C", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=3, max_retries_per_round=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+
+    def measured(value: int) -> dict[str, object]:
+        return {
+            "name": "warmup_rounds_per_s",
+            "value": float(value),
+            "direction": "max",
+            "unit": "rounds/s",
+            "target": 72.0,
+            "progress": {"completed": value, "required": 72, "unit": "rounds"},
+        }
+
+    awaited = seen["B"]["result"]
+    assert isinstance(awaited, dict)
+    assert awaited["outcome"] == "completed"
+    benchmark = awaited["stages"][-1]["result"]
+    assert benchmark["outcome"] == "failed"
+    assert benchmark["partial_measurement"] == measured(38)
+    operations = seen["operations"]["evaluations"]
+    assert isinstance(operations, list)
+    assert [item["stage_outcomes"][-1]["partial_measurement"] for item in operations] == [
+        measured(14),
+        measured(38),
+    ]
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 3
+    history = planner_history(planner[2])
+    for identifier, value in (("A", 14), ("B", 38)):
+        evaluation = history[identifier]["evaluation"]
+        assert isinstance(evaluation, dict)
+        assert evaluation["benchmark_passed"] is False
+        assert evaluation["metric_value"] is None
+        assert evaluation["partial_measurement"] == measured(value)
+    assert f"before it stopped: {json.dumps(measured(1), separators=(',', ':'))}" in planner[2]
+    ranked = _buildable(planner[2])
+    assert [row["hypothesis_id"] for row in ranked] == ["B", "A"]
+    assert [row["partial_measurement"] for row in ranked] == [measured(38), measured(14)]
 
 
 # The candidate's benchmark blocks reading one byte from a FIFO that the test

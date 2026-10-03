@@ -82,6 +82,27 @@ that reaches its end with neither a first-position `error` nor a `hello` is
 ```
 
 - `message` (string, required, non-empty).
+- `partial` (object, optional): what the run measured before it failed or was
+  stopped. It never counts as a result; it lets a reader compare failed runs by
+  how close each came. Omit it when nothing was measured; never estimate it.
+  - `name` (string, required, non-empty, no whitespace): the measured quantity.
+    It need not be a metric declared in `hello`: a run cut short usually
+    measures a different quantity (for example a warmup phase's rate).
+  - `value` (finite number, required): the measured value.
+  - `direction` (`"max"` or `"min"`, required): which way is better.
+  - `unit` (string, optional, non-empty).
+  - `target` (finite number, optional): the value a passing run needs.
+  - `progress` (object, optional): `completed` (integer, at least 0) units of
+    work out of `required` (integer, at least 1), and `unit` (string, no
+    whitespace) naming one unit of work.
+
+```json
+{"kind":"error","message":"warmup stopped at 120s","partial":{"name":"warmup_output_tokens_per_s","value":16.4,"direction":"max","unit":"output tokens/s","target":79.7,"progress":{"completed":15,"required":72,"unit":"rounds"}}}
+```
+
+Unknown keys inside `partial` and `progress` are rejected like any other
+unknown key. `partial` was added to protocol 2 as an optional key, so a stream
+without it is unchanged.
 
 ## Serialization
 

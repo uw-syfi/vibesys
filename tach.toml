@@ -467,7 +467,7 @@ depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing"]
 [[modules]]
 path = "vs_evaluation.agent_evidence"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.agent_mcp"
@@ -636,7 +636,7 @@ expose = ["RuntimeProfilerTurnProvision"]
 from = ["vibesys.orchestration.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
+expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]

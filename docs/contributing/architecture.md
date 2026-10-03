@@ -69,6 +69,7 @@ graph TD
     vs_agent --> vs_sandbox
     vs_evaluation --> vs_agent
     vs_evaluation --> vs_async_ops
+    vs_evaluation --> vs_evaluator_protocol
     vs_evaluation --> vs_project
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
@@ -609,6 +610,7 @@ graph TD
     vs_async_ops.coordinator --> vs_async_ops.ports
     vs_async_ops.ports --> vs_async_ops.models
     vs_async_ops.testing --> vs_async_ops.models
+    vs_evaluation.agent_evidence --> vs_evaluator_protocol
     vs_evaluation.agent_mcp --> vs_agent
     vs_evaluation.agent_mcp --> vs_evaluation.agent_evidence
     vs_evaluation.agent_mcp --> vs_evaluation.agent_models

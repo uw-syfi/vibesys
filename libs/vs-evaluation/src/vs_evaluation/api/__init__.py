@@ -7,6 +7,7 @@ from vs_evaluation.agent_evidence import (
     EvidenceKind,
     EvidenceMetric,
     EvidenceOutcome,
+    PartialMeasurement,
     TrustedEvidence,
 )
 from vs_evaluation.agent_models import (
@@ -208,6 +209,7 @@ __all__ = [
     "ExecutorSubmissionError",
     "FilesystemEvaluationStore",
     "InFlightProfilerOperation",
+    "PartialMeasurement",
     "ProfilerAgentAccessError",
     "ProfilerAgentCapacityError",
     "ProfilerAgentResult",

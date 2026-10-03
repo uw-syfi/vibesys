@@ -140,6 +140,7 @@ class InputGate:
                 metric_direction=benchmark.metric_direction,
                 metric_unit=benchmark.metric_unit,
                 metrics=dict(benchmark.row or {}),
+                partial_measurement=benchmark.partial_measurement,
             )
             await self._commit_state("dynamic: measure input baseline")
         if not benchmark.passed:

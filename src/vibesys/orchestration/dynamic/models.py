@@ -21,7 +21,7 @@ from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.orchestration.hypothesis.state import HypothesisState
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentId, CandidateProfile, MetricDirection
+from vs_runtime.api import AgentId, CandidateProfile, MetricDirection, PartialMeasurement
 
 if TYPE_CHECKING:
     from pydantic.config import ExtraValues
@@ -258,6 +258,9 @@ class EvaluationResult(BaseModel):
     metric_direction: MetricDirection | None = None
     metric_unit: str | None = None
     metrics: dict[str, FiniteFloat] = Field(default_factory=dict)
+    # What the failed benchmark measured before it stopped, as its evaluator
+    # reported it; absent when it reported nothing.
+    partial_measurement: PartialMeasurement | None = None
 
     @property
     def accepted(self) -> bool:
@@ -286,6 +289,9 @@ class VerifiedCandidate(BaseModel):
     metric_name: str | None = None
     metric_value: FiniteFloat | None = None
     metric_unit: str | None = None
+    metric_direction: MetricDirection | None = None
+    # What that benchmark measured before it failed, as its evaluator reported it.
+    partial_measurement: PartialMeasurement | None = None
 
 
 class WorkstreamPhase(StrEnum):

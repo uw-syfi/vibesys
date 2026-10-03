@@ -53,6 +53,12 @@ python3 benchmark/run.py --mode quick \
   --base-url http://127.0.0.1:8000/v1 --output-json result.json
 ```
 
+VibeSys adds `--vs-output <path>` and reads the evaluator result protocol
+record stream written there: the `output_tokens_per_s` row on success, or an
+`error` record on failure. When the warmup is stopped or killed after a
+progress line, that record's `partial` field holds the achieved warmup output
+rate, the rate that finishes within 180 s, and rounds completed out of 72.
+
 `pyproject.toml` pulls torch from the PyTorch ROCm 6.4 wheel index on Linux.
 See [`reference/README.md`](reference/README.md) and
 [`accuracy_checker/README.md`](accuracy_checker/README.md) for the engine

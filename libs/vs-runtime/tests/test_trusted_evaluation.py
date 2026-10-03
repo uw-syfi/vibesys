@@ -193,7 +193,7 @@ def test_truncated_benchmark_output_reads_the_result_file_alone(tmp_path: Path) 
 
     assert result.passed, result.output
     assert result.row == {"score": 7.25}
-    output_path = sandbox.calls[0].command.split("--output-json ")[1].split(" ")[0]
+    output_path = sandbox.calls[0].command.split("--output-json ")[1].split(";")[0]
     assert sandbox.calls[1].command.startswith("printf ")
     assert f"cat {output_path}" in sandbox.calls[1].command
     assert sandbox.calls[-1].command == f"rm -f -- {output_path}"
