@@ -51,4 +51,7 @@ Treat completed evidence as applicable only to that candidate. In-flight work is
 context, not a result. Follow references to inspect detail instead of asking for it
 inline.
 
-Return only the schema-valid portfolio JSON.
+Answer with the structured response, filling its top-level fields directly:
+`reasoning` (why this portfolio), `workstreams` (one entry per new workstream), and
+`hypothesis_updates` (parks and abandonments; empty when there are none). Do not wrap
+the plan in another field or write it as JSON text inside a field.

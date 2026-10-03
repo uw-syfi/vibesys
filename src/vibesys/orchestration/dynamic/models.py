@@ -56,9 +56,19 @@ class PortfolioPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(min_length=1, max_length=2000)
-    workstreams: tuple[WorkstreamPlan, ...] = Field(min_length=1, max_length=32)
-    hypothesis_updates: tuple[HypothesisStrategyUpdate, ...] = Field(default=(), max_length=32)
+    reasoning: str = Field(
+        min_length=1, max_length=2000, description="Why this portfolio of workstreams."
+    )
+    workstreams: tuple[WorkstreamPlan, ...] = Field(
+        min_length=1,
+        max_length=32,
+        description="The new workstreams to start, one entry per hypothesis.",
+    )
+    hypothesis_updates: tuple[HypothesisStrategyUpdate, ...] = Field(
+        default=(),
+        max_length=32,
+        description="Parks and abandonments of completed hypotheses; empty when there are none.",
+    )
 
     @model_validator(mode="after")
     def _distinct_hypotheses(self) -> PortfolioPlan:

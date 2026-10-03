@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,6 +26,8 @@ from vibesys.orchestration.dynamic import (
     PortfolioPlan,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
+from vibesys.orchestration.dynamic.prompts import render_portfolio
+from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
@@ -124,6 +127,46 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
     assert "Correction required" in correction
     assert "was blocked" in correction
     assert "Build the fast path in `engine/` instead." in script.calls[4][2]
+
+
+def _schema_field_names(schema: object) -> set[str]:
+    """Return every property name in a JSON Schema, nested definitions included."""
+    if isinstance(schema, dict):
+        names = set(schema.get("properties", {}))
+        return names.union(*(_schema_field_names(value) for value in schema.values()))
+    if isinstance(schema, list):
+        return set().union(*(_schema_field_names(value) for value in schema))
+    return set()
+
+
+@pytest.mark.parametrize("input_state", ["passing", "failing", "unmeasured"])
+def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(input_state: str) -> None:
+    """The prompt and the reply schema describe one shape.
+
+    A planner told to return "the portfolio JSON" without its field names
+    wrapped the plan in an invented `findings` field and was rejected on the
+    first try. The prompt now names each top-level field, and every
+    identifier it puts in backticks is a schema field (or an outcome value
+    the history rows use).
+    """
+    schema = PortfolioPlan.model_json_schema()
+    prompt = render_portfolio(
+        capacity=2,
+        in_flight=0,
+        remaining=4,
+        objective="Raise throughput.",
+        environment_notes="",
+        root_revision="rev0",
+        baseline='{"throughput":1.0}' if input_state == "passing" else "",
+        input_failure="preflight failed" if input_state == "failing" else "",
+        history="[]",
+        older_ids="",
+    )
+
+    named = set(re.findall(r"`([^`]+)`", prompt))
+    allowed = _schema_field_names(schema) | {item.value for item in HypothesisOutcome} | {"rev0"}
+    assert named <= allowed, sorted(named - allowed)
+    assert set(schema["required"]) <= named
 
 
 def test_profiler_role_is_read_only_resumable_and_evaluation_enabled() -> None:
