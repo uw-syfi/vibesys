@@ -18,7 +18,7 @@ from vibesys.orchestration.hypothesis.transitions import (
     start_hypothesis,
     update_active_hypothesis,
 )
-from vibesys.orchestration.profile_focus import (
+from vibesys.profile_focus import (
     ProfileAttributionSample,
     ProfileFocusState,
     ProfileGuidanceStatus,

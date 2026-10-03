@@ -20,8 +20,8 @@ from vibesys.orchestration.multi.contracts import (
     PreRoundDecision,
 )
 from vibesys.orchestration.multi.models import MultiState
-from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vibesys.orchestration.review import Verdict
+from vibesys.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,

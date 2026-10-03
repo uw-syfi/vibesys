@@ -24,12 +24,6 @@ from vibesys.orchestration.hypothesis import (
     RecordInput,
     build_round_record,
 )
-from vibesys.orchestration.profile_focus import (
-    FocusView,
-    ProfileFocus,
-    ProfileFocusConfig,
-    ProfileFocusState,
-)
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,
@@ -52,6 +46,12 @@ from vibesys.orchestration.single.models import (
 )
 from vibesys.orchestration.single.prompts import render_turn_failed_feedback
 from vibesys.orchestration.structured_turn import TurnFailed
+from vibesys.profile_focus import (
+    FocusView,
+    ProfileFocus,
+    ProfileFocusConfig,
+    ProfileFocusState,
+)
 from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,

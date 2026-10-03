@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vibesys.metrics import MetricSpace
 from vibesys.orchestration.hypothesis.plan import OrchestratorPlan
-from vibesys.orchestration.profile_focus.state import ProfileFocusState
+from vibesys.profile_focus.state import ProfileFocusState
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,

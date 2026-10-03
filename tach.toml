@@ -226,12 +226,12 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime",
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic"
@@ -258,10 +258,10 @@ depends_on = []
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.orchestration.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.metrics", "vs_runtime"]
+depends_on = ["vibesys.profile_focus", "vs_loop_state", "vibesys.metrics", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.profile_focus"
+path = "vibesys.profile_focus"
 layer = "roles_search"
 depends_on = []
 
@@ -616,7 +616,7 @@ expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
 from = ["vibesys.api.profilers"]
 
 [[interfaces]]
-expose = ["agent_options", "hypothesis", "hypothesis\\..*", "profile_focus", "profile_focus\\..*", "profilers", "review"]
+expose = ["agent_options", "hypothesis", "hypothesis\\..*", "profilers", "review"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
@@ -710,3 +710,7 @@ depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "
 [[interfaces]]
 expose = ["FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricSpace", "Objective"]
 from = ["vibesys.metrics"]
+
+[[interfaces]]
+expose = ["FocusLedger", "FocusLedgerRow", "FocusView", "ProfileAttributionError", "ProfileAttributionSample", "ProfileBottleneck", "ProfileFocus", "ProfileFocusConfig", "ProfileFocusState", "ProfileGuidanceStatus", "ProfileGuidedComponent", "ProfileImprovementSample", "parse_attribution", "state", "state\\..*"]
+from = ["vibesys.profile_focus"]

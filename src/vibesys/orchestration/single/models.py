@@ -12,9 +12,9 @@ from vibesys.orchestration.hypothesis import (
     SkillResourceSelection,
 )
 from vibesys.orchestration.hypothesis.state import HypothesisState
-from vibesys.orchestration.profile_focus import FocusLedger
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
+from vibesys.profile_focus import FocusLedger
 from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
 

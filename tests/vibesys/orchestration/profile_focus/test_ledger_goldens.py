@@ -13,13 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.orchestration.profile_focus import ProfileFocus, ProfileFocusConfig
-from vibesys.orchestration.profile_focus.state import (
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
+from vibesys.profile_focus import ProfileFocus, ProfileFocusConfig
+from vibesys.profile_focus.state import (
     ProfileFocusState,
     ProfileGuidanceStatus,
     ProfileGuidedComponent,
 )
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 
 _GOLDEN_DIR = Path(__file__).parent / "ledger_goldens"
 

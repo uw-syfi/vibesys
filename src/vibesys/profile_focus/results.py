@@ -1,4 +1,4 @@
-"""Plain output carriers for :class:`~vibesys.orchestration.profile_focus.focus.ProfileFocus`."""
+"""Plain output carriers for :class:`~vibesys.profile_focus.focus.ProfileFocus`."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict
 
-from vibesys.orchestration.profile_focus.state import (
+from vibesys.profile_focus.state import (
     ProfileBottleneck,
     ProfileGuidanceStatus,
 )

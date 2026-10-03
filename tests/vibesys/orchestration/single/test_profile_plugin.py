@@ -13,10 +13,10 @@ from pydantic import ValidationError
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
+from vibesys.profile_focus import ProfileAttributionError, ProfileGuidanceStatus
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,

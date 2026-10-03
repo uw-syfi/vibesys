@@ -70,8 +70,8 @@ if TYPE_CHECKING:
     from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.multi.files import MultiFiles
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
-    from vibesys.orchestration.profile_focus import FocusView
     from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
+    from vibesys.profile_focus import FocusView
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 

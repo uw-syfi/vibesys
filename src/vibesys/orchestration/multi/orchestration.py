@@ -33,14 +33,14 @@ from vibesys.orchestration.multi.models import (
 )
 from vibesys.orchestration.multi.prompts import render_turn_failed_feedback
 from vibesys.orchestration.multi.turns import AttemptRequest, MultiAgentTurns, PlanRequest
-from vibesys.orchestration.profile_focus import (
+from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import TurnFailed
+from vibesys.profile_focus import (
     FocusView,
     ProfileFocus,
     ProfileFocusConfig,
     ProfileFocusState,
 )
-from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.structured_turn import TurnFailed
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkObjective,

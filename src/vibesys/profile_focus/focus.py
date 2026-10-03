@@ -14,8 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.profile_focus.results import FocusLedger, FocusLedgerRow, FocusView
-from vibesys.orchestration.profile_focus.state import (
+from vibesys.profile_focus.results import FocusLedger, FocusLedgerRow, FocusView
+from vibesys.profile_focus.state import (
     ProfileAttributionSample,
     ProfileBottleneck,
     ProfileFocusState,
@@ -25,7 +25,7 @@ from vibesys.orchestration.profile_focus.state import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.profile_focus.config import ProfileFocusConfig
+    from vibesys.profile_focus.config import ProfileFocusConfig
 
 __all__ = ["ProfileFocus"]
 
