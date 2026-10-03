@@ -452,7 +452,10 @@ class SlurmError(RuntimeError):
 class SlurmJobRunner:
     """Run a command in Slurm without knowing cluster credentials or transport."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # LW-951301; each keyword is an independent injected effect or local resource.
+        # > A settings object would group unrelated effects (process, clock, pause,
+        # > identity, scratch) into a shallow carrier; carrying scratch on each
+        # > request cannot reach collect(), which receives only a durable handle.
         self,
         config: SlurmConfig,
         *,
@@ -460,9 +463,17 @@ class SlurmJobRunner:
         clock: Callable[[], float] = time.monotonic,
         pause: Callable[[float], None] = time.sleep,
         invocation_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+        scratch_root: Path | None = None,
     ) -> None:
-        """Create a runner with injectable process, clock, and identity effects."""
+        """Create a runner with injectable process, clock, and identity effects.
+
+        ``scratch_root`` holds the runner's own transfer files (the job script,
+        collected status, log, and batch results); the system temporary
+        directory when omitted. A caller whose transport only moves files under
+        declared roots, such as the host-owned Slurm broker, passes one of them.
+        """
         self._config = config
+        self._scratch_root = scratch_root
         self._process = process or _run_process
         self._transport = _make_transport(
             config,
@@ -550,7 +561,7 @@ class SlurmJobRunner:
             raise SlurmError.content_stage_failed() from exc
         staging_seconds = max(0.0, self._clock() - staging_started)
 
-        with tempfile.TemporaryDirectory(prefix="vs-slurm-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="vs-slurm-", dir=self._scratch_root) as temporary:
             temporary_path = Path(temporary)
             local_script = temporary_path / "run.sbatch"
             local_script.write_text(
@@ -681,7 +692,9 @@ class SlurmJobRunner:
                 content_cache_hits=handle.job.content_cache_hits,
             )
 
-        with tempfile.TemporaryDirectory(prefix="vs-slurm-batch-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-batch-", dir=self._scratch_root
+        ) as temporary:
             temporary_path = Path(temporary)
             results_root = temporary_path / "results"
             results_root.mkdir()
@@ -833,7 +846,9 @@ class SlurmJobRunner:
             raise SlurmError.cancelled(handle.job_id)
         if status not in {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED}:
             raise SlurmError.job_not_terminal(handle.job_id)
-        with tempfile.TemporaryDirectory(prefix="vs-slurm-collect-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-collect-", dir=self._scratch_root
+        ) as temporary:
             temporary_path = Path(temporary)
             local_status = temporary_path / "exit-code.txt"
             local_log = temporary_path / "job.log"

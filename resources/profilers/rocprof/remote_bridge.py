@@ -101,6 +101,8 @@ class RemoteCaptureBridge:
         if runner is not None:
             self._runner = runner
         elif broker_socket is not None and broker_token is not None:
+            # The broker transfers only files under the run's own roots, and the
+            # candidate workspace is one; the system temporary directory is not.
             self._runner = SlurmJobRunner(
                 self._config,
                 process=lambda argv, *, stdin, timeout: run_brokered_process(
@@ -110,6 +112,7 @@ class RemoteCaptureBridge:
                     stdin=stdin,
                     timeout=timeout,
                 ),
+                scratch_root=self._workspace,
             )
         else:
             self._runner = SlurmJobRunner(self._config)
