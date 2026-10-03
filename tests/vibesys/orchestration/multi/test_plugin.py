@@ -23,6 +23,7 @@ from vibesys.orchestration.review import Verdict
 from vs_runtime.api import (
     AgentCapability,
     AgentTool,
+    AgentTurnTimeoutError,
     BenchmarkEvaluation,
     LocalValidationEvaluation,
     RunFacts,
@@ -471,6 +472,43 @@ def test_paid_attempt_is_not_replayed_after_interrupted_turn(tmp_path: Path) -> 
     ]
     assert [session.member_id for session in implementer_sessions] == ["H-01", "H-01"]
     assert all(session.closed for session in run.agents.sessions)
+
+
+def test_failed_implementer_turn_feeds_a_durable_framework_reason_to_the_retry(
+    tmp_path: Path,
+) -> None:
+    timeout = AgentTurnTimeoutError(12.5)
+
+    async def scenario() -> _Script:
+        script = _Script(
+            _pre_round(),
+            _plan("H-01"),
+            timeout,
+            RuntimeError("agent disconnected"),
+            _implementation(),
+            _judge(),
+        )
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
+            resumed = await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
+            assert resumed is RunStatus.SUCCEEDED
+            return script
+        finally:
+            await run.close()
+
+    script = asyncio.run(scenario())
+    retries = [message for role, _, message in script.calls if role == IMPLEMENTER.id][1:]
+    assert len(retries) == 2
+    reason = f"framework: the previous attempt returned no valid response ({timeout})"
+    # The second retry runs after a restart, so the reason must survive in state.
+    assert all(reason in " ".join(message.split()) for message in retries)
 
 
 def test_rollback_uses_recorded_parent_and_closes_sessions(tmp_path: Path) -> None:

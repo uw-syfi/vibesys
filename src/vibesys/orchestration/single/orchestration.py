@@ -50,6 +50,7 @@ from vibesys.orchestration.single.models import (
     SingleOptions,
     SingleState,
 )
+from vibesys.orchestration.single.prompts import render_turn_failed_feedback
 from vibesys.orchestration.structured_turn import TurnFailed
 from vs_runtime.api import (
     BenchmarkObjective,
@@ -337,7 +338,7 @@ class _SingleRun:
                 selected.attempt.single_agent_response = None
                 selected.attempt.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
                 self.files.note_turn_failed(self.round_number, retry, response)
-                feedback = f"framework: the previous attempt returned no valid response ({response.reason})"
+                feedback = render_turn_failed_feedback(response.reason)
                 selected.attempt.feedback = feedback
                 selected.hypothesis.feedback = feedback
                 await self._checkpoint_hypothesis(selected)
