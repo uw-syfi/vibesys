@@ -85,3 +85,20 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     assert row["status"] == "observed"
     assert row["evidence_ids"] == list(profile.outcome.evidence_ids)
     assert "Where does A spend its time?" in agents.prompts(PROFILER.id)[0]
+
+
+def test_a_run_without_a_profiler_fails_when_its_only_plan_is_profiles(tmp_path: Path) -> None:
+    """r17: a plan dropped whole after correction ended the run as a completed search."""
+    loop_input = LoopInput.create(tmp_path)
+    agents = ScriptedAgents().plan(
+        portfolio(profile_workstream("prof-1", None)),
+        portfolio(profile_workstream("prof-2", None)),
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2))
+
+    assert run.succeeded is None
+    assert run.error is not None
+    assert "the planner scheduled no valid workstream after correction" in str(run.error)
+    assert "workstreams[0].kind" in str(run.error)
+    assert agents.unscripted == []

@@ -68,6 +68,14 @@ _RECOVERABLE_PHASES = frozenset(
 )
 
 
+class DynamicPlanningError(RuntimeError):
+    """The planner scheduled no valid workstream after its correction, with none running."""
+
+    def __init__(self, error: Exception | None) -> None:
+        """Name the validation error the correction did not fix."""
+        super().__init__(f"the planner scheduled no valid workstream after correction: {error}")
+
+
 class DynamicPlanError(ValueError):
     """A portfolio cannot be applied to the durable hypothesis search."""
 
@@ -490,7 +498,12 @@ class _DynamicRun:
             self.run.observations.note(
                 f"dynamic plan still invalid after correction: {first_error}"
             )
-            return self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            valid = self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            if not valid.workstreams and not in_flight:
+                # Nothing runs and nothing was scheduled: ending here would
+                # report a finished search that never searched.
+                raise DynamicPlanningError(first_error)
+            return valid
         finally:
             await session.close()
 
@@ -842,4 +855,4 @@ async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     return await dynamic.execute()
 
 
-__all__ = ["DynamicPlanError", "orchestrate"]
+__all__ = ["DynamicPlanError", "DynamicPlanningError", "orchestrate"]

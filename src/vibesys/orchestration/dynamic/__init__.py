@@ -12,12 +12,14 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamBudget,
     WorkstreamPlan,
 )
+from vibesys.orchestration.dynamic.orchestration import DynamicPlanningError
 from vibesys.orchestration.dynamic.plugin import PLUGIN, REGISTRATION
 
 __all__ = [
     "PLUGIN",
     "REGISTRATION",
     "DynamicOptions",
+    "DynamicPlanningError",
     "DynamicState",
     "EvidenceReference",
     "ImplementPortfolioPlan",

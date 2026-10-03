@@ -6,6 +6,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     Script,
@@ -15,7 +16,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState
+from vibesys.orchestration.dynamic import PLUGIN, DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_runtime.api import (
     AgentCapability,
@@ -73,8 +74,8 @@ class _PlannerSchemas(Script):
         return [message for role, _, message in self.calls if role == ORCHESTRATOR.id]
 
 
-def _profiled_run(tmp_path: Path, script: Script) -> FakeRun:
-    """Return a run that provisions the rocprof profiler agent."""
+def _profiled_run(tmp_path: Path, script: Script, *, profiler_id: str = "rocprof") -> FakeRun:
+    """Return a run that provisions the ``profiler_id`` profiler agent."""
     run = FakeRun(
         PLUGIN,
         project_root=tmp_path,
@@ -82,7 +83,7 @@ def _profiled_run(tmp_path: Path, script: Script) -> FakeRun:
             domain_id="llm-serving",
             objective="Improve.",
             benchmark_configured=True,
-            profiler_id="rocprof",
+            profiler_id=profiler_id,
         ),
         responder=script.respond,
         supported_extra_tools={"evaluation", "profiler"},
@@ -176,3 +177,51 @@ def test_an_unsupported_profile_stops_profiling_and_spends_no_budget(tmp_path: P
     assert profile.outcome.status is CandidateProfileStatus.UNSUPPORTED
     # A budget of two workstreams still runs two implement workstreams.
     assert [item.hypothesis_id for item in state.workstreams] == ["A", "B"]
+
+
+def test_a_run_without_a_profiler_never_receives_a_schema_with_the_profile_kind(
+    tmp_path: Path,
+) -> None:
+    """r17 (--profiler none): the planner's reply schema still offered profiles.
+
+    The executor here could produce profile evidence; without a provisioned
+    profiler the run still cannot profile, so neither the prompt nor the reply
+    schema a strict-schema agent receives may contain the profile kind.
+    """
+    script = _PlannerSchemas(
+        {
+            ORCHESTRATOR.id: [portfolio("A")],
+            IMPLEMENTER.id: [implementation("A")],
+            JUDGE.id: [_PASSED],
+        }
+    )
+
+    async def scenario() -> RunStatus:
+        run = _profiled_run(tmp_path, script, profiler_id="none")
+        run.evaluation.profiling_supported = True
+        run.evaluation.script_benchmark(throughput(2.0))
+        return await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+
+    assert asyncio.run(scenario()) is RunStatus.SUCCEEDED
+    (schema,) = script.schemas
+    assert '"profile"' not in schema
+    assert "ProfilePlan" not in schema
+    assert _PROFILE_PARAGRAPH not in script.planner_messages()[0]
+
+
+def test_a_plan_with_no_valid_workstream_after_correction_fails_the_run(tmp_path: Path) -> None:
+    """r17: every workstream was dropped and the run ended as a completed search.
+
+    With nothing running and nothing valid to schedule, the run fails with the
+    validation error the correction did not fix instead of reporting a search.
+    """
+    script = _PlannerSchemas({ORCHESTRATOR.id: [_profile("prof-1"), _profile("prof-2")]})
+
+    run = _profiled_run(tmp_path, script, profiler_id="none")
+
+    with pytest.raises(DynamicPlanningError, match=r"workstreams\[0\]\.kind"):
+        asyncio.run(PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1)))
+
+    assert len(script.planner_messages()) == 2
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is None or (state.workstreams == [] and state.profiles == [])
