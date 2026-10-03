@@ -1,10 +1,17 @@
-"""Execute one trusted gate through an operator configured Slurm target."""
+"""Execute one trusted gate through an operator configured Slurm target.
+
+``SIGTERM`` or ``SIGINT`` cancels the gate: a submitted job is cancelled
+(``scancel``) before the process exits with status 143. A sandbox stopping
+this command therefore never leaves its job queued.
+"""
 
 from __future__ import annotations
 
 import argparse
 import re
+import signal
 import sys
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,10 +20,17 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     read_slurm_evaluation_plan,
 )
-from vs_slurm.api import SlurmFileArtifact, SlurmJobRequest, SlurmJobRunner, load_slurm_config
+from vs_slurm.api import (
+    SlurmError,
+    SlurmFileArtifact,
+    SlurmJobRequest,
+    SlurmJobRunner,
+    load_slurm_config,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from types import FrameType
 
 _BENCHMARK_OUTPUT_PREFIX = ".vibesys-benchmark-"
 _BENCHMARK_OUTPUT_SUFFIX = ".json"
@@ -26,6 +40,8 @@ _FRAMEWORK_BENCHMARK_OUTPUT = re.compile(
     r"/tmp/vibesys-framework-benchmark-[0-9a-f]+\.json"  # noqa: S108  # lint-waiver: LW-352320 [S108]; the fixed framework benchmark transport path, not a temp file.
 )
 _BENCHMARK_OUTPUT_ARGUMENT_COUNT = 2
+_CANCELLED_EXIT_CODE = 128 + signal.SIGTERM
+_CANCEL_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
 
 class SlurmCommandError(ValueError):
@@ -57,8 +73,17 @@ class SlurmCommandError(ValueError):
         return cls("benchmark output path is outside the framework namespace")
 
 
-def run_gate(plan_path: Path, kind: str, arguments: Sequence[str]) -> int:
-    """Run one planned accuracy or benchmark command and mirror its output."""
+def run_gate(
+    plan_path: Path,
+    kind: str,
+    arguments: Sequence[str],
+    *,
+    cancel: threading.Event | None = None,
+) -> int:
+    """Run one planned accuracy or benchmark command and mirror its output.
+
+    Setting *cancel* cancels the submitted job and raises :class:`SlurmError`.
+    """
     plan = read_slurm_evaluation_plan(plan_path)
     policy = load_slurm_policy(plan.config_path)
     if kind == "accuracy":
@@ -72,7 +97,14 @@ def run_gate(plan_path: Path, kind: str, arguments: Sequence[str]) -> int:
         )
     else:
         raise SlurmCommandError.invalid_kind(kind)
-    result = SlurmJobRunner(load_slurm_config(plan.config_path)).run(
+    cancel = cancel or threading.Event()
+
+    def pause(seconds: float) -> None:
+        # Wake the poll loop as soon as cancellation is requested.
+        cancel.wait(seconds)
+
+    runner = SlurmJobRunner(load_slurm_config(plan.config_path), pause=pause)
+    result = runner.run(
         SlurmJobRequest(
             workspace=Path.cwd(),
             command=policy.remote_argv(command),
@@ -80,6 +112,7 @@ def run_gate(plan_path: Path, kind: str, arguments: Sequence[str]) -> int:
             service=policy.remote_service(),
             support_trees=plan.support_paths,
             file_artifacts=artifacts,
+            cancel_event=cancel,
         )
     )
     if result.output:
@@ -118,16 +151,46 @@ def _benchmark_command(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse and execute one planned gate."""
+    """Parse and execute one planned gate, cancelling it on SIGTERM or SIGINT."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("kind", choices=("accuracy", "benchmark"))
     parsed, remainder = parser.parse_known_args(argv)
+    cancel = threading.Event()
+    outcome: list[int | BaseException] = []
+
+    def gate() -> None:
+        try:
+            outcome.append(run_gate(parsed.plan, parsed.kind, remainder, cancel=cancel))
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-731003 [BLE001]; the worker hands every outcome to the main thread, which reports it.
+            # > Catching narrower types would let an unexpected error vanish
+            # > with the worker thread instead of failing this command.
+            outcome.append(error)
+
+    def request_cancel(_signal: int, _frame: FrameType | None) -> None:
+        cancel.set()
+
+    # The gate runs in a worker so the main thread only waits: a signal
+    # handler that sets the event can then never interrupt a thread holding
+    # the event's lock.
+    previous = {number: signal.signal(number, request_cancel) for number in _CANCEL_SIGNALS}
     try:
-        return run_gate(parsed.plan, parsed.kind, remainder)
-    except (OSError, ValueError) as exc:
-        sys.stderr.write(f"Slurm evaluator failed: {exc}\n")
+        worker = threading.Thread(target=gate, name="slurm-gate")
+        worker.start()
+        worker.join()
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+    result = outcome[0]
+    if isinstance(result, int):
+        return result
+    if cancel.is_set() and isinstance(result, SlurmError):
+        sys.stderr.write(f"Slurm evaluator cancelled: {result}\n")
+        return _CANCELLED_EXIT_CODE
+    if isinstance(result, (OSError, ValueError)):
+        sys.stderr.write(f"Slurm evaluator failed: {result}\n")
         return 1
+    raise result
 
 
 if __name__ == "__main__":

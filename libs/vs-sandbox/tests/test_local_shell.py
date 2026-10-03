@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+import os
+import sys
+import threading
+from pathlib import Path
+from typing import cast
 
 import pytest
 
 from vs_sandbox.api import LocalShellSandbox, Sandbox, SandboxExecutionResult
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_result_defaults_describe_a_successful_untruncated_run() -> None:
@@ -130,3 +131,53 @@ def test_launch_failure_is_reported_not_raised(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.output.startswith("Error executing command")
+
+
+def _running(pid: int) -> bool:
+    """Return whether *pid* names a live (not zombie) process."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    return stat.rpartition(")")[2].split()[0] not in {"Z", "X"}
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+def test_cancelling_execute_stops_the_command_and_its_descendants(tmp_path: Path) -> None:
+    started = tmp_path / "started"
+    os.mkfifo(started)
+    sandbox = LocalShellSandbox(tmp_path, inherit_env=True)
+    cancel = threading.Event()
+    outcome: list[SandboxExecutionResult | BaseException] = []
+
+    def run() -> None:
+        try:
+            outcome.append(
+                sandbox.execute(
+                    f"sleep 1000 & echo $! > {started}; wait", timeout=3600, cancel=cancel
+                )
+            )
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-731004 [BLE001]; the test reports any worker failure.
+            # > Narrower types would leave the main thread blocked on the FIFO.
+            outcome.append(error)
+            started.write_text("")  # release the reader below
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    grandchild = started.read_text(encoding="utf-8").strip()
+    cancel.set()
+    worker.join()
+
+    result = outcome[0]
+    assert isinstance(result, SandboxExecutionResult), result
+    assert result.cancelled
+    assert grandchild
+    assert not _running(int(grandchild))
+
+
+def test_an_unset_cancel_event_leaves_the_command_alone(tmp_path: Path) -> None:
+    result = LocalShellSandbox(tmp_path).execute("echo done", cancel=threading.Event())
+
+    assert result.exit_code == 0
+    assert not result.cancelled
+    assert result.stdout == "done\n"

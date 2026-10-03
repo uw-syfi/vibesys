@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import signal
+import subprocess
+import sys
 from typing import TYPE_CHECKING, TypedDict
 
 import pytest
@@ -10,6 +15,7 @@ from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_pla
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.slurm_command import main
+from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -198,3 +204,43 @@ def test_cli_accepts_the_framework_benchmark_transport_path(
 
     assert exit_code == 1
     assert "invalid settings: name, remote_workspace_root, transport" in capsys.readouterr().err
+
+
+def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    os.mkfifo(state / SUBMITTED_FILE)
+    config_path = tmp_path / "slurm.toml"
+    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+    # A one-hour poll interval: only a prompt cancellation can reach scancel.
+    config_path.write_text(
+        "[slurm]\n"
+        'name = "fake"\n'
+        'remote_workspace_root = "/remote/runs"\n'
+        "poll_interval_seconds = 3600.0\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+    plan_path = tmp_path / "evaluation-plan.json"
+    write_slurm_evaluation_plan(
+        plan_path,
+        SlurmEvaluationPlan(config_path=config_path, benchmark_command=("run-benchmark",)),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    gate = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731005 [S603]; the test runs the real gate CLI with a fixed argv.
+        # > Calling main() in-process cannot receive a real SIGTERM without
+        # > signalling the test runner itself.
+        [sys.executable, "-m", "vs_sandbox.slurm_command", "--plan", str(plan_path), "benchmark"],
+        cwd=workspace,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert (state / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+
+    gate.send_signal(signal.SIGTERM)
+    _, stderr = gate.communicate()
+
+    assert gate.returncode == 128 + signal.SIGTERM, stderr
+    assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
