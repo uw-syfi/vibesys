@@ -32,7 +32,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
-from vs_agent.api import AgentCapabilities, AgentOutputSchemaError, AgentTurnTimeoutError
+from vs_agent.api import AgentCapabilities, AgentOutputSchemaError
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import EvaluationServiceClientError, build_evaluation_tools
@@ -49,7 +49,7 @@ from vs_faults.api import (
     injected_faults,
     prompt_vocabulary,
 )
-from vs_runtime.api import StructuredResponseError
+from vs_runtime.api import RuntimeContractError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -74,14 +74,14 @@ TOOLS = (
 #: Outcomes a run may end with: a typed run result or a typed agent failure.
 TYPED_ENDS = (
     DynamicPlanningError,
-    StructuredResponseError,
+    RuntimeContractError,
     AgentCrashError,
-    AgentTurnTimeoutError,
     AgentOutputSchemaError,
 )
 #: A deadlock guard: a chaos run finishes in seconds; raising it never turns a hang into a pass.
 RUN_GUARD_S = 600.0
 _MAX_TOOL_CALLS = 6
+_POLL_S = 0.2
 _TRANSPORT_FAILURES = frozenset(
     {
         str(EvaluationServiceClientError.incomplete()),
@@ -284,6 +284,8 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     loop_input = LoopInput.create(
         base,
         profiled=seed % 2 == 1,
+        # A faulted poll is retried; a long interval would stall the run.
+        poll_interval_s=_POLL_S,
         connector=lambda inner: connector_command(plan_file, faults_dir / "cluster", inner),
     )
     agents = ChaosAgents(plan)

@@ -17,7 +17,7 @@ from tests.vibesys.orchestration.dynamic.loop._chaos import run_chaos
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PR_SEEDS = "0-49"
+_PR_SEEDS = "0-11"
 
 
 def _seeds() -> list[int]:

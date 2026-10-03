@@ -422,6 +422,7 @@ class LoopInput:
         profiled: bool = False,
         profile_capture: bool = True,
         connector: Callable[[list[str]], list[str]] | None = None,
+        poll_interval_s: float = 3600.0,
     ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
@@ -431,7 +432,8 @@ class LoopInput:
         profiler to capture under load, so the run's evaluation executor
         produces trusted profile evidence; without it, the executor cannot.
         ``connector`` wraps the Fake cluster's connector command (a fault
-        injector does).
+        injector does). A run whose cluster answers a poll wrongly polls again
+        after ``poll_interval_s``.
         """
         domain = "llm-serving" if profiled else "generic"
         root = base / "project"
@@ -472,7 +474,7 @@ class LoopInput:
             "[slurm]\n"
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
-            "poll_interval_seconds = 3600.0\n"
+            f"poll_interval_seconds = {poll_interval_s}\n"
             f'transport = {{ kind = "connector", command = {connector_json} }}\n'
             "[vibesys]\n"
             f'remote_python = "{remote_python}"\n' + service,
