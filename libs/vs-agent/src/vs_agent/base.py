@@ -16,9 +16,11 @@ T = TypeVar("T", bound=BaseModel)
 class ResponseFallback(Generic[T]):
     """A ``fallback_factory`` that records whether the runner had to use it.
 
-    Every :meth:`AgentClient.invoke` implementation calls ``fallback_factory``
-    exactly when the agent's output could not be parsed into ``response_cls``,
-    and returns the parsed response otherwise. Wrapping the factory turns that
+    An ``invoke`` implementation that synthesizes a response calls
+    ``fallback_factory`` exactly when the agent's output could not be parsed
+    into ``response_cls``. :class:`AgentClient` and :class:`FakeAgentClient`
+    never do: they raise :class:`AgentOutputSchemaError` naming the invalid
+    fields so the caller can send a correction. Wrapping the factory turns that
     framework-side event into a typed signal the caller can read after the
     call, so a loop can tell a response it synthesized apart from one the agent
     actually authored.
