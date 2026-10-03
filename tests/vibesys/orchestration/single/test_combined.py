@@ -298,7 +298,10 @@ def test_pareto_guard_downgrades_dominated_pass_and_preserves_evidence() -> None
 
 
 def test_unparseable_turn_yields_failure_and_session_is_cleaned_up() -> None:
-    script = _Script(StructuredResponseError("implementer", SingleAgentRoundResponse))
+    script = _Script(
+        StructuredResponseError("implementer", SingleAgentRoundResponse),
+        StructuredResponseError("implementer", SingleAgentRoundResponse),
+    )
     run = _host(script)
 
     async def scenario() -> SingleAgentRoundResponse:

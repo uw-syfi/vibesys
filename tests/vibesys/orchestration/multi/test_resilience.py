@@ -155,11 +155,12 @@ def test_sparse_review_skips_judge_until_final_continuation_round(tmp_path: Path
     assert state.search.rounds[1].judge_verdict == "pass"
 
 
-def test_malformed_implementer_response_retries_before_judge(tmp_path: Path) -> None:
+def test_malformed_implementer_response_is_corrected_before_judge(tmp_path: Path) -> None:
+    """The same conversation re-emits its response; the attempt and its work are kept."""
     script = _Script(
         _pre_round(),
         _plan(),
-        StructuredResponseError(IMPLEMENTER.id, ImplementerResponse),
+        StructuredResponseError(IMPLEMENTER.id, ImplementerResponse, detail="root: bad"),
         _implementation(),
         _judge(),
     )
@@ -174,7 +175,33 @@ def test_malformed_implementer_response_retries_before_judge(tmp_path: Path) -> 
         JUDGE.id,
     ]
     implementer = [call for call in script.calls if call[0] == IMPLEMENTER.id]
-    assert [len(history) for _role, history, _message in implementer] == [0, 0]
+    assert "Correction required" in implementer[1][2]
+    assert "root: bad" in implementer[1][2]
+    state = asyncio.run(run.state.load(MultiState))
+    assert state is not None
+    assert state.search.rounds[0].attempts == 1
+
+
+def test_malformed_implementer_response_after_correction_retries_before_judge(
+    tmp_path: Path,
+) -> None:
+    script = _Script(
+        _pre_round(),
+        _plan(),
+        StructuredResponseError(IMPLEMENTER.id, ImplementerResponse),
+        StructuredResponseError(IMPLEMENTER.id, ImplementerResponse),
+        _implementation(),
+        _judge(),
+    )
+
+    run = _run(tmp_path, script)
+
+    implementer = [call for call in script.calls if call[0] == IMPLEMENTER.id]
+    assert ["Correction required" in message for _role, _history, message in implementer] == [
+        False,
+        True,
+        False,
+    ]
     state = asyncio.run(run.state.load(MultiState))
     assert state is not None
     assert state.search.rounds[0].attempts == 2

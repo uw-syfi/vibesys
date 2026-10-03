@@ -32,6 +32,7 @@ from vibesys.orchestration.evolve.population import (
 from vibesys.orchestration.evolve.prompts import render_judge, render_mutator, render_profiler
 from vibesys.orchestration.profilers import ProfilerKind, ProfilerSummary, profiler_definition
 from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,
@@ -482,7 +483,7 @@ class _EvolveRun:
             runtime_notes=self.run.facts.environment_notes,
         )
         try:
-            return await session.turn(render_mutator(context), response=MutatorResponse)
+            return await structured_turn(session, render_mutator(context), MutatorResponse)
         except StructuredResponseError:
             return _fallback_mutator()
 
@@ -500,7 +501,7 @@ class _EvolveRun:
             runtime_notes=self.run.facts.environment_notes,
         )
         try:
-            return await session.turn(render_judge(context), response=JudgeResponse)
+            return await structured_turn(session, render_judge(context), JudgeResponse)
         except StructuredResponseError:
             return _fallback_judge()
 
@@ -526,8 +527,8 @@ class _EvolveRun:
             runtime_notes=self.run.facts.environment_notes,
         )
         try:
-            return await session.turn(
-                render_profiler(kind.value, context), response=ProfilerSummary
+            return await structured_turn(
+                session, render_profiler(kind.value, context), ProfilerSummary
             )
         except StructuredResponseError:
             return _fallback_profiler()

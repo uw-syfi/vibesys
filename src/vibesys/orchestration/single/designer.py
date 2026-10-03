@@ -14,6 +14,7 @@ from vibesys.orchestration.hypothesis import (
 from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest, StructuredResponseError
 
 if TYPE_CHECKING:
@@ -116,8 +117,8 @@ async def request_plan(
     )
     try:
         try:
-            plan = await session.turn(
-                render_plan_prompt(request.context), response=OrchestratorPlan
+            plan = await structured_turn(
+                session, render_plan_prompt(request.context), OrchestratorPlan
             )
         except StructuredResponseError:
             plan = _fallback_plan()
@@ -135,8 +136,8 @@ async def request_plan(
                     f"[orchestrator] plan rejected ({error}); reprompting once"
                 )
                 try:
-                    plan = await session.turn(
-                        _correction_message(plan, error), response=OrchestratorPlan
+                    plan = await structured_turn(
+                        session, _correction_message(plan, error), OrchestratorPlan
                     )
                 except StructuredResponseError:
                     plan = _fallback_plan()

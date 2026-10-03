@@ -44,6 +44,7 @@ from vibesys.orchestration.profilers import (
 )
 from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     ResolvedSkillResources,
@@ -248,8 +249,8 @@ class MultiAgentTurns:
         )
         try:
             try:
-                decision = await session.turn(
-                    render_pre_round_prompt(context), response=PreRoundDecision
+                decision = await structured_turn(
+                    session, render_pre_round_prompt(context), PreRoundDecision
                 )
             except StructuredResponseError:
                 decision = _fallback_pre_round()
@@ -319,7 +320,7 @@ class MultiAgentTurns:
         )
         try:
             try:
-                plan = await session.turn(render_plan_prompt(context), response=OrchestratorPlan)
+                plan = await structured_turn(session, render_plan_prompt(context), OrchestratorPlan)
             except StructuredResponseError:
                 plan = _fallback_plan()
             for attempt in range(2):
@@ -344,7 +345,7 @@ class MultiAgentTurns:
                         f"[orchestrator] plan rejected ({error}); reprompting once"
                     )
                     try:
-                        plan = await session.turn(feedback, response=OrchestratorPlan)
+                        plan = await structured_turn(session, feedback, OrchestratorPlan)
                     except StructuredResponseError:
                         plan = _fallback_plan()
                     continue
@@ -394,9 +395,8 @@ class MultiAgentTurns:
         )
         try:
             try:
-                summary = await session.turn(
-                    render_profiler_prompt(kind.value, context),
-                    response=ProfilerSummary,
+                summary = await structured_turn(
+                    session, render_profiler_prompt(kind.value, context), ProfilerSummary
                 )
             except StructuredResponseError:
                 summary = _fallback_profiler()
@@ -520,7 +520,7 @@ class MultiAgentTurns:
             else render_implementer_prompt(context)
         )
         try:
-            response = await session.turn(prompt, response=ImplementerResponse)
+            response = await structured_turn(session, prompt, ImplementerResponse)
         except StructuredResponseError:
             response = _fallback_implementer()
         except AgentTurnTimeoutError as error:
@@ -592,9 +592,8 @@ class MultiAgentTurns:
         session = await self.run.agents.create_session(JUDGE, workspace=request.workspace)
         try:
             try:
-                response = await session.turn(
-                    render_judge_prompt(context),
-                    response=JudgeResponse,
+                response = await structured_turn(
+                    session, render_judge_prompt(context), JudgeResponse
                 )
             except StructuredResponseError:
                 response = _fallback_judge()

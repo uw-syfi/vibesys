@@ -13,6 +13,7 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
 )
 from vibesys.orchestration.single.prompts import render_single_agent_prompt
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     Run,
@@ -145,9 +146,8 @@ class SingleAgentWorker:
             message = f"hypothesis {plan.hypothesis_id!r} changed workspace"
             raise ValueError(message)
         try:
-            response = await session.turn(
-                render_single_agent_prompt(request.context),
-                response=SingleAgentRoundResponse,
+            response = await structured_turn(
+                session, render_single_agent_prompt(request.context), SingleAgentRoundResponse
             )
         except StructuredResponseError:
             response = _fallback_response()
