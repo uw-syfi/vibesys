@@ -29,7 +29,7 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
-from vibesys.orchestration.metrics import Measurement
+from vibesys.orchestration.metrics import Measurement, MetricComparison
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_runtime.api import BenchmarkObjective, MetricDirection, Run, RunStatus
 
@@ -128,6 +128,7 @@ class _DynamicRun:
         """Run bounded portfolio epochs and adopt the best trusted candidate."""
         while self.state.next_epoch <= self.options.max_rounds:
             await self.run.control.checkpoint()
+            await self._measure_baseline()
             epoch = self.state.next_epoch
             plans = self._recoverable_plans(epoch)
             if not plans:
@@ -140,6 +141,87 @@ class _DynamicRun:
                 await self._commit(label=f"dynamic: close epoch {epoch}")
         await self._select_and_adopt()
         return RunStatus.SUCCEEDED
+
+    async def _measure_baseline(self) -> None:
+        """Benchmark the input revision once per run; resume reuses the stored reading.
+
+        Without it, the first accepted candidate has nothing to beat, so a
+        regression could be adopted or built on. A failed measurement is
+        retried before the next epoch rather than failing the run.
+        """
+        if (
+            self.state.baseline is not None
+            or self.state.winner_revision is not None
+            or not self.run.facts.benchmark_configured
+        ):
+            return
+        revision = self._root_revision()
+        try:
+            benchmark = await self.run.evaluation.benchmark(
+                self.run.workspaces.root,
+                objectives=self._objectives(),
+            )
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-031002 [BLE001]; an input-measurement failure is retried before the next epoch.
+            # > The runtime does not normalize evaluator transport failures to one
+            # > exception type, so a narrower catch would let a transient Slurm or
+            # > provider error end the search; propagating instead fails the run
+            # > before any candidate work, for a measurement that can be retried.
+            self.run.observations.note(f"dynamic input baseline measurement failed: {error}")
+            return
+        async with self._state_lock:
+            self.state.baseline = EvaluationResult(
+                revision=revision,
+                benchmark_passed=benchmark.passed,
+                benchmark_feedback=benchmark.feedback,
+                metric_name=benchmark.metric_name,
+                metric_value=benchmark.metric_value,
+                metric_direction=benchmark.metric_direction,
+                metric_unit=benchmark.metric_unit,
+                metrics=dict(benchmark.row or {}),
+            )
+            await self._commit(label="dynamic: measure input baseline")
+        if not benchmark.passed:
+            self.run.observations.note(
+                "dynamic input baseline failed its benchmark; candidates are not gated on it"
+            )
+
+    def _beats_baseline(self, metrics: dict[str, float], headline: Measurement | None) -> bool:
+        """Return whether a candidate materially beats the measured input.
+
+        With configured objectives the candidate must dominate the input row
+        (no worse within noise on any axis, better on one). Without them the
+        headline must be better than the input's beyond noise. A missing or
+        failed input reading gates nothing.
+        """
+        baseline = self.state.baseline
+        if baseline is None or baseline.benchmark_passed is not True:
+            return True
+        space = self.options.metric_space
+        if space.objectives:
+            if not space.complete(baseline.metrics):
+                return True
+            return space.dominates(metrics, baseline.metrics)
+        if baseline.metric_name is None or baseline.metric_value is None or headline is None:
+            return True
+        comparison = space.compare(
+            headline,
+            Measurement(
+                metric=baseline.metric_name,
+                value=baseline.metric_value,
+                direction=(
+                    baseline.metric_direction.value
+                    if baseline.metric_direction is not None
+                    else None
+                ),
+            ),
+        )
+        return comparison in {MetricComparison.BETTER, MetricComparison.INCOMPARABLE}
+
+    def _objectives(self) -> tuple[BenchmarkObjective, ...]:
+        return tuple(
+            BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
+            for item in self.options.metric_space.objectives
+        )
 
     def _capacity(self) -> int:
         return self.options.max_in_flight if self.run.workspaces.supports_parallel_candidates else 1
@@ -200,6 +282,11 @@ class _DynamicRun:
                 capacity=self._capacity(),
                 objective_location=self.run.facts.objective_location,
                 root_revision=self._root_revision(),
+                baseline=(
+                    json.dumps(_compact_evaluation(self.state.baseline), separators=(",", ":"))
+                    if self.state.baseline is not None
+                    else ""
+                ),
                 history=self._history_projection(),
             )
             first_error: DynamicPlanError | ValidationError | None = None
@@ -557,16 +644,7 @@ class _DynamicRun:
             )
             benchmark_task = (
                 evaluations.create_task(
-                    self.run.evaluation.benchmark(
-                        workspace,
-                        objectives=tuple(
-                            BenchmarkObjective(
-                                name=item.name,
-                                direction=MetricDirection(item.direction),
-                            )
-                            for item in self.options.metric_space.objectives
-                        ),
-                    ),
+                    self.run.evaluation.benchmark(workspace, objectives=self._objectives()),
                 )
                 if self.run.facts.benchmark_configured
                 else None
@@ -678,7 +756,15 @@ class _DynamicRun:
             disposition, retained = self._candidate_decision(
                 accepted=accepted,
                 metrics=metrics,
-                framework_metric=framework_metric,
+                headline=(
+                    Measurement(
+                        metric=evaluation.metric_name,
+                        value=evaluation.metric_value,
+                        direction=direction,
+                    )
+                    if framework_metric
+                    else None
+                ),
             )
             record = RoundRecord(
                 round_number=item.sequence,
@@ -755,8 +841,17 @@ class _DynamicRun:
 
     def _winner(self) -> DynamicWorkstream | None:
         search = HypothesisSearch(_hypothesis_config(self.options))
+        # Filter again here: a round recorded before the input baseline was
+        # measured was not gated by it.
         winner = search.best(
-            self.state.search.rounds,
+            [
+                record
+                for record in self.state.search.rounds
+                if self._beats_baseline(
+                    dict(record.metrics),
+                    hypothesis_transitions.headline_measurement(record),
+                )
+            ],
             space=self.options.metric_space,
         )
         if winner is None:
@@ -771,7 +866,7 @@ class _DynamicRun:
         *,
         accepted: bool | None,
         metrics: dict[str, float],
-        framework_metric: bool,
+        headline: Measurement | None,
     ) -> tuple[CandidateDisposition, bool | None]:
         """Apply the shared noise aware frontier policy to one evaluated candidate."""
         if accepted is False:
@@ -779,9 +874,11 @@ class _DynamicRun:
         if accepted is not True:
             return CandidateDisposition.UNASSESSED, None
         space = self.options.metric_space
-        comparable = space.complete(metrics) if space.objectives else framework_metric
+        comparable = space.complete(metrics) if space.objectives else headline is not None
         if not comparable:
             return CandidateDisposition.UNASSESSED, None
+        if not self._beats_baseline(metrics, headline):
+            return CandidateDisposition.DISCARD, False
         search = HypothesisSearch(_hypothesis_config(self.options))
         conflict = search.pareto_conflict(
             disposition=CandidateDisposition.PARETO_FRONTIER,
