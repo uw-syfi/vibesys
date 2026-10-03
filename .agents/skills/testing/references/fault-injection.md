@@ -33,6 +33,26 @@ Generate replies from the output schema the turn declares, mixing:
 - tool calls in unusual orders: waiting on an unknown handle, parallel polls,
   edits after submit, submits after a stop.
 
+## Tool servers without agents
+
+Test an agent tool server by synthesizing tool calls, not by running an agent:
+
+- Generate each call's arguments from the tool's input schema with
+  Hypothesis, including values a well-behaved agent would never send:
+  unknown ids, other roles' handles, extreme sizes, duplicates.
+- Generate sequences of calls across tools, including concurrent and
+  out-of-order sequences, such as await before submit, cancel twice, or
+  submit after stop. A stateful Hypothesis machine fits this well.
+- Assert properties on every reply:
+  - it is a typed outcome or a typed error, never an unhandled exception;
+  - it stays within the size limit;
+  - it is decided within the deadline;
+  - an unauthorized or unsupported call is refused, and no call changes
+    state it does not own.
+
+Drive the server through its public interface against the service's Fake,
+and let the service's own invariants decide pass or fail.
+
 ## Fault schedules
 
 A fault schedule is declarative data: which call, which fault, when on the

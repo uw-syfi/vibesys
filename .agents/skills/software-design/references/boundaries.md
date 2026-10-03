@@ -62,3 +62,22 @@ A remote resource (a cluster job, a sandbox, a remote directory) is owned by
 one scope in the process that created it. Tag it so it can be found again.
 Every exit releases it through that scope, and a sweep on startup or resume
 releases tagged resources that a hard kill left behind.
+
+## Agent tool servers
+
+An MCP tool server is an external contract that agents call with arbitrary
+arguments, in any order, at any time.
+
+- Put each tool server in its own module, or its own library under `libs/`
+  when other packages reuse it. It must have a declared public interface and
+  no imports from the orchestration that uses it.
+- Build its tools on the shared tool layer (`vs_agent` `ToolSpec` and
+  `serve_stdio`), not a hand-built `FastMCP`, so that cross-cutting
+  mechanisms cover every tool: deadlines, result size limits, fault
+  injection.
+- Keep the server a thin adapter over a service with a typed API. The service
+  holds the state and rechecks every call. The server parses arguments and
+  formats replies.
+- Derive which roles are offered a tool, and which calls the service
+  authorizes, from one policy definition. That policy is combined with what
+  the executor reports it supports.

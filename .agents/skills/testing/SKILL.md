@@ -66,7 +66,9 @@ a per-language reference; read the one for the language you are editing:
    than the caller's deadline; and scheduled faults on the far side. For a
    scope that owns a resource, test as a property that an exit at any point
    (each step, exception, cancellation, signal, stop) releases the resource
-   and ends in a typed status. Assert invariants, not one expected trace. See
+   and ends in a typed status. Test an agent tool server with synthesized
+   tool calls and call sequences, not agents. Assert invariants, not one
+   expected trace. See
    [references/fault-injection.md](references/fault-injection.md).
 8. **Test process and signal code in process.** Logic that runs in a child
    process or a signal handler is invisible to coverage and slow to test
