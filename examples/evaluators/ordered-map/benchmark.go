@@ -15,6 +15,20 @@ import (
 
 var nativeBenchmarkShutdownGrace = 15 * time.Second
 
+const (
+	defaultKeySpace  = 256
+	defaultRangeSpan = 16
+	maxKeySpace      = 1 << 20
+)
+
+type benchmarkMix struct {
+	read   int
+	write  int
+	delete int
+	rang   int
+	set    bool
+}
+
 type benchmarkConfig struct {
 	candidateConfig
 	clients     int
@@ -23,6 +37,9 @@ type benchmarkConfig struct {
 	repetitions int
 	seed        int64
 	checkBudget time.Duration
+	keySpace    uint64
+	rangeSpan   uint64
+	mix         benchmarkMix
 }
 
 type benchmarkResult struct {
@@ -43,7 +60,74 @@ type benchmarkResult struct {
 	TotalOpsPerSecSamples []float64 `json:"total_ops_per_sec_samples,omitempty"`
 }
 
+func parseBenchmarkMix(read, write, delete, rang int) (benchmarkMix, error) {
+	values := []int{read, write, delete, rang}
+	set := 0
+	for _, value := range values {
+		if value >= 0 {
+			set++
+		}
+	}
+	if set == 0 {
+		return benchmarkMix{}, nil
+	}
+	if set != 4 {
+		return benchmarkMix{}, errors.New(
+			"read-ratio, write-ratio, delete-ratio, and range-ratio must be set together",
+		)
+	}
+	sum := 0
+	for _, value := range values {
+		if value > 100 {
+			return benchmarkMix{}, errors.New("operation ratios must be in [0, 100]")
+		}
+		sum += value
+	}
+	if sum != 100 {
+		return benchmarkMix{}, fmt.Errorf("operation ratios must sum to 100, got %d", sum)
+	}
+	return benchmarkMix{read: read, write: write, delete: delete, rang: rang, set: true}, nil
+}
+
+func validateMixForScenario(selected scenario, mix benchmarkMix) error {
+	if !mix.set || selected != scenarioSWMR {
+		return nil
+	}
+	if mix.write == 0 && mix.delete == 0 {
+		return errors.New("swmr requires a positive write-ratio or delete-ratio")
+	}
+	if mix.read == 0 && mix.rang == 0 {
+		return errors.New("swmr requires a positive read-ratio or range-ratio")
+	}
+	return nil
+}
+
+func normalizeBenchmarkSpace(keySpace, rangeSpan uint64) (uint64, uint64, error) {
+	if keySpace == 0 {
+		keySpace = defaultKeySpace
+	}
+	if rangeSpan == 0 {
+		rangeSpan = defaultRangeSpan
+	}
+	if keySpace < 2 || keySpace > maxKeySpace {
+		return 0, 0, fmt.Errorf("key-space must be in [2, %d]", maxKeySpace)
+	}
+	if rangeSpan >= keySpace {
+		return 0, 0, fmt.Errorf("range-span must be in [1, key-space)")
+	}
+	return keySpace, rangeSpan, nil
+}
+
 func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
+	keySpace, rangeSpan, err := normalizeBenchmarkSpace(config.keySpace, config.rangeSpan)
+	if err != nil {
+		return benchmarkResult{}, err
+	}
+	config.keySpace = keySpace
+	config.rangeSpan = rangeSpan
+	if err := validateMixForScenario(config.scenario, config.mix); err != nil {
+		return benchmarkResult{}, err
+	}
 	clients, err := clientCount(config.scenario, config.clients)
 	if err != nil {
 		return benchmarkResult{}, err
@@ -73,10 +157,20 @@ func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 		"--max-key-size", strconv.Itoa(config.maxKeySize),
 		"--max-value-size", strconv.Itoa(config.maxValueSize),
 		"--clients", strconv.Itoa(clients),
+		"--key-space", strconv.FormatUint(config.keySpace, 10),
+		"--range-span", strconv.FormatUint(config.rangeSpan, 10),
 		"--warmup-ns", strconv.FormatInt(config.warmup.Nanoseconds(), 10),
 		"--duration-ns", strconv.FormatInt(config.duration.Nanoseconds(), 10),
 		"--output", outputPath,
 	)
+	if config.mix.set {
+		args = append(args,
+			"--read-ratio", strconv.Itoa(config.mix.read),
+			"--write-ratio", strconv.Itoa(config.mix.write),
+			"--delete-ratio", strconv.Itoa(config.mix.delete),
+			"--range-ratio", strconv.Itoa(config.mix.rang),
+		)
+	}
 	timeout := config.warmup + config.duration + nativeBenchmarkShutdownGrace
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -128,6 +222,15 @@ func runNativeBenchmark(config benchmarkConfig) (benchmarkResult, error) {
 }
 
 func runBenchmark(config benchmarkConfig) (benchmarkResult, error) {
+	keySpace, rangeSpan, err := normalizeBenchmarkSpace(config.keySpace, config.rangeSpan)
+	if err != nil {
+		return benchmarkResult{}, err
+	}
+	config.keySpace = keySpace
+	config.rangeSpan = rangeSpan
+	if err := validateMixForScenario(config.scenario, config.mix); err != nil {
+		return benchmarkResult{}, err
+	}
 	if config.duration <= 0 {
 		return benchmarkResult{}, errors.New("duration must be greater than zero")
 	}

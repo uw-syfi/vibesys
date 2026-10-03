@@ -53,8 +53,9 @@ supported key and value lengths.
 The checker then records call and return timestamps around Go-driven
 operations. A mixed single-lane, single-client session replays a fixed boundary
 history covering every op kind. Concurrent trials use N lanes and N clients:
-SWMR keeps client 0 on put/remove while the others issue get plus ordered ops,
-and MW mixes every op on every client.
+SWMR keeps client 0 on put/remove while the others issue get plus ordered ops.
+`mw`, `point-heavy`, and `range-heavy` mix every op on every client. Those
+three names select the timed mix. They share this correctness gate.
 
 Candidate code runs only in the Rust worker. A crash, hang, malformed protocol
 response, invalid ABI status, or failed model check rejects the run without
@@ -93,8 +94,9 @@ the optimization starting point.
 
 ### Mix ratios
 
-Key universe: 256 keys of the configured key size. Values use the configured
-value size.
+The key universe defaults to 256 keys of the configured key size (`--key-space`).
+A range walks `--range-span` keys ahead of its start, strictly less than
+`--key-space`, default 16. Values use the configured value size.
 
 `swmr` (one writer, remaining threads readers):
 
@@ -104,6 +106,24 @@ value size.
 `mw` (every thread mixed):
 
 - 30% get, 25% put, 15% remove, 15% successor, 15% range
+
+`point-heavy` (every thread mixed):
+
+- 50% get, 35% put, 15% remove
+
+`range-heavy` (every thread mixed):
+
+- 10% get, 10% put, 5% remove, 25% successor, 50% range
+
+`--read-ratio`, `--write-ratio`, `--delete-ratio`, and `--range-ratio` override
+that mix. All four are required together and must sum to 100. They assign get,
+put, remove, and range. Successor weight becomes 0. On `swmr` the writer still
+samples only put and remove, and readers sample only get and range, using the
+supplied weights for those operations. Min, max, and predecessor stay on the
+correctness gate. They are not part of the timed mix.
+
+`check` accepts `--failure-history PATH` and writes the first rejected history
+as JSON. `check --scenario all` suffixes the scenario name onto that path.
 
 JSON is analogous to the priority-queue evaluator, with point and ordered-op
 counts instead of enqueue/dequeue counts.

@@ -22,7 +22,7 @@ func candidateFlags(flags *flag.FlagSet) (*string, *string, *bool) {
 
 func selectedScenarios(value string) ([]scenario, error) {
 	if value == "all" {
-		return []scenario{scenarioSWMR, scenarioMW}, nil
+		return []scenario{scenarioSWMR, scenarioMW, scenarioPointHeavy, scenarioRangeHeavy}, nil
 	}
 	selected, err := parseScenario(value)
 	if err != nil {
@@ -73,7 +73,11 @@ func parseCandidateConfig(
 func runCheckCommand(args []string) error {
 	flags := flag.NewFlagSet("check", flag.ContinueOnError)
 	workspace, candidate, useReference := candidateFlags(flags)
-	scenarioName := flags.String("scenario", "swmr", "Map scenario: swmr, mw, or all")
+	scenarioName := flags.String(
+		"scenario",
+		"swmr",
+		"Map scenario: swmr, mw, point-heavy, range-heavy, or all",
+	)
 	maxKeySize := flags.Uint64("max-key-size", 8, "Maximum copied key size in bytes")
 	maxValueSize := flags.Uint64("max-value-size", 8, "Maximum copied value size in bytes")
 	operations := flags.Int("operations", 24, "Approximate operations per concurrent trial")
@@ -85,6 +89,7 @@ func runCheckCommand(args []string) error {
 		defaultCheckBudget,
 		"Time budget for deciding one history; an undecided history fails the gate",
 	)
+	failureHistory := flags.String("failure-history", "", "Write the first rejected history as JSON")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -114,6 +119,7 @@ func runCheckCommand(args []string) error {
 			clients:         *clients,
 			seed:            *seed,
 			checkBudget:     *checkBudget,
+			failureHistory:  failureHistoryForScenario(*failureHistory, selected, len(scenarios)),
 		}
 		if err := runAccuracy(config); err != nil {
 			return fmt.Errorf("%s: %w", selected, err)
@@ -133,13 +139,36 @@ func runCheckCommand(args []string) error {
 	return nil
 }
 
+func failureHistoryForScenario(path string, selected scenario, scenarioCount int) string {
+	if path == "" || scenarioCount == 1 {
+		return path
+	}
+	extension := filepath.Ext(path)
+	base := path[:len(path)-len(extension)]
+	return fmt.Sprintf("%s-%s%s", base, selected, extension)
+}
+
 func runBenchmarkCommand(args []string) error {
 	flags := flag.NewFlagSet("benchmark", flag.ContinueOnError)
 	workspace, candidate, useReference := candidateFlags(flags)
-	scenarioName := flags.String("scenario", "swmr", "Map scenario: swmr, mw, or all")
+	scenarioName := flags.String(
+		"scenario",
+		"swmr",
+		"Map scenario: swmr, mw, point-heavy, range-heavy, or all",
+	)
 	maxKeySize := flags.Uint64("max-key-size", 8, "Maximum copied key size in bytes")
 	maxValueSize := flags.Uint64("max-value-size", 8, "Maximum copied value size in bytes")
 	clients := flags.Int("clients", 4, "Client count for the selected scenario")
+	keySpace := flags.Uint64("key-space", defaultKeySpace, "Distinct encoded keys in the benchmark")
+	rangeSpan := flags.Uint64(
+		"range-span",
+		defaultRangeSpan,
+		"Keys between a range start and its end, strictly less than key-space",
+	)
+	readRatio := flags.Int("read-ratio", -1, "Get weight; set with the other ratios, summing to 100")
+	writeRatio := flags.Int("write-ratio", -1, "Put weight; set with the other ratios, summing to 100")
+	deleteRatio := flags.Int("delete-ratio", -1, "Remove weight; set with the other ratios, summing to 100")
+	rangeRatio := flags.Int("range-ratio", -1, "Range weight; set with the other ratios, summing to 100")
 	duration := flags.Duration("duration", 10*time.Second, "Measured benchmark duration")
 	warmup := flags.Duration("warmup", 2*time.Second, "Warmup duration")
 	repetitions := flags.Int(
@@ -159,6 +188,13 @@ func runBenchmarkCommand(args []string) error {
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments: %v", flags.Args())
+	}
+	if *keySpace == 0 || *rangeSpan == 0 {
+		return errors.New("key-space and range-span must be greater than zero")
+	}
+	mix, err := parseBenchmarkMix(*readRatio, *writeRatio, *deleteRatio, *rangeRatio)
+	if err != nil {
+		return err
 	}
 	scenarios, err := selectedScenarios(*scenarioName)
 	if err != nil {
@@ -185,6 +221,9 @@ func runBenchmarkCommand(args []string) error {
 			repetitions:     *repetitions,
 			seed:            *seed,
 			checkBudget:     *checkBudget,
+			keySpace:        *keySpace,
+			rangeSpan:       *rangeSpan,
+			mix:             mix,
 		})
 		if err != nil {
 			return fmt.Errorf("%s: %w", selected, err)

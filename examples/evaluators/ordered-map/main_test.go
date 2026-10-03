@@ -7,7 +7,7 @@ func TestSelectedScenariosExpandsAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []scenario{scenarioSWMR, scenarioMW}
+	want := []scenario{scenarioSWMR, scenarioMW, scenarioPointHeavy, scenarioRangeHeavy}
 	if len(scenarios) != len(want) {
 		t.Fatalf("scenarios = %v, want %v", scenarios, want)
 	}
@@ -15,6 +15,16 @@ func TestSelectedScenariosExpandsAll(t *testing.T) {
 		if scenarios[index] != want[index] {
 			t.Fatalf("scenarios = %v, want %v", scenarios, want)
 		}
+	}
+}
+
+func TestFailureHistoryGetsScenarioSuffixForAll(t *testing.T) {
+	got := failureHistoryForScenario("failure.json", scenarioPointHeavy, 4)
+	if got != "failure-point-heavy.json" {
+		t.Fatalf("failure history = %q, want %q", got, "failure-point-heavy.json")
+	}
+	if got := failureHistoryForScenario("failure.json", scenarioMW, 1); got != "failure.json" {
+		t.Fatalf("single-scenario failure history = %q", got)
 	}
 }
 
@@ -53,7 +63,7 @@ func TestCandidateConfigValidatesCopiedSizes(t *testing.T) {
 }
 
 func TestClientCountKeepsRequestedClients(t *testing.T) {
-	for _, selected := range []scenario{scenarioSWMR, scenarioMW} {
+	for _, selected := range []scenario{scenarioSWMR, scenarioMW, scenarioPointHeavy, scenarioRangeHeavy} {
 		got, err := clientCount(selected, 4)
 		if err != nil {
 			t.Fatal(err)

@@ -8,7 +8,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const CLOCK_CHECK_INTERVAL: u64 = 64;
-const KEY_UNIVERSE: u64 = 256;
 const RANGE_MAX_ITEMS: u64 = 8;
 
 #[cfg(target_os = "macos")]
@@ -75,14 +74,43 @@ extern "C" {
     fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const u64) -> i32;
 }
 
+#[derive(Clone, Copy)]
+pub struct Ratios {
+    pub read: u32,
+    pub write: u32,
+    pub delete: u32,
+    pub range: u32,
+}
+
 #[derive(Clone)]
 pub struct BenchmarkConfig {
     pub scenario: String,
     pub max_key_size: u64,
     pub max_value_size: u64,
     pub client_count: u32,
+    pub key_space: u64,
+    pub range_span: u64,
+    pub ratios: Option<Ratios>,
     pub warmup: Duration,
     pub duration: Duration,
+}
+
+#[derive(Clone, Copy)]
+struct Weights {
+    get: u32,
+    put: u32,
+    remove: u32,
+    successor: u32,
+    range: u32,
+}
+
+#[derive(Clone, Copy)]
+enum BenchOp {
+    Get,
+    Put,
+    Remove,
+    Successor,
+    Range,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -122,13 +150,15 @@ struct PhaseResult {
     elapsed: Duration,
 }
 
-enum Mix {
-    Writer,
-    Reader,
-    Mixed,
-}
-
 pub fn run_benchmark(api: Api, config: BenchmarkConfig, output_path: &Path) -> Result<(), String> {
+    if config.key_space < 2 || config.range_span == 0 || config.range_span >= config.key_space {
+        return Err(
+            "key-space must be at least 2 and range-span must be in [1, key-space)".to_string(),
+        );
+    }
+    if config.client_count == 0 {
+        return Err("client count must be greater than zero".to_string());
+    }
     if !config.warmup.is_zero() {
         run_phase(&api, &config, config.warmup)?;
     }
@@ -172,21 +202,121 @@ pub fn run_benchmark(api: Api, config: BenchmarkConfig, output_path: &Path) -> R
         .map_err(|error| format!("write benchmark result {}: {error}", output_path.display()))
 }
 
-fn writer_count(scenario: &str, client_count: u32) -> Result<u32, String> {
+fn ensure_scenario(scenario: &str) -> Result<(), String> {
     match scenario {
-        "swmr" => Ok(1),
-        "mw" => Ok(client_count),
+        "swmr" | "mw" | "point-heavy" | "range-heavy" => Ok(()),
         _ => Err(format!("unsupported scenario {scenario:?}")),
     }
 }
 
-fn mix_for(scenario: &str, client_id: u32) -> Result<Mix, String> {
+fn writer_count(scenario: &str, client_count: u32) -> Result<u32, String> {
     match scenario {
-        "swmr" if client_id == 0 => Ok(Mix::Writer),
-        "swmr" => Ok(Mix::Reader),
-        "mw" => Ok(Mix::Mixed),
+        "swmr" => Ok(1),
+        "mw" | "point-heavy" | "range-heavy" => Ok(client_count),
         _ => Err(format!("unsupported scenario {scenario:?}")),
     }
+}
+
+fn default_weights(scenario: &str, client_id: u32) -> Result<Weights, String> {
+    match scenario {
+        "swmr" if client_id == 0 => Ok(Weights {
+            get: 0,
+            put: 70,
+            remove: 30,
+            successor: 0,
+            range: 0,
+        }),
+        "swmr" => Ok(Weights {
+            get: 70,
+            put: 0,
+            remove: 0,
+            successor: 15,
+            range: 15,
+        }),
+        "mw" => Ok(Weights {
+            get: 30,
+            put: 25,
+            remove: 15,
+            successor: 15,
+            range: 15,
+        }),
+        "point-heavy" => Ok(Weights {
+            get: 50,
+            put: 35,
+            remove: 15,
+            successor: 0,
+            range: 0,
+        }),
+        "range-heavy" => Ok(Weights {
+            get: 10,
+            put: 10,
+            remove: 5,
+            successor: 25,
+            range: 50,
+        }),
+        _ => Err(format!("unsupported scenario {scenario:?}")),
+    }
+}
+
+fn weights_for(scenario: &str, client_id: u32, ratios: Option<Ratios>) -> Result<Weights, String> {
+    let Some(ratios) = ratios else {
+        return default_weights(scenario, client_id);
+    };
+    ensure_scenario(scenario)?;
+    if scenario == "swmr" && client_id == 0 {
+        if ratios.write == 0 && ratios.delete == 0 {
+            return Err("swmr writer mix needs a positive write-ratio or delete-ratio".to_string());
+        }
+        return Ok(Weights {
+            get: 0,
+            put: ratios.write,
+            remove: ratios.delete,
+            successor: 0,
+            range: 0,
+        });
+    }
+    if scenario == "swmr" {
+        if ratios.read == 0 && ratios.range == 0 {
+            return Err("swmr reader mix needs a positive read-ratio or range-ratio".to_string());
+        }
+        return Ok(Weights {
+            get: ratios.read,
+            put: 0,
+            remove: 0,
+            successor: 0,
+            range: ratios.range,
+        });
+    }
+    Ok(Weights {
+        get: ratios.read,
+        put: ratios.write,
+        remove: ratios.delete,
+        successor: 0,
+        range: ratios.range,
+    })
+}
+
+fn choose_op(weights: Weights, choice: u64) -> Result<BenchOp, String> {
+    let buckets = [
+        (weights.get, BenchOp::Get),
+        (weights.put, BenchOp::Put),
+        (weights.remove, BenchOp::Remove),
+        (weights.successor, BenchOp::Successor),
+        (weights.range, BenchOp::Range),
+    ];
+    let total: u64 = buckets.iter().map(|(weight, _)| u64::from(*weight)).sum();
+    if total == 0 {
+        return Err("benchmark mix has no operations".to_string());
+    }
+    let mut cursor = choice % total;
+    for (weight, op) in buckets {
+        let weight = u64::from(weight);
+        if cursor < weight {
+            return Ok(op);
+        }
+        cursor -= weight;
+    }
+    Err("benchmark mix cursor fell off the weights".to_string())
 }
 
 fn run_phase(
@@ -212,21 +342,16 @@ fn run_phase(
             let barrier = barrier.clone();
             let start = start.clone();
             let stop = stop.clone();
-            let mix = mix_for(&config.scenario, lane as u32)?;
-            let max_key_size = config.max_key_size as usize;
-            let max_value_size = config.max_value_size as usize;
+            let weights = weights_for(&config.scenario, lane as u32, config.ratios)?;
+            let plan = ClientPlan {
+                weights,
+                key_space: config.key_space,
+                range_span: config.range_span,
+                max_key_size: config.max_key_size as usize,
+                max_value_size: config.max_value_size as usize,
+            };
             workers.push(scope.spawn(move || {
-                run_client(
-                    client,
-                    lane as u32,
-                    mix,
-                    max_key_size,
-                    max_value_size,
-                    duration,
-                    barrier,
-                    start,
-                    stop,
-                )
+                run_client(client, lane as u32, plan, duration, barrier, start, stop)
             }));
         }
 
@@ -259,25 +384,30 @@ fn run_phase(
     Ok(PhaseResult { counts, elapsed })
 }
 
-#[allow(clippy::too_many_arguments)]
+struct ClientPlan {
+    weights: Weights,
+    key_space: u64,
+    range_span: u64,
+    max_key_size: usize,
+    max_value_size: usize,
+}
+
 fn run_client(
     mut client: Client,
     lane: u32,
-    mix: Mix,
-    max_key_size: usize,
-    max_value_size: usize,
+    plan: ClientPlan,
     duration: Duration,
     barrier: Arc<Barrier>,
     start: Arc<OnceLock<Instant>>,
     stop: Arc<AtomicBool>,
 ) -> Result<Counts, String> {
     let mut counts = Counts::default();
-    let mut value = vec![0_u8; max_value_size];
-    let mut output = vec![0_u8; max_value_size];
-    let mut key_out = vec![0_u8; max_key_size];
-    let mut val_out = vec![0_u8; max_value_size];
-    let key_stride = max_key_size;
-    let val_stride = max_value_size;
+    let mut value = vec![0_u8; plan.max_value_size];
+    let mut output = vec![0_u8; plan.max_value_size];
+    let mut key_out = vec![0_u8; plan.max_key_size];
+    let mut val_out = vec![0_u8; plan.max_value_size];
+    let key_stride = plan.max_key_size;
+    let val_stride = plan.max_value_size;
     let mut range_keys = vec![0_u8; key_stride * RANGE_MAX_ITEMS as usize];
     let mut range_vals = vec![0_u8; val_stride * RANGE_MAX_ITEMS as usize];
     let mut lengths_key = vec![0_u64; RANGE_MAX_ITEMS as usize];
@@ -295,38 +425,22 @@ fn run_client(
         let slot = (lane as u64)
             .wrapping_mul(0x9e37_79b9_7f4a_7c15)
             .wrapping_add(attempts)
-            % KEY_UNIVERSE;
-        let key = encode_key(slot, max_key_size);
-        let choice = attempts % 100;
-        let outcome = match mix {
-            Mix::Writer if choice < 70 => put_op(&mut client, &key, &value, &mut counts),
-            Mix::Writer => remove_op(&mut client, &key, &mut output, &mut counts),
-            Mix::Reader if choice < 70 => get_op(&mut client, &key, &mut output, &mut counts),
-            Mix::Reader if choice < 85 => {
+            % plan.key_space;
+        let key = encode_key(slot, plan.max_key_size);
+        let outcome = match choose_op(plan.weights, attempts)? {
+            BenchOp::Get => get_op(&mut client, &key, &mut output, &mut counts),
+            BenchOp::Put => put_op(&mut client, &key, &value, &mut counts),
+            BenchOp::Remove => remove_op(&mut client, &key, &mut output, &mut counts),
+            BenchOp::Successor => {
                 successor_op(&mut client, &key, &mut key_out, &mut val_out, &mut counts)
             }
-            Mix::Reader => range_op(
+            BenchOp::Range => range_op(
                 &mut client,
                 &key,
-                max_key_size,
-                key_stride,
-                val_stride,
-                &mut range_keys,
-                &mut range_vals,
-                &mut lengths_key,
-                &mut lengths_val,
-                &mut counts,
-            ),
-            Mix::Mixed if choice < 30 => get_op(&mut client, &key, &mut output, &mut counts),
-            Mix::Mixed if choice < 55 => put_op(&mut client, &key, &value, &mut counts),
-            Mix::Mixed if choice < 70 => remove_op(&mut client, &key, &mut output, &mut counts),
-            Mix::Mixed if choice < 85 => {
-                successor_op(&mut client, &key, &mut key_out, &mut val_out, &mut counts)
-            }
-            Mix::Mixed => range_op(
-                &mut client,
-                &key,
-                max_key_size,
+                slot,
+                plan.key_space,
+                plan.range_span,
+                plan.max_key_size,
                 key_stride,
                 val_stride,
                 &mut range_keys,
@@ -429,10 +543,27 @@ fn successor_op(
     }
 }
 
+fn range_end(start: &[u8], slot: u64, key_space: u64, span: u64, max_key_size: usize) -> Vec<u8> {
+    let mut end = encode_key(slot.wrapping_add(span) % key_space, max_key_size);
+    if end.as_slice() <= start {
+        end = encode_key(key_space.saturating_sub(1), max_key_size);
+        if end.as_slice() <= start {
+            end = start.to_vec();
+            if let Some(last) = end.last_mut() {
+                *last = last.saturating_add(1);
+            }
+        }
+    }
+    end
+}
+
 #[allow(clippy::too_many_arguments)]
 fn range_op(
     client: &mut Client,
     start: &[u8],
+    slot: u64,
+    key_space: u64,
+    span: u64,
     max_key_size: usize,
     key_stride: usize,
     val_stride: usize,
@@ -442,19 +573,7 @@ fn range_op(
     lengths_val: &mut [u64],
     counts: &mut Counts,
 ) -> Result<(), String> {
-    let mut end = encode_key(
-        (u64::from_le_bytes(pad_slot(start)) + 16) % KEY_UNIVERSE,
-        max_key_size,
-    );
-    if end.as_slice() <= start {
-        end = encode_key(KEY_UNIVERSE.saturating_sub(1), max_key_size);
-        if end.as_slice() <= start {
-            end = start.to_vec();
-            if let Some(last) = end.last_mut() {
-                *last = last.saturating_add(1);
-            }
-        }
-    }
+    let end = range_end(start, slot, key_space, span, max_key_size);
     let mut count = 0;
     let mut remaining = 0;
     let status = client.range_raw(
@@ -479,16 +598,86 @@ fn range_op(
     }
 }
 
-fn pad_slot(key: &[u8]) -> [u8; 8] {
-    let mut bytes = [0_u8; 8];
-    let copy = key.len().min(8);
-    bytes[..copy].copy_from_slice(&key[..copy]);
-    bytes
-}
-
 #[allow(unknown_lints, clippy::manual_is_multiple_of)]
 fn clock_check_due(attempts: u64) -> bool {
     attempts % CLOCK_CHECK_INTERVAL == 0
+}
+
+#[cfg(test)]
+mod mix_tests {
+    use super::{
+        BenchOp, Ratios, Weights, choose_op, default_weights, encode_key, range_end, weights_for,
+    };
+
+    #[test]
+    fn default_mixes_match_the_documented_weights() {
+        let swmr_writer = default_weights("swmr", 0).unwrap();
+        assert_eq!((swmr_writer.put, swmr_writer.remove), (70, 30));
+        let swmr_reader = default_weights("swmr", 1).unwrap();
+        assert_eq!((swmr_reader.get, swmr_reader.successor, swmr_reader.range), (70, 15, 15));
+        let point = default_weights("point-heavy", 3).unwrap();
+        assert_eq!((point.get, point.put, point.remove, point.range), (50, 35, 15, 0));
+        let range = default_weights("range-heavy", 0).unwrap();
+        assert_eq!(
+            (range.successor, range.range, range.get + range.put + range.remove),
+            (25, 50, 25)
+        );
+    }
+
+    #[test]
+    fn explicit_ratios_drop_successor_and_keep_swmr_roles() {
+        let ratios = Ratios {
+            read: 40,
+            write: 30,
+            delete: 10,
+            range: 20,
+        };
+        let writer = weights_for("swmr", 0, Some(ratios)).unwrap();
+        assert_eq!((writer.put, writer.remove, writer.get, writer.range), (30, 10, 0, 0));
+        let reader = weights_for("swmr", 2, Some(ratios)).unwrap();
+        assert_eq!(
+            (reader.get, reader.range, reader.put, reader.successor),
+            (40, 20, 0, 0)
+        );
+        let mixed = weights_for("point-heavy", 0, Some(ratios)).unwrap();
+        assert_eq!(mixed.successor, 0);
+        assert_eq!(mixed.get + mixed.put + mixed.remove + mixed.range, 100);
+        assert!(weights_for(
+            "swmr",
+            0,
+            Some(Ratios {
+                read: 50,
+                write: 0,
+                delete: 0,
+                range: 50,
+            })
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn choose_op_respects_weight_boundaries() {
+        let weights = Weights {
+            get: 50,
+            put: 35,
+            remove: 15,
+            successor: 0,
+            range: 0,
+        };
+        assert!(matches!(choose_op(weights, 0).unwrap(), BenchOp::Get));
+        assert!(matches!(choose_op(weights, 49).unwrap(), BenchOp::Get));
+        assert!(matches!(choose_op(weights, 50).unwrap(), BenchOp::Put));
+        assert!(matches!(choose_op(weights, 84).unwrap(), BenchOp::Put));
+        assert!(matches!(choose_op(weights, 85).unwrap(), BenchOp::Remove));
+        assert!(matches!(choose_op(weights, 99).unwrap(), BenchOp::Remove));
+    }
+
+    #[test]
+    fn range_end_advances_by_the_configured_span() {
+        let start = encode_key(3, 8);
+        let end = range_end(&start, 3, 256, 16, 8);
+        assert_eq!(end, encode_key(19, 8));
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]

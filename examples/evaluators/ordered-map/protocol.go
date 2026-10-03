@@ -22,6 +22,8 @@ type scenario uint32
 const (
 	scenarioSWMR scenario = iota + 1
 	scenarioMW
+	scenarioPointHeavy
+	scenarioRangeHeavy
 )
 
 func parseScenario(value string) (scenario, error) {
@@ -30,6 +32,10 @@ func parseScenario(value string) (scenario, error) {
 		return scenarioSWMR, nil
 	case "mw":
 		return scenarioMW, nil
+	case "point-heavy":
+		return scenarioPointHeavy, nil
+	case "range-heavy":
+		return scenarioRangeHeavy, nil
 	default:
 		return 0, fmt.Errorf("unsupported scenario %q", value)
 	}
@@ -41,6 +47,10 @@ func (s scenario) String() string {
 		return "swmr"
 	case scenarioMW:
 		return "mw"
+	case scenarioPointHeavy:
+		return "point-heavy"
+	case scenarioRangeHeavy:
+		return "range-heavy"
 	default:
 		return fmt.Sprintf("scenario(%d)", s)
 	}

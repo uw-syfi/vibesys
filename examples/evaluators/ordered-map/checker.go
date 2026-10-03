@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime"
 	"sort"
 	"sync"
@@ -117,11 +119,12 @@ func mapOutputFor(req request, resp response) (mapOutput, error) {
 
 type accuracyConfig struct {
 	candidateConfig
-	operations  int
-	trials      int
-	clients     int
-	seed        int64
-	checkBudget time.Duration
+	operations     int
+	trials         int
+	clients        int
+	seed           int64
+	checkBudget    time.Duration
+	failureHistory string
 }
 
 func clientCount(s scenario, clients int) (int, error) {
@@ -129,7 +132,7 @@ func clientCount(s scenario, clients int) (int, error) {
 		return 0, errors.New("client count must be greater than zero")
 	}
 	switch s {
-	case scenarioSWMR, scenarioMW:
+	case scenarioSWMR, scenarioMW, scenarioPointHeavy, scenarioRangeHeavy:
 		return clients, nil
 	default:
 		return 0, fmt.Errorf("unsupported scenario %s", s)
@@ -372,7 +375,7 @@ func runAccuracy(config accuracyConfig) error {
 		config,
 		"ordered boundary history",
 	); err != nil {
-		return err
+		return errors.Join(err, writeFailureHistory(config.failureHistory, boundary))
 	}
 
 	for trial := 0; trial < config.trials; trial++ {
@@ -385,8 +388,22 @@ func runAccuracy(config accuracyConfig) error {
 			config,
 			fmt.Sprintf("trial %d (seed %d)", trial, config.seed+int64(trial)),
 		); err != nil {
-			return err
+			return errors.Join(err, writeFailureHistory(config.failureHistory, history))
 		}
+	}
+	return nil
+}
+
+func writeFailureHistory(path string, history []recordedOperation) error {
+	if path == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(history, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode failure history: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write failure history %q: %w", path, err)
 	}
 	return nil
 }

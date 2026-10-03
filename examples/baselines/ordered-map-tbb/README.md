@@ -9,7 +9,7 @@ Unlike `queue-spsc-rigtorp`, oneTBB is not vendored. It is a system dependency
 (`libtbb-dev` on Debian and Ubuntu, `pkg-config --libs tbb` at link time).
 oneTBB is Apache-2.0.
 
-Valid for both scenarios: `swmr` and `mw`.
+Valid for `swmr`, `mw`, `point-heavy`, and `range-heavy`.
 
 ## What the adapter adds
 
@@ -58,6 +58,12 @@ go -C ../../evaluators/ordered-map run . check \
   --operations 24 --trials 100
 go -C ../../evaluators/ordered-map run . check \
   --workspace ../../baselines/ordered-map-tbb --scenario mw \
+  --operations 24 --trials 100
+go -C ../../evaluators/ordered-map run . check \
+  --workspace ../../baselines/ordered-map-tbb --scenario point-heavy \
+  --operations 24 --trials 100
+go -C ../../evaluators/ordered-map run . check \
+  --workspace ../../baselines/ordered-map-tbb --scenario range-heavy \
   --operations 24 --trials 100
 go -C ../../evaluators/ordered-map run . benchmark \
   --workspace ../../baselines/ordered-map-tbb --scenario swmr \

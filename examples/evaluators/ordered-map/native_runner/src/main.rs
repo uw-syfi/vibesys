@@ -45,6 +45,12 @@ struct Args {
     lane_count: Option<usize>,
     mixed_lane: bool,
     scenario: Option<String>,
+    key_space: Option<u64>,
+    range_span: Option<u64>,
+    read_ratio: Option<u32>,
+    write_ratio: Option<u32>,
+    delete_ratio: Option<u32>,
+    range_ratio: Option<u32>,
     warmup_ns: Option<u64>,
     duration_ns: Option<u64>,
     output: Option<PathBuf>,
@@ -98,10 +104,13 @@ fn run() -> Result<(), String> {
         Command::Benchmark => benchmark::run_benchmark(
             api,
             BenchmarkConfig {
-                scenario: required(args.scenario, "--scenario")?,
+                scenario: required(args.scenario.clone(), "--scenario")?,
                 max_key_size: args.max_key_size,
                 max_value_size: args.max_value_size,
                 client_count: args.client_count,
+                key_space: required(args.key_space, "--key-space")?,
+                range_span: required(args.range_span, "--range-span")?,
+                ratios: ratios_from(&args)?,
                 warmup: Duration::from_nanos(required(args.warmup_ns, "--warmup-ns")?),
                 duration: Duration::from_nanos(required(args.duration_ns, "--duration-ns")?),
             },
@@ -164,6 +173,36 @@ fn parse_args() -> Args {
             StoreOption,
             "map concurrency scenario",
         );
+        parser.refer(&mut args.key_space).add_option(
+            &["--key-space"],
+            StoreOption,
+            "distinct encoded benchmark keys",
+        );
+        parser.refer(&mut args.range_span).add_option(
+            &["--range-span"],
+            StoreOption,
+            "keys between a range start and its end",
+        );
+        parser.refer(&mut args.read_ratio).add_option(
+            &["--read-ratio"],
+            StoreOption,
+            "get weight when overriding the scenario mix",
+        );
+        parser.refer(&mut args.write_ratio).add_option(
+            &["--write-ratio"],
+            StoreOption,
+            "put weight when overriding the scenario mix",
+        );
+        parser.refer(&mut args.delete_ratio).add_option(
+            &["--delete-ratio"],
+            StoreOption,
+            "remove weight when overriding the scenario mix",
+        );
+        parser.refer(&mut args.range_ratio).add_option(
+            &["--range-ratio"],
+            StoreOption,
+            "range weight when overriding the scenario mix",
+        );
         parser.refer(&mut args.warmup_ns).add_option(
             &["--warmup-ns"],
             StoreOption,
@@ -186,4 +225,39 @@ fn parse_args() -> Args {
 
 fn required<T>(value: Option<T>, name: &str) -> Result<T, String> {
     value.ok_or_else(|| format!("{name} is required for this command"))
+}
+
+fn ratios_from(args: &Args) -> Result<Option<benchmark::Ratios>, String> {
+    let values = [
+        args.read_ratio,
+        args.write_ratio,
+        args.delete_ratio,
+        args.range_ratio,
+    ];
+    let set = values.iter().filter(|value| value.is_some()).count();
+    if set == 0 {
+        return Ok(None);
+    }
+    if set != 4 {
+        return Err(
+            "read-ratio, write-ratio, delete-ratio, and range-ratio must be set together"
+                .to_string(),
+        );
+    }
+    let read = args.read_ratio.expect("counted");
+    let write = args.write_ratio.expect("counted");
+    let delete = args.delete_ratio.expect("counted");
+    let range = args.range_ratio.expect("counted");
+    if read > 100 || write > 100 || delete > 100 || range > 100 {
+        return Err("operation ratios must be in [0, 100]".to_string());
+    }
+    if read + write + delete + range != 100 {
+        return Err("operation ratios must sum to 100".to_string());
+    }
+    Ok(Some(benchmark::Ratios {
+        read,
+        write,
+        delete,
+        range,
+    }))
 }

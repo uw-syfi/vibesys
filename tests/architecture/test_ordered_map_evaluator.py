@@ -13,11 +13,15 @@ import pytest
 ORDERED_MAP_INPUTS = {
     "ordered-map-swmr": "swmr",
     "ordered-map-mw": "mw",
+    "ordered-map-point-heavy": "point-heavy",
+    "ordered-map-range-heavy": "range-heavy",
 }
 
 ORDERED_MAP_ACCURACY_SETTINGS = {
     "ordered-map-swmr": ("32", "100"),
     "ordered-map-mw": ("24", "100"),
+    "ordered-map-point-heavy": ("24", "100"),
+    "ordered-map-range-heavy": ("24", "100"),
 }
 
 ORDERED_MAP_CONTRACT = "linearizable point map with weakly consistent ordered operations"

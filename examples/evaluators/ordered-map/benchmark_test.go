@@ -91,6 +91,74 @@ func TestBenchmarkRejectsNonPositiveOrEvenRepetitions(t *testing.T) {
 	}
 }
 
+func TestBenchmarkMixValidation(t *testing.T) {
+	if _, err := parseBenchmarkMix(10, -1, 0, 0); err == nil {
+		t.Fatal("partial ratios were accepted")
+	}
+	if _, err := parseBenchmarkMix(10, 10, 10, 10); err == nil {
+		t.Fatal("ratios that do not sum to 100 were accepted")
+	}
+	mix, err := parseBenchmarkMix(40, 30, 10, 20)
+	if err != nil || !mix.set || mix.read != 40 || mix.rang != 20 {
+		t.Fatalf("mix = %+v, err = %v", mix, err)
+	}
+	if _, _, err := normalizeBenchmarkSpace(256, 256); err == nil {
+		t.Fatal("range-span equal to key-space was accepted")
+	}
+	mix = benchmarkMix{read: 0, write: 0, delete: 0, rang: 100, set: true}
+	if err := validateMixForScenario(scenarioSWMR, mix); err == nil {
+		t.Fatal("swmr mix with no writer operations was accepted")
+	}
+}
+
+func TestNativeBenchmarkPointHeavyOmitsOrderedOps(t *testing.T) {
+	result, err := runNativeBenchmark(benchmarkConfig{
+		candidateConfig: candidateConfig{
+			workspace:    t.TempDir(),
+			useReference: true,
+			scenario:     scenarioPointHeavy,
+			maxKeySize:   8,
+			maxValueSize: 8,
+			clientCount:  2,
+		},
+		clients:   2,
+		keySpace:  64,
+		rangeSpan: 4,
+		duration:  20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Attempts == 0 || result.Successors != 0 || result.Ranges != 0 {
+		t.Fatalf("point-heavy mix = %+v", result)
+	}
+	if result.Writers != 2 || result.Readers != 0 {
+		t.Fatalf("point-heavy roles = %+v", result)
+	}
+}
+
+func TestNativeBenchmarkHonorsReadRatio(t *testing.T) {
+	result, err := runNativeBenchmark(benchmarkConfig{
+		candidateConfig: candidateConfig{
+			workspace:    t.TempDir(),
+			useReference: true,
+			scenario:     scenarioMW,
+			maxKeySize:   8,
+			maxValueSize: 8,
+			clientCount:  2,
+		},
+		clients:  2,
+		duration: 20 * time.Millisecond,
+		mix:      benchmarkMix{read: 100, write: 0, delete: 0, rang: 0, set: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Puts != 0 || result.Ranges != 0 || result.Successors != 0 || result.Gets+result.Missing == 0 {
+		t.Fatalf("read-only mix = %+v", result)
+	}
+}
+
 func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 	workspace := compileCandidateFixture(t, false)
 	result, err := runNativeBenchmark(benchmarkConfig{
